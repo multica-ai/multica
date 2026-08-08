@@ -12,6 +12,9 @@ import (
 
 type AppConfig struct {
 	CdnDomain string `json:"cdn_domain"`
+	// MaxUploadSizeBytes is safe public capability metadata. Clients use it
+	// for preflight validation; the server remains authoritative.
+	MaxUploadSizeBytes int64 `json:"max_upload_size_bytes"`
 	// CdnSigned tells clients that the CDN domain above serves PRIVATE
 	// content through time-bounded signed URLs (CloudFront signing is
 	// enabled). When true, a raw storage URL on the CDN domain is NOT
@@ -76,6 +79,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		AllowSignup:               os.Getenv("ALLOW_SIGNUP") != "false",
 		GoogleClientID:            os.Getenv("GOOGLE_CLIENT_ID"),
 		WorkspaceCreationDisabled: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
+		MaxUploadSizeBytes:        h.maxUploadSizeBytes(),
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()

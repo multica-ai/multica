@@ -136,6 +136,9 @@ backend:
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
     localUploadBaseUrl: http://api.multica.dev.lan
+    # Per-file upload limit. Keep the ingress body limit at least 1 MiB higher
+    # to allow for multipart framing.
+    maxUploadSize: 100MiB
   resources:
     requests:
       cpu: 100m
@@ -187,6 +190,9 @@ frontend:
 ingress:
   enabled: true
   className: traefik
+  # Controller-specific example for the default 100 MiB file limit:
+  # annotations:
+  #   nginx.ingress.kubernetes.io/proxy-body-size: "101m"
   annotations: {}
   frontend:
     host: multica.dev.lan

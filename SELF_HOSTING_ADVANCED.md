@@ -93,6 +93,7 @@ For file uploads and attachments, configure S3 and (optionally) CloudFront:
 | `S3_BUCKET` | Bucket name only (e.g. `my-bucket`). Do **not** include the `.s3.<region>.amazonaws.com` suffix — the server constructs the public URL from `S3_BUCKET` + `S3_REGION` |
 | `S3_REGION` | AWS region (default: `us-west-2`). Must match the bucket's actual region — used for both SDK signing and public URLs |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Static credentials. When both are unset, the AWS SDK default credential chain is used |
+| `MULTICA_MAX_UPLOAD_SIZE` | Maximum size of one file (default `100MiB`, maximum `1GiB`). Accepts bytes or `KB`/`MB`/`GB` and `KiB`/`MiB`/`GiB` suffixes. Web and mobile clients discover the effective value at runtime. |
 | `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint (e.g. MinIO, R2, B2). Setting this defaults to path-style URLs for backward compatibility |
 | `S3_USE_PATH_STYLE` | Optional S3 addressing mode. Leave empty for the default (`true` when `AWS_ENDPOINT_URL` is set, `false` for AWS S3). Set `false` for S3-compatible providers that require virtual-hosted-style URLs |
 | `ATTACHMENT_DOWNLOAD_MODE` | Attachment download behavior: `auto` (default), `cloudfront`, `presign`, or `proxy`. Use `proxy` for private buckets behind Docker/VPC-only endpoints such as `http://rustfs:9000`. Avatars follow the same policy — see below |
@@ -100,6 +101,13 @@ For file uploads and attachments, configure S3 and (optionally) CloudFront:
 | `CLOUDFRONT_DOMAIN` | CloudFront distribution domain — when set, public URLs use this host instead of the S3 host |
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
+
+If Multica is behind nginx, Traefik, Caddy, a cloud load balancer, or another
+ingress, configure that layer to accept at least `MULTICA_MAX_UPLOAD_SIZE` plus
+1 MiB for multipart framing. An upstream proxy can reject the request before
+Multica sees it; its default body limit is independent of this setting. For
+nginx ingress and the default limit, for example, set
+`nginx.ingress.kubernetes.io/proxy-body-size: "101m"`.
 
 #### Avatars on a private bucket
 

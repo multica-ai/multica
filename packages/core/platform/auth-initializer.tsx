@@ -18,6 +18,7 @@ import { setCurrentWorkspace } from "./workspace-storage";
 import type { ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 import type { User } from "../types";
+import { setMaxFileSize } from "../constants/upload";
 
 const logger = createLogger("auth");
 
@@ -49,6 +50,8 @@ export function AuthInitializer({
     api
       .getConfig()
       .then((cfg) => {
+        setMaxFileSize(cfg.max_upload_size_bytes);
+        configStore.getState().setMaxUploadSizeBytes(cfg.max_upload_size_bytes);
         if (cfg.cdn_domain) {
           configStore.getState().setCdnConfig({
             cdnDomain: cfg.cdn_domain,

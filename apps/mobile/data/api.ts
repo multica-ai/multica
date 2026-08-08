@@ -58,12 +58,15 @@ import type {
   Workspace,
 } from "@multica/core/types";
 import {
+  AppConfigSchema,
+  EMPTY_APP_CONFIG,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
   IssueSchema,
   ListIssuesResponseSchema,
   TimelineEntriesSchema,
 } from "@multica/core/api/schemas";
+import type { AppConfigResponse } from "@multica/core/api/schemas";
 import {
   ActiveTasksResponseSchema,
   AgentListSchema,
@@ -146,9 +149,16 @@ export interface FileAsset {
   type: string;
 }
 
-/** Web mirrors this from `packages/core/constants/upload.ts`. Mobile keeps
- *  its own copy per the `mirror, don't import` rule in apps/mobile/CLAUDE.md. */
-const MAX_FILE_SIZE = 100 * 1024 * 1024;
+/** Compatibility fallback for servers older than max_upload_size_bytes. */
+const DEFAULT_MAX_FILE_SIZE = 100 * 1024 * 1024;
+
+function formatFileSizeLimit(bytes: number): string {
+  const gib = 1024 * 1024 * 1024;
+  const mib = 1024 * 1024;
+  if (bytes % gib === 0) return `${bytes / gib} GiB`;
+  if (bytes % mib === 0) return `${bytes / mib} MiB`;
+  return `${bytes.toLocaleString()} bytes`;
+}
 
 /** Hard ceiling for every HTTP request. Mobile-specific because iOS may
  *  suspend a backgrounded network task without ever resolving/rejecting
@@ -180,6 +190,15 @@ export interface ApiClientOptions {
 class ApiClient {
   private token: string | null = null;
   private options: ApiClientOptions = {};
+  private maxUploadSizeBytes = DEFAULT_MAX_FILE_SIZE;
+
+  get uploadSizeLimitBytes(): number {
+    return this.maxUploadSizeBytes;
+  }
+
+  get uploadSizeLimitLabel(): string {
+    return formatFileSizeLimit(this.maxUploadSizeBytes);
+  }
 
   setToken(token: string | null) {
     this.token = token;
@@ -335,6 +354,17 @@ class ApiClient {
     return parseWithFallback(raw, schema, fallback, {
       endpoint: opts?.endpoint ?? path,
     });
+  }
+
+  async loadConfig(opts?: { signal?: AbortSignal }): Promise<AppConfigResponse> {
+    const config = await this.fetchValidated(
+      "/api/config",
+      AppConfigSchema,
+      EMPTY_APP_CONFIG,
+      { signal: opts?.signal, endpoint: "GET /api/config" },
+    );
+    this.maxUploadSizeBytes = config.max_upload_size_bytes;
+    return config;
   }
 
   /** Same as fetchValidated but supports any HTTP method + body. Used by
@@ -1238,9 +1268,11 @@ class ApiClient {
         body = undefined;
       }
       const message =
-        (body && typeof body === "object" && "message" in body
-          ? String((body as { message: unknown }).message)
-          : null) ?? `Upload failed: ${res.status}`;
+        (body && typeof body === "object" && "error" in body
+          ? String((body as { error: unknown }).error)
+          : body && typeof body === "object" && "message" in body
+            ? String((body as { message: unknown }).message)
+            : null) ?? `Upload failed: ${res.status}`;
       console.error(`[api] ← ${res.status} ${path}`, {
         rid,
         duration: `${duration}ms`,
@@ -1271,7 +1303,5 @@ class ApiClient {
     return parsed.data;
   }
 }
-
-export { MAX_FILE_SIZE };
 
 export const api = new ApiClient();

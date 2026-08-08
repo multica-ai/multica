@@ -1,11 +1,17 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type { ApiClient } from "../api/client";
 import type { Attachment } from "../types";
 import { useFileUpload, type UploadResult } from "./use-file-upload";
+import {
+  DEFAULT_MAX_FILE_SIZE,
+  setMaxFileSize,
+} from "../constants/upload";
+
+afterEach(() => setMaxFileSize(DEFAULT_MAX_FILE_SIZE));
 
 // MUL-3192 — verifies that the URL chosen for markdown persistence is
 // a durable, server-supplied absolute URL when available, and falls
@@ -96,7 +102,21 @@ describe("useFileUpload — markdownLink picks the durable URL with three-layer 
       act(async () => {
         await result.current.upload(huge);
       }),
-    ).rejects.toThrow(/100 MB/);
+    ).rejects.toThrow(/100 MiB/);
+    expect(api.uploadFile as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it("uses the upload limit advertised by the server", async () => {
+    const api = makeApi(makeAttachment());
+    setMaxFileSize(3);
+    const file = new File(["four"], "small.bin");
+
+    const { result } = renderHook(() => useFileUpload(api));
+    await expect(
+      act(async () => {
+        await result.current.upload(file);
+      }),
+    ).rejects.toThrow(/3 bytes/);
     expect(api.uploadFile as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
 });

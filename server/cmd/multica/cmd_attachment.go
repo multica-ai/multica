@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -151,12 +152,6 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		filename = args[0]
 	}
 
-	// Download the file content.
-	data, err := client.DownloadFile(ctx, downloadURL)
-	if err != nil {
-		return fmt.Errorf("download file: %w", err)
-	}
-
 	// Write to the output directory, creating it if needed so `-o` works
 	// against a directory that does not exist yet (the help example's
 	// `-o ./attachments` in a clean workdir).
@@ -167,9 +162,34 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		}
 	}
 	destPath := filepath.Join(outputDir, filename)
+	sizeText := strVal(att, "size_bytes")
+	sizeBytes, err := strconv.ParseInt(sizeText, 10, 64)
+	if err != nil || sizeBytes < 0 {
+		return fmt.Errorf("attachment has invalid size_bytes %q", sizeText)
+	}
+	tempFile, err := os.CreateTemp(outputDir, ".multica-download-*")
+	if err != nil {
+		return fmt.Errorf("create temporary download: %w", err)
+	}
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath)
 
-	if err := os.WriteFile(destPath, data, 0o644); err != nil {
-		return fmt.Errorf("write file: %w", err)
+	written, downloadErr := client.DownloadFileTo(ctx, downloadURL, tempFile, sizeBytes)
+	closeErr := tempFile.Close()
+	if downloadErr != nil {
+		return fmt.Errorf("download file: %w", downloadErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close downloaded file: %w", closeErr)
+	}
+	if written != sizeBytes {
+		return fmt.Errorf("download size mismatch: got %d bytes, expected %d", written, sizeBytes)
+	}
+	if err := os.Chmod(tempPath, 0o644); err != nil {
+		return fmt.Errorf("set downloaded file permissions: %w", err)
+	}
+	if err := os.Rename(tempPath, destPath); err != nil {
+		return fmt.Errorf("move downloaded file into place: %w", err)
 	}
 
 	// Print the absolute path so agents can reference the file.
@@ -184,6 +204,6 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		"id":       strVal(att, "id"),
 		"filename": filename,
 		"path":     abs,
-		"size":     strVal(att, "size_bytes"),
+		"size":     sizeText,
 	})
 }
