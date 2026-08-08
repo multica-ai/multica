@@ -361,6 +361,24 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 	payload []byte,
 	plannedAt time.Time,
 ) (*db.AutopilotRun, error) {
+	return s.DispatchAutopilotForPlanAttempt(ctx, autopilot, triggerID, source, payload, plannedAt, false)
+}
+
+// DispatchAutopilotForPlanAttempt adds scheduler-attempt awareness to
+// DispatchAutopilotForPlan. A scheduled run_only dispatch whose runtime is
+// temporarily offline returns a retryable error before creating a run while
+// retryBudgetRemaining is true. The scheduler's bounded retry/backoff then
+// re-enters with the same (trigger_id, planned_at). On the final attempt the
+// normal admission path persists an explicit terminal skipped run/reason.
+func (s *AutopilotService) DispatchAutopilotForPlanAttempt(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+	plannedAt time.Time,
+	retryBudgetRemaining bool,
+) (*db.AutopilotRun, error) {
 	if !triggerID.Valid {
 		return nil, fmt.Errorf("dispatch for plan: trigger_id is required")
 	}
@@ -406,11 +424,26 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 		return nil, fmt.Errorf("dispatch for plan: lookup existing run: %w", err)
 	}
 
+	if retryBudgetRemaining && autopilot.ExecutionMode == "run_only" {
+		if reason, _, skip := s.shouldSkipDispatch(ctx, autopilot, pgtype.UUID{}); skip && isRetryableRuntimeAdmission(reason) {
+			return nil, &errAutopilotRuntimeUnavailable{reason: reason}
+		}
+	}
+
 	// Scheduled dispatch has no member actor → rule_owner attribution, and no
 	// human surface for a per-run reason code, so it is dropped. No webhook
 	// delivery on the scheduled-plan path.
 	run, _, err := s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS, pgtype.UUID{}, pgtype.UUID{})
 	return run, err
+}
+
+type errAutopilotRuntimeUnavailable struct{ reason string }
+
+func (e *errAutopilotRuntimeUnavailable) Error() string { return e.reason }
+
+func isRetryableRuntimeAdmission(reason string) bool {
+	return strings.Contains(reason, "runtime is offline at dispatch time") ||
+		strings.Contains(reason, "runtime is stale at dispatch time")
 }
 
 // isAutopilotRunComplete decides whether an existing autopilot_run row
