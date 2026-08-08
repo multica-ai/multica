@@ -32,7 +32,8 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | `agent skills add` = additive | 947 | `POST /api/agents/{id}/skills/add` (968); requires ≥1 id (953–958) | `multica agent skills add --help` |
 | `agent skills list` | 890 | reads bindings, no side effect | `multica agent skills list --help` |
 | `agent env get` | 1024 | `GET /api/agents/{id}/env` (1034) | `multica agent env get --help` |
-| `agent env set` | 1059 | `PUT /api/agents/{id}/env` with full `custom_env` map (1079) | `multica agent env set --help` |
+| `agent env set` | 1059 | `PUT /api/agents/{id}/env` with full `custom_env` map (1079) — REPLACES the map; absent keys are deleted | `multica agent env set --help` |
+| `agent env merge` | `runAgentEnvMerge` | `PATCH /api/agents/env` with `{agent_ids, set}` — adds/overwrites only the submitted keys, accepts several agent ids, never reads existing values (MUL-5758) | `multica agent env merge --help` |
 
 ## Copy command — `server/cmd/multica/cmd_agent_copy.go`
 
@@ -80,6 +81,10 @@ only.
 | Random emoji avatar default | `agent_avatar.go` 11–32; `agent.go` 1127–1133 | Omitted, empty, or whitespace-only `avatar_url` becomes a cryptographically selected `emoji:<glyph>` sentinel; explicit values are preserved. The template handler uses the same helper at `agent_template.go` 458. |
 | `CreateAgent` insert params | `agent.go` create path | Persists avatar_url, runtime_config, instructions, custom_env, custom_args, model, thinking_level, service_tier, mcp_config, visibility, max_concurrent_tasks |
 | `UpdateAgent` rejects `custom_env` | 910–913 | if `custom_env` present in body → 400 "use PUT /api/agents/{id}/env (or `multica agent env set`)" |
+| `MergeAgentsEnv` bulk merge | `agent_env.go` `MergeAgentsEnv` | `PATCH /api/agents/env`. Rejects agent actors first, then per agent: unresolvable/cross-workspace → `skipped` `not_found`, not writable → `skipped` `forbidden`. Persist + one `agent_env_updated` audit row per agent share one transaction (audit failure rolls the whole batch back). Response carries only submitted key names, never values (MUL-5758) |
+| `mergeEnvKeys` merge rule | `agent_env.go` `mergeEnvKeys` | Submitted keys win, all other keys survive; a resubmitted identical value is reported in neither `added_keys` nor `overwritten_keys` |
+| Bulk input guards | `agent_migrate.go` `parseBulkAgentIDs`; `MergeAgentsEnv` | Non-empty, all-UUID, de-duplicated, ≤ 200 ids; blank keys, an empty `set` and the `****` sentinel are 400 |
+| Env key normalisation | `agent_env.go` `MergeAgentsEnv` | Keys are trimmed at the request boundary and two keys that collide after trimming (`"KEY"` and `" KEY "`) are rejected with 400 rather than resolved — otherwise Go's randomised map iteration would decide which value is stored. `mergeEnvKeys` therefore receives already-normalised keys |
 | `UpdateAgent` persists / clears `mcp_config` | 944–948, 1060–1061 | Tri-state from the raw body: key omitted → no change; literal `null` → `ClearAgentMcpConfig`; object → replace. No 400 like `custom_env` — `mcp_config` IS updatable here |
 | `description` ≤ 255 on update too | 921–924 | same cap re-checked on update |
 
@@ -148,4 +153,5 @@ only.
 | `CreateAgent` INSERT | generated from `queries/agent.sql` | columns include `runtime_config, runtime_id, instructions, custom_env, custom_args, mcp_config, model, thinking_level, service_tier` |
 | `CreateAgentParams` | generated from `queries/agent.sql` | typed params include nullable `Model`, `ThinkingLevel`, and `ServiceTier` |
 | `UpdateAgent` SET | generated from `queries/agent.sql` | COALESCE updates include model/thinking/service tier; dedicated clear queries restore each nullable override |
-| `UpdateAgentCustomEnv` (called by the `UpdateAgentEnv` handler) | 2652 | `SET custom_env = $2` — the only write path for env values |
+| `UpdateAgentCustomEnv` (called by the `UpdateAgentEnv` and `MergeAgentsEnv` handlers) | 2652 | `SET custom_env = $2` — the only write path for env values; the merge handler computes the merged map in Go and writes it through the same query |
+| `ListAgentsByIDsForWorkspaceForUpdate` | `queries/agent.sql` | Workspace-scoped, `kind = 'user'`, `FOR UPDATE`, ordered by id. Every bulk write resolves its request ids through this, so a cross-workspace id simply does not come back |

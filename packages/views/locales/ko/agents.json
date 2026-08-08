@@ -110,6 +110,7 @@
     "cancelled_tasks_toast_other": "작업 {{count}}개를 취소했습니다",
     "cancel_failed_toast": "작업을 취소하지 못했습니다",
     "cancel_dialog_title": "\"{{name}}\"의 모든 작업을 취소할까요?",
+    "cancel_dialog_title_bulk_other": "에이전트 {{count}}개의 모든 작업을 취소할까요?",
     "cancel_dialog_no_tasks": "취소할 활성 작업이 없습니다.",
     "cancel_dialog_running_other": "실행 중 {{count}}개",
     "cancel_dialog_queued_other": "대기 중 {{count}}개",
@@ -121,7 +122,34 @@
     "archive_dialog_title": "\"{{name}}\"을(를) 보관할까요?",
     "archive_dialog_description": "이 에이전트는 할당하거나 멘션할 수 없고, 활성 작업은 모두 취소됩니다. 기록은 유지되며 나중에 복원할 수 있습니다.",
     "archive_dialog_cancel": "취소",
-    "archive_dialog_confirm": "보관"
+    "archive_dialog_confirm": "보관",
+    "switch_runtime": "런타임 / 모델 전환",
+    "inject_env": "환경 변수 추가"
+  },
+  "migrate_dialog": {
+    "title_single": "\"{{name}}\"의 런타임 / 모델 전환",
+    "title_bulk_other": "에이전트 {{count}}개의 런타임 / 모델 전환",
+    "tasks_migrating_other": "대기 중인 작업 {{count}}개가 새 런타임으로 이동합니다.",
+    "tasks_staying_other": "실행 중인 작업 {{count}}개는 완료될 때까지 현재 런타임에 남습니다.",
+    "model_section_title": "전환 후 모델 (선택, 비우면 런타임 기본값)",
+    "blocker_no_target": "먼저 대상 런타임을 선택하세요.",
+    "blocker_no_agents": "선택된 에이전트가 없습니다. 하나 이상 체크하세요.",
+    "target_offline": "이 런타임은 오프라인입니다. 다시 연결될 때까지 작업이 대기합니다.",
+    "cancel": "취소",
+    "confirm": "적용",
+    "success_toast_other": "에이전트 {{count}}개에 적용 · 대기 작업 {{tasks}}개 이동",
+    "skipped_toast_other": "{{count}}개를 건너뛰었습니다",
+    "failed_toast": "런타임 전환에 실패했습니다"
+  },
+  "inject_env_dialog": {
+    "title_single": "\"{{name}}\"에 환경 변수 추가",
+    "title_bulk_other": "에이전트 {{count}}개에 환경 변수 추가",
+    "description": "입력한 키만 추가하거나 덮어씁니다. 다른 변수는 그대로 유지되며 기존 값은 여기에 표시되지 않습니다.",
+    "current_key_count_other": "변수 {{count}}개",
+    "confirm": "적용",
+    "success_toast": "에이전트 {{agents}}개에 적용 · {{added}}개 추가 · {{overwritten}}개 덮어씀",
+    "skipped_toast_other": "{{count}}개를 건너뛰었습니다",
+    "failed_toast": "환경 변수 업데이트에 실패했습니다"
   },
   "detail": {
     "back_to_agents": "에이전트",
@@ -847,6 +875,7 @@
   },
   "actions": {
     "selected_other": "{{count}}개 선택됨",
-    "clear_selection": "선택 해제"
+    "clear_selection": "선택 해제",
+    "menu": "작업 메뉴"
   }
 }

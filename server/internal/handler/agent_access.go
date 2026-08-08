@@ -444,6 +444,45 @@ func (h *Handler) loadInvocationTargetsByAgent(ctx context.Context, agents []db.
 	return out, true
 }
 
+// visibleAgentIDSet returns the subset of `agents` the caller may SEE, using
+// the same predicate ListAgents applies (MUL-5758 security review).
+//
+// Bulk endpoints must not become a side channel around the list's visibility
+// gate: whatever they echo back — a stale-plan snapshot, an agent name in a
+// skip entry — has to be restricted to agents the caller could have seen in
+// the list anyway. Agent actors bypass the member gate exactly as they do in
+// ListAgents, to preserve A2A collaboration; what they must never receive is
+// secret material, which callers enforce by echoing a minimal DTO rather than
+// AgentResponse.
+//
+// Returns ok=false when the invocation targets could not be loaded; callers
+// must fail the request rather than fall back to an unfiltered set.
+func (h *Handler) visibleAgentIDSet(
+	ctx context.Context,
+	agents []db.Agent,
+	actorType string,
+	member db.Member,
+) (map[string]struct{}, bool) {
+	visible := make(map[string]struct{}, len(agents))
+	if actorType == "agent" {
+		for _, a := range agents {
+			visible[uuidToString(a.ID)] = struct{}{}
+		}
+		return visible, true
+	}
+	targetsByAgent, ok := h.loadInvocationTargetsByAgent(ctx, agents)
+	if !ok {
+		return nil, false
+	}
+	userID := uuidToString(member.UserID)
+	for _, a := range agents {
+		if memberAllowedToViewAgent(a, targetsByAgent[uuidToString(a.ID)], userID, member.Role) {
+			visible[uuidToString(a.ID)] = struct{}{}
+		}
+	}
+	return visible, true
+}
+
 // canEnqueueSquadLeader returns true when the given actor is allowed to
 // trigger the squad's private leader. It loads the leader agent and delegates
 // to canInvokeAgent so the leader-trigger path honours invocation permission

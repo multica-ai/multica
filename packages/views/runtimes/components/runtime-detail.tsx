@@ -23,6 +23,7 @@ import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import {
   deriveRuntimeHealth,
   runtimeDisplayName,
+  runtimeListOptions,
   runtimeProfileListOptions,
 } from "@multica/core/runtimes";
 import {
@@ -44,6 +45,7 @@ import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
+import { SwitchAgentRuntimeDialog } from "../../agents/components/switch-agent-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import { runtimeRowLabel } from "./runtime-machines";
 import { useT, useTimeAgo } from "../../i18n";
@@ -101,10 +103,14 @@ export function RuntimeDetail({
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: profiles = [] } = useQuery(runtimeProfileListOptions(wsId));
+  // The migration dialog picks a TARGET runtime, so it needs the workspace's
+  // runtime list, not just the one this page is showing.
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
   const now = useNowTick();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [migrateOpen, setMigrateOpen] = useState(false);
 
   const health = deriveRuntimeHealth(runtime, now);
   const ownerMember = runtime.owner_id
@@ -202,6 +208,11 @@ export function RuntimeDetail({
               agents={servingAgents}
               presenceMap={presenceMap}
               agentHref={(id) => paths.agentDetail(id)}
+              // Evacuating a runtime is the reason bulk migration exists, so
+              // the entry point sits on the runtime the user is looking at
+              // rather than making them go find these agents in the list.
+              canMigrate={!!canEditRuntime && servingAgents.length > 0}
+              onMigrate={() => setMigrateOpen(true)}
             />
             <DiagnosticsCard
               runtime={runtime}
@@ -228,6 +239,22 @@ export function RuntimeDetail({
           runtime={runtime}
           wsId={wsId}
           onDeleted={handleRuntimeDeleted}
+        />
+      )}
+
+      {migrateOpen && (
+        <SwitchAgentRuntimeDialog
+          open
+          onOpenChange={setMigrateOpen}
+          agents={servingAgents}
+          runtimes={runtimes}
+          members={members}
+          currentUserId={user?.id ?? null}
+          wsId={wsId}
+          // The set was rendered from a list that can go stale while the
+          // dialog is open; passing the source runtime makes the server
+          // re-derive it under lock and refuse a plan that drifted.
+          expectedSourceRuntimeId={runtime.id}
         />
       )}
     </div>
@@ -396,10 +423,14 @@ function ServingAgentsCard({
   agents,
   presenceMap,
   agentHref,
+  canMigrate,
+  onMigrate,
 }: {
   agents: Agent[];
   presenceMap: Map<string, AgentPresenceDetail>;
   agentHref: (agentId: string) => string;
+  canMigrate: boolean;
+  onMigrate: () => void;
 }) {
   const { t } = useT("runtimes");
   const { t: tAgents } = useT("agents");
@@ -407,9 +438,16 @@ function ServingAgentsCard({
     <div className="rounded-lg border">
       <div className="flex items-center justify-between border-b px-4 py-2.5">
         <span className="text-caption font-semibold">{t(($) => $.detail.serving_title)}</span>
-        <span className="text-caption text-muted-foreground">
-          {t(($) => $.detail.serving_count, { count: agents.length })}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-caption text-muted-foreground">
+            {t(($) => $.detail.serving_count, { count: agents.length })}
+          </span>
+          {canMigrate && (
+            <Button type="button" variant="outline" size="sm" onClick={onMigrate}>
+              {t(($) => $.detail.migrate_agents)}
+            </Button>
+          )}
+        </div>
       </div>
       {agents.length === 0 ? (
         <div className="flex flex-col items-center px-4 py-6 text-center">

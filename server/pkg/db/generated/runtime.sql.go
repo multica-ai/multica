@@ -706,6 +706,53 @@ func (q *Queries) LockAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRu
 	return i, err
 }
 
+const lockAgentRuntimeForWorkspace = `-- name: LockAgentRuntimeForWorkspace :one
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockAgentRuntimeForWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Workspace-scoped LockAgentRuntime, for callers that lock a runtime id taken
+// from a REQUEST BODY rather than from an already-authorized path param
+// (MUL-5758: the migration endpoint's expected_source_runtime_id).
+//
+// The unscoped variant above is safe only because its callers resolved the
+// runtime through the path and checked membership against that runtime's own
+// workspace. A body-supplied id has had no such check, so locking it unscoped
+// would let a caller authorized in workspace A take a lock on — and then read
+// through — a runtime in workspace B. Returning no rows for an id outside the
+// workspace makes "belongs to someone else" and "does not exist"
+// indistinguishable to the caller.
+func (q *Queries) LockAgentRuntimeForWorkspace(ctx context.Context, arg LockAgentRuntimeForWorkspaceParams) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, lockAgentRuntimeForWorkspace, arg.ID, arg.WorkspaceID)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+		&i.CustomName,
+	)
+	return i, err
+}
+
 const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()

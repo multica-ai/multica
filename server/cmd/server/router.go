@@ -1472,6 +1472,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// cannot mint an agent carrying `system_key` and thereby claim
 				// the system instruction layer. Idempotent per workspace.
 				r.Post("/mika", h.CreateMikaAgent)
+				// Bulk env injection: add/overwrite the submitted keys on
+				// one or more agents, leaving every other key alone. PATCH
+				// (merge) is what distinguishes it from the single-agent
+				// PUT /{id}/env, which replaces the map wholesale and so
+				// cannot inject without first revealing every secret. Same
+				// human-only authorization; agent actors are denied.
+				// Static "env" wins over the {id} route below in chi's
+				// trie, so the single-agent paths are unaffected.
+				r.Patch("/env", h.MergeAgentsEnv)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
@@ -1574,6 +1583,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// the strict DELETE refused with
 					// `runtime_has_active_agents` and the user confirmed.
 					r.Post("/unbind-agents-and-delete", h.UnbindAgentsAndDeleteRuntime)
+					// Move agents onto THIS runtime (the path runtime is the
+					// target) and bring their unclaimed tasks along, in one
+					// transaction. Serves the Agent List row menu, the batch
+					// toolbar, the agent detail inspector and the Runtime
+					// detail page's "migrate agents" flow; `dry_run` answers
+					// the confirmation dialog without writing.
+					r.Post("/migrate-agents", h.MigrateAgentsToRuntime)
 					// Legacy path for installed clients built against the
 					// archive-and-delete contract (MUL-5559 renamed the
 					// behaviour, not just the route). Same handler.

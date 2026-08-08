@@ -4,6 +4,8 @@ import { useState } from "react";
 import {
   AlertCircle,
   Copy,
+  KeyRound,
+  MonitorCog,
   MoreHorizontal,
   RotateCcw,
   Square,
@@ -46,6 +48,12 @@ interface AgentRowActionsProps {
   // Called when the user picks "Duplicate" — the page opens a Create
   // dialog pre-populated with this agent's config as a template.
   onDuplicate: (agent: Agent) => void;
+  // Quick actions that open a shared dialog owned by the page. The row only
+  // announces intent: the dialogs mount once per page rather than once per
+  // row, which matters in a virtualised list where every row would otherwise
+  // carry a RuntimePicker and its runtime queries.
+  onSwitchRuntime: (agent: Agent) => void;
+  onInjectEnv: (agent: Agent) => void;
 }
 
 /**
@@ -65,6 +73,8 @@ export function AgentRowActions({
   presence,
   canManage,
   onDuplicate,
+  onSwitchRuntime,
+  onInjectEnv,
 }: AgentRowActionsProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
@@ -89,8 +99,14 @@ export function AgentRowActions({
   const isSystemAgent = !!agent.system_key;
   const showArchive = canManage && !isArchived && !isSystemAgent;
   const showRestore = canManage && isArchived;
+  // Both quick actions write agent configuration, so they follow the same
+  // permission rule the server enforces (agent owner or workspace
+  // owner/admin). Hidden on archived agents: an archived agent cannot run, so
+  // moving its runtime or injecting secrets has no effect the user can see.
+  const showQuickEdits = canManage && !isArchived;
 
-  const hasAnyAction = showStop || showDuplicate || showArchive || showRestore;
+  const hasAnyAction =
+    showStop || showDuplicate || showArchive || showRestore || showQuickEdits;
 
   const invalidateAgents = () => {
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
@@ -156,6 +172,18 @@ export function AgentRowActions({
               <Square className="h-3.5 w-3.5" />
               {t(($) => $.row_actions.cancel_all_tasks)}
             </DropdownMenuItem>
+          )}
+          {showQuickEdits && (
+            <>
+              <DropdownMenuItem onClick={() => onSwitchRuntime(agent)}>
+                <MonitorCog className="h-3.5 w-3.5" />
+                {t(($) => $.row_actions.switch_runtime)}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onInjectEnv(agent)}>
+                <KeyRound className="h-3.5 w-3.5" />
+                {t(($) => $.row_actions.inject_env)}
+              </DropdownMenuItem>
+            </>
           )}
           {showDuplicate && (
             <DropdownMenuItem onClick={() => onDuplicate(agent)}>

@@ -175,7 +175,8 @@
     "toast_deleted": "런타임을 삭제했습니다",
     "toast_delete_failed": "런타임을 삭제하지 못했습니다",
     "running_chip_other": "· 실행 중 {{count}}개",
-    "queued_chip_other": "· 대기 중 {{count}}개"
+    "queued_chip_other": "· 대기 중 {{count}}개",
+    "migrate_agents": "에이전트 이전"
   },
   "detail_page": {
     "not_found_title": "런타임을 찾을 수 없습니다",

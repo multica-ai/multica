@@ -14,6 +14,9 @@ const updateAgentSpy = vi.hoisted(() =>
 );
 const archiveSpy = vi.hoisted(() => vi.fn(async () => ({})));
 const restoreSpy = vi.hoisted(() => vi.fn(async () => ({})));
+const cancelTasksSpy = vi.hoisted(() =>
+  vi.fn(async (_id: string) => ({ cancelled: 2 })),
+);
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -23,13 +26,14 @@ vi.mock("@multica/core/api", () => ({
     updateAgent: updateAgentSpy,
     archiveAgent: archiveSpy,
     restoreAgent: restoreSpy,
+    cancelAgentTasks: cancelTasksSpy,
   },
 }));
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => <div>avatar</div>,
 }));
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
 }));
 
 import { AgentBatchToolbar } from "./agent-batch-toolbar";
@@ -71,12 +75,13 @@ function makeRow(
   id: string,
   ownerId: string | null,
   overrides: Record<string, unknown> = {},
+  presence: { runningCount?: number; queuedCount?: number } | null = null,
 ): AgentListRow {
   const agent = makeAgent(id, ownerId, overrides);
   return {
     agent: agent as AgentListRow["agent"],
     runtime: null,
-    presence: null,
+    presence: presence as AgentListRow["presence"],
     activity: null,
     runCount: 0,
     lastActiveDays: null,
@@ -88,6 +93,9 @@ function makeRow(
   };
 }
 
+const onSwitchRuntime = vi.fn();
+const onInjectEnv = vi.fn();
+
 function renderToolbar(rows: AgentListRow[]) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui = (nextRows: AgentListRow[]) => (
@@ -98,6 +106,8 @@ function renderToolbar(rows: AgentListRow[]) {
           members={[]}
           currentUserId="user-1"
           onClear={() => {}}
+          onSwitchRuntime={onSwitchRuntime}
+          onInjectEnv={onInjectEnv}
         />
       </I18nProvider>
     </QueryClientProvider>
@@ -109,26 +119,94 @@ function renderToolbar(rows: AgentListRow[]) {
   };
 }
 
+function openActionsMenu() {
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+}
+
 beforeEach(() => {
+  onSwitchRuntime.mockClear();
+  onInjectEnv.mockClear();
   updateAgentSpy.mockClear();
   updateAgentSpy.mockResolvedValue({});
+  cancelTasksSpy.mockClear();
+  cancelTasksSpy.mockResolvedValue({ cancelled: 2 });
 });
 
-describe("AgentBatchToolbar — action order", () => {
-  it("renders Archive last, after the other batch actions", () => {
-    // One archived + one active owned row surfaces all three actions at once.
+describe("AgentBatchToolbar — single Actions menu", () => {
+  it("collapses every bulk action into one menu, destructive Archive last", async () => {
+    // One archived + one active owned row surfaces every menu item at once.
     renderToolbar([
       makeRow("a", "user-1", { archived_at: "2026-01-01T00:00:00Z" }),
       makeRow("b", "user-1"),
     ]);
 
-    // Labelled buttons in DOM order; the clear-selection button is icon-only.
-    const actions = screen
-      .getAllByRole("button")
-      .map((b) => b.textContent?.trim())
-      .filter((text): text is string => !!text);
+    openActionsMenu();
+    const items = (await screen.findAllByRole("menuitem")).map((i) =>
+      i.textContent?.trim(),
+    );
+    expect(items).toEqual([
+      "Cancel all tasks",
+      "Switch runtime / model",
+      "Add env variables",
+      "Set access scope",
+      "Restore",
+      "Archive",
+    ]);
+  });
 
-    expect(actions).toEqual(["Restore", "Set access scope", "Archive"]);
+  it("hands only manageable active rows to the quick-action dialogs", async () => {
+    renderToolbar([
+      makeRow("a", "user-1"),
+      makeRow("b", "user-2"), // not manageable → dropped from the hand-off
+      makeRow("c", "user-1", { archived_at: "2026-01-01T00:00:00Z" }),
+    ]);
+
+    openActionsMenu();
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Switch runtime / model" }),
+    );
+    expect(onSwitchRuntime).toHaveBeenCalledTimes(1);
+    expect(onSwitchRuntime.mock.calls[0]?.[0].map((r: AgentListRow) => r.agent.id)).toEqual(["a"]);
+
+    openActionsMenu();
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Add env variables" }),
+    );
+    expect(onInjectEnv).toHaveBeenCalledTimes(1);
+    expect(onInjectEnv.mock.calls[0]?.[0].map((r: AgentListRow) => r.agent.id)).toEqual(["a"]);
+  });
+});
+
+describe("AgentBatchToolbar — bulk cancel tasks", () => {
+  it("is disabled when no selected agent has running or queued work", async () => {
+    renderToolbar([makeRow("a", "user-1")]); // presence null → nothing to stop
+
+    openActionsMenu();
+    const item = await screen.findByRole("menuitem", {
+      name: "Cancel all tasks",
+    });
+    expect(item.getAttribute("data-disabled")).not.toBeNull();
+  });
+
+  it("confirms, then cancels once per stoppable agent and reports the sum", async () => {
+    renderToolbar([
+      makeRow("a", "user-1", {}, { runningCount: 1 }),
+      makeRow("b", "user-1", {}, { queuedCount: 3 }),
+      makeRow("c", "user-1"), // idle → not part of the batch
+    ]);
+
+    openActionsMenu();
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Cancel all tasks" }),
+    );
+    await screen.findByText(/Cancel all tasks for 2 agents\?/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel all tasks" }));
+    await waitFor(() => expect(cancelTasksSpy).toHaveBeenCalledTimes(2));
+    expect(cancelTasksSpy.mock.calls.map((c) => c[0]).sort()).toEqual([
+      "a",
+      "b",
+    ]);
   });
 });
 
@@ -136,7 +214,10 @@ describe("AgentBatchToolbar — presence", () => {
   it("closes dialogs and removes the toolbar when selection becomes empty", async () => {
     const view = renderToolbar([makeRow("a", "user-1")]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    openActionsMenu();
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Set access scope" }),
+    );
     await screen.findByText(/Applies to 1 agents/);
 
     view.rerenderRows([]);
@@ -144,19 +225,19 @@ describe("AgentBatchToolbar — presence", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Applies to 1 agents/)).not.toBeInTheDocument();
       expect(
-        screen.queryByRole("button", { name: "Set access scope" }),
+        screen.queryByRole("button", { name: "Actions" }),
       ).not.toBeInTheDocument();
     });
   });
 });
 
 describe("AgentBatchToolbar — bulk Set access scope", () => {
-  it("shows the Set access scope button for active owned agents", () => {
-    renderToolbar([makeRow("a", "user-1")]);
-    expect(
-      screen.getByRole("button", { name: "Set access scope" }),
-    ).toBeInTheDocument();
-  });
+  async function openAccessDialog() {
+    openActionsMenu();
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Set access scope" }),
+    );
+  }
 
   it("renders Applies to N with skip count in the dialog", async () => {
     renderToolbar([
@@ -165,22 +246,16 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
       makeRow("c", "user-2"), // not owned → skipped
     ]);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Set access scope" }),
-    );
+    await openAccessDialog();
 
     await screen.findByText(/Applies to 2 agents/);
-    expect(
-      screen.getByText(/1 skipped/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/1 skipped/)).toBeInTheDocument();
   });
 
   it("keeps Apply disabled until a scope is picked", async () => {
     renderToolbar([makeRow("a", "user-1")]);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Set access scope" }),
-    );
+    await openAccessDialog();
     await screen.findByText(/Applies to 1 agents/);
 
     // No radio clicked yet — Apply must be disabled
@@ -194,7 +269,7 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
   it("settles after picking a scope: Apply enables and stays enabled", async () => {
     renderToolbar([makeRow("a", "user-1")]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await openAccessDialog();
     await screen.findByText(/Applies to 1 agents/);
 
     fireEvent.click(screen.getByRole("radio", { name: /Entire workspace/ }));
@@ -220,7 +295,7 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
       makeRow("c", "user-2"), // not owned → must be skipped
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await openAccessDialog();
     await screen.findByText(/Applies to 2 agents/);
 
     fireEvent.click(screen.getByRole("radio", { name: /Entire workspace/ }));
@@ -251,7 +326,7 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
   it("does not retain the previous selection after close and reopen", async () => {
     renderToolbar([makeRow("a", "user-1")]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await openAccessDialog();
     await screen.findByText(/Applies to 1 agents/);
     fireEvent.click(screen.getByRole("radio", { name: /Entire workspace/ }));
     await waitFor(() =>
@@ -265,7 +340,7 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
       ).not.toBeInTheDocument(),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await openAccessDialog();
     await screen.findByText(/Applies to 1 agents/);
 
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();

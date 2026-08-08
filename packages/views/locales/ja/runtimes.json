@@ -175,7 +175,8 @@
     "toast_deleted": "ランタイムを削除しました",
     "toast_delete_failed": "ランタイムを削除できませんでした",
     "running_chip_other": "· 実行中 {{count}} 件",
-    "queued_chip_other": "· キュー待ち {{count}} 件"
+    "queued_chip_other": "· キュー待ち {{count}} 件",
+    "migrate_agents": "エージェントを移行"
   },
   "detail_page": {
     "not_found_title": "ランタイムが見つかりません",

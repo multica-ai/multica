@@ -21,6 +21,7 @@ These commands read state and have no side effects:
 multica agent get <agent-id> --output json      # full persisted agent record
 multica agent skills list <agent-id> --output json   # current skill bindings
 multica agent env get <agent-id> --output json  # plaintext env (agent owner or ws owner/admin; agents denied)
+multica runtime migrate-agents <target-runtime-id> --agent <agent-id> --dry-run --output json  # what a runtime move would change
 ```
 
 An agent can also be **unbound**: `runtime_id` is `NULL` (served as `""` with
@@ -205,6 +206,33 @@ Read-side facts (these are the wrong assumptions to avoid):
   /api/agents/{id}/env"). Plaintext env writes are handled by
   `PUT /api/agents/{id}/env` (`multica agent env set`), which carries the same
   gate and writes an audit row.
+
+There are two write paths, and picking the wrong one destroys data:
+
+| Need | Path | Semantics |
+| --- | --- | --- |
+| Set the agent's env to exactly this map, including removing keys | `PUT /api/agents/{id}/env` — `multica agent env set <agent-id>` | **Replaces the whole map.** Any key absent from the request is deleted. A value of `****` means "keep the existing value for that key". Single agent only. |
+| Add or overwrite specific keys and leave the rest alone, on one agent or many | `PATCH /api/agents/env` — `multica agent env merge <agent-id> [agent-id...]` | **Merges.** Only the submitted keys are written; every other key is untouched. No key deletion. |
+
+Use `env merge` for injection. Reaching for `env set` to add one key means
+first reading the agent's whole env back — a plaintext read of every secret
+that also writes an `agent_env_revealed` audit row per agent. `env merge` never
+reads existing values, so injecting a shared key across a fleet leaves no
+reveal trail.
+
+`PATCH /api/agents/env` takes `{"agent_ids": [...], "set": {"KEY": "value"}}`
+and enforces the same two rules as the single-agent endpoints: **agent actors
+are denied**, and each agent is writable only by its human owner or a workspace
+owner/admin. Agents that fail the second rule come back in `skipped` rather
+than failing the request — the same bulk contract `runtime migrate-agents`
+uses. The response reports `added_keys` / `overwritten_keys` / `key_count` per
+agent, naming **only keys the caller submitted** and never a value. Persist and
+audit share one transaction, so an audit-log outage rolls the whole batch back
+rather than leaving unaudited env mutations on disk.
+
+Blank keys, an empty `set`, and the literal `****` sentinel are rejected with a
+400: `****` means "preserve" on the replace path and has no meaning in an
+injection.
 
 ### mcp_config
 

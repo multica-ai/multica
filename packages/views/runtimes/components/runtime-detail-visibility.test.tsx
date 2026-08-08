@@ -81,6 +81,11 @@ vi.mock("@multica/core/runtimes", () => ({
   runtimeProfileListOptions: (wsId: string) => ({
     queryKey: ["runtime-profiles", wsId],
   }),
+  // The detail page loads the workspace runtime list so the migrate-agents
+  // dialog can offer a target (MUL-5758).
+  runtimeListOptions: (wsId: string) => ({
+    queryKey: ["runtimes", wsId],
+  }),
   parseRuntimeProfileBoundConflict: () => null,
   useDeleteRuntimeProfile: () => ({
     mutate: vi.fn(),

@@ -1514,6 +1514,24 @@ func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent d
 	return true
 }
 
+// canManageAgentForMember is the pure form of the same rule, for callers that
+// decide over a set of agents instead of one request target: a bulk endpoint
+// classifies each agent as writable or skipped rather than aborting the whole
+// request on the first one it may not touch.
+//
+// The owner comparison runs against member.UserID rather than a raw request
+// header. agent.owner_id is nullable and uuidToString renders NULL as "", so
+// comparing against a possibly-empty header would make every NULL-owner agent
+// writable by anyone; member.UserID only exists after the membership lookup
+// succeeded, and the empty-owner guard closes the other side.
+func canManageAgentForMember(agent db.Agent, member db.Member) bool {
+	if roleAllowed(member.Role, "owner", "admin") {
+		return true
+	}
+	ownerID := uuidToString(agent.OwnerID)
+	return ownerID != "" && ownerID == uuidToString(member.UserID)
+}
+
 func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	existing, ok := h.loadAgentForUser(w, r, id)

@@ -13,6 +13,9 @@ import {
   AGENT_MAX_CONCURRENT_TASKS_MIN,
 } from "@multica/core/agents";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
+import { useMigrateAgentsToRuntime } from "@multica/core/runtimes/mutations";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { toast } from "sonner";
 import { isImeComposing } from "@multica/core/utils";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -73,6 +76,26 @@ export function AgentDetailInspector({
   const update = useCallback(
     (data: Record<string, unknown>) => onUpdate(agent.id, data),
     [agent.id, onUpdate],
+  );
+
+  const wsId = useWorkspaceId();
+  const migrate = useMigrateAgentsToRuntime(wsId);
+  const migrateRuntime = useCallback(
+    async (runtimeId: string) => {
+      try {
+        await migrate.mutateAsync({
+          targetRuntimeId: runtimeId,
+          agentIds: [agent.id],
+        });
+      } catch (e) {
+        toast.error(
+          e instanceof Error
+            ? e.message
+            : t(($) => $.migrate_dialog.failed_toast),
+        );
+      }
+    },
+    [agent.id, migrate, t],
   );
 
   const [name, setName] = useState(agent.name);
@@ -247,17 +270,13 @@ export function AgentDetailInspector({
               members={members}
               currentUserId={currentUserId}
               canEdit={canEdit}
-              // Model, thinking level, and service tier are runtime/model
-              // native. Clear them together so the new runtime resolves its
-              // own defaults instead of inheriting incompatible tokens.
-              onChange={(id) =>
-                update({
-                  runtime_id: id,
-                  model: "",
-                  thinking_level: "",
-                  service_tier: "",
-                })
-              }
+              // Routed through the migration endpoint rather than a plain
+              // agent update (MUL-5758). Model / thinking level / service tier
+              // are runtime-native and get cleared there, same as before —
+              // what changes is that the agent's already-queued tasks move to
+              // the new runtime too. Going through PUT /api/agents/{id} left
+              // them claimable only by the runtime the agent just left.
+              onChange={(id) => migrateRuntime(id)}
             />
           </SettingsRow>
           <SettingsRow
