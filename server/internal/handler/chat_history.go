@@ -124,9 +124,15 @@ func (h *Handler) chatHistorySession(w http.ResponseWriter, r *http.Request) (pg
 func (h *Handler) respondChatHistory(w http.ResponseWriter, r *http.Request, sessionID pgtype.UUID, page channel.HistoryPage, err error) {
 	if err != nil {
 		if errors.Is(err, slack.ErrNoSlackSession) {
+			// One read of the binding, two derived fields. Reading it twice
+			// lets an archive land between them and produce a response whose
+			// channel_type names a platform while its note says there is no
+			// channel.
+			channelType := h.sessionChannelType(r.Context(), sessionID)
 			writeJSON(w, http.StatusOK, ChatChannelHistoryResponse{
-				Messages: []channel.HistoryMessage{},
-				Note:     "This conversation is not connected to a chat channel, so there is no channel history to read.",
+				ChannelType: channelType,
+				Messages:    []channel.HistoryMessage{},
+				Note:        noHistoryNote(channelType),
 			})
 			return
 		}
@@ -173,4 +179,36 @@ func parseHistoryLimit(raw string) int {
 		return 0
 	}
 	return n
+}
+
+// noHistoryNote explains an empty read in terms the agent can act on. It is a
+// pure function of the channel type its caller already resolved, so the note
+// and the response's channel_type cannot disagree.
+//
+// The reader is Slack-only, so every other platform lands here — and the note
+// said "this conversation is not connected to a chat channel", which for a
+// WeCom, Lark or DingTalk session is simply false. An agent told it is in a
+// web-only conversation reasons differently about who can see its answer than
+// one told it is in a group whose backlog it cannot read, and that is a
+// difference worth not lying about.
+func noHistoryNote(channelType string) string {
+	if channelType == "" {
+		return "This conversation is not connected to a chat channel, so there is no channel history to read."
+	}
+	return "This conversation is on " + channelType + ", whose backlog this server cannot read. You can see the messages addressed to you in this session, but not the rest of the room."
+}
+
+// sessionChannelType names the platform behind a session, or "" when there is
+// none. Channel-agnostic on purpose: a per-platform lookup here would go blind
+// the next time a channel is added, which is exactly how the note above came
+// to be wrong.
+func (h *Handler) sessionChannelType(ctx context.Context, sessionID pgtype.UUID) string {
+	if h.Queries == nil || !sessionID.Valid {
+		return ""
+	}
+	binding, err := h.Queries.GetChannelChatSessionBindingBySessionAny(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	return binding.ChannelType
 }
