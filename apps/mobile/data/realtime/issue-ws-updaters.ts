@@ -78,6 +78,36 @@ export function invalidateIssueAfterReconnect(
 // Issue timeline (flat TimelineEntry[], ASC oldest-first)
 // =====================================================
 
+/**
+ * Pure cache updater used by useCreateComment's onSuccess to perform the
+ * canonical one-to-one optimistic -> real replacement.
+ *
+ * The pairing key is THIS MUTATION'S OWN ctx (the optimistic id it created
+ * in onMutate) plus the server Comment returned in the HTTP response — no
+ * content/time-window matching against WS events happens anywhere.
+ *
+ *   - If the real id is already present (the WS `comment:created` event
+ *     beat the HTTP response and appended it), just drop the optimistic
+ *     row. The transient optimistic + real duplicate collapses here.
+ *   - Otherwise replace the optimistic row with `real` in place (keeping
+ *     its ASC bottom position).
+ *
+ * Returns the input array unchanged when there is nothing to do. Pure and
+ * exported for unit tests (this node-runnable module has no RN deps).
+ */
+export function replaceOptimisticWithReal(
+  old: TimelineEntry[] | undefined,
+  optimisticId: string | null,
+  real: TimelineEntry,
+): TimelineEntry[] | undefined {
+  if (!old) return old;
+  if (!optimisticId) return old;
+  if (old.some((e) => e.id === real.id)) {
+    return old.filter((e) => e.id !== optimisticId);
+  }
+  return old.map((e) => (e.id === optimisticId ? real : e));
+}
+
 export function appendTimelineEntry(
   qc: QueryClient,
   wsId: string,
@@ -93,6 +123,18 @@ export function appendTimelineEntry(
       if (old.some((e) => e.id === entry.id && e.type === entry.type)) {
         return old;
       }
+      // The WS handler is deliberately IDEMPOTENT BY REAL ID: if an entry
+      // with the server id already exists, leave the cache alone; otherwise
+      // insert it. It does NOT guess which optimistic `optimistic-*` entry
+      // an incoming comment corresponds to. The canonical
+      // optimistic->real pairing lives in useCreateComment's onSuccess,
+      // which owns the optimistic id and the server response and does the
+      // one-to-one replacement there. If the WS event beats the HTTP
+      // response, the real entry is appended alongside the still-pending
+      // optimistic one; onSuccess then removes the optimistic id (the real
+      // one is already present), collapsing the transient duplicate the
+      // instant the response arrives. Identical concurrent submits never
+      // mis-pair because the WS side does no pairing at all.
       const next = [...old, entry];
       next.sort((a, b) => {
         if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
