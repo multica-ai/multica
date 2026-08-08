@@ -39,18 +39,32 @@ export function IssuePickerModal({
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const abortRef = useRef<AbortController>(undefined);
 
+  const cancelPendingSearch = useCallback(() => {
+    if (debounceRef.current !== undefined) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = undefined;
+    }
+
+    if (abortRef.current !== undefined) {
+      abortRef.current.abort();
+      abortRef.current = undefined;
+    }
+  }, []);
+
+  useEffect(() => cancelPendingSearch, [cancelPendingSearch]);
+
   useEffect(() => {
     if (!open) {
+      cancelPendingSearch();
       setQuery("");
       setResults([]);
       setIsLoading(false);
     }
-  }, [open]);
+  }, [cancelPendingSearch, open]);
 
   const search = useCallback(
     (q: string) => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (abortRef.current) abortRef.current.abort();
+      cancelPendingSearch();
 
       if (!q.trim()) {
         setResults([]);
@@ -58,8 +72,10 @@ export function IssuePickerModal({
         return;
       }
 
+      setResults([]);
       setIsLoading(true);
       debounceRef.current = setTimeout(async () => {
+        debounceRef.current = undefined;
         const controller = new AbortController();
         abortRef.current = controller;
         try {
@@ -75,12 +91,17 @@ export function IssuePickerModal({
           }
         } catch {
           if (!controller.signal.aborted) {
+            setResults([]);
             setIsLoading(false);
+          }
+        } finally {
+          if (abortRef.current === controller) {
+            abortRef.current = undefined;
           }
         }
       }, 300);
     },
-    [excludeIds],
+    [cancelPendingSearch, excludeIds],
   );
 
   return (

@@ -22,6 +22,16 @@ function I18nWrapper({ children }: { children: ReactNode }) {
   );
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 const renderSearch = () => render(<SearchCommand />, { wrapper: I18nWrapper });
 
 const {
@@ -299,6 +309,81 @@ describe("SearchCommand", () => {
       expect(useSearchStore.getState().open).toBe(false);
     });
     expect(screen.queryByPlaceholderText("Type a command or search...")).not.toBeInTheDocument();
+  });
+
+  it("cancels an in-flight search and discards its results when the palette closes", async () => {
+    const user = userEvent.setup();
+    const pendingIssues = deferred<{
+      issues: Array<{
+        id: string;
+        identifier: string;
+        title: string;
+        status: "todo";
+      }>;
+    }>();
+    mockSearchIssues.mockReturnValueOnce(pendingIssues.promise);
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "stale");
+    await waitFor(() => expect(mockSearchIssues).toHaveBeenCalledTimes(1), {
+      timeout: 2000,
+    });
+    const signal = mockSearchIssues.mock.calls[0]?.[0]?.signal as AbortSignal;
+
+    act(() => useSearchStore.setState({ open: false }));
+    await act(async () => {
+      pendingIssues.resolve({
+        issues: [
+          {
+            id: "stale-issue",
+            identifier: "MUL-404",
+            title: "Stale search result",
+            status: "todo",
+          },
+        ],
+      });
+      await pendingIssues.promise;
+    });
+
+    act(() => useSearchStore.setState({ open: true }));
+    await screen.findByPlaceholderText("Type a command or search...");
+
+    expect(signal.aborted).toBe(true);
+    expect(screen.queryByText("Stale search result")).not.toBeInTheDocument();
+  });
+
+  it("clears previous results immediately and keeps them cleared when the next search fails", async () => {
+    const user = userEvent.setup();
+    const firstResultTitle = (_: string, element: Element | null) =>
+      element?.textContent === "First query result" && element.tagName === "SPAN";
+    mockSearchIssues
+      .mockResolvedValueOnce({
+        issues: [
+          {
+            id: "first-issue",
+            identifier: "MUL-1",
+            title: "First query result",
+            status: "todo",
+          },
+        ],
+      })
+      .mockRejectedValueOnce(new Error("search failed"));
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "first");
+    await screen.findByText(firstResultTitle, undefined, { timeout: 2000 });
+
+    await user.type(input, "x");
+    expect(screen.queryByText(firstResultTitle)).not.toBeInTheDocument();
+    await waitFor(() => expect(mockSearchIssues).toHaveBeenCalledTimes(2), {
+      timeout: 2000,
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(firstResultTitle)).not.toBeInTheDocument();
+    });
   });
 
   it("shows only New Issue by default and hides Pages / low-frequency commands until query", () => {
