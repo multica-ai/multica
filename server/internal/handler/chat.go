@@ -552,6 +552,10 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Rows cancelled inside the tx, broadcast after it commits. nil when the
+	// request unarchives; BroadcastCancelledTasks is a no-op on an empty slice.
+	var cancelled []db.AgentTaskQueue
+
 	if req.Archived {
 		// Cancel first, in the same transaction. ClaimAgentTask does not read
 		// chat_session.status, so a task queued before the archive stays
@@ -565,7 +569,13 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 		// with this conversation. DeleteChatSession has always cancelled for
 		// the same reason (see the CancelAgentTasksByChatSession call below),
 		// and chat.sql's own comment already assumes archive does too.
-		if _, err := qtx.CancelAgentTasksByChatSession(r.Context(), session.ID); err != nil {
+		//
+		// The query is not limited to never-started work: it also matches
+		// dispatched, running, waiting_local_directory and deferred, which is
+		// why the returned rows have to reach the post-commit broadcast below
+		// rather than being discarded.
+		cancelled, err = qtx.CancelAgentTasksByChatSession(r.Context(), session.ID)
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to cancel queued tasks for the archived session")
 			return
 		}
@@ -580,6 +590,15 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to commit chat session update")
 		return
 	}
+
+	// Post-commit broadcasts, same as DeleteChatSession: subscribers should
+	// never observe events for a tx that didn't actually persist. This is the
+	// call that captures the cancellation and revokes the tasks' mat_ tokens,
+	// reconciles each agent off 'working', emits task:cancelled so other
+	// clients drop the row instead of showing it queued until the next
+	// refresh, and wakes the runtime so a queued successor is claimed now
+	// rather than at the daemon's next poll.
+	h.TaskService.BroadcastCancelledTasks(r.Context(), cancelled)
 
 	resolvedSessionID := uuidToString(updated.ID)
 	status := updated.Status
