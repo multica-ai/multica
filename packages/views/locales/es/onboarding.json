@@ -1,0 +1,369 @@
+{
+  "step_header": {
+    "step_of": "Paso {{current}} de {{total}}"
+  },
+  "welcome": {
+    "wordmark": "Bienvenido a Multica",
+    "headline_line1": "Tus compañeros de IA,",
+    "headline_line2": "en",
+    "headline_emphasis": "un solo workspace.",
+    "lede": "Asignales trabajo como lo harías con un compañero — lo toman, actualizan el estado y comentan cuando terminan.",
+    "lede_web": "La versión de escritorio incluye el runtime — no hay que instalar nada. Continuá en la web para conectar tu propia CLI.",
+    "lede_desktop": "Al final, un agent real va a responder a tu primer issue.",
+    "download_desktop": "Descargar Desktop",
+    "continue_on_web": "Continuar en la web",
+    "start_exploring": "Empezar a explorar",
+    "skip_existing": "Ya hice esto antes",
+    "illustration_caption": "Cada issue, cada hilo, cada decisión — compartida por tu equipo y tus agents.",
+    "illustration": {
+      "card1_actor_name": "Vos",
+      "card1_actor_initial": "V",
+      "card1_body_prefix": " podés redactar un post de lanzamiento corto? Usá los hallazgos de la entrevista de ",
+      "card1_body_suffix": ".",
+      "card1_mention_content": "@Content Agent",
+      "card1_mention_research": "@Research Agent",
+      "card2_actor_name": "Content Agent",
+      "card2_body": "Enseguida. Sacando las citas de Research, redactando alrededor del ángulo de «tiempo ahorrado»…",
+      "card3_actor_name": "Research Agent",
+      "card3_body": "Entrevistas de usuario de esta semana resumidas — 12 llamadas, 4 temas recurrentes, 3 citas textuales.",
+      "card3_timestamp": "Hace 15 min",
+      "card4_actor_name": "Review Agent",
+      "card4_body": "Revisé el borrador del lunes — dejé 4 notas sobre el tono. Quedo a la espera del nuevo.",
+      "card5_actor_name": "Coding Agent",
+      "card5_body_prefix": "Shipeé la feature de exportación que ",
+      "card5_body_suffix": " marcó. Link de preview en el PR.",
+      "card5_mention_you": "@vos",
+      "card5_timestamp": "recién"
+    }
+  },
+  "common": {
+    "back": "Volver",
+    "continue": "Continuar",
+    "skip": "Saltar",
+    "cancel": "Cancelar"
+  },
+  "questions": {
+    "eyebrow_about_you": "Sobre vos",
+    "source": {
+      "question": "¿Cómo te enteraste de Multica?",
+      "friends_colleagues": "Amigos o compañeros",
+      "search": "Google / búsqueda",
+      "social_x": "X / Twitter",
+      "social_linkedin": "LinkedIn",
+      "social_youtube": "YouTube",
+      "social_misc": "Otra red social",
+      "blog_newsletter": "Blog / newsletter",
+      "ai_assistant": "ChatGPT / Claude / Cursor",
+      "from_work": "En el trabajo",
+      "event_conference": "Conferencia / meetup",
+      "dont_remember": "No me acuerdo",
+      "other": "Otro",
+      "other_placeholder": "Ej. un podcast que escucho"
+    },
+    "role": {
+      "question": "¿Qué te describe mejor?",
+      "engineer": "Ingeniero / desarrollador",
+      "product": "Product manager",
+      "designer": "Diseñador",
+      "founder": "Fundador / ejecutivo",
+      "marketing": "Marketing / growth",
+      "writer": "Escritor / contenido",
+      "research": "Investigador / analista",
+      "ops": "Operaciones / gestión de proyectos",
+      "student": "Estudiante / uso personal",
+      "other": "Otro",
+      "other_placeholder": "Ej. docente, líder de soporte"
+    },
+    "use_case": {
+      "question": "¿Para qué querés usar Multica?",
+      "ship_code": "Shipear código con agents de IA",
+      "manage_team": "Gestionar tareas para mi equipo",
+      "personal_tasks": "Organizar mis propias tareas",
+      "plan_research": "Planificar, brainstormear, investigar",
+      "write_publish": "Escribir, editar, publicar",
+      "automate_ops": "Automatizar ops y flujos de trabajo",
+      "evaluate": "Solo estoy explorando",
+      "other": "Otro",
+      "other_placeholder": "Ej. coordinación de grupo de estudio"
+    }
+  },
+  "option_card": {
+    "other_label": "Otro",
+    "other_aria": "Describí otra cosa"
+  },
+  "step_question": {
+    "hint_pick": "Elegí una para continuar — o saltá si preferís no decirlo.",
+    "hint_continue": "Se ve bien. Tocá Continuar cuando estés listo."
+  },
+  "runtime_aside": {
+    "what_eyebrow": "¿Qué es un agent runtime?",
+    "what_prefix": "La «computadora» que conectás es lo que internamente llamamos un ",
+    "what_term": "agent runtime",
+    "what_suffix": ": un pequeño proceso en segundo plano en la computadora, asociado a una herramienta de IA para código — Claude Code, Codex, y demás. Una herramienta, un agent runtime. El agent runtime es lo que realmente ejecuta las tareas que tu agent toma.",
+    "good_eyebrow": "Bueno saber",
+    "swap_title": "Cambiá cuando quieras",
+    "swap_body": "El runtime de cada agent es solo un setting. Cambialo cuando quieras.",
+    "add_more_title": "Agregá más después",
+    "add_more_body": "Podés conectar otra computadora para un compañero, o una dedicada por agent.",
+    "learn_more": "Aprendé sobre agent runtimes →"
+  },
+  "cli_install": {
+    "copy_aria": "Copiar",
+    "intro": "Vas a necesitar un agent runtime en esta computadora (Claude Code, Codex, Cursor, …) para que pueda ejecutar tu agent. También funciona en servidores y dev boxes remotas.",
+    "step1_label": "Instalá la CLI de Multica",
+    "step2_label": "Iniciá el daemon"
+  },
+  "cloud_waitlist": {
+    "intro_main": "Los runtimes en la nube todavía no están disponibles. Dejá tu email y te contactamos cuando lo estén.",
+    "intro_warning": "Ojo: los agents no pueden ejecutar tareas sin un runtime — si saltás esto ahora, tu workspace va a ser de solo lectura hasta que vuelvas e instales uno.",
+    "email_label": "Email",
+    "email_placeholder": "vos@trabajo.com",
+    "reason_label": "¿Por qué cloud?",
+    "optional": "Opcional",
+    "reason_placeholder": "Ej. queremos agents corriendo 24/7, o mi equipo trabaja desde distintos dispositivos.",
+    "join": "Unirme a la lista de espera",
+    "on_list": "Estás en la lista",
+    "success_toast": "Estás en la lista. Te vamos a escribir por email cuando los runtimes en la nube estén disponibles.",
+    "failed_toast": "Error al unirse a la lista de espera"
+  },
+  "first_issue": {
+    "error_title": "Algo salió mal",
+    "retry": "Reintentar",
+    "retry_failed": "Error al reintentar",
+    "finishing": "Finalizando",
+    "opening": "Ya casi — abriendo tu workspace."
+  },
+  "step_agent": {
+    "eyebrow": "Tu primer agent",
+    "headline": "Conocé a tu primer compañero.",
+    "lede_prefix": "Tus respuestas apuntan a un ",
+    "lede_suffix": ". Elegí el que mejor se adapte a vos de estos cuatro — cada template ya está listo para tomar su primer issue. Podés ajustar sus instrucciones desde la página de configuración del agent después.",
+    "footer_hint": "Un agent es suficiente para empezar. Agregá más desde el sidebar después.",
+    "create_action": "Crear {{name}}",
+    "create_failed": "Error al crear el agent",
+    "recommended_badge": "Recomendado",
+    "templates": {
+      "coding": {
+        "label": "Coding Agent",
+        "blurb": "Escribe, refactoriza y shipea código. Lee tu repo.",
+        "instructions": "Sos un Coding Agent en un equipo de producto. Tomá issues de código — implementá features, fixeá bugs, escribí tests y abrí pull requests. Leé el repositorio antes de empezar, seguí las convenciones de código existentes y mantené los diffs enfocados. Pedí aclaraciones cuando los criterios de aceptación sean ambiguos."
+      },
+      "planning": {
+        "label": "Planning Agent",
+        "blurb": "Desglosa trabajo, redacta specs, mantiene el board ordenado.",
+        "instructions": "Sos un Planning Agent. Convertí ideas sueltas y issues abiertos en trabajo con alcance y listo para ejecutar: desglosalos en subtareas, escribí criterios de aceptación y proponé responsables y secuencia. Priorizá claridad sobre velocidad. Cuando estés bloqueado por falta de contexto, hacé una pregunta específica en vez de adivinar."
+      },
+      "writing": {
+        "label": "Writing Agent",
+        "blurb": "Redacta, resume, investiga. Amigable con contenido largo.",
+        "instructions": "Sos un Writing Agent. Redactá documentos, resumí contenido largo e investigá temas en la web cuando sea necesario. Estructurá tu salida como prosa terminada que un lector pueda usar directamente — no un outline. Cité fuentes cuando las uses. Adaptate al tono que el usuario establezca en el issue."
+      },
+      "assistant": {
+        "label": "Assistant",
+        "blurb": "Propósito general. Buen default cuando la tarea no está clara.",
+        "instructions": "Sos un compañero de propósito general. Manejá tareas variadas — código liviano, escritura, investigación, planificación — y sé pragmático con el alcance. Cuando la tarea sea ambigua, hacé una pregunta aclaratoria antes de meterte de lleno. Por defecto preferí salidas cortas y útiles antes que exhaustivas."
+      }
+    },
+    "about_eyebrow": "Qué es un agent",
+    "about_headline": "Un compañero de IA que vive en tu workspace.",
+    "about_body": "Los agents aparecen en cada selector de asignados, como cualquier otro compañero — salvo que pueden trabajar 24/7 en el runtime que les des.",
+    "ways_eyebrow": "Formas de trabajar con un agent",
+    "way_assign_title": "Asignale un issue",
+    "way_assign_body": "Toma la tarea y reporta en el hilo.",
+    "way_mention_title": "@mencioná en un comentario",
+    "way_mention_body": "Incorporalo a una conversación para una respuesta rápida.",
+    "way_chat_title": "Chateá uno a uno",
+    "way_chat_body": "Hacé preguntas rápidas sin crear un issue.",
+    "way_autopilot_title": "Ponelo en Autopilot",
+    "way_autopilot_body": "Triaje diario, resumen semanal, auditoría mensual — en un schedule.",
+    "add_more_hint": "Agregá más agents cuando quieras. Un equipo chico de agents especializados le gana a uno que hace de todo.",
+    "docs_link": "Creando tu primer agent →"
+  },
+  "welcome_after_onboarding": {
+    "loading_helper": "Preparando tu Helper…",
+    "error_title": "No se pudo completar la configuración",
+    "error_generic": "Algo salió mal. Intentá de nuevo.",
+    "retry": "Intentar de nuevo",
+    "dismiss_error": "Descartar",
+    "error_close": "Cerrar",
+    "user_context_heading": "Sobre mí",
+    "user_context_role_label": "Rol",
+    "user_context_use_case_label": "Qué quiero hacer con Multica",
+    "runtime": {
+      "greeting": "Hola, bienvenido a Multica",
+      "subtitle": "Soy tu primer agent asistente.",
+      "capabilities": "Preguntame lo que quieras sobre cómo usar Multica. También puedo hacer cosas en tu workspace — crear issues, configurar tareas programadas, armar nuevos agents…",
+      "section_label": "Elegí una o más tareas para empezar:",
+      "assign_empty": "Elegí una o más",
+      "assign_count": "Asignarme {{count}} tarea →",
+      "assign_count_plural": "Asignarme {{count}} tareas →",
+      "cards": {
+        "intro": {
+          "subtitle": "Dejame explicarte en 1–2 párrafos qué es Multica y qué puede hacer."
+        },
+        "tour": {
+          "subtitle": "Te guío por cómo encajan issue, agent, squad y autopilot."
+        },
+        "welcome_page": {
+          "subtitle": "Te armo una presentación HTML de un solo archivo — adaptada a tu rol, lista para copiar y abrir en el navegador."
+        }
+      },
+      "success": {
+        "title": "¡Todo listo!",
+        "subtitle": "Aguardá — tu {{agentName}} está en eso ☕",
+        "tip_inbox": "Cuando haya novedades, las vas a ver en tu Bandeja de entrada.",
+        "tip_chat": "¿Querés chatear en vivo? Hacé clic en el ícono de chat abajo a la derecha.",
+        "got_it": "Entendido →"
+      }
+    },
+    "skip": {
+      "loading": "Configurando tu workspace…",
+      "title": "¡Bienvenido a Multica!",
+      "subtitle": "Agregamos dos tareas para ayudarte con el próximo paso.",
+      "got_it": "Entendido",
+      "status_in_progress": "En progreso",
+      "status_todo": "Pendiente",
+      "cards": {
+        "install_runtime": {
+          "title": "Conectá un runtime",
+          "subtitle": "Instalá Codex o Kimi para poner los agents en línea."
+        },
+        "create_agent": {
+          "title": "Creá tu primer agent",
+          "subtitle": "Una vez que tengas un runtime en línea, armá tu primer agent de Multica."
+        }
+      }
+    }
+  },
+  "step_workspace": {
+    "eyebrow_first": "Tu primer workspace",
+    "eyebrow_resume": "Continuá o empezá de nuevo",
+    "headline_first": "Nombrá tu workspace.",
+    "headline_resume": "Continuá con {{name}}, o empezá otro.",
+    "lede_first": "Un workspace es donde viven tus issues, agents y proyectos. Podés invitar compañeros o crear más workspaces después.",
+    "lede_resume": "Retomá la configuración con el workspace que ya tenés, o creá uno nuevo aparte — podés pertenecer a cualquier cantidad de workspaces.",
+    "name_label": "Nombre del workspace",
+    "name_placeholder": "Acme Inc, Mi Lab, Proyectos personales…",
+    "url_label": "URL",
+    "slug_placeholder": "acme",
+    "issue_prefix_label": "Prefijo de issues",
+    "issue_prefix_prefix": "Los issues van a verse así: ",
+    "issue_prefix_suffix": ". Podés cambiar esto después en la configuración.",
+    "create_new_title": "Crear un nuevo workspace",
+    "create_new_subtitle": "Empezá de cero — un espacio separado para otra faceta de tu trabajo.",
+    "hint_opening": "Abriendo {{name}}.",
+    "hint_creating": "Creando {{name}}.",
+    "hint_creating_pending": "Creando {{name}}…",
+    "hint_creating_fallback": "tu workspace",
+    "hint_name_first": "Nombrá tu workspace para crearlo.",
+    "hint_pick": "Elegí tu workspace o empezá uno nuevo.",
+    "cta_open": "Abrir {{name}}",
+    "cta_create_named": "Crear {{name}}",
+    "cta_create_workspace": "Crear workspace",
+    "cta_creating": "Creando…",
+    "slug_format_error": "Solo letras minúsculas, números y guiones",
+    "slug_taken_error": "Esa URL de workspace ya está en uso.",
+    "slug_reserved_error": "Esa URL de workspace está reservada y no se puede usar.",
+    "slug_conflict_toast": "Elegí otra URL para el workspace",
+    "create_failed_toast": "Error al crear el workspace",
+    "side_create_eyebrow": "Qué hay dentro de un workspace",
+    "side_existing_eyebrow": "Tu workspace",
+    "side_things_eyebrow": "Cosas que vas a hacer acá",
+    "side_next_eyebrow": "Qué sigue",
+    "side_preview_name": "Tu workspace",
+    "side_preview_slug": "workspace",
+    "perk_assign": "Asigná issues a agents como lo harías con un compañero",
+    "perk_chat": "Chateá con cualquier agent sin crear un issue",
+    "perk_invite": "Invitá compañeros — solo ven este workspace",
+    "perk_switch": "Cambiá a otros workspaces cuando quieras desde arriba a la izquierda",
+    "next_runtime": "Conectá una computadora para que tus agents tengan dónde correr",
+    "next_agent": "Creá el Multica Helper desde tu runtime conectado",
+    "next_starter": "Abrí un issue de onboarding para tu próximo paso",
+    "preview": {
+      "inbox_label": "Bandeja de entrada",
+      "inbox_meta": "tus notificaciones",
+      "issues_label": "Issues",
+      "issues_meta": "board compartido de tareas",
+      "agents_label": "Agents",
+      "agents_meta": "tus compañeros de IA",
+      "projects_label": "Proyectos",
+      "projects_meta": "agrupá issues relacionados",
+      "autopilot_label": "Autopilot",
+      "autopilot_meta": "automatización programada",
+      "runtimes_label": "Runtimes",
+      "runtimes_meta": "dónde corren los agents",
+      "skills_label": "Skills",
+      "skills_meta": "playbooks reutilizables",
+      "more_label": "Y más",
+      "more_meta": "y más"
+    }
+  },
+  "step_runtime": {
+    "scanning_headline": "Conectando esta computadora…",
+    "scanning_lede_prefix": "Tu agent trabaja a través de una herramienta de IA para código que ya tenés — como ",
+    "scanning_lede_suffix": ", y otras. Estamos revisando si tenés alguna instalada en esta computadora.",
+    "found_headline": "Esta computadora está conectada. Elegí un agent runtime.",
+    "found_lede": "Estos son los agent runtimes que encontramos en esta computadora. Elegí uno para tu primer agent — podés cambiarlo o agregar más después.",
+    "runtime_count_one": "{{count}} agent runtime",
+    "runtime_count_other": "{{count}} agent runtimes",
+    "status_all_online": "todos en línea",
+    "status_none_online": "ninguno en línea",
+    "status_n_online": "{{count}} en línea",
+    "online_label": "en línea",
+    "offline_label": "desconectado",
+    "empty_headline": "Todavía no se encontró un agent runtime en esta computadora.",
+    "empty_leade_prefix": "Un agent runtime es una herramienta de IA para código a la que nos conectamos — como ",
+    "empty_lede_suffix": ". Instalá una y actualizá, o elegí una opción abajo.",
+    "empty_skip_title": "Saltar por ahora",
+    "empty_skip_subtitle": "Entrá a tu workspace en modo solo lectura. Tu agent no puede ejecutar tareas hasta que haya un agent runtime conectado en esta computadora — pero podés navegar, planificar e invitar compañeros.",
+    "empty_skip_action": "Saltar",
+    "empty_waitlist_title": "Usá una computadora en la nube",
+    "empty_waitlist_subtitle": "Vamos a correr una computadora por vos en la nube. Todavía no está disponible.",
+    "empty_waitlist_action": "Próximamente",
+    "skip": "Saltar por ahora",
+    "refresh": "Actualizar",
+    "refreshing": "Actualizando…",
+    "hint_selected": "Seleccionado: {{name}}",
+    "hint_pick": "Elegí un agent runtime arriba para continuar.",
+    "hint_waiting": "Esperando el primer resultado…",
+    "hint_skip_or_refresh": "Actualizá después de instalar uno, o saltá para entrar a tu workspace.",
+    "start_exploring": "Empezar a explorar"
+  },
+  "step_platform": {
+    "eyebrow": "Conectá una computadora",
+    "headline": "Conectá una computadora para ejecutar tu agent.",
+    "lede": "Tu agent corre en una computadora real que conectás a Multica. Elegí cómo querés conectar una.",
+    "hint_default": "Elegí una forma de conectar — o saltá y conectá una computadora después.",
+    "hint_downloaded": "Terminá la configuración en la página de descarga, y después volvé a esta pestaña.",
+    "download_title": "Usá esta computadora",
+    "download_title_after": "Abriendo la página de descarga…",
+    "download_subtitle": "Instalá nuestra app de escritorio para conectar esta computadora. Sin configuración — elegí tu plataforma en la próxima página.",
+    "download_subtitle_after": "Se abrió en una nueva pestaña. Elegí tu instalador ahí, y después terminá la configuración en la app de escritorio.",
+    "download_button": "Descargar",
+    "cli_title": "Conectá desde la terminal",
+    "cli_subtitle": "Conectá un servidor, una dev box remota o cualquier computadora headless. Requiere terminal.",
+    "cli_action": "Mostrar pasos",
+    "cloud_title": "Usá una computadora en la nube",
+    "cloud_subtitle": "Vamos a correr una computadora por vos en la nube. Todavía no está disponible.",
+    "cloud_action": "Próximamente",
+    "cli_dialog_title": "Conectá desde la terminal",
+    "cli_dialog_description": "La misma conexión que Desktop, configurada desde la terminal. Usala para servidores, dev boxes remotas o cualquier computadora headless.",
+    "cli_dialog_pick_hint": "Elegí una computadora arriba.",
+    "cli_dialog_connect": "Conectar y continuar",
+    "runtimes_connected_one": "{{count}} computadora conectada",
+    "runtimes_connected_other": "{{count}} computadoras conectadas",
+    "live_listening": "En vivo · Esperando tu computadora",
+    "stage_normal_prefix": "Ejecutá el comando de arriba. En cuanto ",
+    "stage_normal_suffix": " termine el login en el navegador, tu computadora va a aparecer acá automáticamente (generalmente 10–30 segundos).",
+    "stage_midway_prefix": "Todavía escuchando. Asegurate de haber terminado en la pestaña del navegador que ",
+    "stage_midway_suffix": " abrió — necesita que apruebes el login antes de que tu computadora pueda conectarse.",
+    "stage_slow_prefix": "Está tardando más de lo normal. Fijate en la terminal donde ejecutaste ",
+    "stage_slow_suffix": " si hay errores.",
+    "stage_stalled_prefix": "Todavía no llega nada. Si no estás cómodo con la terminal, ",
+    "stage_stalled_term": "Desktop",
+    "stage_stalled_suffix": " es el camino más simple — un clic y esta computadora queda conectada. Cerrá este diálogo y elegí Desktop, o tocá Saltar para continuar."
+  },
+  "errors": {
+    "skip_failed": "Error al finalizar el onboarding"
+  }
+}
