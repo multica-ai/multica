@@ -94,8 +94,8 @@ func TestClaudeStaticModelsExposesFable5(t *testing.T) {
 	if fable.Label != "Claude Fable 5" || fable.Provider != "anthropic" || fable.Default {
 		t.Errorf("unexpected Fable entry: %+v", fable)
 	}
-	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
-		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
+	if defaults != 0 {
+		t.Errorf("claude catalog must flag no Default: the CLI resolves an unset model from its own config, got defaults=%d models=%+v", defaults, models)
 	}
 }
 
@@ -117,8 +117,8 @@ func TestClaudeStaticModelsExposesSonnet5(t *testing.T) {
 	if sonnet.Label != "Claude Sonnet 5" || sonnet.Provider != "anthropic" || sonnet.Default {
 		t.Errorf("unexpected Sonnet 5 entry: %+v", sonnet)
 	}
-	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
-		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
+	if defaults != 0 {
+		t.Errorf("claude catalog must flag no Default: the CLI resolves an unset model from its own config, got defaults=%d models=%+v", defaults, models)
 	}
 }
 

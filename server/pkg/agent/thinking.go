@@ -615,11 +615,22 @@ func parseACPCodebuddyEffort(raw json.RawMessage) (levels []string, defaultLevel
 //     fails closed: the daemon drops the level rather than injecting one that
 //     may not fit. Users who need a specific effort must pick an explicit
 //     model. (MUL-4347 review.)
+//   - claude and opencode: neither exposes a headless "which model would you
+//     resolve to" query, so Multica cannot know the effective model. Claude
+//     Code takes its default from the user's own settings files / env
+//     (`~/.claude/settings.json`, project settings, managed policy,
+//     ANTHROPIC_MODEL) and dropped its `config` subcommand, so a catalog-side
+//     Default flag would be Multica guessing on the CLI's behalf — it would
+//     reject `xhigh` for a user whose CLI is configured to Opus. Both
+//     therefore accept a level any advertised model supports and let the CLI
+//     arbitrate, which matches the daemon guard's own fail-open philosophy
+//     ("if we can't tell, keep the level and let the CLI object"). This only
+//     ever widens: nothing that validates today starts failing.
 //   - other providers: empty model resolves to the catalog's Default entry
 //     so a default-model task with a valid thinking_level isn't misjudged as
 //     "unknown model → reject" (the misjudgement flagged in an earlier
-//     review). opencode has no single default, so it accepts a level any
-//     advertised model supports.
+//     review). That entry is discovered from the runtime itself (e.g. an ACP
+//     `currentModelId`), not hand-maintained.
 //
 // The lookup goes through ListModels so it sees the *current* CLI
 // catalog (including dynamic discovery for codex), not just a static
@@ -644,6 +655,13 @@ func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, mo
 	models := catalog.Models
 	target := model
 	if target == "" {
+		// Providers whose unset model resolves from local configuration we
+		// cannot read: accept anything the advertised catalog supports and let
+		// the CLI arbitrate, rather than substituting a model of our own
+		// choosing (see doc comment).
+		if providerType == "claude" || providerType == "opencode" {
+			return anyModelSupportsThinkingValue(models, value), nil
+		}
 		// Default model = the entry the catalog marks as Default. If no
 		// entry is flagged, fall through to the no-match return; that
 		// matches the existing semantics where an unknown model fails
@@ -655,9 +673,6 @@ func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, mo
 			}
 		}
 		if target == "" {
-			if providerType == "opencode" {
-				return anyModelSupportsThinkingValue(models, value), nil
-			}
 			return false, nil
 		}
 	}

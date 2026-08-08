@@ -551,13 +551,17 @@ func TestCodexAdvertisedLevelsArePersistable(t *testing.T) {
 // ── ValidateThinkingLevel default-model handling ─────────────────────
 //
 // Elon's PR1 review called out that an empty model on a default-model
-// task must not be misjudged as "unknown model → reject". The fix is to
-// resolve empty model to the catalog's default entry inside the
-// validator. Both the daemon's per-model guard and the server's API
-// layer call this; if it gets default-model wrong, any agent without an
-// explicit model set would have its thinking_level dropped silently.
+// task must not be misjudged as "unknown model → reject". Both the daemon's
+// per-model guard and the server's API layer call this; if it gets
+// default-model wrong, any agent without an explicit model set would have
+// its thinking_level dropped silently.
+//
+// For claude the resolution is the catalog union, not a Multica-chosen
+// default: Claude Code reads its own settings / ANTHROPIC_MODEL and offers
+// no headless query for the result, so picking one entry here would reject
+// levels that the user's actually-configured model supports.
 
-func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
+func TestValidateThinkingLevel_EmptyClaudeModelAcceptsCatalogUnion(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fake binary requires a POSIX shell")
 	}
@@ -574,10 +578,7 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 
 	ctx := context.Background()
 
-	t.Run("valid level on default model passes", func(t *testing.T) {
-		// Claude's catalog flags Sonnet 4.6 as Default. Sonnet supports
-		// low/medium/high/max (no xhigh) per claudeModelEffortAllow, so
-		// "high" must round-trip when model is left empty.
+	t.Run("level any advertised model supports passes", func(t *testing.T) {
 		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "", "high")
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
@@ -587,15 +588,30 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid level on default model fails", func(t *testing.T) {
-		// "xhigh" is opus-only; resolving "" to default (sonnet 4.6)
-		// should reject it, not silently accept.
+	t.Run("opus-only level is not blocked by an unset model", func(t *testing.T) {
+		// The regression this pins: `xhigh` is Opus-only, and Claude Code's
+		// unset model can perfectly well resolve to Opus via the user's own
+		// settings. Validating against a Multica-chosen Sonnet default used
+		// to drop `--effort xhigh` for those users, silently downgrading the
+		// run to the CLI's own effort with only a daemon-log warning.
 		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "", "xhigh")
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
+		if !ok {
+			t.Errorf("xhigh must survive an unset claude model; got false")
+		}
+	})
+
+	t.Run("token no advertised model supports still fails", func(t *testing.T) {
+		// Widening to the union is not the same as accepting anything: a
+		// token outside the whole Claude catalog must still fail closed.
+		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "", "ultra")
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
 		if ok {
-			t.Errorf("xhigh should be invalid on sonnet (the default model); got true")
+			t.Errorf("`ultra` is a Codex-only token; must not validate for claude")
 		}
 	})
 

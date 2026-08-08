@@ -36,16 +36,33 @@ vi.mock("@multica/core/api", () => ({
 
 import { ThinkingPropRow } from "./thinking-prop-row";
 
+// Claude entries carry no `default`: which model an unset agent runs on is
+// resolved by Claude Code from its own config, not advertised to us.
 const CLAUDE_MODEL: RuntimeModel = {
   id: "claude-sonnet-4-6",
   label: "Claude Sonnet 4.6",
-  default: true,
   thinking: {
     supported_levels: [
       { value: "none", label: "None" },
       { value: "low", label: "Low" },
       { value: "medium", label: "Medium" },
       { value: "high", label: "High" },
+    ],
+    default_level: "medium",
+  },
+};
+
+// Opus advertises the Opus-only `xhigh` on top of the shared levels, so it
+// is what makes a union-vs-single-entry preview observable.
+const CLAUDE_OPUS_MODEL: RuntimeModel = {
+  id: "claude-opus-4-8",
+  label: "Claude Opus 4.8",
+  thinking: {
+    supported_levels: [
+      { value: "low", label: "Low" },
+      { value: "medium", label: "Medium" },
+      { value: "high", label: "High" },
+      { value: "xhigh", label: "Extra high" },
     ],
     default_level: "medium",
   },
@@ -258,14 +275,40 @@ describe("ThinkingPropRow", () => {
     expect(onChange).toHaveBeenCalledWith("");
   });
 
-  it("still previews the Default model's levels for an empty non-codex model", async () => {
-    // Non-codex providers keep the existing behavior: an empty model previews
-    // the flagged Default entry's catalog. Only codex is fenced off, because
-    // only its empty-model resolution is config-driven and unknowable here.
+  it("previews the catalog union for an empty claude model, not one entry's levels", async () => {
+    // Claude Code resolves an unset model from its own settings / env, so no
+    // single catalog entry can stand in for it. Offering only Sonnet's levels
+    // hid `xhigh` from users whose CLI is configured to Opus — the picker has
+    // to show the union and let the CLI arbitrate.
+    mockInitiateListModels.mockResolvedValue(
+      listResult([CLAUDE_MODEL, CLAUDE_OPUS_MODEL]),
+    );
+    mockGetListModelsResult.mockResolvedValue(
+      listResult([CLAUDE_MODEL, CLAUDE_OPUS_MODEL]),
+    );
     renderRow({ provider: "claude", model: "", value: "" });
 
     await screen.findByText("Thinking");
-    // CLAUDE_MODEL (Default) advertises Low/Medium/High — the picker shows them.
-    expect((await screen.findAllByText("Follow CLI config")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button"));
+    // `xhigh` comes only from the Opus entry; `low` only via the shared rows.
+    expect(await screen.findByText("Extra high")).toBeInTheDocument();
+    expect(await screen.findByText("Low")).toBeInTheDocument();
+  });
+
+  it("previews only the selected model's levels once a claude model is explicit", async () => {
+    // The union is strictly a fallback for "we can't know". With Sonnet named
+    // explicitly, Opus-only `xhigh` must not be offered.
+    mockInitiateListModels.mockResolvedValue(
+      listResult([CLAUDE_MODEL, CLAUDE_OPUS_MODEL]),
+    );
+    mockGetListModelsResult.mockResolvedValue(
+      listResult([CLAUDE_MODEL, CLAUDE_OPUS_MODEL]),
+    );
+    renderRow({ provider: "claude", model: "claude-sonnet-4-6", value: "" });
+
+    await screen.findByText("Thinking");
+    fireEvent.click(screen.getByRole("button"));
+    expect(await screen.findByText("High")).toBeInTheDocument();
+    expect(screen.queryByText("Extra high")).not.toBeInTheDocument();
   });
 });

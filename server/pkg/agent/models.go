@@ -371,12 +371,20 @@ func discoveryCacheKey(providerType, executablePath string) string {
 
 // claudeStaticModels reflects the Claude Code CLI's accepted --model
 // values. Keep this list short and current; stale entries here
-// mislead users more than they help. Default = Sonnet because it's
-// the everyday workhorse (Opus is reserved for advisor-style flows).
+// mislead users more than they help.
+//
+// No entry is flagged Default on purpose. Claude Code resolves an unset
+// model from the user's own configuration — settings files, managed policy,
+// ANTHROPIC_MODEL — and exposes no headless query for the result, so any
+// flag here would be Multica asserting a default it cannot know. The picker
+// already renders an unset model as "Default" (meaning "whatever the CLI
+// picks") rather than badging a row, and ValidateThinkingLevel takes the
+// catalog-union path for an empty claude model instead of borrowing one
+// entry's effort catalog.
 func claudeStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-5", Label: "Claude Sonnet 5", Provider: "anthropic"},
-		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic"},
 		{ID: "claude-fable-5", Label: "Claude Fable 5", Provider: "anthropic"},
 		{ID: "claude-opus-5", Label: "Claude Opus 5", Provider: "anthropic"},
 		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},

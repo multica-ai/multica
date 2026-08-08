@@ -2,7 +2,10 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import type { RuntimeModel } from "@multica/core/types";
+import type {
+  RuntimeModel,
+  RuntimeModelThinkingLevel,
+} from "@multica/core/types";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { PropRow } from "../../../common/prop-row";
 import { SettingsRow } from "../../../settings/components/settings-layout";
@@ -38,8 +41,8 @@ export function ThinkingPropRow({
 }: {
   runtimeId: string | null;
   runtimeOnline: boolean;
-  /** Runtime provider type (e.g. "codex", "claude"). Used to decide whether an
-   *  empty model can safely preview a default model's effort catalog. */
+  /** Runtime provider type (e.g. "codex", "claude"). Decides how an empty
+   *  model resolves to a level set — see `pickLevels`. */
   provider: string;
   model: string;
   value: string;
@@ -52,8 +55,7 @@ export function ThinkingPropRow({
   );
 
   const models = modelsQuery.data?.models ?? [];
-  const entry = pickModelEntry(models, model, provider);
-  const levels = entry?.thinking?.supported_levels ?? [];
+  const levels = pickLevels(models, model, provider);
   if (levels.length === 0 && !value) return null;
 
   return (
@@ -92,8 +94,7 @@ export function ThinkingSettingField({
     runtimeModelsOptions(runtimeOnline ? runtimeId : null),
   );
   const models = modelsQuery.data?.models ?? [];
-  const entry = pickModelEntry(models, model, provider);
-  const levels = entry?.thinking?.supported_levels ?? [];
+  const levels = pickLevels(models, model, provider);
 
   if (levels.length === 0 && !value) return null;
 
@@ -111,19 +112,45 @@ export function ThinkingSettingField({
   );
 }
 
-function pickModelEntry(
+// Effort levels to offer for a (model, provider) pair. Mirrors the backend
+// ValidateThinkingLevel so the picker never offers a level the daemon would
+// drop, and never hides one it would accept.
+function pickLevels(
   models: RuntimeModel[],
   model: string,
   provider: string,
-): RuntimeModel | undefined {
-  if (model) return models.find((m) => m.id === model);
+): RuntimeModelThinkingLevel[] {
+  if (model) {
+    return (
+      models.find((m) => m.id === model)?.thinking?.supported_levels ?? []
+    );
+  }
   // Empty model = "follow the runtime's own default". For codex that default
   // comes from the local config.toml and can be any installed model, so we
   // must NOT preview the flagged Default entry's effort catalog — gpt-5.6-sol
   // alone advertises `ultra`, which the actually-configured model may not
   // support. Fail closed (no preview): the row hides unless a stale level is
   // persisted, in which case it still renders so the orphan can be cleared.
-  // Mirrors the backend ValidateThinkingLevel. (MUL-4347)
-  if (provider === "codex") return undefined;
-  return models.find((m) => m.default) ?? models[0];
+  // (MUL-4347)
+  if (provider === "codex") return [];
+  // claude / opencode resolve an unset model from local configuration we
+  // can't read, so no single entry can stand in for it. Offer the union of
+  // what the runtime advertises and let the CLI arbitrate — picking one
+  // entry here would hide `xhigh` from a user whose CLI is set to Opus.
+  return unionLevels(models);
+}
+
+// Distinct levels across every advertised model, in first-seen catalog order
+// so the runtime's own low→high ordering survives.
+function unionLevels(models: RuntimeModel[]): RuntimeModelThinkingLevel[] {
+  const seen = new Set<string>();
+  const out: RuntimeModelThinkingLevel[] = [];
+  for (const m of models) {
+    for (const level of m.thinking?.supported_levels ?? []) {
+      if (seen.has(level.value)) continue;
+      seen.add(level.value);
+      out.push(level);
+    }
+  }
+  return out;
 }
