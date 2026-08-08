@@ -1,0 +1,75 @@
+{
+  "title": "Facturering (testpagina)",
+  "subtitle": "Rechtstreekse doorgifte naar /api/v1/billing/* van multica-cloud. Geen afgewerkte UI — gewoon elk endpoint op één pagina zodat we de proxy + Stripe-flow kunnen verifiëren.",
+  "endpoints": {
+    "balance": "GET /api/cloud-billing/balance",
+    "transactions": "GET /api/cloud-billing/transactions",
+    "batches": "GET /api/cloud-billing/batches",
+    "topups": "GET /api/cloud-billing/topups",
+    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
+  },
+  "balance": {
+    "title": "Saldo",
+    "credits_suffix": "credits",
+    "meta": "ruwe micro: {{micro}} · eigenaar: {{owner}}… · bijgewerkt {{updated}}"
+  },
+  "buy": {
+    "title": "Credits kopen / Facturering beheren",
+    "no_tiers": "Geen prijsniveaus geconfigureerd. Cloud heeft waarschijnlijk geen Stripe-sleutel ingesteld — checkout geeft 503 terug.",
+    "tier_money_to_credits": "{{money}} → {{credits}} credits",
+    "tier_bonus": " + {{credits}} bonus",
+    "tier_bonus_with_expiry": " + {{credits}} bonus ({{expiry}})",
+    "tier_id": "id: {{id}}",
+    "open_portal": "Stripe Billing Portal openen",
+    "portal_hint": "400 wordt verwacht voor gebruikers die nog niet hebben betaald (er bestaat geen Stripe-klantrecord).",
+    "toast_no_url": "Cloud gaf geen checkout-URL terug",
+    "toast_checkout_failed": "Checkout mislukt",
+    "toast_no_portal_url": "Geen portal-URL teruggegeven",
+    "toast_portal_failed": "Portal mislukt"
+  },
+  "checkout": {
+    "session_label": "Checkoutsessie {{prefix}}…",
+    "loading": "Bestelstatus laden…",
+    "fetch_failed": "Ophalen van status mislukt: {{error}}",
+    "fetch_failed_unknown": "onbekende fout",
+    "final_status": "Definitieve status: {{status}}",
+    "polling_status": "Status ophalen… huidig: {{status}}",
+    "status_unknown": "onbekend",
+    "label_order": "Bestelling",
+    "label_tier": "Niveau",
+    "label_charged": "In rekening gebracht",
+    "charged_value": "{{money}} · {{credits}} credits",
+    "charged_with_bonus": "{{money}} · {{credits}} credits + {{bonus}} bonus",
+    "clear_url": "Uit URL wissen"
+  },
+  "transactions": {
+    "title": "Transacties",
+    "empty": "Nog geen transacties.",
+    "credits_value": "{{value}} credits",
+    "row_meta": "{{date}} · saldo daarna: {{balance}} credits · ref: {{ref}}",
+    "ref_empty": "—"
+  },
+  "batches": {
+    "title": "Creditbatches",
+    "empty": "Nog geen batches.",
+    "remaining_over_total": "{{remaining}} / {{total}} credits",
+    "id_suffix": "{{id}}…",
+    "consumed": "Verbruikt: {{value}} credits",
+    "expires_suffix": " · verloopt {{value}}",
+    "never_expires_suffix": " · verloopt nooit"
+  },
+  "topups": {
+    "title": "Opwaardeerbestellingen",
+    "empty": "Nog geen opwaardeerbestellingen.",
+    "amount_to_credits": "{{money}} → {{credits}} credits",
+    "amount_to_credits_with_bonus": "{{money}} → {{credits}} credits + {{bonus}} bonus",
+    "row_meta": "{{date}} · stripe: {{checkout}}",
+    "stripe_empty": "—"
+  },
+  "shared": {
+    "request_failed": "Verzoek mislukt",
+    "refresh": "Vernieuwen",
+    "paging": "pagina {{page}} / {{totalPages}} · {{total}} totaal",
+    "date_dash": "—"
+  }
+}

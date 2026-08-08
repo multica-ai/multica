@@ -1,0 +1,109 @@
+{
+  "bubble_menu": {
+    "bold": "Vet",
+    "italic": "Cursief",
+    "strikethrough": "Doorhalen",
+    "code": "Code",
+    "highlight": "Markeren",
+    "link": "Link",
+    "list": "Lijst",
+    "task_list": "Takenlijst",
+    "quote": "Citaat",
+    "url_aria_label": "URL",
+    "heading_dropdown": {
+      "text": "Tekst",
+      "normal_text": "Normale tekst",
+      "heading_1": "Kop 1",
+      "heading_2": "Kop 2",
+      "heading_3": "Kop 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Opsommingslijst",
+      "ordered_list": "Genummerde lijst",
+      "task_list": "Takenlijst"
+    },
+    "sub_issue": {
+      "tooltip": "Sub-issue aanmaken vanuit selectie",
+      "created": "{{identifier}} aangemaakt",
+      "create_failed": "Aanmaken van sub-issue mislukt"
+    }
+  },
+  "image": {
+    "view": "Afbeelding bekijken",
+    "download": "Downloaden",
+    "copy_link": "Link kopiëren",
+    "delete": "Verwijderen",
+    "link_copied": "Link gekopieerd",
+    "copy_link_failed": "Kopiëren van link mislukt"
+  },
+  "attachment": {
+    "download_failed": "Kon geen downloadlink ophalen. Probeer het zo meteen opnieuw.",
+    "preview": "Voorbeeld",
+    "preview_loading": "Voorbeeld laden…",
+    "preview_failed": "Kon voorbeeld niet laden",
+    "preview_too_large": "Bestand is te groot voor een voorbeeld. Download het.",
+    "preview_unsupported": "Van dit bestandstype kan geen voorbeeld worden getoond.",
+    "close": "Sluiten",
+    "open_in_new_tab": "Openen in nieuw tabblad",
+    "remove": "Bijlage verwijderen"
+  },
+  "link_hover": {
+    "copy_link": "Link kopiëren",
+    "open_link": "Link openen",
+    "link_copied": "Link gekopieerd",
+    "copy_failed": "Kopiëren mislukt"
+  },
+  "mention": {
+    "group_users": "Gebruikers",
+    "group_issues": "Issues",
+    "all_members": "Alle leden",
+    "searching": "Zoeken...",
+    "no_results": "Geen resultaten",
+    "group_current": "Huidige pagina",
+    "group_recent": "Onlangs bekeken",
+    "group_search": "Zoekresultaten"
+  },
+  "slash_command": {
+    "no_skills_configured": "Geen skills geconfigureerd",
+    "no_results": "Geen overeenkomende skills",
+    "commands": {
+      "note": "Voeg een notitie toe — activeert geen agents"
+    }
+  },
+  "code_block": {
+    "copy_code": "Code kopiëren",
+    "show_preview": "Voorbeeld tonen",
+    "show_source": "Bron tonen",
+    "fullscreen": "Volledig scherm"
+  },
+  "file_card": {
+    "uploading": "{{filename}} uploaden"
+  },
+  "upload": {
+    "failed": "Uploaden van {{filename}} mislukt: {{reason}}",
+    "in_progress": "Uploaden…"
+  },
+  "title_editor": {
+    "title_aria_label": "Titel"
+  },
+  "mermaid": {
+    "render_error": "Kan Mermaid-diagram niet weergeven.",
+    "rendering": "Diagram weergeven…",
+    "viewer_title": "Diagram",
+    "canvas_label": "Diagramcanvas. Sleep om te verschuiven, scroll om te zoomen.",
+    "open_viewer": "Diagramviewer openen",
+    "close_viewer": "Sluiten",
+    "copy_source": "Diagrambron kopiëren",
+    "show_source": "Bron tonen",
+    "show_diagram": "Diagram tonen",
+    "zoom_in": "Inzoomen",
+    "zoom_out": "Uitzoomen",
+    "zoom_fit": "Passend maken",
+    "zoom_actual": "Werkelijke grootte",
+    "reset_view": "Weergave resetten",
+    "export": "Exporteren",
+    "export_png": "PNG downloaden",
+    "export_svg": "SVG downloaden",
+    "export_source": "Downloaden als .mmd"
+  }
+}

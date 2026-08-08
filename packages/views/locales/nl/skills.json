@@ -1,0 +1,312 @@
+{
+  "page": {
+    "title": "Skills",
+    "tagline": "Instructies die elke agent in deze workspace kan gebruiken.",
+    "learn_more": "Meer informatie →",
+    "new_skill": "Nieuwe skill",
+    "search_placeholder": "Skills zoeken…",
+    "scopes": {
+      "all": { "label": "Alle", "description": "Alle skills in deze workspace" },
+      "used": { "label": "In gebruik", "description": "Skills die aan minstens één agent zijn toegewezen" },
+      "unused": { "label": "Ongebruikt", "description": "Skills die aan geen enkele agent zijn toegewezen" },
+      "mine": { "label": "Door mij aangemaakt", "description": "Skills die je hebt aangemaakt" }
+    },
+    "empty": {
+      "title": "Nog geen skills",
+      "description": "Maak je eerste skill aan, importeer er een via een URL of kopieer er een van een verbonden runtime — en elke agent in de workspace kan die gebruiken."
+    },
+    "no_matches": {
+      "title": "Geen overeenkomsten",
+      "with_query": "Geen skills komen overeen met \"{{query}}\"{{filterSuffix}}.",
+      "with_query_filter_suffix": " in dit filter",
+      "filter_only": "Geen skills komen overeen met dit filter.",
+      "try_different": " Probeer een andere zoekopdracht."
+    },
+    "intro_banner": {
+      "title": "Gedeeld met je workspace.",
+      "body": "Iedereen kan een skill aanmaken, er een importeren via een URL of er een kopiëren van hun lokale runtime — en elke agent kan die gebruiken.",
+      "highlight": "Skills van de lokale runtime blijven privé totdat je er hier een naartoe kopieert."
+    },
+    "list_error": {
+      "title": "Kon skills niet laden",
+      "fallback": "Er ging iets mis bij het ophalen van de skill-lijst.",
+      "retry": "Opnieuw proberen"
+    },
+    "supporting_data_warning": "Sommige workspacegegevens konden niet worden geladen. Toewijzing aan makers, runtime-namen of bewerkrechten kunnen onvolledig lijken."
+  },
+  "table": {
+    "name": "Naam",
+    "created_by": "Toegevoegd door",
+    "used_by": "Gebruikt door",
+    "source": "Bron",
+    "updated": "Bijgewerkt",
+    "created": "Aangemaakt",
+    "lock_tooltip": "Alleen-lezen — alleen de maker of een beheerder kan bewerken",
+    "unused": "— ongebruikt",
+    "by_creator": "door {{name}}",
+    "source_manual": "Handmatig aangemaakt",
+    "source_runtime_named": "Van {{name}}",
+    "source_runtime_provider": "Van {{provider}}-runtime",
+    "source_runtime_unknown": "Van een runtime",
+    "source_clawhub": "Van ClawHub",
+    "source_skills_sh": "Van Skills.sh",
+    "source_github": "Van GitHub"
+  },
+  "actions": {
+    "row_menu": "Acties",
+    "add_to_agent": "Aan agent toevoegen",
+    "my_agents": "Mijn agents",
+    "other_agents": "Andere agents",
+    "no_agents": "Geen agents beschikbaar",
+    "search_placeholder": "Agents zoeken…",
+    "no_agents_match": "Geen agents komen overeen met je zoekopdracht.",
+    "has_partial": "{{owned}}/{{total}} toegevoegd",
+    "added_toast": "Toegevoegd aan {{name}}",
+    "add_failed_toast": "Toevoegen van skill mislukt",
+    "delete": "Verwijderen",
+    "selected": "{{count}} geselecteerd",
+    "clear_selection": "Selectie wissen",
+    "delete_no_permission": "Selectie bevat skills die alleen door hun maker of een beheerder kunnen worden verwijderd",
+    "delete_dialog_title_one": "{{count}} skill verwijderen?",
+    "delete_dialog_title_other": "{{count}} skills verwijderen?",
+    "delete_dialog_desc_one": "Hiermee wordt de geselecteerde skill permanent verwijderd en van alle agents verwijderd.",
+    "delete_dialog_desc_other": "Hiermee worden de {{count}} geselecteerde skills permanent verwijderd en van alle agents verwijderd.",
+    "deleted_toast_one": "{{count}} skill verwijderd",
+    "deleted_toast_other": "{{count}} skills verwijderd",
+    "delete_failed_toast": "Verwijderen van skills mislukt",
+    "add_dialog_description": "Selecteer de agents die de geselecteerde skills moeten krijgen.",
+    "cancel": "Annuleren",
+    "add_confirm": "Toevoegen ({{num}})",
+    "adding": "Toevoegen...",
+    "added_multi_toast_one": "Toegevoegd aan {{count}} agent",
+    "added_multi_toast_other": "Toegevoegd aan {{count}} agents"
+  },
+  "toolbar": {
+    "result_count_title": "Overeenkomende skills / alle skills",
+    "filter_label": "Filteren",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Filters wissen",
+    "section_usage": "Gebruik",
+    "display": "Weergave",
+    "sort_by": "Sorteren op",
+    "direction_asc": "Oplopend",
+    "direction_desc": "Aflopend",
+    "section_columns": "Kolommen"
+  },
+  "detail": {
+    "all_skills": "Alle skills",
+    "read_only": "Alleen-lezen",
+    "delete_aria": "Skill verwijderen",
+    "delete_tooltip": "Skill verwijderen",
+    "supporting_data_warning": "Sommige workspacegegevens konden niet worden geladen. Toewijzing aan makers, runtime-namen of bewerkrechten kunnen onvolledig lijken tot de volgende vernieuwing.",
+    "files_label": "Bestanden · {{count}}",
+    "add_file_aria": "Bestand toevoegen",
+    "add_file_tooltip": "Bestand toevoegen",
+    "delete_file": "Bestand verwijderen",
+    "name_aria": "Skill-naam",
+    "name_placeholder": "skill-naam",
+    "description_label": "Beschrijving",
+    "description_placeholder": "Eén zin die beschrijft wanneer een agent deze skill moet gebruiken…",
+    "subline": {
+      "origin_runtime_named": "Lokale runtime · {{name}}",
+      "origin_runtime_provider": "Lokale runtime · {{provider}}",
+      "origin_runtime_unknown": "Lokale runtime",
+      "origin_clawhub": "Geïmporteerd · ClawHub",
+      "origin_skills_sh": "Geïmporteerd · Skills.sh",
+      "origin_github": "Geïmporteerd · GitHub",
+      "origin_workspace": "Workspace",
+      "updated_label": "Bijgewerkt {{when}}",
+      "by_creator": "door {{name}}"
+    },
+    "conflict_banner": {
+      "title": "Iemand anders heeft deze skill bijgewerkt",
+      "body": "Je bewerkingen blijven behouden. Verwerp om hun wijzigingen op te halen, of Opslaan om te overschrijven."
+    },
+    "save_bar": {
+      "unsaved": "Niet-opgeslagen wijzigingen — overschrijven de live skill bij opslaan",
+      "discard": "Verwerpen",
+      "save": "Wijzigingen opslaan",
+      "saving": "Opslaan…"
+    },
+    "sidebar": {
+      "metadata": "Metadata",
+      "created": "Aangemaakt",
+      "updated": "Bijgewerkt",
+      "created_by": "Aangemaakt door",
+      "files": "Bestanden",
+      "id": "ID",
+      "origin": "Herkomst",
+      "used_by_one": "Gebruikt door {{count}} agent",
+      "used_by_other": "Gebruikt door {{count}} agents",
+      "permissions": "Rechten",
+      "permissions_owner": "Je kunt deze skill bewerken en verwijderen. Wijzigingen worden van kracht bij de volgende agent-run.",
+      "permissions_locked_creator": "Alleen de maker ({{name}}) of een workspacebeheerder kan deze skill bewerken.",
+      "permissions_locked": "Alleen de maker of een workspacebeheerder kan deze skill bewerken.",
+      "used_by_empty": "Nog niet aan een agent toegewezen. Open het tabblad Skills van een agent om toe te wijzen."
+    },
+    "origin_card": {
+      "imported_runtime": "Geïmporteerd van lokale runtime",
+      "imported_clawhub": "Geïmporteerd van ClawHub",
+      "imported_skills_sh": "Geïmporteerd van Skills.sh",
+      "imported_github": "Geïmporteerd van GitHub",
+      "provider": "provider · {{provider}}"
+    },
+    "not_found": {
+      "title": "Skill niet gevonden",
+      "fallback": "Deze skill is mogelijk verwijderd of je bent je toegang verloren.",
+      "back": "Terug naar Skills"
+    },
+    "toast_saved": "Skill opgeslagen",
+    "toast_save_failed": "Opslaan van skill mislukt",
+    "toast_deleted": "Skill verwijderd",
+    "toast_delete_failed": "Verwijderen van skill mislukt",
+    "delete_dialog": {
+      "title": "Skill verwijderen?",
+      "description_with_agents_one": "Hiermee wordt \"{{name}}\" permanent verwijderd en verwijderd van {{count}} agent die deze momenteel gebruikt.",
+      "description_with_agents_other": "Hiermee wordt \"{{name}}\" permanent verwijderd en verwijderd van {{count}} agents die deze momenteel gebruiken.",
+      "description_no_agents": "Hiermee wordt \"{{name}}\" permanent verwijderd en van alle agents verwijderd.",
+      "warning": "Deze actie kan niet ongedaan worden gemaakt.",
+      "cancel": "Annuleren",
+      "confirm": "Permanent verwijderen",
+      "deleting": "Verwijderen…"
+    },
+    "add_file": {
+      "placeholder": "templates/review.md",
+      "add": "Toevoegen",
+      "cancel": "Annuleren",
+      "errors": {
+        "empty": "Pad mag niet leeg zijn.",
+        "absolute": "Absolute paden zijn niet toegestaan.",
+        "double_dot": "Paden mogen geen \"..\" bevatten.",
+        "reserved": "SKILL.md is gereserveerd voor het hoofdbestand.",
+        "exists": "Er bestaat al een bestand op dit pad."
+      }
+    }
+  },
+  "create": {
+    "back": "Terug",
+    "back_aria": "Terug naar methodekiezer",
+    "close": "Sluiten",
+    "close_aria": "Sluiten",
+    "method": {
+      "chooser": {
+        "title": "Nieuwe skill",
+        "desc": "Kies hoe je een skill aan deze workspace wilt toevoegen."
+      },
+      "manual": {
+        "title": "Handmatig aanmaken",
+        "desc": "Schrijf een nieuwe SKILL.md vanaf nul."
+      },
+      "url": {
+        "title": "Importeren via URL",
+        "desc": "Haal een gepubliceerde skill op via een URL. Bestanden worden aan de serverkant opgehaald."
+      },
+      "runtime": {
+        "title": "Kopiëren van runtime",
+        "desc": "Scan een lokale runtime en promoveer een van de skills op schijf naar deze workspace."
+      }
+    },
+    "method_card": {
+      "manual_title": "Handmatig aanmaken",
+      "manual_desc": "Begin met een lege SKILL.md en schrijf je eigen instructies.",
+      "url_title": "Importeren via URL",
+      "url_desc": "Haal een gepubliceerde skill op van ClawHub of Skills.sh.",
+      "runtime_title": "Kopiëren van runtime",
+      "runtime_desc": "Promoveer een skill die al op je lokale runtime is geïnstalleerd."
+    },
+    "manual": {
+      "name_label": "Naam",
+      "name_placeholder": "bijv. review-helper",
+      "name_hint": "Moet uniek zijn binnen de workspace.",
+      "description_label": "Beschrijving",
+      "description_placeholder": "Eén zin over wanneer je deze skill aan een agent toewijst.",
+      "name_conflict_hint": " Probeer een andere naam en verstuur opnieuw.",
+      "fallback_error": "Aanmaken van skill mislukt",
+      "cancel": "Annuleren",
+      "submit": "Skill aanmaken",
+      "submitting": "Aanmaken…",
+      "toast_created": "Skill aangemaakt"
+    },
+    "url": {
+      "url_label": "Skill-URL",
+      "supported_sources": "Ondersteunde bronnen",
+      "import": "Importeren",
+      "importing": "Importeren…",
+      "importing_clawhub": "Importeren van ClawHub…",
+      "importing_skills_sh": "Importeren van Skills.sh…",
+      "importing_github": "Importeren van GitHub…",
+      "name_conflict_hint": " De naam van de geïmporteerde skill bestaat al — verwijder de bestaande voordat je het opnieuw probeert.",
+      "fallback_error": "Importeren mislukt",
+      "cancel": "Annuleren",
+      "toast_imported": "Skill geïmporteerd"
+    }
+  },
+  "runtime_import": {
+    "runtime_label": "Runtime",
+    "runtime_placeholder": "Selecteer een lokale runtime",
+    "no_local_runtimes_title": "Geen lokale runtimes beschikbaar",
+    "no_local_runtimes_hint": "Verbind een lokale runtime om de lokale skills te bekijken en te importeren.",
+    "choose_runtime": "Kies een runtime om door te gaan",
+    "must_be_online": "Runtime moet online zijn om lokale skills te bekijken.",
+    "load_failed": "Laden van lokale skills van runtime mislukt",
+    "not_supported": "Deze runtimeprovider stelt nog geen lokale skill-inventaris beschikbaar.",
+    "no_skills_title": "Geen lokale skills gevonden",
+    "no_skills_hint": "Deze runtime heeft nog geen ontdekbare lokale skills.",
+    "search_placeholder": "Lokale skills zoeken",
+    "no_search_results_title": "Geen overeenkomende lokale skills",
+    "no_search_results_hint": "Geen lokale skills komen overeen met \"{{query}}\".",
+    "ignored_files_hint": "Symlinks, onleesbare bestanden, te grote bestanden en zeer grote bundels worden tijdens het importeren genegeerd.",
+    "ready": "Klaar om te importeren",
+    "into_workspace": "in deze workspace.",
+    "select_skill": "Selecteer een skill om door te gaan.",
+    "import_button": "Importeren naar workspace",
+    "importing": "Importeren…",
+    "skill_files_one": "{{count}} bestand",
+    "skill_files_other": "{{count}} bestanden",
+    "skill_name_label": "Skill-naam in workspace",
+    "skill_description_label": "Beschrijving",
+    "skill_description_placeholder": "Optioneel — beschrijf wanneer een agent deze skill moet gebruiken.",
+    "toast_imported": "Skill geïmporteerd",
+    "toast_import_failed": "Importeren van skill mislukt",
+    "select_all": "Alles selecteren ({{count}})",
+    "bulk_ready": "{{count}} skills geselecteerd",
+    "bulk_import_button": "{{count}} skills importeren",
+    "bulk_progress": "{{completed}} / {{total}} importeren…",
+    "bulk_cancel_button": "Annuleren",
+    "bulk_complete_hint": "Importeren voltooid.",
+    "bulk_cancelled_hint": "Importeren geannuleerd.",
+    "bulk_done_button": "Klaar",
+    "bulk_summary_created": "Aangemaakt",
+    "bulk_summary_updated": "Bijgewerkt",
+    "bulk_summary_conflicts": "Conflicten",
+    "bulk_summary_skipped": "Overgeslagen",
+    "bulk_summary_failed": "Mislukt",
+    "conflict_single_title": "Er bestaat al een skill met deze naam",
+    "conflict_bulk_title": "{{count}} skills hebben een beslissing nodig",
+    "conflict_hint": "Kies of je de bestaande workspace-skill wilt overschrijven, met een nieuwe naam wilt importeren of wilt overslaan.",
+    "conflict_locked_creator": "Deze skill is aangemaakt door {{creator}}. Alleen de maker kan die overschrijven via lokaal importeren; bewerk hem via de skill-detailpagina als je hem wilt wijzigen.",
+    "conflict_locked": "Alleen de maker kan deze skill overschrijven via lokaal importeren; bewerk hem via de skill-detailpagina als je hem wilt wijzigen.",
+    "conflict_overwrite": "Overschrijven",
+    "conflict_rename": "Hernoemen",
+    "conflict_skip": "Overslaan",
+    "conflict_cancel": "Annuleren",
+    "conflict_overwrite_all": "Alles overschrijven",
+    "conflict_skip_all": "Alles overslaan",
+    "conflict_rename_label": "Nieuwe skill-naam",
+    "conflict_footer": "{{count}} conflictbeslissingen in behandeling.",
+    "conflict_apply_button": "Beslissingen toepassen",
+    "conflict_missing_resolution": "Kies hoe je dit conflict wilt oplossen.",
+    "conflict_name_still_exists": "Die naam bestaat al. Kies een andere naam of sla over."
+  },
+  "file_tree": {
+    "no_files": "Geen bestanden"
+  },
+  "file_viewer": {
+    "edit_tooltip": "Bewerken",
+    "preview_tooltip": "Voorbeeld",
+    "no_content": "*Nog geen inhoud*",
+    "markdown_placeholder": "Schrijf markdown-inhoud...",
+    "raw_placeholder": "Bestandsinhoud..."
+  }
+}

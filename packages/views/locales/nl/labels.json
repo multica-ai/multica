@@ -1,0 +1,10 @@
+{
+  "remove_label": "Label {{name}} verwijderen",
+  "resource_picker": {
+    "empty": "Geen labels",
+    "add": "Labels toevoegen",
+    "search": "Labels zoeken...",
+    "no_labels": "Maak eerst labels aan in Instellingen",
+    "no_results": "Geen overeenkomende labels"
+  }
+}

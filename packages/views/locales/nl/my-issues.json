@@ -1,0 +1,45 @@
+{
+  "page": {
+    "breadcrumb": "Mijn issues",
+    "workspace_fallback": "Workspace",
+    "empty_title": "Geen issues aan jou toegewezen",
+    "empty_description": "Issues die je aanmaakt of waaraan je bent toegewezen verschijnen hier."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Alle",
+      "all_description": "Aan mij toegewezen, door mij aangemaakt, of met mijn agents en squads erbij betrokken",
+      "assigned_label": "Toegewezen",
+      "assigned_description": "Aan mij toegewezen issues",
+      "created_label": "Aangemaakt",
+      "created_description": "Issues die ik heb aangemaakt",
+      "agents_label": "Mijn agents en squads",
+      "agents_description": "Issues die aan mijn agents zijn toegewezen"
+    },
+    "filter_button": "Filteren",
+    "filter_status": "Status",
+    "filter_priority": "Prioriteit",
+    "issue_count_one": "{{count}} issue",
+    "issue_count_other": "{{count}} issues",
+    "reset_filters": "Alle filters resetten",
+    "display_settings": "Weergave-instellingen",
+    "grouping": "Groeperen",
+    "group_status": "Status",
+    "group_assignee": "Toegewezen aan",
+    "ordering": "Sorteren",
+    "ascending": "Oplopend",
+    "descending": "Aflopend",
+    "card_properties": "Kaarteigenschappen",
+    "view_board": "Bordweergave",
+    "view_list": "Lijstweergave",
+    "view_swimlane": "Swimlaneweergave",
+    "view_label": "Weergave",
+    "view_board_short": "Bord",
+    "view_list_short": "Lijst",
+    "view_swimlane_short": "Swimlane",
+    "sort_manual": "Handmatig"
+  },
+  "errors": {
+    "move_failed": "Verplaatsen van issue mislukt"
+  }
+}

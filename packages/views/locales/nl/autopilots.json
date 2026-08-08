@@ -1,0 +1,447 @@
+{
+  "page": {
+    "title": "Autopilot",
+    "new_autopilot": "Nieuwe autopilot",
+    "start_blank": "Vanaf nul beginnen",
+    "table": {
+      "name": "Naam",
+      "agent": "Agent",
+      "created_by": "Aangemaakt door",
+      "mode": "Modus",
+      "status": "Status",
+      "last_run": "Laatste run",
+      "assignee": "Toegewezen aan",
+      "trigger": "Trigger",
+      "next_run": "Volgende run",
+      "created": "Aangemaakt"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "Nog geen autopilots",
+      "hint": "Plan terugkerende tasks voor je AI-agents. Kies een sjabloon of begin vanaf nul."
+    },
+    "scope_all": "Alle",
+    "no_matches": "Geen overeenkomende automatiseringen",
+    "retry": "Opnieuw proberen"
+  },
+  "status": {
+    "active": "Actief",
+    "paused": "Gepauzeerd",
+    "archived": "Gearchiveerd"
+  },
+  "execution_mode": {
+    "create_issue": "Issue aanmaken",
+    "run_only": "Alleen uitvoeren"
+  },
+  "relative_date": {
+    "today": "Vandaag",
+    "one_day_ago": "1d geleden",
+    "days_ago": "{{count}}d geleden",
+    "months_ago": "{{count}}mnd geleden"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "Dagelijks nieuwsoverzicht",
+      "summary": "Zoek en vat het nieuws van vandaag samen voor het team"
+    },
+    "pr_review": {
+      "title": "PR-reviewherinnering",
+      "summary": "Markeer verouderde pull requests die een review nodig hebben"
+    },
+    "bug_triage": {
+      "title": "Bug-triage",
+      "summary": "Beoordeel en prioriteer nieuwe bugmeldingen"
+    },
+    "weekly_progress": {
+      "title": "Wekelijks voortgangsrapport",
+      "summary": "Stel een wekelijkse samenvatting van de teamvoortgang op"
+    },
+    "dependency_audit": {
+      "title": "Dependency-audit",
+      "summary": "Scan op beveiligingskwetsbaarheden en verouderde packages"
+    },
+    "documentation_check": {
+      "title": "Documentatiecontrole",
+      "summary": "Beoordeel recente wijzigingen op hiaten in de documentatie"
+    }
+  },
+  "detail": {
+    "not_found": "Autopilot niet gevonden",
+    "pause_aria": "Autopilot pauzeren",
+    "activate_aria": "Autopilot activeren",
+    "edit": "Bewerken",
+    "run_now": "Nu uitvoeren",
+    "running": "Uitvoeren...",
+    "toast_triggered": "Autopilot geactiveerd",
+    "toast_trigger_failed": "Activeren van autopilot mislukt",
+    "run_blocked_invocation_not_allowed": "Niet geactiveerd — je hebt geen toestemming om de agent van deze autopilot te gebruiken",
+    "run_blocked_runtime_offline": "Niet geactiveerd — de runtime van de agent is offline",
+    "run_blocked_target_unavailable": "Niet geactiveerd — de agent is niet beschikbaar",
+    "run_blocked_attribution": "Niet geactiveerd — de run kon niet aan een verantwoordelijk lid worden toegeschreven",
+    "run_blocked_already_active": "Niet geactiveerd — een recente run dekt dit al",
+    "run_blocked_generic": "Niet geactiveerd — de run is geblokkeerd",
+    "section_properties": "Eigenschappen",
+    "section_triggers": "Triggers",
+    "section_run_history": "Uitvoeringsgeschiedenis",
+    "section_danger": "Gevarenzone",
+    "field_agent": "Agent",
+    "field_created_by": "Aangemaakt door",
+    "field_output_mode": "Uitvoermodus",
+    "field_project": "Project",
+    "no_project": "Geen project",
+    "project_unavailable": "Project niet beschikbaar",
+    "field_prompt": "Prompt",
+    "field_subscribers": "Abonnees",
+    "field_subscribers_none": "Geen",
+    "add_trigger": "Trigger toevoegen",
+    "no_triggers": "Geen triggers geconfigureerd. Voeg een schema toe om automatisch uit te voeren.",
+    "no_runs": "Nog geen runs. Klik op \"Nu uitvoeren\" om handmatig te activeren.",
+    "delete_button": "Autopilot verwijderen",
+    "toast_deleted": "Autopilot verwijderd",
+    "toast_delete_failed": "Verwijderen van autopilot mislukt",
+    "delete_dialog": {
+      "title": "Autopilot verwijderen",
+      "description": "Hiermee worden \"{{title}}\" en de bijbehorende triggers en uitvoeringsgeschiedenis permanent verwijderd. Deze actie kan niet ongedaan worden gemaakt.",
+      "cancel": "Annuleren",
+      "confirm": "Verwijderen",
+      "deleting": "Verwijderen..."
+    }
+  },
+  "access": {
+    "title": "Toegang beheren",
+    "description": "Leden die je toevoegt kunnen de triggers en webhooks van deze autopilot bewerken, uitvoeren en beheren.",
+    "current_label": "Met toegang",
+    "add": "Lid toevoegen",
+    "search_placeholder": "Leden zoeken…",
+    "no_results": "Geen leden gevonden",
+    "remove_tooltip": "Toegang verwijderen",
+    "empty": "Nog niemand heeft toegang gekregen.",
+    "toast_granted": "Toegang verleend",
+    "toast_revoked": "Toegang verwijderd",
+    "toast_failed": "Kon toegang niet bijwerken",
+    "owner_note": "De maker en workspacebeheerders hebben altijd toegang."
+  },
+  "run_status": {
+    "issue_created": "Issue aangemaakt",
+    "running": "Bezig",
+    "skipped": "Overgeslagen",
+    "completed": "Voltooid",
+    "failed": "Mislukt"
+  },
+  "run_source": {
+    "schedule": "Schema",
+    "manual": "Handmatig",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "run": {
+    "issue_linked": "Issue gekoppeld",
+    "view_log": "Uitvoeringslog bekijken",
+    "skipped_group": {
+      "label": "Overgeslagen",
+      "summary": "{{count}} overgeslagen runs"
+    }
+  },
+  "webhook_payload": {
+    "label": "Webhook-gebeurtenis:",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type: {{type}}",
+    "copy": "Kopiëren",
+    "copied": "Webhook-payload gekopieerd",
+    "copied_short": "Gekopieerd",
+    "copy_failed": "Kopiëren mislukt",
+    "truncated_marker": "[ingekort — klik op Kopiëren voor de volledige payload]"
+  },
+  "trigger_kind": {
+    "schedule": "Schema",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "trigger_row": {
+    "disabled_badge": "Uitgeschakeld",
+    "deprecated_badge": "Verouderd",
+    "next_label": "Volgende: {{date}}",
+    "webhook_url_label": "Webhook-URL",
+    "copy_url": "URL kopiëren",
+    "url_copied": "Webhook-URL gekopieerd",
+    "url_copy_failed": "Kopiëren mislukt",
+    "rotate_url": "URL vernieuwen",
+    "rotate_confirm_title": "Webhook-URL vernieuwen",
+    "rotate_confirm_description": "De huidige URL stopt onmiddellijk met werken. Externe systemen die hem aanroepen moeten worden bijgewerkt met de nieuwe URL. Doorgaan?",
+    "rotate_confirm_cancel": "Annuleren",
+    "rotate_confirm_action": "URL vernieuwen",
+    "rotate_in_progress": "Vernieuwen...",
+    "toast_rotated": "Webhook-URL vernieuwd",
+    "toast_rotate_failed": "Vernieuwen van URL mislukt",
+    "toast_deleted": "Trigger verwijderd",
+    "toast_delete_failed": "Verwijderen van trigger mislukt",
+    "delete_dialog": {
+      "title": "Trigger verwijderen",
+      "description": "Deze trigger wordt verwijderd en de autopilot stopt met afvuren volgens dit schema. Deze actie kan niet ongedaan worden gemaakt.",
+      "cancel": "Annuleren",
+      "confirm": "Verwijderen",
+      "deleting": "Verwijderen..."
+    }
+  },
+  "deliveries": {
+    "section_title": "Webhook-afleveringen",
+    "empty": "Nog geen webhook-afleveringen. Stuur een POST naar de webhook-URL om hier vermeldingen te zien.",
+    "row": {
+      "attempts": "{{count}}× pogingen",
+      "replay_badge": "Opnieuw afspelen"
+    },
+    "status": {
+      "queued": "In wachtrij",
+      "dispatched": "Verzonden",
+      "rejected": "Geweigerd",
+      "ignored": "Genegeerd",
+      "failed": "Mislukt"
+    },
+    "signature": {
+      "not_required": "Geen handtekening",
+      "valid": "Handtekening geldig",
+      "invalid": "Handtekening ongeldig",
+      "missing": "Handtekening ontbreekt"
+    },
+    "detail": {
+      "title": "Aflevering",
+      "received_at": "Ontvangen",
+      "last_attempt_at": "Laatste poging",
+      "attempt_count": "Pogingen",
+      "dispatch_attempts": "Verzendpogingen",
+      "available_at": "Volgende verzending",
+      "response_status": "Reactie",
+      "dedupe_key": "Dedupe-sleutel",
+      "dedupe_source": "Dedupe-bron",
+      "content_type": "Content-Type",
+      "replayed_from": "Opnieuw afgespeeld vanaf",
+      "error_label": "Fout",
+      "raw_body": "Ruwe body",
+      "selected_headers": "Headers",
+      "response_body": "Reactiebody"
+    },
+    "replay": {
+      "action": "Opnieuw afspelen",
+      "in_progress": "Opnieuw afspelen...",
+      "toast_success": "Aflevering opnieuw afgespeeld",
+      "toast_failed": "Opnieuw afspelen mislukt",
+      "disabled_invalid_signature": "Kan niet opnieuw afspelen — handtekening was ongeldig",
+      "disabled_rejected": "Kan een geweigerde aflevering niet opnieuw afspelen",
+      "disabled_queued": "Nog in wachtrij — speel opnieuw af zodra het is afgehandeld"
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "Trigger toevoegen",
+    "type_label": "Type",
+    "type_schedule": "Schema",
+    "type_webhook": "Webhook",
+    "label_field": "Label (optioneel)",
+    "label_placeholder": "bijv. Doordeweekse ochtend",
+    "webhook_help": "Multica genereert een webhook-URL nadat je hebt opgeslagen. POST er willekeurige JSON naartoe om deze autopilot af te vuren.",
+    "submit": "Trigger toevoegen",
+    "submitting": "Toevoegen...",
+    "toast_added_schedule": "Schematrigger toegevoegd",
+    "toast_added_webhook": "Webhook-trigger toegevoegd",
+    "toast_add_failed": "Toevoegen van trigger mislukt"
+  },
+  "dialog": {
+    "sr_create": "Nieuwe autopilot",
+    "sr_edit": "Autopilot bewerken",
+    "header_create": "Nieuwe autopilot",
+    "header_edit": "Autopilot bewerken",
+    "subtitle": "Een terugkerende AI-task",
+    "expand": "Uitklappen",
+    "collapse": "Inklappen",
+    "close": "Sluiten",
+    "title_placeholder": "Autopilot-naam",
+    "runbook_label": "Runbook",
+    "runbook_hint": "Wordt bij elke run door de agent gelezen",
+    "description_placeholder": "# Doel\nWat moet de agent bereiken?\n\n# Context\nVoor wie is dit? Zijn er beperkingen?\n\n# Stappen\n1. …\n2. …",
+    "auto_run_hint": "Na opslaan draait het automatisch totdat het wordt gepauzeerd.",
+    "cancel": "Annuleren",
+    "create": "Autopilot aanmaken",
+    "save": "Opslaan",
+    "creating": "Aanmaken...",
+    "saving": "Opslaan...",
+    "toast_created": "Autopilot aangemaakt",
+    "toast_create_partial": "Autopilot aangemaakt, maar opslaan van schema mislukt",
+    "toast_create_partial_with_reason": "Autopilot aangemaakt, maar opslaan van schema mislukt: {{reason}}",
+    "toast_create_failed": "Aanmaken van autopilot mislukt",
+    "toast_updated": "Autopilot bijgewerkt",
+    "toast_update_partial": "Autopilot bijgewerkt, maar opslaan van schema mislukt",
+    "toast_update_partial_with_reason": "Autopilot bijgewerkt, maar opslaan van schema mislukt: {{reason}}",
+    "toast_update_failed": "Bijwerken van autopilot mislukt",
+    "section_agent": "Agent",
+    "section_assignee": "Toegewezen aan",
+    "select_agent": "Agent selecteren",
+    "select_assignee": "Agent of squad selecteren",
+    "section_project": "Project",
+    "no_project": "Geen project",
+    "section_output_mode": "Uitvoermodus",
+    "section_subscribers": "Abonnees",
+    "subscribers_hint": "Automatisch geabonneerd op elke issue die deze autopilot aanmaakt",
+    "subscribers_empty": "Geen abonnees — voeg een teamgenoot toe om ze bij elke run op de hoogte te stellen",
+    "subscribers_add": "Abonnee toevoegen",
+    "subscribers_search_placeholder": "Leden op naam zoeken…",
+    "subscribers_no_results": "Geen overeenkomende leden",
+    "subscribers_remove_tooltip": "Verwijderen",
+    "section_schedule": "Schema",
+    "section_trigger_kind": "Trigger",
+    "trigger_kind_schedule": "Schema",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "Multica genereert een webhook-URL nadat deze autopilot is aangemaakt. POST er willekeurige JSON naartoe om hem af te vuren.",
+    "webhook_help_edit": "Deze autopilot wordt afgevuurd door een webhook. Beheer de URL (kopiëren / vernieuwen) op de detailpagina van de autopilot.",
+    "webhook_created_title": "Webhook-autopilot klaar",
+    "webhook_created_description": "POST willekeurige JSON naar de onderstaande URL en de autopilot vuurt af. Kopieer hem nu — je kunt hem ook vinden en vernieuwen op de detailpagina van de autopilot.",
+    "webhook_created_warning": "Behandel deze URL als een wachtwoord. Iedereen die hem heeft kan de autopilot activeren.",
+    "webhook_created_done": "Klaar",
+    "event_filter_label": "Gebeurtenisfilters",
+    "event_filter_docs_link_label": "Leer hoe gebeurtenisfilters werken",
+    "event_filter_event_placeholder": "bijv. workflow_run",
+    "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_hint": "Verwerk alleen webhooks die overeenkomen met deze gebeurtenissen. Laat leeg om alles te accepteren.",
+    "schedule_disabled_reason": "Deze autopilot heeft meerdere schema's — bewerk ze op de detailpagina.",
+    "output_modes": {
+      "create_issue": {
+        "label": "Issue aanmaken",
+        "description": "Elke run maakt een bijgehouden issue aan"
+      },
+      "run_only": {
+        "label": "Alleen uitvoeren",
+        "description": "Stille run, geen issue aangemaakt"
+      }
+    }
+  },
+  "schedule_editor": {
+    "time_label": "Tijd",
+    "time_at": "Op een tijdstip",
+    "time_every": "Met een interval",
+    "every_prefix": "Elke",
+    "unit_hours": "uur",
+    "unit_minutes": "minuten",
+    "days_label": "Dagen",
+    "days_every": "Elke dag",
+    "days_weekly": "Dagen van de week",
+    "days_monthly": "Dag van de maand",
+    "monthly_short_month_hint": "Maanden zonder dag {{day}} worden overgeslagen.",
+    "days_short": {
+      "sun": "Zo",
+      "mon": "Ma",
+      "tue": "Di",
+      "wed": "Wo",
+      "thu": "Do",
+      "fri": "Vr",
+      "sat": "Za"
+    },
+    "timezone_label": "Tijdzone",
+    "cron_toggle": "Cron",
+    "cron_click_to_edit": "klik om te bewerken",
+    "cron_hint": "Standaard cron met 5 velden (min uur dom maand dow)",
+    "cron_invalid": "Deze cron-expressie is niet geldig.",
+    "timezone_invalid": "Deze tijdzone wordt niet herkend door de server.",
+    "advanced_hint": "Deze expressie gebruikt functies die de visuele editor niet kan weergeven. Bewerk de cron-tekst rechtstreeks, of vereenvoudig hem om de bediening weer in te schakelen.",
+    "advanced_unverified": "De server kon niet worden bereikt om deze expressie te controleren, dus de bediening blijft uit. Zorg dat de cron-tekst klopt voordat je opslaat.",
+    "advanced_checking": "Deze expressie wordt met de server gecontroleerd. De bediening blijft uit totdat er antwoord komt.",
+    "next_runs_label": "Volgende runs",
+    "next_in": "over {{countdown}}",
+    "preview_unavailable": "Volgende runs zijn nu niet beschikbaar.",
+    "no_upcoming_runs": "Deze expressie heeft geen aankomende runs.",
+    "describe": {
+      "days_every": "Elke dag",
+      "days_monthly": "Dag {{day}} van de maand",
+      "days_long": {
+        "sun": "Zo",
+        "mon": "Ma",
+        "tue": "Di",
+        "wed": "Wo",
+        "thu": "Do",
+        "fri": "Vr",
+        "sat": "Za"
+      },
+      "days_range": "{{from}}–{{to}}",
+      "days_join": ", ",
+      "time_at": "Om {{time}}",
+      "time_every_hour": "Elk uur op :{{minute}}",
+      "time_every_hours": "Elke {{interval}} uur op :{{minute}}",
+      "time_every_hour_window": "Elk uur",
+      "time_every_hours_window": "Elke {{interval}} uur",
+      "time_every_minute": "Elke minuut",
+      "time_every_minutes": "Elke {{interval}} minuten",
+      "window": "{{from}}–{{to}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}}d {{hours}}u {{minutes}}m",
+      "hours_minutes": "{{hours}}u {{minutes}}m",
+      "minutes": "{{minutes}}m",
+      "less_than_minute": "<1m"
+    },
+    "a11y": {
+      "fixed_hour": "Uur",
+      "fixed_minute": "Minuut",
+      "interval": "Interval",
+      "interval_unit": "Interval-eenheid",
+      "window_start_hour": "Beginuur van venster",
+      "window_start_minute": "Beginminuut van venster",
+      "window_end_hour": "Einduur van venster",
+      "window_end_minute": "Eindminuut van venster",
+      "day_pattern": "Dagpatroon",
+      "day_of_month": "Dag van de maand",
+      "timezone": "Tijdzone",
+      "days_full": {
+        "sun": "Zondag",
+        "mon": "Maandag",
+        "tue": "Dinsdag",
+        "wed": "Woensdag",
+        "thu": "Donderdag",
+        "fri": "Vrijdag",
+        "sat": "Zaterdag"
+      }
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "Agents of squads filteren...",
+    "select_agent": "Agent selecteren",
+    "select_assignee": "Agent of squad selecteren",
+    "agents_group": "Agents",
+    "squads_group": "Squads"
+  },
+  "timezone_picker": {
+    "search_placeholder": "Tijdzone zoeken..."
+  },
+  "toolbar": {
+    "result_count_title": "Overeenkomende automatiseringen / alle automatiseringen",
+    "filter_label": "Filteren",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Filters wissen",
+    "section_assignee": "Toegewezen aan",
+    "section_mode": "Modus",
+    "section_trigger": "Trigger",
+    "section_creator": "Aangemaakt door",
+    "display": "Weergave",
+    "sort_by": "Sorteren op",
+    "direction_asc": "Oplopend",
+    "direction_desc": "Aflopend",
+    "section_columns": "Kolommen"
+  },
+  "actions": {
+    "row_menu": "Automatiseringsacties",
+    "pause": "Pauzeren",
+    "resume": "Hervatten",
+    "delete": "Verwijderen",
+    "selected_one": "{{count}} geselecteerd",
+    "selected_other": "{{count}} geselecteerd",
+    "clear_selection": "Selectie wissen",
+    "delete_dialog": {
+      "title": "Automatisering verwijderen?",
+      "description_one": "Hiermee worden \"{{name}}\" en de uitvoeringsgeschiedenis permanent verwijderd.",
+      "description_other": "Hiermee worden {{count}} automatiseringen en hun uitvoeringsgeschiedenis permanent verwijderd.",
+      "warning": "Deze actie kan niet ongedaan worden gemaakt.",
+      "cancel": "Annuleren",
+      "confirm": "Permanent verwijderen",
+      "deleting": "Verwijderen…"
+    }
+  }
+}
