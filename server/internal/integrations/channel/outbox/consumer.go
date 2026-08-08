@@ -340,9 +340,27 @@ func (c *Consumer) checkChatSessionDeliverable(ctx context.Context, row db.Chann
 
 // terminate moves a claimed row to the dead letter with a fixed reason and
 // records the outcome once. OutcomeFenced means the target stopped being
+// settleTimeout bounds a settle that shutdown is deliberately not allowed to
+// cancel. Without a bound, a wedged database would hold shutdown open.
+const settleTimeout = 10 * time.Second
+
+// settleContext detaches the settling UPDATE from the consumer's own lifecycle.
+//
+// By the time a row is settled the send has already happened. If a shutdown
+// cancels the UPDATE, the row stays queued with a lease that expires, the next
+// holder claims it, and the user gets the same message a second time — with
+// nothing anywhere reporting a failure to explain it. The settle is the record
+// of something already done to the outside world, so it does not belong on a
+// context that means "stop doing things".
+func settleContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
+}
+
 // deliverable after enqueue; OutcomeFailed means delivery was attempted and
 // did not succeed.
 func (c *Consumer) terminate(ctx context.Context, row db.ChannelOutboundQueue, lease, outcome, reason string) error {
+	ctx, cancel := settleContext(ctx)
+	defer cancel()
 	_, err := c.q.FailClaimedChannelOutbound(ctx, db.FailClaimedChannelOutboundParams{
 		ID:         row.ID,
 		LeaseToken: pgtype.Text{String: lease, Valid: true},
@@ -355,6 +373,8 @@ func (c *Consumer) terminate(ctx context.Context, row db.ChannelOutboundQueue, l
 }
 
 func (c *Consumer) complete(ctx context.Context, row db.ChannelOutboundQueue, lease string) error {
+	ctx, cancel := settleContext(ctx)
+	defer cancel()
 	_, err := c.q.CompleteClaimedChannelOutbound(ctx, db.CompleteClaimedChannelOutboundParams{
 		ID:         row.ID,
 		LeaseToken: pgtype.Text{String: lease, Valid: true},
@@ -370,6 +390,8 @@ func (c *Consumer) retryOrFail(ctx context.Context, row db.ChannelOutboundQueue,
 		return c.terminate(ctx, row, lease, OutcomeFailed, cause.Error())
 	}
 	next := c.now().Add(Backoff(row.Attempts + 1))
+	ctx, cancel := settleContext(ctx)
+	defer cancel()
 	_, err := c.q.RetryClaimedChannelOutbound(ctx, db.RetryClaimedChannelOutboundParams{
 		ID:            row.ID,
 		LeaseToken:    pgtype.Text{String: lease, Valid: true},

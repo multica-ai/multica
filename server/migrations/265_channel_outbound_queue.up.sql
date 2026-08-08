@@ -25,6 +25,16 @@
 -- last_error survive on the row, and only the retention sweep removes it.
 CREATE TABLE channel_outbound_queue (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- seq is the total order the claim falls back on. created_at alone is not
+    -- one: now() is the transaction timestamp, so every row a single statement
+    -- writes shares it to the microsecond, and for tied rows the claim's order
+    -- was whatever the plan produced. Harmless while each row is an independent
+    -- message; a visible defect the moment one answer is several rows, because
+    -- "part 2 of 3" arriving before "part 1 of 3" is something a reader sees.
+    --
+    -- A sequence rather than a piece index, so the guarantee belongs to the
+    -- queue and not to one adapter's splitting scheme.
+    seq               BIGSERIAL NOT NULL,
     installation_id   UUID NOT NULL,
     workspace_id      UUID NOT NULL,
     channel_type      TEXT NOT NULL,

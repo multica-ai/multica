@@ -52,6 +52,18 @@ WITH candidate AS (
       AND q.status = 'queued'
       AND q.next_attempt_at <= now()
       AND (q.lease_expires_at IS NULL OR q.lease_expires_at <= now())
+      -- A conversation may expose only its oldest queued row. Retry/defer
+      -- updates postpone successors that already exist, while this guard also
+      -- covers successors inserted after the predecessor was postponed.
+      AND NOT EXISTS (
+            SELECT 1
+            FROM channel_outbound_queue predecessor
+            WHERE predecessor.installation_id = q.installation_id
+              AND predecessor.target_chat_type = q.target_chat_type
+              AND predecessor.target_chat_id = q.target_chat_id
+              AND predecessor.status = 'queued'
+              AND (predecessor.created_at, predecessor.seq) < (q.created_at, q.seq)
+      )
       AND EXISTS (
             SELECT 1
             FROM channel_installation ci
@@ -69,7 +81,7 @@ WITH candidate AS (
                   AND cs.status = 'active'
             )
       )
-    ORDER BY q.next_attempt_at, q.created_at
+    ORDER BY q.next_attempt_at, q.created_at, q.seq
     FOR UPDATE SKIP LOCKED
     LIMIT 1
 )
@@ -86,29 +98,89 @@ RETURNING q.*;
 -- deliverable but must wait (rate-window deferral): deferring through
 -- `attempts` would burn the row's retry budget on a condition that is not a
 -- failure and would eventually dead-letter a message that was never tried.
-UPDATE channel_outbound_queue
+--
+-- Postpones the rest of this target's conversation with it, for the same reason
+-- RetryClaimedChannelOutbound does. The rate windows are sliding counts, so a
+-- later row claimed moments after this one can find an attempt has aged out,
+-- be admitted, and answer ahead of the message it was queued behind.
+WITH target AS (
+    SELECT c.installation_id, c.target_chat_type, c.target_chat_id, c.created_at, c.seq
+    FROM channel_outbound_queue c
+    WHERE c.id = $1
+      AND c.lease_token = $2
+      AND c.status = 'queued'
+), held AS (
+    UPDATE channel_outbound_queue q
+    SET next_attempt_at = GREATEST(q.next_attempt_at, $3),
+        updated_at = now()
+    FROM target t
+    WHERE q.installation_id = t.installation_id
+      AND q.target_chat_type = t.target_chat_type
+      AND q.target_chat_id = t.target_chat_id
+      AND q.status = 'queued'
+      AND (q.created_at, q.seq) > (t.created_at, t.seq)
+    RETURNING q.id
+)
+UPDATE channel_outbound_queue AS c
 SET next_attempt_at = $3,
     lease_token = NULL,
     lease_expires_at = NULL,
     updated_at = now()
-WHERE id = $1
-  AND lease_token = $2
-  AND status = 'queued'
-RETURNING *;
+WHERE c.id = $1
+  AND c.lease_token = $2
+  AND c.status = 'queued'
+RETURNING c.*;
 
 -- name: RetryClaimedChannelOutbound :one
 -- Transient send failure: bump attempts, schedule backoff, release lease.
-UPDATE channel_outbound_queue
-SET attempts = attempts + 1,
+--
+-- The same statement postpones every LATER queued row for the same target
+-- behind this one. Without it a conversation steps over its own stalled
+-- message: this row is now due at now()+backoff while a reply enqueued after it
+-- still carries its enqueue time, so the claim hands out the NEWER row first.
+-- Both messages arrive, in an order that reads as deliberate — in a group where
+-- two people asked at once, each reads the other's answer as their own. Nothing
+-- retries, nothing alerts, and the late reply carries no mark saying it is late.
+--
+-- GREATEST, so a row already waiting longer is never pulled earlier. Scoped to
+-- one target, because two chats have never needed ordering against each other
+-- and holding an unrelated room behind this failure would turn one dropped
+-- socket into queue-wide latency.
+--
+-- One statement: a data-modifying CTE always runs to completion, so the hold
+-- cannot be skipped and the caller needs no transaction. `target` reads the
+-- row's identity from the pre-update snapshot; the new time is $3, the same
+-- value the row itself is being set to. The row comparison is strict, so the
+-- retried row is never in its own hold set.
+WITH target AS (
+    SELECT c.installation_id, c.target_chat_type, c.target_chat_id, c.created_at, c.seq
+    FROM channel_outbound_queue c
+    WHERE c.id = $1
+      AND c.lease_token = $2
+      AND c.status = 'queued'
+), held AS (
+    UPDATE channel_outbound_queue q
+    SET next_attempt_at = GREATEST(q.next_attempt_at, $3),
+        updated_at = now()
+    FROM target t
+    WHERE q.installation_id = t.installation_id
+      AND q.target_chat_type = t.target_chat_type
+      AND q.target_chat_id = t.target_chat_id
+      AND q.status = 'queued'
+      AND (q.created_at, q.seq) > (t.created_at, t.seq)
+    RETURNING q.id
+)
+UPDATE channel_outbound_queue AS c
+SET attempts = c.attempts + 1,
     next_attempt_at = $3,
     last_error = $4,
     lease_token = NULL,
     lease_expires_at = NULL,
     updated_at = now()
-WHERE id = $1
-  AND lease_token = $2
-  AND status = 'queued'
-RETURNING *;
+WHERE c.id = $1
+  AND c.lease_token = $2
+  AND c.status = 'queued'
+RETURNING c.*;
 
 -- name: CompleteClaimedChannelOutbound :one
 -- Terminal success. payload is cleared because a delivered row's rendered
@@ -355,6 +427,23 @@ WHERE t.status IN ('completed', 'failed')
   AND t.chat_session_id IS NOT NULL
   AND t.completed_at > sqlc.arg('window_start')::timestamptz
   AND t.completed_at <= sqlc.arg('window_end')::timestamptz
+  -- A failed attempt that has already been retried is not an undelivered
+  -- reply. The retry reports its own outcome, so announcing the parent's
+  -- failure puts "the agent could not handle that message" above the answer
+  -- the retry then produces.
+  --
+  -- The event payload carries retry_pending for exactly this decision, but it
+  -- is not a column and this scan reads the table, so it goes by the lineage
+  -- MaybeRetryFailedTask writes instead. Only 'failed' is filtered: a
+  -- completed task is a delivery regardless of what preceded it.
+  AND (
+        t.status <> 'failed'
+        OR NOT EXISTS (
+            SELECT 1
+            FROM agent_task_queue r
+            WHERE r.retry_of_task_id = t.id
+        )
+  )
   AND (
         sqlc.narg('after_completed_at')::timestamptz IS NULL
         OR t.completed_at > sqlc.narg('after_completed_at')::timestamptz

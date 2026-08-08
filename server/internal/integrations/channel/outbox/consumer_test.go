@@ -76,7 +76,13 @@ func (s *fakeConsumerStore) RetryClaimedChannelOutbound(_ context.Context, arg d
 	return db.ChannelOutboundQueue{}, nil
 }
 
-func (s *fakeConsumerStore) CompleteClaimedChannelOutbound(_ context.Context, arg db.CompleteClaimedChannelOutboundParams) (db.ChannelOutboundQueue, error) {
+// The settle fakes honour ctx because pgx does: a cancelled context fails the
+// UPDATE. Without that a test cannot tell a settle that survived a shutdown from
+// one that never ran.
+func (s *fakeConsumerStore) CompleteClaimedChannelOutbound(ctx context.Context, arg db.CompleteClaimedChannelOutboundParams) (db.ChannelOutboundQueue, error) {
+	if err := ctx.Err(); err != nil {
+		return db.ChannelOutboundQueue{}, err
+	}
 	s.completed = append(s.completed, arg)
 	return db.ChannelOutboundQueue{}, nil
 }
@@ -103,10 +109,17 @@ type fakeSender struct {
 	disposition Disposition
 	err         error
 	sent        []db.ChannelOutboundQueue
+	// onSend runs after the row is recorded and before the disposition is
+	// returned, so a test can make something happen "mid-send" — a shutdown,
+	// for instance.
+	onSend func()
 }
 
 func (f *fakeSender) Send(_ context.Context, row db.ChannelOutboundQueue) (Disposition, error) {
 	f.sent = append(f.sent, row)
+	if f.onSend != nil {
+		f.onSend()
+	}
 	return f.disposition, f.err
 }
 
@@ -627,5 +640,36 @@ func TestSanitizeLastError_Truncates(t *testing.T) {
 	}
 	if got := sanitizeLastError("  spaced  "); got != "spaced" {
 		t.Errorf("sanitizeLastError = %q, want spaced", got)
+	}
+}
+
+// A shutdown landing between a successful send and the settling UPDATE must not
+// leave the row queued. The content is already in the user's chat; the next
+// lease holder would claim the same row and deliver it a second time, and no
+// operator would ever see a failure to explain the duplicate.
+//
+// The settle therefore runs on a context the consumer's own cancellation cannot
+// reach — bounded, so a wedged database cannot hold shutdown open either.
+func TestConsumer_SettlesASentRowEvenWhenTheConsumerIsCancelled(t *testing.T) {
+	t.Parallel()
+	store := &fakeConsumerStore{
+		claim:        []db.ChannelOutboundQueue{activeRow(t, 0)},
+		installation: db.ChannelInstallation{Status: "active"},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	// The frame left the socket, and then the process was told to stop.
+	sender := &fakeSender{disposition: DispositionSent, onSend: cancel}
+	c := newTestConsumer(t, store, sender, nil, newRecordingMetrics())
+
+	if _, err := c.processOne(ctx); err != nil {
+		t.Fatalf("processOne: %v", err)
+	}
+
+	if len(store.completed) != 1 {
+		t.Fatalf("settled %d rows, want 1 — a cancelled shutdown left a delivered row queued, "+
+			"so the next holder will send it again", len(store.completed))
+	}
+	if store.completed[0].LeaseToken.String != testLease {
+		t.Errorf("settle lease = %q, want %q", store.completed[0].LeaseToken.String, testLease)
 	}
 }

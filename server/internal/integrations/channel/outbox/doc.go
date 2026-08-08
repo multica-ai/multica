@@ -30,6 +30,23 @@
 //   - [WakeRegistry] lets a producer nudge a local consumer so the common case
 //     does not wait for the poll tick.
 //
+// # Ordering
+//
+// Delivery order is guaranteed per conversation, not queue-wide: rows for one
+// (installation, target chat) are handed out in the order they were enqueued,
+// and two chats are never ordered against each other.
+//
+// It has to be stated because the natural implementation loses it. Anything
+// that moves a row into the future — a transient send failure taking its
+// backoff, a rate window deferring it — leaves later rows for the same chat
+// carrying their original enqueue time, so the claim hands out the NEWER
+// message first. Both then arrive, in an order that reads as deliberate, with
+// nothing retried and nothing logged: in a group where two people asked at
+// once, each reads the other's answer as the response to their own question.
+// Retry and defer therefore postpone the rest of that chat's queue with the
+// row, and the claim's ORDER BY carries seq so rows sharing a created_at still
+// have one definite order.
+//
 // # What is not here
 //
 // Nothing in this package knows a platform's wire format, credentials, or

@@ -54,6 +54,18 @@ WITH candidate AS (
       AND q.status = 'queued'
       AND q.next_attempt_at <= now()
       AND (q.lease_expires_at IS NULL OR q.lease_expires_at <= now())
+      -- A conversation may expose only its oldest queued row. Retry/defer
+      -- updates postpone successors that already exist, while this guard also
+      -- covers successors inserted after the predecessor was postponed.
+      AND NOT EXISTS (
+            SELECT 1
+            FROM channel_outbound_queue predecessor
+            WHERE predecessor.installation_id = q.installation_id
+              AND predecessor.target_chat_type = q.target_chat_type
+              AND predecessor.target_chat_id = q.target_chat_id
+              AND predecessor.status = 'queued'
+              AND (predecessor.created_at, predecessor.seq) < (q.created_at, q.seq)
+      )
       AND EXISTS (
             SELECT 1
             FROM channel_installation ci
@@ -71,7 +83,7 @@ WITH candidate AS (
                   AND cs.status = 'active'
             )
       )
-    ORDER BY q.next_attempt_at, q.created_at
+    ORDER BY q.next_attempt_at, q.created_at, q.seq
     FOR UPDATE SKIP LOCKED
     LIMIT 1
 )
@@ -81,7 +93,7 @@ SET lease_token = gen_random_uuid()::text,
     updated_at = now()
 FROM candidate
 WHERE q.id = candidate.id
-RETURNING q.id, q.installation_id, q.workspace_id, q.channel_type, q.chat_session_id, q.source_kind, q.source_id, q.target_chat_id, q.target_chat_type, q.msg_type, q.payload_version, q.payload, q.status, q.attempts, q.next_attempt_at, q.lease_token, q.lease_expires_at, q.sent_at, q.last_error, q.created_at, q.updated_at
+RETURNING q.id, q.seq, q.installation_id, q.workspace_id, q.channel_type, q.chat_session_id, q.source_kind, q.source_id, q.target_chat_id, q.target_chat_type, q.msg_type, q.payload_version, q.payload, q.status, q.attempts, q.next_attempt_at, q.lease_token, q.lease_expires_at, q.sent_at, q.last_error, q.created_at, q.updated_at
 `
 
 type ClaimChannelOutboundParams struct {
@@ -102,6 +114,7 @@ func (q *Queries) ClaimChannelOutbound(ctx context.Context, arg ClaimChannelOutb
 	var i ChannelOutboundQueue
 	err := row.Scan(
 		&i.ID,
+		&i.Seq,
 		&i.InstallationID,
 		&i.WorkspaceID,
 		&i.ChannelType,
@@ -187,7 +200,7 @@ SET status = 'sent',
 WHERE id = $1
   AND lease_token = $2
   AND status = 'queued'
-RETURNING id, installation_id, workspace_id, channel_type, chat_session_id, source_kind, source_id, target_chat_id, target_chat_type, msg_type, payload_version, payload, status, attempts, next_attempt_at, lease_token, lease_expires_at, sent_at, last_error, created_at, updated_at
+RETURNING id, seq, installation_id, workspace_id, channel_type, chat_session_id, source_kind, source_id, target_chat_id, target_chat_type, msg_type, payload_version, payload, status, attempts, next_attempt_at, lease_token, lease_expires_at, sent_at, last_error, created_at, updated_at
 `
 
 type CompleteClaimedChannelOutboundParams struct {
@@ -203,6 +216,7 @@ func (q *Queries) CompleteClaimedChannelOutbound(ctx context.Context, arg Comple
 	var i ChannelOutboundQueue
 	err := row.Scan(
 		&i.ID,
+		&i.Seq,
 		&i.InstallationID,
 		&i.WorkspaceID,
 		&i.ChannelType,
@@ -256,15 +270,33 @@ func (q *Queries) CountChannelOutboundAttemptsSince(ctx context.Context, arg Cou
 }
 
 const deferClaimedChannelOutbound = `-- name: DeferClaimedChannelOutbound :one
-UPDATE channel_outbound_queue
+WITH target AS (
+    SELECT c.installation_id, c.target_chat_type, c.target_chat_id, c.created_at, c.seq
+    FROM channel_outbound_queue c
+    WHERE c.id = $1
+      AND c.lease_token = $2
+      AND c.status = 'queued'
+), held AS (
+    UPDATE channel_outbound_queue q
+    SET next_attempt_at = GREATEST(q.next_attempt_at, $3),
+        updated_at = now()
+    FROM target t
+    WHERE q.installation_id = t.installation_id
+      AND q.target_chat_type = t.target_chat_type
+      AND q.target_chat_id = t.target_chat_id
+      AND q.status = 'queued'
+      AND (q.created_at, q.seq) > (t.created_at, t.seq)
+    RETURNING q.id
+)
+UPDATE channel_outbound_queue AS c
 SET next_attempt_at = $3,
     lease_token = NULL,
     lease_expires_at = NULL,
     updated_at = now()
-WHERE id = $1
-  AND lease_token = $2
-  AND status = 'queued'
-RETURNING id, installation_id, workspace_id, channel_type, chat_session_id, source_kind, source_id, target_chat_id, target_chat_type, msg_type, payload_version, payload, status, attempts, next_attempt_at, lease_token, lease_expires_at, sent_at, last_error, created_at, updated_at
+WHERE c.id = $1
+  AND c.lease_token = $2
+  AND c.status = 'queued'
+RETURNING c.id, c.seq, c.installation_id, c.workspace_id, c.channel_type, c.chat_session_id, c.source_kind, c.source_id, c.target_chat_id, c.target_chat_type, c.msg_type, c.payload_version, c.payload, c.status, c.attempts, c.next_attempt_at, c.lease_token, c.lease_expires_at, c.sent_at, c.last_error, c.created_at, c.updated_at
 `
 
 type DeferClaimedChannelOutboundParams struct {
@@ -277,11 +309,17 @@ type DeferClaimedChannelOutboundParams struct {
 // deliverable but must wait (rate-window deferral): deferring through
 // `attempts` would burn the row's retry budget on a condition that is not a
 // failure and would eventually dead-letter a message that was never tried.
+//
+// Postpones the rest of this target's conversation with it, for the same reason
+// RetryClaimedChannelOutbound does. The rate windows are sliding counts, so a
+// later row claimed moments after this one can find an attempt has aged out,
+// be admitted, and answer ahead of the message it was queued behind.
 func (q *Queries) DeferClaimedChannelOutbound(ctx context.Context, arg DeferClaimedChannelOutboundParams) (ChannelOutboundQueue, error) {
 	row := q.db.QueryRow(ctx, deferClaimedChannelOutbound, arg.ID, arg.LeaseToken, arg.NextAttemptAt)
 	var i ChannelOutboundQueue
 	err := row.Scan(
 		&i.ID,
+		&i.Seq,
 		&i.InstallationID,
 		&i.WorkspaceID,
 		&i.ChannelType,
@@ -360,7 +398,7 @@ INSERT INTO channel_outbound_queue (
     COALESCE($11::jsonb, '{}'::jsonb)
 )
 ON CONFLICT (installation_id, source_kind, source_id) DO NOTHING
-RETURNING id, installation_id, workspace_id, channel_type, chat_session_id, source_kind, source_id, target_chat_id, target_chat_type, msg_type, payload_version, payload, status, attempts, next_attempt_at, lease_token, lease_expires_at, sent_at, last_error, created_at, updated_at
+RETURNING id, seq, installation_id, workspace_id, channel_type, chat_session_id, source_kind, source_id, target_chat_id, target_chat_type, msg_type, payload_version, payload, status, attempts, next_attempt_at, lease_token, lease_expires_at, sent_at, last_error, created_at, updated_at
 `
 
 type EnqueueChannelOutboundParams struct {
@@ -407,6 +445,7 @@ func (q *Queries) EnqueueChannelOutbound(ctx context.Context, arg EnqueueChannel
 	var i ChannelOutboundQueue
 	err := row.Scan(
 		&i.ID,
+		&i.Seq,
 		&i.InstallationID,
 		&i.WorkspaceID,
 		&i.ChannelType,
@@ -490,7 +529,7 @@ SET status = 'failed',
 WHERE id = $1
   AND lease_token = $2
   AND status = 'queued'
-RETURNING id, installation_id, workspace_id, channel_type, chat_session_id, source_kind, source_id, target_chat_id, target_chat_type, msg_type, payload_version, payload, status, attempts, next_attempt_at, lease_token, lease_expires_at, sent_at, last_error, created_at, updated_at
+RETURNING id, seq, installation_id, workspace_id, channel_type, chat_session_id, source_kind, source_id, target_chat_id, target_chat_type, msg_type, payload_version, payload, status, attempts, next_attempt_at, lease_token, lease_expires_at, sent_at, last_error, created_at, updated_at
 `
 
 type FailClaimedChannelOutboundParams struct {
@@ -506,6 +545,7 @@ func (q *Queries) FailClaimedChannelOutbound(ctx context.Context, arg FailClaime
 	var i ChannelOutboundQueue
 	err := row.Scan(
 		&i.ID,
+		&i.Seq,
 		&i.InstallationID,
 		&i.WorkspaceID,
 		&i.ChannelType,
@@ -590,6 +630,23 @@ WHERE t.status IN ('completed', 'failed')
   AND t.chat_session_id IS NOT NULL
   AND t.completed_at > $2::timestamptz
   AND t.completed_at <= $3::timestamptz
+  -- A failed attempt that has already been retried is not an undelivered
+  -- reply. The retry reports its own outcome, so announcing the parent's
+  -- failure puts "the agent could not handle that message" above the answer
+  -- the retry then produces.
+  --
+  -- The event payload carries retry_pending for exactly this decision, but it
+  -- is not a column and this scan reads the table, so it goes by the lineage
+  -- MaybeRetryFailedTask writes instead. Only 'failed' is filtered: a
+  -- completed task is a delivery regardless of what preceded it.
+  AND (
+        t.status <> 'failed'
+        OR NOT EXISTS (
+            SELECT 1
+            FROM agent_task_queue r
+            WHERE r.retry_of_task_id = t.id
+        )
+  )
   AND (
         $4::timestamptz IS NULL
         OR t.completed_at > $4::timestamptz
@@ -823,17 +880,35 @@ func (q *Queries) ReleaseChannelOutboundReconcileState(ctx context.Context, arg 
 }
 
 const retryClaimedChannelOutbound = `-- name: RetryClaimedChannelOutbound :one
-UPDATE channel_outbound_queue
-SET attempts = attempts + 1,
+WITH target AS (
+    SELECT c.installation_id, c.target_chat_type, c.target_chat_id, c.created_at, c.seq
+    FROM channel_outbound_queue c
+    WHERE c.id = $1
+      AND c.lease_token = $2
+      AND c.status = 'queued'
+), held AS (
+    UPDATE channel_outbound_queue q
+    SET next_attempt_at = GREATEST(q.next_attempt_at, $3),
+        updated_at = now()
+    FROM target t
+    WHERE q.installation_id = t.installation_id
+      AND q.target_chat_type = t.target_chat_type
+      AND q.target_chat_id = t.target_chat_id
+      AND q.status = 'queued'
+      AND (q.created_at, q.seq) > (t.created_at, t.seq)
+    RETURNING q.id
+)
+UPDATE channel_outbound_queue AS c
+SET attempts = c.attempts + 1,
     next_attempt_at = $3,
     last_error = $4,
     lease_token = NULL,
     lease_expires_at = NULL,
     updated_at = now()
-WHERE id = $1
-  AND lease_token = $2
-  AND status = 'queued'
-RETURNING id, installation_id, workspace_id, channel_type, chat_session_id, source_kind, source_id, target_chat_id, target_chat_type, msg_type, payload_version, payload, status, attempts, next_attempt_at, lease_token, lease_expires_at, sent_at, last_error, created_at, updated_at
+WHERE c.id = $1
+  AND c.lease_token = $2
+  AND c.status = 'queued'
+RETURNING c.id, c.seq, c.installation_id, c.workspace_id, c.channel_type, c.chat_session_id, c.source_kind, c.source_id, c.target_chat_id, c.target_chat_type, c.msg_type, c.payload_version, c.payload, c.status, c.attempts, c.next_attempt_at, c.lease_token, c.lease_expires_at, c.sent_at, c.last_error, c.created_at, c.updated_at
 `
 
 type RetryClaimedChannelOutboundParams struct {
@@ -844,6 +919,25 @@ type RetryClaimedChannelOutboundParams struct {
 }
 
 // Transient send failure: bump attempts, schedule backoff, release lease.
+//
+// The same statement postpones every LATER queued row for the same target
+// behind this one. Without it a conversation steps over its own stalled
+// message: this row is now due at now()+backoff while a reply enqueued after it
+// still carries its enqueue time, so the claim hands out the NEWER row first.
+// Both messages arrive, in an order that reads as deliberate — in a group where
+// two people asked at once, each reads the other's answer as their own. Nothing
+// retries, nothing alerts, and the late reply carries no mark saying it is late.
+//
+// GREATEST, so a row already waiting longer is never pulled earlier. Scoped to
+// one target, because two chats have never needed ordering against each other
+// and holding an unrelated room behind this failure would turn one dropped
+// socket into queue-wide latency.
+//
+// One statement: a data-modifying CTE always runs to completion, so the hold
+// cannot be skipped and the caller needs no transaction. `target` reads the
+// row's identity from the pre-update snapshot; the new time is $3, the same
+// value the row itself is being set to. The row comparison is strict, so the
+// retried row is never in its own hold set.
 func (q *Queries) RetryClaimedChannelOutbound(ctx context.Context, arg RetryClaimedChannelOutboundParams) (ChannelOutboundQueue, error) {
 	row := q.db.QueryRow(ctx, retryClaimedChannelOutbound,
 		arg.ID,
@@ -854,6 +948,7 @@ func (q *Queries) RetryClaimedChannelOutbound(ctx context.Context, arg RetryClai
 	var i ChannelOutboundQueue
 	err := row.Scan(
 		&i.ID,
+		&i.Seq,
 		&i.InstallationID,
 		&i.WorkspaceID,
 		&i.ChannelType,

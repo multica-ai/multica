@@ -125,8 +125,14 @@ func (g *WindowRateGate) Reserve(ctx context.Context, row db.ChannelOutboundQueu
 		}
 		if count >= w.Limit {
 			// Defer by the full window rather than computing when the oldest
-			// attempt ages out: one extra query per rejection buys nothing, and
-			// the queue keeps its order either way.
+			// attempt ages out: one extra query per rejection buys nothing.
+			//
+			// Order is not something this deferral preserves on its own, which
+			// the previous version of this comment claimed. The windows are
+			// sliding counts, so a later row for the same target claimed moments
+			// from now can find an attempt has aged out, be admitted, and answer
+			// ahead of this one. DeferClaimedChannelOutbound is what holds the
+			// rest of the conversation behind this row.
 			return now.Add(w.Duration), false, nil
 		}
 	}
