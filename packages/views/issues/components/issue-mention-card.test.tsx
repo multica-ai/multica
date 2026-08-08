@@ -164,17 +164,24 @@ describe("IssueMentionCard", () => {
     expect(document.querySelector(HOVER_CARD_TRIGGER)).not.toBeNull();
   });
 
-  // The narrow modes nest the AppLink inside a real HoverCardTrigger. Base UI
-  // adds its own handlers there, so this checks a plain click still reaches the
-  // navigation adapter rather than being swallowed on the way out.
-  it.each(["compact", "plain"] as const)(
-    "with the real hover card mounted, a plain click in %s mode still navigates",
-    (mode) => {
+  // The narrow modes nest the AppLink inside a real HoverCardTrigger, and
+  // HoverCardContent stops click/auxclick/dblclick from bubbling through the
+  // React tree. Both navigation paths have to survive that nesting, so the
+  // cases cover the new-tab preference on AND off — the new-tab path is the
+  // one most exposed to event suppression, and the earlier full-mode tests
+  // never reach it because full mode renders no hover card at all.
+  it.each([
+    { mode: "compact", newTab: true },
+    { mode: "plain", newTab: false },
+  ] as const)(
+    "with the real hover card mounted, a plain click in $mode mode navigates (new tab: $newTab)",
+    ({ mode, newTab }) => {
       mentionDisplayState.mode = mode;
-      issueLinkState.openInNewTab = false;
+      issueLinkState.openInNewTab = newTab;
       const push = vi.fn();
+      const openInNewTab = vi.fn();
       render(
-        <NavigationProvider value={makeAdapter({ push })}>
+        <NavigationProvider value={makeAdapter({ push, openInNewTab })}>
           <IssueMentionCard issueId="issue-1" fallbackLabel="MUL-3405" />
         </NavigationProvider>,
       );
@@ -184,7 +191,18 @@ describe("IssueMentionCard", () => {
       expect(anchor).toHaveAttribute("href", "/acme/issues/issue-1");
 
       fireEvent.click(screen.getByTestId("issue-chip"));
-      expect(push).toHaveBeenCalledWith("/acme/issues/issue-1");
+
+      if (newTab) {
+        expect(anchor).toHaveAttribute("target", "_blank");
+        expect(openInNewTab).toHaveBeenCalledWith("/acme/issues/issue-1", "MUL-3405", {
+          activate: true,
+        });
+        expect(push).not.toHaveBeenCalled();
+      } else {
+        expect(anchor).not.toHaveAttribute("target");
+        expect(push).toHaveBeenCalledWith("/acme/issues/issue-1");
+        expect(openInNewTab).not.toHaveBeenCalled();
+      }
     },
   );
 });
