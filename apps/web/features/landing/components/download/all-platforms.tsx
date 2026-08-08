@@ -2,6 +2,7 @@ import Link from "next/link";
 import { useLocale } from "../../i18n";
 import type { DownloadAssets } from "../../utils/parse-release-assets";
 import { AppleIcon, LinuxIcon, WindowsIcon } from "./os-icons";
+import { captureSignupOrDownloadStart } from "../../analytics";
 
 interface Props {
   assets: DownloadAssets;
@@ -175,6 +176,7 @@ function Row({ icon, label, formats, unavailable, isLast }: RowProps) {
             <a
               key={f.label}
               href={f.href}
+              onClick={() => captureSignupOrDownloadStart("download", "download_matrix")}
               className="inline-flex items-center gap-1.5 rounded-lg border border-[#0a0d12]/12 bg-white px-3 py-1.5 text-label font-medium transition-colors hover:border-[#0a0d12]/30 hover:bg-[#0a0d12]/5"
             >
               {f.label}

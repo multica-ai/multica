@@ -4,6 +4,7 @@ import { useLocale } from "../../i18n";
 import type { DetectResult } from "../../utils/os-detect";
 import type { DownloadAssets } from "../../utils/parse-release-assets";
 import { heroButtonClassName } from "../shared";
+import { captureSignupOrDownloadStart } from "../../analytics";
 
 interface Props {
   detected: DetectResult | null;
@@ -55,6 +56,7 @@ export function DownloadHero({
           {content.alt ? (
             <Link
               href={content.alt.href}
+              onClick={() => captureSignupOrDownloadStart("download", "download_hero_alt")}
               className={heroButtonClassName("ghost")}
             >
               {content.alt.label}
@@ -231,7 +233,11 @@ function PrimaryCta({
     );
   }
   return (
-    <a href={href} className={heroButtonClassName("solid")}>
+    <a
+      href={href}
+      onClick={() => captureSignupOrDownloadStart("download", "download_hero")}
+      className={heroButtonClassName("solid")}
+    >
       {children}
     </a>
   );

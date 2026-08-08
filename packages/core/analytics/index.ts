@@ -1,11 +1,9 @@
 // Frontend analytics glue. Thin wrapper over posthog-js.
 //
-// The source-of-truth event catalog is `server/internal/analytics/events.go`. This module only
-// handles the two things the backend can't do itself: attribution capture on
-// first anonymous pageview, and person-identity merge on login. Every funnel
-// event (signup, workspace_created, runtime_registered, issue_executed,
-// invite_sent, invite_accepted) is emitted server-side — see
-// `server/internal/analytics`.
+// Durable product milestones are derived from the operational database and
+// Prometheus. This module handles browser-only acquisition signals, first-touch
+// attribution, identity merge, and client failure telemetry. See
+// docs/analytics/acquisition-activation-funnel.md for the split contract.
 //
 // Configuration comes from the backend's `/api/config` response (populated
 // from POSTHOG_API_KEY on the server), NOT from NEXT_PUBLIC_* envs. That
@@ -45,7 +43,7 @@ let analyticsEnvironment = "dev";
 // (setPersonProperties) can also arrive before init — same config-race as
 // identify/pageview. We replay them in order once init succeeds. These
 // only ever carry user-triggered signals on identified users, so the
-// buffer stays small (~one step-transition worth).
+// buffer stays small (a few acquisition/failure signals at most).
 type PendingOp =
   | {
       kind: "event";
@@ -116,9 +114,9 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     // the billed events until they actually identify, which aligns with how
     // our funnel is set up: signup is the first real funnel step.
     person_profiles: "identified_only",
-    // Turn off every on-by-default auto-capture surface. Our funnel is
-    // narrow and explicit (the events in server/internal/analytics/events.go + a manual
-    // $pageview). Autocapture floods the Activity view with anonymous
+    // Turn off every on-by-default auto-capture surface. Explicit acquisition
+    // events are emitted by the landing experience. Autocapture floods the
+    // Activity view with anonymous
     // "clicked button" / "clicked link" noise, burns the billed event
     // budget, and risks capturing user-typed content in input values.
     // Turn things back on deliberately if we ever want them.

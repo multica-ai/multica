@@ -7,10 +7,12 @@ import { HowItWorksSection } from "./how-it-works-section";
 import { OpenSourceSection } from "./open-source-section";
 import { FAQSection } from "./faq-section";
 import { LandingFooter } from "./landing-footer";
+import { LandingFunnelTracker } from "./landing-funnel-tracker";
 
 export function MulticaLanding() {
   return (
     <>
+      <LandingFunnelTracker />
       <div className="relative">
         <LandingHeader />
         <LandingHero />
