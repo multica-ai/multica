@@ -62,6 +62,24 @@
     "test": {
       "dependsOn": ["^cache-inputs"]
     },
+    // CI-only partitions of the @multica/views suite (see the
+    // frontend-test matrix in ci.yml): vitest --shard splits the run by
+    // test file, and a separate turbo task per shard gives each one its
+    // own cache entry, so a PR that doesn't touch views still replays
+    // all shards instead of re-running a third of the suite per leg.
+    // Same `^cache-inputs` edge as `test`, for the same reason. Local
+    // `pnpm test` keeps running the unsharded `test` task. Keep the
+    // shard count in sync with ci.yml and
+    // packages/views/package.json.
+    "test:shard-1": {
+      "dependsOn": ["^cache-inputs"]
+    },
+    "test:shard-2": {
+      "dependsOn": ["^cache-inputs"]
+    },
+    "test:shard-3": {
+      "dependsOn": ["^cache-inputs"]
+    },
     // `lint` keeps no dependency edge: eslint here is not type-aware (no
     // `projectService` / `parserOptions.project` anywhere in
     // packages/eslint-config), so it only ever reads its own package's files
