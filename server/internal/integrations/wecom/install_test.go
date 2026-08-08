@@ -61,6 +61,8 @@ type fakeInstallStore struct {
 	deferred  []db.DeferClaimedWecomInstallSessionParams
 	completed []db.CompleteWecomInstallSessionParams
 	failed    []db.FailWecomInstallSessionParams
+	// claimedWith is every lease token the worker claimed under, in order.
+	claimedWith []string
 
 	completeRows int64
 	lockErr      error
@@ -137,10 +139,13 @@ func (f *fakeInstallStore) GetWecomInstallSession(_ context.Context, id pgtype.U
 	return db.WecomInstallSession{}, pgx.ErrNoRows
 }
 
-func (f *fakeInstallStore) ClaimDueWecomInstallSession(context.Context, db.ClaimDueWecomInstallSessionParams) (db.WecomInstallSession, error) {
+func (f *fakeInstallStore) ClaimDueWecomInstallSession(_ context.Context, arg db.ClaimDueWecomInstallSessionParams) (db.WecomInstallSession, error) {
 	if len(f.claimQueue) == 0 {
 		return db.WecomInstallSession{}, pgx.ErrNoRows
 	}
+	// The worker mints the token, so a test cannot predict it; recording it is
+	// what lets one assert a later mutation carried the SAME lease.
+	f.claimedWith = append(f.claimedWith, arg.LeaseToken.String)
 	row := f.claimQueue[0]
 	f.claimQueue = f.claimQueue[1:]
 	return row, nil
@@ -815,5 +820,44 @@ func TestInstallWorker_EmptyQueueReportsNoWork(t *testing.T) {
 	}
 	if worked {
 		t.Error("an empty queue must report no work")
+	}
+}
+
+// Every mutation in this worker matches on the current lease token — the
+// invariant stated at the top of install_worker.go, which is what keeps a stale
+// replica from clobbering a new owner. FailWecomInstallSession was the one that
+// did not, so a worker whose lease had already expired could mark a session
+// error out from under the replica that was mid-way through creating the bot.
+func TestInstallWorker_FailingASessionCarriesTheLease(t *testing.T) {
+	store := newFakeInstallStore()
+	// An unconfigured service: processOne claims, then fails the row in
+	// maintenance mode. That is the shortest path to a failSession, and it is
+	// also the one call site outside handleCreating / handlePending — so it
+	// proves the lease reaches every one of them.
+	svc := newInstallService(store, noopTxStarter{}, &fakeBotBinder{}, InstallServiceConfig{
+		Box: testBox(t),
+	}, nil)
+	w := newTestWorker(t, svc)
+	store.claimQueue = []db.WecomInstallSession{{
+		ID:     mustTestUUID(t),
+		Status: InstallStatusCreating,
+	}}
+
+	if _, err := w.processOne(context.Background()); err != nil {
+		t.Fatalf("processOne: %v", err)
+	}
+
+	if len(store.failed) != 1 {
+		t.Fatalf("failed %d sessions, want 1", len(store.failed))
+	}
+	if len(store.claimedWith) != 1 {
+		t.Fatalf("claimed %d times, want 1", len(store.claimedWith))
+	}
+	got := store.failed[0].LeaseToken
+	if !got.Valid || got.String == "" {
+		t.Fatal("the terminal failure carried no lease token, so a stale worker could clobber a new owner")
+	}
+	if got.String != store.claimedWith[0] {
+		t.Errorf("failed under lease %q, want the one it claimed with (%q)", got.String, store.claimedWith[0])
 	}
 }

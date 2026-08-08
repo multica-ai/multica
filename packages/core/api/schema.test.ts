@@ -318,6 +318,55 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listWecomInstallations", () => {
+    it("falls back to a safe empty shape when the response is malformed", async () => {
+      stubFetchJson({ installations: "not-an-array", configured: true });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWecomInstallations("ws-1");
+      expect(res).toEqual({ installations: [], configured: false });
+    });
+
+    // The settings tab shows the QR install entry point only when this is
+    // exactly true, so the flag has to survive parsing. It was declared on the
+    // DingTalk response schema instead of this one and reached the UI only
+    // because the object is loose — working by accident, and unvalidated.
+    it("keeps both install flags, and treats a missing one as off", async () => {
+      stubFetchJson({
+        installations: [{ id: "wc-1", status: "active" }],
+        configured: true,
+        install_supported: true,
+        scan_install_supported: true,
+        future_field: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWecomInstallations("ws-1");
+      expect(res.install_supported).toBe(true);
+      expect(res.scan_install_supported).toBe(true);
+
+      // A server that predates the scan flow sends neither, and must not be
+      // read as "scanning is available".
+      stubFetchJson({ installations: [], configured: true });
+      const older = await client.listWecomInstallations("ws-1");
+      expect(older.scan_install_supported).toBeUndefined();
+      expect(older.scan_install_supported === true).toBe(false);
+    });
+
+    // The flag has to be VALIDATED, not merely passed through. This object is
+    // loose, so an undeclared key survives parsing untouched — which is how the
+    // field kept working while declared on the wrong endpoint's schema. Pinning
+    // the malformed case is what makes the declaration load-bearing.
+    it("does not let a non-boolean scan flag through unvalidated", async () => {
+      stubFetchJson({
+        installations: [],
+        configured: true,
+        scan_install_supported: "yes",
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWecomInstallations("ws-1");
+      expect(res.scan_install_supported).toBeUndefined();
+    });
+  });
+
   describe("getConfig", () => {
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({

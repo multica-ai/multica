@@ -232,4 +232,38 @@ describe("WecomScanInstallDialog", () => {
     expect(await screen.findByTestId("wecom-scan-error", {}, { timeout: 5000 })).toBeTruthy();
     expect(mockStatus).not.toHaveBeenCalled();
   });
+
+  // crypto.randomUUID is SecureContext-gated: it is simply absent over plain
+  // HTTP. A self-hosted deployment on http:// is the ordinary case, and minting
+  // the idempotency key through it threw inside the begin try-block, so the
+  // dialog showed "something went wrong" and never called the API at all.
+  it("still begins the install where crypto.randomUUID is unavailable", async () => {
+    const realCrypto = globalThis.crypto;
+    // A non-secure context keeps getRandomValues and loses randomUUID.
+    vi.stubGlobal("crypto", {
+      getRandomValues: (b: Uint8Array) => realCrypto.getRandomValues(b),
+    });
+    try {
+      mockBegin.mockResolvedValue({
+        session_id: "S1",
+        status: "creating",
+        poll_interval_seconds: 1,
+      });
+      mockStatus.mockResolvedValue({
+        status: "pending",
+        qr_code_url: "https://work.weixin.qq.com/qr",
+        poll_interval_seconds: 1,
+      });
+
+      renderDialog();
+
+      await waitFor(() => expect(mockBegin).toHaveBeenCalled(), { timeout: 5000 });
+      const key = mockBegin.mock.calls[0]?.[2];
+      expect(typeof key).toBe("string");
+      expect(key).toBeTruthy();
+      expect(screen.queryByTestId("wecom-scan-error")).toBeNull();
+    } finally {
+      vi.stubGlobal("crypto", realCrypto);
+    }
+  });
 });

@@ -29,6 +29,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { api, ApiError } from "@multica/core/api";
+import { createSafeId } from "@multica/core/utils";
 import { wecomKeys } from "@multica/core/wecom";
 import { useT } from "../../i18n";
 
@@ -87,7 +88,12 @@ export function WecomScanInstallDialog({
       // the previous session — including an expired one — instead of starting
       // over. Within a single attempt the key is stable, so a retried or
       // double-submitted POST still collapses onto one session.
-      const idempotencyKey = crypto.randomUUID();
+      //
+      // createSafeId, not crypto.randomUUID: that one is SecureContext-gated and
+      // simply absent over plain HTTP, where it threw in here and turned every
+      // scan install on a self-hosted http:// deployment into "something went
+      // wrong" without a request ever leaving the browser.
+      const idempotencyKey = createSafeId();
       const res = await api.beginWecomInstall(wsId, agentId, idempotencyKey);
       if (closedRef.current) return;
       if (!res.session_id) {

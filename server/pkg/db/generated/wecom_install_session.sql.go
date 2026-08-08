@@ -242,6 +242,7 @@ SET status                  = 'error',
     lease_expires_at        = NULL,
     updated_at              = now()
 WHERE id = $3
+  AND lease_token = $4
   AND status IN ('creating', 'pending')
 `
 
@@ -249,13 +250,22 @@ type FailWecomInstallSessionParams struct {
 	ErrorReason  pgtype.Text `json:"error_reason"`
 	ErrorMessage pgtype.Text `json:"error_message"`
 	ID           pgtype.UUID `json:"id"`
+	LeaseToken   pgtype.Text `json:"lease_token"`
 }
 
 // Terminal failure. Idempotent: only mutates a still-active session. Wipes
 // short-lived ciphertext so a leaked DB dump cannot resurrect the QR after
 // the fact. Lease is dropped so the row is not re-claimed.
+// Match-on-lease like every other mutation here: without it a worker whose
+// lease had already expired could mark a session error out from under the new
+// owner that is mid-way through creating the bot.
 func (q *Queries) FailWecomInstallSession(ctx context.Context, arg FailWecomInstallSessionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, failWecomInstallSession, arg.ErrorReason, arg.ErrorMessage, arg.ID)
+	result, err := q.db.Exec(ctx, failWecomInstallSession,
+		arg.ErrorReason,
+		arg.ErrorMessage,
+		arg.ID,
+		arg.LeaseToken,
+	)
 	if err != nil {
 		return 0, err
 	}

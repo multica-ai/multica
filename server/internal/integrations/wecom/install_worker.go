@@ -177,7 +177,7 @@ func (w *InstallWorker) processOne(ctx context.Context) (bool, error) {
 	// row terminal so the frontend gets a clean error rather than a
 	// forever-creating dialog, and clear the ciphertext columns.
 	if !w.svc.Configured() {
-		w.failSession(ctx, row.ID, InstallErrorIntegrationUnconfigured,
+		w.failSession(ctx, row.ID, leaseToken, InstallErrorIntegrationUnconfigured,
 			"WeCom install is not enabled on this server")
 		return true, nil
 	}
@@ -196,7 +196,7 @@ func (w *InstallWorker) handleCreating(ctx context.Context, row db.WecomInstallS
 	// without a QR, give up.
 	now := w.svc.cfg.Now()
 	if row.CreatedAt.Valid && now.Sub(row.CreatedAt.Time) > w.svc.cfg.GenerateDeadline {
-		w.failSession(ctx, row.ID, InstallErrorGenerateFailed,
+		w.failSession(ctx, row.ID, leaseToken, InstallErrorGenerateFailed,
 			"Failed to generate WeCom QR code in time")
 		return nil
 	}
@@ -245,18 +245,18 @@ func (w *InstallWorker) handleCreating(ctx context.Context, row db.WecomInstallS
 func (w *InstallWorker) handlePending(ctx context.Context, row db.WecomInstallSession, leaseToken string) error {
 	now := w.svc.cfg.Now()
 	if row.ExpiresAt.Valid && !row.ExpiresAt.Time.After(now) {
-		w.failSession(ctx, row.ID, InstallErrorExpired,
+		w.failSession(ctx, row.ID, leaseToken, InstallErrorExpired,
 			"The WeCom QR code has expired")
 		return nil
 	}
 	if !row.ScodeEncrypted.Valid || w.svc.cfg.Box == nil {
-		w.failSession(ctx, row.ID, InstallErrorInternalError,
+		w.failSession(ctx, row.ID, leaseToken, InstallErrorInternalError,
 			"Install session is missing state")
 		return nil
 	}
 	scode, err := decodeAndOpen(w.svc.cfg.Box, row.ScodeEncrypted.String)
 	if err != nil {
-		w.failSession(ctx, row.ID, InstallErrorInternalError,
+		w.failSession(ctx, row.ID, leaseToken, InstallErrorInternalError,
 			"Install session state could not be decrypted")
 		return nil
 	}
@@ -279,7 +279,7 @@ func (w *InstallWorker) handlePending(ctx context.Context, row db.WecomInstallSe
 	case QueryStatusInit, QueryStatusPending:
 		// Post-response expiry check (spec §4.2 priority 3).
 		if row.ExpiresAt.Valid && !row.ExpiresAt.Time.After(w.svc.cfg.Now()) {
-			w.failSession(ctx, row.ID, InstallErrorExpired,
+			w.failSession(ctx, row.ID, leaseToken, InstallErrorExpired,
 				"The WeCom QR code has expired")
 			return nil
 		}
@@ -311,7 +311,7 @@ func (w *InstallWorker) handlePending(ctx context.Context, row db.WecomInstallSe
 // Upsert's own transaction open across this function.
 func (w *InstallWorker) finalizeSuccess(ctx context.Context, row db.WecomInstallSession, leaseToken string, bot *BotInfo) error {
 	if bot == nil || strings.TrimSpace(bot.BotID) == "" || strings.TrimSpace(bot.Secret) == "" {
-		w.failSession(ctx, row.ID, InstallErrorWecomProtocolError,
+		w.failSession(ctx, row.ID, leaseToken, InstallErrorWecomProtocolError,
 			"WeCom returned success without bot credentials")
 		return nil
 	}
@@ -329,7 +329,7 @@ func (w *InstallWorker) finalizeSuccess(ctx context.Context, row db.WecomInstall
 		// actionable reason rather than retry into the same conflict.
 		w.svc.cfg.Logger.WarnContext(ctx, "wecom install: bind failed",
 			"session_id", util.UUIDToString(row.ID), "error", err)
-		w.failSession(ctx, row.ID, InstallErrorInstallationConflict,
+		w.failSession(ctx, row.ID, leaseToken, InstallErrorInstallationConflict,
 			"Could not finalize the WeCom install: "+err.Error())
 		return nil
 	}
@@ -377,9 +377,14 @@ func (w *InstallWorker) finalizeSuccess(ctx context.Context, row db.WecomInstall
 
 // failSession is the idempotent terminal marker. Logs infra errors but never
 // returns them — the worker's loop must move on regardless.
-func (w *InstallWorker) failSession(ctx context.Context, id pgtype.UUID, reason, message string) {
+//
+// Takes the lease it was claimed under, like every other mutation here: a worker
+// whose lease has already expired must not be able to mark a session error out
+// from under the replica that now owns it (see this file's header).
+func (w *InstallWorker) failSession(ctx context.Context, id pgtype.UUID, leaseToken, reason, message string) {
 	if _, err := w.svc.store.FailWecomInstallSession(ctx, db.FailWecomInstallSessionParams{
 		ID:           id,
+		LeaseToken:   pgtype.Text{String: leaseToken, Valid: leaseToken != ""},
 		ErrorReason:  pgtype.Text{String: strings.TrimSpace(reason), Valid: reason != ""},
 		ErrorMessage: pgtype.Text{String: message, Valid: message != ""},
 	}); err != nil && !errors.Is(err, context.Canceled) {

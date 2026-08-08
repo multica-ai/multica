@@ -150,6 +150,9 @@ WHERE id = sqlc.arg('id')
 -- Terminal failure. Idempotent: only mutates a still-active session. Wipes
 -- short-lived ciphertext so a leaked DB dump cannot resurrect the QR after
 -- the fact. Lease is dropped so the row is not re-claimed.
+-- Match-on-lease like every other mutation here: without it a worker whose
+-- lease had already expired could mark a session error out from under the new
+-- owner that is mid-way through creating the bot.
 UPDATE wecom_install_session
 SET status                  = 'error',
     error_reason            = sqlc.arg('error_reason'),
@@ -160,6 +163,7 @@ SET status                  = 'error',
     lease_expires_at        = NULL,
     updated_at              = now()
 WHERE id = sqlc.arg('id')
+  AND lease_token = sqlc.arg('lease_token')
   AND status IN ('creating', 'pending');
 
 -- name: PurgeTerminalWecomInstallSessions :execrows
