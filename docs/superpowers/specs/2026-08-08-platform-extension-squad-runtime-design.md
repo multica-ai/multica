@@ -278,7 +278,7 @@ Multica 导入 API 同时接受 `platform.extension/v1` 和 `multica.extension-b
 3. `status = 'online'`。
 4. Redis liveness 为 alive；Redis 不可用时，使用 Multica 已有 DB `last_seen_at` 新鲜度回退判断。
 5. 请求者通过现有 `canUseRuntimeForAgent` 权限检查。
-6. 不存在状态为 `queued`、`deferred`、`dispatched` 或 `running` 的 `agent_task_queue` 记录。
+6. 不存在状态为 `queued`、`deferred`、`dispatched`、`running` 或 `waiting_local_directory` 的 `agent_task_queue` 记录。`waiting_local_directory` 是 Multica 现有的非终态，必须视为 Runtime 忙碌。
 
 选择顺序：
 
