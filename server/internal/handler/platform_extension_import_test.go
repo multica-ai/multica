@@ -181,6 +181,71 @@ func TestImportPlatformExtensionRollsBackReservationWhenRuntimeIsLocked(t *testi
 	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 0, 0, 0, 0, 0)
 }
 
+func TestImportPlatformExtensionRechecksRuntimePermissionUnderLock(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	t.Run("rejects a runtime that becomes unauthorized after prefilter", func(t *testing.T) {
+		workspaceID := createPlatformExtensionTestWorkspace(t, "member")
+		otherUserID := createPlatformExtensionOtherUser(t)
+		runtimeID := createPlatformExtensionTestRuntime(t, workspaceID, platformExtensionRuntimeSeed{
+			Provider: "platform-agent-cli", Status: "online", LastSeenAt: time.Now(), Visibility: "public", OwnerID: otherUserID,
+		})
+		source, raw := twoByTwoPlatformExtensionSource(t, "permission-recheck-unavailable")
+		h := platformExtensionHandlerWithLiveness(platformExtensionFakeLiveness{alive: map[string]bool{runtimeID: true}, ok: true})
+
+		releaseReservation, result := blockPlatformExtensionImportAfterEligibility(t, h, workspaceID, source, raw)
+		if _, err := testPool.Exec(context.Background(), `
+			UPDATE agent_runtime
+			SET visibility = 'private', owner_id = $2
+			WHERE id = $1
+		`, runtimeID, otherUserID); err != nil {
+			t.Fatalf("make prefiltered runtime unauthorized: %v", err)
+		}
+		releaseReservation()
+
+		recorder := awaitPlatformExtensionImport(t, result)
+		assertPlatformExtensionHTTPError(t, recorder, http.StatusConflict, "PLATFORM_RUNTIME_UNAVAILABLE")
+		assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 0, 0, 0, 0, 0)
+	})
+
+	t.Run("continues to the next idle runtime after a locked candidate becomes unauthorized", func(t *testing.T) {
+		workspaceID := createPlatformExtensionTestWorkspace(t, "member")
+		otherUserID := createPlatformExtensionOtherUser(t)
+		firstRuntimeID := createPlatformExtensionTestRuntime(t, workspaceID, platformExtensionRuntimeSeed{
+			Provider: "platform-agent-cli", Status: "online", LastSeenAt: time.Now(), Visibility: "public", OwnerID: otherUserID,
+		})
+		secondRuntimeID := createPlatformExtensionTestRuntime(t, workspaceID, platformExtensionRuntimeSeed{
+			Provider: "platform-agent-cli", Status: "online", LastSeenAt: time.Now().Add(-time.Second), Visibility: "public", OwnerID: otherUserID,
+		})
+		source, raw := twoByTwoPlatformExtensionSource(t, "permission-recheck-next")
+		h := platformExtensionHandlerWithLiveness(platformExtensionFakeLiveness{
+			alive: map[string]bool{firstRuntimeID: true, secondRuntimeID: true}, ok: true,
+		})
+
+		releaseReservation, result := blockPlatformExtensionImportAfterEligibility(t, h, workspaceID, source, raw)
+		if _, err := testPool.Exec(context.Background(), `
+			UPDATE agent_runtime
+			SET visibility = 'private', owner_id = $2
+			WHERE id = $1
+		`, firstRuntimeID, otherUserID); err != nil {
+			t.Fatalf("make first prefiltered runtime unauthorized: %v", err)
+		}
+		releaseReservation()
+
+		recorder := awaitPlatformExtensionImport(t, result)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("import status = %d, want 201: %s", recorder.Code, recorder.Body.String())
+		}
+		response := decodePlatformExtensionImportResponse(t, recorder.Body.Bytes())
+		if response.Runtime.ID != secondRuntimeID {
+			t.Fatalf("selected runtime = %s, want still-authorized fallback %s", response.Runtime.ID, secondRuntimeID)
+		}
+		assertPlatformExtensionNativeResources(t, workspaceID, secondRuntimeID, source, response)
+	})
+}
+
 func TestImportPlatformExtensionRollsBackEveryWriteWhenNativeResourceCreationFails(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -563,6 +628,71 @@ func importPlatformExtensionForTest(t *testing.T, h *Handler, workspaceID, userI
 	recorder := httptest.NewRecorder()
 	h.ImportPlatformExtension(recorder, platformExtensionRequest(http.MethodPost, "/api/extensions/import", workspaceID, userID, body))
 	return recorder
+}
+
+// blockPlatformExtensionImportAfterEligibility parks an import on an
+// uncommitted release identity. Candidate discovery and permission prefiltering
+// happen before the reservation insert, so observing this specific lock wait
+// proves the importer has captured its eligible IDs but has not yet entered the
+// runtime-locking query. Tests can then commit a runtime permission change and
+// release the reservation barrier without guessing at goroutine timing.
+func blockPlatformExtensionImportAfterEligibility(
+	t *testing.T,
+	h *Handler,
+	workspaceID string,
+	source PlatformExtensionSource,
+	body []byte,
+) (release func(), result <-chan *httptest.ResponseRecorder) {
+	t.Helper()
+	ctx := context.Background()
+	reservationTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin release reservation barrier: %v", err)
+	}
+	released := false
+	releaseReservation := func() {
+		if released {
+			return
+		}
+		released = true
+		if err := reservationTx.Rollback(ctx); err != nil {
+			t.Fatalf("release reservation barrier: %v", err)
+		}
+	}
+	t.Cleanup(releaseReservation)
+
+	if _, err := reservationTx.Exec(ctx, `
+		INSERT INTO platform_extension_release (
+			workspace_id, extension_key, name, version, digest, manifest, created_by
+		)
+		VALUES ($1, $2, $3, $4, 'sha256:reservation-barrier', '{}'::jsonb, $5)
+	`, workspaceID, source.Extension.Key, source.Extension.Name, source.Extension.Version, testUserID); err != nil {
+		t.Fatalf("create release reservation barrier: %v", err)
+	}
+	holderPID := holderBackendPID(t, ctx, reservationTx)
+
+	results := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		recorder := httptest.NewRecorder()
+		h.ImportPlatformExtension(recorder, platformExtensionRequest(http.MethodPost, "/api/extensions/import", workspaceID, testUserID, body))
+		results <- recorder
+	}()
+	if !waitForWaiterBlockedBy(t, holderPID, 10*time.Second) {
+		releaseReservation()
+		t.Fatal("import never reached the release reservation barrier after runtime eligibility prefilter")
+	}
+	return releaseReservation, results
+}
+
+func awaitPlatformExtensionImport(t *testing.T, result <-chan *httptest.ResponseRecorder) *httptest.ResponseRecorder {
+	t.Helper()
+	select {
+	case recorder := <-result:
+		return recorder
+	case <-time.After(10 * time.Second):
+		t.Fatal("platform extension import did not finish after releasing reservation barrier")
+		return nil
+	}
 }
 
 func platformExtensionRequest(method, path, workspaceID, userID string, body []byte) *http.Request {

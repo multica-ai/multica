@@ -247,19 +247,44 @@ func (h *Handler) ImportPlatformExtension(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	runtime, err := qtx.LockIdlePlatformExtensionRuntime(r.Context(), db.LockIdlePlatformExtensionRuntimeParams{
-		WorkspaceID:      workspaceUUID,
-		EligibleIds:      eligibleRuntimeIDs,
-		UseRedisLiveness: useRedisLiveness,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		writePlatformExtensionError(w, http.StatusConflict, platformExtensionRuntimeUnavailable, "no online idle Platform Agent CLI runtime is available")
-		return
-	}
-	if err != nil {
-		slog.Error("platform extension: lock runtime failed", "error", err, "workspace_id", workspaceID)
-		writePlatformExtensionError(w, http.StatusInternalServerError, platformExtensionImportFailed, "failed to import extension")
-		return
+	remainingRuntimeIDs := append([]pgtype.UUID(nil), eligibleRuntimeIDs...)
+	var runtime db.AgentRuntime
+	for {
+		if len(remainingRuntimeIDs) == 0 {
+			writePlatformExtensionError(w, http.StatusConflict, platformExtensionRuntimeUnavailable, "no online idle Platform Agent CLI runtime is available")
+			return
+		}
+
+		candidate, lockErr := qtx.LockIdlePlatformExtensionRuntime(r.Context(), db.LockIdlePlatformExtensionRuntimeParams{
+			WorkspaceID:      workspaceUUID,
+			EligibleIds:      remainingRuntimeIDs,
+			UseRedisLiveness: useRedisLiveness,
+		})
+		if errors.Is(lockErr, pgx.ErrNoRows) {
+			writePlatformExtensionError(w, http.StatusConflict, platformExtensionRuntimeUnavailable, "no online idle Platform Agent CLI runtime is available")
+			return
+		}
+		if lockErr != nil {
+			slog.Error("platform extension: lock runtime failed", "error", lockErr, "workspace_id", workspaceID)
+			writePlatformExtensionError(w, http.StatusInternalServerError, platformExtensionImportFailed, "failed to import extension")
+			return
+		}
+		// Visibility and ownership may change after the transaction-external
+		// candidate prefilter. Re-check the latest row while its FOR UPDATE lock
+		// is held; that lock also prevents a second permission change before the
+		// import commits. An unauthorized candidate remains locked but is removed
+		// from this import's candidate set so the next deterministic choice can win.
+		if canUseRuntimeForAgent(member, candidate) {
+			runtime = candidate
+			break
+		}
+		nextRuntimeIDs := make([]pgtype.UUID, 0, len(remainingRuntimeIDs)-1)
+		for _, runtimeID := range remainingRuntimeIDs {
+			if runtimeID != candidate.ID {
+				nextRuntimeIDs = append(nextRuntimeIDs, runtimeID)
+			}
+		}
+		remainingRuntimeIDs = nextRuntimeIDs
 	}
 
 	mapping, err := createPlatformExtensionNativeResources(r.Context(), qtx, release, runtime, member.UserID, bundle)
