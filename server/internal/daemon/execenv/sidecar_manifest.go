@@ -2,6 +2,7 @@ package execenv
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 )
 
 // sidecarManifestFile is the on-disk JSON Prepare writes into envRoot to
@@ -19,6 +21,8 @@ import (
 // so a local_directory run does not litter the user's repo with the
 // bookkeeping file used to undo the litter.
 const sidecarManifestFile = ".multica_sidecar_manifest.json"
+
+const sidecarDirectoryOwnerFile = ".multica-sidecar-owner"
 
 // errPathPreExists is the sentinel recordWriteFile returns when the
 // target path already exists. The manifest contract is that we never
@@ -39,6 +43,38 @@ const sidecarManifestFile = ".multica_sidecar_manifest.json"
 //     fact that would have appeared in those files, so missing-from-
 //     disk is degraded behavior, not failure.
 var errPathPreExists = errors.New("execenv: refuse to overwrite pre-existing path")
+
+var errSidecarOwnershipMismatch = errors.New("execenv: sidecar ownership mismatch")
+
+// sidecarRaceTestHooks expose the exact filesystem race boundaries that must
+// stay deterministic in regression tests. Production never installs hooks.
+// The immutable pointer keeps -race runs safe even when unrelated tests run in
+// parallel; hook callbacks filter on their temporary root-relative paths.
+type sidecarRaceTestHooks struct {
+	beforeDetach func(operation, rel string)
+	afterLink    func(operation, rel string)
+	beforeRecord func(operation, rel string)
+}
+
+var sidecarRaceHooks atomic.Pointer[sidecarRaceTestHooks]
+
+func runBeforeSidecarDetach(operation, rel string) {
+	if hooks := sidecarRaceHooks.Load(); hooks != nil && hooks.beforeDetach != nil {
+		hooks.beforeDetach(operation, rel)
+	}
+}
+
+func runAfterSidecarLink(operation, rel string) {
+	if hooks := sidecarRaceHooks.Load(); hooks != nil && hooks.afterLink != nil {
+		hooks.afterLink(operation, rel)
+	}
+}
+
+func runBeforeSidecarRecord(operation, rel string) {
+	if hooks := sidecarRaceHooks.Load(); hooks != nil && hooks.beforeRecord != nil {
+		hooks.beforeRecord(operation, rel)
+	}
+}
 
 // sidecarManifest records the filesystem mutations writeContextFiles and
 // its callees make inside the agent's WorkDir for a single task. The
@@ -68,9 +104,10 @@ var errPathPreExists = errors.New("execenv: refuse to overwrite pre-existing pat
 // is appended to user-owned content rather than written into a new sidecar
 // directory).
 type sidecarManifest struct {
-	Rooted bool     `json:"rooted,omitempty"`
-	Files  []string `json:"files,omitempty"`
-	Dirs   []string `json:"dirs,omitempty"`
+	Rooted    bool                        `json:"rooted,omitempty"`
+	Files     []string                    `json:"files,omitempty"`
+	Dirs      []string                    `json:"dirs,omitempty"`
+	Ownership map[string]sidecarOwnership `json:"ownership,omitempty"`
 
 	rootPath string
 	root     *os.Root
@@ -87,6 +124,40 @@ type sidecarFilePreimage struct {
 	data        []byte
 	mode        os.FileMode
 	replacement os.FileInfo
+	ownership   sidecarOwnership
+}
+
+type sidecarOwnership struct {
+	Kind   string `json:"kind"`
+	SHA256 string `json:"sha256"`
+}
+
+func fileSidecarOwnership(data []byte) sidecarOwnership {
+	sum := sha256.Sum256(data)
+	return sidecarOwnership{Kind: "file", SHA256: fmt.Sprintf("%x", sum[:])}
+}
+
+func directorySidecarOwnership(token []byte) sidecarOwnership {
+	sum := sha256.Sum256(token)
+	return sidecarOwnership{Kind: "dir", SHA256: fmt.Sprintf("%x", sum[:])}
+}
+
+func (m *sidecarManifest) recordOwnership(rel string, ownership sidecarOwnership) {
+	if m.Ownership == nil {
+		m.Ownership = make(map[string]sidecarOwnership)
+	}
+	m.Ownership[filepath.Clean(rel)] = ownership
+}
+
+func (m *sidecarManifest) ownershipFor(rel, kind string) (sidecarOwnership, error) {
+	if m == nil {
+		return sidecarOwnership{}, errors.New("sidecar manifest is required")
+	}
+	ownership, ok := m.Ownership[filepath.Clean(rel)]
+	if !ok || ownership.Kind != kind || ownership.SHA256 == "" {
+		return sidecarOwnership{}, fmt.Errorf("%w: %s has no persisted %s ownership", errSidecarOwnershipMismatch, rel, kind)
+	}
+	return ownership, nil
 }
 
 func (m *sidecarManifest) bindRoot(rootPath string) error {
@@ -240,6 +311,93 @@ func randomSidecarTempName(name string) (string, error) {
 	return fmt.Sprintf(".%s.tmp-%x", name, random[:]), nil
 }
 
+type fixedDetachedSidecar struct {
+	name string
+	info os.FileInfo
+}
+
+func removeFixedLeafWithIdentity(parent *os.Root, name string, expected os.FileInfo) error {
+	current, err := parent.Lstat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if expected == nil || !os.SameFile(expected, current) {
+		return fmt.Errorf("%w: refuse to remove changed temporary sidecar %s", errSidecarOwnershipMismatch, name)
+	}
+	return parent.Remove(name)
+}
+
+func restoreDetachedFixedSidecar(parent *os.Root, original string, detached *fixedDetachedSidecar) error {
+	if detached == nil || detached.info == nil {
+		return errors.New("detached sidecar identity is required")
+	}
+	if detached.info.IsDir() {
+		return fmt.Errorf("%w: replacement directory preserved at %s", errSidecarOwnershipMismatch, detached.name)
+	}
+	if err := parent.Link(detached.name, original); err != nil {
+		return fmt.Errorf("%w: replacement preserved at %s; no-clobber restore failed: %v", errSidecarOwnershipMismatch, detached.name, err)
+	}
+	restored, err := parent.Lstat(original)
+	if err != nil || !os.SameFile(detached.info, restored) {
+		return fmt.Errorf("%w: restored replacement identity changed; preserved at %s", errSidecarOwnershipMismatch, detached.name)
+	}
+	if err := removeFixedLeafWithIdentity(parent, detached.name, detached.info); err != nil {
+		return fmt.Errorf("%w: restored replacement but quarantine cleanup failed: %v", errSidecarOwnershipMismatch, err)
+	}
+	return nil
+}
+
+// detachFixedSidecar atomically moves a leaf to an unpredictable sibling name
+// through the already-open parent handle. The identity is checked only after
+// the rename: a replacement installed between Lstat and Rename is therefore
+// quarantined rather than deleted. Non-directory replacements are restored
+// with a no-clobber hard link; directories stay quarantined because portable
+// Go has no rename-noreplace operation for directories.
+func detachFixedSidecar(parent *os.Root, name, operation, rel string, expected os.FileInfo) (*fixedDetachedSidecar, error) {
+	observed, err := parent.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	quarantine, err := randomSidecarTempName(name + ".quarantine")
+	if err != nil {
+		return nil, err
+	}
+	runBeforeSidecarDetach(operation, rel)
+	if err := parent.Rename(name, quarantine); err != nil {
+		return nil, err
+	}
+	detachedInfo, err := parent.Lstat(quarantine)
+	if err != nil {
+		return nil, fmt.Errorf("stat detached sidecar %s: %w", rel, err)
+	}
+	detached := &fixedDetachedSidecar{name: quarantine, info: detachedInfo}
+	if !os.SameFile(observed, detachedInfo) || (expected != nil && !os.SameFile(expected, detachedInfo)) {
+		restoreErr := restoreDetachedFixedSidecar(parent, name, detached)
+		if restoreErr != nil {
+			return nil, restoreErr
+		}
+		return nil, fmt.Errorf("%w: %s changed before detach", errSidecarOwnershipMismatch, rel)
+	}
+	return detached, nil
+}
+
+func fixedFileMatchesOwnership(parent *os.Root, name string, expected sidecarOwnership) error {
+	if expected.Kind != "file" || expected.SHA256 == "" {
+		return fmt.Errorf("%w: invalid file ownership for %s", errSidecarOwnershipMismatch, name)
+	}
+	snapshot, err := readFixedSidecarFile(parent, name)
+	if err != nil {
+		return err
+	}
+	if fileSidecarOwnership(snapshot.data) != expected {
+		return fmt.Errorf("%w: file digest changed for %s", errSidecarOwnershipMismatch, name)
+	}
+	return nil
+}
+
 func writeFixedSidecarTemp(parent *os.Root, name string, data []byte, perm os.FileMode) (string, os.FileInfo, error) {
 	tempName, err := randomSidecarTempName(name)
 	if err != nil {
@@ -249,11 +407,16 @@ func writeFixedSidecarTemp(parent *os.Root, name string, data []byte, perm os.Fi
 	if err != nil {
 		return "", nil, fmt.Errorf("create temporary sidecar: %w", err)
 	}
+	tempInfo, statErr := temp.Stat()
+	if statErr != nil {
+		_ = temp.Close()
+		return "", nil, statErr
+	}
 	ok := false
 	defer func() {
 		_ = temp.Close()
 		if !ok {
-			_ = parent.Remove(tempName)
+			_ = removeFixedLeafWithIdentity(parent, tempName, tempInfo)
 		}
 	}()
 	if err := temp.Chmod(perm); err != nil {
@@ -272,75 +435,73 @@ func writeFixedSidecarTemp(parent *os.Root, name string, data []byte, perm os.Fi
 	if err != nil {
 		return "", nil, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || !os.SameFile(tempInfo, info) {
 		return "", nil, fmt.Errorf("temporary sidecar changed type: %s", tempName)
 	}
 	ok = true
 	return tempName, info, nil
 }
 
-func atomicWriteFixedSidecarNoClobber(parent *os.Root, name string, data []byte, perm os.FileMode) error {
+func publishFixedSidecarNoClobber(parent *os.Root, name string, data []byte, perm os.FileMode, operation, rel string) (os.FileInfo, error) {
 	tempName, tempInfo, err := writeFixedSidecarTemp(parent, name, data, perm)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	removeTemp := true
 	defer func() {
 		if removeTemp {
-			_ = parent.Remove(tempName)
+			_ = removeFixedLeafWithIdentity(parent, tempName, tempInfo)
 		}
 	}()
 	if err := parent.Link(tempName, name); err != nil {
 		if _, statErr := parent.Lstat(name); statErr == nil {
-			return fmt.Errorf("%w: %s", errPathPreExists, name)
+			return nil, fmt.Errorf("%w: %s", errPathPreExists, name)
 		}
-		return err
+		return nil, err
 	}
+	runAfterSidecarLink(operation, rel)
 	published, err := parent.Lstat(name)
 	if err != nil || !os.SameFile(tempInfo, published) {
-		_ = parent.Remove(name)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return fmt.Errorf("published sidecar identity changed: %s", name)
+		return nil, fmt.Errorf("%w: published sidecar identity changed: %s", errSidecarOwnershipMismatch, rel)
 	}
-	if err := parent.Remove(tempName); err != nil {
-		_ = parent.Remove(name)
-		return fmt.Errorf("remove temporary sidecar after publish: %w", err)
+	if err := removeFixedLeafWithIdentity(parent, tempName, tempInfo); err != nil {
+		return nil, fmt.Errorf("remove temporary sidecar after publish: %w", err)
 	}
 	removeTemp = false
-	return nil
+	return published, nil
 }
 
-func atomicReplaceFixedSidecar(parent *os.Root, name string, expected os.FileInfo, data []byte, perm os.FileMode) (os.FileInfo, error) {
-	current, err := parent.Lstat(name)
+func atomicWriteFixedSidecarNoClobber(parent *os.Root, name string, data []byte, perm os.FileMode) error {
+	_, err := publishFixedSidecarNoClobber(parent, name, data, perm, "publish-manifest", name)
+	return err
+}
+
+func atomicReplaceFixedSidecar(parent *os.Root, name string, expected os.FileInfo, expectedOwnership sidecarOwnership, data []byte, perm os.FileMode, operation, rel string) (os.FileInfo, error) {
+	detached, err := detachFixedSidecar(parent, name, operation, rel, expected)
 	if err != nil {
 		return nil, err
 	}
-	if current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || !os.SameFile(expected, current) {
-		return nil, fmt.Errorf("sidecar changed before replace: %s", name)
+	restore := func(cause error) (os.FileInfo, error) {
+		if restoreErr := restoreDetachedFixedSidecar(parent, name, detached); restoreErr != nil {
+			return nil, errors.Join(cause, restoreErr)
+		}
+		return nil, cause
 	}
-	tempName, tempInfo, err := writeFixedSidecarTemp(parent, name, data, perm)
+	if detached.info.Mode()&os.ModeSymlink != 0 || !detached.info.Mode().IsRegular() {
+		return restore(fmt.Errorf("%w: replacement source is not a real file: %s", errSidecarOwnershipMismatch, rel))
+	}
+	if err := fixedFileMatchesOwnership(parent, detached.name, expectedOwnership); err != nil {
+		return restore(err)
+	}
+	replacement, err := publishFixedSidecarNoClobber(parent, name, data, perm, "replace-publish", rel)
 	if err != nil {
-		return nil, err
+		return restore(err)
 	}
-	defer func() { _ = parent.Remove(tempName) }() // rename consumes the temp on success
-	current, err = parent.Lstat(name)
-	if err != nil {
-		return nil, err
-	}
-	if current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || !os.SameFile(expected, current) {
-		return nil, fmt.Errorf("sidecar changed during replace: %s", name)
-	}
-	if err := parent.Rename(tempName, name); err != nil {
-		return nil, err
-	}
-	replacement, err := parent.Lstat(name)
-	if err != nil {
-		return nil, err
-	}
-	if replacement.Mode()&os.ModeSymlink != 0 || !replacement.Mode().IsRegular() || !os.SameFile(tempInfo, replacement) {
-		return nil, fmt.Errorf("replacement sidecar is not a real file: %s", name)
+	if err := removeFixedLeafWithIdentity(parent, detached.name, detached.info); err != nil {
+		return nil, fmt.Errorf("remove replaced sidecar quarantine: %w", err)
 	}
 	return replacement, nil
 }
@@ -426,15 +587,28 @@ func recordMkdirAll(path string, perm os.FileMode, m *sidecarManifest) error {
 			default:
 				return fmt.Errorf("stat sidecar directory %s: %w", prefix, statErr)
 			}
-			if created {
-				// Record ownership before the next handle operation so even a
-				// concurrent swap that makes OpenRoot fail cannot leave a newly
-				// created directory absent from the in-memory rollback journal.
-				m.Dirs = append(m.Dirs, prefix)
-			}
 			next, err := openFixedSidecarChild(current, part, info)
 			if err != nil {
 				return fmt.Errorf("open sidecar directory %s: %w", prefix, err)
+			}
+			if created {
+				var token [32]byte
+				if _, err := rand.Read(token[:]); err != nil {
+					_ = next.Close()
+					return fmt.Errorf("generate directory ownership token for %s: %w", prefix, err)
+				}
+				if _, err := publishFixedSidecarNoClobber(next, sidecarDirectoryOwnerFile, token[:], 0o600, "publish-owner-token", filepath.Join(prefix, sidecarDirectoryOwnerFile)); err != nil {
+					_ = next.Close()
+					return fmt.Errorf("publish directory ownership token for %s: %w", prefix, err)
+				}
+				runBeforeSidecarRecord("record-owned-dir", prefix)
+				currentInfo, err := current.Lstat(part)
+				if err != nil || !os.SameFile(info, currentInfo) {
+					_ = next.Close()
+					return fmt.Errorf("%w: created directory changed before record: %s", errSidecarOwnershipMismatch, prefix)
+				}
+				m.Dirs = append(m.Dirs, prefix)
+				m.recordOwnership(prefix, directorySidecarOwnership(token[:]))
 			}
 			_ = current.Close()
 			current = next
@@ -507,28 +681,23 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 			return err
 		}
 		defer parent.Close()
-		file, err := parent.OpenFile(leaf, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+		published, err := publishFixedSidecarNoClobber(parent, leaf, data, perm, "publish-owned-file", rel)
 		if err != nil {
-			if _, statErr := parent.Lstat(leaf); statErr == nil {
+			if errors.Is(err, errPathPreExists) {
 				return fmt.Errorf("%w: %s", errPathPreExists, path)
 			}
 			return err
 		}
-		ok := false
-		defer func() {
-			_ = file.Close()
-			if !ok {
-				_ = parent.Remove(leaf)
-			}
-		}()
-		if _, err := file.Write(data); err != nil {
+		runBeforeSidecarRecord("record-owned-file", rel)
+		current, err := parent.Lstat(leaf)
+		if err != nil || !os.SameFile(published, current) {
+			return fmt.Errorf("%w: published sidecar changed before record: %s", errSidecarOwnershipMismatch, rel)
+		}
+		if err := fixedFileMatchesOwnership(parent, leaf, fileSidecarOwnership(data)); err != nil {
 			return err
 		}
-		if err := file.Close(); err != nil {
-			return err
-		}
-		ok = true
 		m.Files = append(m.Files, rel)
+		m.recordOwnership(rel, fileSidecarOwnership(data))
 		return nil
 	}
 	_, statErr := os.Lstat(path)
@@ -593,7 +762,7 @@ func overwriteExistingSidecarFile(path string, data []byte, perm os.FileMode, m 
 		return err
 	}
 	defer parent.Close()
-	replacement, err := atomicReplaceFixedSidecar(parent, leaf, snapshot.identity, data, perm)
+	replacement, err := atomicReplaceFixedSidecar(parent, leaf, snapshot.identity, fileSidecarOwnership(snapshot.data), data, perm, "replace-file", rel)
 	if err != nil {
 		return err
 	}
@@ -604,7 +773,9 @@ func overwriteExistingSidecarFile(path string, data []byte, perm os.FileMode, m 
 		data:        append([]byte(nil), snapshot.data...),
 		mode:        snapshot.mode,
 		replacement: replacement,
+		ownership:   fileSidecarOwnership(data),
 	}
+	m.recordOwnership(rel, fileSidecarOwnership(data))
 	return nil
 }
 
@@ -619,6 +790,11 @@ func recordExistingSidecarOwnership(path string, m *sidecarManifest) error {
 	rel, err := pathRelativeToRoot(m.rootPath, path)
 	if err != nil {
 		return err
+	}
+	for _, existing := range m.Files {
+		if filepath.Clean(existing) == rel {
+			return nil
+		}
 	}
 	m.Files = append(m.Files, rel)
 	return nil
@@ -755,14 +931,14 @@ func (f *fixedManifestFile) remove() error {
 	if f == nil || f.root == nil || f.snapshot == nil {
 		return errors.New("fixed sidecar manifest handle is not open")
 	}
-	current, err := f.root.Lstat(sidecarManifestFile)
-	if err != nil {
-		return err
-	}
-	if current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || !os.SameFile(f.snapshot.identity, current) {
-		return errors.New("sidecar manifest changed before removal")
-	}
-	return f.root.Remove(sidecarManifestFile)
+	return detachAndDeleteOwnedFixedFile(
+		f.root,
+		sidecarManifestFile,
+		sidecarManifestFile,
+		"cleanup-manifest",
+		f.snapshot.identity,
+		fileSidecarOwnership(f.snapshot.data),
+	)
 }
 
 func decodeSidecarManifest(data []byte, m *sidecarManifest) error {
@@ -772,7 +948,39 @@ func decodeSidecarManifest(data []byte, m *sidecarManifest) error {
 	return json.Unmarshal(data, m)
 }
 
-func removeFixedSidecarFile(root *os.Root, rel string) error {
+func detachAndDeleteOwnedFixedFile(parent *os.Root, leaf, rel, operation string, expectedIdentity os.FileInfo, ownership sidecarOwnership) error {
+	detached, err := detachFixedSidecar(parent, leaf, operation, rel, expectedIdentity)
+	if err != nil {
+		return err
+	}
+	restore := func(cause error) error {
+		if restoreErr := restoreDetachedFixedSidecar(parent, leaf, detached); restoreErr != nil {
+			return errors.Join(cause, restoreErr)
+		}
+		return cause
+	}
+	if detached.info.Mode()&os.ModeSymlink != 0 || !detached.info.Mode().IsRegular() {
+		return restore(fmt.Errorf("%w: owned file changed type: %s", errSidecarOwnershipMismatch, rel))
+	}
+	if err := fixedFileMatchesOwnership(parent, detached.name, ownership); err != nil {
+		return restore(err)
+	}
+	if err := removeFixedLeafWithIdentity(parent, detached.name, detached.info); err != nil {
+		return fmt.Errorf("remove verified sidecar quarantine %s: %w", rel, err)
+	}
+	return nil
+}
+
+func removeFixedSidecarFile(root *os.Root, rel, operation string, ownership sidecarOwnership) error {
+	parent, leaf, err := openFixedSidecarParent(root, rel)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	return detachAndDeleteOwnedFixedFile(parent, leaf, rel, operation, nil, ownership)
+}
+
+func removeLegacyFixedSidecarFile(root *os.Root, rel string) error {
 	parent, leaf, err := openFixedSidecarParent(root, rel)
 	if err != nil {
 		return err
@@ -783,12 +991,80 @@ func removeFixedSidecarFile(root *os.Root, rel string) error {
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return fmt.Errorf("owned sidecar is not a real file: %s", rel)
+		return fmt.Errorf("legacy sidecar is not a real file: %s", rel)
 	}
 	return parent.Remove(leaf)
 }
 
-func removeFixedSidecarDir(root *os.Root, rel string) error {
+func openDetachedOwnedSidecarDir(parent *os.Root, rel string, detached *fixedDetachedSidecar, ownership sidecarOwnership) (*os.Root, os.FileInfo, error) {
+	if detached == nil || detached.info == nil || detached.info.Mode()&os.ModeSymlink != 0 || !detached.info.IsDir() {
+		return nil, nil, fmt.Errorf("%w: owned directory changed type: %s", errSidecarOwnershipMismatch, rel)
+	}
+	if ownership.Kind != "dir" || ownership.SHA256 == "" {
+		return nil, nil, fmt.Errorf("%w: invalid directory ownership for %s", errSidecarOwnershipMismatch, rel)
+	}
+	dirRoot, err := openFixedSidecarChild(parent, detached.name, detached.info)
+	if err != nil {
+		return nil, nil, err
+	}
+	token, err := readFixedSidecarFile(dirRoot, sidecarDirectoryOwnerFile)
+	if err != nil {
+		_ = dirRoot.Close()
+		return nil, nil, fmt.Errorf("%w: read directory ownership token for %s: %v", errSidecarOwnershipMismatch, rel, err)
+	}
+	if directorySidecarOwnership(token.data) != ownership {
+		_ = dirRoot.Close()
+		return nil, nil, fmt.Errorf("%w: directory ownership token changed for %s", errSidecarOwnershipMismatch, rel)
+	}
+	return dirRoot, token.identity, nil
+}
+
+func removeFixedSidecarDir(root *os.Root, rel, operation string, ownership sidecarOwnership) error {
+	parent, leaf, err := openFixedSidecarParent(root, rel)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	detached, err := detachFixedSidecar(parent, leaf, operation, rel, nil)
+	if err != nil {
+		return err
+	}
+	dirRoot, tokenIdentity, err := openDetachedOwnedSidecarDir(parent, rel, detached, ownership)
+	if err != nil {
+		return fmt.Errorf("%w; replacement directory preserved at %s", err, detached.name)
+	}
+	dir, err := dirRoot.Open(".")
+	if err != nil {
+		_ = dirRoot.Close()
+		return err
+	}
+	entries, readErr := dir.ReadDir(-1)
+	_ = dir.Close()
+	if readErr != nil {
+		_ = dirRoot.Close()
+		return readErr
+	}
+	for _, entry := range entries {
+		if entry.Name() != sidecarDirectoryOwnerFile {
+			_ = dirRoot.Close()
+			return fmt.Errorf("%w: owned directory gained content and was preserved at %s", errSidecarOwnershipMismatch, detached.name)
+		}
+	}
+	if err := detachAndDeleteOwnedFixedFile(dirRoot, sidecarDirectoryOwnerFile, filepath.Join(rel, sidecarDirectoryOwnerFile), "cleanup-owner-token", tokenIdentity, directoryTokenFileOwnership(ownership)); err != nil {
+		_ = dirRoot.Close()
+		return err
+	}
+	if err := dirRoot.Close(); err != nil {
+		return err
+	}
+	current, err := parent.Lstat(detached.name)
+	if err != nil || !os.SameFile(detached.info, current) {
+		return fmt.Errorf("%w: detached directory changed before removal: %s", errSidecarOwnershipMismatch, rel)
+	}
+	return parent.Remove(detached.name)
+}
+
+func removeLegacyFixedSidecarDir(root *os.Root, rel string) error {
 	parent, leaf, err := openFixedSidecarParent(root, rel)
 	if err != nil {
 		return err
@@ -799,9 +1075,13 @@ func removeFixedSidecarDir(root *os.Root, rel string) error {
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("owned sidecar is not a real directory: %s", rel)
+		return fmt.Errorf("legacy sidecar is not a real directory: %s", rel)
 	}
 	return parent.Remove(leaf)
+}
+
+func directoryTokenFileOwnership(directoryOwnership sidecarOwnership) sidecarOwnership {
+	return sidecarOwnership{Kind: "file", SHA256: directoryOwnership.SHA256}
 }
 
 func fixedSidecarDirHasEntries(root *os.Root, rel string) (hasEntries bool, ok bool) {
@@ -834,23 +1114,31 @@ func fixedSidecarDirHasEntries(root *os.Root, rel string) (hasEntries bool, ok b
 	return len(entries) > 0, true
 }
 
-func removeAllFixedSidecarDir(root *os.Root, rel string) error {
+func removeAllFixedSidecarDir(root *os.Root, rel string, ownership sidecarOwnership) error {
 	parent, leaf, err := openFixedSidecarParent(root, rel)
 	if err != nil {
 		return err
 	}
 	defer parent.Close()
-	info, err := parent.Lstat(leaf)
+	detached, err := detachFixedSidecar(parent, leaf, "reuse-dir", rel, nil)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("managed skill sidecar is not a real directory: %s", rel)
+	dirRoot, _, err := openDetachedOwnedSidecarDir(parent, rel, detached, ownership)
+	if err != nil {
+		return fmt.Errorf("%w; replacement directory preserved at %s", err, detached.name)
 	}
-	return parent.RemoveAll(leaf)
+	if err := dirRoot.Close(); err != nil {
+		return err
+	}
+	current, err := parent.Lstat(detached.name)
+	if err != nil || !os.SameFile(detached.info, current) {
+		return fmt.Errorf("%w: detached skill directory changed before removal: %s", errSidecarOwnershipMismatch, rel)
+	}
+	return parent.RemoveAll(detached.name)
 }
 
 func restoreFixedSidecarPreimage(root *os.Root, rel string, preimage sidecarFilePreimage) error {
@@ -859,7 +1147,7 @@ func restoreFixedSidecarPreimage(root *os.Root, rel string, preimage sidecarFile
 		return err
 	}
 	defer parent.Close()
-	_, err = atomicReplaceFixedSidecar(parent, leaf, preimage.replacement, preimage.data, preimage.mode.Perm())
+	_, err = atomicReplaceFixedSidecar(parent, leaf, preimage.replacement, preimage.ownership, preimage.data, preimage.mode.Perm(), "restore-file", rel)
 	return err
 }
 
@@ -869,6 +1157,16 @@ func rollbackSidecarManifest(m *sidecarManifest) error {
 	}
 	defer m.closeRoot()
 	var firstErr error
+	blockedDirs := make(map[string]struct{})
+	blockAncestors := func(path string) {
+		for parent := filepath.Dir(filepath.Clean(path)); parent != "." && parent != string(filepath.Separator); parent = filepath.Dir(parent) {
+			blockedDirs[parent] = struct{}{}
+			next := filepath.Dir(parent)
+			if next == parent {
+				break
+			}
+		}
+	}
 	removePath := func(path string) error {
 		if !m.Rooted {
 			return os.Remove(path)
@@ -880,7 +1178,11 @@ func rollbackSidecarManifest(m *sidecarManifest) error {
 		if err != nil {
 			return err
 		}
-		return removeFixedSidecarFile(m.root, rel)
+		ownership, err := m.ownershipFor(rel, "file")
+		if err != nil {
+			return err
+		}
+		return removeFixedSidecarFile(m.root, rel, "rollback-file", ownership)
 	}
 	removeDir := func(path string) error {
 		if !m.Rooted {
@@ -893,7 +1195,11 @@ func rollbackSidecarManifest(m *sidecarManifest) error {
 		if err != nil {
 			return err
 		}
-		return removeFixedSidecarDir(m.root, rel)
+		ownership, err := m.ownershipFor(rel, "dir")
+		if err != nil {
+			return err
+		}
+		return removeFixedSidecarDir(m.root, rel, "rollback-dir", ownership)
 	}
 	directoryHasEntries := func(path string) (bool, bool) {
 		if !m.Rooted || m.root == nil {
@@ -914,16 +1220,25 @@ func rollbackSidecarManifest(m *sidecarManifest) error {
 					if err != nil && firstErr == nil {
 						firstErr = fmt.Errorf("restore %s: %w", path, err)
 					}
+					if err != nil {
+						blockAncestors(path)
+					}
 					continue
 				}
 			}
 		}
-		if err := removePath(path); err != nil && !errors.Is(err, fs.ErrNotExist) && firstErr == nil {
-			firstErr = fmt.Errorf("remove %s: %w", path, err)
+		if err := removePath(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("remove %s: %w", path, err)
+			}
+			blockAncestors(path)
 		}
 	}
 	for i := len(m.Dirs) - 1; i >= 0; i-- {
 		path := m.Dirs[i]
+		if _, blocked := blockedDirs[filepath.Clean(path)]; blocked {
+			continue
+		}
 		if err := removeDir(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			hasEntries, ok := directoryHasEntries(path)
 			if hasEntries && ok {
@@ -1013,6 +1328,16 @@ func cleanupSidecars(envRoot, workDir string) error {
 	}
 
 	var firstErr error
+	blockedDirs := make(map[string]struct{})
+	blockAncestors := func(path string) {
+		for parent := filepath.Dir(filepath.Clean(path)); parent != "." && parent != string(filepath.Separator); parent = filepath.Dir(parent) {
+			blockedDirs[parent] = struct{}{}
+			next := filepath.Dir(parent)
+			if next == parent {
+				break
+			}
+		}
+	}
 	captureErr := func(err error) {
 		if firstErr == nil {
 			firstErr = err
@@ -1034,7 +1359,14 @@ func cleanupSidecars(envRoot, workDir string) error {
 		if err != nil {
 			return err
 		}
-		return removeFixedSidecarFile(workRoot, rel)
+		if !m.Rooted {
+			return removeLegacyFixedSidecarFile(workRoot, rel)
+		}
+		ownership, err := m.ownershipFor(rel, "file")
+		if err != nil {
+			return err
+		}
+		return removeFixedSidecarFile(workRoot, rel, "cleanup-file", ownership)
 	}
 	removeDir := func(path string) error {
 		if workRoot == nil {
@@ -1044,7 +1376,14 @@ func cleanupSidecars(envRoot, workDir string) error {
 		if err != nil {
 			return err
 		}
-		return removeFixedSidecarDir(workRoot, rel)
+		if !m.Rooted {
+			return removeLegacyFixedSidecarDir(workRoot, rel)
+		}
+		ownership, err := m.ownershipFor(rel, "dir")
+		if err != nil {
+			return err
+		}
+		return removeFixedSidecarDir(workRoot, rel, "cleanup-dir", ownership)
 	}
 	directoryHasEntries := func(path string) (bool, bool) {
 		if workRoot == nil {
@@ -1060,6 +1399,7 @@ func cleanupSidecars(envRoot, workDir string) error {
 	for _, f := range m.Files {
 		if err := removeFile(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			captureErr(fmt.Errorf("remove %s: %w", f, err))
+			blockAncestors(f)
 		}
 	}
 
@@ -1069,6 +1409,9 @@ func cleanupSidecars(envRoot, workDir string) error {
 	// (permission denied, busy, etc. — capture and surface).
 	for i := len(m.Dirs) - 1; i >= 0; i-- {
 		d := m.Dirs[i]
+		if _, blocked := blockedDirs[filepath.Clean(d)]; blocked {
+			continue
+		}
 		err := removeDir(d)
 		if err == nil || errors.Is(err, fs.ErrNotExist) {
 			continue
@@ -1220,7 +1563,12 @@ func removeReusedManagedSkillDirsAt(envRoot, workDir, skillsParent string) error
 			continue
 		}
 		if workRoot != nil {
-			err = removeAllFixedSidecarDir(workRoot, candidate)
+			ownership, ownershipErr := m.ownershipFor(candidate, "dir")
+			if ownershipErr != nil {
+				err = ownershipErr
+			} else {
+				err = removeAllFixedSidecarDir(workRoot, candidate, ownership)
+			}
 		} else {
 			err = os.RemoveAll(d)
 		}

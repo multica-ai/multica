@@ -2,7 +2,6 @@ package execenv
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -192,26 +191,9 @@ func writePlatformAgentContext(workDir string, ctx *PlatformAgentContextForEnv, 
 	if err := recordMkdirAll(dir, 0o700, manifest); err != nil {
 		return fmt.Errorf("create platform agent context directory: %w", err)
 	}
-	parentRel, err := pathRelativeToRoot(workDir, dir)
-	if err != nil {
-		return fmt.Errorf("resolve platform agent context directory: %w", err)
-	}
-	expectedParent, err := manifest.root.Lstat(parentRel)
-	if err != nil {
-		return fmt.Errorf("stat platform agent context directory: %w", err)
-	}
-	if !expectedParent.IsDir() || expectedParent.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("platform agent context directory must be a real directory: %s", dir)
-	}
-	parentRoot, err := manifest.root.OpenRoot(parentRel)
-	if err != nil {
-		return fmt.Errorf("open platform agent context directory: %w", err)
-	}
-	defer parentRoot.Close()
-	if err := atomicWriteFileNoClobberAt(manifest.root, parentRoot, expectedParent, parentRel, "context.json", data, 0o600); err != nil {
+	if err := recordWriteFile(filepath.Join(dir, "context.json"), data, 0o600, manifest); err != nil {
 		return fmt.Errorf("write platform agent context: %w", err)
 	}
-	manifest.Files = append(manifest.Files, filepath.Join(parentRel, "context.json"))
 	return nil
 }
 
@@ -222,44 +204,13 @@ func atomicWriteFileNoClobberAt(workRoot, parentRoot *os.Root, expectedParent os
 	if err := validateFixedPlatformParent(workRoot, parentRoot, expectedParent, parentRel); err != nil {
 		return err
 	}
-	var random [16]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		return fmt.Errorf("generate temporary sidecar name: %w", err)
-	}
-	tempName := fmt.Sprintf(".context.json.tmp-%x", random[:])
-	temp, err := parentRoot.OpenFile(tempName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	published, err := publishFixedSidecarNoClobber(parentRoot, name, data, perm, "publish-owned-file", filepath.Join(parentRel, name))
 	if err != nil {
-		return fmt.Errorf("create temporary sidecar: %w", err)
-	}
-	defer func() {
-		_ = temp.Close()
-		_ = parentRoot.Remove(tempName)
-	}()
-	if err := temp.Chmod(perm); err != nil {
-		return fmt.Errorf("chmod temporary sidecar: %w", err)
-	}
-	if _, err := temp.Write(data); err != nil {
-		return fmt.Errorf("write temporary sidecar: %w", err)
-	}
-	if err := temp.Sync(); err != nil {
-		return fmt.Errorf("sync temporary sidecar: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("close temporary sidecar before publish: %w", err)
-	}
-	if err := parentRoot.Link(tempName, name); err != nil {
-		if _, statErr := parentRoot.Lstat(name); statErr == nil {
-			return fmt.Errorf("%w: %s", errPathPreExists, filepath.Join(parentRel, name))
-		}
 		return fmt.Errorf("publish sidecar: %w", err)
 	}
 	if err := validateFixedPlatformParent(workRoot, parentRoot, expectedParent, parentRel); err != nil {
-		_ = parentRoot.Remove(name)
+		_ = detachAndDeleteOwnedFixedFile(parentRoot, name, filepath.Join(parentRel, name), "publish-parent-rollback", published, fileSidecarOwnership(data))
 		return fmt.Errorf("platform agent context parent changed during publish: %w", err)
-	}
-	if err := parentRoot.Remove(tempName); err != nil {
-		_ = parentRoot.Remove(name)
-		return fmt.Errorf("remove temporary sidecar after publish: %w", err)
 	}
 	return nil
 }
