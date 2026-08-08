@@ -14,18 +14,68 @@ package wecom
 //
 // The first two tests are the pair that matters: the same event, the same
 // session, opposite verdicts, decided only by where the question came from.
-// The rest pin the branches where the origin cannot be established, because
-// the cost of guessing runs both ways — a wrong yes puts a line in a room it
-// did not belong in, a wrong no leaves a WeCom user sitting on the guard's
-// "还在处理，完成后我再单独回复你" forever.
+// The rest pin the branches where the origin cannot be established. This is an
+// authorization check on writing into somebody else's group chat, so those
+// refuse — a lookup that did not answer is not evidence the question came from
+// WeCom — and the case that made fail-open tempting is covered without them,
+// by the round state this process already holds.
 
 import (
+	"context"
 	"errors"
+	"log/slog"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// logRecorder keeps what the manager logged. A refusal writes no frame and no
+// message, so without this a test asserting "nothing was sent" passes just as
+// happily when the handler returned three lines earlier for an unrelated
+// reason. The WARN line is the refusal's only outward sign, and it is also the
+// only thing that tells an operator their database has stopped answering a
+// question the room's notices depend on.
+type logRecorder struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (r *logRecorder) Enabled(context.Context, slog.Level) bool { return true }
+
+func (r *logRecorder) Handle(_ context.Context, rec slog.Record) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.records = append(r.records, rec.Clone())
+	return nil
+}
+
+func (r *logRecorder) WithAttrs([]slog.Attr) slog.Handler { return r }
+func (r *logRecorder) WithGroup(string) slog.Handler      { return r }
+
+// refusals returns the reason attribute of every WARN line the origin gate
+// wrote, in order.
+func (r *logRecorder) refusals() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, rec := range r.records {
+		if rec.Level != slog.LevelWarn || !strings.Contains(rec.Message, "origin cannot be established") {
+			continue
+		}
+		reason := ""
+		rec.Attrs(func(a slog.Attr) bool {
+			if a.Key == "reason" {
+				reason = a.Value.String()
+			}
+			return true
+		})
+		out = append(out, reason)
+	}
+	return out
+}
 
 // newBoundRoomRig is a bubbleRig whose manager also holds the binding row —
 // the address of last resort for a failure notice, and the one the leak
@@ -34,17 +84,40 @@ import (
 func newBoundRoomRig(t *testing.T) *bubbleRig {
 	t.Helper()
 	rig := newBubbleRig(t)
+	rig.logs = &logRecorder{}
 	rig.typing = NewTypingIndicator(TypingIndicatorConfig{
 		Senders:  rig.senders,
 		Streams:  rig.streams,
 		Tasks:    rig.q,
 		Bindings: rig.q,
+		Logger:   slog.New(rig.logs),
 		// No guard: these tests drive the endings themselves.
 		GuardAfter: -1,
 	})
 	rig.bus = events.New()
 	rig.typing.Register(rig.bus)
 	return rig
+}
+
+// refusedOrigin asserts that the room was told nothing and that the refusal
+// was logged once, with a reason naming what could not be established.
+func (r *bubbleRig) refusedOrigin(t *testing.T, wantReason string) {
+	t.Helper()
+	if got := pushedTexts(t, r.conn); len(got) != 0 {
+		t.Fatalf("the room was told %q about a run whose origin could not be established — "+
+			"an unreadable lookup granted permission to write into an external group chat", got)
+	}
+	if frames := r.conn.streamFrames(t); len(frames) != 0 {
+		t.Fatalf("the room got %d stream frames for a run of unknown origin, want none", len(frames))
+	}
+	reasons := r.logs.refusals()
+	if len(reasons) != 1 {
+		t.Fatalf("the gate logged %d refusals (%v), want exactly 1 — a failure notice this process "+
+			"decided to swallow has to be visible to whoever runs it", len(reasons), reasons)
+	}
+	if !strings.Contains(reasons[0], wantReason) {
+		t.Errorf("refusal reason = %q, want it to name %q", reasons[0], wantReason)
+	}
 }
 
 // askedInTheBrowser files a task row for a run the installer started in the
@@ -169,12 +242,22 @@ func TestAWebUIRunsFailureLeavesTheRoomsOwnBubbleAlone(t *testing.T) {
 
 // ---- where the origin cannot be established ----
 //
-// Every one of these delivers. The asymmetry with the answer path is the
-// point: an answer held back is still readable in Multica, and a failure
-// notice held back is a promise broken in silence.
+// Every one of these refuses and says so. Writing into a WeCom group is a
+// permission, and none of these branches is evidence that the run came from
+// WeCom: a `connection refused` from the database says nothing at all about
+// which surface asked. "One line of copy naming no question and no answer"
+// still tells a room that activity nobody there can see has gone wrong, and
+// the existence of the activity is the disclosure.
+//
+// The promise these used to be protecting is not paid for here. It is covered
+// two tests further down, out of the round state this process already holds.
 
-// A task:failed with no task id on it cannot be attributed at all.
-func TestAFailureWithNoTaskIDIsStillDelivered(t *testing.T) {
+// A task:failed with no task id on it cannot be attributed at all. Both
+// publishers go through service.taskEvent, which sets TaskID on the envelope
+// and task_id in the payload from the row it is publishing about, so this is a
+// shape nothing in production produces — and a test-only shape is not worth a
+// standing permission to write into a customer's group chat.
+func TestAFailureWithNoTaskIDIsRefused(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
 	rig.q.channelIngested = askedInTheWebUI() // would refuse, if it were ever asked
@@ -185,31 +268,25 @@ func TestAFailureWithNoTaskIDIsStillDelivered(t *testing.T) {
 		Payload:       map[string]any{"failure_reason": "provider_network"},
 	})
 
-	if got := pushedTexts(t, rig.conn); len(got) != 1 || got[0] != streamCopyFailed {
-		t.Fatalf("the asker read %q, want [%q] — an unattributable failure was swallowed",
-			got, streamCopyFailed)
-	}
+	rig.refusedOrigin(t, "no task id")
 }
 
 // The task row is gone — cancelled and reaped while its failure was in flight.
-// The answer path drops a reply here; a failure notice still goes out, because
-// the round on the other side may be holding the guard's promise.
-func TestAVanishedTaskRowStillDeliversTheFailure(t *testing.T) {
+// Nothing left to read means nothing that says the question was asked here.
+func TestAVanishedTaskRowRefusesTheFailure(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
 	rig.q.channelIngested = askedInTheWebUI() // no row to ask about, so this never applies
 
 	rig.failed(t, "task-1", false) // rig.q.tasks holds no row for it
 
-	if got := pushedTexts(t, rig.conn); len(got) != 1 || got[0] != streamCopyFailed {
-		t.Fatalf("the asker read %q, want [%q] — a run whose row had been reaped went unreported",
-			got, streamCopyFailed)
-	}
+	rig.refusedOrigin(t, "cannot read the task row")
 }
 
-// The database did not answer. Same call: a lookup that failed is not a
-// verdict that the room should hear nothing.
-func TestAnUnreadableOriginStillDeliversTheFailure(t *testing.T) {
+// The database did not answer. A lookup that failed is not a verdict, and a
+// gate that treated it as one would let an outage hand out the permission the
+// gate exists to withhold.
+func TestAnUnreadableOriginRefusesTheFailure(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
 	rig.askedInTheRoom(t, "task-1")
@@ -217,9 +294,65 @@ func TestAnUnreadableOriginStillDeliversTheFailure(t *testing.T) {
 
 	rig.failed(t, "task-1", false)
 
-	if got := pushedTexts(t, rig.conn); len(got) != 1 || got[0] != streamCopyFailed {
-		t.Fatalf("the asker read %q, want [%q] — a failed origin lookup was treated as a refusal",
-			got, streamCopyFailed)
+	rig.refusedOrigin(t, "connection refused")
+}
+
+// ---- and where it can be established without a database ----
+//
+// The case the refusals above look like they cost is the case with local
+// evidence, which is why the trade-off is not one. A round sitting on the
+// guard's promise, and a round still open, are both written only by the
+// inbound path — a message this adapter ingested, named by the flush that
+// answered it — so either one is proof of origin that no outage can take away.
+
+// TestAnUnreadableOriginStillKeepsTheGuardsPromise is the pair to
+// TestAnUnreadableOriginRefusesTheFailure: same broken database, same event,
+// and the opposite outcome, because this round is owed words.
+//
+// The gate runs before anything is consumed, so the promise is still on the
+// list when it is asked. Refusing here would be the one failure that cannot be
+// recovered from — the asker was told "还在处理，完成后我再单独回复你" and would
+// wait for a reply that was never going to come.
+func TestAnUnreadableOriginStillKeepsTheGuardsPromise(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.askedInTheRoom(t, "task-1")
+	rig.ran(t, "REQ-1", 1, "task-1")
+	rig.guardClosed(t, 1) // "还在处理，完成后我再单独回复你"
+	// Every database read the gate could make now fails.
+	rig.q.taskErr = errors.New("connection refused")
+	rig.q.originErr = errors.New("connection refused")
+
+	rig.failed(t, "task-1", false)
+
+	got := pushedTexts(t, rig.conn)
+	if len(got) != 1 || got[0] != streamCopyFailed {
+		t.Fatalf("the asker read %q, want exactly [%q] — they are sitting on the guard's promise of a "+
+			"separate reply, and this process knew the round was theirs without asking anybody", got, streamCopyFailed)
+	}
+	if reasons := rig.logs.refusals(); len(reasons) != 0 {
+		t.Errorf("the gate refused (%v) a round whose own promise names this run", reasons)
+	}
+}
+
+// A round still open is the same evidence one step earlier, and it costs no
+// read at all: the bubble on screen was opened by a message from the room.
+func TestAnOpenRoundIsProofEnoughOfOrigin(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.ran(t, "REQ-1", 1, "task-1")
+	rig.q.taskErr = errors.New("connection refused")
+	rig.q.originErr = errors.New("connection refused")
+
+	rig.failed(t, "task-1", false)
+
+	frames := rig.conn.streamFrames(t)
+	if len(frames) != 2 || frames[1]["finish"] != true || frames[1]["content"] != streamCopyFailed {
+		t.Fatalf("the bubble was left as %v, want it sealed with %q — a database outage left the room's "+
+			"own question spinning on a run that is already dead", frames, streamCopyFailed)
+	}
+	if rig.q.taskGets != 0 {
+		t.Errorf("the gate read %d task row(s) for a run whose own bubble is open in this process", rig.q.taskGets)
 	}
 }
 

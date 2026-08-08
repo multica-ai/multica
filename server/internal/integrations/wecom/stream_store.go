@@ -224,7 +224,48 @@ type endedRound struct {
 	// answered. Bounded: a batch old enough to have fallen off cannot still
 	// have a message in flight for it.
 	finished []engine.RunBatchID
+	// told lists the RUNS whose ending has already been said — a bubble
+	// sealed, a promise kept, a plain message sent. It is what makes a second
+	// publisher of one run's failure silent, and it has to be per run for the
+	// same reason owed is: the existence of a note says only that SOMETHING in
+	// this session has been spoken for. Keyed by session, a second run's
+	// failure would read another run's note as its own and its asker would be
+	// told nothing at all. Bounded the way finished is.
+	told []string
 }
+
+// isTold reports whether this run's ending has already been said.
+func (e endedRound) isTold(taskID string) bool {
+	if taskID == "" {
+		return false
+	}
+	for _, id := range e.told {
+		if id == taskID {
+			return true
+		}
+	}
+	return false
+}
+
+// tell adds a run to the told list, keeping it bounded. Returns the new list.
+func (e endedRound) tell(taskID string) []string {
+	if taskID == "" || e.isTold(taskID) {
+		return e.told
+	}
+	next := append(e.told, taskID)
+	if len(next) > maxToldRounds {
+		next = next[len(next)-maxToldRounds:]
+	}
+	return next
+}
+
+// maxToldRounds bounds the told list. What it has to outlast is a REPEAT of
+// one run's ending — a sweeper tick republishing a failure, an auto-retry's
+// first attempt arriving late — which lands within minutes of the original,
+// while the note itself is discarded after roundMemory. Thirty-two rounds is
+// far more than a session serializing its runs gets through in that gap, and
+// it keeps the note a fixed size for a chat that never stops.
+const maxToldRounds = 32
 
 // isFinished reports whether this run's bubble is already over.
 func (e endedRound) isFinished(batch engine.RunBatchID) bool {
@@ -542,6 +583,7 @@ func (s *streamStore) rememberLocked(key string, addr roundAddress, ending round
 	next := endedRound{addr: addr, at: s.now()}
 	if prev, ok := s.ended[key]; ok {
 		next.owed = prev.owed
+		next.told = prev.told
 		next.finished = prev.finish(batch)
 		if !addr.known() {
 			next.addr = prev.addr
@@ -556,6 +598,9 @@ func (s *streamStore) rememberLocked(key string, addr roundAddress, ending round
 		// flush had named the run leaves nothing for a later failure to match,
 		// and an unnamed entry would be handed to the first failure in the
 		// session — which is a different round's.
+		//
+		// Nothing is told here either: "still working, I'll reply separately"
+		// is the one closer that does not end the round.
 		if taskID != "" {
 			next.owed = append(next.owed, taskID)
 		}
@@ -563,9 +608,33 @@ func (s *streamStore) rememberLocked(key string, addr roundAddress, ending round
 		owed := settle(next.owed, taskID)
 		settled = len(owed) < len(next.owed)
 		next.owed = owed
+		// This run has now been spoken for. A repeat of its own ending stays
+		// silent on that; another run's ending is not covered by it.
+		next.told = next.tell(taskID)
 	}
 	s.ended[key] = next
 	return settled
+}
+
+// tell records that a run's ending has been said, without settling a promise
+// or touching the address. It is the alias half of the retry-clone lookup: an
+// ending that reached its round through the batch owner was said in the
+// clone's name too, and a repeat carrying the clone's own id has to find that
+// on file or it says the same thing a second time. See roundTaker.
+func (s *streamStore) tell(sessionID pgtype.UUID, taskID string) {
+	if taskID == "" {
+		return
+	}
+	key := util.UUIDToString(sessionID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	note, ok := s.ended[key]
+	if !ok {
+		return
+	}
+	note.told = note.tell(taskID)
+	s.ended[key] = note
 }
 
 // claimEnding asks whether THIS round is still owed an ending, and claims the
@@ -580,14 +649,17 @@ func (s *streamStore) rememberLocked(key string, addr roundAddress, ending round
 // round the user actually cancelled is never told at all. A repeat then finds
 // the list still non-empty and says the same thing twice.
 //
-// roundToldAlready covers both "this round's ending has already been said" and
-// "the promise on file belongs to a different round". Neither is this caller's
-// to speak for, and the first of them is the whole point of the claim:
-// task:failed has two publishers and a sweeper tick can repeat one.
+// roundToldAlready means THIS run has been spoken for — its own ending has
+// already been said, and task:failed has two publishers with a sweeper tick
+// able to repeat either. It is read off the told list, which is per run: the
+// existence of a note says only that something in this session has ended, and
+// a claim that read it as "already told" would silence the second run of a
+// session whose first run had a note on file, leaving its asker with nothing.
 //
-// roundForgotten is not a refusal. It means this process has no address for
-// the round — a restart mid-run, a turn whose opening frame the server refused
-// — so the caller has to find the chat itself.
+// roundForgotten is not a refusal. It means this process has nothing on file
+// for the round — a restart mid-run, a turn whose opening frame the server
+// refused, or simply a run this session's note has never spoken for — so the
+// caller has to find the chat itself.
 func (s *streamStore) claimEnding(sessionID pgtype.UUID, taskID string) (roundAddress, roundVerdict) {
 	key := util.UUIDToString(sessionID)
 
@@ -604,15 +676,74 @@ func (s *streamStore) claimEnding(sessionID pgtype.UUID, taskID string) (roundAd
 	if !round.addr.known() {
 		return roundAddress{}, roundForgotten
 	}
-	// An unnamed ending claims nothing, for the same reason rememberLocked
-	// files no unnamed promise: there is no round it could be speaking for.
-	owed := settle(round.owed, taskID)
-	if len(owed) == len(round.owed) {
+	if round.isTold(taskID) {
 		return round.addr, roundToldAlready
 	}
+	// An unnamed ending claims nothing, for the same reason rememberLocked
+	// files no unnamed promise: there is no round it could be speaking for.
+	// It is not forgotten either — a caller told to go and find a chat would
+	// announce an ending it cannot attribute to any round in it.
+	if taskID == "" {
+		return round.addr, roundToldAlready
+	}
+	owed := settle(round.owed, taskID)
+	if len(owed) == len(round.owed) {
+		// The promise on file belongs to a different round and this run has
+		// never been spoken for. Not this caller's promise to spend, and not a
+		// reason for silence: the caller finds its own address.
+		return roundAddress{}, roundForgotten
+	}
 	round.owed = owed
+	round.told = round.tell(taskID)
 	s.ended[key] = round
 	return round.addr, roundOwesAnEnding
+}
+
+// remembers reports whether a session has a note at all. It gates the
+// retry-clone lookup on the claim path, where an outstanding promise is not
+// the only thing a second id could match: an ending already told under the
+// batch owner's name is the other, and reading it is what keeps a repeat
+// carrying the clone's own id silent.
+func (s *streamStore) remembers(sessionID pgtype.UUID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.ended[util.UUIDToString(sessionID)]
+	return ok
+}
+
+// knowsRound reports whether this process holds local evidence that a run
+// belongs to a WeCom round of this session: a round bound to it, or a promise
+// owed to it. Both are written only by the inbound path — a round is opened by
+// a message this adapter ingested and named by the flush that answered it, and
+// a promise is left by the guard closing that round's own bubble — so either
+// one is positive proof of where the question was asked, needing no database.
+//
+// It is deliberately not the whole of the origin question: a run with nothing
+// on file here may still have come from WeCom, and that case is the row's to
+// answer (failureBelongsOnWecom).
+func (s *streamStore) knowsRound(sessionID pgtype.UUID, taskID string) bool {
+	if taskID == "" {
+		return false
+	}
+	key := util.UUIDToString(sessionID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, r := range s.sessions[key] {
+		if r.taskID == taskID {
+			return true
+		}
+	}
+	note, ok := s.ended[key]
+	if !ok || s.now().Sub(note.at) > roundMemory {
+		return false
+	}
+	for _, id := range note.owed {
+		if id == taskID {
+			return true
+		}
+	}
+	return false
 }
 
 // owes reports whether a session's note still holds an unclaimed promise. It
@@ -757,7 +888,15 @@ func (r roundTaker) take(ctx context.Context, sessionID pgtype.UUID, taskID stri
 	if root == "" || root == taskID {
 		return streamHandle{}, false
 	}
-	return r.streams.takeTask(sessionID, root, ending)
+	h, ok := r.streams.takeTask(sessionID, root, ending)
+	if ok && ending == roundOver {
+		// The round was ended in the clone's name as much as the owner's. A
+		// repeat carrying the clone's own id has to find that on file, or it
+		// finds no round, goes looking for a chat in the binding row, and says
+		// the same thing a second time.
+		r.streams.tell(sessionID, taskID)
+	}
+	return h, ok
 }
 
 // claim asks whether the round a task belongs to is still owed an ending, and
@@ -769,20 +908,35 @@ func (r roundTaker) take(ctx context.Context, sessionID pgtype.UUID, taskID stri
 // the flush bound, so a clone's final failure carries a name the list does not
 // hold, and without the second lookup the guard's "I'll reply separately"
 // would go unanswered on every run long enough to be guard-closed and then
-// retried.
+// retried. The owner's name is also the one the round's ending was told under,
+// so the second lookup is what keeps a repeat of a clone's ending silent.
 func (r roundTaker) claim(ctx context.Context, sessionID pgtype.UUID, taskID string) (roundAddress, roundVerdict) {
 	if r.streams == nil {
 		return roundAddress{}, roundForgotten
 	}
 	addr, verdict := r.streams.claimEnding(sessionID, taskID)
-	if verdict != roundToldAlready {
+	if verdict != roundForgotten {
+		// Either this id claimed the promise or this id has already been
+		// spoken for. Both are answers about the round; only "nothing on file
+		// under this name" is the miss a second id could resolve.
 		return addr, verdict
 	}
-	root := r.rootID(ctx, sessionID, taskID)
+	root := r.rootID(ctx, taskID, r.streams.remembers(sessionID))
 	if root == "" {
 		return addr, verdict
 	}
-	return r.streams.claimEnding(sessionID, root)
+	rootAddr, rootVerdict := r.streams.claimEnding(sessionID, root)
+	if rootVerdict == roundForgotten {
+		// The owner is no better known than the clone. Whatever the clone's
+		// own id answered stands.
+		return addr, verdict
+	}
+	if rootVerdict == roundOwesAnEnding {
+		// The promise is spent in the clone's name too, so a repeat of the
+		// clone's own ending does not go looking for a chat to repeat it in.
+		r.streams.tell(sessionID, taskID)
+	}
+	return rootAddr, rootVerdict
 }
 
 // settle files a round's ending when nothing was taken and nothing was claimed
@@ -800,17 +954,20 @@ func (r roundTaker) settle(ctx context.Context, sessionID pgtype.UUID, taskID st
 	if r.streams.remember(sessionID, addr, roundOver, taskID) {
 		return
 	}
-	if root := r.rootID(ctx, sessionID, taskID); root != "" {
+	if root := r.rootID(ctx, taskID, r.streams.owes(sessionID)); root != "" {
 		r.streams.remember(sessionID, addr, roundOver, root)
 	}
 }
 
 // rootID is the retry-clone lookup for the two paths that speak for a round
 // with no bubble left. hasRounds cannot gate it there — the guard took the
-// handle, so the session has nothing open — and an outstanding promise is what
-// takes its place: with nothing owed there is no second id worth a row.
-func (r roundTaker) rootID(ctx context.Context, sessionID pgtype.UUID, taskID string) string {
-	if !r.streams.owes(sessionID) {
+// handle, so the session has nothing open — so worthAsking takes its place,
+// and what makes a second id worth a row differs by caller. settle only ever
+// clears a promise, so nothing owed means nothing to clear. claim also has to
+// find an ending already told under the owner's name, which outlives the
+// promise, so it asks whenever the session has a note at all.
+func (r roundTaker) rootID(ctx context.Context, taskID string, worthAsking bool) string {
+	if !worthAsking {
 		return ""
 	}
 	root := r.rootTaskID(ctx, taskID)

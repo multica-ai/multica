@@ -175,8 +175,16 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		// before another connection could carry it.
 		content = text
 	}
-	if content == "" {
-		return nil // nothing to say, no bubble to close, nothing to send
+	if !hasVisibleChar(content) {
+		// No bubble to close and nothing to say. Ordinarily that is the end of
+		// it — but if the guard closed this round's bubble it said "还在处理，
+		// 完成后我再单独回复你", and returning here is that promise broken in
+		// silence: the user is left waiting for a reply that has already
+		// happened, and the promise stays on the list for the next repeat of
+		// this run's failure to spend. The bubble path fifteen lines up ends
+		// an empty completion in words for the same reason; after the guard
+		// the words go out as the separate reply instead.
+		return o.keepThePromiseWithNoReply(ctx, sessionID, e)
 	}
 
 	binding, err := o.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
@@ -232,6 +240,26 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		ChatType:       chatType,
 	})
 	return nil
+}
+
+// keepThePromiseWithNoReply delivers the guard's promised separate reply for a
+// run that finished with nothing to say.
+//
+// The claim is what makes this safe to send at all. A promise exists only
+// where the guard closed a bubble this adapter opened, so roundOwesAnEnding is
+// itself the proof that a WeCom round is waiting on these words — no binding
+// row is consulted and no session that never asked anything here is written
+// to. Any other verdict means nobody is owed anything and an empty completion
+// is what it looks like: nothing to send.
+func (o *Outbound) keepThePromiseWithNoReply(ctx context.Context, sessionID pgtype.UUID, e events.Event) error {
+	if o.streams == nil || o.senders == nil {
+		return nil
+	}
+	addr, verdict := o.rounds().claim(ctx, sessionID, taskIDFromEvent(e))
+	if verdict != roundOwesAnEnding {
+		return nil
+	}
+	return o.senders.sendTextCtx(ctx, addr.InstallationID, addr.ChatID, addr.ChatType, streamCopyNoReply)
 }
 
 // rounds builds the matcher that turns a task id on an event into the round it
