@@ -11,6 +11,12 @@ import (
 	"testing"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestPostJSON(t *testing.T) {
 	type reqBody struct {
 		Name string `json:"name"`
@@ -164,6 +170,127 @@ func TestPostJSON(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
+}
+
+func TestGetJSONRetriesTransientTransportErrors(t *testing.T) {
+	attempts := 0
+	client := NewAPIClient("https://example.test", "ws-1", "test-token")
+	client.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		switch attempts {
+		case 1:
+			return nil, io.ErrUnexpectedEOF
+		case 2:
+			return nil, errors.New("http2: client connection lost")
+		default:
+			if req.Method != http.MethodGet {
+				t.Errorf("method = %s, want GET", req.Method)
+			}
+			if req.URL.Path != "/api/workspaces/ws-1/members" {
+				t.Errorf("path = %s, want /api/workspaces/ws-1/members", req.URL.Path)
+			}
+			if auth := req.Header.Get("Authorization"); auth != "Bearer test-token" {
+				t.Errorf("authorization = %q, want bearer token", auth)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+				Request:    req,
+			}, nil
+		}
+	})}
+
+	var out map[string]bool
+	if err := client.GetJSON(context.Background(), "/api/workspaces/ws-1/members", &out); err != nil {
+		t.Fatalf("GetJSON returned error after transient retries: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+	if !out["ok"] {
+		t.Fatalf("decoded response = %+v, want ok=true", out)
+	}
+}
+
+func TestGetJSONWithHeadersRetriesTransientTransportErrors(t *testing.T) {
+	attempts := 0
+	client := NewAPIClient("https://example.test", "", "")
+	client.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, errors.New("read tcp 127.0.0.1:1234->127.0.0.1:443: connection reset by peer")
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"X-Total-Count": []string{"1"}},
+			Body:       io.NopCloser(strings.NewReader(`[{"id":"issue-1"}]`)),
+			Request:    req,
+		}, nil
+	})}
+
+	var out []map[string]string
+	headers, err := client.GetJSONWithHeaders(context.Background(), "/api/issues", &out)
+	if err != nil {
+		t.Fatalf("GetJSONWithHeaders returned error after transient retry: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if got := headers.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1", got)
+	}
+	if len(out) != 1 || out[0]["id"] != "issue-1" {
+		t.Fatalf("decoded response = %+v, want issue-1", out)
+	}
+}
+
+func TestGetJSONRetryExhaustionPreservesNetworkError(t *testing.T) {
+	attempts := 0
+	client := NewAPIClient("https://example.test", "", "")
+	client.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		return nil, io.ErrUnexpectedEOF
+	})}
+
+	err := client.GetJSON(context.Background(), "/api/issues", nil)
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+	if attempts != getJSONMaxAttempts {
+		t.Fatalf("attempts = %d, want %d", attempts, getJSONMaxAttempts)
+	}
+	var netErr *NetworkError
+	if !errors.As(err, &netErr) {
+		t.Fatalf("error type = %T, want *NetworkError", err)
+	}
+	if netErr.Op != "GET /api/issues" {
+		t.Errorf("network op = %q, want GET /api/issues", netErr.Op)
+	}
+	if !errors.Is(netErr.Err, io.ErrUnexpectedEOF) {
+		t.Errorf("network cause = %v, want unexpected EOF", netErr.Err)
+	}
+}
+
+func TestPostJSONDoesNotRetryTransientTransportErrors(t *testing.T) {
+	attempts := 0
+	client := NewAPIClient("https://example.test", "", "")
+	client.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		return nil, io.ErrUnexpectedEOF
+	})}
+
+	err := client.PostJSON(context.Background(), "/api/issues", map[string]string{"title": "x"}, nil)
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	var netErr *NetworkError
+	if !errors.As(err, &netErr) {
+		t.Fatalf("error type = %T, want *NetworkError", err)
+	}
 }
 
 func TestDeleteJSONResponse(t *testing.T) {
