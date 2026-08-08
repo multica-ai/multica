@@ -561,15 +561,20 @@ func TestBuildChatPromptNoNarrationOnEveryChannel(t *testing.T) {
 // chat channel policy (MUL-4899). Collapsing them into one condition is exactly
 // the bug this matrix exists to catch:
 //
-//   - delivery: `attachment upload` guidance is injected iff there is NO channel.
-//     Any IM reply leaves Multica, where the upload has nothing to bind to.
+//   - delivery: `attachment upload` guidance is injected iff something actually
+//     carries the file the last hop. That is per-adapter, not "is there a
+//     channel": web/mobile renders a card, WeCom's adapter fetches the bound
+//     attachment and pushes it into the room (integrations/wecom/
+//     outbound_media.go), and Slack and Lark do neither. ChannelCarriesFiles
+//     owns the answer.
 //   - history: the `chat history` / `chat thread` commands are injected iff the
 //     channel is Slack. Those endpoints are hardwired to h.SlackHistory
 //     (handler/chat_history.go) — on Feishu they answer "no channel
 //     integration", so teaching them there sends the agent down a dead path.
 //
-// Feishu is the case that proves the axes are separate: no upload AND no
-// history. A single `ChatChannelType != ""` gate cannot express it.
+// Two cases prove the axes are separate. Feishu has no upload AND no history,
+// so a single gate cannot express it. WeCom is the mirror image — upload but no
+// history — and is also why the delivery axis cannot be `ChatChannelType != ""`.
 func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 	// Match the IMPERATIVE, not the bare command name. An IM prompt names
 	// `multica attachment upload` on purpose — to state that it does not apply
@@ -609,6 +614,23 @@ func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 				"no history reader for Feishu/Lark",
 				"delivered to Feishu/Lark as text",
 				"You cannot attach a file to it",
+			},
+		},
+		{
+			// The mirror of Feishu, and the row that makes the delivery axis
+			// impossible to express as "is there a channel". WeCom's adapter
+			// goes back for the bound file, so the upload guidance applies —
+			// with the caveat that the file lands as its own message, since an
+			// agent told only "files work here" writes "see the chart below"
+			// and nothing appears below.
+			name:        "wecom: upload, no history",
+			channelType: execenv.ChannelTypeWecom,
+			wantUpload:  true,
+			wantHistory: false,
+			wantPhrases: []string{
+				"WeCom",
+				"sends it into the WeCom conversation as a separate message",
+				"there is no way to place it inline",
 			},
 		},
 	}

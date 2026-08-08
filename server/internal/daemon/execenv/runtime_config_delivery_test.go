@@ -13,11 +13,12 @@ import (
 //     cannot silently inherit no invariant at all; this test is what keeps that
 //     true.
 //   - The surface policy ("here is how a file actually gets delivered HERE") is
-//     PER-KIND, and there are five surfaces, not four — web/mobile chat and IM
-//     chat are the same taskKind but opposite answers.
+//     PER-KIND, and the chat kind alone splits three ways: web/mobile renders a
+//     card, WeCom pushes the file into the room as its own message, and Slack
+//     and Lark cannot deliver one at all.
 
-// deliveryInvariantFixtures covers all five task kinds. The chat kind appears
-// twice because ChatChannelType splits it into two surfaces.
+// deliveryInvariantFixtures covers every task kind. The chat kind appears four
+// times because ChatChannelType splits it into separate surfaces.
 func deliveryInvariantFixtures() map[string]TaskContextForEnv {
 	return map[string]TaskContextForEnv{
 		"comment":     {IssueID: "i-1", TriggerCommentID: "tc-1", AgentName: "Eve", AgentID: "eve-1"},
@@ -27,6 +28,7 @@ func deliveryInvariantFixtures() map[string]TaskContextForEnv {
 		"chat_direct": {ChatSessionID: "c-1", AgentName: "Eve", AgentID: "eve-1"},
 		"chat_slack":  {ChatSessionID: "c-1", ChatChannelType: ChannelTypeSlack, AgentName: "Eve", AgentID: "eve-1"},
 		"chat_feishu": {ChatSessionID: "c-1", ChatChannelType: ChannelTypeFeishu, AgentName: "Eve", AgentID: "eve-1"},
+		"chat_wecom":  {ChatSessionID: "c-1", ChatChannelType: ChannelTypeWecom, AgentName: "Eve", AgentID: "eve-1"},
 	}
 }
 
@@ -66,14 +68,27 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 			mustHave: []string{"`--attachment <path>` to `multica issue comment add`"},
 			mustNot:  []string{"multica attachment upload"},
 		},
-		// Direct chat is the ONLY surface where `attachment upload` works.
+		// Direct chat: the upload binds to the reply and the browser renders a
+		// card, so the file can sit inline where the agent puts it.
 		"chat_direct": {
 			mustHave: []string{"`multica attachment upload <local-path>`"},
-			mustNot:  []string{"text-only"},
+			mustNot:  []string{"text-only", "separate message"},
 		},
-		// IM surfaces are text-only. The upload command must not appear: it binds
-		// to a Multica chat reply, which an IM reply is not, so suggesting it
-		// would have the agent upload a file and report it as delivered.
+		// WeCom: the upload works, but the adapter delivers the file as its own
+		// message. Saying only "files work here" would have the agent write
+		// "see the chart below" with nothing below it.
+		"chat_wecom": {
+			mustHave: []string{
+				"`multica attachment upload <local-path>`",
+				"WeCom conversation as a separate message",
+				"not inline",
+			},
+			mustNot: []string{"text-only", "does NOT apply"},
+		},
+		// Slack and Lark are text-only. The upload command must not appear as an
+		// instruction: it binds to a Multica chat reply, which an IM reply on
+		// those platforms is not, so suggesting it would have the agent upload a
+		// file and report it as delivered.
 		"chat_slack": {
 			mustHave: []string{"Slack conversation is text-only", "does NOT apply"},
 			mustNot:  []string{"run `multica attachment upload"},
