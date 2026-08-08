@@ -183,6 +183,21 @@ import type {
   CreateBillingPortalSessionResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
+import type {
+  PlatformExtensionDetail,
+  PlatformExtensionImportResult,
+  PlatformExtensionMapping,
+} from "../extensions/types";
+import {
+  PLATFORM_EXTENSION_MAX_IMPORT_BYTES,
+  PlatformExtensionDocumentEncodingError,
+  PlatformExtensionDocumentTooLargeError,
+} from "../extensions/types";
+import {
+  PlatformExtensionDetailSchema,
+  PlatformExtensionImportResultSchema,
+  PlatformExtensionListSchema,
+} from "../extensions/schemas";
 import type { CreateFeedbackResponse, FeedbackKind } from "../feedback/types";
 import type {
   CloudRuntimeNode,
@@ -627,6 +642,43 @@ export class ApiClient {
 
   async issueCliToken(): Promise<{ token: string }> {
     return this.fetch("/api/cli-token", { method: "POST" });
+  }
+
+  async listPlatformExtensions(): Promise<PlatformExtensionMapping[]> {
+    const raw = await this.fetch<unknown>("/api/extensions");
+    return parseWithFallback(raw, PlatformExtensionListSchema, [], {
+      endpoint: "GET /api/extensions",
+    });
+  }
+
+  async getPlatformExtension(id: string): Promise<PlatformExtensionDetail | null> {
+    const raw = await this.fetch<unknown>(`/api/extensions/${encodeURIComponent(id)}`);
+    return parseWithFallback(raw, PlatformExtensionDetailSchema, null, {
+      endpoint: "GET /api/extensions/{id}",
+    });
+  }
+
+  async importPlatformExtension(
+    document: Uint8Array | ArrayBuffer,
+  ): Promise<PlatformExtensionImportResult | null> {
+    const bytes = document instanceof Uint8Array
+      ? Uint8Array.from(document)
+      : new Uint8Array(document.slice(0));
+    if (bytes.byteLength > PLATFORM_EXTENSION_MAX_IMPORT_BYTES) {
+      throw new PlatformExtensionDocumentTooLargeError();
+    }
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new PlatformExtensionDocumentEncodingError();
+    }
+    const raw = await this.fetch<unknown>("/api/extensions/import", {
+      method: "POST",
+      body: bytes,
+    });
+    return parseWithFallback(raw, PlatformExtensionImportResultSchema, null, {
+      endpoint: "POST /api/extensions/import",
+    });
   }
 
   async getMe(): Promise<User> {
