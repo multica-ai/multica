@@ -97,7 +97,10 @@ describe("IssueChip", () => {
 
     const mention = screen.getByText("MUL-3405");
     expect(mention).toHaveClass("issue-mention", "text-primary");
-    expect(mention).not.toHaveClass("border", "text-caption");
+    // One class per assertion: multi-argument `.not.toHaveClass` inverts an
+    // `every()`, so it passes when only one of the listed classes is absent.
+    expect(mention).not.toHaveClass("border");
+    expect(mention).not.toHaveClass("text-caption");
   });
 
   it("renders the unresolved fallback label in each variant", () => {

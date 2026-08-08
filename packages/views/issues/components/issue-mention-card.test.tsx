@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { IssueMentionCard } from "./issue-mention-card";
@@ -36,11 +35,31 @@ vi.mock("./issue-chip", () => ({
   ),
 }));
 
-vi.mock("./issue-hover-card", () => ({
-  IssueHoverCard: ({ children }: { children: ReactNode }) => (
-    <span data-testid="issue-hover-card">{children}</span>
-  ),
+// IssueHoverCard is deliberately NOT mocked: it is the component that nests the
+// AppLink inside a Base UI trigger and stops click events on its popup, so a
+// mock would hide exactly the interaction these tests are here to protect.
+// Its dependencies are stubbed instead, the same way issue-hover-card.test.tsx
+// does — which also removes the need for a QueryClientProvider.
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: vi.fn(() => ({ data: undefined })),
 }));
+
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "workspace-1",
+}));
+
+vi.mock("@multica/core/issues/queries", () => ({
+  issueDetailOptions: (_workspaceId: string, issueId: string) => ({
+    queryKey: ["issue", issueId],
+  }),
+}));
+
+vi.mock("./status-icon", () => ({
+  StatusIcon: () => <svg data-testid="status-icon" />,
+}));
+
+/** Emitted by the real HoverCardTrigger, so it can't be faked by a mock. */
+const HOVER_CARD_TRIGGER = "[data-slot='hover-card-trigger']";
 
 function makeAdapter(
   overrides: Partial<NavigationAdapter> = {},
@@ -120,7 +139,7 @@ describe("IssueMentionCard", () => {
       </NavigationProvider>,
     );
 
-    expect(document.querySelector("[data-testid='issue-hover-card']")).toBeNull();
+    expect(document.querySelector(HOVER_CARD_TRIGGER)).toBeNull();
   });
 
   it("wraps the mention in a hover card in compact mode", () => {
@@ -131,7 +150,7 @@ describe("IssueMentionCard", () => {
       </NavigationProvider>,
     );
 
-    expect(document.querySelector("[data-testid='issue-hover-card']")).not.toBeNull();
+    expect(document.querySelector(HOVER_CARD_TRIGGER)).not.toBeNull();
   });
 
   it("wraps the mention in a hover card in plain mode", () => {
@@ -142,28 +161,30 @@ describe("IssueMentionCard", () => {
       </NavigationProvider>,
     );
 
-    expect(document.querySelector("[data-testid='issue-hover-card']")).not.toBeNull();
+    expect(document.querySelector(HOVER_CARD_TRIGGER)).not.toBeNull();
   });
 
-  // The hover card nests the AppLink inside HoverCardTrigger. This asserts the
-  // link survives that nesting structurally. It does NOT prove real clicks
-  // still navigate — HoverCardContent stops click/auxclick/dblclick from
-  // bubbling through the React tree, and the mock above replaces exactly the
-  // component that does so. Task 7's manual pass is what verifies actual
-  // click and cmd-click behavior.
+  // The narrow modes nest the AppLink inside a real HoverCardTrigger. Base UI
+  // adds its own handlers there, so this checks a plain click still reaches the
+  // navigation adapter rather than being swallowed on the way out.
   it.each(["compact", "plain"] as const)(
-    "keeps the mention a navigable link in %s mode",
+    "with the real hover card mounted, a plain click in %s mode still navigates",
     (mode) => {
       mentionDisplayState.mode = mode;
+      issueLinkState.openInNewTab = false;
+      const push = vi.fn();
       render(
-        <NavigationProvider value={makeAdapter()}>
+        <NavigationProvider value={makeAdapter({ push })}>
           <IssueMentionCard issueId="issue-1" fallbackLabel="MUL-3405" />
         </NavigationProvider>,
       );
 
+      expect(document.querySelector(HOVER_CARD_TRIGGER)).not.toBeNull();
       const anchor = screen.getByRole("link");
       expect(anchor).toHaveAttribute("href", "/acme/issues/issue-1");
-      expect(anchor).toHaveAttribute("target", "_blank");
+
+      fireEvent.click(screen.getByTestId("issue-chip"));
+      expect(push).toHaveBeenCalledWith("/acme/issues/issue-1");
     },
   );
 });
