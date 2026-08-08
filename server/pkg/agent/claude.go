@@ -1110,15 +1110,16 @@ func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, execPath, "--version")
-	hideAgentWindow(cmd)
-	// exec.CommandContext only kills the direct child on timeout. A broken CLI
-	// (node/bun shim) can leave grandchildren that inherited and still hold our
-	// stdout pipe open, and cmd.Output() blocks in Wait() until that pipe
-	// closes — defeating the timeout above. WaitDelay forces the pipes shut and
-	// reaps shortly after the context fires so this call always returns.
-	cmd.WaitDelay = 2 * time.Second
-	data, err := cmd.Output()
+	// RunCollect, not cmd.Output(): a broken CLI (node/bun shim) can leave
+	// grandchildren that inherited and still hold our stdout pipe open, and
+	// cmd.Output() blocks in Wait() until that pipe closes — defeating the
+	// timeout above. RunCollect owns the pipes so Wait returns on the direct
+	// child's exit, then kills the group so the grandchild cannot linger as an
+	// orphan. The previous cmd.WaitDelay backstop bounded the call but left
+	// that orphan running and reported exec.ErrWaitDelay, i.e. it failed a
+	// probe whose output had in fact arrived — and a failed version probe skips
+	// runtime registration entirely. See run_collect.go and MUL-5467.
+	data, _, err := RunCollect(ctx, nil, execPath, "--version")
 	if err != nil {
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)
 	}

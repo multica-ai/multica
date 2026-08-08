@@ -7,11 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // openclawConfigFile is the per-task synthesized OpenClaw config the daemon
@@ -32,24 +33,21 @@ const openclawUserSnapshotFile = "openclaw-user-snapshot.json"
 // invocation during task setup. The CLI is fast (<200ms normal); 5s leaves
 // headroom for a cold node start.
 //
-// It is a deadline, not a guaranteed cap — see the gap below.
+// This deadline is enforceable as of MUL-5467, which is not a given: it was
+// documented here as a known gap for several releases. exec.CommandContext
+// kills only the direct child, and cmd.Output() blocks in Wait() until the
+// output pipes os/exec manages reach EOF — so an openclaw that leaves a
+// descendant holding stdout (its `openclaw-config` helper; on Windows, the
+// cmd.exe → node shim) parked the call for the descendant's lifetime.
+// Measured on linux/dash: a shim whose backgrounded child slept 6s took 6.01s
+// against a 150ms deadline. A cmd.WaitDelay backstop bounded the call but left
+// the descendant running, which is why it was reverted from #6084.
 //
-// Known gap (deliberately not fixed here): this deadline does not actually
-// bound the call when the CLI leaves a descendant holding stdout.
-// CommandContext kills only the direct child, and cmd.Output() blocks in
-// Wait() until the stdout pipe closes, so the call runs for the descendant's
-// lifetime. Measured on linux/dash: a shim whose backgrounded child slept 6s
-// took 6.01s against a 150ms deadline. An npm shim is that shape on Windows
-// (cmd.exe → node).
-//
-// A cmd.WaitDelay backstop bounds the call but leaves the descendant running
-// (measured: returns in 2.17s with the grandchild still in state S), trading a
-// hang for a process leak — and on Unix nothing reaps it, because
-// preparationProcessController.finish() is a no-op there. Closing this properly
-// needs process-tree ownership (Unix process group, Windows Job Object) so the
-// deadline can terminate the whole tree, which is its own change with its own
-// risk surface. Tracked in MUL-5467; this file intentionally keeps the existing
-// behaviour rather than shipping half of it.
+// execOpenclawCLI now goes through agent.RunCollectQuiet, which owns the pipes
+// (so Wait returns on the direct child's exit) and kills the child's process
+// group (so the descendant is reaped rather than orphaned). On Windows there is
+// no group to signal, so the call is bounded but the descendant can still
+// outlive it — closing that needs a Job Object and is not done here.
 const openclawCLITimeout = 5 * time.Second
 
 // OpenclawConfigPrep is the input to prepareOpenclawConfig. Only OpenclawBin
@@ -497,15 +495,7 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 func openclawParseActiveConfigPath(out string) (string, bool, error) {
 	// OpenClaw may print terminal UI borders (e.g., Doctor warnings) before
 	// the actual path. The path is always the last non-empty line.
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	path := ""
-	for i := len(lines) - 1; i >= 0; i-- {
-		trimmed := strings.TrimSpace(lines[i])
-		if trimmed != "" {
-			path = trimmed
-			break
-		}
-	}
+	path := openclawLastNonEmptyLine(out)
 	if path == "" {
 		return "", false, fmt.Errorf("`openclaw config file` returned empty output")
 	}
@@ -515,6 +505,59 @@ func openclawParseActiveConfigPath(out string) (string, bool, error) {
 		return "", false, err
 	}
 	return openclawStatConfigPath(path)
+}
+
+// openclawLastNonEmptyLine returns the last non-empty, trimmed line of out.
+// Shared by the parser and by openclawConfigPathComplete so the two cannot
+// disagree about which line carries the answer.
+func openclawLastNonEmptyLine(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if trimmed := strings.TrimSpace(lines[i]); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+// openclawOutputComplete returns the rule that decides whether the bytes
+// captured so far are a finished answer for this openclaw subcommand, for
+// agent.RunCollectQuiet's early return.
+//
+// A nil result means "no rule for this shape", which makes RunCollectQuiet wait
+// for the process to exit — the conservative behaviour. Adding a subcommand
+// without a rule therefore loses the hang tolerance rather than risking a
+// truncated answer.
+func openclawOutputComplete(args []string) agent.OutputComplete {
+	for _, a := range args {
+		if a == "--json" {
+			return agent.JSONOutputComplete
+		}
+	}
+	if len(args) >= 2 && args[0] == "config" && args[1] == "file" {
+		return openclawConfigPathComplete
+	}
+	return nil
+}
+
+// openclawConfigPathComplete reports whether out already carries a usable
+// `openclaw config file` answer, i.e. its last non-empty line looks like a path.
+//
+// Deliberately stricter than openclawParseActiveConfigPath, which resolves a
+// relative line through filepath.Abs and would therefore accept a Doctor warning
+// border as an answer. That leniency is fine once the command has finished, but
+// as a completeness rule it would let the early return fire on the banner
+// OpenClaw prints *before* the path (see MUL-3136) and return the banner as the
+// config path.
+func openclawConfigPathComplete(out []byte) bool {
+	line := openclawLastNonEmptyLine(string(out))
+	if line == "" {
+		return false
+	}
+	if line == "~" || strings.HasPrefix(line, "~/") {
+		return true
+	}
+	return filepath.IsAbs(line)
 }
 
 func openclawFallbackActiveConfigPath() (string, bool, error) {
@@ -798,14 +841,20 @@ var openclawExec = execOpenclawCLI
 // error, so errors.Is(err, context.DeadlineExceeded) holds for callers that
 // check cancellation the standard way. The process error is still printed for
 // diagnosis, just not as the wrapped cause.
+//
+// The invocation goes through agent.RunCollectQuiet rather than cmd.Output(),
+// which closes the gap openclawCLITimeout documents (MUL-5467) and tolerates an
+// openclaw that prints its answer and then declines to exit. Both are
+// openclaw-side misbehaviour we cannot fix from here, and neither should stop a
+// chat task from starting. See server/pkg/agent/run_collect.go.
+//
+// The completeness rule is per-subcommand (openclawOutputComplete): the runner
+// must never treat "some output arrived" as "the answer arrived", or a response
+// still streaming when the deadline hits would be reported as success.
 func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Env = os.Environ()
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	raw, err := cmd.Output()
+	raw, stderr, _, err := agent.RunCollectQuiet(ctx, os.Environ(), 0, openclawOutputComplete(args), bin, args...)
 	if err != nil {
-		stderrMsg := strings.TrimSpace(stderr.String())
+		stderrMsg := strings.TrimSpace(stderr)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			if stderrMsg != "" {
 				return "", fmt.Errorf("openclaw %s: %w (process: %v; stderr: %s)", strings.Join(args, " "), ctxErr, err, stderrMsg)

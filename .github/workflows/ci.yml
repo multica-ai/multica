@@ -366,6 +366,22 @@ jobs:
         # blocked forever. -v makes RUN/PASS evidence explicit in CI logs.
         run: go test ./pkg/agent -v -run '^TestCodexWindowsInheritedStdoutDescendantCleanupIsBounded$' -count=1 -timeout=5m
 
+      - name: Test bounded CLI output collection on Windows
+        working-directory: server
+        # MUL-5467: RunCollect / RunCollectQuiet replace cmd.Output() on the
+        # openclaw CLI paths. Windows is where the process-group half does not
+        # apply — configureProcessGroup is a no-op and a descendant holding the
+        # pipe cannot be reaped — so the local half has to be proven on a real
+        # cmd.exe host: a CLI that prints its answer and then refuses to exit
+        # still yields that answer, a response still streaming at the deadline is
+        # NOT reported as success, and no goroutine started by the collector
+        # outlives the call. The last one is the reason this cannot live in the
+        # ubuntu job: on Unix the group kill releases the pipe, so the
+        # close-the-read-ends path these tests exercise is never taken.
+        # -v so a skip (a -run pattern that stops matching) is visible in the log
+        # instead of passing as "ok".
+        run: go test ./pkg/agent -v -run '^TestWindowsRunCollect' -count=1 -timeout=5m
+
       - name: Test Windows OpenClaw npm shim interpreter resolution
         working-directory: server
         # #6061: every OpenClaw task failed execenv prep on a Windows host with
