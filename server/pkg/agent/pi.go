@@ -18,8 +18,20 @@ import (
 // piBackend implements Backend by spawning the Pi CLI in non-interactive
 // JSON mode (`pi -p --mode json --session <path>`) and parsing its event
 // stream on stdout.
+//
+// It also backs the "omp" (oh-my-pi) provider — omp is a separate CLI
+// (https://omp.sh) that is a drop-in fork of pi and speaks the same JSON
+// event protocol. The daemon probes a separate `omp` binary and registers
+// it under the "omp" key; piBackend uses defaultExecutable so the fallback
+// binary name matches the provider key (pi → "pi", omp → "omp") when
+// cfg.ExecutablePath is empty.
 type piBackend struct {
-	cfg Config
+	cfg               Config
+	defaultExecutable string
+	// providerLabel is the human-facing name used in log messages and error
+	// strings ("pi" or "omp"). Defaults to "pi" when empty so existing callers
+	// that construct piBackend directly (tests) keep their original output.
+	providerLabel string
 }
 
 var (
@@ -175,20 +187,27 @@ func isPiToolNameByte(b byte) bool {
 }
 
 func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+	label := b.providerLabel
+	if label == "" {
+		label = "pi"
+	}
 	// Pi trims piped stdin before building its initial message. Reject an empty
 	// task here so whitespace-only input cannot turn into a successful process
 	// with no turn, no output, and an empty session.
 	if strings.TrimSpace(prompt) == "" {
-		return nil, fmt.Errorf("pi prompt must not be empty")
+		return nil, fmt.Errorf("%s prompt must not be empty", label)
 	}
 
 	execName := b.cfg.ExecutablePath
+	if execName == "" {
+		execName = b.defaultExecutable
+	}
 	if execName == "" {
 		execName = "pi"
 	}
 	lookedUp, err := exec.LookPath(execName)
 	if err != nil {
-		return nil, fmt.Errorf("pi executable not found at %q: %w", execName, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", label, execName, err)
 	}
 
 	timeout := opts.Timeout
@@ -200,12 +219,12 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	if sessionPath == "" {
 		p, err := newPiSessionPath()
 		if err != nil {
-			return nil, fmt.Errorf("pi session path: %w", err)
+			return nil, fmt.Errorf("%s session path: %w", label, err)
 		}
 		sessionPath = p
 	}
 	if err := ensurePiSessionFile(sessionPath); err != nil {
-		return nil, fmt.Errorf("pi session file: %w", err)
+		return nil, fmt.Errorf("%s session file: %w", label, err)
 	}
 
 	runCtx, cancel := runContext(ctx, timeout)
@@ -225,7 +244,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("pi stdout pipe: %w", err)
+		return nil, fmt.Errorf("%s stdout pipe: %w", label, err)
 	}
 	// Pi reads piped stdin to EOF as its initial prompt in print/JSON mode.
 	// Keeping user-controlled text off argv prevents the npm PowerShell shim
@@ -235,19 +254,19 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("pi stdin pipe: %w", err)
+		return nil, fmt.Errorf("%s stdin pipe: %w", label, err)
 	}
 	var closeStdinOnce sync.Once
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[pi:stderr] ")
+	cmd.Stderr = newLogWriter(b.cfg.Logger, "["+label+":stderr] ")
 
 	if err := cmd.Start(); err != nil {
 		closeStdin()
 		cancel()
-		return nil, fmt.Errorf("start pi: %w", err)
+		return nil, fmt.Errorf("start %s: %w", label, err)
 	}
 
-	b.cfg.Logger.Info("pi started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info(label+" started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -371,7 +390,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					if evt.FinalError != "" {
 						finalError = evt.FinalError
 					} else {
-						finalError = "pi exhausted automatic retries"
+						finalError = label + " exhausted automatic retries"
 					}
 				}
 			}
@@ -390,19 +409,19 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 		if runCtx.Err() == context.DeadlineExceeded {
 			finalStatus = "timeout"
-			finalError = fmt.Sprintf("pi timed out after %s", timeout)
+			finalError = fmt.Sprintf("%s timed out after %s", label, timeout)
 		} else if runCtx.Err() == context.Canceled {
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
 		} else if waitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("pi exited with error: %v", waitErr)
+			finalError = fmt.Sprintf("%s exited with error: %v", label, waitErr)
 		} else if writeErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("pi prompt write failed: %v", writeErr)
+			finalError = fmt.Sprintf("%s prompt write failed: %v", label, writeErr)
 		}
 
-		b.cfg.Logger.Info("pi finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info(label+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		resCh <- Result{
 			Status:     finalStatus,

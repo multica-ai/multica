@@ -154,6 +154,9 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		providerRoot = filepath.Join(home, ".openclaw", "skills")
 	case "pi":
 		providerRoot = filepath.Join(home, ".pi", "agent", "skills")
+	case "omp":
+		// omp user skills dir mirrors agent.BuiltinRuntimes[omp].UserSkillsDir.
+		providerRoot = filepath.Join(home, ".omp", "agent", "skills")
 	case "cursor":
 		providerRoot = filepath.Join(home, ".cursor", "skills")
 	case "hermes":

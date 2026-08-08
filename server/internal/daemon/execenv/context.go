@@ -376,6 +376,13 @@ func skillsDirPath(workDir, provider string) string {
 	case "pi":
 		// Pi natively discovers skills from .pi/skills/ in the workdir.
 		return filepath.Join(workDir, ".pi", "skills")
+	case "omp":
+		// Oh-My-Pi (omp) is a built-in runtime identity on the pi protocol.
+		// Its skills dir (.omp/skills/) is declared in
+		// agent.BuiltinRuntimes[omp].SkillsDir; this case mirrors that
+		// declaration because execenv does not import the agent package
+		// (circular dep). Keep the two in sync when editing the descriptor.
+		return filepath.Join(workDir, ".omp", "skills")
 	case "cursor":
 		// Cursor natively discovers skills from .cursor/skills/ in the workdir.
 		return filepath.Join(workDir, ".cursor", "skills")
