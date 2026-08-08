@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS external_pull_request_issue_url_idx;

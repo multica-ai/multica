@@ -124,6 +124,8 @@ export const EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE: ListGitHubRepositoriesResp
 
 export const GitHubPullRequestSchema = z.object({
   id: z.string(),
+  // Keep provider lenient for future VCS adapters while defaulting older
+  // GitHub-only responses. "code" identifies Alibaba Code platform MRs.
   provider: z.string().optional().default("github"),
   workspace_id: z.string(),
   repo_owner: z.string(),
@@ -156,6 +158,10 @@ export const GitHubPullRequestSchema = z.object({
   additions: z.number().optional().default(0),
   deletions: z.number().optional().default(0),
   changed_files: z.number().optional().default(0),
+  ready_to_merge: z.boolean().nullable().optional(),
+  comment_count: z.number().optional().default(0),
+  unresolved_comment_count: z.number().optional().default(0),
+  sync_error: z.string().nullable().optional(),
 }).loose();
 
 export const IssuePullRequestsResponseSchema = z.object({

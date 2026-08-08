@@ -11,6 +11,80 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createExternalPullRequest = `-- name: CreateExternalPullRequest :one
+
+INSERT INTO external_pull_request (
+    workspace_id, issue_id, provider, repository_path, review_number,
+    title, html_url, created_by_type, created_by_id
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9
+)
+ON CONFLICT (workspace_id, issue_id, provider, html_url) DO UPDATE SET
+    repository_path = EXCLUDED.repository_path,
+    review_number = EXCLUDED.review_number,
+    title = EXCLUDED.title,
+    updated_at = now()
+RETURNING id, workspace_id, issue_id, provider, repository_path, review_number, title, html_url, created_by_type, created_by_id, created_at, updated_at, state, source_branch, target_branch, author_login, pr_created_at, pr_updated_at, ready_to_merge, comment_count, unresolved_comment_count, sync_requested_at, last_sync_at, sync_error
+`
+
+type CreateExternalPullRequestParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	IssueID        pgtype.UUID `json:"issue_id"`
+	Provider       string      `json:"provider"`
+	RepositoryPath string      `json:"repository_path"`
+	ReviewNumber   int32       `json:"review_number"`
+	Title          string      `json:"title"`
+	HtmlUrl        string      `json:"html_url"`
+	CreatedByType  string      `json:"created_by_type"`
+	CreatedByID    pgtype.UUID `json:"created_by_id"`
+}
+
+// =====================
+// External pull requests
+// =====================
+func (q *Queries) CreateExternalPullRequest(ctx context.Context, arg CreateExternalPullRequestParams) (ExternalPullRequest, error) {
+	row := q.db.QueryRow(ctx, createExternalPullRequest,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.Provider,
+		arg.RepositoryPath,
+		arg.ReviewNumber,
+		arg.Title,
+		arg.HtmlUrl,
+		arg.CreatedByType,
+		arg.CreatedByID,
+	)
+	var i ExternalPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.Provider,
+		&i.RepositoryPath,
+		&i.ReviewNumber,
+		&i.Title,
+		&i.HtmlUrl,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.State,
+		&i.SourceBranch,
+		&i.TargetBranch,
+		&i.AuthorLogin,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.ReadyToMerge,
+		&i.CommentCount,
+		&i.UnresolvedCommentCount,
+		&i.SyncRequestedAt,
+		&i.LastSyncAt,
+		&i.SyncError,
+	)
+	return i, err
+}
+
 const createGitHubInstallation = `-- name: CreateGitHubInstallation :one
 INSERT INTO github_installation (
     workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id
@@ -55,6 +129,50 @@ func (q *Queries) CreateGitHubInstallation(ctx context.Context, arg CreateGitHub
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteExternalPullRequest = `-- name: DeleteExternalPullRequest :one
+DELETE FROM external_pull_request
+WHERE id = $1 AND workspace_id = $2 AND issue_id = $3
+RETURNING id, workspace_id, issue_id, provider, repository_path, review_number, title, html_url, created_by_type, created_by_id, created_at, updated_at, state, source_branch, target_branch, author_login, pr_created_at, pr_updated_at, ready_to_merge, comment_count, unresolved_comment_count, sync_requested_at, last_sync_at, sync_error
+`
+
+type DeleteExternalPullRequestParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+func (q *Queries) DeleteExternalPullRequest(ctx context.Context, arg DeleteExternalPullRequestParams) (ExternalPullRequest, error) {
+	row := q.db.QueryRow(ctx, deleteExternalPullRequest, arg.ID, arg.WorkspaceID, arg.IssueID)
+	var i ExternalPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.Provider,
+		&i.RepositoryPath,
+		&i.ReviewNumber,
+		&i.Title,
+		&i.HtmlUrl,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.State,
+		&i.SourceBranch,
+		&i.TargetBranch,
+		&i.AuthorLogin,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.ReadyToMerge,
+		&i.CommentCount,
+		&i.UnresolvedCommentCount,
+		&i.SyncRequestedAt,
+		&i.LastSyncAt,
+		&i.SyncError,
 	)
 	return i, err
 }
@@ -113,6 +231,96 @@ DELETE FROM github_pending_installation WHERE installation_id = $1
 func (q *Queries) DeletePendingGitHubInstallation(ctx context.Context, installationID int64) error {
 	_, err := q.db.Exec(ctx, deletePendingGitHubInstallation, installationID)
 	return err
+}
+
+const failExternalPullRequestSync = `-- name: FailExternalPullRequestSync :one
+UPDATE external_pull_request
+SET sync_error = $2,
+    last_sync_at = now(),
+    updated_at = now()
+WHERE id = $1
+  AND workspace_id = $3
+RETURNING id, workspace_id, issue_id, provider, repository_path, review_number, title, html_url, created_by_type, created_by_id, created_at, updated_at, state, source_branch, target_branch, author_login, pr_created_at, pr_updated_at, ready_to_merge, comment_count, unresolved_comment_count, sync_requested_at, last_sync_at, sync_error
+`
+
+type FailExternalPullRequestSyncParams struct {
+	ID          pgtype.UUID `json:"id"`
+	SyncError   pgtype.Text `json:"sync_error"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) FailExternalPullRequestSync(ctx context.Context, arg FailExternalPullRequestSyncParams) (ExternalPullRequest, error) {
+	row := q.db.QueryRow(ctx, failExternalPullRequestSync, arg.ID, arg.SyncError, arg.WorkspaceID)
+	var i ExternalPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.Provider,
+		&i.RepositoryPath,
+		&i.ReviewNumber,
+		&i.Title,
+		&i.HtmlUrl,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.State,
+		&i.SourceBranch,
+		&i.TargetBranch,
+		&i.AuthorLogin,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.ReadyToMerge,
+		&i.CommentCount,
+		&i.UnresolvedCommentCount,
+		&i.SyncRequestedAt,
+		&i.LastSyncAt,
+		&i.SyncError,
+	)
+	return i, err
+}
+
+const getExternalPullRequestByID = `-- name: GetExternalPullRequestByID :one
+SELECT id, workspace_id, issue_id, provider, repository_path, review_number, title, html_url, created_by_type, created_by_id, created_at, updated_at, state, source_branch, target_branch, author_login, pr_created_at, pr_updated_at, ready_to_merge, comment_count, unresolved_comment_count, sync_requested_at, last_sync_at, sync_error FROM external_pull_request
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetExternalPullRequestByIDParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetExternalPullRequestByID(ctx context.Context, arg GetExternalPullRequestByIDParams) (ExternalPullRequest, error) {
+	row := q.db.QueryRow(ctx, getExternalPullRequestByID, arg.ID, arg.WorkspaceID)
+	var i ExternalPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.Provider,
+		&i.RepositoryPath,
+		&i.ReviewNumber,
+		&i.Title,
+		&i.HtmlUrl,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.State,
+		&i.SourceBranch,
+		&i.TargetBranch,
+		&i.AuthorLogin,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.ReadyToMerge,
+		&i.CommentCount,
+		&i.UnresolvedCommentCount,
+		&i.SyncRequestedAt,
+		&i.LastSyncAt,
+		&i.SyncError,
+	)
+	return i, err
 }
 
 const getGitHubInstallationByID = `-- name: GetGitHubInstallationByID :one
@@ -336,6 +544,62 @@ func (q *Queries) LinkIssueToPullRequest(ctx context.Context, arg LinkIssueToPul
 		arg.PreserveCloseIntent,
 	)
 	return err
+}
+
+const listExternalPullRequestsByIssue = `-- name: ListExternalPullRequestsByIssue :many
+SELECT id, workspace_id, issue_id, provider, repository_path, review_number, title, html_url, created_by_type, created_by_id, created_at, updated_at, state, source_branch, target_branch, author_login, pr_created_at, pr_updated_at, ready_to_merge, comment_count, unresolved_comment_count, sync_requested_at, last_sync_at, sync_error FROM external_pull_request
+WHERE workspace_id = $1 AND issue_id = $2
+ORDER BY created_at DESC
+`
+
+type ListExternalPullRequestsByIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+func (q *Queries) ListExternalPullRequestsByIssue(ctx context.Context, arg ListExternalPullRequestsByIssueParams) ([]ExternalPullRequest, error) {
+	rows, err := q.db.Query(ctx, listExternalPullRequestsByIssue, arg.WorkspaceID, arg.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExternalPullRequest{}
+	for rows.Next() {
+		var i ExternalPullRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.Provider,
+			&i.RepositoryPath,
+			&i.ReviewNumber,
+			&i.Title,
+			&i.HtmlUrl,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.State,
+			&i.SourceBranch,
+			&i.TargetBranch,
+			&i.AuthorLogin,
+			&i.PrCreatedAt,
+			&i.PrUpdatedAt,
+			&i.ReadyToMerge,
+			&i.CommentCount,
+			&i.UnresolvedCommentCount,
+			&i.SyncRequestedAt,
+			&i.LastSyncAt,
+			&i.SyncError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listGitHubInstallationsByInstallationID = `-- name: ListGitHubInstallationsByInstallationID :many
@@ -592,6 +856,53 @@ func (q *Queries) ListPullRequestsByIssue(ctx context.Context, issueID pgtype.UU
 	return items, nil
 }
 
+const markExternalPullRequestSyncRequested = `-- name: MarkExternalPullRequestSyncRequested :one
+UPDATE external_pull_request
+SET sync_requested_at = now(), sync_error = NULL
+WHERE id = $1
+  AND workspace_id = $2
+  AND (last_sync_at IS NULL OR last_sync_at < now() - interval '5 minutes')
+  AND (sync_requested_at IS NULL OR sync_requested_at < now() - interval '1 minute')
+RETURNING id, workspace_id, issue_id, provider, repository_path, review_number, title, html_url, created_by_type, created_by_id, created_at, updated_at, state, source_branch, target_branch, author_login, pr_created_at, pr_updated_at, ready_to_merge, comment_count, unresolved_comment_count, sync_requested_at, last_sync_at, sync_error
+`
+
+type MarkExternalPullRequestSyncRequestedParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) MarkExternalPullRequestSyncRequested(ctx context.Context, arg MarkExternalPullRequestSyncRequestedParams) (ExternalPullRequest, error) {
+	row := q.db.QueryRow(ctx, markExternalPullRequestSyncRequested, arg.ID, arg.WorkspaceID)
+	var i ExternalPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.Provider,
+		&i.RepositoryPath,
+		&i.ReviewNumber,
+		&i.Title,
+		&i.HtmlUrl,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.State,
+		&i.SourceBranch,
+		&i.TargetBranch,
+		&i.AuthorLogin,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.ReadyToMerge,
+		&i.CommentCount,
+		&i.UnresolvedCommentCount,
+		&i.SyncRequestedAt,
+		&i.LastSyncAt,
+		&i.SyncError,
+	)
+	return i, err
+}
+
 const unlinkIssueFromPullRequest = `-- name: UnlinkIssueFromPullRequest :exec
 DELETE FROM issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2
@@ -605,6 +916,86 @@ type UnlinkIssueFromPullRequestParams struct {
 func (q *Queries) UnlinkIssueFromPullRequest(ctx context.Context, arg UnlinkIssueFromPullRequestParams) error {
 	_, err := q.db.Exec(ctx, unlinkIssueFromPullRequest, arg.IssueID, arg.PullRequestID)
 	return err
+}
+
+const updateExternalPullRequestSync = `-- name: UpdateExternalPullRequestSync :one
+UPDATE external_pull_request
+SET title = $2,
+    state = $3,
+    source_branch = $7,
+    target_branch = $8,
+    author_login = $9,
+    pr_created_at = $10,
+    pr_updated_at = $11,
+    ready_to_merge = $12,
+    comment_count = $4,
+    unresolved_comment_count = $5,
+    last_sync_at = now(),
+    sync_error = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND workspace_id = $6
+RETURNING id, workspace_id, issue_id, provider, repository_path, review_number, title, html_url, created_by_type, created_by_id, created_at, updated_at, state, source_branch, target_branch, author_login, pr_created_at, pr_updated_at, ready_to_merge, comment_count, unresolved_comment_count, sync_requested_at, last_sync_at, sync_error
+`
+
+type UpdateExternalPullRequestSyncParams struct {
+	ID                     pgtype.UUID        `json:"id"`
+	Title                  string             `json:"title"`
+	State                  string             `json:"state"`
+	CommentCount           int32              `json:"comment_count"`
+	UnresolvedCommentCount int32              `json:"unresolved_comment_count"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	SourceBranch           pgtype.Text        `json:"source_branch"`
+	TargetBranch           pgtype.Text        `json:"target_branch"`
+	AuthorLogin            pgtype.Text        `json:"author_login"`
+	PrCreatedAt            pgtype.Timestamptz `json:"pr_created_at"`
+	PrUpdatedAt            pgtype.Timestamptz `json:"pr_updated_at"`
+	ReadyToMerge           pgtype.Bool        `json:"ready_to_merge"`
+}
+
+func (q *Queries) UpdateExternalPullRequestSync(ctx context.Context, arg UpdateExternalPullRequestSyncParams) (ExternalPullRequest, error) {
+	row := q.db.QueryRow(ctx, updateExternalPullRequestSync,
+		arg.ID,
+		arg.Title,
+		arg.State,
+		arg.CommentCount,
+		arg.UnresolvedCommentCount,
+		arg.WorkspaceID,
+		arg.SourceBranch,
+		arg.TargetBranch,
+		arg.AuthorLogin,
+		arg.PrCreatedAt,
+		arg.PrUpdatedAt,
+		arg.ReadyToMerge,
+	)
+	var i ExternalPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.Provider,
+		&i.RepositoryPath,
+		&i.ReviewNumber,
+		&i.Title,
+		&i.HtmlUrl,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.State,
+		&i.SourceBranch,
+		&i.TargetBranch,
+		&i.AuthorLogin,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.ReadyToMerge,
+		&i.CommentCount,
+		&i.UnresolvedCommentCount,
+		&i.SyncRequestedAt,
+		&i.LastSyncAt,
+		&i.SyncError,
+	)
+	return i, err
 }
 
 const updateGitHubInstallationAccountByInstallationID = `-- name: UpdateGitHubInstallationAccountByInstallationID :many

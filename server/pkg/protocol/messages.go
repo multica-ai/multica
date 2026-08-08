@@ -111,6 +111,32 @@ type PendingWorkPayload struct {
 	Kind      string `json:"kind,omitempty"`
 }
 
+// CodeMRSyncPayload is a best-effort server-to-daemon request. RepositoryPath
+// and ReviewNumber are passed to a1 as separate argv values, never through a
+// shell. ExternalPullRequestID is the server-side row the daemon reports back.
+type CodeMRSyncPayload struct {
+	RuntimeID             string `json:"runtime_id"`
+	ExternalPullRequestID string `json:"external_pull_request_id"`
+	RepositoryPath        string `json:"repository_path"`
+	ReviewNumber          int32  `json:"review_number"`
+}
+
+// CodeMRSnapshotResult is the normalized subset of a1 output Multica stores.
+// Comment bodies deliberately stay on Code; only aggregate counts are cached.
+type CodeMRSnapshotResult struct {
+	Title                  string `json:"title"`
+	State                  string `json:"state"`
+	SourceBranch           string `json:"source_branch,omitempty"`
+	TargetBranch           string `json:"target_branch,omitempty"`
+	AuthorLogin            string `json:"author_login,omitempty"`
+	CreatedAt              string `json:"created_at,omitempty"`
+	UpdatedAt              string `json:"updated_at,omitempty"`
+	ReadyToMerge           *bool  `json:"ready_to_merge,omitempty"`
+	CommentCount           int32  `json:"comment_count"`
+	UnresolvedCommentCount int32  `json:"unresolved_comment_count"`
+	Error                  string `json:"error,omitempty"`
+}
+
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
 	TaskID  string `json:"task_id"`

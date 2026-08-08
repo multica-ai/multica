@@ -336,6 +336,11 @@ func (h *Hub) NotifyPendingWork(runtimeID, kind string) {
 	h.notifyPendingWork(runtimeID, kind, "")
 }
 
+// NotifyCodeMRSync asks the daemon that owns runtimeID to query one Code MR.
+func (h *Hub) NotifyCodeMRSync(payload protocol.CodeMRSyncPayload) {
+	h.notifyCodeMRSync(payload, "")
+}
+
 func (h *Hub) notifyTaskAvailable(runtimeID, taskID, eventID string) {
 	if h == nil || runtimeID == "" {
 		return
@@ -383,6 +388,22 @@ func (h *Hub) notifyPendingWork(runtimeID, kind, eventID string) {
 		return
 	}
 	delivered, deduped := h.notifyFrame(runtimeID, data, eventID)
+	if delivered {
+		M.WakeupDeliveredHit.Add(1)
+	} else if !deduped {
+		M.WakeupDeliveredMiss.Add(1)
+	}
+}
+
+func (h *Hub) notifyCodeMRSync(payload protocol.CodeMRSyncPayload, eventID string) {
+	if h == nil || payload.RuntimeID == "" || payload.ExternalPullRequestID == "" {
+		return
+	}
+	data, err := codeMRSyncFrame(payload)
+	if err != nil {
+		return
+	}
+	delivered, deduped := h.notifyFrame(payload.RuntimeID, data, eventID)
 	if delivered {
 		M.WakeupDeliveredHit.Add(1)
 	} else if !deduped {
@@ -439,6 +460,19 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 		var payload protocol.PendingWorkPayload
 		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
 			slog.Debug("daemon websocket relay: invalid pending_work payload", "error", err, "scope_id", scopeID, "event_id", eventID)
+			M.WakeupDeliveredMiss.Add(1)
+			return
+		}
+		delivered, deduped := h.notifyFrame(payload.RuntimeID, frame, eventID)
+		if delivered {
+			M.WakeupDeliveredHit.Add(1)
+		} else if !deduped {
+			M.WakeupDeliveredMiss.Add(1)
+		}
+	case protocol.EventDaemonCodeMRSync:
+		var payload protocol.CodeMRSyncPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" || payload.ExternalPullRequestID == "" {
+			slog.Debug("daemon websocket relay: invalid code_mr_sync payload", "error", err, "scope_id", scopeID, "event_id", eventID)
 			M.WakeupDeliveredMiss.Add(1)
 			return
 		}
@@ -572,6 +606,13 @@ func pendingWorkFrame(runtimeID, kind string) ([]byte, error) {
 			RuntimeID: runtimeID,
 			Kind:      kind,
 		}),
+	})
+}
+
+func codeMRSyncFrame(payload protocol.CodeMRSyncPayload) ([]byte, error) {
+	return json.Marshal(protocol.Message{
+		Type:    protocol.EventDaemonCodeMRSync,
+		Payload: mustMarshalRaw(payload),
 	})
 }
 

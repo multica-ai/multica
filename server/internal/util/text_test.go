@@ -47,3 +47,30 @@ func TestUnescapeBackslashEscapes(t *testing.T) {
 		})
 	}
 }
+
+func TestTruncateUTF8(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       string
+		maxBytes int
+		want     string
+	}{
+		{"short enough", "hello", 10, "hello"},
+		{"exact fit", "hello", 5, "hello"},
+		{"ascii cut", "hello world", 5, "hello"},
+		{"cut at rune boundary", "中文测试", 6, "中文"},
+		{"cut inside rune backs off", "中文测试", 7, "中文"},
+		{"cut inside rune at start", "中", 1, ""},
+		{"emoji cut inside", "a😀b", 3, "a"},
+		{"zero budget", "abc", 0, ""},
+		{"empty input", "", 5, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TruncateUTF8(tt.in, tt.maxBytes)
+			if got != tt.want {
+				t.Fatalf("TruncateUTF8(%q, %d) = %q, want %q", tt.in, tt.maxBytes, got, tt.want)
+			}
+		})
+	}
+}

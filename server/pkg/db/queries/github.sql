@@ -280,3 +280,73 @@ ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
 -- name: UnlinkIssueFromPullRequest :exec
 DELETE FROM issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2;
+
+-- =====================
+-- External pull requests
+-- =====================
+
+-- name: CreateExternalPullRequest :one
+INSERT INTO external_pull_request (
+    workspace_id, issue_id, provider, repository_path, review_number,
+    title, html_url, created_by_type, created_by_id
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, sqlc.narg('created_by_id')
+)
+ON CONFLICT (workspace_id, issue_id, provider, html_url) DO UPDATE SET
+    repository_path = EXCLUDED.repository_path,
+    review_number = EXCLUDED.review_number,
+    title = EXCLUDED.title,
+    updated_at = now()
+RETURNING *;
+
+-- name: ListExternalPullRequestsByIssue :many
+SELECT * FROM external_pull_request
+WHERE workspace_id = $1 AND issue_id = $2
+ORDER BY created_at DESC;
+
+-- name: GetExternalPullRequestByID :one
+SELECT * FROM external_pull_request
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: MarkExternalPullRequestSyncRequested :one
+UPDATE external_pull_request
+SET sync_requested_at = now(), sync_error = NULL
+WHERE id = $1
+  AND workspace_id = $2
+  AND (last_sync_at IS NULL OR last_sync_at < now() - interval '5 minutes')
+  AND (sync_requested_at IS NULL OR sync_requested_at < now() - interval '1 minute')
+RETURNING *;
+
+-- name: UpdateExternalPullRequestSync :one
+UPDATE external_pull_request
+SET title = $2,
+    state = $3,
+    source_branch = sqlc.narg('source_branch'),
+    target_branch = sqlc.narg('target_branch'),
+    author_login = sqlc.narg('author_login'),
+    pr_created_at = sqlc.narg('pr_created_at'),
+    pr_updated_at = sqlc.narg('pr_updated_at'),
+    ready_to_merge = sqlc.narg('ready_to_merge'),
+    comment_count = $4,
+    unresolved_comment_count = $5,
+    last_sync_at = now(),
+    sync_error = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND workspace_id = $6
+RETURNING *;
+
+-- name: FailExternalPullRequestSync :one
+UPDATE external_pull_request
+SET sync_error = $2,
+    last_sync_at = now(),
+    updated_at = now()
+WHERE id = $1
+  AND workspace_id = $3
+RETURNING *;
+
+-- name: DeleteExternalPullRequest :one
+DELETE FROM external_pull_request
+WHERE id = $1 AND workspace_id = $2 AND issue_id = $3
+RETURNING *;

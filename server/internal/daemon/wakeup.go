@@ -426,6 +426,13 @@ func (d *Daemon) readTaskWakeupMessagesForConnection(conn *websocket.Conn, taskW
 			// Own goroutine: the hint triggers an HTTP heartbeat plus the work it
 			// claims, and the read pump must stay free for the next frame.
 			go d.handlePendingWorkHint(payload.RuntimeID, payload.Kind)
+		case protocol.EventDaemonCodeMRSync:
+			var payload protocol.CodeMRSyncPayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				d.logger.Debug("code MR sync websocket invalid payload", "error", err)
+				continue
+			}
+			go d.handleCodeMRSync(payload)
 		case protocol.EventDaemonHeartbeatAck:
 			var ack HeartbeatResponse
 			if err := json.Unmarshal(msg.Payload, &ack); err != nil {

@@ -147,6 +147,9 @@ const (
 	// itself: the daemon still pulls the request through the normal heartbeat
 	// claim, so a lost or duplicated hint is harmless.
 	EventDaemonPendingWork = "daemon:pending_work"
+	// EventDaemonCodeMRSync asks the daemon that owns RuntimeID to query one
+	// Alibaba Code MR through the authenticated a1 CLI and report a snapshot.
+	EventDaemonCodeMRSync = "daemon:code_mr_sync"
 	// Generic daemon→server request/response over the WebSocket control
 	// connection (MUL-4257). The daemon sends EventDaemonRPCRequest with a
 	// correlation id + method + body; the server replies EventDaemonRPCResponse

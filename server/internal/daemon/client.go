@@ -497,6 +497,11 @@ func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, re
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/import/%s/result", runtimeID, requestID), result, nil)
 }
 
+// ReportCodeMRSnapshot sends an a1-backed Alibaba Code MR snapshot to the server.
+func (c *Client) ReportCodeMRSnapshot(ctx context.Context, runtimeID, externalPullRequestID string, result protocol.CodeMRSnapshotResult) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/external-pull-requests/%s/result", runtimeID, externalPullRequestID), result, nil)
+}
+
 // WorkspaceInfo holds minimal workspace metadata returned by the API.
 type WorkspaceInfo struct {
 	ID   string `json:"id"`

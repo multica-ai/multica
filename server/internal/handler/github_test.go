@@ -77,6 +77,163 @@ func TestExtractIdentifiers(t *testing.T) {
 	}
 }
 
+func TestParseCodeReviewURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		wantRepo   string
+		wantNumber int32
+		wantURL    string
+		wantErr    bool
+	}{
+		{
+			name:       "nested repository path",
+			raw:        "https://code.alibaba-inc.com/base-biz/agentworks-python/codereview/28981841?tab=changes#discussion",
+			wantRepo:   "base-biz/agentworks-python",
+			wantNumber: 28981841,
+			wantURL:    "https://code.alibaba-inc.com/base-biz/agentworks-python/codereview/28981841",
+		},
+		{
+			name:       "deeper group",
+			raw:        " https://code.alibaba-inc.com/abm-gitops/dataworks-public/codereview/28658198 ",
+			wantRepo:   "abm-gitops/dataworks-public",
+			wantNumber: 28658198,
+			wantURL:    "https://code.alibaba-inc.com/abm-gitops/dataworks-public/codereview/28658198",
+		},
+		{name: "reject github", raw: "https://github.com/acme/repo/pull/1", wantErr: true},
+		{name: "reject non review path", raw: "https://code.alibaba-inc.com/acme/repo/tree/main", wantErr: true},
+		{name: "reject non numeric id", raw: "https://code.alibaba-inc.com/acme/repo/codereview/latest", wantErr: true},
+		{name: "reject non https", raw: "http://code.alibaba-inc.com/acme/repo/codereview/1", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseCodeReviewURL(tc.raw)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseCodeReviewURL(%q) unexpectedly succeeded: %+v", tc.raw, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseCodeReviewURL(%q): %v", tc.raw, err)
+			}
+			if got.RepositoryPath != tc.wantRepo || got.ReviewNumber != tc.wantNumber || got.URL != tc.wantURL {
+				t.Fatalf("parseCodeReviewURL(%q) = %+v", tc.raw, got)
+			}
+		})
+	}
+}
+
+func TestCodePullRequestAutoLinkFromIssueContent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	w := httptest.NewRecorder()
+	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "External Code MR test",
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&issue); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM external_pull_request WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issue.ID)
+	})
+
+	const reviewURL = "https://code.alibaba-inc.com/base-biz/agentworks-python/codereview/28981841?tab=changes"
+	w = httptest.NewRecorder()
+	req := withURLParam(newRequest("POST", "/api/issues/"+issue.ID+"/comments", map[string]any{
+		"content": "MR created: " + reviewURL,
+	}), "id", issue.ID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: %d %s", w.Code, w.Body.String())
+	}
+
+	var linkedCount int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM external_pull_request WHERE issue_id = $1`, issue.ID).Scan(&linkedCount); err != nil {
+		t.Fatalf("count auto-linked pull requests: %v", err)
+	}
+	if linkedCount != 1 {
+		t.Fatalf("auto-linked pull requests = %d, want 1", linkedCount)
+	}
+
+	const metadataURL = "https://code.alibaba-inc.com/abm-gitops/dataworks-public/codereview/28658198"
+	w = httptest.NewRecorder()
+	req = withURLParams(newRequest("PUT", "/api/issues/"+issue.ID+"/metadata/pr_url", map[string]any{
+		"value": metadataURL,
+	}), "id", issue.ID, "key", "pr_url")
+	testHandler.SetIssueMetadataKey(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SetIssueMetadataKey: %d %s", w.Code, w.Body.String())
+	}
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM external_pull_request WHERE issue_id = $1`, issue.ID).Scan(&linkedCount); err != nil {
+		t.Fatalf("count metadata-linked pull requests: %v", err)
+	}
+	if linkedCount != 2 {
+		t.Fatalf("pull requests after pr_url metadata = %d, want 2", linkedCount)
+	}
+
+	// Historical comments written before this feature are discovered when the
+	// PR section is read. Repeated reads stay idempotent.
+	const historicalURL = "https://code.alibaba-inc.com/dataworks/legacy-repo/codereview/29000001"
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
+		VALUES ($1, $2, 'member', $3, $4)
+	`, issue.ID, testWorkspaceID, testUserID, "Historical MR: "+historicalURL); err != nil {
+		t.Fatalf("insert historical comment: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = withURLParam(newRequest("GET", "/api/issues/"+issue.ID+"/pull-requests", nil), "id", issue.ID)
+	testHandler.ListPullRequestsForIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListPullRequestsForIssue: %d %s", w.Code, w.Body.String())
+	}
+	var listed struct {
+		PullRequests []GitHubPullRequestResponse `json:"pull_requests"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(listed.PullRequests) != 3 {
+		t.Fatalf("listed pull requests = %+v", listed.PullRequests)
+	}
+
+	w = httptest.NewRecorder()
+	req = withURLParam(newRequest("GET", "/api/issues/"+issue.ID+"/pull-requests", nil), "id", issue.ID)
+	testHandler.ListPullRequestsForIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("second ListPullRequestsForIssue: %d %s", w.Code, w.Body.String())
+	}
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM external_pull_request WHERE issue_id = $1`, issue.ID).Scan(&linkedCount); err != nil {
+		t.Fatalf("count idempotent pull requests: %v", err)
+	}
+	if linkedCount != 3 {
+		t.Fatalf("pull requests after repeated discovery = %d, want 3", linkedCount)
+	}
+
+	// Deleting the issue must clean up auto-linked external MR rows explicitly.
+	w = httptest.NewRecorder()
+	req = withURLParam(newRequest("DELETE", "/api/issues/"+issue.ID, nil), "id", issue.ID)
+	testHandler.DeleteIssue(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteIssue: %d %s", w.Code, w.Body.String())
+	}
+	var externalCount int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM external_pull_request WHERE issue_id = $1`, issue.ID).Scan(&externalCount); err != nil {
+		t.Fatalf("count external pull requests after issue delete: %v", err)
+	}
+	if externalCount != 0 {
+		t.Fatalf("external pull requests after issue delete = %d, want 0", externalCount)
+	}
+}
+
 func TestExtractClosingIdentifiers(t *testing.T) {
 	cases := []struct {
 		name string

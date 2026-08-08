@@ -41,6 +41,7 @@ const STATE_ICON: Record<
   draft: { icon: GitPullRequestDraft, className: "text-muted-foreground" },
   merged: { icon: GitMerge, className: "text-violet-600 dark:text-violet-400" },
   closed: { icon: GitPullRequestClosed, className: "text-rose-600 dark:text-rose-400" },
+  unknown: { icon: GitPullRequest, className: "text-muted-foreground" },
 };
 
 export function PullRequestList({ issueId }: { issueId: string }) {
@@ -117,7 +118,12 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
           {pr.title}
         </p>
         <p className="text-micro text-muted-foreground truncate">
-          {pr.repo_owner}/{pr.repo_name}#{pr.number} · {stateLabel}
+          {pr.repo_owner}/{pr.repo_name}
+          {pr.provider === "code" || pr.provider === "gitlab" ? "!" : "#"}
+          {pr.number} ·{" "}
+          {pr.provider === "code" && pr.snapshot_available !== true
+            ? t(($) => $.detail.pull_request_provider_code)
+            : stateLabel}
           {pr.author_login ? ` · @${pr.author_login}` : null}
         </p>
         <PullRequestRowDetails pr={pr} />
@@ -129,6 +135,45 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
 function PullRequestRowDetails({ pr }: { pr: GitHubPullRequest }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
+
+  if (pr.provider === "code") {
+    if (pr.snapshot_available === true) {
+      const commentCount = pr.comment_count ?? 0;
+      const unresolvedCount = pr.unresolved_comment_count ?? 0;
+      const isTerminal = pr.state === "merged" || pr.state === "closed";
+      let mergeStatus: PullRequestMergeStatus = { kind: "none" };
+      if (pr.ready_to_merge === true) {
+        mergeStatus = { kind: "ready" };
+      } else if (pr.ready_to_merge === false) {
+        mergeStatus = { kind: "blocked" };
+      }
+      const mergeBadge = isTerminal ? null : getMergeBadge(mergeStatus, t);
+      if (commentCount === 0 && !pr.sync_error && !mergeBadge) {
+        return null;
+      }
+      return (
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-micro text-muted-foreground">
+          {commentCount > 0 ? (
+            <span>
+              {t(($) => $.detail.pull_request_comments_summary, {
+                count: commentCount,
+                unresolved: unresolvedCount,
+              })}
+            </span>
+          ) : null}
+          {pr.sync_error ? <span>{t(($) => $.detail.pull_request_external_sync_failed)}</span> : null}
+          {mergeBadge ? <PullRequestBadge badge={mergeBadge} /> : null}
+        </div>
+      );
+    }
+    return (
+      <p className="mt-1 text-micro text-muted-foreground">
+        {pr.sync_error
+          ? t(($) => $.detail.pull_request_external_sync_failed)
+          : t(($) => $.detail.pull_request_external_status_unknown)}
+      </p>
+    );
+  }
 
   const showStats = shouldShowPullRequestStats({
     additions: pr.additions,
@@ -323,5 +368,5 @@ function getStateLabel(state: GitHubPullRequestState, t: IssuesT): string {
         ? t(($) => $.detail.pull_request_state_merged)
         : state === "closed"
           ? t(($) => $.detail.pull_request_state_closed)
-          : state;
+          : t(($) => $.detail.pull_request_state_unknown);
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // RelayNotifier sends daemon wakeup hints to the local daemon hub and, when
@@ -124,6 +125,32 @@ func (n *RelayNotifier) NotifyPendingWork(runtimeID, kind string) {
 	if err := n.relay.PublishWithID(realtime.ScopeDaemonRuntime, runtimeID, "", frame, eventID); err != nil {
 		M.WakeupPublishErrors.Add(1)
 		slog.Warn("daemon websocket pending work publish failed", "error", err, "runtime_id", runtimeID, "kind", kind)
+		return
+	}
+	M.WakeupPublishedTotal.Add(1)
+}
+
+// NotifyCodeMRSync fans an a1 MR query request to the node holding the target
+// daemon connection. Delivery is best effort; page visits retry stale rows.
+func (n *RelayNotifier) NotifyCodeMRSync(payload protocol.CodeMRSyncPayload) {
+	if payload.RuntimeID == "" || payload.ExternalPullRequestID == "" {
+		return
+	}
+	eventID := ulid.Make().String()
+	if n.local != nil {
+		n.local.notifyCodeMRSync(payload, eventID)
+	}
+	if n.relay == nil {
+		return
+	}
+	frame, err := codeMRSyncFrame(payload)
+	if err != nil {
+		M.WakeupPublishErrors.Add(1)
+		return
+	}
+	if err := n.relay.PublishWithID(realtime.ScopeDaemonRuntime, payload.RuntimeID, "", frame, eventID); err != nil {
+		M.WakeupPublishErrors.Add(1)
+		slog.Warn("daemon websocket code MR sync publish failed", "error", err, "runtime_id", payload.RuntimeID, "external_pull_request_id", payload.ExternalPullRequestID)
 		return
 	}
 	M.WakeupPublishedTotal.Add(1)
