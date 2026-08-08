@@ -96,6 +96,13 @@ func breakLinkAdjacency(s string) string {
 //  3. What follows the colon is plausibly a link *destination* — see
 //     looksLikeLinkDestination.
 //
+// Conditions 1 and 3 are halves of one question and are kept honest by one
+// answer: containerPrefixBefore reports the block containers holding the
+// label, and looksLikeLinkDestination is handed that same containerPrefix so
+// it can step back into them when the destination sits on the next line.
+// Teaching one half about a container and not the other is what leaves a
+// definition intact — see the comment on containerPrefix.
+//
 // Condition 3 is the whole design. Breaking every "]:" would be simpler and is
 // the wrong trade: "[Bug]: 登录失败" is a form real people write, and it comes
 // back from here byte-identical because 登录失败 names no host — as a
@@ -106,10 +113,11 @@ func breakLinkAdjacency(s string) string {
 //
 // # What it deliberately lets through
 //
-//   - Relative destinations. "[文件]: report.pdf", "[页面]: /inbox" and
-//     "[Bug]: 登录失败" all still define a reference, and the label can still
-//     come out as a link — but pointing at the client's own base, not at an
-//     attacker. Paid knowingly to keep the human form intact.
+//   - Relative destinations. "[文件]: report.pdf", "[页面]: /inbox",
+//     "[Owner]: R&D", "[Regex]: \d+" and "[Bug]: 登录失败" all still define a
+//     reference, and the label can still come out as a link — but pointing at
+//     the client's own base, not at an attacker. Paid knowingly to keep the
+//     human form intact.
 //   - "[foo]:(https://evil.example)". CommonMark keeps the parens inside the
 //     href, so it is not a URL anyone navigates to. A leading "(" is skipped
 //     anyway before the destination is examined, in case this renderer is
@@ -117,10 +125,12 @@ func breakLinkAdjacency(s string) string {
 //
 // # Where it over-fires, and why that is the safe side
 //
-// It does not model block context, so it fires on a "[x]: https://…" line that
-// CommonMark would fold into the preceding paragraph or read as indented code,
-// and it does not check the spec's "nothing may follow the destination" rule,
-// so "[x]: https://evil.example 请点击" is broken too though CommonMark would
+// It models block containers only as a count of ">" markers, so it fires on a
+// "[x]: https://…" line that CommonMark would fold into the preceding
+// paragraph or read as indented code, and on a next-line destination whose
+// blockquote nesting is shallower than the definition's. It does not check the
+// spec's "nothing may follow the destination" rule either, so
+// "[x]: https://evil.example 请点击" is broken too though CommonMark would
 // leave it as prose. Every one of those costs a single space on a line that
 // already carries a URL. Under-firing costs a working link under the bot's
 // name, so the approximation runs this way round on purpose — the more so
@@ -149,7 +159,11 @@ func breakLinkReferenceDefinitions(s string) string {
 	var out strings.Builder
 	prev := 0
 	for i := 0; i < len(s); i++ {
-		if s[i] != '[' || !blockScaffoldOnlyBefore(s, i) {
+		if s[i] != '[' {
+			continue
+		}
+		container, ok := containerPrefixBefore(s, i)
+		if !ok {
 			continue
 		}
 		end, ok := linkLabelEnd(s, i)
@@ -162,7 +176,7 @@ func breakLinkReferenceDefinitions(s string) string {
 		if end+1 >= len(s) || s[end+1] != ':' {
 			continue
 		}
-		if !looksLikeLinkDestination(s[end+2:]) {
+		if !looksLikeLinkDestination(s[end+2:], container) {
 			continue
 		}
 		out.WriteString(s[prev : end+1])
@@ -176,26 +190,52 @@ func breakLinkReferenceDefinitions(s string) string {
 	return out.String()
 }
 
-// blockScaffoldOnlyBefore reports whether everything between the start of the
-// line holding s[i] and i is block scaffolding: indentation, ">" markers and
-// list bullets. Anything else — a word, a "**" — means the "[" is inside a
-// paragraph, where no definition can begin.
+// containerPrefix is what a line's block scaffolding opens: the blockquote
+// nesting the line sits inside. It is the one notion of a container the rule
+// has, and both halves of the rule work from it — the half that decides what
+// may precede the label produces one, the half that scans past the colon
+// replays it. Neither can be taught about a container the other has not,
+// which is the whole reason it exists as a value rather than as a bool.
+//
+// Only ">" markers are counted. Indentation and list bullets are scaffolding
+// too, and they need no replay: CommonMark continues a list item with plain
+// indentation, which the destination scan already steps over as whitespace.
+// A blockquote is different — it repeats its marker on every line it holds,
+// so a destination on the next line arrives as "> https://…", and a scan that
+// does not expect the marker reads it as the destination.
+type containerPrefix struct {
+	quotes int
+}
+
+// containerPrefixBefore reports the containers holding the "[" at s[i], and
+// whether everything between the start of its line and i is block scaffolding
+// at all: indentation, ">" markers and list bullets. Anything else — a word, a
+// "**" — means the "[" is inside a paragraph, where no definition can begin.
 //
 // It walks back only as far as the first byte that cannot be scaffolding, so a
 // "[" in the middle of prose is settled by reading one byte rather than the
 // whole line, and a body full of them stays linear.
-func blockScaffoldOnlyBefore(s string, i int) bool {
+func containerPrefixBefore(s string, i int) (containerPrefix, bool) {
 	start := i
 	for start > 0 && isBlockScaffoldByte(s[start-1]) {
 		start--
 	}
 	if start > 0 && s[start-1] != '\n' {
-		return false
+		return containerPrefix{}, false
 	}
-	p := s[start:i]
+	return parseContainerPrefix(s[start:i])
+}
+
+// parseContainerPrefix reads p as a whole run of block scaffolding and reports
+// the containers it opens. ok is false when p holds anything that is not
+// scaffolding.
+func parseContainerPrefix(p string) (prefix containerPrefix, ok bool) {
 	for len(p) > 0 {
 		switch {
-		case p[0] == ' ' || p[0] == '\t' || p[0] == '>':
+		case p[0] == ' ' || p[0] == '\t':
+			p = p[1:]
+		case p[0] == '>':
+			prefix.quotes++
 			p = p[1:]
 		case (p[0] == '-' || p[0] == '+' || p[0] == '*') && len(p) > 1 && (p[1] == ' ' || p[1] == '\t'):
 			p = p[2:]
@@ -207,16 +247,39 @@ func blockScaffoldOnlyBefore(s string, i int) bool {
 				n++
 			}
 			if n == 0 || n+1 >= len(p) || (p[n] != '.' && p[n] != ')') || (p[n+1] != ' ' && p[n+1] != '\t') {
-				return false
+				return containerPrefix{}, false
 			}
 			p = p[n+2:]
 		}
 	}
-	return true
+	return prefix, true
+}
+
+// skipContinuationPrefix steps over the markers of the containers in prefix at
+// the start of a continuation line, and returns where the line's content
+// begins. It is the replay half of containerPrefixBefore.
+//
+// It consumes at most prefix.quotes markers and never more. Fewer is allowed
+// because a blockquote takes lazy continuation lines: "> [x]:" followed by a
+// bare "https://…" with no marker still defines the reference. More is not a
+// continuation of this definition at all — a line deeper than the block it
+// continues opens a new one — so the scan stops and lets the leftover ">"
+// speak for itself, which is to say it is not a destination.
+func skipContinuationPrefix(s string, i int, prefix containerPrefix) int {
+	i = skipSpacesTabs(s, i)
+	for n := 0; n < prefix.quotes; n++ {
+		if i >= len(s) || s[i] != '>' {
+			return i
+		}
+		i = skipSpacesTabs(s, i+1)
+	}
+	return i
 }
 
 // isBlockScaffoldByte is the character set a scaffolding prefix can draw on —
-// a superset of the markers the loop above then parses exactly.
+// a superset of the markers parseContainerPrefix then parses exactly. It only
+// decides how far back to walk; whether the run really is scaffolding is
+// parseContainerPrefix's answer.
 func isBlockScaffoldByte(c byte) bool {
 	switch {
 	case c == ' ', c == '\t', c == '>':
@@ -272,7 +335,13 @@ func linkLabelEnd(s string, open int) (int, bool) {
 // A destination qualifies when it carries a scheme ("https:", and equally
 // "javascript:" or "data:"), or is scheme-relative ("//host/path"), or uses
 // the escape machinery that spells either of those after decoding.
-func looksLikeLinkDestination(rest string) bool {
+//
+// prefix is the containers the definition's own line sits inside, and it is a
+// parameter rather than something rediscovered here for the reason given on
+// containerPrefix: when the destination is on the next line it arrives behind
+// the same markers, and a scan that walks past the colon without them reads
+// the marker as the destination and clears a definition that resolves.
+func looksLikeLinkDestination(rest string, prefix containerPrefix) bool {
 	i := skipSpacesTabs(rest, 0)
 	// CommonMark allows up to one line ending between the colon and the
 	// destination, so the definition can span two lines. A second line
@@ -283,7 +352,7 @@ func looksLikeLinkDestination(rest string) bool {
 		i++
 	}
 	if i < len(rest) && rest[i] == '\n' {
-		i = skipSpacesTabs(rest, i+1)
+		i = skipContinuationPrefix(rest, i+1, prefix)
 	}
 	if i < len(rest) && (rest[i] == '<' || rest[i] == '(') {
 		// "<…>" is the spec's bracketed destination form, and it may hold
@@ -304,9 +373,60 @@ func looksLikeLinkDestination(rest string) bool {
 	// destination, and all of "https\://evil.example", "\/\/evil.example"
 	// and "&#x68;ttps://evil.example" resolve to a working off-host URL —
 	// checked against a CommonMark parser, all three. Rather than decode
-	// them, take any use of that machinery as a destination: a title that
-	// reads like prose does not carry a backslash or an "&" here.
-	return strings.ContainsAny(dest, `\&`)
+	// them, take any use of that machinery as a destination.
+	//
+	// The machinery, not the characters. A lone "\" or "&" spells nothing:
+	// "R&D", "\d+", "docs\setup" and "foo&bar" are all relative destinations,
+	// which this function promises to leave whole, and they carry no escape a
+	// parser would act on.
+	return hasBackslashEscape(dest) || hasCharacterReference(dest)
+}
+
+// hasBackslashEscape reports whether s uses a CommonMark backslash escape — a
+// "\" before ASCII punctuation, which is the only place the backslash means
+// anything. In "\d+" and "docs\setup" it stays literal text.
+func hasBackslashEscape(s string) bool {
+	for i := 0; i+1 < len(s); i++ {
+		if s[i] == '\\' && isASCIIPunct(s[i+1]) {
+			return true
+		}
+	}
+	return false
+}
+
+// isASCIIPunct is CommonMark's ASCII punctuation set — every ASCII character
+// that is neither a letter, a digit, nor a space.
+func isASCIIPunct(c byte) bool {
+	switch {
+	case c >= '!' && c <= '/', c >= ':' && c <= '@', c >= '[' && c <= '`', c >= '{' && c <= '~':
+		return true
+	}
+	return false
+}
+
+// hasCharacterReference reports whether s holds a character reference — "&",
+// a name or a "#"-led numeric body, then ";". "R&D" and "foo&bar" have no ";"
+// to close one, so nothing in them decodes.
+//
+// It does not check the name against HTML5's table: an unknown name decodes to
+// nothing and breaking it costs one space, which is the side of this call the
+// rest of the file already runs on.
+func hasCharacterReference(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '&' {
+			continue
+		}
+		for j := i + 1; j < len(s); j++ {
+			c := s[j]
+			if c == ';' {
+				return j > i+1
+			}
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '#') {
+				break
+			}
+		}
+	}
+	return false
 }
 
 // hasURIScheme reports whether s begins with a URI scheme followed by ":" —

@@ -1,6 +1,7 @@
 package wecom
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 
@@ -69,6 +70,12 @@ func TestBreakLinkAdjacencyIsIdempotent(t *testing.T) {
 // wrong: the destination hidden behind a "<", pushed onto the next line, spelt
 // with backslash escapes or a character reference, or defined inside a
 // blockquote or a list item where the label is no longer at column zero.
+//
+// The blockquote-continuation block is the one that got through: the label
+// half accepted the ">" and the destination half did not expect it back on the
+// next line, so the scan read the marker as the destination and cleared a
+// definition that resolves. TestContainerPrefixHalvesAgree is the test for the
+// disagreement itself; these pin the shapes it reached.
 var linkReferenceAttacks = []struct {
 	name string
 	body string
@@ -95,6 +102,32 @@ var linkReferenceAttacks = []struct {
 	{"full reference", "[重置密码]: https://evil.example\n\n[点这里][重置密码]"},
 	{"two definitions", "[a]: https://evil.example\n[b]: https://evil.example/2\n\n[a] [b]"},
 	{"uppercase scheme", "[重置密码]: HTTPS://EVIL.EXAMPLE\n\n[重置密码]"},
+
+	// The destination on its own line, behind the block container the
+	// definition sits in.
+	{"blockquote continuation", "> [重置密码]:\n> https://evil.example\n\n[重置密码]"},
+	{"blockquote continuation, no space after the marker", ">[重置密码]:\n>https://evil.example\n\n[重置密码]"},
+	{"blockquote continuation, tab after the marker", ">\t[重置密码]:\n>\thttps://evil.example\n\n[重置密码]"},
+	{"blockquote continuation, CRLF", "> [重置密码]:\r\n> https://evil.example\r\n\r\n[重置密码]"},
+	{"blockquote continuation, nested twice", "> > [重置密码]:\n> > https://evil.example\n\n[重置密码]"},
+	{"blockquote continuation, nested three deep", "> > > [重置密码]:\n> > > https://evil.example\n\n[重置密码]"},
+	{"blockquote continuation, indented markers", "  >  >  [重置密码]:\n  >  >  https://evil.example\n\n[重置密码]"},
+	{"list inside a blockquote, continued by indentation", "> - [重置密码]:\n>   https://evil.example\n\n[重置密码]"},
+	{"ordered list inside a blockquote", "> 1. [重置密码]:\n>    https://evil.example\n\n[重置密码]"},
+	{"blockquote continuation, angle bracketed", "> [重置密码]:\n> <https://evil.example>\n\n[重置密码]"},
+	{"blockquote continuation, scheme relative", "> [重置密码]:\n> //evil.example/x\n\n[重置密码]"},
+	{"blockquote continuation, escaped scheme colon", "> [重置密码]:\n> " + `https\://evil.example` + "\n\n[重置密码]"},
+	{"blockquote continuation, character reference", "> [重置密码]:\n> &#x68;ttps://evil.example\n\n[重置密码]"},
+	{"blockquote lazy continuation, marker dropped", "> [重置密码]:\nhttps://evil.example\n\n[重置密码]"},
+	{"list continuation by indentation", "- [重置密码]:\n  https://evil.example\n\n[重置密码]"},
+
+	// A definition reached this way feeds the same reference map, so it is
+	// worth pinning that every way of spending it is closed, not just the
+	// shortcut form.
+	{"blockquote continuation, collapsed reference", "> [重置密码]:\n> https://evil.example\n\n[重置密码][]"},
+	{"blockquote continuation, full reference", "> [重置密码]:\n> https://evil.example\n\n[点这里][重置密码]"},
+	{"blockquote continuation, image reference", "> [重置密码]:\n> https://evil.example\n\n![重置密码]"},
+	{"blockquote continuation, used inside the blockquote", "> [重置密码]:\n> https://evil.example\n>\n> [重置密码]"},
 }
 
 // TestBreakLinkReferenceDefinitionsClosesEveryKnownDefinition is the guard's
@@ -133,6 +166,14 @@ func TestBreakLinkReferenceDefinitionsLeavesProseAlone(t *testing.T) {
 		"[文件]: report.pdf",
 		"[页面]: /inbox",
 		"[Bug]: 见 https://tracker.example/1", // destination is 见, not the URL
+		// Relative destinations that happen to hold a "\" or an "&". Neither
+		// character spells an escape or a character reference here, so there
+		// is nothing to decode and nothing to break.
+		"[Owner]: R&D",
+		`[Regex]: \d+`,
+		`[Path]: docs\setup`,
+		"[Query]: foo&bar",
+		"[Note]: see A&B for details",
 		"[Bug] 登录失败",
 		"修复 (见 issue 12)",
 		"见 [文档]: https://wiki.example/x", // not at block position
@@ -180,6 +221,126 @@ func TestBreakLinkReferenceDefinitionsInsertsOneSpace(t *testing.T) {
 				t.Fatalf("emitted a backslash for %q: %q — WeCom reads \"\\[\" as a math delimiter", tc.in, got)
 			}
 		})
+	}
+}
+
+// scaffoldPrefixes enumerates block scaffolding by composing, up to depth
+// pieces deep, everything a definition line can be indented and nested with.
+// It is the alphabet containerPrefixBefore reads, so every prefix it accepts is
+// somewhere a member can put a definition — which makes it the right thing to
+// sweep both halves of the rule over.
+func scaffoldPrefixes(depth int) []string {
+	pieces := []string{" ", "   ", "\t", ">", "> ", ">\t", "- ", "* ", "1. "}
+	var out []string
+	seen := map[string]bool{}
+	var build func(string, int)
+	build = func(cur string, d int) {
+		if !seen[cur] {
+			seen[cur] = true
+			out = append(out, cur)
+		}
+		if d == 0 {
+			return
+		}
+		for _, p := range pieces {
+			build(cur+p, d-1)
+		}
+	}
+	build("", depth)
+	return out
+}
+
+// TestContainerPrefixHalvesAgree is the test for the mistake rather than for
+// its symptoms, and it is the one that would have caught the blockquote
+// continuation before it shipped.
+//
+// Breaking a definition is one rule decided in two places. containerPrefixBefore
+// says what scaffolding may precede the label; looksLikeLinkDestination scans
+// what follows the colon. CommonMark carries a blockquote's marker onto every
+// line the quote holds, so the moment the first half accepts a ">" the second
+// half has to expect it back on a destination that sits on the next line. Teach
+// one and not the other and the definition survives untouched — which is
+// exactly what happened.
+//
+// The expected marker count is taken here from the prefix text, not read off
+// containerPrefixBefore's answer, so the halves are checked against the markdown
+// rule instead of against each other's idea of it.
+func TestContainerPrefixHalvesAgree(t *testing.T) {
+	for _, prefix := range scaffoldPrefixes(3) {
+		container, ok := containerPrefixBefore(prefix+"[重置密码]", len(prefix))
+		if !ok {
+			continue
+		}
+		quotes := strings.Count(prefix, ">")
+		if container.quotes != quotes {
+			t.Fatalf("prefix %q opens %d blockquotes, containerPrefixBefore reports %d",
+				prefix, quotes, container.quotes)
+		}
+		// Every nesting from a lazy continuation carrying no marker at all up
+		// to the definition's own depth is a line the parser still reads as
+		// this definition's destination.
+		for n := 0; n <= quotes; n++ {
+			for _, marker := range []string{">", "> ", ">\t", " > ", "  >"} {
+				rest := "\n" + strings.Repeat(marker, n) + "https://evil.example"
+				if !looksLikeLinkDestination(rest, container) {
+					t.Fatalf("prefix %q may hold a definition, but the destination scan misses %q —\n"+
+						"the two halves disagree about what a block container is", prefix, rest)
+				}
+			}
+		}
+		// And no deeper. A line nested further than the definition's own block
+		// starts a new one rather than continuing it, so stepping over that
+		// marker would be swallowing a character that happened to be in the
+		// way rather than modelling the container.
+		deeper := "\n" + strings.Repeat("> ", quotes+1) + "https://evil.example"
+		if looksLikeLinkDestination(deeper, container) {
+			t.Fatalf("prefix %q opens %d blockquotes but the destination scan stepped over %d in %q",
+				prefix, quotes, quotes+1, deeper)
+		}
+	}
+}
+
+// TestBreakLinkReferenceDefinitionsAcrossBlockScaffolding sweeps scaffolding on
+// the definition line against scaffolding on the destination line and asserts
+// against a real parser rather than against a list of shapes someone thought
+// of: whatever combination genuinely defines a link to the attacker's host must
+// come back from the guard defining none.
+//
+// Self-checking the way linkReferenceAttacks is. A combination is only asserted
+// on after it has been shown to resolve unguarded, and the number that do is
+// pinned, so the sweep cannot come to pass by testing nothing.
+func TestBreakLinkReferenceDefinitionsAcrossBlockScaffolding(t *testing.T) {
+	prefixes := scaffoldPrefixes(2)
+	destinations := []string{
+		"https://evil.example",
+		"//evil.example/x",
+		"<https://evil.example>",
+		`https\://evil.example`,
+	}
+	live := 0
+	for _, def := range prefixes {
+		if _, ok := containerPrefixBefore(def+"[", len(def)); !ok {
+			continue
+		}
+		for _, cont := range prefixes {
+			for _, dest := range destinations {
+				for _, nl := range []string{"\n", "\r\n"} {
+					body := def + "[重置密码]:" + nl + cont + dest + nl + nl + "[重置密码]"
+					if !sendsReaderTo(markdownDestinations(body), "evil.example") {
+						continue
+					}
+					live++
+					guarded := breakMemberLinks(body)
+					if sendsReaderTo(markdownDestinations(guarded), "evil.example") {
+						t.Fatalf("definition behind %q with its destination behind %q survived the guard:\n%q → %q",
+							def, cont, body, guarded)
+					}
+				}
+			}
+		}
+	}
+	if live < 4000 {
+		t.Fatalf("only %d swept combinations defined a link at all — the sweep has stopped testing anything", live)
 	}
 }
 
@@ -238,6 +399,27 @@ func markdownDestinations(md string) []string {
 func hasDestinationTo(dests []string, host string) bool {
 	for _, d := range dests {
 		if strings.Contains(strings.ToLower(d), strings.ToLower(host)) {
+			return true
+		}
+	}
+	return false
+}
+
+// sendsReaderTo is the stricter reading of the same question, and the sweep
+// above needs it: a destination has to actually aim at host, not merely spell
+// its name. A tab before a ">" on the destination line makes goldmark read
+// ">https://evil.example" as the destination — it contains the name and goes
+// nowhere, because a leading ">" makes it relative and the client resolves it
+// against its own base. Relative destinations are let through on purpose, so a
+// sweep that counted those would be demanding breaks the guard's contract
+// promises not to make.
+func sendsReaderTo(dests []string, host string) bool {
+	for _, d := range dests {
+		u, err := url.Parse(strings.TrimSpace(d))
+		if err != nil || u.Host == "" {
+			continue
+		}
+		if strings.EqualFold(u.Hostname(), host) {
 			return true
 		}
 	}
