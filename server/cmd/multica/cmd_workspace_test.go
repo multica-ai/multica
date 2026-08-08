@@ -177,8 +177,8 @@ func TestRunWorkspaceCreateRequiresSlug(t *testing.T) {
 func TestRunWorkspaceCreateRejectsDualStdin(t *testing.T) {
 	cmd := newWorkspaceCreateTestCmd()
 	for name, value := range map[string]string{
-		"name":             "Growth Team",
-		"slug":             "growth-team",
+		"name":              "Growth Team",
+		"slug":              "growth-team",
 		"description-stdin": "true",
 		"context-stdin":     "true",
 	} {
@@ -198,8 +198,8 @@ func TestRunWorkspaceCreateRejectsDualStdin(t *testing.T) {
 func TestRunWorkspaceCreateReadsDescriptionFromStdin(t *testing.T) {
 	cmd := newWorkspaceCreateTestCmd()
 	for name, value := range map[string]string{
-		"name":             "Growth Team",
-		"slug":             "growth-team",
+		"name":              "Growth Team",
+		"slug":              "growth-team",
 		"description-stdin": "true",
 	} {
 		if err := cmd.Flags().Set(name, value); err != nil {
@@ -345,6 +345,21 @@ func TestRunWorkspaceSwitch(t *testing.T) {
 			t.Errorf("expected staging config file at %s, got %v", path, err)
 		}
 	})
+}
+
+func TestRunWorkspaceSwitchFailsClosedInTaskContext(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TOKEN", "mat_task_sentinel")
+	t.Setenv("MULTICA_SERVER_URL", "https://task.invalid")
+	t.Setenv("MULTICA_WORKSPACE_ID", "task-workspace")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	err := runWorkspaceSwitch(newWorkspaceSwitchTestCmd(), []string{"target"})
+	if err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+		t.Fatalf("runWorkspaceSwitch error = %v, want task-context guard before API or profile access", err)
+	}
 }
 
 func TestResolveWorkspaceByIDOrSlug(t *testing.T) {

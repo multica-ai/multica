@@ -49,6 +49,28 @@ func TestDaemonAlive(t *testing.T) {
 	}
 }
 
+func TestDaemonLocalCommandsFailClosedInTaskContext(t *testing.T) {
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	cases := map[string]func() error{
+		"probe-runtimes": func() error { return runDaemonProbeRuntimes(daemonProbeRuntimesCmd, nil) },
+		"start":          func() error { return runDaemonStart(daemonStartCmd, nil) },
+		"restart":        func() error { return runDaemonRestart(daemonRestartCmd, nil) },
+		"stop":           func() error { return runDaemonStop(daemonStopCmd, nil) },
+		"status":         func() error { return runDaemonStatus(daemonStatusCmd, nil) },
+		"logs":           func() error { return runDaemonLogs(daemonLogsCmd, nil) },
+		"disk-usage":     func() error { return runDaemonDiskUsage(daemonDiskUsageCmd, nil) },
+	}
+	for name, run := range cases {
+		err := run()
+		if err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+			t.Fatalf("daemon %s error = %v, want task-context guard", name, err)
+		}
+	}
+}
+
 func TestPrintDaemonStatusIncludesCLIVersion(t *testing.T) {
 	t.Parallel()
 
