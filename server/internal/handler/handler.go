@@ -128,6 +128,11 @@ type Config struct {
 	// Surfaced through /api/config so self-hosted operators can confirm which
 	// server build is deployed. Empty in dev builds.
 	ServerVersion string
+	// PlatformExtensionPolicy is the trusted command classification policy
+	// supplied by the platform adapter. Nil selects the bundled Mock V1 policy;
+	// non-nil values are validated by every import and never read from document
+	// input or environment variables inside the compiler.
+	PlatformExtensionPolicy *PlatformExtensionPolicy
 }
 
 type cloudRuntimeProxy interface {
@@ -153,28 +158,29 @@ type DaemonPendingWorkNotifier interface {
 }
 
 type Handler struct {
-	Queries                *db.Queries
-	DB                     dbExecutor
-	TxStarter              txStarter
-	Hub                    *realtime.Hub
-	DaemonHub              *daemonws.Hub
-	DaemonProfileRefresh   RuntimeProfileRefreshNotifier
-	DaemonWorkspaceRefresh WorkspaceSetRefreshNotifier
-	Bus                    *events.Bus
-	TaskService            *service.TaskService
-	IssueService           *service.IssueService
-	AutopilotService       *service.AutopilotService
-	EmailService           *service.EmailService
-	UpdateStore            UpdateStore
-	ModelListStore         ModelListStore
-	LocalSkillListStore    LocalSkillListStore
-	LocalSkillImportStore  LocalSkillImportStore
-	FeatureFlags           *featureflag.Service
-	LivenessStore          LivenessStore
-	HeartbeatScheduler     HeartbeatScheduler
-	Storage                storage.Storage
-	CFSigner               *auth.CloudFrontSigner
-	Analytics              analytics.Client
+	Queries                 *db.Queries
+	DB                      dbExecutor
+	TxStarter               txStarter
+	Hub                     *realtime.Hub
+	DaemonHub               *daemonws.Hub
+	DaemonProfileRefresh    RuntimeProfileRefreshNotifier
+	DaemonWorkspaceRefresh  WorkspaceSetRefreshNotifier
+	Bus                     *events.Bus
+	TaskService             *service.TaskService
+	IssueService            *service.IssueService
+	AutopilotService        *service.AutopilotService
+	EmailService            *service.EmailService
+	UpdateStore             UpdateStore
+	ModelListStore          ModelListStore
+	LocalSkillListStore     LocalSkillListStore
+	LocalSkillImportStore   LocalSkillImportStore
+	FeatureFlags            *featureflag.Service
+	LivenessStore           LivenessStore
+	HeartbeatScheduler      HeartbeatScheduler
+	PlatformExtensionPolicy PlatformExtensionPolicy
+	Storage                 storage.Storage
+	CFSigner                *auth.CloudFrontSigner
+	Analytics               analytics.Client
 	// DaemonPendingWork pushes "heartbeat now" hints for queued
 	// heartbeat-carried requests (MUL-5444). Optional: when nil,
 	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
@@ -322,6 +328,10 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	if cfg.AttachmentDownloadURLTTL <= 0 {
 		cfg.AttachmentDownloadURLTTL = defaultAttachmentDownloadURLTTL
 	}
+	platformExtensionPolicy := DefaultPlatformExtensionV1Policy()
+	if cfg.PlatformExtensionPolicy != nil {
+		platformExtensionPolicy = *cfg.PlatformExtensionPolicy
+	}
 
 	var daemonHub *daemonws.Hub
 	if len(daemonHubs) > 0 {
@@ -366,6 +376,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		LocalSkillImportStore:        NewInMemoryLocalSkillImportStore(),
 		LivenessStore:                NewNoopLivenessStore(),
 		HeartbeatScheduler:           NewPassthroughHeartbeatScheduler(queries),
+		PlatformExtensionPolicy:      platformExtensionPolicy,
 		Storage:                      store,
 		CFSigner:                     cfSigner,
 		Analytics:                    analyticsClient,

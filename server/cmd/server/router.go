@@ -1276,6 +1276,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceMember(queries))
 
+			// Platform Extension releases and atomic native-resource import.
+			r.Route("/api/extensions", func(r chi.Router) {
+				r.Get("/", h.ListPlatformExtensions)
+				r.Post("/import", h.ImportPlatformExtension)
+				r.Get("/{id}", h.GetPlatformExtension)
+			})
+
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 

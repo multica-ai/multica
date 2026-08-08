@@ -866,6 +866,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceConnections(ctx, requester.WorkspaceID) },
 		},
 		{
+			name: "delete platform extension releases",
+			run:  func() error { return qtx.DeletePlatformExtensionReleasesByWorkspace(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete squads and skills",
 			run:  func() error { return qtx.DeleteWorkspaceSquadsAndSkills(ctx, requester.WorkspaceID) },
 		},

@@ -77,6 +77,7 @@ INSERT INTO platform_extension_release (
     $6,
     $7
 )
+ON CONFLICT (workspace_id, extension_key, version) DO NOTHING
 RETURNING id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at
 `
 
@@ -118,6 +119,18 @@ func (q *Queries) CreatePlatformExtensionReleaseReservation(ctx context.Context,
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const deletePlatformExtensionReleasesByWorkspace = `-- name: DeletePlatformExtensionReleasesByWorkspace :exec
+DELETE FROM platform_extension_release
+WHERE workspace_id = $1
+`
+
+// platform_extension_release deliberately has no workspace foreign key, so
+// workspace teardown must remove its audit mappings explicitly.
+func (q *Queries) DeletePlatformExtensionReleasesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deletePlatformExtensionReleasesByWorkspace, workspaceID)
+	return err
 }
 
 const getPlatformExtensionReleaseByIdentity = `-- name: GetPlatformExtensionReleaseByIdentity :one
@@ -221,4 +234,129 @@ func (q *Queries) ListPlatformExtensionReleasesInWorkspace(ctx context.Context, 
 		return nil, err
 	}
 	return items, nil
+}
+
+const listPlatformExtensionRuntimeCandidates = `-- name: ListPlatformExtensionRuntimeCandidates :many
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+FROM agent_runtime
+WHERE workspace_id = $1
+  AND provider = 'platform-agent-cli'
+  AND status = 'online'
+ORDER BY id ASC
+`
+
+// The handler applies canUseRuntimeForAgent and Redis liveness to this small
+// candidate set before the import transaction re-checks and locks a winner.
+func (q *Queries) ListPlatformExtensionRuntimeCandidates(ctx context.Context, workspaceID pgtype.UUID) ([]AgentRuntime, error) {
+	rows, err := q.db.Query(ctx, listPlatformExtensionRuntimeCandidates, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentRuntime{}
+	for rows.Next() {
+		var i AgentRuntime
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DaemonID,
+			&i.Name,
+			&i.RuntimeMode,
+			&i.Provider,
+			&i.Status,
+			&i.DeviceInfo,
+			&i.Metadata,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerID,
+			&i.LegacyDaemonID,
+			&i.Visibility,
+			&i.ProfileID,
+			&i.CustomName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockIdlePlatformExtensionRuntime = `-- name: LockIdlePlatformExtensionRuntime :one
+WITH active_agent_counts AS (
+    SELECT runtime_id, count(*) AS agent_count
+    FROM agent
+    WHERE archived_at IS NULL
+      AND runtime_id IS NOT NULL
+    GROUP BY runtime_id
+)
+SELECT rt.id, rt.workspace_id, rt.daemon_id, rt.name, rt.runtime_mode, rt.provider, rt.status, rt.device_info, rt.metadata, rt.last_seen_at, rt.created_at, rt.updated_at, rt.owner_id, rt.legacy_daemon_id, rt.visibility, rt.profile_id, rt.custom_name
+FROM agent_runtime rt
+LEFT JOIN active_agent_counts counts ON counts.runtime_id = rt.id
+WHERE rt.workspace_id = $1
+  AND rt.provider = 'platform-agent-cli'
+  AND rt.status = 'online'
+  AND rt.id = ANY($2::uuid[])
+  AND (
+      $3::boolean
+      OR rt.last_seen_at >= now() - interval '150 seconds'
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM agent_task_queue task
+      WHERE task.runtime_id = rt.id
+        AND task.status IN (
+            'queued',
+            'deferred',
+            'dispatched',
+            'running',
+            'waiting_local_directory'
+        )
+  )
+ORDER BY
+    rt.last_seen_at DESC NULLS LAST,
+    COALESCE(counts.agent_count, 0) ASC,
+    rt.created_at ASC,
+    rt.id ASC
+FOR UPDATE OF rt SKIP LOCKED
+LIMIT 1
+`
+
+type LockIdlePlatformExtensionRuntimeParams struct {
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	EligibleIds      []pgtype.UUID `json:"eligible_ids"`
+	UseRedisLiveness bool          `json:"use_redis_liveness"`
+}
+
+// Re-checks every database-owned eligibility condition while locking the
+// selected runtime. eligible_ids has already been filtered by the handler's
+// canUseRuntimeForAgent predicate and, when Redis is healthy, its batch
+// liveness result. When Redis is unavailable, last_seen_at supplies the same
+// 150-second fallback window used by the runtime sweeper.
+func (q *Queries) LockIdlePlatformExtensionRuntime(ctx context.Context, arg LockIdlePlatformExtensionRuntimeParams) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, lockIdlePlatformExtensionRuntime, arg.WorkspaceID, arg.EligibleIds, arg.UseRedisLiveness)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+		&i.CustomName,
+	)
+	return i, err
 }

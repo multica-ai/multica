@@ -80,6 +80,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"notification_preference":         workspaceDelete,
 	"personal_access_token":           workspaceDeleteKeep,
 	"pinned_item":                     workspaceDelete,
+	"platform_extension_release":      workspaceDelete,
 	"project":                         workspaceDelete,
 	"project_resource":                workspaceDelete,
 	"quick_action":                    workspaceDelete,
