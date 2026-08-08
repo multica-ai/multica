@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -53,9 +52,7 @@ func newBoundRoomRig(t *testing.T) *bubbleRig {
 // and the messages in that batch carry no channel_ingested stamp.
 func (r *bubbleRig) askedInTheBrowser(t *testing.T, taskName string) {
 	t.Helper()
-	id := mustParseTestUUID(t, taskName)
-	r.q.t = t
-	r.q.tasks[taskUUID(t, taskName)] = db.AgentTaskQueue{ID: id, ChatInputTaskID: id}
+	r.q.fileTask(t, taskUUID(t, taskName))
 	r.q.channelIngested = askedInTheWebUI()
 }
 
@@ -65,9 +62,7 @@ func (r *bubbleRig) askedInTheBrowser(t *testing.T, taskName string) {
 // not one.
 func (r *bubbleRig) askedInTheRoom(t *testing.T, taskName string) {
 	t.Helper()
-	id := mustParseTestUUID(t, taskName)
-	r.q.t = t
-	r.q.tasks[taskUUID(t, taskName)] = db.AgentTaskQueue{ID: id, ChatInputTaskID: id}
+	r.q.fileTask(t, taskUUID(t, taskName))
 	r.q.channelIngested = askedOverWecom()
 }
 
@@ -237,10 +232,7 @@ func TestTheOriginOfARetryCloneIsItsParentsBatch(t *testing.T) {
 	rig := newBoundRoomRig(t)
 	rig.askedInTheRoom(t, "task-1")
 	// FailTask's retry child: fresh id, inheriting the parent's input batch.
-	rig.q.tasks[taskUUID(t, "retry")] = db.AgentTaskQueue{
-		ID:              mustParseTestUUID(t, "retry"),
-		ChatInputTaskID: mustParseTestUUID(t, "task-1"),
-	}
+	rig.q.fileRetryClone(t, taskUUID(t, "retry"), taskUUID(t, "task-1"))
 
 	rig.failed(t, "retry", false)
 

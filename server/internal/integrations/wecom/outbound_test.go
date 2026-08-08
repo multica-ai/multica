@@ -50,15 +50,14 @@ type fakeOutboundQueries struct {
 	// askedInTheWebUI for one typed in Multica.
 	//
 	// It is a pointer, and it has no default on purpose. Two gates read this
-	// one stamp in opposite directions — the answer path delivers only when it
-	// is set, and the failure-notice path #6606 adds delivers unless it is — so
-	// either zero value would let one of them pass a test that never said where
-	// the question came from. Left unset the fake ends the test naming the
-	// omission, which is what keeps this rig usable by whichever of the two
-	// lands second.
+	// one stamp in opposite directions — the answer path in outbound.go
+	// delivers only when it is set, the failure-notice path in
+	// typing_indicator.go delivers unless it is — so either zero value would
+	// let one of them pass a test that never said where the question came
+	// from. Left unset the fake ends the test naming the omission.
 	//
 	// originAskedFor records which id the stamp was read for, which is the
-	// whole of the retry-clone question.
+	// whole of the retry-clone question. See failure_origin_test.go.
 	channelIngested *bool
 	originErr       error
 	originAskedFor  []string
