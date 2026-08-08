@@ -356,6 +356,121 @@ func TestFinalizePlatformSidecarsRollsBackWhenManifestPersistenceFails(t *testin
 	}
 }
 
+func TestFinalizePlatformSidecarsRejectsManifestSymlinkWithoutClobberingTarget(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := &sidecarManifest{}
+	if err := writePlatformAgentContext(workDir, validPlatformAgentContext("manifest-symlink"), manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	outside := filepath.Join(t.TempDir(), "user.json")
+	const outsideData = "outside-user-manifest"
+	if err := os.WriteFile(outside, []byte(outsideData), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(envRoot, sidecarManifestFile)); err != nil {
+		t.Skipf("symlink fixture unavailable: %v", err)
+	}
+
+	if err := finalizeSidecarManifest("platform-agent-cli", envRoot, workDir, manifest, discardLogger()); err == nil {
+		t.Fatal("finalizeSidecarManifest() error = nil for manifest symlink")
+	}
+	if data, err := os.ReadFile(outside); err != nil || string(data) != outsideData {
+		t.Fatalf("manifest persistence changed outside target: %q, %v", data, err)
+	}
+	if _, err := os.Lstat(filepath.Join(workDir, ".platform-agent")); !os.IsNotExist(err) {
+		t.Fatalf("failed finalize left untracked platform sidecars: %v", err)
+	}
+}
+
+func TestCleanupPlatformSidecarsRejectsManifestSymlinkWithoutFollowingTarget(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	contextPath := filepath.Join(workDir, ".platform-agent", "context.json")
+	if err := os.MkdirAll(filepath.Dir(contextPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(contextPath, []byte("daemon-owned"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outsideManifest := filepath.Join(t.TempDir(), "user.json")
+	manifestData, err := json.Marshal(&sidecarManifest{
+		Rooted: true,
+		Files:  []string{filepath.Join(".platform-agent", "context.json")},
+		Dirs:   []string{".platform-agent"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outsideManifest, manifestData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideManifest, filepath.Join(envRoot, sidecarManifestFile)); err != nil {
+		t.Skipf("symlink fixture unavailable: %v", err)
+	}
+
+	if err := CleanupSidecarsAt(envRoot, workDir); err == nil {
+		t.Fatal("CleanupSidecarsAt() error = nil for manifest symlink")
+	}
+	if data, err := os.ReadFile(contextPath); err != nil || string(data) != "daemon-owned" {
+		t.Fatalf("cleanup followed symlink manifest and changed sidecar: %q, %v", data, err)
+	}
+	if data, err := os.ReadFile(outsideManifest); err != nil || string(data) != string(manifestData) {
+		t.Fatalf("cleanup changed outside manifest target: %q, %v", data, err)
+	}
+}
+
+func TestPreparePlatformAgentRestoresRefreshedMarkerWhenLaterWriteFails(t *testing.T) {
+	workDir := t.TempDir()
+	markerPath := filepath.Join(workDir, TaskContextMarkerRelPath)
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const originalMarker = "{\n  \"managed_by\": \"multica-daemon-task\",\n  \"agent_id\": \"prior-agent\"\n}\n"
+	if err := os.WriteFile(markerPath, []byte(originalMarker), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, ".agent_context"), []byte("collision"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "workspace-marker-restore",
+		TaskID:         "task-marker-restore",
+		AgentName:      "Marker Restore",
+		Provider:       "platform-agent-cli",
+		LocalWorkDir:   workDir,
+		Task: TaskContextForEnv{
+			AgentID:              "new-agent",
+			PlatformAgentContext: validPlatformAgentContext("marker-restore"),
+		},
+	}, discardLogger())
+	if err == nil {
+		t.Fatal("Prepare() error = nil after forced post-marker failure")
+	}
+	data, readErr := os.ReadFile(markerPath)
+	if readErr != nil {
+		t.Fatalf("rollback removed pre-existing daemon marker: %v", readErr)
+	}
+	if string(data) != originalMarker {
+		t.Fatalf("rollback restored marker bytes %q, want %q", data, originalMarker)
+	}
+	if runtime.GOOS != "windows" {
+		info, statErr := os.Stat(markerPath)
+		if statErr != nil {
+			t.Fatal(statErr)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("rollback marker mode = %o, want 600", info.Mode().Perm())
+		}
+	}
+}
+
 func TestReusePlatformAgentReplacesDaemonOwnedContext(t *testing.T) {
 	root := t.TempDir()
 	first, err := Prepare(PrepareParams{
@@ -587,6 +702,94 @@ func TestCleanupPlatformSidecarsDoesNotFollowSwappedParentOutsideWorkdir(t *test
 	}
 }
 
+func TestCleanupPlatformSidecarsDoesNotFollowSwappedParentInsideWorkdir(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := &sidecarManifest{}
+	if err := writePlatformAgentContext(workDir, validPlatformAgentContext("cleanup-internal-swap"), manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSidecarManifest(envRoot, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.closeRoot(); err != nil {
+		t.Fatal(err)
+	}
+
+	platformDir := filepath.Join(workDir, ".platform-agent")
+	originalDir := filepath.Join(workDir, ".platform-agent-owned")
+	if err := os.Rename(platformDir, originalDir); err != nil {
+		t.Fatal(err)
+	}
+	decoyDir := filepath.Join(workDir, "decoy")
+	if err := os.Mkdir(decoyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	decoyContext := filepath.Join(decoyDir, "context.json")
+	if err := os.WriteFile(decoyContext, []byte("user-decoy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("decoy", platformDir); err != nil {
+		t.Skipf("symlink fixture unavailable: %v", err)
+	}
+
+	if err := CleanupSidecarsAt(envRoot, workDir); err == nil {
+		t.Fatal("CleanupSidecarsAt() error = nil after internal parent swap")
+	}
+	if data, err := os.ReadFile(decoyContext); err != nil || string(data) != "user-decoy" {
+		t.Fatalf("cleanup followed internal parent swap: %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(originalDir, "context.json")); err != nil {
+		t.Fatalf("cleanup mistook swapped parent for original sidecar: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(envRoot, sidecarManifestFile)); err != nil {
+		t.Fatalf("failed cleanup removed retry manifest: %v", err)
+	}
+}
+
+func TestCleanupPlatformSidecarsRejectsSwappedLeafSymlink(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := &sidecarManifest{}
+	if err := writePlatformAgentContext(workDir, validPlatformAgentContext("cleanup-leaf-swap"), manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSidecarManifest(envRoot, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.closeRoot(); err != nil {
+		t.Fatal(err)
+	}
+
+	contextPath := filepath.Join(workDir, ".platform-agent", "context.json")
+	originalPath := filepath.Join(workDir, ".platform-agent", "context-owned.json")
+	if err := os.Rename(contextPath, originalPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("context-owned.json", contextPath); err != nil {
+		t.Skipf("symlink fixture unavailable: %v", err)
+	}
+
+	if err := CleanupSidecarsAt(envRoot, workDir); err == nil {
+		t.Fatal("CleanupSidecarsAt() error = nil after leaf swap")
+	}
+	if _, err := os.Stat(originalPath); err != nil {
+		t.Fatalf("cleanup changed original context behind swapped leaf: %v", err)
+	}
+	if info, err := os.Lstat(contextPath); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("cleanup removed swapped leaf without failing closed: info=%v err=%v", info, err)
+	}
+	if _, err := os.Lstat(filepath.Join(envRoot, sidecarManifestFile)); err != nil {
+		t.Fatalf("failed cleanup removed retry manifest: %v", err)
+	}
+}
+
 func TestRollbackPlatformSidecarsDoesNotFollowSwappedParentOutsideWorkdir(t *testing.T) {
 	workDir := t.TempDir()
 	manifest := &sidecarManifest{}
@@ -615,6 +818,66 @@ func TestRollbackPlatformSidecarsDoesNotFollowSwappedParentOutsideWorkdir(t *tes
 	}
 	if _, err := os.Stat(filepath.Join(originalDir, "context.json")); err != nil {
 		t.Fatalf("rollback mistook swapped path for the original sidecar: %v", err)
+	}
+}
+
+func TestRollbackPlatformSidecarsDoesNotFollowSwappedParentInsideWorkdir(t *testing.T) {
+	workDir := t.TempDir()
+	manifest := &sidecarManifest{}
+	if err := writePlatformAgentContext(workDir, validPlatformAgentContext("rollback-internal-swap"), manifest); err != nil {
+		t.Fatal(err)
+	}
+	platformDir := filepath.Join(workDir, ".platform-agent")
+	originalDir := filepath.Join(workDir, ".platform-agent-owned")
+	if err := os.Rename(platformDir, originalDir); err != nil {
+		t.Fatal(err)
+	}
+	decoyDir := filepath.Join(workDir, "decoy")
+	if err := os.Mkdir(decoyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	decoyContext := filepath.Join(decoyDir, "context.json")
+	if err := os.WriteFile(decoyContext, []byte("user-decoy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("decoy", platformDir); err != nil {
+		t.Skipf("symlink fixture unavailable: %v", err)
+	}
+
+	if err := rollbackSidecarManifest(manifest); err == nil {
+		t.Fatal("rollbackSidecarManifest() error = nil after internal parent swap")
+	}
+	if data, err := os.ReadFile(decoyContext); err != nil || string(data) != "user-decoy" {
+		t.Fatalf("rollback followed internal parent swap: %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(originalDir, "context.json")); err != nil {
+		t.Fatalf("rollback mistook swapped parent for original sidecar: %v", err)
+	}
+}
+
+func TestRollbackPlatformSidecarsRejectsSwappedLeafSymlink(t *testing.T) {
+	workDir := t.TempDir()
+	manifest := &sidecarManifest{}
+	if err := writePlatformAgentContext(workDir, validPlatformAgentContext("rollback-leaf-swap"), manifest); err != nil {
+		t.Fatal(err)
+	}
+	contextPath := filepath.Join(workDir, ".platform-agent", "context.json")
+	originalPath := filepath.Join(workDir, ".platform-agent", "context-owned.json")
+	if err := os.Rename(contextPath, originalPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("context-owned.json", contextPath); err != nil {
+		t.Skipf("symlink fixture unavailable: %v", err)
+	}
+
+	if err := rollbackSidecarManifest(manifest); err == nil {
+		t.Fatal("rollbackSidecarManifest() error = nil after leaf swap")
+	}
+	if _, err := os.Stat(originalPath); err != nil {
+		t.Fatalf("rollback changed original context behind swapped leaf: %v", err)
+	}
+	if info, err := os.Lstat(contextPath); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("rollback removed swapped leaf without failing closed: info=%v err=%v", info, err)
 	}
 }
 
@@ -669,6 +932,103 @@ func TestReusePlatformAgentDoesNotFollowSwappedSkillParentOutsideWorkdir(t *test
 	}
 	if _, err := os.Stat(filepath.Join(originalSkillsParent, "managed", "SKILL.md")); err != nil {
 		t.Fatalf("reuse mistook swapped skill parent for managed content: %v", err)
+	}
+}
+
+func TestReusePlatformAgentDoesNotFollowSwappedSkillParentInsideWorkdir(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	managedSkillDir := filepath.Join(workDir, ".agent_context", "skills", "managed")
+	if err := os.MkdirAll(managedSkillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(managedSkillDir, "SKILL.md"), []byte("managed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSidecarManifest(envRoot, &sidecarManifest{
+		Rooted: true,
+		Dirs:   []string{filepath.Join(".agent_context", "skills", "managed")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	skillsParent := filepath.Join(workDir, ".agent_context", "skills")
+	originalSkillsParent := filepath.Join(workDir, ".agent_context", "skills-owned")
+	if err := os.Rename(skillsParent, originalSkillsParent); err != nil {
+		t.Fatal(err)
+	}
+	decoySkill := filepath.Join(workDir, ".agent_context", "decoy", "managed")
+	if err := os.MkdirAll(decoySkill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	decoySentinel := filepath.Join(decoySkill, "user.txt")
+	if err := os.WriteFile(decoySentinel, []byte("user-decoy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("decoy", skillsParent); err != nil {
+		t.Skipf("symlink fixture unavailable: %v", err)
+	}
+
+	got := Reuse(ReuseParams{
+		WorkspacesRoot: envRoot,
+		WorkDir:        workDir,
+		Provider:       "platform-agent-cli",
+		Task: TaskContextForEnv{
+			AgentID:              "agent-skill-internal-swap",
+			PlatformAgentContext: validPlatformAgentContext("skill-internal-swap"),
+		},
+	}, discardLogger())
+	if got != nil {
+		t.Fatalf("Reuse() = %+v, want fail-closed nil", got)
+	}
+	if data, err := os.ReadFile(decoySentinel); err != nil || string(data) != "user-decoy" {
+		t.Fatalf("reuse followed internal skill-parent swap: %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(originalSkillsParent, "managed", "SKILL.md")); err != nil {
+		t.Fatalf("reuse mistook swapped parent for managed content: %v", err)
+	}
+}
+
+func TestReusePlatformAgentRejectsSwappedManagedSkillLeaf(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	managedSkillDir := filepath.Join(workDir, ".agent_context", "skills", "managed")
+	if err := os.MkdirAll(managedSkillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(managedSkillDir, "SKILL.md"), []byte("managed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSidecarManifest(envRoot, &sidecarManifest{
+		Rooted: true,
+		Dirs:   []string{filepath.Join(".agent_context", "skills", "managed")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	originalSkillDir := filepath.Join(workDir, ".agent_context", "skills", "managed-owned")
+	if err := os.Rename(managedSkillDir, originalSkillDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("managed-owned", managedSkillDir); err != nil {
+		t.Skipf("symlink fixture unavailable: %v", err)
+	}
+
+	got := Reuse(ReuseParams{
+		WorkspacesRoot: envRoot,
+		WorkDir:        workDir,
+		Provider:       "platform-agent-cli",
+		Task: TaskContextForEnv{
+			AgentID:              "agent-skill-leaf-swap",
+			PlatformAgentContext: validPlatformAgentContext("skill-leaf-swap"),
+		},
+	}, discardLogger())
+	if got != nil {
+		t.Fatalf("Reuse() = %+v, want fail-closed nil", got)
+	}
+	if _, err := os.Stat(filepath.Join(originalSkillDir, "SKILL.md")); err != nil {
+		t.Fatalf("reuse changed original skill behind swapped leaf: %v", err)
+	}
+	if info, err := os.Lstat(managedSkillDir); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("reuse removed swapped skill leaf without failing closed: info=%v err=%v", info, err)
 	}
 }
 

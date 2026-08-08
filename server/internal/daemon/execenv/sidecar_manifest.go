@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -73,6 +74,19 @@ type sidecarManifest struct {
 
 	rootPath string
 	root     *os.Root
+	preimage map[string]sidecarFilePreimage
+}
+
+type sidecarFileSnapshot struct {
+	data     []byte
+	mode     os.FileMode
+	identity os.FileInfo
+}
+
+type sidecarFilePreimage struct {
+	data        []byte
+	mode        os.FileMode
+	replacement os.FileInfo
 }
 
 func (m *sidecarManifest) bindRoot(rootPath string) error {
@@ -120,6 +134,217 @@ func openFixedSidecarRoot(rootPath string) (*os.Root, error) {
 	return root, nil
 }
 
+func openFixedSidecarChild(parent *os.Root, name string, expected os.FileInfo) (*os.Root, error) {
+	if expected.Mode()&os.ModeSymlink != 0 || !expected.IsDir() {
+		return nil, fmt.Errorf("sidecar directory must be a real directory: %s", name)
+	}
+	child, err := parent.OpenRoot(name)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := child.Stat(".")
+	if err != nil {
+		_ = child.Close()
+		return nil, err
+	}
+	if !os.SameFile(expected, opened) {
+		_ = child.Close()
+		return nil, fmt.Errorf("sidecar directory changed while opening: %s", name)
+	}
+	return child, nil
+}
+
+// openFixedSidecarParent resolves every parent component through a separately
+// verified directory handle. os.Root confines paths to its tree, but it still
+// follows symlinks that stay inside that tree; passing a multi-component name
+// directly would therefore let an in-workdir parent swap redirect a delete or
+// truncate. The returned handle is owned by the caller.
+func openFixedSidecarParent(root *os.Root, rel string) (*os.Root, string, error) {
+	clean := filepath.Clean(rel)
+	if clean == "." || clean == ".." || filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return nil, "", fmt.Errorf("invalid rooted sidecar path %q", rel)
+	}
+	leaf := filepath.Base(clean)
+	parentPath := filepath.Dir(clean)
+	rootInfo, err := root.Stat(".")
+	if err != nil {
+		return nil, "", err
+	}
+	current, err := openFixedSidecarChild(root, ".", rootInfo)
+	if err != nil {
+		return nil, "", err
+	}
+	if parentPath == "." {
+		return current, leaf, nil
+	}
+	for _, part := range strings.Split(parentPath, string(filepath.Separator)) {
+		expected, err := current.Lstat(part)
+		if err != nil {
+			_ = current.Close()
+			return nil, "", err
+		}
+		next, err := openFixedSidecarChild(current, part, expected)
+		_ = current.Close()
+		if err != nil {
+			return nil, "", err
+		}
+		current = next
+	}
+	return current, leaf, nil
+}
+
+func readFixedSidecarFile(parent *os.Root, name string) (*sidecarFileSnapshot, error) {
+	expected, err := parent.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if expected.Mode()&os.ModeSymlink != 0 || !expected.Mode().IsRegular() {
+		return nil, fmt.Errorf("sidecar must be a real file: %s", name)
+	}
+	file, err := parent.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if !os.SameFile(expected, opened) {
+		_ = file.Close()
+		return nil, fmt.Errorf("sidecar changed while opening: %s", name)
+	}
+	data, err := io.ReadAll(file)
+	closeErr := file.Close()
+	if err != nil {
+		return nil, err
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	current, err := parent.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if !os.SameFile(expected, current) {
+		return nil, fmt.Errorf("sidecar changed while reading: %s", name)
+	}
+	return &sidecarFileSnapshot{data: data, mode: expected.Mode(), identity: expected}, nil
+}
+
+func randomSidecarTempName(name string) (string, error) {
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(".%s.tmp-%x", name, random[:]), nil
+}
+
+func writeFixedSidecarTemp(parent *os.Root, name string, data []byte, perm os.FileMode) (string, os.FileInfo, error) {
+	tempName, err := randomSidecarTempName(name)
+	if err != nil {
+		return "", nil, fmt.Errorf("generate temporary sidecar name: %w", err)
+	}
+	temp, err := parent.OpenFile(tempName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return "", nil, fmt.Errorf("create temporary sidecar: %w", err)
+	}
+	ok := false
+	defer func() {
+		_ = temp.Close()
+		if !ok {
+			_ = parent.Remove(tempName)
+		}
+	}()
+	if err := temp.Chmod(perm); err != nil {
+		return "", nil, err
+	}
+	if _, err := temp.Write(data); err != nil {
+		return "", nil, err
+	}
+	if err := temp.Sync(); err != nil {
+		return "", nil, err
+	}
+	if err := temp.Close(); err != nil {
+		return "", nil, err
+	}
+	info, err := parent.Lstat(tempName)
+	if err != nil {
+		return "", nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", nil, fmt.Errorf("temporary sidecar changed type: %s", tempName)
+	}
+	ok = true
+	return tempName, info, nil
+}
+
+func atomicWriteFixedSidecarNoClobber(parent *os.Root, name string, data []byte, perm os.FileMode) error {
+	tempName, tempInfo, err := writeFixedSidecarTemp(parent, name, data, perm)
+	if err != nil {
+		return err
+	}
+	removeTemp := true
+	defer func() {
+		if removeTemp {
+			_ = parent.Remove(tempName)
+		}
+	}()
+	if err := parent.Link(tempName, name); err != nil {
+		if _, statErr := parent.Lstat(name); statErr == nil {
+			return fmt.Errorf("%w: %s", errPathPreExists, name)
+		}
+		return err
+	}
+	published, err := parent.Lstat(name)
+	if err != nil || !os.SameFile(tempInfo, published) {
+		_ = parent.Remove(name)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("published sidecar identity changed: %s", name)
+	}
+	if err := parent.Remove(tempName); err != nil {
+		_ = parent.Remove(name)
+		return fmt.Errorf("remove temporary sidecar after publish: %w", err)
+	}
+	removeTemp = false
+	return nil
+}
+
+func atomicReplaceFixedSidecar(parent *os.Root, name string, expected os.FileInfo, data []byte, perm os.FileMode) (os.FileInfo, error) {
+	current, err := parent.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || !os.SameFile(expected, current) {
+		return nil, fmt.Errorf("sidecar changed before replace: %s", name)
+	}
+	tempName, tempInfo, err := writeFixedSidecarTemp(parent, name, data, perm)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = parent.Remove(tempName) }() // rename consumes the temp on success
+	current, err = parent.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || !os.SameFile(expected, current) {
+		return nil, fmt.Errorf("sidecar changed during replace: %s", name)
+	}
+	if err := parent.Rename(tempName, name); err != nil {
+		return nil, err
+	}
+	replacement, err := parent.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if replacement.Mode()&os.ModeSymlink != 0 || !replacement.Mode().IsRegular() || !os.SameFile(tempInfo, replacement) {
+		return nil, fmt.Errorf("replacement sidecar is not a real file: %s", name)
+	}
+	return replacement, nil
+}
+
 func (m *sidecarManifest) closeRoot() error {
 	if m == nil || m.root == nil {
 		return nil
@@ -155,6 +380,15 @@ func recordMkdirAll(path string, perm os.FileMode, m *sidecarManifest) error {
 			return err
 		}
 		parts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
+		rootInfo, err := m.root.Stat(".")
+		if err != nil {
+			return err
+		}
+		current, err := openFixedSidecarChild(m.root, ".", rootInfo)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = current.Close() }()
 		prefix := ""
 		for _, part := range parts {
 			if prefix == "" {
@@ -162,28 +396,48 @@ func recordMkdirAll(path string, perm os.FileMode, m *sidecarManifest) error {
 			} else {
 				prefix = filepath.Join(prefix, part)
 			}
-			info, statErr := m.root.Lstat(prefix)
+			info, statErr := current.Lstat(part)
+			created := false
 			switch {
 			case statErr == nil:
 				if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 					return fmt.Errorf("sidecar directory must be a real directory: %s", prefix)
 				}
 			case errors.Is(statErr, fs.ErrNotExist):
-				if err := m.root.Mkdir(prefix, perm); err != nil {
+				if err := current.Mkdir(part, perm); err != nil {
 					// Another writer may have created the directory after our
 					// Lstat. Accept that race only when the winner created the
 					// same real directory shape we require; symlinks and files
 					// remain hard failures.
-					info, statErr = m.root.Lstat(prefix)
+					info, statErr = current.Lstat(part)
 					if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 						return err
 					}
-					continue
+				} else {
+					created = true
+					info, statErr = current.Lstat(part)
+					if statErr != nil {
+						return fmt.Errorf("verify created sidecar directory %s: %w", prefix, statErr)
+					}
+					if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+						return fmt.Errorf("created sidecar directory changed type: %s", prefix)
+					}
 				}
-				m.Dirs = append(m.Dirs, prefix)
 			default:
 				return fmt.Errorf("stat sidecar directory %s: %w", prefix, statErr)
 			}
+			if created {
+				// Record ownership before the next handle operation so even a
+				// concurrent swap that makes OpenRoot fail cannot leave a newly
+				// created directory absent from the in-memory rollback journal.
+				m.Dirs = append(m.Dirs, prefix)
+			}
+			next, err := openFixedSidecarChild(current, part, info)
+			if err != nil {
+				return fmt.Errorf("open sidecar directory %s: %w", prefix, err)
+			}
+			_ = current.Close()
+			current = next
 		}
 		return nil
 	}
@@ -248,9 +502,14 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 		if err != nil {
 			return err
 		}
-		file, err := m.root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+		parent, leaf, err := openFixedSidecarParent(m.root, rel)
 		if err != nil {
-			if _, statErr := m.root.Lstat(rel); statErr == nil {
+			return err
+		}
+		defer parent.Close()
+		file, err := parent.OpenFile(leaf, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+		if err != nil {
+			if _, statErr := parent.Lstat(leaf); statErr == nil {
 				return fmt.Errorf("%w: %s", errPathPreExists, path)
 			}
 			return err
@@ -259,7 +518,7 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 		defer func() {
 			_ = file.Close()
 			if !ok {
-				_ = m.root.Remove(rel)
+				_ = parent.Remove(leaf)
 			}
 		}()
 		if _, err := file.Write(data); err != nil {
@@ -288,9 +547,17 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 	return nil
 }
 
-func readExistingSidecarFile(path string, m *sidecarManifest) ([]byte, error) {
+func readExistingSidecarFile(path string, m *sidecarManifest) (*sidecarFileSnapshot, error) {
 	if m == nil || !m.Rooted {
-		return os.ReadFile(path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return nil, err
+		}
+		return &sidecarFileSnapshot{data: data, mode: info.Mode(), identity: info}, nil
 	}
 	if m.root == nil {
 		return nil, errors.New("root-confined sidecar manifest is not bound")
@@ -299,17 +566,15 @@ func readExistingSidecarFile(path string, m *sidecarManifest) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	info, err := m.root.Lstat(rel)
+	parent, leaf, err := openFixedSidecarParent(m.root, rel)
 	if err != nil {
 		return nil, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("existing sidecar is not a real file: %s", rel)
-	}
-	return m.root.ReadFile(rel)
+	defer parent.Close()
+	return readFixedSidecarFile(parent, leaf)
 }
 
-func overwriteExistingSidecarFile(path string, data []byte, perm os.FileMode, m *sidecarManifest) error {
+func overwriteExistingSidecarFile(path string, data []byte, perm os.FileMode, m *sidecarManifest, snapshot *sidecarFileSnapshot) error {
 	if m == nil || !m.Rooted {
 		return os.WriteFile(path, data, perm)
 	}
@@ -320,22 +585,27 @@ func overwriteExistingSidecarFile(path string, data []byte, perm os.FileMode, m 
 	if err != nil {
 		return err
 	}
-	info, err := m.root.Lstat(rel)
+	if snapshot == nil {
+		return errors.New("existing sidecar snapshot is required")
+	}
+	parent, leaf, err := openFixedSidecarParent(m.root, rel)
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return fmt.Errorf("existing sidecar is not a real file: %s", rel)
-	}
-	file, err := m.root.OpenFile(rel, os.O_WRONLY|os.O_TRUNC, perm)
+	defer parent.Close()
+	replacement, err := atomicReplaceFixedSidecar(parent, leaf, snapshot.identity, data, perm)
 	if err != nil {
 		return err
 	}
-	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
-		return err
+	if m.preimage == nil {
+		m.preimage = make(map[string]sidecarFilePreimage)
 	}
-	return file.Close()
+	m.preimage[rel] = sidecarFilePreimage{
+		data:        append([]byte(nil), snapshot.data...),
+		mode:        snapshot.mode,
+		replacement: replacement,
+	}
+	return nil
 }
 
 func recordExistingSidecarOwnership(path string, m *sidecarManifest) error {
@@ -427,11 +697,170 @@ func writeSidecarManifest(envRoot string, m *sidecarManifest) error {
 	return os.WriteFile(filepath.Join(envRoot, sidecarManifestFile), data, 0o644)
 }
 
+func writePlatformSidecarManifest(envRoot string, m *sidecarManifest) error {
+	if envRoot == "" {
+		return nil
+	}
+	if m == nil {
+		m = &sidecarManifest{}
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("marshal sidecar manifest: %w", err)
+	}
+	envRootHandle, err := openFixedSidecarRoot(envRoot)
+	if err != nil {
+		return fmt.Errorf("open sidecar manifest root: %w", err)
+	}
+	defer envRootHandle.Close()
+	if err := atomicWriteFixedSidecarNoClobber(envRootHandle, sidecarManifestFile, data, 0o644); err != nil {
+		return fmt.Errorf("publish sidecar manifest: %w", err)
+	}
+	return nil
+}
+
+type fixedManifestFile struct {
+	root     *os.Root
+	snapshot *sidecarFileSnapshot
+}
+
+func readSidecarManifestFile(envRoot string, fixed bool) ([]byte, *fixedManifestFile, error) {
+	manifestPath := filepath.Join(envRoot, sidecarManifestFile)
+	if !fixed {
+		data, err := os.ReadFile(manifestPath)
+		return data, nil, err
+	}
+	root, err := openFixedSidecarRoot(envRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	snapshot, err := readFixedSidecarFile(root, sidecarManifestFile)
+	if err != nil {
+		_ = root.Close()
+		return nil, nil, err
+	}
+	return snapshot.data, &fixedManifestFile{root: root, snapshot: snapshot}, nil
+}
+
+func (f *fixedManifestFile) close() error {
+	if f == nil || f.root == nil {
+		return nil
+	}
+	err := f.root.Close()
+	f.root = nil
+	return err
+}
+
+func (f *fixedManifestFile) remove() error {
+	if f == nil || f.root == nil || f.snapshot == nil {
+		return errors.New("fixed sidecar manifest handle is not open")
+	}
+	current, err := f.root.Lstat(sidecarManifestFile)
+	if err != nil {
+		return err
+	}
+	if current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || !os.SameFile(f.snapshot.identity, current) {
+		return errors.New("sidecar manifest changed before removal")
+	}
+	return f.root.Remove(sidecarManifestFile)
+}
+
 func decodeSidecarManifest(data []byte, m *sidecarManifest) error {
 	if err := ValidateNoDuplicateJSONKeys(data); err != nil {
 		return fmt.Errorf("validate sidecar manifest JSON: %w", err)
 	}
 	return json.Unmarshal(data, m)
+}
+
+func removeFixedSidecarFile(root *os.Root, rel string) error {
+	parent, leaf, err := openFixedSidecarParent(root, rel)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	info, err := parent.Lstat(leaf)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("owned sidecar is not a real file: %s", rel)
+	}
+	return parent.Remove(leaf)
+}
+
+func removeFixedSidecarDir(root *os.Root, rel string) error {
+	parent, leaf, err := openFixedSidecarParent(root, rel)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	info, err := parent.Lstat(leaf)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("owned sidecar is not a real directory: %s", rel)
+	}
+	return parent.Remove(leaf)
+}
+
+func fixedSidecarDirHasEntries(root *os.Root, rel string) (hasEntries bool, ok bool) {
+	parent, leaf, err := openFixedSidecarParent(root, rel)
+	if err != nil {
+		return false, false
+	}
+	defer parent.Close()
+	expected, err := parent.Lstat(leaf)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, true
+	}
+	if err != nil || expected.Mode()&os.ModeSymlink != 0 || !expected.IsDir() {
+		return false, false
+	}
+	dirRoot, err := openFixedSidecarChild(parent, leaf, expected)
+	if err != nil {
+		return false, false
+	}
+	defer dirRoot.Close()
+	dir, err := dirRoot.Open(".")
+	if err != nil {
+		return false, false
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, false
+	}
+	return len(entries) > 0, true
+}
+
+func removeAllFixedSidecarDir(root *os.Root, rel string) error {
+	parent, leaf, err := openFixedSidecarParent(root, rel)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	info, err := parent.Lstat(leaf)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("managed skill sidecar is not a real directory: %s", rel)
+	}
+	return parent.RemoveAll(leaf)
+}
+
+func restoreFixedSidecarPreimage(root *os.Root, rel string, preimage sidecarFilePreimage) error {
+	parent, leaf, err := openFixedSidecarParent(root, rel)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	_, err = atomicReplaceFixedSidecar(parent, leaf, preimage.replacement, preimage.data, preimage.mode.Perm())
+	return err
 }
 
 func rollbackSidecarManifest(m *sidecarManifest) error {
@@ -451,7 +880,20 @@ func rollbackSidecarManifest(m *sidecarManifest) error {
 		if err != nil {
 			return err
 		}
-		return m.root.Remove(rel)
+		return removeFixedSidecarFile(m.root, rel)
+	}
+	removeDir := func(path string) error {
+		if !m.Rooted {
+			return os.Remove(path)
+		}
+		if m.root == nil {
+			return errors.New("root-confined sidecar manifest is not bound")
+		}
+		rel, err := pathRelativeToRoot(m.rootPath, path)
+		if err != nil {
+			return err
+		}
+		return removeFixedSidecarDir(m.root, rel)
 	}
 	directoryHasEntries := func(path string) (bool, bool) {
 		if !m.Rooted || m.root == nil {
@@ -461,16 +903,28 @@ func rollbackSidecarManifest(m *sidecarManifest) error {
 		if err != nil {
 			return false, false
 		}
-		return rootDirHasEntries(m.root, rel)
+		return fixedSidecarDirHasEntries(m.root, rel)
 	}
 	for _, path := range m.Files {
+		if m.Rooted {
+			rel, err := pathRelativeToRoot(m.rootPath, path)
+			if err == nil {
+				if preimage, ok := m.preimage[rel]; ok {
+					err = restoreFixedSidecarPreimage(m.root, rel, preimage)
+					if err != nil && firstErr == nil {
+						firstErr = fmt.Errorf("restore %s: %w", path, err)
+					}
+					continue
+				}
+			}
+		}
 		if err := removePath(path); err != nil && !errors.Is(err, fs.ErrNotExist) && firstErr == nil {
 			firstErr = fmt.Errorf("remove %s: %w", path, err)
 		}
 	}
 	for i := len(m.Dirs) - 1; i >= 0; i-- {
 		path := m.Dirs[i]
-		if err := removePath(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := removeDir(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			hasEntries, ok := directoryHasEntries(path)
 			if hasEntries && ok {
 				continue
@@ -540,12 +994,15 @@ func cleanupSidecars(envRoot, workDir string) error {
 		return nil
 	}
 	manifestPath := filepath.Join(envRoot, sidecarManifestFile)
-	data, err := os.ReadFile(manifestPath)
+	data, fixedManifest, err := readSidecarManifestFile(envRoot, workDir != "")
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("read sidecar manifest %s: %w", manifestPath, err)
+	}
+	if fixedManifest != nil {
+		defer fixedManifest.close()
 	}
 	var m sidecarManifest
 	if err := decodeSidecarManifest(data, &m); err != nil {
@@ -569,7 +1026,7 @@ func cleanupSidecars(envRoot, workDir string) error {
 		}
 		defer workRoot.Close()
 	}
-	removePath := func(path string) error {
+	removeFile := func(path string) error {
 		if workRoot == nil {
 			return os.Remove(path)
 		}
@@ -577,7 +1034,17 @@ func cleanupSidecars(envRoot, workDir string) error {
 		if err != nil {
 			return err
 		}
-		return workRoot.Remove(rel)
+		return removeFixedSidecarFile(workRoot, rel)
+	}
+	removeDir := func(path string) error {
+		if workRoot == nil {
+			return os.Remove(path)
+		}
+		rel, err := pathRelativeToRoot(workDir, path)
+		if err != nil {
+			return err
+		}
+		return removeFixedSidecarDir(workRoot, rel)
 	}
 	directoryHasEntries := func(path string) (bool, bool) {
 		if workRoot == nil {
@@ -587,11 +1054,11 @@ func cleanupSidecars(envRoot, workDir string) error {
 		if err != nil {
 			return false, false
 		}
-		return rootDirHasEntries(workRoot, rel)
+		return fixedSidecarDirHasEntries(workRoot, rel)
 	}
 
 	for _, f := range m.Files {
-		if err := removePath(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := removeFile(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			captureErr(fmt.Errorf("remove %s: %w", f, err))
 		}
 	}
@@ -602,7 +1069,7 @@ func cleanupSidecars(envRoot, workDir string) error {
 	// (permission denied, busy, etc. — capture and surface).
 	for i := len(m.Dirs) - 1; i >= 0; i-- {
 		d := m.Dirs[i]
-		err := removePath(d)
+		err := removeDir(d)
 		if err == nil || errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -639,7 +1106,11 @@ func cleanupSidecars(envRoot, workDir string) error {
 		// retried after the swapped/blocked path is repaired.
 		return firstErr
 	}
-	if err := os.Remove(manifestPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	removeManifest := func() error { return os.Remove(manifestPath) }
+	if fixedManifest != nil {
+		removeManifest = fixedManifest.remove
+	}
+	if err := removeManifest(); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		captureErr(fmt.Errorf("remove manifest %s: %w", manifestPath, err))
 	}
 
@@ -663,22 +1134,6 @@ func pathRelativeToRoot(rootPath, path string) (string, error) {
 		return "", fmt.Errorf("sidecar path %s escapes root %s", path, rootPath)
 	}
 	return rel, nil
-}
-
-func rootDirHasEntries(root *os.Root, path string) (hasEntries bool, ok bool) {
-	dir, err := root.Open(path)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, true
-		}
-		return false, false
-	}
-	defer dir.Close()
-	entries, err := dir.ReadDir(1)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, false
-	}
-	return len(entries) > 0, true
 }
 
 // removeReusedManagedSkillDirs force-removes the skill directories the prior
@@ -718,12 +1173,15 @@ func removeReusedManagedSkillDirsAt(envRoot, workDir, skillsParent string) error
 	if envRoot == "" || skillsParent == "" {
 		return nil
 	}
-	data, err := os.ReadFile(filepath.Join(envRoot, sidecarManifestFile))
+	data, fixedManifest, err := readSidecarManifestFile(envRoot, workDir != "")
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("read sidecar manifest for reuse skill rollback: %w", err)
+	}
+	if fixedManifest != nil {
+		defer fixedManifest.close()
 	}
 	var m sidecarManifest
 	if err := decodeSidecarManifest(data, &m); err != nil {
@@ -762,7 +1220,7 @@ func removeReusedManagedSkillDirsAt(envRoot, workDir, skillsParent string) error
 			continue
 		}
 		if workRoot != nil {
-			err = workRoot.RemoveAll(candidate)
+			err = removeAllFixedSidecarDir(workRoot, candidate)
 		} else {
 			err = os.RemoveAll(d)
 		}

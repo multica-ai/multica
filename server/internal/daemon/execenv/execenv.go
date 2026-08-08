@@ -697,7 +697,11 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 }
 
 func finalizeSidecarManifest(provider, envRoot, workDir string, manifest *sidecarManifest, logger *slog.Logger) error {
-	if err := writeSidecarManifest(envRoot, manifest); err != nil {
+	writeManifest := writeSidecarManifest
+	if provider == "platform-agent-cli" {
+		writeManifest = writePlatformSidecarManifest
+	}
+	if err := writeManifest(envRoot, manifest); err != nil {
 		if logger != nil {
 			logger.Warn("execenv: write sidecar manifest failed", "error", err)
 		}
