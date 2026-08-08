@@ -12,14 +12,17 @@
  * `vertical-align: middle` rule on `[data-node-view-wrapper]` in CSS handles
  * line-box alignment; setting it on the inner <a> has no effect because the
  * wrapper is the outermost inline element.
+ * `plain` display mode renders bare inherited-size text instead of the card,
+ * which is shorter than the line box and needs no separate accommodation.
  */
 
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useIssueLinkStore } from "@multica/core/issues/stores";
+import { useIssueLinkStore, useIssueMentionDisplayStore } from "@multica/core/issues/stores";
 import { useNavigation } from "../../navigation";
 import { IssueChip } from "../../issues/components/issue-chip";
+import { IssueHoverCard } from "../../issues/components/issue-hover-card";
 import { ProjectChip } from "../../projects/components/project-chip";
 
 export function MentionView({ node }: NodeViewProps) {
@@ -96,6 +99,7 @@ function IssueMention({
   const p = useWorkspacePaths();
   const { push, openInNewTab } = useNavigation();
   const newTabPreferred = useIssueLinkStore((s) => s.openInNewTab);
+  const mode = useIssueMentionDisplayStore((s) => s.mode);
   const issuePath = p.issueDetail(issueId);
 
   const handleClick = (e: React.MouseEvent) => {
@@ -120,7 +124,7 @@ function IssueMention({
     push(issuePath);
   };
 
-  return (
+  const anchor = (
     <a
       href={issuePath}
       target={newTabPreferred ? "_blank" : undefined}
@@ -131,8 +135,13 @@ function IssueMention({
       <IssueChip
         issueId={issueId}
         fallbackLabel={fallbackLabel}
+        variant={mode}
         className="cursor-pointer hover:bg-accent transition-colors"
       />
     </a>
   );
+
+  if (mode === "full") return anchor;
+
+  return <IssueHoverCard issueId={issueId}>{anchor}</IssueHoverCard>;
 }
