@@ -486,6 +486,12 @@ export interface UpdateMeRequest {
   timezone?: string;
 }
 
+export interface UpdatePushoverSettingsRequest {
+  /** A 30-character Pushover User Key. Empty clears the stored key. */
+  user_key?: string;
+  login_codes_enabled?: boolean;
+}
+
 export interface CreateMemberRequest {
   email: string;
   role?: MemberRole;

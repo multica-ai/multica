@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -58,13 +59,15 @@ type UserResponse struct {
 	AvatarURL *string `json:"avatar_url"`
 	Language  *string `json:"language"`
 	// Pinned IANA tz; nil = no preference (use browser-detected tz).
-	Timezone                *string         `json:"timezone"`
-	OnboardedAt             *string         `json:"onboarded_at"`
-	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
-	StarterContentState     *string         `json:"starter_content_state"`
-	ProfileDescription      string          `json:"profile_description"`
-	CreatedAt               string          `json:"created_at"`
-	UpdatedAt               string          `json:"updated_at"`
+	Timezone                  *string         `json:"timezone"`
+	OnboardedAt               *string         `json:"onboarded_at"`
+	OnboardingQuestionnaire   json.RawMessage `json:"onboarding_questionnaire"`
+	StarterContentState       *string         `json:"starter_content_state"`
+	ProfileDescription        string          `json:"profile_description"`
+	PushoverUserKeyConfigured bool            `json:"pushover_user_key_configured"`
+	PushoverLoginCodesEnabled bool            `json:"pushover_login_codes_enabled"`
+	CreatedAt                 string          `json:"created_at"`
+	UpdatedAt                 string          `json:"updated_at"`
 }
 
 // MaxProfileDescriptionLen caps the user-supplied profile_description body.
@@ -82,18 +85,20 @@ func (h *Handler) userToResponse(u db.User) UserResponse {
 		q = []byte("{}")
 	}
 	return UserResponse{
-		ID:                      uuidToString(u.ID),
-		Name:                    u.Name,
-		Email:                   u.Email,
-		AvatarURL:               h.resolveAvatarURLPtr(textToPtr(u.AvatarUrl)),
-		Language:                textToPtr(u.Language),
-		Timezone:                textToPtr(u.Timezone),
-		OnboardedAt:             timestampToPtr(u.OnboardedAt),
-		OnboardingQuestionnaire: json.RawMessage(q),
-		StarterContentState:     textToPtr(u.StarterContentState),
-		ProfileDescription:      u.ProfileDescription,
-		CreatedAt:               timestampToString(u.CreatedAt),
-		UpdatedAt:               timestampToString(u.UpdatedAt),
+		ID:                        uuidToString(u.ID),
+		Name:                      u.Name,
+		Email:                     u.Email,
+		AvatarURL:                 h.resolveAvatarURLPtr(textToPtr(u.AvatarUrl)),
+		Language:                  textToPtr(u.Language),
+		Timezone:                  textToPtr(u.Timezone),
+		OnboardedAt:               timestampToPtr(u.OnboardedAt),
+		OnboardingQuestionnaire:   json.RawMessage(q),
+		StarterContentState:       textToPtr(u.StarterContentState),
+		ProfileDescription:        u.ProfileDescription,
+		PushoverUserKeyConfigured: u.PushoverUserKey.Valid,
+		PushoverLoginCodesEnabled: u.PushoverLoginCodesEnabled,
+		CreatedAt:                 timestampToString(u.CreatedAt),
+		UpdatedAt:                 timestampToString(u.UpdatedAt),
 	}
 }
 
@@ -279,7 +284,8 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check signup restrictions before sending magic link
-	_, err := h.Queries.GetUserByEmail(r.Context(), email)
+	loginUser, err := h.Queries.GetUserByEmail(r.Context(), email)
+	userExists := err == nil
 	if err != nil {
 		if !isNotFound(err) {
 			// Real database/query error → return 500
@@ -335,8 +341,15 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.EmailService.SendVerificationCode(email, code); err != nil {
-		slog.Error("failed to send verification code", "email", email, "error", err)
+	if err := deliverLoginCode(
+		r.Context(),
+		email,
+		code,
+		loginUser,
+		userExists,
+		h.EmailService.SendVerificationCode,
+		h.PushoverService,
+	); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to send verification code")
 		return
 	}
@@ -345,6 +358,38 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	_ = h.Queries.DeleteExpiredVerificationCodes(r.Context())
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Verification code sent"})
+}
+
+func deliverLoginCode(
+	ctx context.Context,
+	email, code string,
+	loginUser db.User,
+	userExists bool,
+	emailSender func(to, code string) error,
+	pushover LoginCodePusher,
+) error {
+	emailErr := emailSender(email, code)
+	if emailErr != nil {
+		slog.Error("failed to send verification code by email", "email", email, "error", emailErr)
+	}
+
+	pushoverAttempted := false
+	var pushoverErr error
+	if userExists && pushover != nil && pushover.Enabled() &&
+		loginUser.PushoverLoginCodesEnabled && loginUser.PushoverUserKey.Valid {
+		pushoverAttempted = true
+		pushoverErr = pushover.SendLoginCode(ctx, loginUser.PushoverUserKey.String, code)
+		if pushoverErr != nil {
+			slog.Error("failed to send verification code by Pushover", "email", email, "error", pushoverErr)
+		}
+	}
+
+	// Delivery is additive. Preserve the existing email/log path, but allow a
+	// successful Pushover delivery to keep login usable during an email outage.
+	if emailErr != nil && (!pushoverAttempted || pushoverErr != nil) {
+		return errors.New("all login-code delivery channels failed")
+	}
+	return nil
 }
 
 func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
@@ -442,6 +487,11 @@ type UpdateMeRequest struct {
 	ProfileDescription *string `json:"profile_description"`
 	// IANA tz to pin; "" clears back to NULL; nil leaves untouched.
 	Timezone *string `json:"timezone"`
+}
+
+type UpdateMyPushoverSettingsRequest struct {
+	UserKey           *string `json:"user_key"`
+	LoginCodesEnabled *bool   `json:"login_codes_enabled"`
 }
 
 type GoogleLoginRequest struct {
@@ -723,4 +773,90 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, h.userToResponse(updatedUser))
+}
+
+func (h *Handler) UpdateMyPushoverSettings(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req UpdateMyPushoverSettingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	currentUser, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+
+	userKey := currentUser.PushoverUserKey
+	if req.UserKey != nil {
+		trimmed := strings.TrimSpace(*req.UserKey)
+		if trimmed == "" {
+			userKey = pgtype.Text{}
+		} else {
+			if !service.IsValidPushoverKey(trimmed) {
+				writeError(w, http.StatusBadRequest, "Pushover user key must be 30 letters and numbers")
+				return
+			}
+			userKey = pgtype.Text{String: trimmed, Valid: true}
+		}
+	}
+
+	loginCodesEnabled := currentUser.PushoverLoginCodesEnabled
+	if req.LoginCodesEnabled != nil {
+		loginCodesEnabled = *req.LoginCodesEnabled
+	}
+	if loginCodesEnabled && !userKey.Valid {
+		writeError(w, http.StatusBadRequest, "a Pushover user key is required to enable login codes")
+		return
+	}
+
+	updatedUser, err := h.Queries.UpdateUserPushoverSettings(r.Context(), db.UpdateUserPushoverSettingsParams{
+		ID:                        currentUser.ID,
+		PushoverUserKey:           userKey,
+		PushoverLoginCodesEnabled: loginCodesEnabled,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update Pushover settings")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, h.userToResponse(updatedUser))
+}
+
+func (h *Handler) SendMyPushoverTestNotification(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if h.PushoverService == nil || !h.PushoverService.Enabled() {
+		writeError(w, http.StatusServiceUnavailable, "Pushover is not configured")
+		return
+	}
+
+	currentUser, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if !currentUser.PushoverUserKey.Valid {
+		writeError(w, http.StatusBadRequest, "connect Pushover before sending a test notification")
+		return
+	}
+
+	if err := h.PushoverService.SendTestNotification(
+		r.Context(),
+		currentUser.PushoverUserKey.String,
+	); err != nil {
+		slog.Error("failed to send Pushover test notification", "user_id", userID, "error", err)
+		writeError(w, http.StatusBadGateway, "failed to send Pushover test notification")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

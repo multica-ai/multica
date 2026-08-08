@@ -52,6 +52,29 @@ STARTTLS is used automatically when advertised by the server. Port 465 (SMTPS / 
 
 > **Note:** If neither Resend nor SMTP is configured, generated verification codes are printed to backend logs — copy them from there to log in. A fixed local testing code (e.g. `888888`) is **opt-in only**: set `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env` and keep `APP_ENV` non-production. The Docker self-host stack pins `APP_ENV=production`, so the shortcut is ignored there. **Never enable a fixed code on a publicly reachable instance.**
 
+### Pushover (Optional)
+
+Pushover can deliver login codes in addition to the existing email or log delivery path. It does not replace email/log delivery, so new users can still receive their first code before configuring their Pushover account.
+
+1. [Create a Pushover application](https://pushover.net/apps/build) named `Multica`.
+2. Set its 30-character Application API Token on the backend:
+
+   ```env
+   PUSHOVER_APPLICATION_TOKEN=your_application_api_token
+   ```
+
+3. Restart the backend, then open **Settings → Profile → Pushover**. Enter the User Key shown on the [Pushover dashboard](https://pushover.net/). Multica connects automatically and enables **Login codes** by default.
+
+The Pushover card under **Settings → Integrations** is always visible so administrators can discover the server configuration and see whether it is enabled:
+
+![Pushover integration status](docs/assets/pushover-integration-status.jpg)
+
+Only the per-user Profile controls are hidden when `PUSHOVER_APPLICATION_TOKEN` is not configured. Once connected, members can disconnect their User Key, send a test notification, or opt out of individual notification types without a separate Save action:
+
+![Pushover profile settings](docs/assets/pushover-profile-settings.jpg)
+
+Use **Send Test Notification** to verify delivery before relying on the integration. Pushover receives a normal-priority login message titled `Multica Login Code` whose body is the six-digit code. The application token is never returned to clients; `/api/config` exposes only whether Pushover is available.
+
 ### Google OAuth (Optional)
 
 | Variable | Description |
