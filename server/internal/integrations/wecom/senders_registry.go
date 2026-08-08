@@ -16,6 +16,7 @@ package wecom
 // without threading the Channel through the engine.
 
 import (
+	"context"
 	"sync"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -75,4 +76,30 @@ func (r *sendersRegistry) get(id pgtype.UUID) *wsSender {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.byKey[util.UUIDToString(id)]
+}
+
+// stream writes one frame of a streaming reply to the bubble h describes.
+//
+// A stream frame is only meaningful while the req_id it echoes is still fresh,
+// so a frame that cannot go out now is worthless later — there is nothing
+// useful to do with it but report the failure and let the caller say the same
+// words as an ordinary message instead.
+func (r *sendersRegistry) stream(ctx context.Context, h streamHandle, content string, finish bool) error {
+	sender := r.get(h.InstallationID)
+	if sender == nil {
+		return errNoLiveConnection
+	}
+	return sender.respondStream(ctx, h.ReqID, h.StreamID, content, finish)
+}
+
+// sendTextCtx pushes a plain message to a chat over the installation's live
+// connection — the fallback every closing frame degrades to. Separate from
+// stream because a message has no req_id to expire: this is the path that
+// still works when the bubble is beyond saving.
+func (r *sendersRegistry) sendTextCtx(ctx context.Context, id pgtype.UUID, chatID string, chatType int, content string) error {
+	sender := r.get(id)
+	if sender == nil {
+		return errNoLiveConnection
+	}
+	return sender.sendTextCtx(ctx, chatID, chatType, content)
 }
