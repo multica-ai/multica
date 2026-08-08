@@ -773,6 +773,13 @@ var piThinkingLevelLabels = map[string]string{
 
 var piThinkingLevelOrder = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 
+// Keep Pi discovery within the established 15-second window while reserving a
+// real opportunity for the compatibility fallback when RPC hangs.
+const (
+	piRPCDiscoveryTimeout   = 7 * time.Second
+	piTableDiscoveryTimeout = 8 * time.Second
+)
+
 type piRPCModel struct {
 	ID               string             `json:"id"`
 	Name             string             `json:"name"`
@@ -789,6 +796,7 @@ type piRPCState struct {
 type piRPCResponse struct {
 	ID      string          `json:"id"`
 	Type    string          `json:"type"`
+	Command string          `json:"command"`
 	Success bool            `json:"success"`
 	Data    json.RawMessage `json:"data"`
 }
@@ -799,6 +807,10 @@ type piRPCResponse struct {
 // versions and pi-family forks may not implement RPC, so discovery falls back
 // to the existing table parser without advertising a guessed thinking catalog.
 func discoverPiModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverPiModelsWithin(ctx, executablePath, piRPCDiscoveryTimeout, piTableDiscoveryTimeout)
+}
+
+func discoverPiModelsWithin(ctx context.Context, executablePath string, rpcTimeout, tableTimeout time.Duration) ([]Model, error) {
 	if executablePath == "" {
 		executablePath = "pi"
 	}
@@ -806,15 +818,19 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	if err != nil {
 		return []Model{}, nil
 	}
-	// RPC and the compatibility table fallback share one discovery budget.
-	// An old or broken RPC surface must not double the established 15-second
-	// model-list timeout before the UI gets an answer.
-	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	if models, ok := discoverPiModelsRPC(runCtx, executablePath, lookedUp); ok {
+	// Split the established 15-second discovery budget so an RPC surface that
+	// accepts the mode but never answers cannot starve the compatibility table
+	// fallback. Both phase contexts still inherit caller cancellation.
+	rpcCtx, rpcCancel := context.WithTimeout(ctx, rpcTimeout)
+	models, ok := discoverPiModelsRPC(rpcCtx, executablePath, lookedUp)
+	rpcCancel()
+	if ok {
 		return models, nil
 	}
-	return discoverPiModelsTable(runCtx, executablePath)
+
+	tableCtx, tableCancel := context.WithTimeout(ctx, tableTimeout)
+	defer tableCancel()
+	return discoverPiModelsTable(tableCtx, executablePath)
 }
 
 // discoverPiModelsRPC starts a short-lived Pi RPC session and requests both
@@ -877,22 +893,21 @@ func discoverPiModelsRPC(ctx context.Context, executablePath, lookedUp string) (
 		if err := json.Unmarshal(scanner.Bytes(), &response); err != nil || response.Type != "response" {
 			continue
 		}
-		switch response.ID {
-		case "multica-state":
+		switch {
+		case response.ID == "multica-state" || response.Command == "get_state":
 			stateDone = true
 			if response.Success {
 				_ = json.Unmarshal(response.Data, &state)
 			}
-		case "multica-models":
+		case response.ID == "multica-models" || response.Command == "get_available_models":
 			modelsDone = true
-			if !response.Success {
-				continue
-			}
-			var payload struct {
-				Models []piRPCModel `json:"models"`
-			}
-			if err := json.Unmarshal(response.Data, &payload); err == nil {
-				rawModels = payload.Models
+			if response.Success {
+				var payload struct {
+					Models []piRPCModel `json:"models"`
+				}
+				if err := json.Unmarshal(response.Data, &payload); err == nil {
+					rawModels = payload.Models
+				}
 			}
 		}
 		if modelsDone && stateDone {
@@ -949,9 +964,10 @@ func piModelsFromRPC(rawModels []piRPCModel, state piRPCState) []Model {
 	return models
 }
 
-// piThinkingFromRPCModel mirrors Pi's getSupportedThinkingLevels(model):
-// reasoning=false has no useful effort dial; off..high are available unless
-// explicitly mapped to null; xhigh/max require an explicit non-null mapping.
+// piThinkingFromRPCModel follows Pi's getSupportedThinkingLevels(model) for
+// reasoning-capable models: off..high are available unless explicitly mapped
+// to null; xhigh/max require an explicit non-null mapping. Pi reports only
+// "off" for reasoning=false; Multica intentionally hides that no-op picker.
 func piThinkingFromRPCModel(model piRPCModel) *ModelThinking {
 	if !model.Reasoning {
 		return nil
