@@ -2,8 +2,9 @@
 
 import { AppLink } from "../../navigation";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useIssueLinkStore } from "@multica/core/issues/stores";
+import { useIssueLinkStore, useIssueMentionDisplayStore } from "@multica/core/issues/stores";
 import { IssueChip } from "./issue-chip";
+import { IssueHoverCard } from "./issue-hover-card";
 
 interface IssueMentionCardProps {
   issueId: string;
@@ -18,11 +19,17 @@ interface IssueMentionCardProps {
  *
  * Plain click honors the "open issue links in new tab" preference
  * (Settings → Preferences): new browser tab on web, new app tab on desktop.
+ *
+ * Density follows the reader's "issue mention style" preference. The narrower
+ * modes hide the title, so those get a hover card that brings it back; `full`
+ * already shows it and stays exactly as it was.
  */
 export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardProps) {
   const p = useWorkspacePaths();
   const openInNewTab = useIssueLinkStore((s) => s.openInNewTab);
-  return (
+  const mode = useIssueMentionDisplayStore((s) => s.mode);
+
+  const link = (
     <AppLink
       href={p.issueDetail(issueId)}
       target={openInNewTab ? "_blank" : undefined}
@@ -32,8 +39,13 @@ export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardPro
       <IssueChip
         issueId={issueId}
         fallbackLabel={fallbackLabel}
+        variant={mode}
         className="cursor-pointer hover:bg-accent transition-colors"
       />
     </AppLink>
   );
+
+  if (mode === "full") return link;
+
+  return <IssueHoverCard issueId={issueId}>{link}</IssueHoverCard>;
 }
