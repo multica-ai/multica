@@ -94,6 +94,46 @@ func TestHookAPIPublishRequiresHumanPermissionRunAndBaseline(t *testing.T) {
 	}
 }
 
+// Pausing a managed policy has to work over HTTP, not just against the
+// repository: the owner flag is derived from the member in request context,
+// so this is what proves an owner can actually disable one and a plain member
+// still cannot.
+func TestHookAPIDisableOnManagedPolicyIsOwnerOnly(t *testing.T) {
+	const policyID = "33333333-3333-3333-3333-333333333333"
+	auth := &fakeHookAuthorizer{allow: map[HookPermission]bool{HookPermissionWrite: true, HookPermissionManageManaged: true}}
+
+	for _, testCase := range []struct {
+		name  string
+		owner bool
+		want  int
+	}{
+		{name: "member", owner: false, want: http.StatusForbidden},
+		{name: "owner", owner: true, want: http.StatusOK},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := NewMemoryHookRepository()
+			repo.Seed(hookTestWorkspaceID, newTestHookPolicy(policyID, HookRequire, HookModeManaged, HookBinding{Kind: HookScopeWorkspace, ID: hookTestWorkspaceID}))
+			router := hookTestRouter(NewHookAPI(repo, auth))
+
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, hookRequest(t, http.MethodPost, "/"+policyID+"/disable", nil, "member-1", testCase.owner))
+			if rec.Code != testCase.want {
+				t.Fatalf("disable status = %d, want %d; body=%s", rec.Code, testCase.want, rec.Body.String())
+			}
+			if testCase.want != http.StatusOK {
+				return
+			}
+			var disabled HookPolicy
+			if err := json.Unmarshal(rec.Body.Bytes(), &disabled); err != nil {
+				t.Fatal(err)
+			}
+			if disabled.Mode != HookModeOff {
+				t.Fatalf("mode after disable = %q, want %q", disabled.Mode, HookModeOff)
+			}
+		})
+	}
+}
+
 func TestHookAPITestCreatesFreshBaselineWithoutSideEffects(t *testing.T) {
 	repo := NewMemoryHookRepository()
 	policy := newTestHookPolicy("22222222-2222-2222-2222-222222222222", HookBlock, HookModeDryRun, HookBinding{Kind: HookScopeModel, ID: "claude-opus-4-6"})

@@ -72,6 +72,11 @@ func (r *PostgresHookRepository) List(ctx context.Context, workspaceID string) (
 	return policies, nil
 }
 
+// ensureManagedPolicies seeds the code-defined managed policies once per
+// workspace per process. Seeding owns the definition (name, description,
+// events, conditions) but NOT the operational state: mode and policy_version
+// are set on first insert and never rewritten, so an owner who pauses or edits
+// a managed policy keeps that decision across restarts.
 func (r *PostgresHookRepository) ensureManagedPolicies(ctx context.Context, workspaceID string, wsID pgtype.UUID) error {
 	r.managedMu.Lock()
 	defer r.managedMu.Unlock()
@@ -109,8 +114,6 @@ func (r *PostgresHookRepository) ensureManagedPolicies(ctx context.Context, work
 			ON CONFLICT (id) DO UPDATE SET
 				name=EXCLUDED.name,
 				description=EXCLUDED.description,
-				policy_version=1,
-				mode='managed',
 				fail_mode='closed',
 				event_types=EXCLUDED.event_types,
 				conditions=EXCLUDED.conditions,
@@ -120,16 +123,12 @@ func (r *PostgresHookRepository) ensureManagedPolicies(ctx context.Context, work
 			WHERE (
 				cerebro_workflow_hook_policy.name,
 				cerebro_workflow_hook_policy.description,
-				cerebro_workflow_hook_policy.policy_version,
-				cerebro_workflow_hook_policy.mode,
 				cerebro_workflow_hook_policy.fail_mode,
 				cerebro_workflow_hook_policy.event_types,
 				cerebro_workflow_hook_policy.conditions
 			) IS DISTINCT FROM (
 				EXCLUDED.name,
 				EXCLUDED.description,
-				EXCLUDED.policy_version,
-				EXCLUDED.mode,
 				EXCLUDED.fail_mode,
 				EXCLUDED.event_types,
 				EXCLUDED.conditions
@@ -209,9 +208,6 @@ func (r *PostgresHookRepository) Update(ctx context.Context, workspaceID string,
 	if err != nil {
 		return HookPolicy{}, err
 	}
-	if isBuiltInManagedHookPolicy(workspaceID, current.ID) {
-		return HookPolicy{}, ErrManagedHookLocked
-	}
 	if current.Mode == HookModeManaged && !actor.IsOwner {
 		return HookPolicy{}, ErrManagedHookLocked
 	}
@@ -227,9 +223,6 @@ func (r *PostgresHookRepository) Disable(ctx context.Context, workspaceID string
 	current, err := r.Get(ctx, workspaceID, id)
 	if err != nil {
 		return HookPolicy{}, err
-	}
-	if isBuiltInManagedHookPolicy(workspaceID, current.ID) {
-		return HookPolicy{}, ErrManagedHookLocked
 	}
 	if current.Mode == HookModeManaged && !actor.IsOwner {
 		return HookPolicy{}, ErrManagedHookLocked
@@ -248,9 +241,6 @@ func (r *PostgresHookRepository) Delete(ctx context.Context, workspaceID string,
 	current, err := r.Get(ctx, workspaceID, id)
 	if err != nil {
 		return err
-	}
-	if isBuiltInManagedHookPolicy(workspaceID, current.ID) {
-		return ErrManagedHookLocked
 	}
 	if current.Mode == HookModeManaged && !actor.IsOwner {
 		return ErrManagedHookLocked

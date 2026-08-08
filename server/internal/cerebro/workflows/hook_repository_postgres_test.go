@@ -73,35 +73,45 @@ func TestPostgresHookRepositoryEnsuresManagedMessagePolicies(t *testing.T) {
 	}
 }
 
-func TestPostgresHookRepositoryLocksBuiltInManagedPoliciesForOwners(t *testing.T) {
+// An owner may pause any code-defined managed policy, and re-seeding must not
+// undo it. Seeding runs once per process, so "survives re-seeding" is the same
+// claim as "survives a server restart".
+func TestPostgresHookRepositoryKeepsOwnerPauseOnManagedPolicy(t *testing.T) {
 	pool := openWorkflowIntegrationPool(t)
 	ctx := context.Background()
 	fixture := setupWorkflowIntegrationFixture(t, pool)
 	repo := NewPostgresHookRepository(pool)
 	workspaceID := uuidString(fixture.workspaceID)
+	target := managedHookPolicies(workspaceID)[0].Policy.ID
+	if _, err := repo.List(ctx, workspaceID); err != nil {
+		t.Fatalf("seed policies: %v", err)
+	}
+
+	member := HookPermissionActor{Type: "member", ID: uuidString(fixture.userID)}
+	if _, err := repo.Disable(ctx, workspaceID, member, target); !errors.Is(err, ErrManagedHookLocked) {
+		t.Fatalf("non-owner disable error = %v, want ErrManagedHookLocked", err)
+	}
+
+	owner := HookPermissionActor{Type: "member", ID: uuidString(fixture.userID), IsOwner: true}
+	paused, err := repo.Disable(ctx, workspaceID, owner, target)
+	if err != nil {
+		t.Fatalf("owner disable: %v", err)
+	}
+	if paused.Mode != HookModeOff {
+		t.Fatalf("mode after disable = %q, want %q", paused.Mode, HookModeOff)
+	}
+
+	repo.managedMu.Lock()
+	delete(repo.managedWorkspaces, workspaceID)
+	repo.managedMu.Unlock()
 	policies, err := repo.List(ctx, workspaceID)
 	if err != nil {
-		t.Fatalf("list policies: %v", err)
+		t.Fatalf("list after re-seed: %v", err)
 	}
-	var managed HookPolicy
 	for _, policy := range policies {
-		if isBuiltInManagedHookPolicy(workspaceID, policy.ID) {
-			managed = policy
-			break
+		if policy.ID == target && policy.Mode != HookModeOff {
+			t.Fatalf("mode after re-seed = %q, want %q", policy.Mode, HookModeOff)
 		}
-	}
-	if managed.ID == "" {
-		t.Fatal("built-in managed policy was not created")
-	}
-	owner := HookPermissionActor{Type: "member", ID: uuidString(fixture.userID), IsOwner: true}
-	if _, err := repo.Update(ctx, workspaceID, owner, managed.ID, managed); !errors.Is(err, ErrManagedHookLocked) {
-		t.Fatalf("owner update error = %v, want ErrManagedHookLocked", err)
-	}
-	if _, err := repo.Disable(ctx, workspaceID, owner, managed.ID); !errors.Is(err, ErrManagedHookLocked) {
-		t.Fatalf("owner disable error = %v, want ErrManagedHookLocked", err)
-	}
-	if err := repo.Delete(ctx, workspaceID, owner, managed.ID); !errors.Is(err, ErrManagedHookLocked) {
-		t.Fatalf("owner delete error = %v, want ErrManagedHookLocked", err)
 	}
 }
 

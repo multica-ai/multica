@@ -245,15 +245,6 @@ func managedHookPolicies(workspaceID string) []managedHookPolicyDefinition {
 	return definitions
 }
 
-func isBuiltInManagedHookPolicy(workspaceID, policyID string) bool {
-	for _, definition := range managedHookPolicies(workspaceID) {
-		if definition.Policy.ID == policyID {
-			return true
-		}
-	}
-	return false
-}
-
 func managedPolicyJSON(policy HookPolicy) (events, conditions, modifications, actions []byte) {
 	events, _ = json.Marshal(policy.Events)
 	conditions, _ = json.Marshal(policy.Conditions)
