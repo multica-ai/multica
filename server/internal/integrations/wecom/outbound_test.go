@@ -44,6 +44,13 @@ type fakeOutboundQueries struct {
 	tasks    map[string]db.AgentTaskQueue
 	taskErr  error
 	taskGets int
+	// askedInTheBrowser flips the channel_ingested stamp on the input batch:
+	// false (the zero value) is a question typed in WeCom, which is what every
+	// rig here models. originAskedFor records which id the stamp was read for,
+	// which is the whole of the retry-clone question. See failure_origin_test.go.
+	askedInTheBrowser bool
+	originErr         error
+	originAskedFor    []string
 }
 
 func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
@@ -69,6 +76,16 @@ func (f *fakeOutboundQueries) GetAgentTask(_ context.Context, id pgtype.UUID) (d
 	}
 	return task, nil
 }
+func (f *fakeOutboundQueries) TaskHasChannelIngestedMessages(_ context.Context, taskID pgtype.UUID) (bool, error) {
+	f.originAskedFor = append(f.originAskedFor, util.UUIDToString(taskID))
+	if f.originErr != nil {
+		return false, f.originErr
+	}
+	return !f.askedInTheBrowser, nil
+}
+
+// originAsked is the ids the provenance stamp was read for, in order.
+func (f *fakeOutboundQueries) originAsked() []string { return f.originAskedFor }
 
 func newOutboundWithConn(t *testing.T, q outboundQueries) (*Outbound, pgtype.UUID, *recordingConn) {
 	t.Helper()
