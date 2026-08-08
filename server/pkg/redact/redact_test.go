@@ -73,6 +73,54 @@ func TestRedactGitHubFineGrainedToken(t *testing.T) {
 	}
 }
 
+// TestRedactAWSTemporaryAccessKey guards the ASIA prefix used by AWS STS
+// temporary credentials, which assume-role and SSO logins hand out. They grant
+// the same access as a long-term AKIA key until they expire, but the original
+// pattern only matched AKIA, so an agent printing ~/.aws/credentials or its own
+// environment leaked them unredacted.
+func TestRedactAWSTemporaryAccessKey(t *testing.T) {
+	t.Parallel()
+	if got := Text("AWS_ACCESS_KEY_ID is " + asm("ASIA", "IOSFODNN7EXAMPLE")); strings.Contains(got, asm("ASIA", "IOSFODNN7")) {
+		t.Fatalf("AWS temporary access key not redacted: %s", got)
+	}
+	if got := Text("key " + asm("ABIA", "IOSFODNN7EXAMPLE")); !strings.Contains(got, "[REDACTED AWS KEY]") {
+		t.Fatalf("AWS bearer access key not redacted: %s", got)
+	}
+	// A word that merely starts with ASIA must survive untouched.
+	if got := Text("ASIAPACIFIC region"); !strings.Contains(got, "ASIAPACIFIC") {
+		t.Fatalf("ordinary word should NOT be redacted: %s", got)
+	}
+}
+
+// TestRedactPGPPrivateKeyBlock guards the OpenPGP armor headers, whose BLOCK
+// suffix sits between "PRIVATE KEY" and the closing dashes. The original PEM
+// pattern required those dashes immediately after "PRIVATE KEY", so an armored
+// GPG secret key reached the DB / WS broadcast in full.
+func TestRedactPGPPrivateKeyBlock(t *testing.T) {
+	t.Parallel()
+	input := "backup:\n-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQdGBGT0abcdef\n-----END PGP PRIVATE KEY BLOCK-----\nDone."
+	got := Text(input)
+	if strings.Contains(got, "lQdGBGT0abcdef") {
+		t.Fatalf("PGP private key content not redacted: %s", got)
+	}
+	if !strings.Contains(got, "[REDACTED PRIVATE KEY]") {
+		t.Fatalf("expected [REDACTED PRIVATE KEY] placeholder, got: %s", got)
+	}
+}
+
+// TestRedactSlackBrowserSessionTokens guards the xoxc-/xoxd- pair used by the
+// Slack web client. Together they authenticate as the user against the full
+// Slack API, but the char class covered only b/p/o/r/a/s/e.
+func TestRedactSlackBrowserSessionTokens(t *testing.T) {
+	t.Parallel()
+	if got := Text("client token " + asm("xoxc-", "1234567890-0987654321-abcdefghijklm")); strings.Contains(got, asm("xoxc-", "1234567890")) {
+		t.Fatalf("Slack client token not redacted: %s", got)
+	}
+	if got := Text("cookie " + asm("xoxd-", "1234567890abcdefghijklmnop")); !strings.Contains(got, "[REDACTED SLACK TOKEN]") {
+		t.Fatalf("Slack session cookie token not redacted: %s", got)
+	}
+}
+
 func TestRedactGoogleAPIKeyEndingWithDash(t *testing.T) {
 	t.Parallel()
 	input := `the config file still had "` + asm("AIza", "SyB1cD3fGhIjKlMnOpQrStUvWxYz012345-") + `" in it`

@@ -17,14 +17,21 @@ type secretPattern struct {
 
 // Patterns are checked in order; first match wins per position.
 var patterns = []secretPattern{
-	// AWS access key IDs (always start with AKIA)
-	{regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`), "[REDACTED AWS KEY]"},
+	// AWS access key IDs. AKIA is the long-term IAM user prefix; ASIA marks the
+	// temporary STS credentials produced by assume-role and SSO logins, which are
+	// just as usable until they expire and are what agent output most often
+	// contains. ABIA and ACCA cover the remaining AWS-issued key ID prefixes.
+	{regexp.MustCompile(`\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b`), "[REDACTED AWS KEY]"},
 
 	// AWS secret access keys (40 char base64-ish, preceded by a common separator)
 	{regexp.MustCompile(`(?i)(?:aws_secret_access_key|secret_?access_?key)\s*[=:]\s*[A-Za-z0-9/+=]{40}`), "[REDACTED AWS SECRET]"},
 
-	// PEM private keys (multi-line)
-	{regexp.MustCompile(`(?s)-----BEGIN[A-Z\s]*PRIVATE KEY-----.*?-----END[A-Z\s]*PRIVATE KEY-----`), "[REDACTED PRIVATE KEY]"},
+	// PEM private keys (multi-line). The trailing [A-Z\s]* is what allows the
+	// OpenPGP armor headers, which carry a BLOCK suffix after PRIVATE KEY
+	// ("-----BEGIN PGP PRIVATE KEY BLOCK-----"). Without it only the
+	// RSA/EC/DSA/OPENSSH style markers match and an armored GPG secret key
+	// exported by `gpg --export-secret-keys --armor` leaks in full.
+	{regexp.MustCompile(`(?s)-----BEGIN[A-Z\s]*PRIVATE KEY[A-Z\s]*-----.*?-----END[A-Z\s]*PRIVATE KEY[A-Z\s]*-----`), "[REDACTED PRIVATE KEY]"},
 
 	// GitHub tokens (classic PAT, OAuth, user-to-server, server-to-server, refresh)
 	{regexp.MustCompile(`\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}\b`), "[REDACTED GITHUB TOKEN]"},
@@ -39,8 +46,10 @@ var patterns = []secretPattern{
 	{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}\b`), "[REDACTED API KEY]"},
 
 	// Slack bot/user/legacy tokens. The char class includes 'e' so the
-	// newer xoxe- config/refresh tokens are covered alongside xoxb/p/o/r/a/s.
-	{regexp.MustCompile(`\bxox[bporase]-[A-Za-z0-9\-]{10,}\b`), "[REDACTED SLACK TOKEN]"},
+	// newer xoxe- config/refresh tokens are covered alongside xoxb/p/o/r/a/s,
+	// plus 'c' and 'd' for the xoxc-/xoxd- browser-session pair, which grants
+	// full user-level API access and is commonly pasted into shell sessions.
+	{regexp.MustCompile(`\bxox[bporasecd]-[A-Za-z0-9\-]{10,}\b`), "[REDACTED SLACK TOKEN]"},
 
 	// Slack app-level tokens use the xapp- prefix, which the xox*- rule above
 	// does not match. Without this an app-level token echoed in agent output
