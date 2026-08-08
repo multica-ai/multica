@@ -165,11 +165,21 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 		chatID = senderID
 	}
 
-	// The command source is the sender's own words with the addressing taken
-	// off the front. In a group the @-mention IS how you reach the bot, so it
-	// arrives glued to whatever was typed after it — "@Andrew /new" is a person
-	// asking for a fresh session, not prose that happens to contain a word.
-	command := stripLeadingMentions(mc.Text.Content, botDisplayName)
+	// The command source is the sender's own words. In a group the @-mention IS
+	// how you reach the bot, so it arrives glued to whatever was typed after it
+	// — "@Andrew /new" is a person asking for a fresh session, not prose that
+	// happens to contain a word — and the addressing comes off the front.
+	//
+	// Groups only. In a 1:1 nobody has to address the bot, so a leading "@" is
+	// the sender naming a colleague they are talking ABOUT: "@李雷 /issue 帮我
+	// 问问他" is a question, and stripping the name would turn it into a filed
+	// issue nobody asked for plus, via SkipAgentRun below, no answer at all.
+	// Passing the raw content through keeps p2p exactly where it was before
+	// CommandText was set here.
+	command := mc.Text.Content
+	if chatType == channel.ChatTypeGroup {
+		command = stripLeadingMentions(mc.Text.Content, botDisplayName)
+	}
 
 	wm := InboundMessage{
 		BotID:        botID,
@@ -189,12 +199,14 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 		Type:           channelMsgType(mc.MsgType),
 		Text:           mc.Text.Content,
 		AddressedToBot: true,
-		// The sender's own words, addressing removed. Command classification is
-		// shared (channel/message.go) and falls back to Text when this is empty
-		// — and in a group Text starts with the mention, so every slash command
-		// read as ordinary prose. Lark sets this from its command body
-		// (feishu_channel.go:139) and Slack from its cleaned text
+		// The sender's own words, with a group's addressing removed. Command
+		// classification is shared (channel/message.go) and falls back to Text
+		// when this is empty — and in a group Text starts with the mention, so
+		// every slash command read as ordinary prose. Lark sets this from its
+		// command body (feishu_channel.go:139) and Slack from its cleaned text
 		// (slack/inbound.go:131); WeCom was the one adapter leaving it empty.
+		// In a p2p chat this is Text verbatim, which is what the fallback was
+		// already producing.
 		CommandText: command,
 		// A pure /issue command in WeCom should NOT trigger the
 		// agent — the engine already creates the issue and the
@@ -204,9 +216,11 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 		// alone on this — Slack/Lark keep the historical "let the agent
 		// see /issue and respond too" behaviour.
 		//
-		// Read off the same stripped source the engine will parse, so a group
-		// /issue behaves like the p2p one instead of filing the issue and then
-		// also asking the agent about it.
+		// Read off the same source the engine will parse, so a group /issue
+		// behaves like the p2p one instead of filing the issue and then also
+		// asking the agent about it. It has to be the same source: read off the
+		// raw text instead and a p2p "@李雷 /issue …" would file an issue and
+		// stay silent, which is the whole reason the strip above is gated.
 		SkipAgentRun: isIssueCommand(command),
 		Source: channel.Source{
 			ChannelType: TypeWecom,
@@ -222,6 +236,10 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 // group chat is how the sender addresses the bot. WeCom puts them in the text
 // and sends no mention list alongside it, so there is nothing to match against
 // but the shape: an "@" at the very front, up to the next space.
+//
+// Group messages only — the caller gates it on chatType. Nobody addresses the
+// bot in a 1:1, so the same "@" at the front there is a colleague's name in the
+// sender's own sentence, and removing it would rewrite what they said.
 //
 // Only the front. A name further into the sentence is the sender talking ABOUT
 // somebody — "@Andrew ask @李雷 about yesterday" is one instruction naming one
