@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
-import { copyFile, mkdir, readFile, rm, chmod } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
+import { chmod, copyFile, lstat, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const defaultDestDir = resolve(here, "..", "resources", "bin");
@@ -65,11 +70,83 @@ export function parseChecksumManifest(raw) {
   return checksums;
 }
 
+export function parseGoBuildMetadata(raw) {
+  const goos = raw.match(/\bGOOS=([a-z0-9]+)\b/)?.[1];
+  const goarch = raw.match(/\bGOARCH=([a-z0-9]+)\b/)?.[1];
+  if (!goos || !goarch) {
+    throw new Error(
+      "[bundle-platform-agent-cli] Go build metadata must include GOOS and GOARCH",
+    );
+  }
+  return { goos, goarch };
+}
+
+export function parsePlatformAgentVersionMarker(binary) {
+  const matches = binary
+    .toString("latin1")
+    .matchAll(/platform-agent-cli-release-version:([0-9]+\.[0-9]+\.[0-9]+(?:[.+-][0-9A-Za-z.-]+)?)/g);
+  const versions = new Set(Array.from(matches, (match) => match[1]));
+  if (versions.size !== 1) {
+    throw new Error(
+      "[bundle-platform-agent-cli] binary must contain exactly one release version marker",
+    );
+  }
+  return versions.values().next().value;
+}
+
+export async function inspectPlatformAgentBinary(
+  artifactPath,
+  goBinary = process.env.GO_BINARY || "go",
+) {
+  try {
+    const { stdout } = await execFileAsync(
+      goBinary,
+      ["version", "-m", artifactPath],
+      { maxBuffer: 1024 * 1024 },
+    );
+    return {
+      ...parseGoBuildMetadata(stdout),
+      version: parsePlatformAgentVersionMarker(await readFile(artifactPath)),
+    };
+  } catch (error) {
+    throw new Error(
+      `[bundle-platform-agent-cli] cannot inspect Go binary metadata for ${artifactPath}: ${error.message}`,
+    );
+  }
+}
+
 async function removeStagedPlatformAgent(destDir) {
   await Promise.all([
     rm(join(destDir, "platform-agent-cli"), { force: true }),
     rm(join(destDir, "platform-agent-cli.exe"), { force: true }),
   ]);
+}
+
+async function atomicCopy(source, destination, mode) {
+  const tempPath = join(
+    dirname(destination),
+    `.${basename(destination)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  try {
+    await copyFile(source, tempPath, fsConstants.COPYFILE_EXCL);
+    if (mode !== undefined) await chmod(tempPath, mode);
+    await rename(tempPath, destination);
+  } finally {
+    await rm(tempPath, { force: true });
+  }
+}
+
+async function requireRegularFile(path, label) {
+  let info;
+  try {
+    info = await lstat(path);
+  } catch (error) {
+    throw new Error(`[bundle-platform-agent-cli] cannot stat ${label}: ${error.message}`);
+  }
+  if (!info.isFile()) {
+    throw new Error(`[bundle-platform-agent-cli] ${label} must be a regular file: ${path}`);
+  }
+  return info;
 }
 
 export async function stageReleasePlatformAgent({
@@ -78,6 +155,7 @@ export async function stageReleasePlatformAgent({
   targetPlatform = process.platform,
   targetArch = process.arch,
   destDir = defaultDestDir,
+  inspectBinary = inspectPlatformAgentBinary,
 } = {}) {
   if (typeof version !== "string" || version.trim() === "") {
     throw new Error(
@@ -96,6 +174,7 @@ export async function stageReleasePlatformAgent({
     targetArch,
   );
   const artifactPath = join(artifactDir, artifactName);
+  await requireRegularFile(artifactPath, "selected release artifact");
   const manifest = parseChecksumManifest(
     await readFile(join(artifactDir, "checksums.txt"), "utf8"),
   );
@@ -115,11 +194,37 @@ export async function stageReleasePlatformAgent({
     );
   }
 
+  const metadata = await inspectBinary(artifactPath);
+  const expectedPlatform = PLATFORM_TO_ARTIFACT[normalizeTargetPlatform(targetPlatform)];
+  const expectedArch = ARCH_TO_ARTIFACT[normalizeTargetArch(targetArch)];
+  if (metadata.goos !== expectedPlatform) {
+    throw new Error(
+      `[bundle-platform-agent-cli] binary target platform mismatch: expected ${expectedPlatform}, got ${metadata.goos}`,
+    );
+  }
+  if (metadata.goarch !== expectedArch) {
+    throw new Error(
+      `[bundle-platform-agent-cli] binary target architecture mismatch: expected ${expectedArch}, got ${metadata.goarch}`,
+    );
+  }
+  if (metadata.version !== version) {
+    throw new Error(
+      `[bundle-platform-agent-cli] binary version mismatch: expected ${version}, got ${metadata.version}`,
+    );
+  }
+
   await mkdir(destDir, { recursive: true });
-  await removeStagedPlatformAgent(destDir);
   const destBinary = join(destDir, platformAgentBinaryName(targetPlatform));
-  await copyFile(artifactPath, destBinary);
-  if (targetPlatform !== "win32") await chmod(destBinary, 0o755);
+  await atomicCopy(
+    artifactPath,
+    destBinary,
+    targetPlatform === "win32" ? undefined : 0o755,
+  );
+  const staleBinary = join(
+    destDir,
+    targetPlatform === "win32" ? "platform-agent-cli" : "platform-agent-cli.exe",
+  );
+  await rm(staleBinary, { force: true });
   console.log(
     `[bundle-platform-agent-cli] bundled ${artifactPath} → ${destBinary}`,
   );
@@ -132,8 +237,8 @@ export async function stageDevPlatformAgent({
 } = {}) {
   const binaryName = platformAgentBinaryName(targetPlatform);
   await mkdir(destDir, { recursive: true });
-  await removeStagedPlatformAgent(destDir);
   if (!devBinary) {
+    await removeStagedPlatformAgent(destDir);
     console.warn(
       "[bundle-platform-agent-cli] PLATFORM_AGENT_CLI_DEV_BINARY not set — " +
         "continuing without a bundled Platform Agent CLI",
@@ -141,9 +246,29 @@ export async function stageDevPlatformAgent({
     return;
   }
 
+  if (!isAbsolute(devBinary)) {
+    throw new Error(
+      "[bundle-platform-agent-cli] PLATFORM_AGENT_CLI_DEV_BINARY must be an absolute path",
+    );
+  }
+  const info = await requireRegularFile(devBinary, "development binary");
+  if (targetPlatform !== "win32" && (info.mode & 0o111) === 0) {
+    throw new Error(
+      `[bundle-platform-agent-cli] development binary must be executable on ${targetPlatform}: ${devBinary}`,
+    );
+  }
+
   const destBinary = join(destDir, binaryName);
-  await copyFile(devBinary, destBinary);
-  if (targetPlatform !== "win32") await chmod(destBinary, 0o755);
+  await atomicCopy(
+    devBinary,
+    destBinary,
+    targetPlatform === "win32" ? undefined : 0o755,
+  );
+  const staleBinary = join(
+    destDir,
+    targetPlatform === "win32" ? "platform-agent-cli" : "platform-agent-cli.exe",
+  );
+  await rm(staleBinary, { force: true });
   console.log(`[bundle-platform-agent-cli] bundled ${devBinary} → ${destBinary}`);
 }
 

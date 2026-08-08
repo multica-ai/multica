@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   PLATFORM_AGENT_CLI_DESKTOP_BUNDLED_ONLY_ENV,
   PLATFORM_AGENT_CLI_PATH_ENV,
+  PLATFORM_AGENT_MODE_ENV,
   bundledPlatformAgentPath,
   withBundledPlatformAgentPath,
 } from "./platform-agent-runtime";
@@ -46,6 +47,7 @@ describe("withBundledPlatformAgentPath", () => {
       PATH: "/usr/bin",
       [PLATFORM_AGENT_CLI_DESKTOP_BUNDLED_ONLY_ENV]: "1",
       [PLATFORM_AGENT_CLI_PATH_ENV]: "/workspace/apps/desktop/resources/bin/platform-agent-cli",
+      [PLATFORM_AGENT_MODE_ENV]: "mock",
     });
   });
 
@@ -65,6 +67,7 @@ describe("withBundledPlatformAgentPath", () => {
     expect(result).toEqual({
       PATH: "/usr/bin",
       [PLATFORM_AGENT_CLI_DESKTOP_BUNDLED_ONLY_ENV]: "1",
+      [PLATFORM_AGENT_MODE_ENV]: "mock",
     });
     expect(sourceEnv).toEqual({
       PATH: "/usr/bin",
@@ -88,11 +91,59 @@ describe("withBundledPlatformAgentPath", () => {
     expect(result).toEqual({
       PATH: "C:/Windows/System32",
       [PLATFORM_AGENT_CLI_DESKTOP_BUNDLED_ONLY_ENV]: "1",
+      [PLATFORM_AGENT_MODE_ENV]: "mock",
     });
     expect(
       Object.keys(result).filter(
         (key) => key.toUpperCase() === PLATFORM_AGENT_CLI_PATH_ENV,
       ),
     ).toEqual([]);
+  });
+
+  it("preserves an explicit HTTP mode for daemon start children", () => {
+    const result = withBundledPlatformAgentPath(
+      {
+        PATH: "/usr/bin",
+        [PLATFORM_AGENT_MODE_ENV]: "http",
+      },
+      "/workspace/apps/desktop",
+      "linux",
+      () => true,
+    );
+
+    expect(result[PLATFORM_AGENT_MODE_ENV]).toBe("http");
+  });
+
+  it("only defaults the mode when the environment key is absent", () => {
+    const result = withBundledPlatformAgentPath(
+      {
+        PATH: "/usr/bin",
+        [PLATFORM_AGENT_MODE_ENV]: "",
+      },
+      "/workspace/apps/desktop",
+      "linux",
+      () => true,
+    );
+
+    expect(result[PLATFORM_AGENT_MODE_ENV]).toBe("");
+  });
+
+  it("canonicalizes an explicit mixed-case Windows mode key for probe children", () => {
+    const result = withBundledPlatformAgentPath(
+      {
+        Path: "C:/Windows/System32",
+        Platform_Agent_Mode: "http",
+      },
+      "C:/Multica/resources/app.asar",
+      "win32",
+      () => true,
+    );
+
+    expect(result[PLATFORM_AGENT_MODE_ENV]).toBe("http");
+    expect(
+      Object.keys(result).filter(
+        (key) => key.toUpperCase() === PLATFORM_AGENT_MODE_ENV,
+      ),
+    ).toEqual([PLATFORM_AGENT_MODE_ENV]);
   });
 });

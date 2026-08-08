@@ -7,6 +7,7 @@ import {
   readdir,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,6 +16,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   parseChecksumManifest,
+  parseGoBuildMetadata,
+  parsePlatformAgentVersionMarker,
   platformAgentArtifactName,
   platformAgentBinaryName,
   stageDevPlatformAgent,
@@ -41,14 +44,14 @@ afterEach(async () => {
 
 describe("platform-agent artifact contract", () => {
   it.each([
-    ["darwin", "x64", "platform-agent-cli_0.1.0_darwin_amd64"],
-    ["darwin", "arm64", "platform-agent-cli_0.1.0_darwin_arm64"],
-    ["linux", "x64", "platform-agent-cli_0.1.0_linux_amd64"],
-    ["linux", "arm64", "platform-agent-cli_0.1.0_linux_arm64"],
-    ["win32", "x64", "platform-agent-cli_0.1.0_windows_amd64.exe"],
-    ["win32", "arm64", "platform-agent-cli_0.1.0_windows_arm64.exe"],
+    ["darwin", "x64", "platform-agent-cli_0.2.0_darwin_amd64"],
+    ["darwin", "arm64", "platform-agent-cli_0.2.0_darwin_arm64"],
+    ["linux", "x64", "platform-agent-cli_0.2.0_linux_amd64"],
+    ["linux", "arm64", "platform-agent-cli_0.2.0_linux_arm64"],
+    ["win32", "x64", "platform-agent-cli_0.2.0_windows_amd64.exe"],
+    ["win32", "arm64", "platform-agent-cli_0.2.0_windows_arm64.exe"],
   ])("maps Electron %s/%s to %s", (platform, arch, artifact) => {
-    expect(platformAgentArtifactName("0.1.0", platform, arch)).toBe(artifact);
+    expect(platformAgentArtifactName("0.2.0", platform, arch)).toBe(artifact);
   });
 
   it("uses the canonical bundled executable name for each platform", () => {
@@ -83,6 +86,33 @@ describe("platform-agent artifact contract", () => {
       );
     },
   );
+});
+
+describe("parseGoBuildMetadata", () => {
+  it("extracts the target from real go version metadata without executing the binary", () => {
+    expect(
+      parseGoBuildMetadata(`artifact: go1.26.1
+\tpath\tgithub.com/multica/platform-agent-cli/cmd/platform-agent-cli
+\tbuild\tCGO_ENABLED=0
+\tbuild\tGOARCH=arm64
+\tbuild\tGOOS=windows
+`),
+    ).toEqual({ goos: "windows", goarch: "arm64" });
+  });
+
+  it("reads the format-independent release version marker from binary bytes", () => {
+    expect(
+      parsePlatformAgentVersionMarker(
+        Buffer.from("binary\\0platform-agent-cli-release-version:0.2.0\\0data"),
+      ),
+    ).toBe("0.2.0");
+  });
+
+  it("rejects metadata without a complete target", () => {
+    expect(() =>
+      parseGoBuildMetadata("artifact: go1.26.1\n\tbuild\tGOARCH=amd64\n"),
+    ).toThrow(/GOOS/i);
+  });
 });
 
 describe("parseChecksumManifest", () => {
@@ -121,7 +151,7 @@ describe("stageReleasePlatformAgent", () => {
     const root = await makeTempDir();
     const artifactDir = join(root, "artifacts");
     const destDir = join(root, "resources", "bin");
-    const artifactName = platformAgentArtifactName("0.1.0", platform, arch);
+    const artifactName = platformAgentArtifactName("0.2.0", platform, arch);
     await mkdir(artifactDir, { recursive: true });
     await mkdir(destDir, { recursive: true });
     if (writeSelectedArtifact) {
@@ -143,11 +173,12 @@ describe("stageReleasePlatformAgent", () => {
     await writeFile(join(fixture.destDir, "multica.exe"), "multica windows sibling");
 
     await stageReleasePlatformAgent({
-      version: "0.1.0",
+      version: "0.2.0",
       artifactDir: fixture.artifactDir,
       targetPlatform: "linux",
       targetArch: "x64",
       destDir: fixture.destDir,
+      inspectBinary: async () => ({ goos: "linux", goarch: "amd64", version: "0.2.0" }),
     });
 
     expect(await readFile(join(fixture.destDir, "platform-agent-cli"), "utf8")).toBe(
@@ -170,7 +201,7 @@ describe("stageReleasePlatformAgent", () => {
     const fixture = await setupRelease({ writeSelectedArtifact: false });
     await expect(
       stageReleasePlatformAgent({
-        version: "0.1.0",
+        version: "0.2.0",
         artifactDir: fixture.artifactDir,
         targetPlatform: "linux",
         targetArch: "x64",
@@ -183,7 +214,7 @@ describe("stageReleasePlatformAgent", () => {
     const fixture = await setupRelease({ manifestName: "some-other-artifact" });
     await expect(
       stageReleasePlatformAgent({
-        version: "0.1.0",
+        version: "0.2.0",
         artifactDir: fixture.artifactDir,
         targetPlatform: "linux",
         targetArch: "x64",
@@ -197,7 +228,7 @@ describe("stageReleasePlatformAgent", () => {
     await writeFile(join(fixture.artifactDir, "checksums.txt"), "malformed\n");
     await expect(
       stageReleasePlatformAgent({
-        version: "0.1.0",
+        version: "0.2.0",
         artifactDir: fixture.artifactDir,
         targetPlatform: "linux",
         targetArch: "x64",
@@ -210,7 +241,7 @@ describe("stageReleasePlatformAgent", () => {
     const fixture = await setupRelease({ checksum: "0".repeat(64) });
     await expect(
       stageReleasePlatformAgent({
-        version: "0.1.0",
+        version: "0.2.0",
         artifactDir: fixture.artifactDir,
         targetPlatform: "linux",
         targetArch: "x64",
@@ -221,17 +252,35 @@ describe("stageReleasePlatformAgent", () => {
 
   it.each([
     ["empty version", { version: "", artifactDir: "/artifacts" }, /version/i],
-    ["relative artifact directory", { version: "0.1.0", artifactDir: "artifacts" }, /absolute/i],
+    ["relative artifact directory", { version: "0.2.0", artifactDir: "artifacts" }, /absolute/i],
   ])("fails closed for an %s", async (_label, overrides, expected) => {
     const destDir = await makeTempDir();
     await expect(
       stageReleasePlatformAgent({
-        version: "0.1.0",
+        version: "0.2.0",
         artifactDir: "/artifacts",
         targetPlatform: "linux",
         targetArch: "x64",
         destDir,
         ...overrides,
+      }),
+    ).rejects.toThrow(expected);
+  });
+
+  it.each([
+    ["wrong target architecture", { goos: "linux", goarch: "arm64", version: "0.2.0" }, /architecture/i],
+    ["wrong target platform", { goos: "darwin", goarch: "amd64", version: "0.2.0" }, /platform/i],
+    ["wrong embedded version", { goos: "linux", goarch: "amd64", version: "0.1.9" }, /version/i],
+  ])("rejects a checksum-valid binary with %s", async (_label, metadata, expected) => {
+    const fixture = await setupRelease();
+    await expect(
+      stageReleasePlatformAgent({
+        version: "0.2.0",
+        artifactDir: fixture.artifactDir,
+        targetPlatform: "linux",
+        targetArch: "x64",
+        destDir: fixture.destDir,
+        inspectBinary: async () => metadata,
       }),
     ).rejects.toThrow(expected);
   });
@@ -279,6 +328,54 @@ describe("stageDevPlatformAgent", () => {
         destDir,
       }),
     ).rejects.toThrow();
-    expect(await readdir(destDir)).toEqual([]);
+    expect((await readdir(destDir)).sort()).toEqual([
+      "platform-agent-cli",
+      "platform-agent-cli.exe",
+    ]);
+  });
+
+  it("rejects a relative development binary path", async () => {
+    const destDir = await makeTempDir();
+    await expect(
+      stageDevPlatformAgent({
+        devBinary: "relative/platform-agent-cli",
+        targetPlatform: "linux",
+        destDir,
+      }),
+    ).rejects.toThrow(/absolute/i);
+  });
+
+  it("rejects directories and symlinks instead of staging non-regular files", async () => {
+    const root = await makeTempDir();
+    const realBinary = join(root, "real-platform-agent-cli");
+    const linkedBinary = join(root, "linked-platform-agent-cli");
+    await writeFile(realBinary, "binary");
+    await chmod(realBinary, 0o755);
+    await symlink(realBinary, linkedBinary);
+
+    for (const devBinary of [root, linkedBinary]) {
+      await expect(
+        stageDevPlatformAgent({
+          devBinary,
+          targetPlatform: "linux",
+          destDir: join(root, "dest"),
+        }),
+      ).rejects.toThrow(/regular file/i);
+    }
+  });
+
+  it("rejects a non-executable Unix development binary", async () => {
+    const root = await makeTempDir();
+    const devBinary = join(root, "platform-agent-cli");
+    await writeFile(devBinary, "binary");
+    await chmod(devBinary, 0o644);
+
+    await expect(
+      stageDevPlatformAgent({
+        devBinary,
+        targetPlatform: "darwin",
+        destDir: join(root, "dest"),
+      }),
+    ).rejects.toThrow(/executable/i);
   });
 });

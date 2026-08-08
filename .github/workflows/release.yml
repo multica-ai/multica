@@ -410,6 +410,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Download pinned Platform Agent CLI release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node apps/desktop/scripts/platform-agent-cli-release.mjs --artifact-dir "${{ runner.temp }}/platform-agent-cli"
+
       - name: Package Desktop installers (${{ matrix.target }})
         working-directory: apps/desktop
         env:

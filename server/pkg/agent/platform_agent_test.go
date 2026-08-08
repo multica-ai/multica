@@ -33,10 +33,10 @@ func TestPlatformAgentProviderContract(t *testing.T) {
 }
 
 func TestPlatformAgentMinimumVersion(t *testing.T) {
-	if err := CheckMinVersion("platform-agent-cli", "platform-agent-cli 0.1.0"); err != nil {
+	if err := CheckMinVersion("platform-agent-cli", "platform-agent-cli 0.2.0"); err != nil {
 		t.Fatal(err)
 	}
-	if err := CheckMinVersion("platform-agent-cli", "platform-agent-cli 0.0.9"); err == nil {
+	if err := CheckMinVersion("platform-agent-cli", "platform-agent-cli 0.1.9"); err == nil {
 		t.Fatal("expected below-minimum error")
 	}
 }

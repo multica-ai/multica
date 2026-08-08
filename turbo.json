@@ -18,7 +18,9 @@
     "POSTGRES_DB",
     "POSTGRES_PORT",
     "DESKTOP_RENDERER_PORT",
-    "DESKTOP_APP_SUFFIX"
+    "DESKTOP_APP_SUFFIX",
+    "PLATFORM_AGENT_CLI_DEV_BINARY",
+    "PLATFORM_AGENT_MODE"
   ],
   "tasks": {
     "build": {

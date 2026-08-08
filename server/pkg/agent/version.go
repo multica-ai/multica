@@ -13,7 +13,7 @@ import (
 var MinVersions = map[string]string{
 	"claude":             "2.0.0",
 	"codex":              "0.100.0", // app-server --listen stdio:// added in 0.100.0
-	"platform-agent-cli": "0.1.0",
+	"platform-agent-cli": "0.2.0",
 	"copilot":            "1.0.0",  // --output-format json envelope stable from 1.0.x
 	"grok":               "0.2.89", // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
 	"qwen":               "0.20.0", // stream-json protocol captured and verified against Qwen Code 0.20.0

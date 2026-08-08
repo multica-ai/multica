@@ -489,9 +489,9 @@ describe("electron-builder.yml packaging config", () => {
   // YAML dependency: collect the `  - "…"` items that follow `files:` up to
   // the next top-level key. Commented (`#`) lines are ignored, so a
   // commented-out exclusion would (correctly) not count.
-  function readFilesBlock(raw) {
+  function readSequenceBlock(raw, key) {
     const lines = raw.split("\n");
-    const start = lines.findIndex((l) => /^files:\s*$/.test(l));
+    const start = lines.findIndex((l) => l === `${key}:`);
     if (start === -1) return [];
     const entries = [];
     for (let i = start + 1; i < lines.length; i += 1) {
@@ -507,8 +507,18 @@ describe("electron-builder.yml packaging config", () => {
 
   it("excludes the dist output directory from the packaged files", () => {
     expect(configPath, "electron-builder.yml not found").toBeTruthy();
-    const entries = readFilesBlock(readFileSync(configPath, "utf-8"));
+    const entries = readSequenceBlock(readFileSync(configPath, "utf-8"), "files");
     expect(entries.length).toBeGreaterThan(0);
     expect(entries).toContain("!dist/**");
+  });
+
+  it("packages the staged Platform Agent CLI through unpacked resources", () => {
+    expect(configPath, "electron-builder.yml not found").toBeTruthy();
+    const raw = readFileSync(configPath, "utf-8");
+    const files = readSequenceBlock(raw, "files");
+    const unpacked = readSequenceBlock(raw, "asarUnpack");
+
+    expect(files).not.toContain("!resources/**");
+    expect(unpacked).toContain("resources/**");
   });
 });
