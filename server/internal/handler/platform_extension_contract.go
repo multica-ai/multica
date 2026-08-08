@@ -458,7 +458,7 @@ func reservedPlatformExtensionSkillPath(value string) bool {
 			continue
 		}
 		switch strings.ToLower(trimmed) {
-		case ".platform-agent", ".agent_context", ".git", "agents.md":
+		case ".platform-agent", ".agent_context", ".git", "agents.md", ".multica-sidecar-owner":
 			return true
 		}
 		if platformExtensionWindowsDeviceName.MatchString(trimmed) {

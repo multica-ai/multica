@@ -325,6 +325,21 @@ func TestCompilePlatformExtension_RejectsInvalidSource(t *testing.T) {
 	}
 }
 
+func TestCompilePlatformExtension_RejectsDaemonOwnershipControlPathAtAnyDepth(t *testing.T) {
+	for _, filePath := range []string{
+		".multica-sidecar-owner",
+		"references/.multica-sidecar-owner",
+		"references/.MULTICA-SIDECAR-OWNER. ",
+	} {
+		t.Run(filePath, func(t *testing.T) {
+			source := readPlatformExtensionSource(t)
+			source.Skills[0].Files = append(source.Skills[0].Files, PlatformExtensionSkillFile{Path: filePath, Content: "must not shadow daemon ownership"})
+			_, err := CompilePlatformExtension(source)
+			assertPlatformExtensionCode(t, err, "RESERVED_SKILL_PATH")
+		})
+	}
+}
+
 func TestCompilePlatformExtension_EnforcesLimitsAndClassificationOrder(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
