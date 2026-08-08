@@ -39,6 +39,13 @@ func TestWecomInstallErrorMatrix(t *testing.T) {
 		err        error
 		wantStatus int
 		wantCode   string
+		// wantError is the exact sentence, not a smoke check that one exists.
+		// It is what a client too old to know the codes shows the admin, so it
+		// is as much a part of the contract as the status: an outcome that
+		// keeps its status and code but picks up a neighbour's sentence still
+		// sends those clients to do the wrong thing, and only pinning the text
+		// catches that.
+		wantError string
 		// why records the admin action this outcome is telling them to take.
 		// Two rows that share a code cannot be telling them different things.
 		why string
@@ -48,6 +55,7 @@ func TestWecomInstallErrorMatrix(t *testing.T) {
 			err:        wecom.ErrBotOwnedBySameWorkspace,
 			wantStatus: http.StatusConflict,
 			wantCode:   "wecom_bot_owned_by_same_workspace",
+			wantError:  "this bot is already connected to another agent in this workspace — disconnect it there first, then connect it here",
 			why:        "go disconnect it from the other agent here",
 		},
 		{
@@ -55,6 +63,7 @@ func TestWecomInstallErrorMatrix(t *testing.T) {
 			err:        wecom.ErrBotOwnedByArchivedAgent,
 			wantStatus: http.StatusConflict,
 			wantCode:   "wecom_bot_owned_by_archived_agent",
+			wantError:  "this bot is connected to an archived agent in this workspace — restore that agent, or disconnect its bot, before connecting it here",
 			why:        "restore that agent or disconnect its bot",
 		},
 		{
@@ -62,6 +71,7 @@ func TestWecomInstallErrorMatrix(t *testing.T) {
 			err:        wecom.ErrBotOwnedByAnotherWorkspace,
 			wantStatus: http.StatusConflict,
 			wantCode:   "wecom_bot_owned_by_another_workspace",
+			wantError:  "this bot is already connected to a different Multica workspace — disconnect it there before connecting it here",
 			why:        "go disconnect it in the other workspace",
 		},
 		{
@@ -69,6 +79,7 @@ func TestWecomInstallErrorMatrix(t *testing.T) {
 			err:        fmt.Errorf("%w: bot_id is required", wecom.ErrInvalidInstallationParams),
 			wantStatus: http.StatusBadRequest,
 			wantCode:   "wecom_install_rejected",
+			wantError:  "could not connect the WeCom bot — check the Bot ID and secret from the WeCom admin console, and that the bot is a smart bot with the long connection enabled",
 			why:        "fill in the field you left out",
 		},
 		{
@@ -76,6 +87,7 @@ func TestWecomInstallErrorMatrix(t *testing.T) {
 			err:        wecom.ErrCredentialsRejected,
 			wantStatus: http.StatusBadRequest,
 			wantCode:   "wecom_credentials_rejected",
+			wantError:  "WeCom rejected this Bot ID and secret — check both on the WeCom admin console, and that the bot is a smart bot with the long connection enabled",
 			why:        "go check the pair on the WeCom console — the only outcome that may say this",
 		},
 		{
@@ -83,6 +95,7 @@ func TestWecomInstallErrorMatrix(t *testing.T) {
 			err:        wecom.ErrCredentialsUnverifiable,
 			wantStatus: http.StatusServiceUnavailable,
 			wantCode:   "wecom_credentials_unverifiable",
+			wantError:  "could not reach WeCom to verify this bot — the credentials were not changed; try again in a moment",
 			why:        "wait and retry; the credentials were not changed",
 		},
 		{
@@ -90,6 +103,7 @@ func TestWecomInstallErrorMatrix(t *testing.T) {
 			err:        errors.New("dial tcp 10.0.0.5:5432: connect: connection refused"),
 			wantStatus: http.StatusInternalServerError,
 			wantCode:   "wecom_install_failed",
+			wantError:  "could not save this bot — something went wrong on our side. Your credentials were not changed; please try again, and contact support if it keeps failing",
 			why:        "nothing — it is ours to fix, and the admin must not be sent to rotate a secret",
 		},
 		{
@@ -97,6 +111,7 @@ func TestWecomInstallErrorMatrix(t *testing.T) {
 			err:        errors.New("wecom: encrypt secret: secretbox: no key"),
 			wantStatus: http.StatusInternalServerError,
 			wantCode:   "wecom_install_failed",
+			wantError:  "could not save this bot — something went wrong on our side. Your credentials were not changed; please try again, and contact support if it keeps failing",
 			why:        "nothing — ours",
 		},
 		{
@@ -104,6 +119,7 @@ func TestWecomInstallErrorMatrix(t *testing.T) {
 			err:        fmt.Errorf("upsert: %w", wecom.ErrCredentialsUnverifiable),
 			wantStatus: http.StatusServiceUnavailable,
 			wantCode:   "wecom_credentials_unverifiable",
+			wantError:  "could not reach WeCom to verify this bot — the credentials were not changed; try again in a moment",
 			why:        "errors.Is, not string matching",
 		},
 	}
@@ -127,11 +143,12 @@ func TestWecomInstallErrorMatrix(t *testing.T) {
 			if body.Code != tc.wantCode {
 				t.Errorf("code = %q, want %q (%s)", body.Code, tc.wantCode, tc.why)
 			}
-			// The sentence is the fallback for a client that does not know the
-			// code, so an empty one silently degrades those clients to a bare
-			// status.
-			if body.Error == "" {
-				t.Error("no error sentence: a client that does not know the code has nothing to show")
+			// The sentence is what a client that does not know the code shows,
+			// so it has to be this outcome's own sentence — an empty one leaves
+			// those clients a bare status, and a neighbour's tells the admin to
+			// take the wrong action.
+			if body.Error != tc.wantError {
+				t.Errorf("error = %q, want %q (%s)", body.Error, tc.wantError, tc.why)
 			}
 		})
 	}
