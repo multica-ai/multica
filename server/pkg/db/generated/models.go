@@ -1081,6 +1081,8 @@ type User struct {
 	ProfileDescription      string             `json:"profile_description"`
 	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
 	Timezone pgtype.Text `json:"timezone"`
+	// Sanitized first-touch acquisition dimensions: source, medium, campaign, and referrer_host only. Never contains a full URL, query string, email, IP, content, or source code.
+	AcquisitionAttribution []byte `json:"acquisition_attribution"`
 }
 
 type UserComposioConnection struct {

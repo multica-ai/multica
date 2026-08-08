@@ -164,7 +164,7 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 // none exists. isNew reports whether this call created the user — the signup
 // event fires on that edge, covering both the verification-code and Google
 // OAuth entry points.
-func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.User, isNew bool, err error) {
+func (h *Handler) findOrCreateUser(ctx context.Context, email, signupSource string) (user db.User, isNew bool, err error) {
 	user, err = h.Queries.GetUserByEmail(ctx, email)
 	isNew = isNotFound(err)
 	if err != nil && !isNew {
@@ -184,8 +184,9 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 		name = email[:at]
 	}
 	created, err := h.Queries.CreateUser(ctx, db.CreateUserParams{
-		Name:  name,
-		Email: email,
+		Name:                   name,
+		Email:                  email,
+		AcquisitionAttribution: analytics.ParseAcquisitionAttribution(signupSource),
 	})
 	if err != nil {
 		return db.User{}, false, err
@@ -380,7 +381,8 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, isNew, err := h.findOrCreateUser(r.Context(), email)
+	signupSource := signupSourceFromRequest(r)
+	user, isNew, err := h.findOrCreateUser(r.Context(), email, signupSource)
 	if err != nil {
 		var signupErr SignupError
 		if errors.As(err, &signupErr) {
@@ -391,7 +393,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isNew {
-		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.Signup(uuidToString(user.ID), user.Email, signupSource))
 	}
 
 	tokenString, err := h.issueJWT(user)
@@ -548,7 +550,8 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	email := strings.ToLower(strings.TrimSpace(gUser.Email))
 
-	user, isNew, err := h.findOrCreateUser(r.Context(), email)
+	signupSource := signupSourceFromRequest(r)
+	user, isNew, err := h.findOrCreateUser(r.Context(), email, signupSource)
 	if err != nil {
 		var signupErr SignupError
 		if errors.As(err, &signupErr) {
@@ -559,7 +562,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isNew {
-		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
+		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSource)
 		evt.Properties["auth_method"] = "google"
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, evt)
 	}

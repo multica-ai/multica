@@ -8,6 +8,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import { docsHrefForLocale, useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
+import { captureSignupOrDownloadStart } from "../analytics";
 import { formatStarCount, useGithubStars } from "../utils/use-github-stars";
 import { GitHubMark, githubUrl, headerButtonClassName } from "./shared";
 
@@ -107,6 +108,9 @@ export function LandingHeader({
           </Link>
           <Link
             href={ctaHref}
+            onClick={() => {
+              if (!user) captureSignupOrDownloadStart("signup", "header");
+            }}
             className={headerButtonClassName("solid", variant)}
           >
             {ctaLabel}

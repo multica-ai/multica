@@ -6,6 +6,7 @@ import { ArrowRight, Download } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
+import { captureSignupOrDownloadStart } from "../analytics";
 import {
   ClaudeCodeLogo,
   CodexLogo,
@@ -41,11 +42,18 @@ export function LandingHero() {
             </p>
 
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-              <Link href={ctaHref} className={heroButtonClassName("solid")}>
+              <Link
+                href={ctaHref}
+                onClick={() => {
+                  if (!user) captureSignupOrDownloadStart("signup", "hero");
+                }}
+                className={heroButtonClassName("solid")}
+              >
                 {user ? t.header.dashboard : t.hero.cta}
               </Link>
               <Link
                 href="/download"
+                onClick={() => captureSignupOrDownloadStart("download", "hero")}
                 className={heroButtonClassName("ghost")}
               >
                 <Download className="size-4" aria-hidden />
