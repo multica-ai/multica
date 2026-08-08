@@ -272,6 +272,273 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	}
 }
 
+// TestTaskTempBaseDir covers the MULTICA_AGENT_TEMP_BASE validation contract:
+// unset keeps the platform default, a valid absolute directory is honored,
+// and invalid values produce errors (which ensureTaskTempDir surfaces as a
+// task-startup failure) instead of a silent fallback to /tmp.
+func TestTaskTempBaseDir(t *testing.T) {
+	validBase := t.TempDir()
+	notDir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notDir, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write notDir fixture: %v", err)
+	}
+	readOnlyBase := filepath.Join(t.TempDir(), "read-only")
+	if err := os.Mkdir(readOnlyBase, 0o500); err != nil {
+		t.Fatalf("mkdir readOnlyBase fixture: %v", err)
+	}
+	// t.TempDir cleanup needs to descend into it again.
+	t.Cleanup(func() { _ = os.Chmod(readOnlyBase, 0o700) })
+
+	cases := []struct {
+		name    string
+		value   string
+		set     bool
+		skip    func() string // non-empty reason skips the case
+		want    string        // expected base when wantErr is false
+		wantErr bool
+	}{
+		{name: "unset keeps platform default", set: false, want: socketSafeTempBaseDir()},
+		{name: "empty keeps platform default", set: true, value: "  ", want: socketSafeTempBaseDir()},
+		{name: "valid absolute dir is honored", set: true, value: validBase, want: validBase},
+		{name: "relative path rejected", set: true, value: "relative/base", wantErr: true},
+		{name: "missing dir rejected", set: true, value: filepath.Join(validBase, "missing"), wantErr: true},
+		{name: "non-directory rejected", set: true, value: notDir, wantErr: true},
+		{
+			name: "non-writable dir rejected", set: true, value: readOnlyBase, wantErr: true,
+			skip: func() string {
+				if os.Geteuid() == 0 {
+					return "root bypasses directory write permissions"
+				}
+				return ""
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.skip != nil {
+				if reason := tc.skip(); reason != "" {
+					t.Skip(reason)
+				}
+			}
+			// Register the restore hook in both branches: t.Setenv remembers
+			// whether the variable was originally set and undoes either case.
+			t.Setenv("MULTICA_AGENT_TEMP_BASE", tc.value)
+			if !tc.set {
+				if err := os.Unsetenv("MULTICA_AGENT_TEMP_BASE"); err != nil {
+					t.Fatalf("unset MULTICA_AGENT_TEMP_BASE: %v", err)
+				}
+			}
+			got, err := taskTempBaseDir()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("taskTempBaseDir() = %q, want error", got)
+				}
+				// The message must name the variable the operator set, so the
+				// failure is actionable rather than a bare mkdir/stat error.
+				if !strings.Contains(err.Error(), "MULTICA_AGENT_TEMP_BASE") {
+					t.Fatalf("error %q does not mention MULTICA_AGENT_TEMP_BASE", err)
+				}
+				// ensureTaskTempDir must propagate the failure so the task
+				// start fails clearly instead of falling back to /tmp.
+				dir, e := ensureTaskTempDir("root", "ws", "task")
+				if e == nil {
+					t.Fatalf("ensureTaskTempDir() = %q with invalid MULTICA_AGENT_TEMP_BASE, want error", dir)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("taskTempBaseDir(): %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("taskTempBaseDir() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// The writability probe must not leave anything behind in the base.
+	entries, err := os.ReadDir(validBase)
+	if err != nil {
+		t.Fatalf("read validBase: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("validBase is not empty after probing, entries=%v", entries)
+	}
+}
+
+// TestRunTask_TaskTempBaseOverride is the MULTICA_AGENT_TEMP_BASE counterpart
+// of TestRunTask_InjectsPrivateTaskTempDir: with the variable set, all three
+// temp vars point at one fresh private dir under the configured base, agent
+// custom_env still cannot override them, and the dir is removed on task exit.
+func TestRunTask_TaskTempBaseOverride(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script agent fixture is POSIX-only")
+	}
+
+	tempBase := t.TempDir()
+	t.Setenv("MULTICA_AGENT_TEMP_BASE", tempBase)
+
+	workspacesRoot := t.TempDir()
+	workspaceID := "ws-temp-base"
+	taskID := "task-temp-base"
+
+	captureFile := filepath.Join(t.TempDir(), "agent-env.txt")
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/sh
+printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\n' "$TMPDIR" "$TMP" "$TEMP" > "$CAPTURE_FILE"
+IFS= read -r _
+printf '%s\n' '{"type":"system","session_id":"sess-temp-base"}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-temp-base","result":"done"}'
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake agent: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:     make(map[string]*workspaceState),
+		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots: make(map[string]int),
+		cfg: Config{
+			WorkspacesRoot: workspacesRoot,
+			AgentTimeout:   5 * time.Second,
+			ServerBaseURL:  srv.URL,
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakeBin, Model: ""},
+			},
+		},
+	}
+
+	task := Task{
+		ID:          taskID,
+		WorkspaceID: workspaceID,
+		RuntimeID:   "rt-1",
+		IssueID:     "issue-temp-base",
+		AuthToken:   "mat_temp_base",
+		Agent: &AgentData{
+			ID:   "agent-temp-base",
+			Name: "test-agent",
+			CustomEnv: map[string]string{
+				"CAPTURE_FILE": captureFile,
+				"TMPDIR":       "/shared/tmp",
+				"TMP":          "/shared/tmp",
+				"TEMP":         "/shared/tmp",
+			},
+		},
+	}
+
+	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result, err := d.runTask(context.Background(), task, "claude", 0, taskLog)
+	if err != nil {
+		t.Fatalf("runTask(): %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("runTask status = %q, want completed (comment=%q)", result.Status, result.Comment)
+	}
+
+	raw, err := os.ReadFile(captureFile)
+	if err != nil {
+		t.Fatalf("read captured agent env: %v", err)
+	}
+	got := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			t.Fatalf("malformed captured env line %q", line)
+		}
+		got[key] = value
+	}
+	taskTempDir := got["TMPDIR"]
+	if taskTempDir == "" {
+		t.Fatal("TMPDIR was not captured")
+	}
+	for _, key := range []string{"TMP", "TEMP"} {
+		if got[key] != taskTempDir {
+			t.Fatalf("%s = %q, want same private task temp dir %q", key, got[key], taskTempDir)
+		}
+	}
+	if filepath.Dir(taskTempDir) != tempBase {
+		t.Fatalf("task temp dir %q is not directly under configured base %q", taskTempDir, tempBase)
+	}
+	if _, err := os.Stat(taskTempDir); !os.IsNotExist(err) {
+		t.Fatalf("expected task temp dir %q to be cleaned after run, stat err=%v", taskTempDir, err)
+	}
+}
+
+// TestRunTask_TaskTempBaseInvalidFailsStartup pins the "no silent fallback"
+// half of the contract at the level operators experience it: an unusable
+// MULTICA_AGENT_TEMP_BASE fails the task with a message naming the variable,
+// and the agent never starts against a /tmp dir it did not ask for.
+func TestRunTask_TaskTempBaseInvalidFailsStartup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script agent fixture is POSIX-only")
+	}
+
+	missingBase := filepath.Join(t.TempDir(), "does-not-exist")
+	t.Setenv("MULTICA_AGENT_TEMP_BASE", missingBase)
+
+	workspacesRoot := t.TempDir()
+	captureFile := filepath.Join(t.TempDir(), "agent-env.txt")
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/sh
+printf 'ran\n' > "$CAPTURE_FILE"
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake agent: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:     make(map[string]*workspaceState),
+		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots: make(map[string]int),
+		cfg: Config{
+			WorkspacesRoot: workspacesRoot,
+			AgentTimeout:   5 * time.Second,
+			ServerBaseURL:  srv.URL,
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakeBin, Model: ""},
+			},
+		},
+	}
+
+	task := Task{
+		ID:          "task-temp-base-invalid",
+		WorkspaceID: "ws-temp-base-invalid",
+		RuntimeID:   "rt-1",
+		IssueID:     "issue-temp-base-invalid",
+		AuthToken:   "mat_temp_base_invalid",
+		Agent: &AgentData{
+			ID:        "agent-temp-base-invalid",
+			Name:      "test-agent",
+			CustomEnv: map[string]string{"CAPTURE_FILE": captureFile},
+		},
+	}
+
+	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	_, err := d.runTask(context.Background(), task, "claude", 0, taskLog)
+	if err == nil {
+		t.Fatal("runTask() succeeded with an unusable MULTICA_AGENT_TEMP_BASE, want failure")
+	}
+	if !strings.Contains(err.Error(), "MULTICA_AGENT_TEMP_BASE") {
+		t.Fatalf("runTask() error = %v, want it to name MULTICA_AGENT_TEMP_BASE", err)
+	}
+	if _, statErr := os.Stat(captureFile); !os.IsNotExist(statErr) {
+		t.Fatalf("agent ran despite the temp-base failure, stat err=%v", statErr)
+	}
+}
+
 func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 	oldRefresh := taskPrepareLeaseRefresh
 	oldTimeout := taskPrepareLeaseTimeout
