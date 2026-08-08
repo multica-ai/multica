@@ -3,7 +3,17 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { chmod, copyFile, lstat, mkdir, readFile, rename, rm } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -82,16 +92,25 @@ export function parseGoBuildMetadata(raw) {
 }
 
 export function parsePlatformAgentVersionMarker(binary) {
-  const matches = binary
-    .toString("latin1")
-    .matchAll(/platform-agent-cli-release-version:([0-9]+\.[0-9]+\.[0-9]+(?:[.+-][0-9A-Za-z.-]+)?)/g);
-  const versions = new Set(Array.from(matches, (match) => match[1]));
-  if (versions.size !== 1) {
+  const coreIdentifier = "(?:0|[1-9][0-9]*)";
+  const prereleaseIdentifier =
+    "(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)";
+  const buildIdentifier = "[0-9A-Za-z-]+";
+  const semver =
+    `${coreIdentifier}\\.${coreIdentifier}\\.${coreIdentifier}` +
+    `(?:-${prereleaseIdentifier}(?:\\.${prereleaseIdentifier})*)?` +
+    `(?:\\+${buildIdentifier}(?:\\.${buildIdentifier})*)?`;
+  const marker = new RegExp(
+    `platform-agent-cli-release-version:(${semver})(?![0-9A-Za-z.+-])`,
+    "g",
+  );
+  const matches = Array.from(binary.toString("latin1").matchAll(marker));
+  if (matches.length !== 1) {
     throw new Error(
       "[bundle-platform-agent-cli] binary must contain exactly one release version marker",
     );
   }
-  return versions.values().next().value;
+  return matches[0][1];
 }
 
 export async function inspectPlatformAgentBinary(
@@ -122,13 +141,26 @@ async function removeStagedPlatformAgent(destDir) {
   ]);
 }
 
-async function atomicCopy(source, destination, mode) {
+async function atomicCopy(source, destination, mode, validate) {
   const tempPath = join(
     dirname(destination),
     `.${basename(destination)}.${process.pid}.${randomUUID()}.tmp`,
   );
   try {
-    await copyFile(source, tempPath, fsConstants.COPYFILE_EXCL);
+    if (validate) {
+      const sourceFile = await open(source, "r");
+      try {
+        await writeFile(tempPath, await sourceFile.readFile(), {
+          flag: "wx",
+          mode: 0o600,
+        });
+      } finally {
+        await sourceFile.close();
+      }
+      await validate(tempPath);
+    } else {
+      await copyFile(source, tempPath, fsConstants.COPYFILE_EXCL);
+    }
     if (mode !== undefined) await chmod(tempPath, mode);
     await rename(tempPath, destination);
   } finally {
@@ -185,33 +217,8 @@ export async function stageReleasePlatformAgent({
     );
   }
 
-  const artifact = await readFile(artifactPath);
-  const actualChecksum = createHash("sha256").update(artifact).digest("hex");
-  if (actualChecksum !== expectedChecksum) {
-    throw new Error(
-      `[bundle-platform-agent-cli] checksum mismatch for ${artifactName}: ` +
-        `expected ${expectedChecksum}, got ${actualChecksum}`,
-    );
-  }
-
-  const metadata = await inspectBinary(artifactPath);
   const expectedPlatform = PLATFORM_TO_ARTIFACT[normalizeTargetPlatform(targetPlatform)];
   const expectedArch = ARCH_TO_ARTIFACT[normalizeTargetArch(targetArch)];
-  if (metadata.goos !== expectedPlatform) {
-    throw new Error(
-      `[bundle-platform-agent-cli] binary target platform mismatch: expected ${expectedPlatform}, got ${metadata.goos}`,
-    );
-  }
-  if (metadata.goarch !== expectedArch) {
-    throw new Error(
-      `[bundle-platform-agent-cli] binary target architecture mismatch: expected ${expectedArch}, got ${metadata.goarch}`,
-    );
-  }
-  if (metadata.version !== version) {
-    throw new Error(
-      `[bundle-platform-agent-cli] binary version mismatch: expected ${version}, got ${metadata.version}`,
-    );
-  }
 
   await mkdir(destDir, { recursive: true });
   const destBinary = join(destDir, platformAgentBinaryName(targetPlatform));
@@ -219,6 +226,33 @@ export async function stageReleasePlatformAgent({
     artifactPath,
     destBinary,
     targetPlatform === "win32" ? undefined : 0o755,
+    async (stagedPath) => {
+      const artifact = await readFile(stagedPath);
+      const actualChecksum = createHash("sha256").update(artifact).digest("hex");
+      if (actualChecksum !== expectedChecksum) {
+        throw new Error(
+          `[bundle-platform-agent-cli] checksum mismatch for ${artifactName}: ` +
+            `expected ${expectedChecksum}, got ${actualChecksum}`,
+        );
+      }
+
+      const metadata = await inspectBinary(stagedPath);
+      if (metadata.goos !== expectedPlatform) {
+        throw new Error(
+          `[bundle-platform-agent-cli] binary target platform mismatch: expected ${expectedPlatform}, got ${metadata.goos}`,
+        );
+      }
+      if (metadata.goarch !== expectedArch) {
+        throw new Error(
+          `[bundle-platform-agent-cli] binary target architecture mismatch: expected ${expectedArch}, got ${metadata.goarch}`,
+        );
+      }
+      if (metadata.version !== version) {
+        throw new Error(
+          `[bundle-platform-agent-cli] binary version mismatch: expected ${version}, got ${metadata.version}`,
+        );
+      }
+    },
   );
   const staleBinary = join(
     destDir,

@@ -108,6 +108,35 @@ describe("parseGoBuildMetadata", () => {
     ).toBe("0.2.0");
   });
 
+  it("accepts a complete SemVer release marker", () => {
+    expect(
+      parsePlatformAgentVersionMarker(
+        Buffer.from(
+          "binary\\0platform-agent-cli-release-version:1.2.3-rc.1+build.5\\0data",
+        ),
+      ),
+    ).toBe("1.2.3-rc.1+build.5");
+  });
+
+  it.each([
+    [
+      "duplicate markers",
+      "platform-agent-cli-release-version:0.2.0\\0platform-agent-cli-release-version:0.2.0",
+    ],
+    [
+      "a non-SemVer suffix",
+      "platform-agent-cli-release-version:0.2.0.evil",
+    ],
+    [
+      "a leading-zero core version",
+      "platform-agent-cli-release-version:01.2.3",
+    ],
+  ])("rejects %s", (_label, contents) => {
+    expect(() =>
+      parsePlatformAgentVersionMarker(Buffer.from(contents)),
+    ).toThrow(/exactly one release version marker/i);
+  });
+
   it("rejects metadata without a complete target", () => {
     expect(() =>
       parseGoBuildMetadata("artifact: go1.26.1\n\tbuild\tGOARCH=amd64\n"),
@@ -197,6 +226,29 @@ describe("stageReleasePlatformAgent", () => {
     ]);
   });
 
+  it("publishes the exact bytes that passed checksum and metadata validation", async () => {
+    const fixture = await setupRelease({ contents: "verified release bytes" });
+    const artifactPath = join(fixture.artifactDir, fixture.artifactName);
+
+    await stageReleasePlatformAgent({
+      version: "0.2.0",
+      artifactDir: fixture.artifactDir,
+      targetPlatform: "linux",
+      targetArch: "x64",
+      destDir: fixture.destDir,
+      inspectBinary: async (stagedPath) => {
+        expect(stagedPath).not.toBe(artifactPath);
+        expect((await stat(stagedPath)).mode & 0o777).toBe(0o600);
+        await writeFile(artifactPath, "replacement after validation started");
+        return { goos: "linux", goarch: "amd64", version: "0.2.0" };
+      },
+    });
+
+    expect(await readFile(join(fixture.destDir, "platform-agent-cli"), "utf8")).toBe(
+      "verified release bytes",
+    );
+  });
+
   it("fails when the selected artifact is missing", async () => {
     const fixture = await setupRelease({ writeSelectedArtifact: false });
     await expect(
@@ -273,6 +325,7 @@ describe("stageReleasePlatformAgent", () => {
     ["wrong embedded version", { goos: "linux", goarch: "amd64", version: "0.1.9" }, /version/i],
   ])("rejects a checksum-valid binary with %s", async (_label, metadata, expected) => {
     const fixture = await setupRelease();
+    await writeFile(join(fixture.destDir, "platform-agent-cli"), "last known good");
     await expect(
       stageReleasePlatformAgent({
         version: "0.2.0",
@@ -283,6 +336,10 @@ describe("stageReleasePlatformAgent", () => {
         inspectBinary: async () => metadata,
       }),
     ).rejects.toThrow(expected);
+    expect(await readFile(join(fixture.destDir, "platform-agent-cli"), "utf8")).toBe(
+      "last known good",
+    );
+    expect(await readdir(fixture.destDir)).toEqual(["platform-agent-cli"]);
   });
 });
 

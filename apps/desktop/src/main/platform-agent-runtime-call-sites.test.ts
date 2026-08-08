@@ -1,11 +1,15 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const daemonManager = readFileSync(
-  fileURLToPath(new URL("./daemon-manager.ts", import.meta.url)),
-  "utf8",
-);
+const daemonManagerPath = [
+  resolve(process.cwd(), "src/main/daemon-manager.ts"),
+  resolve(process.cwd(), "apps/desktop/src/main/daemon-manager.ts"),
+].find(existsSync);
+if (!daemonManagerPath) {
+  throw new Error("cannot locate Desktop daemon-manager.ts");
+}
+const daemonManager = readFileSync(daemonManagerPath, "utf8");
 
 function sourceBetween(start: string, end: string): string {
   const startIndex = daemonManager.indexOf(start);
