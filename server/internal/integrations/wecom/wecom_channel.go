@@ -617,13 +617,23 @@ func (c *wecomChannel) pingLoop(ctx context.Context, sender *wsSender, log *slog
 }
 
 // Send is the outbound Channel entry the engine calls with a normalized
-// OutboundMessage. Iteration 1 always uses aibot_send_msg (WeCom's
-// "proactive push" cmd) rather than aibot_respond_msg — send_msg has no 5s
-// deadline and works regardless of whether the message ever ties back to a
-// specific inbound frame. The one caveat is chat_type: aibot_send_msg needs
-// to know whether the ChatID is a single-user id or a group id. We piggy-
-// back on the length heuristic used by internal-customer-service (chat ids
-// are ≥33 chars, userids are shorter), which is stable in practice.
+// OutboundMessage. It always uses aibot_send_msg (WeCom's "proactive push"
+// cmd) rather than aibot_respond_msg, because a normalized OutboundMessage
+// carries a chat id and no callback req_id — there is nothing here to reply
+// in-window to.
+//
+// An earlier version of this comment justified the choice with a 5-second
+// deadline on aibot_respond_msg. That is not a rule: 5 seconds applies to
+// aibot_respond_welcome_msg and aibot_respond_update_msg, and a reply to a
+// message callback is allowed for 24 hours
+// (https://developer.work.weixin.qq.com/document/path/101463).
+//
+// What aibot_send_msg does require is that the user has already written to the
+// bot in that conversation; an unsolicited push to a chat nobody has messaged
+// is refused. The other caveat is chat_type: aibot_send_msg needs to know
+// whether the ChatID is a single-user id or a group id. We piggy-back on the
+// length heuristic used by internal-customer-service (chat ids are ≥33 chars,
+// userids are shorter), which is stable in practice.
 //
 // The Channel is not the primary outbound path in the multica engine — the
 // EventChatDone subscriber and the OutboundReplier handle most sends — but

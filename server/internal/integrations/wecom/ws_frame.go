@@ -363,9 +363,16 @@ type InboundMessage struct {
 	// envelope's Text field is populated from this.
 	Content string `json:"content,omitempty"`
 
-	// ReqID is the frame req_id the server sent this message with. We
-	// keep it so a future aibot_respond_msg (5s window) can echo it back;
-	// iteration 1 uses aibot_send_msg unconditionally and does not need it.
+	// ReqID is the frame req_id the server sent this message with. An
+	// aibot_respond_msg — the in-window reply — has to echo it; this adapter
+	// does not send one, and keeps the id so a caller that does can.
+	//
+	// There is no short window on it. Replies are allowed for 24 hours after the
+	// callback, and the id is not tied to the connection that received it: a
+	// stream opened on one connection took a refresh and a closing frame from a
+	// second one, measured against a live bot. The bounds that do apply are the
+	// stream's own lifetime (see errcodeStreamExpired) and 846605 for an id the
+	// server does not recognise.
 	ReqID string `json:"req_id,omitempty"`
 
 	// Media lists the attachments to fetch, in the order the user sent them.

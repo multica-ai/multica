@@ -51,18 +51,60 @@ type outboundQueries interface {
 // Outbound enqueues agent replies and inbox notifications for delivery to
 // WeCom. Registered against the shared event bus.
 type Outbound struct {
-	q        outboundQueries
+	q outboundQueries
+	// senders is the live installation→socket registry. Nothing in this file
+	// uses it: every send here is addressed by chat id, and those belong on the
+	// queue. It is held for the frames that CANNOT become rows — see the note
+	// on NewOutbound — so a subscriber that has one stays able to reach the
+	// socket without re-plumbing the constructor.
+	senders  *sendersRegistry
 	producer *outbox.Producer
 	logger   *slog.Logger
 }
 
 // NewOutbound builds the WeCom outbound subscriber over the shared outbound
 // queue producer.
-func NewOutbound(q outboundQueries, producer *outbox.Producer, logger *slog.Logger) *Outbound {
+//
+// senders sits next to producer because the choice of transport belongs to the
+// call site. What decides it is the frame's lifetime and cadence, NOT its
+// addressing — see the numbers below, which are measured rather than assumed:
+//
+//   - Addressed by chat id — an agent reply, an inbox card, the remainder of a
+//     long answer: these go on the queue. Any replica may produce them and the
+//     lease holder delivers, which is the routing problem the queue exists for.
+//     One prerequisite the platform imposes: aibot_send_msg only reaches a
+//     conversation the user has already written to the bot in. A proactive push
+//     to somebody who has never messaged the bot in that chat is refused, so an
+//     unsolicited notification is not something the queue can make arrive.
+//   - Addressed by the req_id of an inbound callback — aibot_respond_msg, the
+//     in-window streaming reply: these should not become rows, but not for the
+//     reason this comment used to give. The req_id is NOT bound to the
+//     connection that received it: measured against a live bot, a stream opened
+//     on one connection accepted both a refresh and its closing frame from a
+//     second connection, after the first had been displaced (errcode 0 both
+//     times, while a random req_id on the original connection was refused with
+//     846605 — so the server does validate it). The reply window is 24 hours.
+//     What rules the queue out is the shape of the traffic: a stream lives 10
+//     minutes by the doc (6 by the only other implementation anyone has read),
+//     and is refreshed every second or so, which is hundreds of frames for one
+//     message. A durable row per message is the wrong unit for that, and the
+//     queue's value — surviving a deploy, draining an hours-old backlog — is
+//     worth nothing to a frame that expires in minutes.
+//   - Bounded by size — a media upload is up to 50 MB over ~100 acked chunks
+//     against a 30s ClaimLease, and a worker holds one row per installation, so
+//     it would expire its own lease and park every text reply for that bot
+//     behind it.
+//
+// A path that bypasses the queue owes the queue a record of the delivery: the
+// reconciler reads absence of a row as "never delivered", so an unrecorded
+// socket send is re-delivered as a duplicate.
+//
+// Protocol reference: https://developer.work.weixin.qq.com/document/path/101463
+func NewOutbound(q outboundQueries, senders *sendersRegistry, producer *outbox.Producer, logger *slog.Logger) *Outbound {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Outbound{q: q, producer: producer, logger: logger}
+	return &Outbound{q: q, senders: senders, producer: producer, logger: logger}
 }
 
 // Register subscribes to the chat-done and inbox events on the bus.

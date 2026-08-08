@@ -245,7 +245,7 @@ func TestOutbound_RegisterAndHandleEventNoopOnNonWecom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewProducer: %v", err)
 	}
-	o := NewOutbound(q, producer, slog.Default())
+	o := NewOutbound(q, newSendersRegistry(), producer, slog.Default())
 	bus := events.New()
 	o.Register(bus)
 	// Publishing must not panic; the handler runs synchronously on the bus.

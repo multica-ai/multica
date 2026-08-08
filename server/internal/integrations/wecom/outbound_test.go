@@ -212,7 +212,7 @@ func newOutboundWithQueue(t *testing.T, q outboundQueries) (*Outbound, pgtype.UU
 	if err != nil {
 		t.Fatalf("NewProducer: %v", err)
 	}
-	return NewOutbound(q, producer, slog.Default()), mustTestUUID(t), store
+	return NewOutbound(q, newSendersRegistry(), producer, slog.Default()), mustTestUUID(t), store
 }
 
 func chatDoneEvent(content string) events.Event {

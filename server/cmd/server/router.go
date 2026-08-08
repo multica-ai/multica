@@ -811,7 +811,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// published the event. Without it the agent's reply lands only
 				// in Multica's web UI — the user in WeCom sees no response.
 				if wecomProducer != nil {
-					wecom.NewOutbound(queries, wecomProducer, slog.Default()).Register(bus)
+					wecom.NewOutbound(queries, wecomSenders, wecomProducer, slog.Default()).Register(bus)
 
 					// Reconciler: the safety net for a replica that died
 					// between finishing a task and enqueueing its reply. One
