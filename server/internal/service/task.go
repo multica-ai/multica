@@ -32,6 +32,26 @@ import (
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
+// ErrIssueExecutionSuppressed signals that issue metadata declares the issue an
+// aggregation-only parent orchestrator. Callers must not create, rerun, or
+// retry agent work for such an issue.
+var ErrIssueExecutionSuppressed = errors.New("issue execution is suppressed by metadata")
+
+// executionSuppressionError translates a guarded INSERT miss into the stable
+// issue-policy error when metadata changed after the caller loaded db.Issue.
+// Other pgx.ErrNoRows causes remain untouched so genuine data problems keep
+// their existing diagnostics.
+func (s *TaskService) executionSuppressionError(ctx context.Context, issueID pgtype.UUID, err error) error {
+	if !errors.Is(err, pgx.ErrNoRows) || !issueID.Valid {
+		return err
+	}
+	issue, loadErr := s.Queries.GetIssue(ctx, issueID)
+	if loadErr == nil && util.IssueExecutionSuppressed(issue.Metadata) {
+		return ErrIssueExecutionSuppressed
+	}
+	return err
+}
+
 type TaskService struct {
 	Queries   *db.Queries
 	TxStarter TxStarter
@@ -1068,6 +1088,10 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 }
 
 func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz) (db.AgentTaskQueue, error) {
+	if util.IssueExecutionSuppressed(issue.Metadata) {
+		slog.Info("task enqueue skipped: issue execution suppressed", "issue_id", util.UUIDToString(issue.ID))
+		return db.AgentTaskQueue{}, ErrIssueExecutionSuppressed
+	}
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1158,6 +1182,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		task, err = s.Queries.CreateAgentTask(ctx, createParams)
 	}
 	if err != nil {
+		err = s.executionSuppressionError(ctx, issue.ID, err)
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
@@ -1224,6 +1249,10 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 }
 
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
+	if util.IssueExecutionSuppressed(issue.Metadata) {
+		slog.Info("mention task enqueue skipped: issue execution suppressed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, ErrIssueExecutionSuppressed
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -1280,6 +1309,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
 	})
 	if err != nil {
+		err = s.executionSuppressionError(ctx, issue.ID, err)
 		// A concurrent enqueue for the same (issue, agent) won the race and the
 		// unique index rejected this insert. That is benign — a sibling run
 		// already covers this target — so log it at debug and return a typed
@@ -1303,6 +1333,10 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 // EnqueueDeferredAssigneeFallback creates an inert task that becomes claimable
 // only after PromoteDueDeferredTasksForRuntime flips it from deferred to queued.
 func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue db.Issue, agentID, squadID pgtype.UUID, escalationForTaskID pgtype.UUID, triggerCommentID pgtype.UUID, fireAt time.Time) (db.AgentTaskQueue, error) {
+	if util.IssueExecutionSuppressed(issue.Metadata) {
+		slog.Info("deferred fallback enqueue skipped: issue execution suppressed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, ErrIssueExecutionSuppressed
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("deferred fallback enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -1353,6 +1387,7 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 		TriggerEvidenceRefID: attrEvidenceRef,
 	})
 	if err != nil {
+		err = s.executionSuppressionError(ctx, issue.ID, err)
 		slog.Error("deferred fallback enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create deferred task: %w", err)
 	}
@@ -3836,7 +3871,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
+		} else if s.retryEligibleForTask(ctx, failureReason, parent) {
 			wantRetry = true
 			// Persist the reason-aware effective budget into the child so the
 			// retry chain self-describes (e.g. provider_network → max_attempts=3),
@@ -4212,6 +4247,36 @@ func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 		(t.IssueID.Valid || t.ChatSessionID.Valid)
 }
 
+// retryEligibleForTask extends the generic retry budget with the issue-level
+// execution contract. Chat tasks keep the existing retry behavior. Issue-task
+// metadata lookup failures fail closed so a deleted or unreadable issue cannot
+// accidentally bypass execution suppression.
+func (s *TaskService) retryEligibleForTask(ctx context.Context, failureReason string, task db.AgentTaskQueue) bool {
+	if !retryEligible(failureReason, task) {
+		return false
+	}
+	if !task.IssueID.Valid {
+		return true
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("task auto-retry skipped: failed to load issue suppression metadata",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return false
+	}
+	if util.IssueExecutionSuppressed(issue.Metadata) {
+		slog.Info("task auto-retry skipped: issue execution suppressed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+		)
+		return false
+	}
+	return true
+}
+
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
 // task when the failure was infrastructure-shaped (daemon crash, runtime
 // went offline, dispatch/run timeout) and the task hasn't exhausted its
@@ -4250,7 +4315,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// Autopilot has its own retry semantics (don't double-trigger) and a task
 	// with no issue/chat link has nowhere to report its retry — retryEligible
 	// covers both, keeping this sweeper path in sync with FailTask's in-tx retry.
-	if !retryEligible(reason, parent) {
+	if !s.retryEligibleForTask(ctx, reason, parent) {
 		return nil, nil
 	}
 
@@ -4365,6 +4430,9 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("load issue: %w", err)
+	}
+	if util.IssueExecutionSuppressed(issue.Metadata) {
+		return nil, ErrIssueExecutionSuppressed
 	}
 
 	// Determine the target agent for the rerun.

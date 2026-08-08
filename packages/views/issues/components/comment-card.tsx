@@ -261,14 +261,17 @@ function TaskCommentRetryButton({
     try {
       await api.rerunIssue(issueId, taskId);
     } catch (e) {
-      // Rerun re-checks the operator's invoke permission (MUL-4525); a
-      // structured 403 is a permission block, not a transient failure.
+      // Rerun re-checks invoke permission and the issue execution contract;
+      // structured admission blocks are policy outcomes, not transient failures.
+      const reason = dispatchReasonCode(e);
       toast.error(
-        dispatchReasonCode(e) === "invocation_not_allowed"
+        reason === "invocation_not_allowed"
           ? t(($) => $.execution_log.retry_blocked)
-          : e instanceof Error
-            ? e.message
-            : t(($) => $.execution_log.retry_failed),
+          : reason === "execution_suppressed"
+            ? t(($) => $.execution_log.retry_execution_suppressed)
+            : e instanceof Error
+              ? e.message
+              : t(($) => $.execution_log.retry_failed),
       );
     } finally {
       setRetrying(false);

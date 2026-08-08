@@ -52,6 +52,10 @@ const (
 	// success: nothing new runs. (Named to avoid implying the NEW comment was
 	// already processed.)
 	ReasonSelfTriggerSuppressed ReasonCode = "self_trigger_suppressed"
+	// ReasonExecutionSuppressed: the issue is intentionally aggregation-only and
+	// its metadata contract refuses all direct execution, including explicit
+	// mentions and manual reruns. This describes issue policy, not target state.
+	ReasonExecutionSuppressed ReasonCode = "execution_suppressed"
 	// ReasonInternalError: an unexpected server error prevented a clean decision.
 	ReasonInternalError ReasonCode = "internal_error"
 )

@@ -3242,7 +3242,7 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 // triggering execution. Moving out of backlog is handled separately in
 // UpdateIssue.
 func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
-	if issue.Status == "backlog" {
+	if util.IssueExecutionSuppressed(issue.Metadata) || issue.Status == "backlog" {
 		return false
 	}
 	return h.isAgentAssigneeReady(ctx, issue)
@@ -3264,6 +3264,9 @@ func (h *Handler) shouldEnqueueAssigneeFallback(ctx context.Context, issue db.Is
 }
 
 func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, actorType, actorID string, opts commentTriggerComputeOptions) (db.Agent, bool, bool) {
+	if util.IssueExecutionSuppressed(issue.Metadata) {
+		return db.Agent{}, false, false
+	}
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
 		return db.Agent{}, false, false
 	}

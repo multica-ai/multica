@@ -169,9 +169,11 @@ comment-triggered runs otherwise must not change status unless asked.
 | `multica issue metadata set <issue-id> --key --value [--type]` | `server/cmd/multica/cmd_issue_metadata.go:80,109-111` |
 | `multica issue metadata delete <issue-id> --key` | `server/cmd/multica/cmd_issue_metadata.go:93,113` |
 | API routes (PUT/DELETE `/metadata/{key}`) | `server/cmd/server/router.go:478-479` |
+| `workflow_role=parent_orchestrator` + `execution_expected=false` suppresses issue executions | predicate `server/internal/util/issue_execution.go`; assignment/status preview + write gates `server/internal/service/issue_trigger.go`, `server/internal/service/issue.go`, `server/internal/handler/issue.go`; comment and Stage-completion gates `server/internal/handler/comment.go`, `server/internal/handler/issue_child_done.go`; final service enqueue/rerun/retry gates `server/internal/service/task.go`; SQL current-metadata gates for fresh/deferred/retry insertion and queued/deferred/dispatched lifecycle boundaries (candidate listing, generic and channel-media promotion, claim, reclaim, start) in `server/pkg/db/queries/agent.sql`; structured explicit-request reason `execution_suppressed` in `server/internal/dispatch/reason.go`, `server/internal/handler/admission.go` |
 
 `--value` is JSON-parsed by default (bool/number sniff); `--type` forces
-`string`/`number`/`bool`.
+`string`/`number`/`bool`. Both metadata keys are required for suppression; Stage
+children remain runnable unless they carry the same pair.
 
 ## Custom properties CLI
 
@@ -197,4 +199,5 @@ grep -n 'extractIdentifiers(\|extractClosingIdentifiers(\|derivePRState(' intern
 grep -n 'qualifyingIdents\|reference_only\|ReferenceOnly' internal/handler/github.go pkg/db/queries/github.sql
 grep -n 'prevIssue.Status == "backlog"\|func (h \*Handler) shouldEnqueueAgentTask' internal/handler/issue.go
 grep -n 'func notifyParentOfChildDone'       internal/handler/issue_child_done.go
+grep -n 'IssueExecutionSuppressed'           internal/util/issue_execution.go internal/handler/*.go internal/service/*.go
 ```

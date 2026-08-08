@@ -131,9 +131,19 @@ list (see the reference-only rule above).
 
 Metadata is a free-form KV bag of durable issue state. Reading metadata is safe.
 Writing a metadata key is a state mutation and should be tied to an explicit
-task requirement to record that state for later readers or runs. Keys are
-whatever your workflow needs — the platform curates no vocabulary; pick short
-snake_case names and reuse them consistently within your workspace.
+task requirement to record that state for later readers or runs. Most keys are
+workflow-defined: the platform curates no vocabulary for them, so pick short
+snake_case names and reuse them consistently within your workspace. One pair has
+platform execution semantics:
+when both `workflow_role=parent_orchestrator` and `execution_expected=false` are
+set, the issue is an aggregation-only parent. Assignment, backlog promotion,
+comments (including explicit agent/squad mentions), Stage-completion wakes,
+manual reruns, and automatic retries do not create executions for that parent.
+Explicit mentions and manual reruns report the stable blocked reason
+`execution_suppressed` instead of silently doing nothing.
+Stage children remain ordinary runnable issues unless they carry the same pair.
+Removing either key, changing the role, or setting `execution_expected=true`
+restores normal trigger behavior.
 
 Never store secrets, tokens, or API keys in metadata.
 Not metadata: logs or summaries; runtime bookkeeping such as timestamps,
@@ -181,7 +191,8 @@ on it. These are the contracts, not advice:
 
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
-  the assigned agent then.
+  the assigned agent then, except for an execution-suppressed parent marked by
+  both `workflow_role=parent_orchestrator` and `execution_expected=false`.
 - **`in_progress` / `in_review` on assignment runs** are agent-managed CLI
   mutations, not `StartTask` / `CompleteTask` side effects. The assignment
   runtime brief asks ordinary agents for `todo`/`backlog` → `in_progress` then
@@ -226,12 +237,14 @@ Creating every serial step as `todo` enqueues the whole chain at once.
 ### Stages: order sub-issues into barrier groups
 
 `--stage <N>` (N ≥ 1) groups sub-issues under the same parent into ordered
-stages. The parent assignee is woken **once, when a whole stage finishes** —
-i.e. every sub-issue in the lowest unfinished stage has reached a terminal
-status (`done`/`cancelled`). A completion that does not close a stage is silent
-(no comment, no wake). A sibling set with **no** stages is one implicit stage,
-so the parent is woken once when the *last* sub-issue finishes — not on every
-child.
+stages. The parent assignee is normally woken **once, when a whole stage finishes**
+— i.e. every sub-issue in the lowest unfinished stage has reached a terminal
+status (`done`/`cancelled`). A completion that does not close a stage
+is silent (no comment, no wake). A sibling set with **no** stages is one implicit
+stage, so the parent is normally woken once when the *last* sub-issue finishes —
+not on every child. An execution-suppressed parent still receives the Stage
+completion system comment as aggregation evidence, but the comment does not wake
+or execute its assignee.
 
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee, who then decides whether to promote the next stage's
