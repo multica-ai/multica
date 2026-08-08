@@ -155,3 +155,49 @@ func TestSlackTypingNotifier_OnSettledClears(t *testing.T) {
 		t.Fatalf("OnSettled must clear the reaction, removed = %+v", fr.removed)
 	}
 }
+
+// A cancelled run publishes neither chat-done nor task-failed, so the bus
+// subscription is the only thing that can ever take the reaction back off.
+//
+// Driven through Register + Publish rather than by calling handleEvent, which
+// is what the sibling tests above do. handleEvent runs identically whether or
+// not the manager is subscribed to task:cancelled, so a test written that way
+// passes with the fix reverted — it proves the handler works and says nothing
+// about whether the event reaches it. Only a real publish can fail for the
+// reason the user experiences.
+func TestTypingIndicator_ClearsOnTaskCancelled(t *testing.T) {
+	sessionID := uid(7)
+	q := &fakeOutboundQueries{
+		binding: db.ChannelChatSessionBinding{InstallationID: uid(1)},
+		inst:    db.ChannelInstallation{ID: uid(1), Status: "active", Config: slackInstallConfigJSON()},
+	}
+	fr := &fakeReactor{}
+	m := newTestTyping(q, fr)
+	bus := events.New()
+	m.Register(bus)
+
+	ts := freshTS()
+	m.Add(context.Background(), db.ChannelInstallation{Config: slackInstallConfigJSON()}, sessionID, "C1", ts)
+
+	// The shape broadcastTaskEvent publishes for a cancel: ids on the envelope
+	// and in the payload map, status "cancelled", and no content of any kind.
+	bus.Publish(events.Event{
+		Type:          protocol.EventTaskCancelled,
+		TaskID:        util.UUIDToString(uid(9)),
+		ChatSessionID: util.UUIDToString(sessionID),
+		Payload: map[string]any{
+			"task_id":         util.UUIDToString(uid(9)),
+			"chat_session_id": util.UUIDToString(sessionID),
+			"status":          "cancelled",
+		},
+	})
+
+	if len(fr.removed) != 1 {
+		t.Fatalf("the run was cancelled and the :%s: reaction is still on C1/%s — "+
+			"the user is watching a typing indicator spin for an answer nobody is "+
+			"producing (removed %d reactions)", typingEmoji, ts, len(fr.removed))
+	}
+	if fr.removed[0].Channel != "C1" || fr.removed[0].Timestamp != ts {
+		t.Errorf("cleared the wrong message: %+v, want C1/%s", fr.removed[0], ts)
+	}
+}

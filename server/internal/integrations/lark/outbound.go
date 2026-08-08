@@ -252,6 +252,14 @@ func (p *Patcher) SetTypingIndicatorManager(m *TypingIndicatorManager) {
 //   - EventTaskFailed — the run failed; surface a short error card
 //     so the failure is visually distinct from a successful reply.
 //
+//   - EventTaskCancelled — the run ended without an answer. Nothing is
+//     sent for it; the subscription exists so the Typing reaction comes
+//     off. A cancellation publishes no chat-done and no task-failed, so
+//     without this the badge sits on the user's message for good. Every
+//     cancel path lands here — CancelTask for a running or queued task,
+//     the queued follow-up cancel behind it, and the agent- and
+//     issue-level bulk cancels all broadcast task:cancelled per row.
+//
 // We deliberately do NOT subscribe to EventTaskQueued / EventTaskRunning
 // (no thinking-card lifecycle anymore — adds noise without value) or to
 // EventTaskCompleted (chat tasks always emit EventChatDone first, which
@@ -262,6 +270,7 @@ func (p *Patcher) SetTypingIndicatorManager(m *TypingIndicatorManager) {
 func (p *Patcher) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, p.handleEvent)
 	bus.Subscribe(protocol.EventChatDone, p.handleEvent)
+	bus.Subscribe(protocol.EventTaskCancelled, p.handleEvent)
 }
 
 func (p *Patcher) handleEvent(e events.Event) {
@@ -296,6 +305,24 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 			return nil
 		}
 		return fmt.Errorf("lookup chat session binding: %w", err)
+	}
+
+	// A cancelled run has no reply to place, so the only thing owed to the user
+	// is taking the Typing badge off. That happens here, ahead of the origin
+	// classification below, because the classification answers "does this
+	// answer belong on Lark" and a cancellation has no answer to misroute. The
+	// ordering is load-bearing: a task cancelled for owning an empty input
+	// batch — the failure #6611 fixed the cause of — reports no
+	// channel-ingested messages, so a clear placed after that gate would be
+	// skipped on exactly the run that most needs it. Removing a badge Lark
+	// itself put there is safe to do for any cancel on this session; this is
+	// the same session-wide clear slack.TypingIndicatorManager performs, and
+	// the worst it can cost is a missing badge on a turn still running.
+	if e.Type == protocol.EventTaskCancelled {
+		if p.typingIndicator != nil {
+			p.typingIndicator.Clear(ctx, chatSessionID)
+		}
+		return nil
 	}
 
 	// Only bound sessions reach here, so classify the task origin before
