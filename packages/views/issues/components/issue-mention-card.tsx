@@ -23,24 +23,35 @@ interface IssueMentionCardProps {
  * Density follows the reader's "issue mention style" preference. The narrower
  * modes hide the title, so those get a hover card that brings it back; `full`
  * already shows it and stays exactly as it was.
+ *
+ * Two details are mode-dependent because `plain` renders bare prose, not a box:
+ *   - `align-middle` centers the boxed chip in the line box. Bare text of the
+ *     surrounding size must sit on the sentence baseline instead, so plain mode
+ *     leaves vertical-align alone.
+ *   - `hover:bg-accent` needs padding and a radius to look like anything but a
+ *     rectangle hugging the glyphs. Plain mode's hover affordance is the
+ *     underline that `IssueChip` already carries.
  */
 export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardProps) {
   const p = useWorkspacePaths();
   const openInNewTab = useIssueLinkStore((s) => s.openInNewTab);
   const mode = useIssueMentionDisplayStore((s) => s.mode);
+  const isPlain = mode === "plain";
 
   const link = (
     <AppLink
       href={p.issueDetail(issueId)}
       target={openInNewTab ? "_blank" : undefined}
       newTabTitle={fallbackLabel}
-      className="issue-mention align-middle"
+      className={isPlain ? "issue-mention" : "issue-mention align-middle"}
     >
       <IssueChip
         issueId={issueId}
         fallbackLabel={fallbackLabel}
         variant={mode}
-        className="cursor-pointer hover:bg-accent transition-colors"
+        className={
+          isPlain ? "cursor-pointer" : "cursor-pointer hover:bg-accent transition-colors"
+        }
       />
     </AppLink>
   );

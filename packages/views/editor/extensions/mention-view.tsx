@@ -13,13 +13,17 @@
  * line-box alignment; setting it on the inner <a> has no effect because the
  * wrapper is the outermost inline element.
  * `plain` display mode renders bare inherited-size text instead of the card,
- * which is shorter than the line box and needs no separate accommodation.
+ * which is shorter than the line box and needs no separate accommodation. It
+ * does need the alignment back: prose-sized text belongs on the sentence
+ * baseline, so the wrapper carries `.issue-mention-plain`, whose rule in
+ * shell.css outranks the `vertical-align: middle` default above.
  */
 
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useIssueLinkStore, useIssueMentionDisplayStore } from "@multica/core/issues/stores";
+import type { IssueMentionMode } from "@multica/core/issues/stores";
 import { useNavigation } from "../../navigation";
 import { IssueChip } from "../../issues/components/issue-chip";
 import { IssueHoverCard } from "../../issues/components/issue-hover-card";
@@ -27,11 +31,17 @@ import { ProjectChip } from "../../projects/components/project-chip";
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
+  // Read here rather than inside IssueMention: the wrapper is the outermost
+  // inline element, so it is the only place vertical alignment can be chosen.
+  const mode = useIssueMentionDisplayStore((s) => s.mode);
 
   if (type === "issue") {
     return (
-      <NodeViewWrapper as="span" className="inline">
-        <IssueMention issueId={id} fallbackLabel={label} />
+      <NodeViewWrapper
+        as="span"
+        className={mode === "plain" ? "inline issue-mention-plain" : "inline"}
+      >
+        <IssueMention issueId={id} fallbackLabel={label} mode={mode} />
       </NodeViewWrapper>
     );
   }
@@ -92,14 +102,15 @@ function ProjectMention({
 function IssueMention({
   issueId,
   fallbackLabel,
+  mode,
 }: {
   issueId: string;
   fallbackLabel?: string;
+  mode: IssueMentionMode;
 }) {
   const p = useWorkspacePaths();
   const { push, openInNewTab } = useNavigation();
   const newTabPreferred = useIssueLinkStore((s) => s.openInNewTab);
-  const mode = useIssueMentionDisplayStore((s) => s.mode);
   const issuePath = p.issueDetail(issueId);
 
   const handleClick = (e: React.MouseEvent) => {
@@ -136,7 +147,11 @@ function IssueMention({
         issueId={issueId}
         fallbackLabel={fallbackLabel}
         variant={mode}
-        className="cursor-pointer hover:bg-accent transition-colors"
+        className={
+          mode === "plain"
+            ? "cursor-pointer"
+            : "cursor-pointer hover:bg-accent transition-colors"
+        }
       />
     </a>
   );
