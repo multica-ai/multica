@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
@@ -24,8 +24,8 @@ import {
 } from "@multica/cerebro-usage";
 import {
   addAnalyticsFilterValue,
-  filtersToSearchParams,
   removeAnalyticsFilterValue,
+  replaceAnalyticsTimeBucket,
   type AnalyticsFilter,
 } from "../../core/analytics";
 import { valueLabel } from "../../core/dimension-labels";
@@ -36,8 +36,11 @@ import { RunsToolbar } from "./runs-toolbar";
 
 type Result = AnalyticsQueryResult | undefined;
 type HeatGrain = Extract<AnalyticsGrain, "hour" | "day" | "month">;
+type JudgeGateVerdict = "pass" | "fail";
 
 const DAY_MS = 86_400_000;
+const RUNS_LINE_COLOR = "#8b7cf6";
+const SAVINGS_LINE_COLOR = "#65c18c";
 
 function num(value: unknown): number {
   return typeof value === "number" ? value : Number(value) || 0;
@@ -69,6 +72,7 @@ function passClass(rate: number): string {
 export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVisual, onRunPanelOpen }: { workspaceId: string; filters: AnalyticsFilter[]; onFiltersChange: React.Dispatch<React.SetStateAction<AnalyticsFilter[]>>; onNewVisual: () => void; onRunPanelOpen?: () => void }) {
   const range = useDashboardStore((s) => s.range);
   const setRange = useDashboardStore((s) => s.setRange);
+  const clearFilters = useDashboardStore((s) => s.clearFilters);
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", []);
   const [heatGrain, setHeatGrain] = useState<HeatGrain>("hour");
   const [search, setSearch] = useState("");
@@ -85,12 +89,6 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
     const since = new Date(Date.now() - timeRangeToDays(range) * DAY_MS).toISOString();
     return { dimension: "time", operator: "gte", values: [since] };
   }, [range]);
-
-  useEffect(() => {
-    const params = filtersToSearchParams(filters, new URLSearchParams(window.location.search));
-    const search = params.toString();
-    window.history.replaceState(null, "", `${window.location.pathname}${search ? `?${search}` : ""}`);
-  }, [filters]);
 
   const baseFilters = useMemo(() => [...filters, sinceFilter], [filters, sinceFilter]);
 
@@ -122,35 +120,43 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
         [],
         { page: { limit: 1 } },
       )),
-      // 1 activity heatmap
+      // 1 judge gate outcome
+      analyticsQueryOptions(workspaceId, build(["quality_pass_rate"], [], {
+        filters: [
+          ...baseFilters.filter((filter) => filter.dimension !== "quality_type"),
+          { dimension: "quality_type", operator: "in", values: ["judge_gate"] },
+        ],
+        page: { limit: 1 },
+      })),
+      // 2 activity heatmap
       analyticsQueryOptions(workspaceId, build(["runs"], ["time"], {
         grain: heatGrain,
         page: panelPage("activity", heatGrain === "hour" ? 168 : heatGrain === "day" ? 62 : 12),
         sort: [{ field: "time", direction: "asc" }],
       })),
-      // 2 runs & savings over time
+      // 3 runs & savings over time
       analyticsQueryOptions(workspaceId, build(["runs", "saved_cents"], ["time"], {
         grain: "day",
         page: panelPage("time-series", 62),
         sort: [{ field: "time", direction: "asc" }],
       })),
-      // 3 by model
+      // 4 by model
       analyticsQueryOptions(workspaceId, build(["runs"], ["model"], { page: panelPage("model", 6) })),
-      // 4 by outcome
+      // 5 by outcome
       analyticsQueryOptions(workspaceId, build(["runs"], ["status"], { page: panelPage("outcome", 6) })),
-      // 5 usage by source
+      // 6 usage by source
       analyticsQueryOptions(workspaceId, build(["runs"], ["source"], { page: panelPage("sources", 8) })),
-      // 6 people x source
+      // 7 people x source
       analyticsQueryOptions(workspaceId, build(["runs"], ["person", "source"], { page: panelPage("people-source", 60) })),
-      // 7 provider / model / skill chips
+      // 8 provider / model / skill chips
       analyticsQueryOptions(workspaceId, build(["runs", "skill_invocations"], ["provider", "model", "skill"], { page: panelPage("chips", 12) })),
-      // 8 people x project
+      // 9 people x project
       analyticsQueryOptions(workspaceId, build(["runs", "cost_cents", "quality_pass_rate"], ["person", "project"], { page: panelPage("people-project", 200) })),
-      // 9 quality observations by category
+      // 10 quality observations by category
       analyticsQueryOptions(workspaceId, build(["runs", "quality_pass_rate"], ["quality_category"], { page: panelPage("quality", 8) })),
-      // 10 blocking categories by type
+      // 11 blocking categories by type
       analyticsQueryOptions(workspaceId, build(["runs"], ["quality_type"], { page: panelPage("blocking", 8) })),
-      // 11 matching runs
+      // 12 matching runs
       analyticsQueryOptions(workspaceId, build(
         ["cost_cents", "skill_invocations", "input_tokens", "output_tokens", "saved_cents", "duration_seconds"],
         ["run", "time", "person", "source", "runtime", "provider", "model", "status", "cost_kind", "issue", "reference_label", "debug_link", "trace"],
@@ -159,7 +165,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
     ],
   });
 
-  const [kpi, heat, timeSeries, byModel, byOutcome, bySource, peopleSource, chips, peopleProject, qualityObs, blocking, runsResult] =
+  const [kpi, judgeGate, heat, timeSeries, byModel, byOutcome, bySource, peopleSource, chips, peopleProject, qualityObs, blocking, runsResult] =
     queries.map((q) => q.data) as Result[];
   const loading = queries.some((q) => q.isLoading);
 
@@ -179,22 +185,16 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
     onFiltersChange((current) => removeAnalyticsFilterValue(current, dimension, value, operator));
     resetPaging();
   };
+  const onQualityVerdictFilter = (verdict: JudgeGateVerdict) => {
+    onFiltersChange((current) => withJudgeGateVerdictFilter(current, verdict));
+    resetPaging();
+  };
   // Buckets arrive as local wall time serialized with a Z suffix (the SQL
   // truncates in the query timezone). Re-interpret them as local time before
   // building the UTC range, otherwise the filter is offset by the timezone
   // and matches the wrong runs.
-  const onTimeBucketFilter = (value: string) => {
-    const start = new Date(value.replace(/(\.\d+)?Z$/, ""));
-    if (Number.isNaN(start.getTime())) return;
-    const end = new Date(start);
-    if (heatGrain === "hour") end.setHours(end.getHours() + 1);
-    else if (heatGrain === "month") end.setMonth(end.getMonth() + 1);
-    else end.setDate(end.getDate() + 1);
-    onFiltersChange((current) => [
-      ...current.filter((filter) => !(filter.dimension === "time" && (filter.operator === "gte" || filter.operator === "lte"))),
-      { dimension: "time", operator: "gte", values: [start.toISOString()] },
-      { dimension: "time", operator: "lte", values: [end.toISOString()] },
-    ]);
+  const onTimeBucketFilter = (value: string, grain: HeatGrain) => {
+    onFiltersChange((current) => replaceAnalyticsTimeBucket(current, value, grain));
     resetPaging();
   };
 
@@ -213,7 +213,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
   };
 
   const kpiRow = (kpi?.rows ?? [])[0] ?? {};
-  const gatePass = num(kpiRow.quality_pass_rate);
+  const gatePass = num((judgeGate?.rows ?? [])[0]?.quality_pass_rate);
   const aggregated = aggregatePeopleProject(peopleProject);
   const peoplePages = countTablePages(aggregated.people.size);
   const projectPages = countTablePages(aggregated.projects.size);
@@ -228,7 +228,10 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
           filters={filters}
           onAddFilter={onFilter}
           onRemoveFilter={onRemoveFilter}
-          onClear={() => { onFiltersChange([]); resetPaging(); }}
+          onClear={() => {
+            clearFilters();
+            resetPaging();
+          }}
           onCustomize={() => setCompactLayout((compact) => !compact)}
           onNewVisual={() => {
             setSelectedRun(null);
@@ -259,7 +262,11 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
               <span className="rounded border bg-[#f3f2f0] px-2 py-1">Color: Volume</span>
             </div>
           </div>
-          <ActivityHeatmap result={heat} grain={heatGrain} onFilter={onTimeBucketFilter} />
+          <ActivityHeatmap
+            result={heat}
+            grain={heatGrain}
+            onFilter={(value) => onTimeBucketFilter(value, heatGrain)}
+          />
           <PanelFooterPager
             label="Activity grid"
             page={(panelCursors.activity?.length ?? 0) + 1}
@@ -275,7 +282,10 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
           {/* Runs & cost over time */}
           <div className="xl:col-span-2">
             <Panel title="Runs & cost over time" meta="Click any point to filter">
-              <TimeSeries result={timeSeries} />
+              <TimeSeries
+                result={timeSeries}
+                onTimeFilter={(value) => onTimeBucketFilter(value, "day")}
+              />
               <div className="grid grid-cols-2 gap-4 border-t p-4">
                 <BarList title="By model" result={byModel} dimension="model" metric="runs" onFilter={onFilter} />
                 <BarList title="By outcome" result={byOutcome} dimension="status" metric="runs" onFilter={onFilter} colorByStatus />
@@ -335,7 +345,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
           <div className="grid lg:grid-cols-[220px_1fr]">
             <div className="border-b p-4 lg:border-b-0 lg:border-r">
               <Eyebrow>Judge gate outcome</Eyebrow>
-              <Donut value={gatePass} />
+              <Donut value={gatePass} onFilter={onQualityVerdictFilter} />
               <p className="mt-2 text-center text-[10px] text-muted-foreground">
                 Pass rate from stored judge verdicts, not a universal quality score.
               </p>
@@ -655,9 +665,16 @@ export function ActivityHeatmap({ result, grain, onFilter }: { result: Result; g
   );
 }
 
-export function TimeSeries({ result }: { result: Result }) {
+export function TimeSeries({
+  result,
+  onTimeFilter,
+}: {
+  result: Result;
+  onTimeFilter?: (value: string) => void;
+}) {
   const series = (result?.rows ?? []).map((row) => ({
     t: shortDay(str(row.time)),
+    rawTime: str(row.time) ?? "",
     Runs: num(row.runs),
     Savings: Math.round(num(row.saved_cents) / 100),
   }));
@@ -677,19 +694,119 @@ export function TimeSeries({ result }: { result: Result }) {
           <YAxis yAxisId="left" tick={false} tickLine={false} axisLine={false} width={0} />
           <YAxis yAxisId="right" orientation="right" tick={false} tickLine={false} axisLine={false} width={0} />
           <Tooltip contentStyle={{ fontSize: 11 }} />
-          <Line yAxisId="left" type="monotone" dataKey="Runs" stroke="#8b7cf6" strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }}>
+          <Line
+            yAxisId="left"
+            type="monotone"
+            dataKey="Runs"
+            stroke={RUNS_LINE_COLOR}
+            strokeWidth={2}
+            dot={(props) => (
+              <TimeSeriesPoint
+                cx={props.cx}
+                cy={props.cy}
+                rawTime={typeof props.payload?.rawTime === "string" ? props.payload.rawTime : ""}
+                series="Runs"
+                value={num(props.value)}
+                color={RUNS_LINE_COLOR}
+                onTimeFilter={onTimeFilter}
+              />
+            )}
+            activeDot={false}
+          >
             <LabelList dataKey="Runs" position="top" className="fill-[#6f63d7] text-[9px]" />
           </Line>
-          <Line yAxisId="right" type="monotone" dataKey="Savings" stroke="#65c18c" strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }}>
+          <Line
+            yAxisId="right"
+            type="monotone"
+            dataKey="Savings"
+            stroke={SAVINGS_LINE_COLOR}
+            strokeWidth={2}
+            dot={(props) => (
+              <TimeSeriesPoint
+                cx={props.cx}
+                cy={props.cy}
+                rawTime={typeof props.payload?.rawTime === "string" ? props.payload.rawTime : ""}
+                series="Savings"
+                value={num(props.value)}
+                color={SAVINGS_LINE_COLOR}
+                onTimeFilter={onTimeFilter}
+              />
+            )}
+            activeDot={false}
+          >
             <LabelList dataKey="Savings" position="bottom" className="fill-[#438a62] text-[9px]" formatter={(value: unknown) => `$${num(value)}`} />
           </Line>
         </LineChart>
       </ResponsiveContainer>
-      <div className="sr-only">
-        {series.map((point, index) => <span key={index} aria-label={`Runs point ${point.Runs}`} />)}
-      </div>
     </div>
   );
+}
+
+export function TimeSeriesPoint({
+  cx,
+  cy,
+  rawTime,
+  series,
+  value,
+  color,
+  onTimeFilter,
+}: {
+  cx?: number;
+  cy?: number;
+  rawTime: string;
+  series: "Runs" | "Savings";
+  value: number;
+  color: string;
+  onTimeFilter?: (value: string) => void;
+}) {
+  if (cx == null || cy == null) return null;
+  const activate = () => {
+    if (rawTime) onTimeFilter?.(rawTime);
+  };
+  const interactive = Boolean(rawTime && onTimeFilter);
+  return (
+    <g
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      aria-label={
+        interactive
+          ? `Filter Runs & cost over time by ${formatTimePointLabel(rawTime)}, ${series} ${value}`
+          : undefined
+      }
+      onClick={(event) => {
+        event.stopPropagation();
+        activate();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        activate();
+      }}
+      className={interactive ? "group cursor-pointer outline-none" : undefined}
+    >
+      <circle cx={cx} cy={cy} r={12} fill="transparent" />
+      <circle
+        cx={cx}
+        cy={cy}
+        r={3}
+        fill={color}
+        stroke={color}
+        strokeWidth={2}
+        className="group-focus-visible:stroke-ring group-focus-visible:stroke-[5]"
+      />
+    </g>
+  );
+}
+
+function formatTimePointLabel(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unknown date";
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 function BarList({
@@ -995,20 +1112,57 @@ function RunsTable({
   );
 }
 
-export function Donut({ value }: { value: number }) {
+export function withJudgeGateVerdictFilter(
+  filters: AnalyticsFilter[],
+  verdict: JudgeGateVerdict,
+): AnalyticsFilter[] {
+  return [
+    ...filters.filter((filter) =>
+      filter.dimension !== "quality_type" && filter.dimension !== "quality_verdict"
+    ),
+    { dimension: "quality_type", operator: "in", values: ["judge_gate"] },
+    { dimension: "quality_verdict", operator: "in", values: [verdict] },
+  ];
+}
+
+export function Donut({ value, onFilter }: { value: number; onFilter?: (verdict: JudgeGateVerdict) => void }) {
   const pctValue = Math.round(value * 100);
   const reviseEnd = pctValue + Math.round((100 - pctValue) * 0.65);
   return (
-    <div
-      aria-label={`Judge gate outcome ${pctValue}%`}
-      className="relative mx-auto mt-2 size-28 rounded-full"
-    >
-      <svg aria-hidden="true" viewBox="0 0 112 112" className="size-full -rotate-90">
-        <circle cx="56" cy="56" r="48" pathLength="100" fill="none" stroke="#ff3b68" strokeWidth="16" />
-        <circle cx="56" cy="56" r="48" pathLength="100" fill="none" stroke="#f0b429" strokeWidth="16" strokeDasharray={`${reviseEnd} ${100 - reviseEnd}`} />
-        <circle cx="56" cy="56" r="48" pathLength="100" fill="none" stroke="#00a56a" strokeWidth="16" strokeDasharray={`${pctValue} ${100 - pctValue}`} />
-      </svg>
-      <div className="absolute inset-4 grid place-items-center rounded-full bg-card font-mono text-lg font-bold">{pctValue}%</div>
+    <div className="mt-2">
+      <div
+        aria-label={`Judge gate outcome ${pctValue}%`}
+        className="relative mx-auto size-28 rounded-full"
+      >
+        <svg aria-hidden="true" viewBox="0 0 112 112" className="size-full -rotate-90">
+          <circle cx="56" cy="56" r="48" pathLength="100" fill="none" stroke="#ff3b68" strokeWidth="16" />
+          <circle cx="56" cy="56" r="48" pathLength="100" fill="none" stroke="#f0b429" strokeWidth="16" strokeDasharray={`${reviseEnd} ${100 - reviseEnd}`} />
+          <circle cx="56" cy="56" r="48" pathLength="100" fill="none" stroke="#00a56a" strokeWidth="16" strokeDasharray={`${pctValue} ${100 - pctValue}`} />
+        </svg>
+        <div className="absolute inset-4 grid place-items-center rounded-full bg-card font-mono text-lg font-bold">{pctValue}%</div>
+      </div>
+      {onFilter && (
+        <div role="group" aria-label="Judge gate outcome filters" className="mt-3 flex justify-center gap-2">
+          <button
+            type="button"
+            aria-label="Filter runs by passing judge gates"
+            onClick={() => onFilter("pass")}
+            className="rounded border px-2 py-1 text-[10px] text-success hover:border-success focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success"
+          >
+            <span aria-hidden="true" className="mr-1 inline-block size-2 rounded-full bg-success" />
+            Pass
+          </button>
+          <button
+            type="button"
+            aria-label="Filter runs by failed judge gates"
+            onClick={() => onFilter("fail")}
+            className="rounded border px-2 py-1 text-[10px] text-destructive hover:border-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+          >
+            <span aria-hidden="true" className="mr-1 inline-block size-2 rounded-full bg-destructive" />
+            Fail
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -51,7 +51,7 @@ export type AnalyticsFilter = {
   values: string[];
 };
 
-const FILTER_DIMENSIONS: AnalyticsDimension[] = ["time", "person", "agent", "project", "runtime", "source", "provider", "model", "skill", "status", "cost_kind", "quality_type", "quality_category", "context", "run", "issue", "source_id", "reference", "reference_label", "trace"];
+export const ANALYTICS_FILTER_DIMENSIONS: readonly AnalyticsDimension[] = ["time", "person", "agent", "project", "runtime", "source", "provider", "model", "skill", "status", "cost_kind", "quality_type", "quality_category", "quality_verdict", "context", "run", "issue", "source_id", "reference", "reference_label", "trace"];
 const RANGE_OPERATORS: Extract<AnalyticsOperator, "gte" | "lte">[] = ["gte", "lte"];
 const TEXT_OPERATORS: Extract<AnalyticsOperator, "contains" | "not_contains">[] = ["contains", "not_contains"];
 
@@ -146,9 +146,34 @@ export function removeAnalyticsFilterValue(
     .filter((filter) => filter.values.length > 0);
 }
 
+export function replaceAnalyticsTimeBucket(
+  filters: AnalyticsFilter[],
+  value: string,
+  grain: Extract<AnalyticsGrain, "hour" | "day" | "week" | "month">,
+): AnalyticsFilter[] {
+  const start = new Date(value.replace(/(\.\d+)?Z$/, ""));
+  if (Number.isNaN(start.getTime())) return filters;
+  const end = new Date(start);
+  if (grain === "hour") end.setHours(end.getHours() + 1);
+  else if (grain === "week") end.setDate(end.getDate() + 7);
+  else if (grain === "month") end.setMonth(end.getMonth() + 1);
+  else end.setDate(end.getDate() + 1);
+  return [
+    ...filters.filter(
+      (filter) =>
+        !(
+          filter.dimension === "time" &&
+          (filter.operator === "gte" || filter.operator === "lte")
+        ),
+    ),
+    { dimension: "time", operator: "gte", values: [start.toISOString()] },
+    { dimension: "time", operator: "lte", values: [end.toISOString()] },
+  ];
+}
+
 export function filtersFromSearchParams(params: URLSearchParams): AnalyticsFilter[] {
   const filters: AnalyticsFilter[] = [];
-  for (const dimension of FILTER_DIMENSIONS) {
+  for (const dimension of ANALYTICS_FILTER_DIMENSIONS) {
     const include = [...new Set(params.getAll(dimension))].sort();
     const exclude = [...new Set(params.getAll(`exclude.${dimension}`))].sort();
     if (include.length) filters.push({ dimension, operator: "in", values: include });
@@ -163,7 +188,7 @@ export function filtersFromSearchParams(params: URLSearchParams): AnalyticsFilte
 
 export function filtersToSearchParams(filters: AnalyticsFilter[], current = new URLSearchParams()): URLSearchParams {
   const params = new URLSearchParams(current);
-  for (const dimension of FILTER_DIMENSIONS) {
+  for (const dimension of ANALYTICS_FILTER_DIMENSIONS) {
     params.delete(dimension);
     params.delete(`exclude.${dimension}`);
     for (const operator of [...RANGE_OPERATORS, ...TEXT_OPERATORS]) params.delete(`${dimension}.${operator}`);

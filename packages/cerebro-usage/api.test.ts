@@ -45,8 +45,18 @@ describe("canonical analytics API", () => {
   });
 
   it("loads the server catalog used by visual configuration", async () => {
-    cerebroRequest.mockResolvedValue({ populations: ["all"], metrics: ["runs"], dimensions: ["time", "runtime"], grains: ["day"], operators: ["in"] });
-    await expect(fetchAnalyticsCatalog()).resolves.toMatchObject({ metrics: ["runs"], dimensions: ["time", "runtime"] });
+    cerebroRequest.mockResolvedValue({
+      populations: ["all"],
+      metrics: ["runs"],
+      dimensions: ["time", "runtime", "issue", "quality_verdict"],
+      grains: ["day"],
+      operators: ["in", "contains", "not_contains"],
+    });
+    await expect(fetchAnalyticsCatalog()).resolves.toMatchObject({
+      metrics: ["runs"],
+      dimensions: ["time", "runtime", "issue", "quality_verdict"],
+      operators: ["in", "contains", "not_contains"],
+    });
     expect(cerebroRequest).toHaveBeenCalledWith("/api/analytics/catalog");
   });
 

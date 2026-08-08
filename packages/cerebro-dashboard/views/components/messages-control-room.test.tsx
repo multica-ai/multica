@@ -116,6 +116,37 @@ describe("MessagesControlRoom", () => {
     expect(onSelectActor).toHaveBeenCalledWith("member-1", "Jesper", "member");
   });
 
+  it("filters the messages table from an issue click", () => {
+    const original = queryResult.data.messages;
+    queryResult.data.messages = [
+      { ...original[0]!, id: "message-1", content: "About the dashboard", issue_number: 2996, issue_title: "Dashboard i Multica" },
+      { ...original[0]!, id: "message-2", content: "Unrelated message" },
+    ] as typeof original;
+
+    render(
+      <MessagesControlRoom
+        workspaceId="workspace-1"
+        workspaceSlug="firtal"
+        data={overview}
+        isLoading={false}
+        filters={[]}
+        onFiltersChange={vi.fn()}
+        onNewVisual={vi.fn()}
+        onSelectActor={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Unrelated message")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Filter messages by issue Dashboard i Multica" }),
+    );
+    expect(screen.queryByText("Unrelated message")).toBeNull();
+    expect(screen.getByText("About the dashboard")).toBeTruthy();
+    const search = screen.getByRole("textbox", { name: "Search all messages" }) as HTMLInputElement;
+    expect(search.value).toBe("Dashboard i Multica");
+    queryResult.data.messages = original;
+  });
+
   it("treats nullable message aggregates as empty lists", () => {
     const sparseOverview = {
       ...overview,

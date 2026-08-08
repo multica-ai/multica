@@ -22,6 +22,9 @@ func BuildSQL(query Query, workspaceID string) (SQLPlan, error) {
 
 	args := []any{workspaceID}
 	where := []string{"r.workspace_id = $1"}
+	qualityJoinRequired := contains(query.Metrics, MetricQualityPassRate) ||
+		containsAny(query.Dimensions, DimensionQualityType, DimensionQualityCategory, DimensionQualityVerdict)
+	qualityFilterPredicates := make([]string, 0, 3)
 	if query.Population != PopulationAll {
 		args = append(args, string(query.Population))
 		where = append(where, "r.population = $"+strconv.Itoa(len(args)))
@@ -44,26 +47,23 @@ func BuildSQL(query Query, workspaceID string) (SQLPlan, error) {
 			values = containsPatterns(filter.Values)
 		}
 		args = append(args, values)
+		if isQualityDimension(filter.Dimension) && !qualityJoinRequired {
+			expr := qualityDimensionSQL(filter.Dimension, "q_filter")
+			param := "$" + strconv.Itoa(len(args)) + "::text[]"
+			qualityFilterPredicates = append(qualityFilterPredicates, filterPredicateSQL(expr, param, filter.Operator))
+			continue
+		}
 		expr, param, err := filterExpression(filter.Dimension, len(args))
 		if err != nil {
 			return SQLPlan{}, err
 		}
-		switch filter.Operator {
-		case OperatorIn:
-			where = append(where, expr+" = ANY("+param+")")
-		case OperatorNotIn:
-			where = append(where, "NOT ("+expr+" = ANY("+param+"))")
-		case OperatorEqual:
-			where = append(where, expr+" = ("+param+")[1]")
-		case OperatorGreaterEqual:
-			where = append(where, expr+" >= ("+param+")[1]")
-		case OperatorLessEqual:
-			where = append(where, expr+" <= ("+param+")[1]")
-		case OperatorContains:
-			where = append(where, expr+" ILIKE ANY("+param+")")
-		case OperatorNotContains:
-			where = append(where, "NOT ("+expr+" ILIKE ANY("+param+"))")
-		}
+		where = append(where, filterPredicateSQL(expr, param, filter.Operator))
+	}
+	if len(qualityFilterPredicates) > 0 {
+		where = append(where,
+			"EXISTS (SELECT 1 FROM cerebro_analytics_quality_measurement q_filter WHERE q_filter.analytics_run_id=r.id AND "+
+				strings.Join(qualityFilterPredicates, " AND ")+")",
+		)
 	}
 	offset := 0
 	if query.Page.Cursor != "" {
@@ -91,7 +91,7 @@ func BuildSQL(query Query, workspaceID string) (SQLPlan, error) {
 	if contains(query.Metrics, MetricSavedCents) {
 		joins += " LEFT JOIN cerebro_analytics_run_saving s ON s.analytics_run_id=r.id"
 	}
-	if contains(query.Metrics, MetricQualityPassRate) || queryUsesDimension(query, DimensionQualityType, DimensionQualityCategory) {
+	if qualityJoinRequired {
 		joins += " LEFT JOIN cerebro_analytics_quality_measurement q ON q.analytics_run_id=r.id"
 	}
 	if contains(query.Metrics, MetricSkillInvocations) || queryUsesDimension(query, DimensionSkill) {
@@ -133,6 +133,50 @@ func BuildSQL(query Query, workspaceID string) (SQLPlan, error) {
 	return SQLPlan{SQL: sql, Args: args}, nil
 }
 
+func filterPredicateSQL(expr string, param string, operator Operator) string {
+	switch operator {
+	case OperatorIn:
+		return expr + " = ANY(" + param + ")"
+	case OperatorNotIn:
+		return "NOT (" + expr + " = ANY(" + param + "))"
+	case OperatorEqual:
+		return expr + " = (" + param + ")[1]"
+	case OperatorGreaterEqual:
+		return expr + " >= (" + param + ")[1]"
+	case OperatorLessEqual:
+		return expr + " <= (" + param + ")[1]"
+	case OperatorContains:
+		return expr + " ILIKE ANY(" + param + ")"
+	case OperatorNotContains:
+		return "NOT (" + expr + " ILIKE ANY(" + param + "))"
+	}
+	return ""
+}
+
+func isQualityDimension(dimension Dimension) bool {
+	return dimension == DimensionQualityType ||
+		dimension == DimensionQualityCategory ||
+		dimension == DimensionQualityVerdict
+}
+
+func qualityDimensionSQL(dimension Dimension, alias string) string {
+	column := map[Dimension]string{
+		DimensionQualityType:     "measurement_type",
+		DimensionQualityCategory: "category",
+		DimensionQualityVerdict:  "verdict",
+	}[dimension]
+	return "COALESCE(" + alias + "." + column + ",'')"
+}
+
+func containsAny[T comparable](values []T, targets ...T) bool {
+	for _, target := range targets {
+		if contains(values, target) {
+			return true
+		}
+	}
+	return false
+}
+
 func queryUsesDimension(query Query, dimensions ...Dimension) bool {
 	for _, dimension := range dimensions {
 		if contains(query.Dimensions, dimension) {
@@ -156,7 +200,7 @@ func parseOffsetCursor(cursor string) (int, bool) {
 }
 
 var filterDimensionSQL = map[Dimension]string{
-	DimensionPerson: "r.person_label", DimensionAgent: "r.agent_label", DimensionProject: "r.project_label", DimensionFunction: "ai_function.name", DimensionOperatingLoop: "ai_loop.name", DimensionRuntime: "r.runtime_label", DimensionSource: "r.source_type", DimensionProvider: "r.provider", DimensionModel: "r.model", DimensionSkill: "sk.skill_name", DimensionStatus: "r.status", DimensionCostKind: "r.cost_kind", DimensionQualityType: "q.measurement_type", DimensionQualityCategory: "q.category", DimensionContext: "ref.reference_kind",
+	DimensionPerson: "r.person_label", DimensionAgent: "r.agent_label", DimensionProject: "r.project_label", DimensionFunction: "ai_function.name", DimensionOperatingLoop: "ai_loop.name", DimensionRuntime: "r.runtime_label", DimensionSource: "r.source_type", DimensionProvider: "r.provider", DimensionModel: "r.model", DimensionSkill: "sk.skill_name", DimensionStatus: "r.status", DimensionCostKind: "r.cost_kind", DimensionQualityType: "q.measurement_type", DimensionQualityCategory: "q.category", DimensionQualityVerdict: "q.verdict", DimensionContext: "ref.reference_kind",
 	DimensionRun: "r.run_id::text", DimensionIssue: "ref_issue.label", DimensionSourceID: "r.source_id::text", DimensionReference: "ref.reference_id", DimensionReferenceLabel: "ref.label", DimensionDebugLink: "ref.href", DimensionTrace: "r.trace_id",
 }
 

@@ -1263,11 +1263,12 @@ export class ApiClient {
   async getCerebroDashboardOverview<T = unknown>(
     range: "24h" | "7d" | "30d",
     // CEREBRO-PATCH(cerebro-dashboard-client): actor filtering for JEH-684 dashboard drilldown
-    filter?: { actor_type?: "member" | "agent"; actor_id?: string | null },
+    filter?: { actor_type?: "member" | "agent"; actor_id?: string | null; start?: string | null; end?: string | null }, // CEREBRO-PATCH(cerebro-dashboard-exact-bounds-client): FIR-2996
   ): Promise<T> {
     const params = new URLSearchParams({ range });
     if (filter?.actor_type) params.set("actor_type", filter.actor_type);
     if (filter?.actor_id) params.set("actor_id", filter.actor_id);
+    if (filter?.start && filter?.end) { params.set("start", filter.start); params.set("end", filter.end); } // CEREBRO-PATCH(cerebro-dashboard-exact-bounds-client): FIR-2996
     return this.fetch<T>(`/api/cerebro/dashboard?${params.toString()}`);
   }
 
@@ -1283,11 +1284,12 @@ export class ApiClient {
   // CEREBRO-PATCH(cerebro-dashboard-all-messages-client): TECH-3093 all messages table
   async getCerebroDashboardAllMessages<T = unknown>(
     range: "24h" | "7d" | "30d",
-    filter?: { actor_type?: string; actor_id?: string | null },
+    filter?: { actor_type?: string; actor_id?: string | null; start?: string | null; end?: string | null }, // CEREBRO-PATCH(cerebro-dashboard-exact-bounds-client): FIR-2996
   ): Promise<T> {
     const params = new URLSearchParams({ range });
     if (filter?.actor_type) params.set("actor_type", filter.actor_type);
     if (filter?.actor_id) params.set("actor_id", filter.actor_id);
+    if (filter?.start && filter?.end) { params.set("start", filter.start); params.set("end", filter.end); } // CEREBRO-PATCH(cerebro-dashboard-exact-bounds-client): FIR-2996
     return this.fetch<T>(`/api/cerebro/dashboard/all-messages?${params.toString()}`);
   }
 

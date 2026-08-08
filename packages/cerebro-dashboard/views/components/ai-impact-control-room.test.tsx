@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { useDashboardStore } from "../../core/store";
 import { AIImpactControlRoom } from "./ai-impact-control-room";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  useDashboardStore.getState().reset();
+});
 
 describe("AIImpactControlRoom", () => {
   it("renders the three API-backed views", () => {
@@ -67,5 +71,69 @@ describe("AIImpactControlRoom", () => {
     expect(screen.getByText("Resolve customer needs")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Quality & Risk" }));
     expect(screen.getByText("Scale")).toBeTruthy();
+  });
+
+  it("filters every AI Impact view from a row click and clears from the chip", () => {
+    render(
+      <AIImpactControlRoom
+        overview={{ families: [] }}
+        functions={{
+          functions: [
+            {
+              id: "function-1",
+              name: "Customer Service",
+              operating_loops: [
+                { id: "loop-1", name: "Resolve customer needs", decision: "Scale" },
+              ],
+            },
+            {
+              id: "function-2",
+              name: "Finance",
+              operating_loops: [
+                { id: "loop-2", name: "Close the books", decision: "Observe" },
+              ],
+            },
+          ],
+        }}
+        qualityRisk={{
+          decisions: [
+            {
+              function_id: "function-1",
+              function_name: "Customer Service",
+              operating_loop_id: "loop-1",
+              operating_loop_name: "Resolve customer needs",
+              decision: "Scale",
+            },
+            {
+              function_id: "function-2",
+              function_name: "Finance",
+              operating_loop_id: "loop-2",
+              operating_loop_name: "Close the books",
+              decision: "Observe",
+            },
+          ],
+        }}
+        isLoading={{ overview: false, functions: false, qualityRisk: false }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Functions" }));
+    expect(screen.getByText("Finance")).toBeTruthy();
+    fireEvent.click(
+      screen.getAllByRole("button", {
+        name: "Filter AI Impact by Customer Service · Resolve customer needs",
+      })[0]!,
+    );
+    expect(screen.queryByText("Finance")).toBeNull();
+    expect(useDashboardStore.getState().aiImpactSelections.functionName).toBe("Customer Service");
+
+    fireEvent.click(screen.getByRole("button", { name: "Quality & Risk" }));
+    expect(screen.queryByText("Close the books")).toBeNull();
+    expect(screen.getByText("Resolve customer needs")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove Function filter Customer Service" }),
+    );
+    expect(useDashboardStore.getState().aiImpactSelections.functionName).toBeNull();
   });
 });
