@@ -4,7 +4,7 @@ import { RedirectIfAuthenticated } from "@/features/landing/components/redirect-
 
 export const metadata: Metadata = {
   title: {
-    absolute: "Multica — Project Management for Human + Agent Teams",
+    absolute: "Project workspace",
   },
   description:
     "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",

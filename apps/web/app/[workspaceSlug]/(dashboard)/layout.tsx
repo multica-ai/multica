@@ -5,6 +5,7 @@ import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { FloatingChat } from "@multica/views/chat";
 import { WebNotificationBridge } from "@/components/web-notification-bridge";
+import { DashboardPageTitle } from "@/components/dashboard-page-title";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -19,6 +20,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </>
       }
     >
+      <DashboardPageTitle />
       {children}
     </DashboardLayout>
   );
