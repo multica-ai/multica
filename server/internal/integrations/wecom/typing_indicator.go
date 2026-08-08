@@ -422,8 +422,9 @@ func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
 	}
 	// No bubble left. If the guard already closed one for this run it promised
 	// a separate reply, and that promise is now void — say so, in the chat the
-	// promise was made in.
-	m.settleOwedEnding(ctx, sessionID, streamCopyCancelled)
+	// promise was made in. The task id goes with it: the promise to keep is
+	// the cancelled round's own, and a session can hold several.
+	m.settleOwedEnding(ctx, sessionID, taskID, streamCopyCancelled)
 }
 
 // rounds builds the matcher that turns a task id on an event into the round it
@@ -454,12 +455,15 @@ func retryPending(e events.Event) bool {
 // A round the store says is accounted for gets nothing. That is the whole of
 // the not-twice rule: the answer took the handle the same way the guard does,
 // and a task:failed arriving behind a delivered answer — an auto-retry's first
-// attempt, a sweeper that ran late — must not contradict it.
+// attempt, a sweeper that ran late — must not contradict it. Which is why the
+// claim is made in this run's name: a promise belonging to another round is
+// not this failure's to spend, and spending it would both misreport that round
+// and leave this one's repeat with a promise still to take.
 func (m *TypingIndicatorManager) sayTheRunFailed(ctx context.Context, sessionID pgtype.UUID, taskID string) {
 	if m.senders == nil {
 		return
 	}
-	addr, verdict := m.streams.claimEnding(sessionID)
+	addr, verdict := m.rounds().claim(ctx, sessionID, taskID)
 	switch verdict {
 	case roundToldAlready:
 		return
@@ -477,15 +481,20 @@ func (m *TypingIndicatorManager) sayTheRunFailed(ctx context.Context, sessionID 
 	m.sayAsPlainMessage(ctx, sessionID, addr, streamCopyFailed)
 }
 
-// settleOwedEnding keeps the guard's promise and nothing more. It speaks only
-// for a round the guard closed early — the one case where words are owed and
-// no bubble is left to put them in — and stays silent when the store has no
-// outstanding promise, which is every round that already ended properly.
-func (m *TypingIndicatorManager) settleOwedEnding(ctx context.Context, sessionID pgtype.UUID, text string) {
+// settleOwedEnding keeps the guard's promise to ONE round and nothing more. It
+// speaks only for a round the guard closed early — the one case where words are
+// owed and no bubble is left to put them in — and stays silent when that round
+// has no outstanding promise, which is every round that already ended properly.
+//
+// taskID is which round. A session can hold a promise per guard-closed round,
+// and the copy differs per outcome, so claiming without a name would announce
+// this run's outcome against somebody else's promise and leave this run's own
+// asker with the silence the guard promised to break.
+func (m *TypingIndicatorManager) settleOwedEnding(ctx context.Context, sessionID pgtype.UUID, taskID, text string) {
 	if m.senders == nil {
 		return
 	}
-	addr, verdict := m.streams.claimEnding(sessionID)
+	addr, verdict := m.rounds().claim(ctx, sessionID, taskID)
 	if verdict != roundOwesAnEnding {
 		return
 	}

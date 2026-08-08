@@ -216,7 +216,28 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return errors.New("wecom: connection not ready on this replica")
 	}
 	chatType := aibotChatTypeFromChannel(channel.ChatType(binding.ChatType))
-	return sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content)
+	if err := sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content); err != nil {
+		return err
+	}
+	// The answer went out as an ordinary message. For a round the guard closed
+	// at five minutes that message IS the separate reply it promised, so the
+	// promise is now kept and has to come off the list — by this run's own id,
+	// leaving a promise another round is still waiting on exactly where it is.
+	// Left on the list it would be claimed by the next repeat of this run's
+	// failure, which would tell the user "这次没跑通" underneath the answer they
+	// have just read.
+	o.rounds().settle(ctx, sessionID, taskIDFromEvent(e), roundAddress{
+		InstallationID: inst.ID,
+		ChatID:         binding.ChannelChatID,
+		ChatType:       chatType,
+	})
+	return nil
+}
+
+// rounds builds the matcher that turns a task id on an event into the round it
+// belongs to — the same one the typing indicator's endings go through.
+func (o *Outbound) rounds() roundTaker {
+	return roundTaker{streams: o.streams, tasks: o.tasks, log: o.logger}
 }
 
 // chatDoneTaskID recovers the task id an EventChatDone belongs to, as the row
@@ -243,8 +264,7 @@ func (o *Outbound) takeStream(ctx context.Context, sessionID pgtype.UUID, e even
 	if o.streams == nil || o.senders == nil {
 		return streamHandle{}, false
 	}
-	taker := roundTaker{streams: o.streams, tasks: o.tasks, log: o.logger}
-	return taker.take(ctx, sessionID, taskIDFromEvent(e), roundOver)
+	return o.rounds().take(ctx, sessionID, taskIDFromEvent(e), roundOver)
 }
 
 // finishStream writes the answer into the bubble and seals it. A failure here
