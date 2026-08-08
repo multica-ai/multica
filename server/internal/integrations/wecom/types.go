@@ -28,11 +28,14 @@
 // shared channel engine? Keep this adapter building — and loop in the code
 // owners for anything that changes WeCom-visible behavior.
 //
-// Known limits of the first version, both deliberate: inbound handling is
-// text-only (other message types get a short "text only" receipt), and outbound
-// delivery requires a SINGLE backend replica, because the only send path is the
-// in-process WebSocket in sendersRegistry while EventChatDone dispatches on the
-// in-process events.Bus. See SELF_HOSTING.md.
+// Inbound handles text, photos, files, videos and 图文混排 (media_ingest.go
+// downloads and decrypts what a callback points at); a kind it cannot read
+// still gets a short receipt. Standalone voice notes are not read yet.
+//
+// Known limit, deliberate: outbound delivery requires a SINGLE backend
+// replica, because the only send path is the in-process WebSocket in
+// sendersRegistry while EventChatDone dispatches on the in-process
+// events.Bus. See SELF_HOSTING.md.
 package wecom
 
 import (
