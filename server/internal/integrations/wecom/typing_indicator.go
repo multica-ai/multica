@@ -76,6 +76,18 @@ type taskLookup interface {
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 }
 
+// taskOrigin is the task row plus where the run's input came from. The typing
+// indicator needs both halves: the row to find the chat session behind a
+// sweeper's task:failed, and the provenance stamp to decide whether a failed
+// run's notice belongs in the WeCom room at all — the same question outbound.go
+// asks before pushing an answer there. Kept apart from taskLookup because the
+// round matcher and the outbound subscriber only ever need the row.
+// *db.Queries satisfies it.
+type taskOrigin interface {
+	taskLookup
+	engine.ChannelProvenanceQueries
+}
+
 // chatBindingLookup finds which WeCom chat a session belongs to. It is the
 // address of last resort for a failure notice: the handle is gone and this
 // process has no note of the round, which is what a restart mid-run looks like.
@@ -91,7 +103,7 @@ type chatBindingLookup interface {
 type TypingIndicatorManager struct {
 	senders  *sendersRegistry
 	streams  *streamStore
-	tasks    taskLookup
+	tasks    taskOrigin
 	bindings chatBindingLookup
 	log      *slog.Logger
 
@@ -109,9 +121,11 @@ type TypingIndicatorConfig struct {
 	Logger  *slog.Logger
 
 	// Tasks resolves a task id to its chat session, for the task:failed the
-	// sweepers publish without one. Nil limits failure handling to the events
-	// that carry a session.
-	Tasks taskLookup
+	// sweepers publish without one, and answers where that run's input came
+	// from. Nil limits failure handling to the events that carry a session,
+	// and leaves the origin question unanswerable — see failureBelongsOnWecom
+	// for what this manager does when it cannot ask.
+	Tasks taskOrigin
 
 	// Bindings finds the chat behind a session when nothing else can — a run
 	// that failed after this process was restarted, or after a bubble that was
@@ -371,6 +385,14 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 	defer cancel()
 	taskID := taskIDFromEvent(e)
+	// A run started in the browser against this same session gets its notice
+	// there. Announcing it here would tell everyone in the room that something
+	// they never saw has gone wrong. Asked BEFORE the bubble is taken, for the
+	// reason outbound.go asks before finishing one: a gate placed after the
+	// take has already sealed a WeCom round's bubble with a web run's ending.
+	if !m.failureBelongsOnWecom(ctx, taskID) {
+		return
+	}
 	if m.closeBubble(ctx, sessionID,
 		func(*streamStore) (streamHandle, bool) {
 			return m.rounds().take(ctx, sessionID, taskID, roundOver)
@@ -379,6 +401,42 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 		return
 	}
 	m.sayTheRunFailed(ctx, sessionID, taskID)
+}
+
+// failureBelongsOnWecom asks the question outbound.go asks of an answer: did
+// this run's input come from the channel? The engine makes the INSTALLER the
+// creator of a group's chat_session, so that session appears in their own
+// Multica chat list and they can ask it something in a browser. Both runs fail
+// the same way, on the same bus, carrying the same session — nothing in the
+// event says which surface asked, so the row has to be read.
+//
+// Every uncertainty answers yes, and that direction is deliberate. It is the
+// opposite of what the answer path does with a vanished task, and for a reason
+// the answer path does not have: streamCopyFailed is the only "that run did not
+// go through" WeCom ever produces, and the round it speaks for may be sitting
+// on the guard's "还在处理，完成后我再单独回复你". A no there is not caution, it
+// is a promise broken in silence, with nothing the user can do about it. A
+// notice that reaches a room it did not have to is a line of copy naming no
+// question and no answer, and the user can ask again.
+func (m *TypingIndicatorManager) failureBelongsOnWecom(ctx context.Context, taskID string) bool {
+	if m.tasks == nil || taskID == "" {
+		return true
+	}
+	id, err := util.ParseUUID(taskID)
+	if err != nil || !id.Valid {
+		return true
+	}
+	task, err := m.tasks.GetAgentTask(ctx, id)
+	if err != nil {
+		return true
+	}
+	deliver, err := engine.TaskInputIsChannelIngested(ctx, m.tasks, task)
+	if err != nil {
+		m.log.WarnContext(ctx, "wecom typing: cannot tell where a failed run was asked, delivering",
+			"task_id", taskID, "error", err)
+		return true
+	}
+	return deliver
 }
 
 // handleTaskCancelled seals the bubble of a run the user stopped.

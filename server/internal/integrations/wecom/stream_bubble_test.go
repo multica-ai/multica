@@ -120,6 +120,7 @@ func (c *bubbleConn) pushes(t *testing.T) []map[string]any {
 type bubbleRig struct {
 	conn    *bubbleConn
 	streams *streamStore
+	senders *sendersRegistry
 	typing  *TypingIndicatorManager
 	out     *Outbound
 	q       *fakeOutboundQueries
@@ -141,6 +142,7 @@ func newBubbleRig(t *testing.T) *bubbleRig {
 	rig := &bubbleRig{
 		conn:    conn,
 		streams: streams,
+		senders: reg,
 		instID:  instID,
 		now:     time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC),
 	}
