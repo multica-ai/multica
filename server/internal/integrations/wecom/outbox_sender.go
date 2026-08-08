@@ -40,6 +40,40 @@ const (
 // mis-addressed message to a user.
 const payloadVersionV1 = 1
 
+// WeCom errcodes an aibot_send_msg can answer with. Only the ones we act on
+// differently are named; the rest fall to the default in retryableSendError.
+const (
+	// errCodeSystemBusy is WeCom's generic "try again" — a platform-side
+	// hiccup, and not a statement about this frame.
+	errCodeSystemBusy = -1
+
+	// errCodeMsgTooLong: the frame was over the per-message cap, and NOTHING
+	// was written. Re-sending the identical bytes earns the identical answer.
+	errCodeMsgTooLong = 45002
+
+	// errCodeAPIFreqLimit and errCodeAPIConcurrencyLimit are quota, not
+	// content: the same frame succeeds once the window moves. The rate gate
+	// exists to keep us under these, so reaching one means our accounting and
+	// WeCom's have drifted — which a later attempt resolves by itself.
+	errCodeAPIFreqLimit        = 45009
+	errCodeAPIConcurrencyLimit = 45033
+)
+
+// maxSendContentBytes is WeCom's ceiling for one aibot_send_msg. Past it the
+// server refuses the whole frame with errCodeMsgTooLong and delivers nothing.
+//
+// Checked before the write so an over-cap row dead-letters on its first attempt
+// instead of being refused identically eight times by a server that has already
+// made up its mind.
+//
+// This is a floor, not a splitter, and deliberately so: a row settles as ONE
+// Disposition, so splitting inside Send would make a failure on the third frame
+// retry the whole row and re-deliver the first two. There is no way to express
+// "two of three landed". A long answer therefore has to be split at enqueue
+// time — one row per piece, each with its own business key in SourceID — which
+// keeps every piece independently retryable.
+const maxSendContentBytes = 20480
+
 // outboundPayload is the v1 queue payload. It is deliberately pre-rendered
 // data rather than a rendered string: the row may sit through a deploy, and
 // re-rendering at send time means a copy fix applies to queued messages too.
@@ -111,8 +145,6 @@ func newQueueSender(senders *sendersRegistry) *queueSender {
 
 // Send renders one row and pushes it over the installation's live socket.
 func (s *queueSender) Send(ctx context.Context, row db.ChannelOutboundQueue) (outbox.Disposition, error) {
-	_ = ctx // the aibot write path is a mutex-guarded socket write, not ctx-aware
-
 	// payload_version 0 predates the column default and is read as v1; anything
 	// above v1 is a document this build does not know.
 	if row.PayloadVersion > payloadVersionV1 {
@@ -121,6 +153,13 @@ func (s *queueSender) Send(ctx context.Context, row db.ChannelOutboundQueue) (ou
 	body, err := renderOutbound(row.Payload)
 	if err != nil {
 		return outbox.DispositionFailed, err
+	}
+	// Over the cap the server refuses the frame and delivers nothing, the same
+	// way every time, so this is terminal on the first attempt rather than after
+	// the eighth.
+	if n := len(body); n > maxSendContentBytes {
+		return outbox.DispositionFailed, fmt.Errorf(
+			"wecom: rendered message is %d bytes, over WeCom's %d-byte per-message cap", n, maxSendContentBytes)
 	}
 
 	if s.senders == nil {
@@ -134,7 +173,10 @@ func (s *queueSender) Send(ctx context.Context, row db.ChannelOutboundQueue) (ou
 		return outbox.DispositionRetry, errors.New("wecom: connection not ready")
 	}
 
-	if err := sender.sendText(row.TargetChatID, int(row.TargetChatType), body); err != nil {
+	// ctx, not context.Background: the send now waits for WeCom's verdict, and
+	// that wait belongs to the consumer. A lease loss or a shutdown has to end
+	// it immediately instead of holding a worker for the full ack timeout.
+	if err := sender.sendTextCtx(ctx, row.TargetChatID, int(row.TargetChatType), body); err != nil {
 		if retryableSendError(err) {
 			return outbox.DispositionRetry, err
 		}
@@ -143,17 +185,42 @@ func (s *queueSender) Send(ctx context.Context, row db.ChannelOutboundQueue) (ou
 	return outbox.DispositionSent, nil
 }
 
-// retryableSendError classifies a write failure. The default is terminal: a
-// socket write that failed for a reason we do not recognize is more likely a
-// malformed frame than a blip, and retrying a malformed frame eight times
-// just delays the dead letter.
+// retryableSendError classifies a failed send.
+//
+// A refusal WeCom stated is decided on its errcode, never on its prose: the
+// codes mean different things and the strings are not ours. The default for a
+// stated refusal is terminal — the server looked at this exact frame and
+// declined it, so eight identical frames only delay the dead letter. (The
+// credential probe fails the other way on an unknown code, because there the
+// cost of guessing is telling an admin to rotate a secret that was fine.)
+//
+// Everything that is not a verdict is treated as the socket failing rather than
+// the message, which is the condition this queue exists to survive.
 func retryableSendError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
+	var apiErr *wecomAPIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.Code {
+		case errCodeSystemBusy, errCodeAPIFreqLimit, errCodeAPIConcurrencyLimit:
+			return true
+		default:
+			return false
+		}
+	}
+	// A lost ack is genuinely ambiguous — the frame went out, so the message may
+	// well have landed, and a retry can therefore duplicate it. Retrying anyway
+	// is the lesser harm: bounded attempts cap the duplication, and a reader can
+	// make sense of a repeated reply, where a silently dropped one leaves them
+	// waiting on an answer that is never coming. A cancelled context is the
+	// consumer stopping, which is not the row's fault at all.
+	if errors.Is(err, errAckTimeout) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
+	// Transport failures still arrive as prose from net and gorilla.
 	msg := strings.ToLower(err.Error())
 	for _, transient := range []string{
 		"timeout",
