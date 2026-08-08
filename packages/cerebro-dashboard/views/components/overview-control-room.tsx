@@ -45,6 +45,7 @@ export function OverviewControlRoom({
 }) {
   const range = useDashboardStore((state) => state.range);
   const setRange = useDashboardStore((state) => state.setRange);
+  const clearFilters = useDashboardStore((state) => state.clearFilters);
   const [compactLayout, setCompactLayout] = useState(false);
 
   const addFilter = (dimension: AnalyticsDimension, value: string, operator: "in" | "not_in" | "contains" | "not_contains") => {
@@ -75,7 +76,7 @@ export function OverviewControlRoom({
         filters={filters}
         onAddFilter={addFilter}
         onRemoveFilter={removeFilter}
-        onClear={() => onFiltersChange([])}
+        onClear={clearFilters}
         onCustomize={() => setCompactLayout((current) => !current)}
         onNewVisual={onNewVisual}
       />
@@ -91,7 +92,7 @@ export function OverviewControlRoom({
       </section>
 
       <div className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
-        <ControlRoomPanel title="Work throughput" meta="Completed tasks and issues · click a day to filter every analytics panel">
+        <ControlRoomPanel title="Work throughput" meta="Completed tasks and issues · click a day to filter the complete Dashboard">
           {isLoading ? <ControlRoomLoading /> : (data?.timeline.length ?? 0) === 0 ? <ControlRoomEmpty>No activity in the selected range.</ControlRoomEmpty> : (
             <div className="grid min-h-52 grid-flow-col auto-cols-fr items-end gap-1 p-4" role="list" aria-label="Daily work throughput">
               {data?.timeline.map((bucket) => {

@@ -50,10 +50,12 @@ export function MessagesControlRoom({
 }) {
   const range = useDashboardStore((state) => state.range);
   const setRange = useDashboardStore((state) => state.setRange);
+  const clearFilters = useDashboardStore((state) => state.clearFilters);
   const scope = useDashboardStore((state) => state.scope);
   const actorId = useDashboardStore((state) => state.actorId);
+  const exactTimeRange = useDashboardStore((state) => state.exactTimeRange);
   const currentUserId = useAuthStore((state) => state.user?.id ?? "");
-  const messagesQuery = useQuery(allMessagesOptions(workspaceId, range, scope, actorId));
+  const messagesQuery = useQuery(allMessagesOptions(workspaceId, range, scope, actorId, exactTimeRange));
   const [compactLayout, setCompactLayout] = useState(false);
   const [search, setSearch] = useState("");
   const [messagePage, setMessagePage] = useState(0);
@@ -113,7 +115,10 @@ export function MessagesControlRoom({
         filters={filters}
         onAddFilter={addFilter}
         onRemoveFilter={removeFilter}
-        onClear={() => onFiltersChange([])}
+        onClear={() => {
+          clearFilters();
+          setMessagePage(0);
+        }}
         onCustomize={() => setCompactLayout((current) => !current)}
         onNewVisual={onNewVisual}
       />
@@ -180,7 +185,15 @@ export function MessagesControlRoom({
                     <td className="whitespace-nowrap px-3 py-2 font-mono text-[10px] text-muted-foreground">{formatTime(message.created_at)}</td>
                     <td className="px-3 py-2"><button type="button" onClick={(event) => { event.stopPropagation(); if (message.sender_id && message.sender_name) selectActor(message.sender_id, message.sender_name); }} className="font-medium hover:underline">{message.sender_name ?? "Unknown"}</button></td>
                     <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{message.agent_name}</td>
-                    <td className="max-w-44 truncate px-3 py-2 text-muted-foreground">{message.issue_title ? `#${message.issue_number} ${message.issue_title}` : "—"}</td>
+                    <td className="max-w-44 truncate px-3 py-2 text-muted-foreground">
+                      {message.issue_title ? (
+                        <button type="button" aria-label={`Filter messages by issue ${message.issue_title}`} onClick={(event) => { event.stopPropagation(); setSearch(message.issue_title!); setMessagePage(0); }} className="max-w-full truncate hover:underline">
+                          {`#${message.issue_number} ${message.issue_title}`}
+                        </button>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td className="max-w-md px-3 py-2">
                       <button type="button" aria-label={`Open conversation with ${message.agent_name}`} onClick={() => setSelectedMessage(message)} className="w-full rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <span className="line-clamp-2">{message.content}</span>

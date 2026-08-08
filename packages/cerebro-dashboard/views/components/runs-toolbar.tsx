@@ -28,6 +28,7 @@ const FILTER_DIMENSIONS: AnalyticsDimension[] = [
   "cost_kind",
   "quality_type",
   "quality_category",
+  "quality_verdict",
 ];
 
 type AddOperator = Extract<AnalyticsOperator, "in" | "not_in" | "contains" | "not_contains">;

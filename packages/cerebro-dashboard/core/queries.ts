@@ -4,6 +4,7 @@ import {
   fetchActorMessages,
   fetchAllMessages,
   fetchSessionMessages,
+  type ExactBounds,
   type TimeRange,
 } from "./api";
 import {
@@ -24,12 +25,24 @@ export const dashboardKeys = {
     [...dashboardKeys.aiImpact(wsId), "quality-risk"] as const,
   aiImpactPeople: (wsId: string, period: PeopleImpactPeriod) =>
     [...dashboardKeys.aiImpact(wsId), "people", period] as const,
-  overview: (wsId: string, range: TimeRange, scope: ActorScope, actorId: string | null) =>
-    [...dashboardKeys.all(wsId), "overview", range, scope, actorId] as const,
+  overview: (
+    wsId: string,
+    range: TimeRange,
+    scope: ActorScope,
+    actorId: string | null,
+    bounds: ExactBounds | null = null,
+  ) =>
+    [...dashboardKeys.all(wsId), "overview", range, scope, actorId, bounds?.start ?? null, bounds?.end ?? null] as const,
   actorMessages: (wsId: string, actorId: string, range: TimeRange) =>
     [...dashboardKeys.all(wsId), "actor-messages", actorId, range] as const,
-  allMessages: (wsId: string, range: TimeRange, scope: ActorScope, actorId: string | null) =>
-    [...dashboardKeys.all(wsId), "all-messages", range, scope, actorId] as const,
+  allMessages: (
+    wsId: string,
+    range: TimeRange,
+    scope: ActorScope,
+    actorId: string | null,
+    bounds: ExactBounds | null = null,
+  ) =>
+    [...dashboardKeys.all(wsId), "all-messages", range, scope, actorId, bounds?.start ?? null, bounds?.end ?? null] as const,
   sessionMessages: (wsId: string, sessionId: string) =>
     [...dashboardKeys.all(wsId), "session-messages", sessionId] as const,
 };
@@ -77,10 +90,11 @@ export function dashboardOverviewOptions(
   range: TimeRange,
   scope: ActorScope,
   actorId: string | null,
+  bounds: ExactBounds | null = null,
 ) {
   return queryOptions({
-    queryKey: dashboardKeys.overview(wsId, range, scope, actorId),
-    queryFn: () => fetchDashboardOverview(range, scope, actorId),
+    queryKey: dashboardKeys.overview(wsId, range, scope, actorId, bounds),
+    queryFn: () => fetchDashboardOverview(range, scope, actorId, bounds),
     enabled: !!wsId,
     staleTime: 30 * 1000,
     refetchOnWindowFocus: true,
@@ -101,10 +115,11 @@ export function allMessagesOptions(
   range: TimeRange,
   scope: ActorScope,
   actorId: string | null,
+  bounds: ExactBounds | null = null,
 ) {
   return queryOptions({
-    queryKey: dashboardKeys.allMessages(wsId, range, scope, actorId),
-    queryFn: () => fetchAllMessages(range, scope, actorId),
+    queryKey: dashboardKeys.allMessages(wsId, range, scope, actorId, bounds),
+    queryFn: () => fetchAllMessages(range, scope, actorId, bounds),
     enabled: !!wsId,
     staleTime: 30 * 1000,
   });

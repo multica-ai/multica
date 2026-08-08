@@ -20,7 +20,7 @@ import { PeopleControlRoom, type PeopleImpactPeriod } from "./components/people-
 import { MessagesControlRoom } from "./components/messages-control-room";
 import { OverviewControlRoom } from "./components/overview-control-room";
 import { RunsControlRoom } from "./components/runs-control-room";
-import { filtersFromSearchParams, type AnalyticsFilter } from "../core/analytics";
+import { serializeDashboardFilterState } from "../core/filter-state";
 
 // One Dashboard shell and filter state for the three FIR-2996 control rooms.
 export function DashboardPage() {
@@ -31,16 +31,16 @@ export function DashboardPage() {
   const scope = useDashboardStore((s) => s.scope);
   const actorId = useDashboardStore((s) => s.actorId);
   const actorName = useDashboardStore((s) => s.actorName);
+  const exactTimeRange = useDashboardStore((s) => s.exactTimeRange);
   const tab = useDashboardStore((s) => s.tab);
   const setActor = useDashboardStore((s) => s.setActor);
-  const setScope = useDashboardStore((s) => s.setScope);
+  const analyticsFilters = useDashboardStore((s) => s.analyticsFilters);
+  const setAnalyticsFilters = useDashboardStore((s) => s.setAnalyticsFilters);
+  const hydrateFilters = useDashboardStore((s) => s.hydrateFilters);
   const [visualBuilderOpen, setVisualBuilderOpen] = useState(false);
   const [peoplePeriod, setPeoplePeriod] = useState<PeopleImpactPeriod>("day");
-  const [analyticsFilters, setAnalyticsFilters] = useState<AnalyticsFilter[]>(() =>
-    typeof window === "undefined" ? [] : filtersFromSearchParams(new URLSearchParams(window.location.search)),
-  );
   const wsId = workspace?.id ?? "";
-  const overview = useQuery(dashboardOverviewOptions(wsId, range, scope, actorId));
+  const overview = useQuery(dashboardOverviewOptions(wsId, range, scope, actorId, exactTimeRange));
   const aiImpactWsId = tab === "ai-impact" && aiImpactEnabled ? wsId : "";
   const aiImpactOverview = useQuery(aiImpactOverviewOptions(aiImpactWsId));
   const aiImpactFunctions = useQuery(aiImpactFunctionsOptions(aiImpactWsId));
@@ -48,20 +48,34 @@ export function DashboardPage() {
   const people = useQuery(aiImpactPeopleOptions(tab === "people" && aiImpactEnabled ? wsId : "", peoplePeriod));
 
   const selectActor = (id: string, name: string, type: "member" | "agent") => {
-    setScope(type === "agent" ? "agents" : "members");
-    setActor(id, name);
-    setAnalyticsFilters((current) => [
-      ...current.filter((filter) => filter.dimension !== "person" && filter.dimension !== "agent"),
-      { dimension: type === "agent" ? "agent" : "person", operator: "in", values: [name] },
-    ]);
+    setActor(id, name, type);
   };
 
   useEffect(() => {
-    const hasActorFilter = analyticsFilters.some((filter) =>
-      (filter.dimension === "person" || filter.dimension === "agent") && filter.values.length > 0,
-    );
-    if (actorId && !hasActorFilter) setActor(null);
-  }, [actorId, analyticsFilters, setActor]);
+    const writeUrl = (state: ReturnType<typeof useDashboardStore.getState>) => {
+      const params = serializeDashboardFilterState(
+        state,
+        new URLSearchParams(window.location.search),
+      );
+      const search = params.toString();
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${search ? `?${search}` : ""}`,
+      );
+    };
+    const readUrl = () =>
+      hydrateFilters(new URLSearchParams(window.location.search));
+
+    readUrl();
+    writeUrl(useDashboardStore.getState());
+    const unsubscribe = useDashboardStore.subscribe(writeUrl);
+    window.addEventListener("popstate", readUrl);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("popstate", readUrl);
+    };
+  }, [hydrateFilters]);
 
   if (!enabled) return null;
 

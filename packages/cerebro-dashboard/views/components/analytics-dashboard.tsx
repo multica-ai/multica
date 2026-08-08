@@ -14,9 +14,8 @@ import {
 import {
   buildVisualQuery,
   DEFAULT_ANALYTICS_VISUALS,
-  filtersFromSearchParams,
-  filtersToSearchParams,
   removeAnalyticsFilterValue,
+  replaceAnalyticsTimeBucket,
   toggleAnalyticsFilter,
   type AnalyticsFilter,
   type AnalyticsVisual,
@@ -25,17 +24,13 @@ import {
 import { AnalyticsWorkbench } from "./analytics-workbench";
 
 export function AnalyticsDashboard({ workspaceId, initialVisuals = DEFAULT_ANALYTICS_VISUALS, showToolbar = true, builderOpen, onBuilderOpenChange, filters: controlledFilters, onFiltersChange }: { workspaceId: string; initialVisuals?: AnalyticsVisual[]; showToolbar?: boolean; builderOpen?: boolean; onBuilderOpenChange?: (open: boolean) => void; filters?: AnalyticsFilter[]; onFiltersChange?: Dispatch<SetStateAction<AnalyticsFilter[]>> }) {
-  const [internalFilters, setInternalFilters] = useState<AnalyticsFilter[]>(() => typeof window === "undefined" ? [] : filtersFromSearchParams(new URLSearchParams(window.location.search)));
+  const [internalFilters, setInternalFilters] = useState<AnalyticsFilter[]>([]);
   const filters = controlledFilters ?? internalFilters;
   const setFilters = onFiltersChange ?? setInternalFilters;
   const [visuals, setVisuals] = useState<AnalyticsVisual[]>(initialVisuals);
   const [cursorHistory, setCursorHistory] = useState<Record<string, string[]>>({});
+  useEffect(() => setCursorHistory({}), [filters]);
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", []);
-  useEffect(() => {
-    const params = filtersToSearchParams(filters, new URLSearchParams(window.location.search));
-    const search = params.toString();
-    window.history.replaceState(null, "", `${window.location.pathname}${search ? `?${search}` : ""}`);
-  }, [filters]);
   const catalog = useQuery(analyticsCatalogOptions(workspaceId));
   const savedVisuals = useQuery(analyticsVisualsOptions(workspaceId));
   useEffect(() => {
@@ -95,18 +90,8 @@ export function AnalyticsDashboard({ workspaceId, initialVisuals = DEFAULT_ANALY
   // wall time serialized with a Z suffix, so strip the Z and re-interpret as
   // local time before building the UTC range.
   const timeFilter = (grain: AnalyticsGrain, value: string) => {
-    const start = new Date(value.replace(/(\.\d+)?Z$/, ""));
-    if (Number.isNaN(start.getTime())) return;
-    const end = new Date(start);
-    if (grain === "hour") end.setHours(end.getHours() + 1);
-    else if (grain === "week") end.setDate(end.getDate() + 7);
-    else if (grain === "month") end.setMonth(end.getMonth() + 1);
-    else end.setDate(end.getDate() + 1);
-    setFilters((current) => [
-      ...current.filter((filter) => !(filter.dimension === "time" && (filter.operator === "gte" || filter.operator === "lte"))),
-      { dimension: "time", operator: "gte", values: [start.toISOString()] },
-      { dimension: "time", operator: "lte", values: [end.toISOString()] },
-    ]);
+    if (grain === "none") return;
+    setFilters((current) => replaceAnalyticsTimeBucket(current, value, grain));
     setCursorHistory({});
   };
   return (

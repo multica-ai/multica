@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
+import { useDashboardStore } from "../../core/store";
 import {
   ControlRoomEmpty,
   ControlRoomLoading,
@@ -56,11 +57,36 @@ export function PeopleControlRoom({
   onPeriodChange: (period: PeopleImpactPeriod) => void;
   loading: boolean;
 }) {
-  const [selectedId, setSelectedId] = useState(people[0]?.id ?? null);
+  // Person selection is shared with the Dashboard actor filter, so picking a
+  // person here also scopes Overview, Runs, and Messages (and vice versa).
+  const sharedActorId = useDashboardStore((state) => state.actorId);
+  const setActor = useDashboardStore((state) => state.setActor);
+  const setAnalyticsFilters = useDashboardStore((state) => state.setAnalyticsFilters);
+  const [selectedId, setSelectedId] = useState(sharedActorId ?? people[0]?.id ?? null);
   const selected = people.find((person) => person.id === selectedId) ?? people[0];
   useEffect(() => {
+    if (sharedActorId && people.some((person) => person.id === sharedActorId)) {
+      setSelectedId(sharedActorId);
+      return;
+    }
     if (!people.some((person) => person.id === selectedId)) setSelectedId(people[0]?.id ?? null);
-  }, [people, selectedId]);
+  }, [people, selectedId, sharedActorId]);
+
+  const selectPerson = (person: PeopleImpact) => {
+    setSelectedId(person.id);
+    setActor(person.id, person.name, person.type);
+  };
+  const filterDayBucket = (bucket: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(bucket)) return;
+    const start = new Date(`${bucket}T00:00:00.000Z`);
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + 1);
+    setAnalyticsFilters((current) => [
+      ...current.filter((filter) => filter.dimension !== "time"),
+      { dimension: "time", operator: "gte", values: [start.toISOString()] },
+      { dimension: "time", operator: "lte", values: [end.toISOString()] },
+    ]);
+  };
 
   return (
     <div className="min-w-0 space-y-3 p-6">
@@ -102,8 +128,8 @@ export function PeopleControlRoom({
                 <button
                   key={person.id}
                   type="button"
-                  onClick={() => setSelectedId(person.id)}
-                  aria-label={`${person.name}, ${person.type}`}
+                  onClick={() => selectPerson(person)}
+                  aria-label={`${person.name}, ${person.type} — select to filter the Dashboard`}
                   className={cn(
                     "grid w-full grid-cols-[32px_minmax(0,1fr)] items-center gap-3 rounded-md px-2 py-2 text-left",
                     selected?.id === person.id ? "bg-muted text-foreground" : "hover:bg-muted/60",
@@ -167,10 +193,15 @@ export function PeopleControlRoom({
               <section aria-label="Activity" className="rounded-lg border bg-background p-3">
                 <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Activity</p>
                 <div className="flex min-h-8 items-end gap-1 overflow-hidden">
-                  {selected.activity.length === 0 ? <span className="text-xs text-muted-foreground">No activity in this period.</span> : selected.activity.map((item) => (
-                    <span key={item.bucket} title={`${item.bucket}: ${item.count}`} aria-label={`${item.bucket}: ${item.count} activities`}
-                      className="min-w-2 flex-1 rounded-sm bg-primary/20" style={{ height: `${Math.max(8, Math.min(32, item.count * 4))}px` }} />
-                  ))}
+                  {selected.activity.length === 0 ? <span className="text-xs text-muted-foreground">No activity in this period.</span> : selected.activity.map((item) =>
+                    /^\d{4}-\d{2}-\d{2}$/.test(item.bucket) ? (
+                      <button key={item.bucket} type="button" onClick={() => filterDayBucket(item.bucket)} title={`${item.bucket}: ${item.count}`} aria-label={`Filter Dashboard by ${item.bucket}: ${item.count} activities`}
+                        className="min-w-2 flex-1 rounded-sm bg-primary/20 hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" style={{ height: `${Math.max(8, Math.min(32, item.count * 4))}px` }} />
+                    ) : (
+                      <span key={item.bucket} title={`${item.bucket}: ${item.count}`} aria-label={`${item.bucket}: ${item.count} activities`}
+                        className="min-w-2 flex-1 rounded-sm bg-primary/20" style={{ height: `${Math.max(8, Math.min(32, item.count * 4))}px` }} />
+                    ),
+                  )}
                 </div>
               </section>
             </div>

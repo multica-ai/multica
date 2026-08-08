@@ -28,6 +28,7 @@ export type AnalyticsDimension =
   | "cost_kind"
   | "quality_type"
   | "quality_category"
+  | "quality_verdict"
   | "context"
   | "run"
   | "issue"
@@ -53,9 +54,9 @@ export interface AnalyticsQuery {
 const AnalyticsCatalogSchema = z.object({
   populations: z.array(z.enum(["agent", "gateway", "all"])),
   metrics: z.array(z.enum(["runs", "input_tokens", "output_tokens", "cost_cents", "missing_cost_runs", "saved_cents", "duration_seconds", "quality_pass_rate", "skill_invocations"])),
-  dimensions: z.array(z.enum(["time", "person", "agent", "project", "function", "operating_loop", "runtime", "source", "provider", "model", "skill", "status", "cost_kind", "quality_type", "quality_category", "context", "run", "source_id", "reference", "reference_label", "debug_link", "trace"])),
+  dimensions: z.array(z.enum(["time", "person", "agent", "project", "function", "operating_loop", "runtime", "source", "provider", "model", "skill", "status", "cost_kind", "quality_type", "quality_category", "quality_verdict", "context", "run", "issue", "source_id", "reference", "reference_label", "debug_link", "trace"])),
   grains: z.array(z.enum(["none", "hour", "day", "week", "month"])),
-  operators: z.array(z.enum(["in", "not_in", "eq", "gte", "lte"])),
+  operators: z.array(z.enum(["in", "not_in", "eq", "gte", "lte", "contains", "not_contains"])),
 });
 const AnalyticsQueryResultSchema = z.object({
   columns: z.array(z.string()),
