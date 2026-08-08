@@ -368,6 +368,119 @@ func TestAGuardClosedRoundsFailureIsStillReported(t *testing.T) {
 	if md == nil || md["content"] != streamCopyFailed {
 		t.Fatalf("the second round's failure did not reach its asker: %v", pushes[1])
 	}
+	// The same failure once more — the sweeper repeat the block comment above
+	// sayTheRunFailed anticipates. The promise it spent was its own, so there
+	// is nothing left in this session for it to take a second time.
+	rig.failed(t, "task-2", false)
+	if got := len(rig.conn.pushes(t)); got != 2 {
+		t.Fatalf("a republished failure brought the total to %d plain messages, want 2 — "+
+			"the second notice took a promise this run had already settled and told the user twice about one failed run", got)
+	}
+}
+
+// TestARepeatedFailureDoesNotSpendAnotherRoundsPromise isolates the claim.
+//
+// Every guard-closed round in a session leaves a promise of its own, so a
+// claim that takes the head of the list finds something to take every time —
+// which means the second publisher of one run's failure speaks too. The user
+// reads "⚠️ 这次没跑通" twice, and the promise the second notice consumed
+// belonged to a round that is still running and can no longer be told anything.
+func TestARepeatedFailureDoesNotSpendAnotherRoundsPromise(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ran(t, "REQ-F1", 1, "task-1")
+	rig.ran(t, "REQ-F2", 2, "task-2")
+	// Both runs outlive the stream window, so both bubbles close on a promise.
+	rig.guardClosed(t, 1)
+	rig.guardClosed(t, 2)
+
+	// The second round's run fails, and a sweeper tick republishes it.
+	rig.failed(t, "task-2", false)
+	rig.failed(t, "task-2", false)
+
+	pushes := rig.conn.pushes(t)
+	if len(pushes) != 1 {
+		t.Fatalf("one run's failure was announced %d times, want 1 — the repeat spent the promise made to the OTHER "+
+			"question, whose run is still going", len(pushes))
+	}
+	if md, _ := pushes[0]["markdown"].(map[string]any); md == nil || md["content"] != streamCopyFailed {
+		t.Fatalf("the failure notice did not carry the failure copy: %v", pushes[0])
+	}
+
+	// And the round that was never told anything still gets its own reply.
+	rig.answer(t, "the first answer", "task-1")
+	pushes = rig.conn.pushes(t)
+	if len(pushes) != 2 {
+		t.Fatalf("got %d plain messages in total, want 2 (one failure, then the first round's answer)", len(pushes))
+	}
+	if md, _ := pushes[1]["markdown"].(map[string]any); md == nil || md["content"] != "the first answer" {
+		t.Fatalf("the first round's own answer never reached its asker: %v", pushes[1])
+	}
+}
+
+// TestACancelSpendsTheCancelledRoundsPromiseNotTheRunningOnes is the same
+// mismatch on the cancel path, where it costs more than a duplicate: the copy
+// differs per outcome. Two rounds are past the window and each is owed a
+// reply. The user stops the second one. Taking the head tells the FIRST
+// round's asker "⏹️ 这次处理已取消" about a run nobody stopped, and leaves the
+// promise of the round they did stop on the list — for the first round's own
+// late failure to spend, underneath the answer that round has already given.
+func TestACancelSpendsTheCancelledRoundsPromiseNotTheRunningOnes(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ran(t, "REQ-C1", 1, "task-1")
+	rig.ran(t, "REQ-C2", 2, "task-2")
+	rig.guardClosed(t, 1)
+	rig.guardClosed(t, 2)
+
+	rig.cancelled(t, "task-2")
+	// The first round was never cancelled. Its run finishes and answers, which
+	// is the separate reply its own guard promised.
+	rig.answer(t, "the first answer", "task-1")
+	// A sweeper republishing the first run's earlier failure, late.
+	rig.failed(t, "task-1", false)
+
+	pushes := rig.conn.pushes(t)
+	if len(pushes) != 2 {
+		t.Fatalf("got %d plain messages, want 2 (the cancellation, then the first round's answer) — "+
+			"a promise was left unspent for the late failure to claim, so the user read a failure notice under a delivered answer", len(pushes))
+	}
+	first, _ := pushes[0]["markdown"].(map[string]any)
+	if first == nil || first["content"] != streamCopyCancelled {
+		t.Fatalf("the first message was not the cancellation: %v", pushes[0])
+	}
+	second, _ := pushes[1]["markdown"].(map[string]any)
+	if second == nil || second["content"] != "the first answer" {
+		t.Fatalf("the still-running round's answer did not reach its asker: %v", pushes[1])
+	}
+}
+
+// TestAnAnsweredGuardClosedRoundIsNoLongerOwedAReply is the other half: the
+// answer path has to settle its own round's promise.
+//
+// Once the guard has taken the bubble the answer cannot land in it, so it goes
+// out as an ordinary message — and that message IS the separate reply the
+// guard promised. Nothing on that path said so, so the promise stayed on file
+// for good, and the next repeat of this run's own failure claimed it: "⚠️ 这次
+// 没跑通" printed underneath the answer the user has just read.
+func TestAnAnsweredGuardClosedRoundIsNoLongerOwedAReply(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ran(t, "REQ-A1", 1, "task-1")
+	rig.guardClosed(t, 1)
+
+	rig.answer(t, "the answer that took five minutes", "task-1")
+	// The sweeper repeat sayTheRunFailed's own comment anticipates.
+	rig.failed(t, "task-1", false)
+
+	pushes := rig.conn.pushes(t)
+	if len(pushes) != 1 {
+		t.Fatalf("a guard-closed round that answered produced %d plain messages, want 1 — "+
+			"its promise was never settled, so the run's failure notice contradicted the answer above it", len(pushes))
+	}
+	if md, _ := pushes[0]["markdown"].(map[string]any); md == nil || md["content"] != "the answer that took five minutes" {
+		t.Fatalf("the promised separate reply did not carry the answer: %v", pushes[0])
+	}
 }
 
 // TestABubbleIsNeverRepaintedForARunThatHasAnswered. OnIngested is detached and

@@ -269,6 +269,16 @@ func (r *bubbleRig) cancelled(t *testing.T, taskName string) {
 	})
 }
 
+// guardClosed is the five-minute guard firing on one round: it takes the
+// bubble and leaves the promise behind, which is what armGuard's timer does,
+// without a test having to wait out the window. The run carries on.
+func (r *bubbleRig) guardClosed(t *testing.T, batch engine.RunBatchID) {
+	t.Helper()
+	if _, ok := r.streams.takeBatch(bubbleSessionID(t), batch, roundContinues); !ok {
+		t.Fatalf("could not guard-close round %d", batch)
+	}
+}
+
 // mustParseTestUUID turns a readable test name into a stable UUID, so a test
 // can say "task-1" and the store still sees the pgtype.UUID the seam carries.
 func mustParseTestUUID(t *testing.T, name string) pgtype.UUID {
@@ -505,8 +515,9 @@ func TestTheGuardClosesABubbleTheWindowIsAboutToStrand(t *testing.T) {
 	if frames[1]["content"] != streamCopyStillWorking {
 		t.Errorf("guard copy = %q, want %q", frames[1]["content"], streamCopyStillWorking)
 	}
-	// The round is NOT over: the guard promised a separate reply.
-	if _, verdict := rig.streams.claimEnding(bubbleSessionID(t)); verdict != roundOwesAnEnding {
+	// The round is NOT over: the guard promised a separate reply, filed under
+	// the run the flush named.
+	if _, verdict := rig.streams.claimEnding(bubbleSessionID(t), taskUUID(t, "task-1")); verdict != roundOwesAnEnding {
 		t.Fatalf("after a guard close the store says %v, want roundOwesAnEnding — the promised reply would never be sent", verdict)
 	}
 }
