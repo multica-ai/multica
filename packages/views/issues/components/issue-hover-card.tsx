@@ -9,6 +9,7 @@ import {
   HoverCardTrigger,
   HoverCardContent,
 } from "@multica/ui/components/ui/hover-card";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { StatusIcon } from "./status-icon";
 
 interface IssueHoverCardProps {
@@ -31,10 +32,10 @@ interface IssueHoverCardProps {
  * not use this.
  *
  * The detail query lives in IssueHoverCardBody rather than here on purpose:
- * Base UI mounts the popup only while the card is open, so a paragraph
- * containing many mentions issues no detail requests until one is hovered.
- * Moving the query up into IssueHoverCard would fire one request per mention on
- * render.
+ * Base UI mounts the popup only while the card is open, so this component adds
+ * no detail request of its own until a card opens. Moving the query up into
+ * IssueHoverCard would fire one request per mention on render. (The chip inside
+ * the trigger has its own unresolved-issue fetch; that is independent of this.)
  */
 export function IssueHoverCard({ issueId, children, delay }: IssueHoverCardProps) {
   return (
@@ -58,8 +59,8 @@ function IssueHoverCardBody({ issueId }: { issueId: string }) {
   if (!issue) {
     return (
       <div className="flex flex-col gap-1.5">
-        <div className="h-3 w-20 animate-pulse rounded bg-muted" />
-        <div className="h-4 w-48 animate-pulse rounded bg-muted" />
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-4 w-48" />
       </div>
     );
   }
