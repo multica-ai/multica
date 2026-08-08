@@ -1,65 +1,51 @@
-# -----------------------------------------------------------------------------
-# Container images
-# -----------------------------------------------------------------------------
+# Container images. A digest takes precedence over tag; an empty application
+# tag falls back to Chart.appVersion.
 images:
   backend:
     repository: ghcr.io/multica-ai/multica-backend
-    # Empty defaults to Chart.appVersion. Released OCI charts set appVersion to
-    # the Git tag (for example v0.3.5), so installs use matching app images.
     tag: ""
+    digest: ""
     pullPolicy: IfNotPresent
   frontend:
     repository: ghcr.io/multica-ai/multica-web
-    # Empty defaults to Chart.appVersion. Set explicitly to override.
     tag: ""
+    digest: ""
     pullPolicy: IfNotPresent
   postgres:
     repository: pgvector/pgvector
     tag: pg17
+    digest: ""
     pullPolicy: IfNotPresent
 
-# -----------------------------------------------------------------------------
-# Pre-created Secret with sensitive values. Create it before `helm install`:
-#
-# Built-in postgres (default):
-#   kubectl -n <namespace> create secret generic multica-secrets \
-#     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
-#     --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
-#     --from-literal=RESEND_API_KEY="" \
-#     --from-literal=GOOGLE_CLIENT_SECRET="" \
-#     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
-#     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
-#
-# External postgres (postgres.external.enabled=true):
-#   Replace POSTGRES_PASSWORD with DATABASE_URL pointing at your external cluster.
-#   kubectl -n <namespace> create secret generic multica-secrets \
-#     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
-#     --from-literal=DATABASE_URL="postgres://user:pass@host:5432/multica?sslmode=require" \
-#     --from-literal=RESEND_API_KEY="" \
-#     --from-literal=GOOGLE_CLIENT_SECRET="" \
-#     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
-#     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
-#
-# The chart references this Secret by name; it does not template it, so real
-# values never need to land in git.
-# -----------------------------------------------------------------------------
+# References to registry credentials used by every workload.
+imagePullSecrets: []
+
+# Pre-created Secret loaded by the backend and built-in PostgreSQL. The chart
+# never creates or stores secret values. Depending on enabled integrations it
+# may contain: JWT_SECRET, DATABASE_URL, REDIS_URL, SMTP_USERNAME,
+# SMTP_PASSWORD, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN,
+# RESEND_API_KEY, GOOGLE_CLIENT_SECRET, CLOUDFRONT_PRIVATE_KEY,
+# GITHUB_WEBHOOK_SECRET, GITHUB_APP_PRIVATE_KEY and MULTICA_LLM_API_KEY.
+# Self-hosted VCS integrations additionally need MULTICA_VCS_SECRET_KEY.
+# Built-in PostgreSQL additionally needs POSTGRES_PASSWORD. Only the relevant
+# keys are required.
 existingSecret: multica-secrets
 
-# -----------------------------------------------------------------------------
-# PostgreSQL (pgvector)
-# -----------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+# PostgreSQL (pgvector). Set external.enabled=true and provide DATABASE_URL in
+# existingSecret to skip the built-in Deployment, PVC, and Service.
 postgres:
-  # Set external.enabled=true to skip the built-in postgres Deployment/PVC and
-  # supply DATABASE_URL directly via the existingSecret instead. When true,
-  # the postgres Deployment, PVC, and Service are not created.
-  # Add DATABASE_URL to your existingSecret pointing at the external cluster.
   external:
     enabled: false
   database: multica
   user: multica
   persistence:
     size: 10Gi
-    # Leave empty to use the cluster's default StorageClass.
     storageClass: ""
   resources:
     requests:
@@ -68,61 +54,54 @@ postgres:
     limits:
       cpu: 1000m
       memory: 1Gi
-  # Standard Kubernetes scheduling constraints for the postgres Deployment.
+  podSecurityContext: {}
+  containerSecurityContext: {}
+  nodeSelector: {}
   affinity: {}
   tolerations: []
+  topologySpreadConstraints: []
+  podAnnotations: {}
+  podLabels: {}
 
-# -----------------------------------------------------------------------------
-# Backend (Go API + WS server)
-# -----------------------------------------------------------------------------
+# Backend (Go API and WebSocket server).
 backend:
-  # Concurrent backend pods are now safe to start: cmd/migrate uses a
-  # Postgres session-level advisory lock to serialize the startup
-  # `migrate up` run, so late-arriving pods queue and then no-op (see
-  # GitHub multica-ai/multica#3647). 1 is still the recommended default
-  # because the chart Deployment uses strategy: Recreate and there is no
-  # leader-elected workload split — increase this only if you actually
-  # need horizontal scale of the API/WS server.
   replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: Recreate
+  terminationGracePeriodSeconds: 60
+  lifecycle: {}
   uploads:
     persistence:
-      # When true (default) the chart provisions a PersistentVolumeClaim for
-      # /app/data/uploads and mounts it into the backend pod. The backend only
-      # uses this directory when S3 is NOT configured (`backend.config.s3Bucket`
-      # empty) — see server/cmd/server/router.go for the storage selection.
-      #
-      # Set to false when you have configured S3/CloudFront and don't want the
-      # chart to declare the uploads PVC at all. The default access mode is
-      # ReadWriteOnce, which prevents `backend.replicas > 1` from scheduling a
-      # second pod (Multi-Attach error); disabling persistence — or switching
-      # accessModes to a ReadWriteMany class — removes that constraint on the
-      # storage side. Note: backend startup migrations are not yet serialized
-      # across pods, so multi-replica still requires care beyond the chart.
+      # Disable when S3 is configured, or use a ReadWriteMany StorageClass for
+      # multiple backend replicas that still use local uploads.
       enabled: true
       size: 5Gi
-      # Leave empty to use the cluster's default StorageClass.
       storageClass: ""
-      # PVC accessModes. Defaults to [ReadWriteOnce] to match the typical
-      # local-path / hostPath / EBS StorageClass on a single-node setup. Switch
-      # to [ReadWriteMany] (with a compatible StorageClass such as NFS, EFS,
-      # CephFS) if you intend to share the uploads volume across multiple
-      # backend replicas without S3.
       accessModes:
         - ReadWriteOnce
-  # All non-secret backend env. Secret values come from `existingSecret`.
   config:
     appEnv: production
     appUrl: http://multica.dev.lan
+    publicUrl: ""
     frontendOrigin: http://multica.dev.lan
     corsAllowedOrigins: ""
+    allowedOrigins: ""
     cookieDomain: ""
+    # null preserves pool_max_conns and pool_min_conns from DATABASE_URL.
+    # Set these explicitly to override the connection-string values.
+    databaseMaxConns: null
+    databaseMinConns: null
+    logLevel: info
+    metricsAddr: ""
+    analyticsDisabled: true
+    # Must be shorter than terminationGracePeriodSeconds after allowing time
+    # for the server's remaining graceful shutdown work.
+    shutdownHoldDuration: ""
     resendFromEmail: noreply@multica.ai
     allowSignup: true
     allowedEmails: ""
     allowedEmailDomains: ""
-    # Self-host gate (#3433): set true to make POST /api/workspaces 403 for
-    # every caller. Bootstrap the workspace with this false, then flip to
-    # true so users can only join via invitation.
     disableWorkspaceCreation: false
     # Self-host-only VCS integration (Forgejo / Gitea / GitLab). The official
     # chart enables the product surface by default; operators must also provide
@@ -131,11 +110,37 @@ backend:
     vcsIntegrationEnabled: true
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
+    smtp:
+      host: ""
+      # Defaults match the application when SMTP_PORT and SMTP_TLS are unset.
+      port: 25
+      fromEmail: ""
+      tls: ""
+      tlsInsecure: false
+      ehloName: ""
+    redis:
+      disableClientName: false
+    rateLimit:
+      auth: 5
+      authVerify: 20
+      trustedProxies: ""
+    trustedProxies: ""
     s3Bucket: ""
     s3Region: us-west-2
+    s3EndpointUrl: ""
+    # null leaves application auto-detection in control.
+    s3UsePathStyle: null
+    attachmentDownloadMode: auto
+    attachmentDownloadUrlTtl: 30m
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
     localUploadBaseUrl: http://api.multica.dev.lan
+  extraEnv: []
+  extraEnvFrom: []
+  extraVolumes: []
+  extraVolumeMounts: []
+  podSecurityContext: {}
+  containerSecurityContext: {}
   resources:
     requests:
       cpu: 100m
@@ -143,15 +148,50 @@ backend:
     limits:
       cpu: 1000m
       memory: 1Gi
-  # Standard Kubernetes scheduling constraints for the backend Deployment.
+  startupProbe:
+    enabled: true
+    httpGet:
+      path: /health
+      port: http
+    failureThreshold: 30
+    periodSeconds: 10
+  readinessProbe:
+    enabled: true
+    httpGet:
+      path: /readyz
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  livenessProbe:
+    enabled: true
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 30
+  metrics:
+    enabled: false
+    containerPort: 9090
+    servicePort: 9090
+  service:
+    labels: {}
+    annotations: {}
+  nodeSelector: {}
   affinity: {}
   tolerations: []
+  topologySpreadConstraints: []
+  podAnnotations: {}
+  podLabels: {}
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
 
-# -----------------------------------------------------------------------------
-# Frontend (Next.js standalone)
-# -----------------------------------------------------------------------------
+# Frontend (Next.js standalone).
 frontend:
   replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
   config:
     # Backend origin used by the frontend runtime proxy for /api, /auth,
     # /uploads, and /ws. Empty defaults to this release's backend Service.
@@ -170,6 +210,13 @@ frontend:
     # Because that name is unprefixed, only ONE such release can run per
     # namespace. Keep false for current images.
     backendAlias: false
+  service:
+    labels: {}
+    annotations: {}
+  extraVolumes: []
+  extraVolumeMounts: []
+  podSecurityContext: {}
+  containerSecurityContext: {}
   resources:
     requests:
       cpu: 100m
@@ -177,33 +224,78 @@ frontend:
     limits:
       cpu: 1000m
       memory: 1Gi
-  # Standard Kubernetes scheduling constraints for the frontend Deployment.
+  nodeSelector: {}
   affinity: {}
   tolerations: []
+  topologySpreadConstraints: []
+  podAnnotations: {}
+  podLabels: {}
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
 
-# -----------------------------------------------------------------------------
-# Ingress
-# -----------------------------------------------------------------------------
 ingress:
   enabled: true
   className: traefik
   annotations: {}
   frontend:
     host: multica.dev.lan
+    annotations: {}
   backend:
     host: api.multica.dev.lan
-  # tls:
-  #   - hosts: [multica.dev.lan, api.multica.dev.lan]
-  #     secretName: multica-tls
+    annotations: {}
+  tls: []
 
-# -----------------------------------------------------------------------------
-# Monitoring
-# -----------------------------------------------------------------------------
+# Gateway API HTTPRoutes. The Gateway and its listeners must already exist.
+# Disable ingress.enabled when HTTPRoute should be the only public entrypoint.
+httpRoute:
+  enabled: false
+  annotations: {}
+  # Existing Gateway used by both routes. namespace is optional when the
+  # Gateway is in the release namespace; sectionName selects a listener.
+  parentRefs: []
+  # - name: internal-gateway
+  #   namespace: gateway-system
+  #   sectionName: https
+  frontend:
+    enabled: true
+    annotations: {}
+    # Optional component override; empty inherits httpRoute.parentRefs.
+    parentRefs: []
+    hostnames: []
+    # Empty uses a PathPrefix / rule targeting the chart frontend Service.
+    rules: []
+  backend:
+    enabled: true
+    annotations: {}
+    # Optional component override; empty inherits httpRoute.parentRefs.
+    parentRefs: []
+    hostnames: []
+    # Empty uses a PathPrefix / rule targeting the chart backend Service.
+    rules: []
+
+# The chart renders these rules verbatim. When enabled, empty rule lists deny
+# traffic in that direction; provide every rule required by the deployment.
+networkPolicy:
+  enabled: false
+  ingress:
+    frontend: []
+    backend: []
+    postgres: []
+  egress:
+    frontend: []
+    backend: []
+    postgres: []
+
 monitoring:
+  serviceMonitor:
+    enabled: false
+    additionalLabels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    port: metrics
   prometheusRule:
-    # Requires the Prometheus Operator CRD (monitoring.coreos.com/v1). Kept
-    # disabled by default so minimal self-host installs without that CRD still
-    # render and install.
     enabled: false
     additionalLabels: {}
     samplerQueryErrorsFor: 5m

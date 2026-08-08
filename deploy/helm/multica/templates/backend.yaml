@@ -1,5 +1,4 @@
-{{- $backendImageTag := default .Chart.AppVersion .Values.images.backend.tag -}}
-{{- if .Values.backend.uploads.persistence.enabled -}}
+{{- if .Values.backend.uploads.persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -26,13 +25,10 @@ metadata:
     {{- include "multica.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 spec:
-  # The backend entrypoint runs migrations before starting. Concurrent
-  # runs are protected by a Postgres advisory lock in cmd/migrate (see
-  # GitHub multica-ai/multica#3647), so multiple replicas no longer race;
-  # 1 is still the chart default (strategy: Recreate, no leader split).
   replicas: {{ .Values.backend.replicas }}
+  revisionHistoryLimit: {{ .Values.backend.revisionHistoryLimit }}
   strategy:
-    type: Recreate
+    {{- toYaml .Values.backend.strategy | nindent 4 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: multica
@@ -40,70 +36,94 @@ spec:
       app.kubernetes.io/component: backend
   template:
     metadata:
+      {{- $systemAnnotations := dict
+        "checksum/config" (include (print $.Template.BasePath "/configmap.yaml") . | sha256sum)
+        "checksum/secret" ((lookup "v1" "Secret" .Release.Namespace .Values.existingSecret).data | toYaml | sha256sum)
+      -}}
+      {{- $podAnnotations := mergeOverwrite (deepCopy (default dict .Values.backend.podAnnotations)) $systemAnnotations }}
       annotations:
-        # Roll the backend pods whenever its config changes. envFrom does not
-        # watch the referenced objects, and helm upgrade alone won't change the
-        # pod template hash, so without these checksums editing values.yaml +
-        # `helm upgrade` would leave the old pods running stale config.
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        # existingSecret is created out-of-band (not a chart template), so we
-        # checksum the live object via lookup instead of $.Template.BasePath.
-        # lookup returns empty during `helm template`/`--dry-run`, so the
-        # rendered value there is a placeholder; on a real install/upgrade it
-        # reflects the actual Secret and rolls pods on rotation.
-        checksum/secret: {{ (lookup "v1" "Secret" .Release.Namespace .Values.existingSecret).data | toYaml | sha256sum }}
+        {{- toYaml $podAnnotations | nindent 8 }}
       labels:
-        {{- include "multica.labels" . | nindent 8 }}
-        app.kubernetes.io/component: backend
+        {{- include "multica.podLabels" (dict "root" . "component" "backend" "custom" .Values.backend.podLabels) | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "multica.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      terminationGracePeriodSeconds: {{ .Values.backend.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: backend
-          image: "{{ .Values.images.backend.repository }}:{{ $backendImageTag }}"
+          image: {{ include "multica.backend.image" . | quote }}
           imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          {{- with .Values.backend.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: 8080
               name: http
+            {{- if .Values.backend.metrics.enabled }}
+            - containerPort: {{ .Values.backend.metrics.containerPort }}
+              name: metrics
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ .Release.Name }}-config
             - secretRef:
                 name: {{ .Values.existingSecret }}
-          {{- if not .Values.postgres.external.enabled }}
+            {{- range .Values.backend.extraEnvFrom }}
+            {{- if not (and .secretRef (eq .secretRef.name $.Values.existingSecret)) }}
+            {{- toYaml (list .) | nindent 12 }}
+            {{- end }}
+            {{- end }}
+          {{- if or (not .Values.postgres.external.enabled) .Values.backend.extraEnv }}
           env:
+            {{- if not .Values.postgres.external.enabled }}
             - name: DATABASE_URL
               value: {{ include "multica.databaseUrl" . | quote }}
+            {{- end }}
+            {{- with .Values.backend.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
-          {{- if .Values.backend.uploads.persistence.enabled }}
+          {{- if or .Values.backend.uploads.persistence.enabled .Values.backend.extraVolumeMounts }}
           volumeMounts:
+            {{- if .Values.backend.uploads.persistence.enabled }}
             - name: uploads
               mountPath: /app/data/uploads
+            {{- end }}
+            {{- with .Values.backend.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
-          # The entrypoint runs `./migrate up` before serving traffic. On a
-          # cold cluster (Postgres still coming up) this can take minutes. The
-          # startupProbe holds off liveness/readiness until /healthz is OK,
-          # giving migrations a ~5 min budget (30 * 10s) so the pod is never
-          # killed mid-migration. Once it passes, the aggressive livenessProbe
-          # below takes over.
+          {{- if .Values.backend.startupProbe.enabled }}
           startupProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
-            failureThreshold: 30
-            periodSeconds: 10
+            {{- toYaml (omit .Values.backend.startupProbe "enabled") | nindent 12 }}
+          {{- end }}
+          {{- if .Values.backend.readinessProbe.enabled }}
           readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            {{- toYaml (omit .Values.backend.readinessProbe "enabled") | nindent 12 }}
+          {{- end }}
+          {{- if .Values.backend.livenessProbe.enabled }}
           livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 30
+            {{- toYaml (omit .Values.backend.livenessProbe "enabled") | nindent 12 }}
+          {{- end }}
+          {{- with .Values.backend.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.backend.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
@@ -112,11 +132,20 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.backend.uploads.persistence.enabled }}
+      {{- with .Values.backend.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or .Values.backend.uploads.persistence.enabled .Values.backend.extraVolumes }}
       volumes:
+        {{- if .Values.backend.uploads.persistence.enabled }}
         - name: uploads
           persistentVolumeClaim:
             claimName: {{ include "multica.backend.fullname" . }}-uploads
+        {{- end }}
+        {{- with .Values.backend.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
 ---
 apiVersion: v1
@@ -126,6 +155,13 @@ metadata:
   labels:
     {{- include "multica.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
+    {{- with .Values.backend.service.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.backend.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: ClusterIP
   selector:
@@ -134,8 +170,28 @@ spec:
     app.kubernetes.io/component: backend
   ports:
     - port: 8080
-      targetPort: 8080
+      targetPort: http
       name: http
+{{- if .Values.backend.metrics.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "multica.backend.fullname" . }}-metrics
+  labels:
+    {{- include "multica.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend-metrics
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: multica
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: backend
+  ports:
+    - port: {{ .Values.backend.metrics.servicePort }}
+      targetPort: metrics
+      name: metrics
+{{- end }}
 {{- if .Values.frontend.compatibility.backendAlias }}
 ---
 # DNS alias for legacy multica-web images that baked
