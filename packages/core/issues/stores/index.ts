@@ -23,6 +23,10 @@ export {
 } from "./resolved-expand-store";
 export { useCommentComposerStore } from "./comment-composer-store";
 export { useIssueLinkStore } from "./issue-link-store";
+export {
+  useIssueMentionDisplayStore,
+  type IssueMentionMode,
+} from "./issue-mention-display-store";
 export { useCommentDraftStore, type CommentDraftKey } from "./comment-draft-store";
 export {
   myIssuesViewStore,
