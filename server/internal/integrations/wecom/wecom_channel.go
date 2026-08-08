@@ -317,6 +317,15 @@ func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 // not quietly discard the messages it could not reach.
 const callbackQueueDepth = 64
 
+// errSubscribeRejected marks a handshake the server refused on its merits —
+// bad credentials, a bot that no longer exists, a bot whose long connection is
+// off. It is separated from every other connection failure because only this
+// one needs a person: it repeats identically on every backoff until somebody
+// fixes the installation, while a dial failure or a timeout usually recovers
+// on its own. An operator watching one number cannot tell "our network
+// blipped" from "this tenant's bot has been broken since Tuesday".
+var errSubscribeRejected = errors.New("wecom: subscribe rejected")
+
 // subscribe sends the aibot_subscribe frame and waits (up to
 // subscribeTimeout) for the server's ack. The ack shape is a frame with
 // echoed headers.req_id + errcode; errcode == 0 means good, anything else
@@ -360,7 +369,7 @@ func (c *wecomChannel) subscribe(ctx context.Context, conn wsConn, sender *wsSen
 			continue
 		}
 		if env.ErrCode != 0 {
-			return fmt.Errorf("wecom: subscribe rejected errcode=%d errmsg=%s", env.ErrCode, env.ErrMsg)
+			return fmt.Errorf("%w: errcode=%d errmsg=%s", errSubscribeRejected, env.ErrCode, env.ErrMsg)
 		}
 		return nil
 	}
