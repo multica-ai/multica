@@ -1,0 +1,103 @@
+{
+  "page": {
+    "title": "Squads",
+    "new_button": "Novo squad",
+    "empty_no_squads": "Ainda não há squads. Crie um para começar.",
+    "empty_no_match": "Nenhum squad corresponde aos seus filtros.",
+    "table": {
+      "name": "Squad",
+      "leader": "Líder",
+      "members": "Membros",
+      "creator": "Criado por",
+      "created": "Criado"
+    },
+    "no_matches": "Nenhum squad corresponde",
+    "row_menu": "Ações do squad",
+    "archive_action": "Arquivar"
+  },
+  "inspector": {
+    "details_section": "Detalhes",
+    "archive_button": "Arquivar"
+  },
+  "archive_dialog": {
+    "title": "Arquivar este squad?",
+    "description": "\"{{name}}\" será arquivado. As issues atualmente atribuídas a este squad serão transferidas para o líder dele. Isso não pode ser desfeito — crie um novo squad se precisar do roteamento de volta.",
+    "cancel": "Cancelar",
+    "confirm": "Arquivar",
+    "archiving": "Arquivando…",
+    "success": "Squad arquivado"
+  },
+  "name_editor": {
+    "cancel": "Cancelar"
+  },
+  "add_member_dialog": {
+    "title": "Adicionar membro",
+    "description": "Adicione um membro do workspace ou um agent a este squad.",
+    "label_member": "Membro",
+    "label_role": "Função",
+    "label_optional": "(opcional)",
+    "placeholder_role_inline": "Adicionar função…",
+    "cancel": "Cancelar"
+  },
+  "description_dialog": {
+    "title": "Editar descrição",
+    "placeholder_empty": "Adicionar uma descrição",
+    "cancel": "Cancelar"
+  },
+  "discard_changes_dialog": {
+    "title": "Descartar alterações não salvas?",
+    "description": "Você tem alterações não salvas nesta aba. Trocar de aba vai descartá-las.",
+    "keep_editing": "Continuar editando",
+    "discard_button": "Descartar"
+  },
+  "members_tab": {
+    "section_title": "Membros",
+    "section_count_one": "{{count}} membro neste squad",
+    "section_count_other": "{{count}} membros neste squad",
+    "add_member_button": "Adicionar membro",
+    "create_agent_button": "Criar agent",
+    "leader_chip": "Líder",
+    "view_agent_tooltip": "Abrir detalhes do agent",
+    "make_leader_tooltip": "Tornar líder do squad",
+    "remove_member_tooltip": "Remover do squad",
+    "status_working": "Trabalhando",
+    "status_idle": "Ocioso",
+    "status_offline": "Offline",
+    "status_unstable": "Instável",
+    "status_archived": "Arquivado",
+    "issue_status_blocked": "bloqueada",
+    "active_issue_more": "e mais {{count}}",
+    "last_active_label": "ativo pela última vez {{time}}"
+  },
+  "profile_card": {
+    "unavailable": "Squad indisponível",
+    "detail_link": "Detalhes →",
+    "archived": "Arquivado",
+    "member_count_one": "{{count}} membro",
+    "member_count_other": "{{count}} membros",
+    "members_section": "Membros",
+    "more_members_one": "+{{count}} a mais",
+    "more_members_other": "+{{count}} a mais"
+  },
+  "instructions_tab": {
+    "description": "As instruções do squad são injetadas no prompt do agent líder sempre que ele trabalha em uma issue atribuída a este squad. Use-as para dar ao líder orientações gerais do squad, acordos de trabalho ou contexto que ele deve seguir em cada task.",
+    "unsaved_changes": "Alterações não salvas",
+    "save_button": "Salvar"
+  },
+  "scope": {
+    "mine": "Meus",
+    "all": "Todos"
+  },
+  "toolbar": {
+    "display": "Exibição",
+    "sort_by": "Ordenar por",
+    "direction_asc": "Crescente",
+    "direction_desc": "Decrescente",
+    "section_columns": "Colunas",
+    "result_count_title": "Squads correspondentes / todos os squads",
+    "filter_label": "Filtro",
+    "filter_active_count_one": "{{count}} filtro",
+    "filter_active_count_other": "{{count}} filtros",
+    "clear_filters": "Limpar filtros"
+  }
+}

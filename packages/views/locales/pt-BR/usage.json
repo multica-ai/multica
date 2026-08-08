@@ -1,0 +1,108 @@
+{
+  "title": "Uso",
+  "filter": {
+    "project_label": "Projeto",
+    "all_projects": "Todos os projetos",
+    "period_label": "Período"
+  },
+  "kpi": {
+    "cost_label": "Custo · {{days}}D",
+    "tokens_label": "Tokens · {{days}}D",
+    "tokens_hint": "Entrada {{input}} · Saída {{output}}",
+    "run_time_label": "Tempo de execução · {{days}}D",
+    "run_time_hint": "Em {{tasks}} tasks",
+    "tasks_label": "Tasks · {{days}}D",
+    "tasks_hint": "{{failed}} falharam"
+  },
+  "dim": {
+    "label": "Dimensão",
+    "daily": "Diário",
+    "weekly": "Semanal"
+  },
+  "daily": {
+    "title_cost": "Custo diário",
+    "title_tokens": "Tokens diários",
+    "title_time": "Tempo de execução diário",
+    "title_tasks": "Tasks diárias",
+    "title_errors": "Erros diários",
+    "metric_cost": "Custo",
+    "metric_tokens": "Tokens",
+    "metric_time": "Tempo",
+    "metric_tasks": "Tasks",
+    "no_data": "Nenhum uso neste período.",
+    "metric_label": "Métrica"
+  },
+  "weekly": {
+    "title_cost": "Custo semanal",
+    "title_tokens": "Tokens semanais",
+    "title_time": "Tempo de execução semanal",
+    "title_tasks": "Tasks semanais",
+    "title_errors": "Erros semanais",
+    "partial_label": "{{range}} (parcial · {{covered}} / 7 dias)"
+  },
+  "errors": {
+    "tooltip_rate": "Taxa de erro",
+    "class": {
+      "auth": "Autenticação",
+      "rate_limit": "Limite de taxa",
+      "timeout": "Timeout",
+      "provider": "Provedor",
+      "runtime": "Runtime",
+      "agent": "Agent",
+      "other": "Outro"
+    },
+    "title": "Erros",
+    "summary": "{{failed}} de {{total}} execuções falharam · {{rate}}",
+    "mix_title": "Composição de falhas · {{failed}}",
+    "mix_label": "Composição de falhas",
+    "codes_label": "Códigos de erro",
+    "by_agent": "Principais responsáveis",
+    "sort_label": "Classificar responsáveis por",
+    "sort_failed": "Falhas",
+    "sort_rate": "Taxa",
+    "header_agent": "Agent",
+    "header_failed": "Falhas",
+    "header_runs": "Execuções",
+    "header_rate": "Taxa",
+    "other_agents": "Outros agents",
+    "low_sample": "Menos de {{count}} execuções neste período — essa taxa não é representativa.",
+    "no_data": "Nenhuma execução com falha neste período.",
+    "show_reasons": "Mostrar códigos de erro",
+    "hide_reasons": "Ocultar códigos de erro",
+    "show_all": "Mostrar todos os {{count}}",
+    "show_less": "Mostrar top {{count}}",
+    "kpi_failed_label": "Tasks com falha · {{days}}D",
+    "kpi_failed_hint": "De {{total}} execuções",
+    "kpi_rate_label": "Taxa de falha · {{days}}D",
+    "kpi_agents_label": "Agents afetados · {{days}}D",
+    "kpi_agents_hint": "Pior {{name}} · {{count}}"
+  },
+  "leaderboard": {
+    "title": "Ranking",
+    "caption": "{{count}} agents",
+    "caption_with_deleted": "{{count}} agents · {{deleted}} excluídos",
+    "sort_label": "Classificar agents por",
+    "deleted_agents": "Agents excluídos",
+    "other_agents": "Outros agents",
+    "header_agent": "Agent",
+    "header_tokens": "Tokens",
+    "header_cost": "Custo",
+    "header_time": "Tempo",
+    "header_tasks": "Tasks",
+    "show_all": "Mostrar todos",
+    "show_less": "Mostrar top {{count}}",
+    "no_data": "Nenhuma atividade de agent neste período."
+  },
+  "empty": {
+    "title": "Ainda não há uso",
+    "body": "Quando os agents começarem a executar tasks aqui, o consumo de tokens e o tempo de execução deles vão aparecer nesta tela."
+  },
+  "duration": {
+    "less_than_minute": "<1m"
+  },
+  "tab_usage": "Uso",
+  "header": {
+    "timezone_and_updated": "{{tz}} · atualizado {{time}}",
+    "refresh": "Atualizar"
+  }
+}
