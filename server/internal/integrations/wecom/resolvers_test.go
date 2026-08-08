@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/outbox"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -175,7 +176,11 @@ func TestOutbound_RegisterAndHandleEventNoopOnNonWecom(t *testing.T) {
 	// that isn't a wecom binding must be a silent no-op (handleEvent swallows
 	// the processEvent result). Uses pgx.ErrNoRows via the fake.
 	q := &fakeOutboundQueries{sessionErr: pgx.ErrNoRows}
-	o := NewOutbound(q, newSendersRegistry(), slog.Default())
+	producer, err := outbox.NewProducer(channelTypeWecom, &recordingEnqueueStore{}, nil, nil)
+	if err != nil {
+		t.Fatalf("NewProducer: %v", err)
+	}
+	o := NewOutbound(q, producer, slog.Default())
 	bus := events.New()
 	o.Register(bus)
 	// Publishing must not panic; the handler runs synchronously on the bus.

@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/outbox"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
@@ -248,6 +249,16 @@ type Handler struct {
 	// where the storage backend exists; main.go starts it as an independent
 	// worker goroutine. Nil when no storage backend is configured.
 	ChannelMediaReconciler *service.ChannelMediaReconciler
+	// ChannelOutboxReconcilers rescue outbound replies whose producing replica
+	// died before enqueueing them, one per channel that adopts the durable
+	// outbound queue. Built in cmd/server/router.go alongside each adapter;
+	// main.go starts them as independent workers. Empty when no channel on the
+	// queue is configured.
+	ChannelOutboxReconcilers []*outbox.Reconciler
+	// ChannelOutboxMetrics is the swappable sink the outbound queue workers
+	// push to. Built during routing, pointed at the Prometheus collector by
+	// main.go once the registry exists.
+	ChannelOutboxMetrics *outbox.MetricsRef
 	// SlackInstall owns the bring-your-own-app Slack install lifecycle (register
 	// pasted tokens / list / revoke) and the at-rest encryption of each app's bot
 	// + app tokens (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set.
@@ -273,6 +284,14 @@ type Handler struct {
 	// WecomCredentials unseals a wecom installation's smart-bot secret for the
 	// WebSocket subscribe frame. Nil disables the wecom integration.
 	WecomCredentials wecom.CredentialsResolver
+	// WecomInstall drives the scan-code install sessions (QR generate + poll).
+	// Nil unless MULTICA_WECOM_SECRET_KEY is set; Configured() is additionally
+	// false without a QR provider, in which case the endpoints return 503 but
+	// in-flight sessions still terminate cleanly.
+	WecomInstall *wecom.InstallService
+	// WecomInstallWorker drives those sessions. Built in cmd/server/router.go;
+	// main.go starts it as an independent worker.
+	WecomInstallWorker *wecom.InstallWorker
 	// WecomBindingTokens mints/redeems the user-binding tokens behind the
 	// "link your Multica account" prompt sent to first-time WeCom users
 	// (their aibot userid is a "T"-prefixed anonymized id with no relation
