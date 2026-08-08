@@ -1,11 +1,33 @@
+// The SVG path in WecomMark below is copied verbatim from `svg/logo-wecom.svg`
+// in Tencent's TDesign icon set, used under the MIT License. Source:
+// https://github.com/Tencent/tdesign-icons/blob/main/svg/logo-wecom.svg
+//
+// Copyright (c) 2021-present TDesign
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // The WeCom (企业微信) brand mark. lucide-react carries no brand icons, so the
 // WeCom connect button used the generic MessagesSquare speech bubble — the same
-// glyph as Slack's — and nothing on the page said which platform it was.
-//
-// Artwork: `svg/logo-wecom.svg` from Tencent's own TDesign icon set
-// (github.com/Tencent/tdesign-icons, MIT), so this is the vendor's mark rather
-// than a redrawing of it. Same 24x24 box and currentColor fill as GitHubMark
-// next door, so it drops into a Button beside lucide icons without restyling.
+// glyph as Slack's — and nothing on the page said which platform it was. The
+// artwork is the vendor's own mark rather than a redrawing of it; see the
+// license notice above. Same 24x24 box and currentColor fill as GitHubMark next
+// door, so it drops into a Button beside lucide icons without restyling.
 export function WecomMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
