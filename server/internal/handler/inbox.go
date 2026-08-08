@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service/inboxv2"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -170,6 +171,7 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to mark read")
 		return
 	}
+	h.syncInboxGroup(r, item, inboxAdaptRead)
 
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
@@ -199,6 +201,7 @@ func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to mark unread")
 		return
 	}
+	h.syncInboxGroup(r, item, inboxAdaptUnread)
 
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
@@ -232,6 +235,7 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 			IssueID:       item.IssueID,
 		})
 	}
+	h.syncInboxGroup(r, item, inboxAdaptArchive)
 
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
@@ -274,6 +278,7 @@ func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 			IssueID:       item.IssueID,
 		})
 	}
+	h.syncInboxGroup(r, item, inboxAdaptUnarchive)
 
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
@@ -362,6 +367,9 @@ func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 	})
+	if err == nil {
+		h.syncInboxGroupBatch(r, wsUUID, parseUUID(userID), inboxv2.BatchMarkAllRead)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark all inbox read")
 		return
@@ -391,6 +399,9 @@ func (h *Handler) ArchiveAllInbox(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 	})
+	if err == nil {
+		h.syncInboxGroupBatch(r, wsUUID, parseUUID(userID), inboxv2.BatchArchiveAll)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive all inbox")
 		return
@@ -420,6 +431,9 @@ func (h *Handler) ArchiveAllReadInbox(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 	})
+	if err == nil {
+		h.syncInboxGroupBatch(r, wsUUID, parseUUID(userID), inboxv2.BatchArchiveRead)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive all read inbox")
 		return
@@ -449,6 +463,9 @@ func (h *Handler) ArchiveCompletedInbox(w http.ResponseWriter, r *http.Request) 
 		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 	})
+	if err == nil {
+		h.syncInboxGroupBatch(r, wsUUID, parseUUID(userID), inboxv2.BatchArchiveComplete)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive completed inbox")
 		return

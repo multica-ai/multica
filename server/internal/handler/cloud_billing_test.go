@@ -400,7 +400,6 @@ func TestStripeWebhookDisabledReturnsUnavailable(t *testing.T) {
 	}
 }
 
-
 // TestStripeWebhookRateLimited pins the per-IP rate-limit fast
 // path. With a denying limiter installed the handler must 429
 // BEFORE consulting upstream. Mirrors HandleAutopilotWebhook's

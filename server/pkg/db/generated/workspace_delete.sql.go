@@ -263,6 +263,9 @@ deleted_activity AS (
 deleted_inbox AS (
     DELETE FROM inbox_item WHERE workspace_id = $1
 ),
+deleted_inbox_groups AS (
+    DELETE FROM inbox_group WHERE workspace_id = $1
+),
 deleted_issue_dependencies AS (
     DELETE FROM issue_dependency
     WHERE issue_id IN (SELECT id FROM ws_issues)
@@ -400,6 +403,9 @@ WHERE channel_media_pending_object.workspace_id = $1
 // Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
 // than the session set because that column exists precisely so this statement
 // does not have to join through chat_session, which it deletes in this same CTE.
+// inbox_group carries no foreign key (repo rule), so deleting inbox_item does
+// not sweep it: the group has to be named here or a deleted workspace leaves
+// every recipient's read cursors and archive state behind.
 // Keep the two-system cleanup ledger until object storage has been settled.
 // Moving every row out of pending also prevents a concurrent media bind from
 // attaching an object after the workspace teardown commits. The reconciler

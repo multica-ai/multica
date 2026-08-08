@@ -35,7 +35,8 @@
     "original_input": "原始输入",
     "edit_advanced": "在完整表单中编辑",
     "archive": "归档",
-    "unarchive": "取消归档"
+    "unarchive": "取消归档",
+    "new_updates_other": "{{count}} 条新动态"
   },
   "types": {
     "issue_assigned": "已分配",

@@ -35,7 +35,8 @@
     "original_input": "元の入力",
     "edit_advanced": "詳細フォームで編集",
     "archive": "アーカイブ",
-    "unarchive": "アーカイブ解除"
+    "unarchive": "アーカイブ解除",
+    "new_updates_other": "{{count}} 件の新着"
   },
   "types": {
     "issue_assigned": "割り当て済み",

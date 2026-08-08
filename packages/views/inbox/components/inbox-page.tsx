@@ -2,28 +2,16 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
-import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
-  inboxListOptions,
-  archivedInboxListOptions,
-  deduplicateInboxItems,
-  deduplicateArchivedInboxItems,
-  useInboxUnreadCount,
-} from "@multica/core/inbox/queries";
-import {
-  useMarkInboxRead,
-  useMarkInboxUnread,
-  useArchiveInbox,
-  useUnarchiveInbox,
-  useMarkAllInboxRead,
-  useArchiveAllInbox,
-  useArchiveAllReadInbox,
-  useArchiveCompletedInbox,
-} from "@multica/core/inbox/mutations";
+  useInboxRows,
+  inboxRowHighlightCommentId,
+  type InboxRow,
+} from "@multica/core/inbox/rows";
+import { useInboxRowActions } from "@multica/core/inbox/row-mutations";
 
 import { IssueDetail } from "../../issues/components";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
@@ -39,8 +27,8 @@ import {
   ChevronLeft,
   ListChecks,
   ArrowLeft,
+  ArrowDown,
 } from "lucide-react";
-import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   ResizablePanelGroup,
@@ -66,6 +54,16 @@ import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle, isQuickCreateOutcome } from "./inbox-display";
 import { useT } from "../../i18n";
 
+/**
+ * What the reader was shown when they opened a row: which row, how far its
+ * event sequence had got, and which comment the jump landed on.
+ */
+interface OpenSnapshot {
+  key: string;
+  seq: number;
+  highlight: string | undefined;
+}
+
 export function InboxPage() {
   const { t } = useT("inbox");
   const { searchParams, replace } = useNavigation();
@@ -86,21 +84,20 @@ export function InboxPage() {
   }, [urlView]);
 
   const wsId = useWorkspaceId();
-  const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
-  const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
-
-  // Fetched in both views, not just the archived one: the main list's entry
-  // into the archive is labelled with this count, so it has to be known before
-  // the user goes there.
+  // One data source, two generations. Under the `inbox_v2` flag the rows come
+  // from the server already grouped; otherwise they are the v1 events folded
+  // client-side, in the same shape. Nothing below this line knows which.
+  //
+  // The archive is fetched in both views, not just the archived one: the main
+  // list's entry into it is labelled with this count.
   const {
-    data: rawArchivedItems = [],
-    isLoading: archivedLoading,
-    isError: archivedError,
-  } = useQuery(archivedInboxListOptions(wsId));
-  const archivedItems = useMemo(
-    () => deduplicateArchivedInboxItems(rawArchivedItems),
-    [rawArchivedItems],
-  );
+    rows: items,
+    archivedRows: archivedItems,
+    loading,
+    archivedLoading,
+    archivedError,
+    grouped,
+  } = useInboxRows(wsId);
 
   const isArchivedView = view === "archived";
   const visibleItems = isArchivedView ? archivedItems : items;
@@ -203,16 +200,12 @@ export function InboxPage() {
   });
 
   const isCompact = useIsCompact();
-  const unreadCount = useInboxUnreadCount(wsId);
+  // Counted off the rows actually on screen rather than from a second source.
+  // A badge derived separately from the list is exactly how the old count came
+  // to disagree with what the user could see.
+  const unreadCount = useMemo(() => items.filter((i) => !i.read).length, [items]);
 
-  const markReadMutation = useMarkInboxRead();
-  const markUnreadMutation = useMarkInboxUnread();
-  const archiveMutation = useArchiveInbox();
-  const unarchiveMutation = useUnarchiveInbox();
-  const markAllReadMutation = useMarkAllInboxRead();
-  const archiveAllMutation = useArchiveAllInbox();
-  const archiveAllReadMutation = useArchiveAllReadInbox();
-  const archiveCompletedMutation = useArchiveCompletedInbox();
+  const actions = useInboxRowActions(grouped);
   const timeAgo = useTimeAgo();
   const typeLabels = useTypeLabels();
 
@@ -224,26 +217,116 @@ export function InboxPage() {
   // re-opening the row later marks it read again like any other open.
   const manualUnreadIdRef = useRef<string | null>(null);
 
+  // Look a row up by the id the list callbacks hand back.
+  const rowById = useCallback(
+    (id: string): InboxRow | null =>
+      items.find((r) => r.id === id) ?? archivedItems.find((r) => r.id === id) ?? null,
+    [items, archivedItems],
+  );
+
+  const onMutationError = useCallback(
+    (fallback: string) => (err: unknown) =>
+      toast.error(err instanceof Error && err.message ? err.message : fallback),
+    [],
+  );
+
+  // Is this tab actually in front of the user?
+  //
+  // "Selected" is not "seen". A background tab restored from a session, or one
+  // sitting behind the window since yesterday, has a selected row and would
+  // otherwise mark it read without a human ever looking at it — which is the
+  // ghost-read half of the same bug ghost-unread is the other half of.
+  const [documentVisible, setDocumentVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState === "visible",
+  );
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisibility = () =>
+      setDocumentVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
+  // What the reader was shown when they opened the row.
+  //
+  // Frozen at open rather than tracked live, which is what stops a new event
+  // from moving the ground under someone mid-read: the highlight stays on the
+  // comment they opened, and anything newer is OFFERED rather than applied.
+  //
+  // One state object, not three: the key, the sequence and the highlight are a
+  // single snapshot, and splitting them lets a re-render land with the
+  // highlight from one row and the sequence from another.
+  //
+  // Under v1 there is no sequence to freeze, so `seq` stays 0, `pendingUpdates`
+  // is always 0, and the behaviour is exactly what it was.
+  const [opened, setOpened] = useState<OpenSnapshot | null>(null);
+
+  const selectedId = selected?.id;
+  const selectedRead = selected?.read;
+  const selectedSeq = selected?.group?.seq ?? null;
+  const snapshotOf = useCallback(
+    (row: InboxRow, key: string): OpenSnapshot => ({
+      key,
+      seq: row.group?.seq ?? 0,
+      highlight: inboxRowHighlightCommentId(row),
+    }),
+    [],
+  );
+
+  // Re-snapshot only when the selection moves to a DIFFERENT row. The
+  // functional update is what makes that true regardless of how often this
+  // effect re-runs — re-snapshotting on every new event for the same row is
+  // precisely what freezing exists to prevent.
+  const selectedRow = selected;
+  useEffect(() => {
+    if (!selectedRow) {
+      setOpened(null);
+      return;
+    }
+    setOpened((prev) =>
+      prev?.key === selectedKey ? prev : snapshotOf(selectedRow, selectedKey),
+    );
+  }, [selectedKey, selectedRow, snapshotOf]);
+
+  const openedHighlight = opened?.key === selectedKey ? opened.highlight : undefined;
+
+  // How many events landed on the open row since it was opened.
+  const pendingUpdates =
+    selectedSeq !== null && opened?.key === selectedKey
+      ? Math.max(0, selectedSeq - opened.seq)
+      : 0;
+
+  // Catch up, on the reader's command: adopt the newest event as the target.
+  const applyPendingUpdates = useCallback(() => {
+    if (!selected) return;
+    setOpened(snapshotOf(selected, selectedKey));
+  }, [selected, selectedKey, snapshotOf]);
+
   // Auto-mark-read whenever a selected item is unread — covers both click-
   // to-select and URL-param-select (e.g. OS notification click on desktop).
   // The mutation flips `read: true` optimistically, so this effect settles
   // in one pass and can't loop. Kept in a `useEffect` rather than inlined
   // in handleSelect so URL-driven selection triggers it too.
-  const markReadMutate = markReadMutation.mutate;
-  const selectedId = selected?.id;
-  const selectedRead = selected?.read;
+  //
+  // Gated on the tab being in front of the user: see `documentVisible`.
+  const markReadMutate = actions.markRead.mutate;
+  const markReadFailed = t(($) => $.errors.mark_read_failed);
   useEffect(() => {
     if (!selectedId || selectedRead) return;
+    if (!documentVisible) return;
     if (manualUnreadIdRef.current === selectedId) return;
-    markReadMutate(selectedId, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.mark_read_failed),
-        ),
-    });
-  }, [selectedId, selectedRead, markReadMutate, t]);
+    const row = rowById(selectedId);
+    if (!row) return;
+    markReadMutate(row, { onError: onMutationError(markReadFailed) });
+  }, [
+    selectedId,
+    selectedRead,
+    documentVisible,
+    markReadMutate,
+    rowById,
+    onMutationError,
+    markReadFailed,
+  ]);
 
   // Release the guard as soon as the selection moves off the parked row.
   useEffect(() => {
@@ -252,21 +335,16 @@ export function InboxPage() {
     }
   }, [selectedId]);
 
-  const handleSelect = (item: InboxItem) => {
+  const handleSelect = (item: InboxRow) => {
     setSelectedKey(item.issue_id ?? item.id);
   };
 
   const handleMarkRead = (id: string) => {
     // Reading it back explicitly cancels an earlier park on the same row.
     if (manualUnreadIdRef.current === id) manualUnreadIdRef.current = null;
-    markReadMutation.mutate(id, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.mark_read_failed),
-        ),
-    });
+    const row = rowById(id);
+    if (!row) return;
+    actions.markRead.mutate(row, { onError: onMutationError(markReadFailed) });
   };
 
   const handleMarkUnread = (id: string) => {
@@ -274,13 +352,10 @@ export function InboxPage() {
     // the others, and arming it for a background row would suppress the very
     // first open of that row later.
     if (selected?.id === id) manualUnreadIdRef.current = id;
-    markUnreadMutation.mutate(id, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.mark_unread_failed),
-        ),
+    const row = rowById(id);
+    if (!row) return;
+    actions.markUnread.mutate(row, {
+      onError: onMutationError(t(($) => $.errors.mark_unread_failed)),
     });
   };
 
@@ -288,7 +363,7 @@ export function InboxPage() {
   // from, so both have to move the selection off it first. `list` is whichever
   // list the row came from — the main one for archive, the archived one for
   // unarchive.
-  const advanceSelectionPast = (id: string, list: InboxItem[]) => {
+  const advanceSelectionPast = (id: string, list: InboxRow[]) => {
     const idx = list.findIndex((i) => i.id === id);
     const target = idx >= 0 ? list[idx] : null;
     const wasSelected = !!target && (target.issue_id ?? target.id) === selectedKey;
@@ -301,75 +376,49 @@ export function InboxPage() {
   };
 
   const handleArchive = (id: string) => {
+    const row = rowById(id);
+    if (!row) return;
     advanceSelectionPast(id, items);
-    archiveMutation.mutate(id, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.archive_failed),
-        ),
+    actions.archive.mutate(row, {
+      onError: onMutationError(t(($) => $.errors.archive_failed)),
     });
   };
 
   const handleUnarchive = (id: string) => {
+    const row = rowById(id);
+    if (!row) return;
     advanceSelectionPast(id, archivedItems);
-    unarchiveMutation.mutate(id, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.unarchive_failed),
-        ),
+    actions.unarchive.mutate(row, {
+      onError: onMutationError(t(($) => $.errors.unarchive_failed)),
     });
   };
 
   // Batch operations
   const handleMarkAllRead = () => {
-    markAllReadMutation.mutate(undefined, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.mark_all_read_failed),
-        ),
+    actions.batch.mutate("mark-all-read", {
+      onError: onMutationError(t(($) => $.errors.mark_all_read_failed)),
     });
   };
 
   const handleArchiveAll = () => {
     setSelectedKey("");
-    archiveAllMutation.mutate(undefined, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.archive_all_failed),
-        ),
+    actions.batch.mutate("archive-all", {
+      onError: onMutationError(t(($) => $.errors.archive_all_failed)),
     });
   };
 
   const handleArchiveAllRead = () => {
     const readKeys = items.filter((i) => i.read).map((i) => i.issue_id ?? i.id);
     if (readKeys.includes(selectedKey)) setSelectedKey("");
-    archiveAllReadMutation.mutate(undefined, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.archive_all_read_failed),
-        ),
+    actions.batch.mutate("archive-all-read", {
+      onError: onMutationError(t(($) => $.errors.archive_all_read_failed)),
     });
   };
 
   const handleArchiveCompleted = () => {
     setSelectedKey("");
-    archiveCompletedMutation.mutate(undefined, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.archive_completed_failed),
-        ),
+    actions.batch.mutate("archive-completed", {
+      onError: onMutationError(t(($) => $.errors.archive_completed_failed)),
     });
   };
 
@@ -507,6 +556,22 @@ export function InboxPage() {
     <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">{compactBackAction}</div>
   ) : null;
 
+  // New events that arrived while the reader was reading. Offered, never
+  // applied: the alternative is the notification the user is mid-sentence on
+  // being swapped for a newer one, which is the "being dragged away" complaint
+  // this refactor set out to fix. Clicking adopts them.
+  const pendingUpdatesBar =
+    pendingUpdates > 0 ? (
+      <button
+        type="button"
+        onClick={applyPendingUpdates}
+        className="flex w-full shrink-0 items-center justify-center gap-1.5 border-b bg-accent/40 px-3 py-1.5 text-caption font-medium text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        <ArrowDown className="size-3.5 shrink-0" />
+        {t(($) => $.detail.new_updates, { count: pendingUpdates })}
+      </button>
+    ) : null;
+
   const detailContent = selected?.issue_id ? (
     // Key by issue_id (not inbox-item id): a new comment/reaction generates a
     // new inbox notification for the same issue, and the dedup helper picks the
@@ -531,7 +596,12 @@ export function InboxPage() {
         issueId={selected.issue_id}
         defaultSidebarOpen={false}
         layoutId="multica_inbox_issue_detail_layout"
-        highlightCommentId={selected.details?.comment_id ?? undefined}
+        // The target the reader OPENED, not the newest one. Under v2 the
+        // server resolved it from the representative event; under v1 it is dug
+        // out of the details blob, which is all v1 ever had. Either way it is
+        // frozen for the duration of the read — recomputing it live is how the
+        // old client scrolled people away from the comment they were reading.
+        highlightCommentId={openedHighlight}
         leadingAction={compactBackAction}
         onDelete={() => {
           // Issue deletion CASCADE-deletes the inbox item server-side, and the
@@ -649,7 +719,12 @@ export function InboxPage() {
       // no-op, and pointed both scroll restoration and the timeline
       // virtualizer at an element that never scrolls. This wrapper only has to
       // give the detail a definite height to fill.
-      return <div className="flex flex-1 flex-col min-h-0">{detailContent}</div>;
+      return (
+        <div className="flex flex-1 flex-col min-h-0">
+          {pendingUpdatesBar}
+          {detailContent}
+        </div>
+      );
     }
 
     if (selected) {
@@ -658,6 +733,7 @@ export function InboxPage() {
       return (
         <div className="flex flex-1 flex-col min-h-0">
           {compactBackBar}
+          {pendingUpdatesBar}
           <div className="flex-1 min-h-0 overflow-y-auto">{detailContent}</div>
         </div>
       );
@@ -711,6 +787,7 @@ export function InboxPage() {
       <ResizableHandle />
       <ResizablePanel id="detail" minSize="40%">
       <div className="flex flex-col min-h-0 h-full">
+        {detailContent && pendingUpdatesBar}
         {detailContent ?? (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />

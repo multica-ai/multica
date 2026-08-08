@@ -28,10 +28,16 @@ const (
 	// gate remained in every such client and fails closed (default false) if
 	// the key stops being published.
 	resourceLabelsCompat = "settings_resource_labels"
+	// InboxV2 gates the group-based inbox on web and desktop. Independent of
+	// the database write gate: the server can be writing groups long before any
+	// client reads them, and this switch can go back off at any time without a
+	// data migration because inbox_item stays the complete v1 truth throughout.
+	InboxV2 = "inbox_v2"
 )
 
 var frontendPublicFlags = []string{
 	ComposioMCPApps,
+	InboxV2,
 }
 
 func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) bool {

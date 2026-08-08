@@ -18,18 +18,18 @@ import (
 // token kind the caller used:
 //
 //   - JWT cookie / mul_ PAT  → X-User-ID = the human's user id.
-//                              X-Actor-Source is left empty.
+//     X-Actor-Source is left empty.
 //   - mat_ task token        → X-User-ID = the OWNING human's user id,
-//                              plus X-Agent-ID, X-Task-ID, and the
-//                              authoritative server-set header
-//                              `X-Actor-Source: task_token`.
+//     plus X-Agent-ID, X-Task-ID, and the
+//     authoritative server-set header
+//     `X-Actor-Source: task_token`.
 //   - mcn_ cloud-node PAT    → X-User-ID = the OWNING human's user id,
-//                              plus `X-Actor-Source: cloud_pat`.
-//                              The token authenticates a cloud-runtime
-//                              EC2 node operating on the owner's
-//                              behalf — same conceptual category as
-//                              mat_ (machine running owner-scoped
-//                              code) for authorization purposes.
+//     plus `X-Actor-Source: cloud_pat`.
+//     The token authenticates a cloud-runtime
+//     EC2 node operating on the owner's
+//     behalf — same conceptual category as
+//     mat_ (machine running owner-scoped
+//     code) for authorization purposes.
 //
 // The mat_ and mcn_ designs (MUL-2600 and the cloud-node PAT story
 // respectively) were both deliberately built this way: every request

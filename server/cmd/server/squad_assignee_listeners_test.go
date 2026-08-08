@@ -9,6 +9,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/service/inboxv2"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -52,7 +53,7 @@ func TestSquadAssigneeListenersSkipUnsupportedRecipientWrites(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
 	registerSubscriberListeners(bus, testPool)
-	registerNotificationListeners(bus, queries)
+	registerNotificationListeners(bus, queries, inboxv2.NewService(queries, testPool))
 
 	squadID := createAssignmentListenerTestSquad(t)
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)

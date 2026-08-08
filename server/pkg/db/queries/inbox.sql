@@ -96,9 +96,44 @@ UPDATE inbox_item SET archived = false
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = true;
 
 -- name: ArchiveInboxByIssueAndType :many
-UPDATE inbox_item SET archived = true
-WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false
-RETURNING recipient_type, recipient_id;
+-- Event-level dismissal: an issue reached a terminal status, so its stale
+-- task_failed rows stop advertising a failure the work has moved past.
+--
+-- dismissed_at records that this is a dismissal rather than the user archiving
+-- the issue. Without the distinction the v2 mirror, which derives `archived`
+-- for a whole group from the group's own archive state, would set these rows
+-- back to active on the next delivery — see migration 275.
+-- The stamp is applied to every matching row that is not already dismissed,
+-- INCLUDING rows that are already archived. Restricting it to archived = false
+-- looked equivalent while archive was purely a user action, but the v2 mirror
+-- sets archived = true for every row of an archived group: an issue reaching a
+-- terminal status while its group was archived would then stamp nothing, and
+-- un-archiving later would bring the stale task_failed row back to life.
+--
+-- The returned set is still only the rows that were ACTIVE before the stamp, so
+-- the websocket fan-out keeps notifying exactly the recipients whose visible
+-- inbox actually changed.
+--
+-- group_id rides along because dismissing a row can retire the group's
+-- representative, and the caller has to recompute the pointers in this same
+-- transaction. A dismissal that leaves the group pointing at the dismissed row
+-- is invisible while the write gate is closed and wrong the moment it opens.
+WITH previously_active AS (
+    SELECT inbox_item.recipient_type, inbox_item.recipient_id, inbox_item.group_id
+    FROM inbox_item
+    WHERE inbox_item.workspace_id = $1 AND inbox_item.issue_id = $2
+      AND inbox_item.type = $3 AND inbox_item.archived = false
+),
+stamped AS (
+    UPDATE inbox_item
+    SET archived = true, dismissed_at = now()
+    WHERE inbox_item.workspace_id = $1 AND inbox_item.issue_id = $2
+      AND inbox_item.type = $3 AND inbox_item.dismissed_at IS NULL
+    RETURNING inbox_item.group_id
+)
+SELECT recipient_type, recipient_id,
+       ARRAY(SELECT DISTINCT group_id FROM stamped WHERE group_id IS NOT NULL)::uuid[] AS touched_group_ids
+FROM previously_active;
 
 -- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item

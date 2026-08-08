@@ -167,10 +167,10 @@ func TestIsBusinessEmailDomain(t *testing.T) {
 
 func TestCanonicalBusinessEmail(t *testing.T) {
 	cases := []struct {
-		name    string
-		input   string
-		want    string
-		wantOk  bool
+		name   string
+		input  string
+		want   string
+		wantOk bool
 	}{
 		{"plain", "ada@multica.ai", "ada@multica.ai", true},
 		{"uppercase normalized", "Ada@Multica.AI", "ada@multica.ai", true},

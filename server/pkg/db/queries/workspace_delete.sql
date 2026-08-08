@@ -166,6 +166,12 @@ deleted_activity AS (
 deleted_inbox AS (
     DELETE FROM inbox_item WHERE workspace_id = $1
 ),
+-- inbox_group carries no foreign key (repo rule), so deleting inbox_item does
+-- not sweep it: the group has to be named here or a deleted workspace leaves
+-- every recipient's read cursors and archive state behind.
+deleted_inbox_groups AS (
+    DELETE FROM inbox_group WHERE workspace_id = $1
+),
 deleted_issue_dependencies AS (
     DELETE FROM issue_dependency
     WHERE issue_id IN (SELECT id FROM ws_issues)

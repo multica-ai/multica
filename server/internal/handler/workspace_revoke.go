@@ -176,6 +176,18 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
+	// inbox_group is per-person state and has no meaning once the person is not
+	// a member. It carries no FK either, and leaving it behind is not merely
+	// untidy: the lazy migration and the cross-workspace unread summary both
+	// join member, so orphaned groups would be invisible to their owner and
+	// impossible for them to clear.
+	if _, err := qtx.DeleteInboxGroupsForMember(ctx, db.DeleteInboxGroupsForMemberParams{
+		WorkspaceID: workspaceID,
+		RecipientID: userID,
+	}); err != nil {
+		return empty, err
+	}
+
 	// Member row deletion lives inside the same tx so a successful revoke is
 	// never followed by a failed member-delete (which would leave the user
 	// still a member with a dead runtime), and a failed revoke never leaves

@@ -334,10 +334,10 @@ func TestWebhookEventAllowedByTriggerScope_MultipleFilters(t *testing.T) {
 
 func TestSplitWebhookEvent(t *testing.T) {
 	tests := []struct {
-		input           string
-		wantProvider    string
-		wantName        string
-		wantAction      string
+		input        string
+		wantProvider string
+		wantName     string
+		wantAction   string
 	}{
 		{"github.workflow_run.completed", "github", "workflow_run", "completed"},
 		{"github.push", "github", "push", ""},

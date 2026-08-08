@@ -1,0 +1,23 @@
+-- Separate event-level dismissal from group-level archive.
+--
+-- These two look identical in the old schema — both are `archived = true` on a
+-- row — but they are different facts, and collapsing them breaks a feature that
+-- has to survive this refactor.
+--
+-- Group archive is "I have dealt with this issue", and the v2 mirror derives it
+-- for every row of the group from inbox_group.archived_at. Event dismissal is
+-- "this one notification is no longer meaningful": when an issue reaches a
+-- terminal status, ArchiveInboxByIssueAndType retires its stale task_failed
+-- rows so the inbox stops advertising a failure the work has moved past.
+--
+-- With only the boolean, the mirror cannot tell them apart: it would compute
+-- archived from the group and resurrect every dismissed row on the next
+-- delivery. dismissed_at records the second fact in its own column, so the
+-- mirror can honour both — archived = group archived OR this row dismissed —
+-- and the representative-row search can skip dismissed rows instead of electing
+-- one the user was deliberately shown the back of.
+--
+-- Nullable, like the other v2 columns: rows dismissed before this migration
+-- keep archived = true and are indistinguishable from archived ones, which is
+-- exactly the pre-migration behaviour and no worse than it.
+ALTER TABLE inbox_item ADD COLUMN dismissed_at TIMESTAMPTZ;

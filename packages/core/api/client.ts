@@ -182,6 +182,7 @@ import type {
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
 } from "../types";
+import type { InboxGroup, InboxGroupPage } from "./schemas";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type { CreateFeedbackResponse, FeedbackKind } from "../feedback/types";
 import type {
@@ -313,6 +314,12 @@ import {
   EMPTY_INBOX_UNREAD_SUMMARY,
   InboxItemListSchema,
   EMPTY_INBOX_ITEMS,
+  InboxGroupPageSchema,
+  EMPTY_INBOX_GROUP_PAGE,
+  InboxGroupUnreadCountSchema,
+  EMPTY_INBOX_GROUP_UNREAD_COUNT,
+  InboxGroupUnreadSummarySchema,
+  EMPTY_INBOX_GROUP_UNREAD_SUMMARY,
   NotificationPreferenceResponseSchema,
   EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
   LabelSchema,
@@ -2040,6 +2047,107 @@ export class ApiClient {
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
     return this.fetch("/api/inbox");
+  }
+
+  // Inbox v2. Groups, not events — one row per (person, source), which is the
+  // row the UI has always rendered and until now had to reconstruct locally.
+  //
+  // Every one of these can answer `ready: false`, meaning this user's history
+  // has not been folded into groups yet. That is a routing signal, not an
+  // error: the caller falls back to the v1 methods above, which remain the
+  // complete truth for as long as inbox_item exists.
+  async listInboxGroups(cursor?: {
+    at: string;
+    id: string;
+  }): Promise<InboxGroupPage> {
+    const query = cursor
+      ? `?cursor_at=${encodeURIComponent(cursor.at)}&cursor_id=${encodeURIComponent(cursor.id)}`
+      : "";
+    const raw = await this.fetch<unknown>(`/api/v2/inbox${query}`);
+    return parseWithFallback(raw, InboxGroupPageSchema, EMPTY_INBOX_GROUP_PAGE, {
+      endpoint: "GET /api/v2/inbox",
+    });
+  }
+
+  async listArchivedInboxGroups(cursor?: {
+    at: string;
+    id: string;
+  }): Promise<InboxGroupPage> {
+    const query = cursor
+      ? `?cursor_at=${encodeURIComponent(cursor.at)}&cursor_id=${encodeURIComponent(cursor.id)}`
+      : "";
+    const raw = await this.fetch<unknown>(`/api/v2/inbox/archived${query}`);
+    return parseWithFallback(raw, InboxGroupPageSchema, EMPTY_INBOX_GROUP_PAGE, {
+      endpoint: "GET /api/v2/inbox/archived",
+    });
+  }
+
+  async getInboxGroupUnreadCount(): Promise<{ count: number; ready: boolean }> {
+    const raw = await this.fetch<unknown>("/api/v2/inbox/unread-count");
+    return parseWithFallback(
+      raw,
+      InboxGroupUnreadCountSchema,
+      EMPTY_INBOX_GROUP_UNREAD_COUNT,
+      { endpoint: "GET /api/v2/inbox/unread-count" },
+    );
+  }
+
+  async getInboxGroupUnreadSummary(): Promise<{
+    workspaces: { workspace_id: string; count: number }[];
+    ready: boolean;
+  }> {
+    const raw = await this.fetch<unknown>("/api/v2/inbox/unread-summary");
+    return parseWithFallback(
+      raw,
+      InboxGroupUnreadSummarySchema,
+      EMPTY_INBOX_GROUP_UNREAD_SUMMARY,
+      { endpoint: "GET /api/v2/inbox/unread-summary" },
+    );
+  }
+
+  // The read reports what the client actually saw. observedSeq stops it from
+  // marking a newer event read than the one on screen; observedStateVersion
+  // stops a read issued before the user's own "mark unread" — and arriving
+  // after it — from undoing their decision.
+  async markInboxGroupRead(
+    id: string,
+    observed: { seq: number; stateVersion: number },
+  ): Promise<InboxGroup> {
+    return this.fetch(`/api/v2/inbox/${id}/read`, {
+      method: "POST",
+      body: JSON.stringify({
+        observed_seq: observed.seq,
+        observed_state_version: observed.stateVersion,
+      }),
+    });
+  }
+
+  async markInboxGroupUnread(id: string): Promise<InboxGroup> {
+    return this.fetch(`/api/v2/inbox/${id}/unread`, { method: "POST" });
+  }
+
+  async archiveInboxGroup(id: string): Promise<InboxGroup> {
+    return this.fetch(`/api/v2/inbox/${id}/archive`, { method: "POST" });
+  }
+
+  async unarchiveInboxGroup(id: string): Promise<InboxGroup> {
+    return this.fetch(`/api/v2/inbox/${id}/unarchive`, { method: "POST" });
+  }
+
+  async markAllInboxGroupsRead(): Promise<{ count: number }> {
+    return this.fetch("/api/v2/inbox/mark-all-read", { method: "POST" });
+  }
+
+  async archiveAllInboxGroups(): Promise<{ count: number }> {
+    return this.fetch("/api/v2/inbox/archive-all", { method: "POST" });
+  }
+
+  async archiveAllReadInboxGroups(): Promise<{ count: number }> {
+    return this.fetch("/api/v2/inbox/archive-all-read", { method: "POST" });
+  }
+
+  async archiveCompletedInboxGroups(): Promise<{ count: number }> {
+    return this.fetch("/api/v2/inbox/archive-completed", { method: "POST" });
   }
 
   async markInboxRead(id: string): Promise<InboxItem> {

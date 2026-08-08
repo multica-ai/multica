@@ -31,6 +31,10 @@ import {
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_USER,
   InboxItemListSchema,
+  InboxGroupPageSchema,
+  EMPTY_INBOX_GROUP_PAGE,
+  InboxGroupUnreadCountSchema,
+  EMPTY_INBOX_GROUP_UNREAD_COUNT,
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
@@ -1303,5 +1307,117 @@ describe("WeCom installation schemas", () => {
       { endpoint: "POST /api/wecom/binding/redeem" },
     );
     expect(redeem).toEqual(EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE);
+  });
+});
+
+describe("InboxGroupPageSchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/v2/inbox" };
+
+  const group = (overrides: Record<string, unknown> = {}) => ({
+    id: "group-1",
+    workspace_id: "ws-1",
+    recipient_id: "member-1",
+    source_kind: "issue",
+    source_id: "issue-1",
+    unread: true,
+    archived: false,
+    seq: 3,
+    state_version: 7,
+    surfaced_at: "2026-06-15T08:00:00Z",
+    event_id: "item-1",
+    type: "new_comment",
+    severity: "info",
+    title: "Issue title",
+    body: null,
+    issue_id: "issue-1",
+    issue_status: "in_progress",
+    created_at: "2026-06-15T08:00:00Z",
+    target_kind: "comment",
+    target_id: "comment-9",
+    ...overrides,
+  });
+
+  it("parses a well-formed page and tolerates extra fields", () => {
+    const parsed = parseWithFallback(
+      { items: [group({ future_field: 1 })], next_cursor: null, ready: true, extra: "x" },
+      InboxGroupPageSchema,
+      EMPTY_INBOX_GROUP_PAGE,
+      ENDPOINT,
+    );
+    expect(parsed.ready).toBe(true);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.items[0]).toMatchObject({ id: "group-1", unread: true });
+  });
+
+  it("keeps a notification type or source kind this client doesn't know yet", () => {
+    // Same leniency as v1: a backend that ships a new inbox type or a new
+    // source kind must not blank the list on an older client.
+    const parsed = parseWithFallback(
+      { items: [group({ type: "some_future_type", source_kind: "project" })], ready: true },
+      InboxGroupPageSchema,
+      EMPTY_INBOX_GROUP_PAGE,
+      ENDPOINT,
+    );
+    expect(parsed.items).toHaveLength(1);
+  });
+
+  it("falls back to a NOT-READY page when the response is malformed", () => {
+    // ready:false is the important half. An empty-but-ready page would tell
+    // the caller "you have no notifications"; not-ready routes it back to the
+    // v1 endpoints, which still hold the complete truth.
+    for (const malformed of [
+      null,
+      "nope",
+      [],
+      { items: "not-an-array", ready: true },
+      { items: [group({ seq: "three" })], ready: true },
+      { items: [group()] },
+    ]) {
+      const parsed = parseWithFallback(
+        malformed,
+        InboxGroupPageSchema,
+        EMPTY_INBOX_GROUP_PAGE,
+        ENDPOINT,
+      );
+      expect(parsed).toBe(EMPTY_INBOX_GROUP_PAGE);
+      expect(parsed.ready).toBe(false);
+    }
+  });
+
+  it("treats a missing optional target as absent rather than failing", () => {
+    const parsed = parseWithFallback(
+      { items: [group({ target_kind: null, target_id: null, issue_id: null })], ready: true },
+      InboxGroupPageSchema,
+      EMPTY_INBOX_GROUP_PAGE,
+      ENDPOINT,
+    );
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.items[0]?.target_kind).toBeNull();
+  });
+});
+
+describe("InboxGroupUnreadCountSchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/v2/inbox/unread-count" };
+
+  it("parses a well-formed count", () => {
+    const parsed = parseWithFallback(
+      { count: 4, ready: true },
+      InboxGroupUnreadCountSchema,
+      EMPTY_INBOX_GROUP_UNREAD_COUNT,
+      ENDPOINT,
+    );
+    expect(parsed).toMatchObject({ count: 4, ready: true });
+  });
+
+  it("falls back to zero-and-not-ready on malformed JSON", () => {
+    for (const malformed of [null, { count: "four", ready: true }, { ready: true }]) {
+      const parsed = parseWithFallback(
+        malformed,
+        InboxGroupUnreadCountSchema,
+        EMPTY_INBOX_GROUP_UNREAD_COUNT,
+        ENDPOINT,
+      );
+      expect(parsed).toBe(EMPTY_INBOX_GROUP_UNREAD_COUNT);
+    }
   });
 });

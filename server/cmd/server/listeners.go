@@ -81,6 +81,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 	personalEvents := map[string]bool{
 		protocol.EventInboxNew:           true,
 		protocol.EventInboxRead:          true,
+		protocol.EventInboxUnread:        true,
 		protocol.EventInboxArchived:      true,
 		protocol.EventInboxUnarchived:    true,
 		protocol.EventInboxBatchRead:     true,
@@ -116,10 +117,19 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		sendToRecipient(b, e, recipientID)
 	})
 
-	// inbox:read, inbox:archived, inbox:unarchived, inbox:batch-read,
-	// inbox:batch-archived — extract recipient from top-level payload
+	// inbox:read, inbox:unread, inbox:archived, inbox:unarchived,
+	// inbox:batch-read, inbox:batch-archived — extract recipient from top-level
+	// payload.
+	//
+	// inbox:unread was missing from both this list and personalEvents, so it
+	// fell through to the SubscribeAll workspace fanout below: marking one
+	// notification unread pushed that person's item_id and recipient_id to every
+	// connected member of the workspace, and made all of their clients
+	// invalidate an inbox that had not changed. It is personal state, like every
+	// other event here.
 	for _, eventType := range []string{
-		protocol.EventInboxRead, protocol.EventInboxArchived, protocol.EventInboxUnarchived,
+		protocol.EventInboxRead, protocol.EventInboxUnread,
+		protocol.EventInboxArchived, protocol.EventInboxUnarchived,
 		protocol.EventInboxBatchRead, protocol.EventInboxBatchArchived,
 	} {
 		bus.Subscribe(eventType, func(e events.Event) {

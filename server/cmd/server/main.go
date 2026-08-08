@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/inboxv2"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/redis/go-redis/v9"
@@ -335,7 +336,7 @@ func main() {
 	// so subscribers must be written first within the same synchronous event dispatch.
 	registerSubscriberListeners(bus, pool)
 	registerActivityListeners(bus, queries)
-	registerNotificationListeners(bus, queries)
+	registerNotificationListeners(bus, queries, inboxv2.NewService(queries, pool))
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
@@ -431,7 +432,7 @@ func main() {
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
-	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
+	go runAutopilotFailureMonitor(autopilotCtx, queries, inboxv2.NewService(queries, pool), bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)

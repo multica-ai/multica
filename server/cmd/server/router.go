@@ -1679,6 +1679,25 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/unarchive", h.UnarchiveInboxItem)
 			})
 
+			// Inbox v2. Same twelve operations against inbox_group instead of
+			// inbox_item, mounted alongside v1 rather than replacing it: mobile
+			// stays on v1 indefinitely, and the frontend gate has to be able to
+			// go back off without a deploy.
+			r.Route("/api/v2/inbox", func(r chi.Router) {
+				r.Get("/", h.ListInboxV2)
+				r.Get("/archived", h.ListArchivedInboxV2)
+				r.Get("/unread-count", h.CountUnreadInboxV2)
+				r.Get("/unread-summary", h.UnreadInboxSummaryV2)
+				r.Post("/mark-all-read", h.MarkAllInboxReadV2)
+				r.Post("/archive-all", h.ArchiveAllInboxV2)
+				r.Post("/archive-all-read", h.ArchiveAllReadInboxV2)
+				r.Post("/archive-completed", h.ArchiveCompletedInboxV2)
+				r.Post("/{id}/read", h.MarkInboxGroupReadV2)
+				r.Post("/{id}/unread", h.MarkInboxGroupUnreadV2)
+				r.Post("/{id}/archive", h.ArchiveInboxGroupV2)
+				r.Post("/{id}/unarchive", h.UnarchiveInboxGroupV2)
+			})
+
 			// Notification preferences
 			r.Route("/api/notification-preferences", func(r chi.Router) {
 				r.Get("/", h.GetNotificationPreferences)

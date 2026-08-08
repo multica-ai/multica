@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/inboxv2"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -69,7 +70,7 @@ func envFailureMonitorConfig() failureMonitorConfig {
 // learns that auto-pause happened.
 //
 // Disable with `AUTOPILOT_FAIL_MONITOR_INTERVAL=0`.
-func runAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *events.Bus, cfg failureMonitorConfig) {
+func runAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, inbox *inboxv2.Service, bus *events.Bus, cfg failureMonitorConfig) {
 	if cfg.Interval <= 0 {
 		slog.Info("autopilot failure monitor: disabled (interval <= 0)")
 		return
@@ -95,7 +96,7 @@ func runAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *e
 
 	// Run once immediately after the startup delay so a freshly-deployed node
 	// catches existing offenders without waiting a full interval.
-	tickAutopilotFailureMonitor(ctx, queries, bus, cfg)
+	tickAutopilotFailureMonitor(ctx, queries, inbox, bus, cfg)
 
 	ticker := time.NewTicker(cfg.Interval)
 	defer ticker.Stop()
@@ -105,14 +106,14 @@ func runAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *e
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			tickAutopilotFailureMonitor(ctx, queries, bus, cfg)
+			tickAutopilotFailureMonitor(ctx, queries, inbox, bus, cfg)
 		}
 	}
 }
 
 // tickAutopilotFailureMonitor performs a single sweep: query candidates,
 // attempt to pause each, and emit notifications + WS events on success.
-func tickAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *events.Bus, cfg failureMonitorConfig) {
+func tickAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, inbox *inboxv2.Service, bus *events.Bus, cfg failureMonitorConfig) {
 	since := time.Now().Add(-cfg.Lookback)
 	candidates, err := queries.SelectAutopilotsExceedingFailureThreshold(
 		ctx,
@@ -174,7 +175,7 @@ func tickAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *
 			"fail_pct", failPct,
 		)
 
-		emitAutopilotPausedNotifications(ctx, queries, bus, paused, c, cfg, failPct)
+		emitAutopilotPausedNotifications(ctx, queries, inbox, bus, paused, c, cfg, failPct)
 
 		// Fan out the status change so any open UI updates the autopilot row.
 		workspaceID := util.UUIDToString(paused.WorkspaceID)
@@ -205,6 +206,7 @@ func tickAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *
 func emitAutopilotPausedNotifications(
 	ctx context.Context,
 	queries *db.Queries,
+	inbox *inboxv2.Service,
 	bus *events.Bus,
 	autopilot db.Autopilot,
 	candidate db.SelectAutopilotsExceedingFailureThresholdRow,
@@ -221,17 +223,22 @@ func emitAutopilotPausedNotifications(
 		"Auto-paused after %d of %d runs failed (%.1f%%) in the last %s. Investigate the failures, fix the root cause, then re-enable from the autopilot page.",
 		candidate.FailedRuns, candidate.TotalRuns, failPct, formatLookback(cfg.Lookback),
 	)
-	details, _ := json.Marshal(map[string]any{
+	// Every value a string. apps/mobile parses `details` as
+	// z.record(z.string(), z.string()) through parseWithFallback, which validates
+	// the WHOLE inbox response at once — so a single number here does not degrade
+	// this one notification, it blanks the entire mobile inbox for anyone in a
+	// workspace with an auto-paused autopilot.
+	details, _ := json.Marshal(inboxv2.StringDetails(map[string]string{
 		"autopilot_id":         util.UUIDToString(autopilot.ID),
 		"autopilot_title":      autopilot.Title,
-		"failed_runs":          candidate.FailedRuns,
-		"total_runs":           candidate.TotalRuns,
-		"fail_pct":             failPct,
-		"lookback_seconds":     int64(cfg.Lookback.Seconds()),
-		"threshold_min_runs":   cfg.MinRuns,
-		"threshold_fail_ratio": cfg.FailRatio,
+		"failed_runs":          strconv.Itoa(int(candidate.FailedRuns)),
+		"total_runs":           strconv.Itoa(int(candidate.TotalRuns)),
+		"fail_pct":             strconv.FormatFloat(failPct, 'f', 1, 64),
+		"lookback_seconds":     strconv.FormatInt(int64(cfg.Lookback.Seconds()), 10),
+		"threshold_min_runs":   strconv.Itoa(int(cfg.MinRuns)),
+		"threshold_fail_ratio": strconv.FormatFloat(cfg.FailRatio, 'f', -1, 64),
 		"reason":               "auto_paused_high_failure_rate",
-	})
+	}))
 
 	workspaceID := util.UUIDToString(autopilot.WorkspaceID)
 	autopilotIDStr := util.UUIDToString(autopilot.ID)
@@ -244,19 +251,56 @@ func emitAutopilotPausedNotifications(
 		}
 		emitted[key] = true
 
-		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-			WorkspaceID:   autopilot.WorkspaceID,
-			RecipientType: r.Type,
-			RecipientID:   r.ID,
-			Type:          "autopilot_paused",
-			Severity:      "attention",
-			IssueID:       pgtype.UUID{},
-			Title:         title,
-			Body:          util.StrToText(body),
-			ActorType:     util.StrToText("system"),
-			ActorID:       pgtype.UUID{},
-			Details:       details,
-		})
+		// Agents receive work through the run queue, not the inbox: they get the
+		// legacy row (which nothing renders) and no group, matching inbox_group's
+		// member-only rule.
+		if r.Type != "member" {
+			if _, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+				WorkspaceID:   autopilot.WorkspaceID,
+				RecipientType: r.Type,
+				RecipientID:   r.ID,
+				Type:          "autopilot_paused",
+				Severity:      "attention",
+				IssueID:       pgtype.UUID{},
+				Title:         title,
+				Body:          util.StrToText(body),
+				ActorType:     util.StrToText("system"),
+				ActorID:       pgtype.UUID{},
+				Details:       details,
+			}); err != nil {
+				slog.Warn("autopilot failure monitor: agent inbox write failed",
+					"autopilot_id", autopilotIDStr, "error", err)
+			}
+			continue
+		}
+
+		res, err := inbox.Deliver(ctx, inboxv2.Delivery{
+			WorkspaceID: autopilot.WorkspaceID,
+			RecipientID: r.ID,
+			// No issue to hang this on, so the notification is its own source.
+			// Folding every issue-less notification a person has into one group
+			// would give an autopilot pause and an unrelated quick-create failure
+			// a shared read cursor.
+			SourceKind: inboxv2.SourceStandalone,
+			SourceID:   inboxv2.NewStandaloneSource(),
+			Type:       "autopilot_paused",
+			Severity:   "attention",
+			IssueID:    pgtype.UUID{},
+			Title:      title,
+			Body:       util.StrToText(body),
+			ActorType:  util.StrToText("system"),
+			ActorID:    pgtype.UUID{},
+			Details:    details,
+			// The monitor re-evaluates on a timer: the same pause seen twice must
+			// stay one notification, which is exactly what the counts in the key
+			// give us — a later, genuinely different pause has different counts.
+			DeliveryKey: inboxv2.DeliveryKey(workspaceID, util.UUIDToString(r.ID), "autopilot_paused",
+				autopilotIDStr, strconv.Itoa(int(candidate.FailedRuns)), strconv.Itoa(int(candidate.TotalRuns))),
+		}, time.Now())
+		if err == nil && res.Deduplicated {
+			continue
+		}
+		item := res.Item
 		if err != nil {
 			slog.Warn("autopilot failure monitor: inbox write failed",
 				"autopilot_id", autopilotIDStr,

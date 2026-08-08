@@ -1919,6 +1919,95 @@ export const InboxItemListSchema = z.array(
 export const EMPTY_INBOX_ITEMS: InboxItem[] = [];
 
 // ---------------------------------------------------------------------------
+// Inbox v2 groups (`/api/v2/inbox` and `/api/v2/inbox/archived` GET).
+//
+// One entry per (person, source) instead of one per event: this is the row the
+// product has always operated on, and the client no longer folds anything.
+//
+// The envelope is an object, not an array, because `ready` and `next_cursor`
+// have to travel with the page. `ready: false` is not an error — it means the
+// user's history has not been folded into groups yet and the caller should use
+// the v1 endpoints for now, which are completely correct.
+//
+// Lenient in the same places v1 is: `type` / `severity` / `source_kind` stay
+// `z.string()` so a notification kind this client does not know yet still
+// parses and renders. On malformed JSON parseWithFallback returns
+// EMPTY_INBOX_GROUP_PAGE, whose `ready: false` routes the caller back to v1
+// rather than showing an empty inbox.
+// ---------------------------------------------------------------------------
+
+export const InboxGroupSchema = z
+  .object({
+    id: z.string(),
+    workspace_id: z.string(),
+    recipient_id: z.string(),
+    source_kind: z.string(),
+    source_id: z.string(),
+    unread: z.boolean(),
+    archived: z.boolean(),
+    seq: z.number(),
+    state_version: z.number(),
+    surfaced_at: z.string(),
+    event_id: z.string(),
+    type: z.string(),
+    severity: z.string(),
+    title: z.string(),
+    body: z.string().nullish(),
+    actor_type: z.string().nullish(),
+    actor_id: z.string().nullish(),
+    // Values are typed loosely here and narrowed to strings when projected:
+    // the mobile schema requires an all-strings map, and a value that is not
+    // one must be dropped rather than take the whole response down with it.
+    details: z.record(z.string(), z.unknown()).nullish(),
+    issue_id: z.string().nullish(),
+    issue_status: z.string().nullish(),
+    created_at: z.string(),
+    target_kind: z.string().nullish(),
+    target_id: z.string().nullish(),
+  })
+  .loose();
+
+export const InboxGroupPageSchema = z
+  .object({
+    items: z.array(InboxGroupSchema),
+    next_cursor: z.string().nullish(),
+    ready: z.boolean(),
+  })
+  .loose();
+
+export type InboxGroup = z.infer<typeof InboxGroupSchema>;
+export type InboxGroupPage = z.infer<typeof InboxGroupPageSchema>;
+
+// ready: false on a parse failure is deliberate. An empty-but-ready page would
+// tell the caller "you have no notifications"; not-ready tells it to ask v1,
+// which still holds the complete truth.
+export const EMPTY_INBOX_GROUP_PAGE: InboxGroupPage = {
+  items: [],
+  next_cursor: null,
+  ready: false,
+};
+
+export const InboxGroupUnreadCountSchema = z
+  .object({
+    count: z.number(),
+    ready: z.boolean(),
+  })
+  .loose();
+
+export const EMPTY_INBOX_GROUP_UNREAD_COUNT = { count: 0, ready: false };
+
+export const InboxGroupUnreadSummarySchema = z
+  .object({
+    workspaces: z.array(
+      z.object({ workspace_id: z.string(), count: z.number() }).loose(),
+    ),
+    ready: z.boolean(),
+  })
+  .loose();
+
+export const EMPTY_INBOX_GROUP_UNREAD_SUMMARY = { workspaces: [], ready: false };
+
+// ---------------------------------------------------------------------------
 // Billing schemas (cloud-billing proxy surface)
 //
 // All billing JSON we receive comes from multica-cloud verbatim — we proxy

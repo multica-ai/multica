@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service/inboxv2"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -116,7 +117,7 @@ func TestAutopilotFailureMonitor_PausesOffenderAndNotifiesCreator(t *testing.T) 
 		updateEvents = append(updateEvents, e)
 	})
 
-	tickAutopilotFailureMonitor(context.Background(), queries, bus, cfg)
+	tickAutopilotFailureMonitor(context.Background(), queries, inboxv2.NewService(queries, testPool), bus, cfg)
 
 	if got := reloadAutopilotStatus(t, queries, offender.ID); got != "paused" {
 		t.Fatalf("expected offender to be paused, got %q", got)
@@ -185,7 +186,7 @@ func TestAutopilotFailureMonitor_LeavesAlreadyPausedAlone(t *testing.T) {
 		inboxEvents = append(inboxEvents, e)
 	})
 
-	tickAutopilotFailureMonitor(context.Background(), queries, bus, cfg)
+	tickAutopilotFailureMonitor(context.Background(), queries, inboxv2.NewService(queries, testPool), bus, cfg)
 
 	if len(inboxEvents) != 0 {
 		t.Fatalf("paused autopilots must not generate notifications, got %d", len(inboxEvents))
@@ -212,7 +213,7 @@ func TestAutopilotFailureMonitor_AgentCreatorRoutesToOwner(t *testing.T) {
 		inboxEvents = append(inboxEvents, e)
 	})
 
-	tickAutopilotFailureMonitor(context.Background(), queries, bus, cfg)
+	tickAutopilotFailureMonitor(context.Background(), queries, inboxv2.NewService(queries, testPool), bus, cfg)
 
 	if got := reloadAutopilotStatus(t, queries, ap.ID); got != "paused" {
 		t.Fatalf("expected paused, got %q", got)
@@ -249,7 +250,7 @@ func TestAutopilotFailureMonitor_BelowThresholdNoOp(t *testing.T) {
 		inboxEvents = append(inboxEvents, e)
 	})
 
-	tickAutopilotFailureMonitor(context.Background(), queries, bus, cfg)
+	tickAutopilotFailureMonitor(context.Background(), queries, inboxv2.NewService(queries, testPool), bus, cfg)
 
 	if got := reloadAutopilotStatus(t, queries, ap.ID); got != "active" {
 		t.Fatalf("expected active, got %q", got)

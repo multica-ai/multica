@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service/inboxv2"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -778,19 +779,29 @@ func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
 		if sub.UserType != "member" {
 			continue
 		}
-		item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-			WorkspaceID:   ap.WorkspaceID,
-			RecipientType: "member",
-			RecipientID:   sub.UserID,
-			Type:          "issue_subscribed",
-			Severity:      "info",
-			IssueID:       issue.ID,
-			Title:         issue.Title,
-			Body:          pgtype.Text{},
-			ActorType:     pgtype.Text{String: "agent", Valid: true},
-			ActorID:       leaderID,
-			Details:       details,
-		})
+		res, err := inboxv2.NewService(s.Queries, s.TxStarter).Deliver(ctx, inboxv2.Delivery{
+			WorkspaceID: ap.WorkspaceID,
+			RecipientID: sub.UserID,
+			SourceKind:  inboxv2.SourceIssue,
+			SourceID:    issue.ID,
+			Type:        "issue_subscribed",
+			Severity:    "info",
+			IssueID:     issue.ID,
+			Title:       issue.Title,
+			Body:        pgtype.Text{},
+			ActorType:   pgtype.Text{String: "agent", Valid: true},
+			ActorID:     leaderID,
+			Details:     details,
+			// One subscription notification per (autopilot run, issue, person):
+			// a re-run that re-subscribes the same people to the same issue is
+			// the same fact, not a new one.
+			DeliveryKey: inboxv2.DeliveryKey(util.UUIDToString(ap.WorkspaceID), util.UUIDToString(sub.UserID),
+				"issue_subscribed", util.UUIDToString(issue.ID)),
+		}, time.Now())
+		if err == nil && res.Deduplicated {
+			continue
+		}
+		item := res.Item
 		if err != nil {
 			slog.Error("autopilot subscriber inbox write failed",
 				"autopilot_id", util.UUIDToString(ap.ID),

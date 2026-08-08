@@ -3387,6 +3387,16 @@ func (h *Handler) deleteIssueAndCollectAttachmentURLs(ctx context.Context, issue
 	if err != nil {
 		return nil, fmt.Errorf("list issue attachment URLs: %w", err)
 	}
+	// inbox_group has no FK to issue (repo rule), so its rows for this issue
+	// have to go explicitly and in the same transaction — an issue that is gone
+	// but whose groups survive leaves every subscriber an inbox row that renders
+	// a title for something they can no longer open.
+	if _, err := qtx.DeleteInboxGroupsForIssue(ctx, db.DeleteInboxGroupsForIssueParams{
+		WorkspaceID: issue.WorkspaceID,
+		SourceID:    issue.ID,
+	}); err != nil {
+		return nil, fmt.Errorf("delete inbox groups for issue: %w", err)
+	}
 	if err := qtx.DeleteIssue(ctx, db.DeleteIssueParams{
 		ID:          issue.ID,
 		WorkspaceID: issue.WorkspaceID,

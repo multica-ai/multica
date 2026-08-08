@@ -1,26 +1,23 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { InboxItem } from "@multica/core/types";
+import type { InboxRow } from "@multica/core/inbox/rows";
 import { InboxPage } from "./inbox-page";
 
 vi.mock("react-resizable-panels", () => ({
   useDefaultLayout: () => ({ defaultLayout: undefined, onLayoutChanged: vi.fn() }),
 }));
 
-// The page runs two queries — the active list and the archived one. They are
-// told apart by the queryKey their options carry, so each test can stock the
-// two lists independently.
-const listData: { active: InboxItem[]; archived: InboxItem[] } = {
+// The page reads one hook for both lists. Tests stock them independently, and
+// `grouped` is what selects the v1 or v2 behaviour the page is exercising.
+const listData: { active: InboxRow[]; archived: InboxRow[]; grouped: boolean } = {
   active: [],
   archived: [],
+  grouped: false,
 };
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { queryKey: readonly unknown[] }) => ({
-    data: options.queryKey.includes("archived") ? listData.archived : listData.active,
-    isLoading: false,
-    isError: false,
-  }),
+  useQuery: () => ({ data: undefined, isLoading: false, isError: false }),
+  queryOptions: (o: unknown) => o,
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -42,35 +39,53 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
   useIssueDraftStore: { getState: () => ({ setDraft: vi.fn() }) },
 }));
 
-vi.mock("@multica/core/inbox/queries", () => ({
-  inboxListOptions: () => ({ queryKey: ["inbox", "workspace-1", "list"] }),
-  archivedInboxListOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived"] }),
-  deduplicateInboxItems: (items: InboxItem[]) => items.filter((i) => !i.archived),
-  deduplicateArchivedInboxItems: (items: InboxItem[]) => items.filter((i) => i.archived),
-  useInboxUnreadCount: () => 2,
+vi.mock("@multica/core/inbox/rows", () => ({
+  useInboxRows: () => ({
+    rows: listData.active,
+    archivedRows: listData.archived,
+    loading: false,
+    archivedLoading: false,
+    archivedError: false,
+    grouped: listData.grouped,
+  }),
+  // The real implementation, duplicated here rather than imported: mocking a
+  // module replaces all of it, and the page's jump-target behaviour is exactly
+  // what several of these tests assert.
+  inboxRowHighlightCommentId: (row: InboxRow | null | undefined) => {
+    if (!row) return undefined;
+    if (row.group) {
+      return row.group.targetKind === "comment" && row.group.targetId
+        ? row.group.targetId
+        : undefined;
+    }
+    return row.details?.comment_id ?? undefined;
+  },
 }));
 
 // Stable spies: the auto-mark-read effect keys on the mutate identity, so a
 // fresh `vi.fn()` per render would make the effect's deps churn.
 const markReadMutate = vi.fn();
 const markUnreadMutate = vi.fn();
+const archiveMutate = vi.fn();
+const unarchiveMutate = vi.fn();
+const batchMutate = vi.fn();
 
-vi.mock("@multica/core/inbox/mutations", () => {
-  const mutation = () => ({ mutate: vi.fn() });
-  return {
-    useMarkInboxRead: () => ({ mutate: markReadMutate }),
-    useMarkInboxUnread: () => ({ mutate: markUnreadMutate }),
-    useArchiveInbox: mutation,
-    useUnarchiveInbox: mutation,
-    useMarkAllInboxRead: mutation,
-    useArchiveAllInbox: mutation,
-    useArchiveAllReadInbox: mutation,
-    useArchiveCompletedInbox: mutation,
-  };
-});
+vi.mock("@multica/core/inbox/row-mutations", () => ({
+  useInboxRowActions: () => ({
+    markRead: { mutate: markReadMutate },
+    markUnread: { mutate: markUnreadMutate },
+    archive: { mutate: archiveMutate },
+    unarchive: { mutate: unarchiveMutate },
+    batch: { mutate: batchMutate },
+  }),
+}));
 
+let lastHighlight: string | undefined;
 vi.mock("../../issues/components", () => ({
-  IssueDetail: () => null,
+  IssueDetail: ({ highlightCommentId }: { highlightCommentId?: string }) => {
+    lastHighlight = highlightCommentId;
+    return null;
+  },
   StatusIcon: () => null,
 }));
 
@@ -91,6 +106,14 @@ const FOLD_INNER = 851;
 const TABLET = 1024;
 const DESKTOP = 1440;
 const layout = { width: PHONE };
+
+// The auto-read gate reads document.visibilityState directly, so tests drive it
+// through the real property rather than a module mock.
+let visibility: DocumentVisibilityState = "visible";
+Object.defineProperty(document, "visibilityState", {
+  configurable: true,
+  get: () => visibility,
+});
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => layout.width < 768,
   useIsCompact: () => layout.width < 1024,
@@ -110,9 +133,9 @@ vi.mock("./inbox-list", () => ({
     view,
     onSelect,
   }: {
-    items: InboxItem[];
+    items: InboxRow[];
     view: string;
-    onSelect: (item: InboxItem) => void;
+    onSelect: (item: InboxRow) => void;
   }) => (
     <div data-testid="list" data-view={view}>
       {items.map((i) => (
@@ -147,7 +170,7 @@ vi.mock("./inbox-context-menu", () => ({
 vi.mock("./inbox-detail-label", () => ({ useTypeLabels: () => ({}) }));
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }) }));
 
-function item(overrides: Partial<InboxItem> = {}): InboxItem {
+function item(overrides: Partial<InboxRow> = {}): InboxRow {
   return {
     id: "inbox-1",
     workspace_id: "workspace-1",
@@ -172,17 +195,28 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
 function reset() {
   listData.active = [];
   listData.archived = [];
+  listData.grouped = false;
   searchParams = new URLSearchParams();
   replace.mockClear();
   markReadMutate.mockClear();
   markUnreadMutate.mockClear();
+  archiveMutate.mockClear();
+  unarchiveMutate.mockClear();
+  batchMutate.mockClear();
   rowActions = null;
+  lastHighlight = undefined;
   layout.width = PHONE;
+  visibility = "visible";
 }
 
 describe("InboxPage", () => {
-  it("keeps the title unread count static", () => {
+  it("keeps the title unread count static, and counts the rows on screen", () => {
     reset();
+    listData.active = [
+      item({ id: "a", issue_id: "issue-a", read: false }),
+      item({ id: "b", issue_id: "issue-b", read: false }),
+      item({ id: "c", issue_id: "issue-c", read: true }),
+    ];
     const { container } = render(<InboxPage />);
     const titleCount = container.querySelector("h1")?.parentElement?.querySelector(
       "number-flow-react",
@@ -267,7 +301,7 @@ describe("InboxPage", () => {
     expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-3");
   });
 
-  // `InboxItem.issue_id` is nullable: a quick-create outcome is a notification,
+  // `InboxRow.issue_id` is nullable: a quick-create outcome is a notification,
   // not an issue, so `IssueDetail` never renders for it — and `IssueDetail` is
   // what carries the way back in its own header on a phone. This branch has to
   // supply its own bar or opening one of these is a dead end.
@@ -303,7 +337,10 @@ describe("InboxPage", () => {
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
 
-    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(markReadMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "inbox-a" }),
+      expect.anything(),
+    );
   });
 
   it("keeps an explicitly unread row unread while it stays open", () => {
@@ -323,7 +360,10 @@ describe("InboxPage", () => {
     act(() => rowActions?.onMarkUnread("inbox-a"));
     rerender(<InboxPage />);
 
-    expect(markUnreadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(markUnreadMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "inbox-a" }),
+      expect.anything(),
+    );
     expect(markReadMutate).not.toHaveBeenCalled();
   });
 
@@ -346,7 +386,10 @@ describe("InboxPage", () => {
     markReadMutate.mockClear();
     fireEvent.click(rowA!);
 
-    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(markReadMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "inbox-a" }),
+      expect.anything(),
+    );
   });
 
   it("folds to a single column on a folded inner screen", () => {
@@ -391,5 +434,146 @@ describe("InboxPage", () => {
 
     expect(replace).toHaveBeenCalledWith("/acme/issues/issue-404");
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+  });
+});
+
+// --- v2 group behaviour ----------------------------------------------------
+//
+// These three are the behavioural contracts the group model exists to deliver.
+// They are asserted through the page, because each one is a rule about what the
+// READER experiences, not about what a query returns.
+
+function groupRow(overrides: Partial<InboxRow> = {}): InboxRow {
+  return item({
+    id: "group-a",
+    issue_id: "issue-a",
+    read: false,
+    group: {
+      seq: 5,
+      stateVersion: 2,
+      targetKind: "comment",
+      targetId: "comment-5",
+      sourceKind: "issue",
+      sourceId: "issue-a",
+    },
+    ...overrides,
+  });
+}
+
+describe("InboxPage, grouped", () => {
+  it("jumps to the target the server resolved, not one dug out of details", () => {
+    reset();
+    listData.grouped = true;
+    layout.width = DESKTOP;
+    // `details.comment_id` disagrees on purpose: the v1 client read that field,
+    // and reading it under v2 would send the user to the wrong comment.
+    listData.active = [
+      groupRow({ details: { comment_id: "stale-comment" } }),
+    ];
+
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+
+    expect(lastHighlight).toBe("comment-5");
+  });
+
+  it("does not move the reader when new events land on the open row", () => {
+    reset();
+    listData.grouped = true;
+    layout.width = DESKTOP;
+    listData.active = [groupRow()];
+
+    const { rerender } = render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    expect(lastHighlight).toBe("comment-5");
+
+    // Two newer events arrive for the SAME row while it is open.
+    listData.active = [
+      groupRow({ group: { seq: 7, stateVersion: 4, targetKind: "comment", targetId: "comment-7", sourceKind: "issue", sourceId: "issue-a" } }),
+    ];
+    rerender(<InboxPage />);
+
+    // The highlight stays where the reader is.
+    expect(lastHighlight).toBe("comment-5");
+    // And the new events are offered instead.
+    expect(screen.getByRole("button", { name: /Inbox/ })).toBeTruthy();
+  });
+
+  it("adopts the new events only when the reader asks", () => {
+    reset();
+    listData.grouped = true;
+    layout.width = DESKTOP;
+    listData.active = [groupRow()];
+
+    const { rerender } = render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+
+    listData.active = [
+      groupRow({ group: { seq: 9, stateVersion: 5, targetKind: "comment", targetId: "comment-9", sourceKind: "issue", sourceId: "issue-a" } }),
+    ];
+    rerender(<InboxPage />);
+    expect(lastHighlight).toBe("comment-5");
+
+    // The offer is the only control that moves them.
+    const offer = screen
+      .getAllByRole("button")
+      .find((b) => b.className.includes("bg-accent/40"));
+    expect(offer).toBeTruthy();
+    fireEvent.click(offer!);
+    rerender(<InboxPage />);
+
+    expect(lastHighlight).toBe("comment-9");
+  });
+
+  it("does not mark a row read while the tab is in the background", () => {
+    reset();
+    listData.grouped = true;
+    layout.width = DESKTOP;
+    listData.active = [groupRow()];
+    visibility = "hidden";
+
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+
+    // "Selected" is not "seen": a tab behind the window has a selected row and
+    // would otherwise report it read without a human ever looking at it.
+    expect(markReadMutate).not.toHaveBeenCalled();
+  });
+
+  it("marks it read as soon as the tab comes forward", () => {
+    reset();
+    listData.grouped = true;
+    layout.width = DESKTOP;
+    listData.active = [groupRow()];
+    visibility = "hidden";
+
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    expect(markReadMutate).not.toHaveBeenCalled();
+
+    act(() => {
+      visibility = "visible";
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(markReadMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "group-a" }),
+      expect.anything(),
+    );
+  });
+
+  it("routes writes with the group row, so they reach the group endpoints", () => {
+    reset();
+    listData.grouped = true;
+    layout.width = DESKTOP;
+    listData.active = [groupRow()];
+
+    render(<InboxPage />);
+    act(() => rowActions?.onAction("group-a"));
+
+    expect(archiveMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "group-a", group: expect.objectContaining({ seq: 5 }) }),
+      expect.anything(),
+    );
   });
 });

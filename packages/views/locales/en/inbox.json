@@ -35,7 +35,9 @@
     "original_input": "Original input",
     "edit_advanced": "Edit as advanced form",
     "archive": "Archive",
-    "unarchive": "Unarchive"
+    "unarchive": "Unarchive",
+    "new_updates_one": "{{count}} new update",
+    "new_updates_other": "{{count}} new updates"
   },
   "types": {
     "issue_assigned": "Assigned",

@@ -23,6 +23,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/internal/service/inboxv2"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
@@ -5450,23 +5451,32 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		"identifier":      identifier,
 		"original_prompt": qc.Prompt,
 	})
-	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-		WorkspaceID:   workspaceID,
-		RecipientType: "member",
-		RecipientID:   requesterID,
-		Type:          "quick_create_done",
-		Severity:      "info",
-		IssueID:       issue.ID,
-		Title:         issue.Title,
-		Body:          pgtype.Text{},
-		ActorType:     pgtype.Text{String: "agent", Valid: true},
-		ActorID:       task.AgentID,
-		Details:       details,
-	})
+	res, err := s.inbox().Deliver(ctx, inboxv2.Delivery{
+		WorkspaceID: workspaceID,
+		RecipientID: requesterID,
+		SourceKind:  inboxv2.SourceIssue,
+		SourceID:    issue.ID,
+		Type:        "quick_create_done",
+		Severity:    "info",
+		IssueID:     issue.ID,
+		Title:       issue.Title,
+		Body:        pgtype.Text{},
+		ActorType:   pgtype.Text{String: "agent", Valid: true},
+		ActorID:     task.AgentID,
+		Details:     details,
+		// The task is the event. A completion re-delivered after a retry is the
+		// same completion, and keying on the task id says so.
+		DeliveryKey: inboxv2.DeliveryKey(util.UUIDToString(workspaceID), util.UUIDToString(requesterID),
+			"quick_create_done", util.UUIDToString(task.ID)),
+	}, time.Now())
 	if err != nil {
 		slog.Error("quick-create completion: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
 		return
 	}
+	if res.Deduplicated {
+		return
+	}
+	item := res.Item
 	s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), issue.Status)
 }
 
@@ -5549,23 +5559,32 @@ func (s *TaskService) writeQuickCreateOutcomeInbox(ctx context.Context, task db.
 		"original_prompt": qc.Prompt,
 		"error":           redact.Text(errMsg),
 	})
-	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-		WorkspaceID:   workspaceID,
-		RecipientType: "member",
-		RecipientID:   requesterID,
-		Type:          inboxType,
-		Severity:      "action_required",
-		IssueID:       pgtype.UUID{},
-		Title:         title,
-		Body:          pgtype.Text{String: redact.Text(errMsg), Valid: true},
-		ActorType:     pgtype.Text{String: "agent", Valid: true},
-		ActorID:       task.AgentID,
-		Details:       details,
-	})
+	res, err := s.inbox().Deliver(ctx, inboxv2.Delivery{
+		WorkspaceID: workspaceID,
+		RecipientID: requesterID,
+		// The issue was never created, so there is nothing durable to group
+		// under: this notification is its own source.
+		SourceKind: inboxv2.SourceStandalone,
+		SourceID:   inboxv2.NewStandaloneSource(),
+		Type:       inboxType,
+		Severity:   "action_required",
+		IssueID:    pgtype.UUID{},
+		Title:      title,
+		Body:       pgtype.Text{String: redact.Text(errMsg), Valid: true},
+		ActorType:  pgtype.Text{String: "agent", Valid: true},
+		ActorID:    task.AgentID,
+		Details:    details,
+		DeliveryKey: inboxv2.DeliveryKey(util.UUIDToString(workspaceID), util.UUIDToString(requesterID),
+			inboxType, util.UUIDToString(task.ID)),
+	}, time.Now())
 	if err != nil {
 		slog.Error("quick-create failure: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
 		return
 	}
+	if res.Deduplicated {
+		return
+	}
+	item := res.Item
 	s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), "")
 }
 
@@ -5625,4 +5644,14 @@ func agentToMap(a db.Agent) map[string]any {
 		"archived_at":          util.TimestampToPtr(a.ArchivedAt),
 		"archived_by":          util.UUIDToPtr(a.ArchivedBy),
 	}
+}
+
+// inbox builds the inbox v2 service over this service's own handles.
+//
+// Built per call rather than held as a field: it is a thin wrapper over the
+// queries and transaction starter TaskService already owns, and threading it as
+// a constructor parameter would mean touching every TaskService assembly site
+// for no additional capability.
+func (s *TaskService) inbox() *inboxv2.Service {
+	return inboxv2.NewService(s.Queries, s.TxStarter)
 }

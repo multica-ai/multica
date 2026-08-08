@@ -35,7 +35,8 @@
     "original_input": "원본 입력",
     "edit_advanced": "고급 양식으로 수정",
     "archive": "보관",
-    "unarchive": "보관 해제"
+    "unarchive": "보관 해제",
+    "new_updates_other": "새 소식 {{count}}건"
   },
   "types": {
     "issue_assigned": "할당됨",
