@@ -119,7 +119,7 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
         </p>
         <p className="text-micro text-muted-foreground truncate">
           {pr.repo_owner}/{pr.repo_name}
-          {pr.provider === "code" ? "!" : "#"}
+          {pr.provider === "code" || pr.provider === "gitlab" ? "!" : "#"}
           {pr.number} ·{" "}
           {pr.provider === "code" && pr.snapshot_available !== true
             ? t(($) => $.detail.pull_request_provider_code)

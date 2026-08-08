@@ -1,6 +1,24 @@
 package util
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
+
+// TruncateUTF8 shortens s to at most maxBytes bytes without splitting a
+// multi-byte UTF-8 sequence: if the cut lands inside a rune, it backs up to
+// the rune boundary. This keeps the result valid UTF-8 — required before
+// storing truncated text in PostgreSQL TEXT columns, which reject invalid
+// encodings.
+func TruncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
+		maxBytes--
+	}
+	return s[:maxBytes]
+}
 
 // UnescapeBackslashEscapes decodes the common backslash escape sequences
 // (\n, \r, \t, \\) that LLM agents routinely emit as 4-character literals

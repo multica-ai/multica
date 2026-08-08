@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
@@ -177,9 +178,7 @@ func normalizeA1MRState(state string) (string, error) {
 
 func formatA1CommandError(operation, detail string) string {
 	detail = strings.TrimSpace(redact.Text(detail))
-	if len(detail) > codeMRA1ErrorLimit {
-		detail = detail[:codeMRA1ErrorLimit]
-	}
+	detail = util.TruncateUTF8(detail, codeMRA1ErrorLimit)
 	if detail == "" {
 		return operation + " failed"
 	}
@@ -197,14 +196,14 @@ func (d *Daemon) handleCodeMRSync(req protocol.CodeMRSyncPayload) {
 	a1Path, err := exec.LookPath("a1")
 	if err != nil {
 		result.Error = "a1 is not installed on the daemon host"
-		_ = d.client.ReportCodeMRSnapshot(ctx, req.RuntimeID, req.ExternalPullRequestID, result)
+		d.reportCodeMRSnapshot(ctx, req, result)
 		return
 	}
 	reviewID := strconv.FormatInt(int64(req.ReviewNumber), 10)
 	view, err := runA1JSON(ctx, a1Path, "repo", "mr", "view", reviewID, "--repo", req.RepositoryPath, "-f", "json")
 	if err != nil {
 		result.Error = formatA1CommandError("a1 repo mr view", err.Error())
-		_ = d.client.ReportCodeMRSnapshot(ctx, req.RuntimeID, req.ExternalPullRequestID, result)
+		d.reportCodeMRSnapshot(ctx, req, result)
 		return
 	}
 	status, statusErr := runA1JSON(ctx, a1Path, "repo", "mr", "status", reviewID, "--repo", req.RepositoryPath, "-f", "json")
@@ -214,13 +213,19 @@ func (d *Daemon) handleCodeMRSync(req protocol.CodeMRSyncPayload) {
 	comments, err := runA1JSON(ctx, a1Path, "repo", "mr", "comment", "list", "--mr", reviewID, "--repo", req.RepositoryPath, "--sort", "asc", "-f", "json")
 	if err != nil {
 		result.Error = formatA1CommandError("a1 repo mr comment list", err.Error())
-		_ = d.client.ReportCodeMRSnapshot(ctx, req.RuntimeID, req.ExternalPullRequestID, result)
+		d.reportCodeMRSnapshot(ctx, req, result)
 		return
 	}
 	result, err = parseA1CodeMRSnapshot(view, status, comments)
 	if err != nil {
 		result.Error = formatA1CommandError("parse a1 MR snapshot", err.Error())
 	}
+	d.reportCodeMRSnapshot(ctx, req, result)
+}
+
+// reportCodeMRSnapshot sends the snapshot and logs delivery failures so
+// production sync breakdowns are diagnosable from every call site.
+func (d *Daemon) reportCodeMRSnapshot(ctx context.Context, req protocol.CodeMRSyncPayload, result protocol.CodeMRSnapshotResult) {
 	if err := d.client.ReportCodeMRSnapshot(ctx, req.RuntimeID, req.ExternalPullRequestID, result); err != nil {
 		d.logger.Warn("code MR snapshot report failed", "runtime_id", req.RuntimeID, "external_pull_request_id", req.ExternalPullRequestID, "error", err)
 	}

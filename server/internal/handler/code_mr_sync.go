@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
@@ -90,11 +91,9 @@ func (h *Handler) ReportCodeMRSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	if result.Error != "" {
 		safe := strings.TrimSpace(redact.Text(result.Error))
-		if len(safe) > 1024 {
-			safe = safe[:1024]
-		}
+		safe = util.TruncateUTF8(safe, 1024)
 		updated, updateErr := h.Queries.FailExternalPullRequestSync(r.Context(), db.FailExternalPullRequestSyncParams{
-			ID: prID, SyncError: pgtype.Text{String: safe, Valid: safe != ""},
+			ID: prID, SyncError: pgtype.Text{String: safe, Valid: safe != ""}, WorkspaceID: runtime.WorkspaceID,
 		})
 		if updateErr != nil {
 			writeError(w, http.StatusInternalServerError, "failed to record Code MR sync failure")
@@ -126,6 +125,7 @@ func (h *Handler) ReportCodeMRSnapshot(w http.ResponseWriter, r *http.Request) {
 		ReadyToMerge:           ready,
 		CommentCount:           result.CommentCount,
 		UnresolvedCommentCount: result.UnresolvedCommentCount,
+		WorkspaceID:            runtime.WorkspaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update Code MR snapshot")

@@ -334,13 +334,16 @@ SET title = $2,
     sync_error = NULL,
     updated_at = now()
 WHERE id = $1
+  AND workspace_id = $6
 RETURNING *;
 
 -- name: FailExternalPullRequestSync :one
 UPDATE external_pull_request
 SET sync_error = $2,
+    last_sync_at = now(),
     updated_at = now()
 WHERE id = $1
+  AND workspace_id = $3
 RETURNING *;
 
 -- name: DeleteExternalPullRequest :one

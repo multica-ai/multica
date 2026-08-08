@@ -236,18 +236,21 @@ func (q *Queries) DeletePendingGitHubInstallation(ctx context.Context, installat
 const failExternalPullRequestSync = `-- name: FailExternalPullRequestSync :one
 UPDATE external_pull_request
 SET sync_error = $2,
+    last_sync_at = now(),
     updated_at = now()
 WHERE id = $1
+  AND workspace_id = $3
 RETURNING id, workspace_id, issue_id, provider, repository_path, review_number, title, html_url, created_by_type, created_by_id, created_at, updated_at, state, source_branch, target_branch, author_login, pr_created_at, pr_updated_at, ready_to_merge, comment_count, unresolved_comment_count, sync_requested_at, last_sync_at, sync_error
 `
 
 type FailExternalPullRequestSyncParams struct {
-	ID        pgtype.UUID `json:"id"`
-	SyncError pgtype.Text `json:"sync_error"`
+	ID          pgtype.UUID `json:"id"`
+	SyncError   pgtype.Text `json:"sync_error"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
 func (q *Queries) FailExternalPullRequestSync(ctx context.Context, arg FailExternalPullRequestSyncParams) (ExternalPullRequest, error) {
-	row := q.db.QueryRow(ctx, failExternalPullRequestSync, arg.ID, arg.SyncError)
+	row := q.db.QueryRow(ctx, failExternalPullRequestSync, arg.ID, arg.SyncError, arg.WorkspaceID)
 	var i ExternalPullRequest
 	err := row.Scan(
 		&i.ID,
@@ -914,18 +917,19 @@ const updateExternalPullRequestSync = `-- name: UpdateExternalPullRequestSync :o
 UPDATE external_pull_request
 SET title = $2,
     state = $3,
-    source_branch = $6,
-    target_branch = $7,
-    author_login = $8,
-    pr_created_at = $9,
-    pr_updated_at = $10,
-    ready_to_merge = $11,
+    source_branch = $7,
+    target_branch = $8,
+    author_login = $9,
+    pr_created_at = $10,
+    pr_updated_at = $11,
+    ready_to_merge = $12,
     comment_count = $4,
     unresolved_comment_count = $5,
     last_sync_at = now(),
     sync_error = NULL,
     updated_at = now()
 WHERE id = $1
+  AND workspace_id = $6
 RETURNING id, workspace_id, issue_id, provider, repository_path, review_number, title, html_url, created_by_type, created_by_id, created_at, updated_at, state, source_branch, target_branch, author_login, pr_created_at, pr_updated_at, ready_to_merge, comment_count, unresolved_comment_count, sync_requested_at, last_sync_at, sync_error
 `
 
@@ -935,6 +939,7 @@ type UpdateExternalPullRequestSyncParams struct {
 	State                  string             `json:"state"`
 	CommentCount           int32              `json:"comment_count"`
 	UnresolvedCommentCount int32              `json:"unresolved_comment_count"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
 	SourceBranch           pgtype.Text        `json:"source_branch"`
 	TargetBranch           pgtype.Text        `json:"target_branch"`
 	AuthorLogin            pgtype.Text        `json:"author_login"`
@@ -950,6 +955,7 @@ func (q *Queries) UpdateExternalPullRequestSync(ctx context.Context, arg UpdateE
 		arg.State,
 		arg.CommentCount,
 		arg.UnresolvedCommentCount,
+		arg.WorkspaceID,
 		arg.SourceBranch,
 		arg.TargetBranch,
 		arg.AuthorLogin,
