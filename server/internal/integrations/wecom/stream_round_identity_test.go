@@ -483,6 +483,104 @@ func TestAnAnsweredGuardClosedRoundIsNoLongerOwedAReply(t *testing.T) {
 	}
 }
 
+// TestAnEmptyAnswerAfterTheGuardStillKeepsThePromise. An empty completion is a
+// legitimate outcome — the agent had nothing to add — and inside a bubble it
+// already ends in words, because a blank closing frame is discarded and the
+// spinner stays. After the guard there is no bubble but there is a promise,
+// and returning without a word breaks it in a way the user cannot recover
+// from: they were told a reply was coming separately, and nothing ever
+// arrives. The promise also stays on the list, for the next repeat of this
+// run's failure to spend under the silence.
+func TestAnEmptyAnswerAfterTheGuardStillKeepsThePromise(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.askedInTheRoom(t, "task-1")
+	rig.ran(t, "REQ-E1", 1, "task-1")
+	rig.guardClosed(t, 1) // "还在处理，完成后我再单独回复你"
+
+	rig.answer(t, "   \n ", "task-1")
+
+	pushes := rig.conn.pushes(t)
+	if len(pushes) != 1 {
+		t.Fatalf("a run that finished with nothing to say sent %d plain messages, want 1 — "+
+			"the asker was promised a separate reply and received nothing at all", len(pushes))
+	}
+	md, _ := pushes[0]["markdown"].(map[string]any)
+	if md == nil || md["content"] != streamCopyNoReply {
+		t.Fatalf("the promised reply said %v, want %q", pushes[0], streamCopyNoReply)
+	}
+	// And the promise is spent by it, so the sweeper repeat of this run's own
+	// failure does not claim it and print "这次没跑通" underneath.
+	rig.failed(t, "task-1", false)
+	if got := len(rig.conn.pushes(t)); got != 1 {
+		t.Fatalf("a republished failure brought the total to %d plain messages, want 1 — "+
+			"the promise the empty answer kept was left on the list for it to spend again", got)
+	}
+}
+
+// The limit on the above. streamCopyNoReply goes out because a promise names
+// this round; a run that ended properly is owed nothing, and an empty
+// completion for it is what it looks like — nothing to send. Without the
+// claim, every empty chat:done on a bound session would put a line in the room,
+// including the ones a browser produced.
+func TestAnEmptyAnswerWithNothingOwedSaysNothing(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.askedInTheRoom(t, "task-1")
+
+	rig.answer(t, "", "task-1")
+
+	if pushes := rig.conn.pushes(t); len(pushes) != 0 {
+		t.Fatalf("an empty answer for a round owed nothing sent %d plain message(s) into the room", len(pushes))
+	}
+	if frames := rig.conn.streamFrames(t); len(frames) != 0 {
+		t.Fatalf("an empty answer for a round with no bubble wrote %d stream frames", len(frames))
+	}
+}
+
+// TestASecondRunsFailureIsNotSilencedByTheFirstsNote.
+//
+// The not-twice rule is per RUN, and the note a session keeps is one note. A
+// dedup that reads "this session has a note" as "this run has been told"
+// answers correctly for the run that filed it and wrongly for every other run
+// in the session: the second asker is dropped by bookkeeping left behind by a
+// run they have nothing to do with.
+//
+// Both halves are asserted in one sequence, because either one alone is
+// satisfiable by deleting the other: A twice is the dedup that has to stay,
+// and B after it is the notice that has to still arrive.
+func TestASecondRunsFailureIsNotSilencedByTheFirstsNote(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.askedInTheRoom(t, "task-1")
+	rig.askedInTheRoom(t, "task-2")
+
+	// No bubbles anywhere — this process restarted mid-run, so both notices
+	// have to find their chat in the binding row.
+	rig.failed(t, "task-1", false)
+	if got := pushedTexts(t, rig.conn); len(got) != 1 || got[0] != streamCopyFailed {
+		t.Fatalf("the first run's asker read %q, want [%q]", got, streamCopyFailed)
+	}
+
+	// The sweeper repeat of the FIRST run's own failure — the dedup this is
+	// all for. One run's failure is news once.
+	rig.failed(t, "task-1", false)
+	if got := pushedTexts(t, rig.conn); len(got) != 1 {
+		t.Fatalf("a republished failure of one run was announced %d times, want 1: %q", len(got), got)
+	}
+
+	// A different run, in the same session, whose asker has been told nothing.
+	rig.failed(t, "task-2", false)
+	got := pushedTexts(t, rig.conn)
+	if len(got) != 2 {
+		t.Fatalf("two runs failed and the room read %d notice(s) (%q), want 2 — the second run's asker was "+
+			"silenced by the note the FIRST run left, and nobody ever told them their question died", len(got), got)
+	}
+	if got[1] != streamCopyFailed {
+		t.Fatalf("the second run's notice said %q, want %q", got[1], streamCopyFailed)
+	}
+}
+
 // TestABubbleIsNeverRepaintedForARunThatHasAnswered. OnIngested is detached and
 // carries the Router's reply budget; a badly delayed one can arrive after the
 // run it was painting for has already answered. Painting then would open a

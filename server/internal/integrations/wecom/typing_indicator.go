@@ -390,7 +390,7 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 	// they never saw has gone wrong. Asked BEFORE the bubble is taken, for the
 	// reason outbound.go asks before finishing one: a gate placed after the
 	// take has already sealed a WeCom round's bubble with a web run's ending.
-	if !m.failureBelongsOnWecom(ctx, taskID) {
+	if !m.failureBelongsOnWecom(ctx, sessionID, taskID) {
 		return
 	}
 	if m.closeBubble(ctx, sessionID,
@@ -408,35 +408,64 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 // creator of a group's chat_session, so that session appears in their own
 // Multica chat list and they can ask it something in a browser. Both runs fail
 // the same way, on the same bus, carrying the same session — nothing in the
-// event says which surface asked, so the row has to be read.
+// event says which surface asked.
 //
-// Every uncertainty answers yes, and that direction is deliberate. It is the
-// opposite of what the answer path does with a vanished task, and for a reason
-// the answer path does not have: streamCopyFailed is the only "that run did not
-// go through" WeCom ever produces, and the round it speaks for may be sitting
-// on the guard's "还在处理，完成后我再单独回复你". A no there is not caution, it
-// is a promise broken in silence, with nothing the user can do about it. A
-// notice that reaches a room it did not have to is a line of copy naming no
-// question and no answer, and the user can ask again.
-func (m *TypingIndicatorManager) failureBelongsOnWecom(ctx context.Context, taskID string) bool {
-	if m.tasks == nil || taskID == "" {
+// This is an authorization check on writing into somebody else's group chat,
+// so uncertainty is not permission. A lookup that did not answer is not
+// evidence the question came from WeCom, and "one line of copy naming no
+// question and no answer" still tells a room that activity it cannot see went
+// wrong — the existence of the activity is the disclosure. So an origin that
+// cannot be established refuses, and says so at WARN.
+//
+// That costs nothing on the case worth protecting, because that case has local
+// evidence. A round sitting on the guard's "还在处理，完成后我再单独回复你" has
+// this run on its owed list, and a round still open has it bound; both are
+// written only by the inbound path, and both are read here before anything is
+// consumed. So a WeCom round whose promise is outstanding is delivered while
+// the database is down, and it is only the runs this process has never seen
+// that have to produce a row to be spoken for.
+func (m *TypingIndicatorManager) failureBelongsOnWecom(ctx context.Context, sessionID pgtype.UUID, taskID string) bool {
+	// Positive proof of origin, held in memory. Asked first, so the paths
+	// below never decide the one case where silence breaks a promise.
+	if m.streams.knowsRound(sessionID, taskID) {
 		return true
+	}
+	if taskID == "" {
+		// Both task:failed publishers carry one in production — see the block
+		// comment above handleTaskFailed — so this is a payload shape nothing
+		// real produces, and it names no run to attribute.
+		m.refuseUnknownOrigin(ctx, sessionID, taskID, "no task id on the event")
+		return false
+	}
+	if m.tasks == nil {
+		m.refuseUnknownOrigin(ctx, sessionID, taskID, "no task lookup configured")
+		return false
 	}
 	id, err := util.ParseUUID(taskID)
 	if err != nil || !id.Valid {
-		return true
+		m.refuseUnknownOrigin(ctx, sessionID, taskID, "unparseable task id")
+		return false
 	}
 	task, err := m.tasks.GetAgentTask(ctx, id)
 	if err != nil {
-		return true
+		m.refuseUnknownOrigin(ctx, sessionID, taskID, "cannot read the task row: "+err.Error())
+		return false
 	}
 	deliver, err := engine.TaskInputIsChannelIngested(ctx, m.tasks, task)
 	if err != nil {
-		m.log.WarnContext(ctx, "wecom typing: cannot tell where a failed run was asked, delivering",
-			"task_id", taskID, "error", err)
-		return true
+		m.refuseUnknownOrigin(ctx, sessionID, taskID, "cannot read the channel-ingested stamp: "+err.Error())
+		return false
 	}
 	return deliver
+}
+
+// refuseUnknownOrigin logs a failure notice this process declined to put in a
+// WeCom room. WARN because it is a real outcome for the asker — a run of
+// theirs ended and they were not told — and the only signal that a database
+// the origin check depends on has stopped answering.
+func (m *TypingIndicatorManager) refuseUnknownOrigin(ctx context.Context, sessionID pgtype.UUID, taskID, reason string) {
+	m.log.WarnContext(ctx, "wecom typing: refusing to announce a failed run whose origin cannot be established",
+		"chat_session_id", util.UUIDToString(sessionID), "task_id", taskID, "reason", reason)
 }
 
 // handleTaskCancelled seals the bubble of a run the user stopped.

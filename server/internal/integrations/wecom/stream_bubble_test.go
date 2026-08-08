@@ -127,6 +127,11 @@ type bubbleRig struct {
 	bus     *events.Bus
 	instID  pgtype.UUID
 	now     time.Time
+	// logs is what the manager wrote while the test ran. Set only by the rigs
+	// whose subject is a decision NOT to send: a refusal is invisible in the
+	// frames, so the log line is the only thing that separates it from a
+	// handler that returned for some unrelated reason. See failure_origin_test.
+	logs *logRecorder
 }
 
 func newBubbleRig(t *testing.T) *bubbleRig {
