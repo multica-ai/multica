@@ -291,7 +291,7 @@ INSERT INTO external_pull_request (
     title, html_url, created_by_type, created_by_id
 ) VALUES (
     $1, $2, $3, $4, $5,
-    $6, $7, sqlc.narg('created_by_type'), sqlc.narg('created_by_id')
+    $6, $7, $8, sqlc.narg('created_by_id')
 )
 ON CONFLICT (workspace_id, issue_id, provider, html_url) DO UPDATE SET
     repository_path = EXCLUDED.repository_path,

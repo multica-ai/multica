@@ -1181,7 +1181,7 @@ func (h *Handler) linkCodePullRequestsFromText(ctx context.Context, issue db.Iss
 			ReviewNumber:   ref.ReviewNumber,
 			Title:          fmt.Sprintf("%s MR !%d", ref.RepositoryPath, ref.ReviewNumber),
 			HtmlUrl:        ref.URL,
-			CreatedByType:  strToText(actorType),
+			CreatedByType:  actorType,
 			CreatedByID:    actorUUID(actorID),
 		})
 		if err != nil {

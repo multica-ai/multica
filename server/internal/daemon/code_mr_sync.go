@@ -26,6 +26,10 @@ const (
 	// Headroom on top of the three a1 command budgets so the final snapshot
 	// report still has time to land when the commands run slow.
 	codeMRSnapshotReportHeadroom = 30 * time.Second
+	// WaitDelay bounds how long cmd.Run may block after the context deadline:
+	// descendant processes that inherit the stdout/stderr pipes would
+	// otherwise hold them open and hang the wait well past the budget.
+	codeMRA1WaitDelay = 5 * time.Second
 )
 
 var codeMRRepositoryPathRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)+$`)
@@ -81,12 +85,16 @@ func runA1JSON(ctx context.Context, a1Path string, args ...string) ([]byte, erro
 	stdout := &boundedBuffer{remaining: codeMRA1OutputLimit}
 	stderr := &boundedBuffer{remaining: codeMRA1ErrorLimit}
 	cmd := exec.CommandContext(cmdCtx, a1Path, args...)
+	cmd.WaitDelay = codeMRA1WaitDelay
 	cmd.Env = append(os.Environ(), "A1_NO_UPDATE_CHECK=1")
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
+		if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) {
+			return nil, errors.New("a1 timed out")
+		}
 		if cmdCtx.Err() != nil {
-			return nil, fmt.Errorf("a1 timed out: %w", cmdCtx.Err())
+			return nil, fmt.Errorf("a1 canceled: %w", cmdCtx.Err())
 		}
 		return nil, fmt.Errorf("a1 failed: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
