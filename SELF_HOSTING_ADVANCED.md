@@ -178,8 +178,13 @@ you do:
 Each outbound frame produces two lines that share a `seq`: `dir=out` when it is
 about to be written, and `dir=out.done` with `ok=true` / `ok=false` once the
 socket has answered. `seq` is the frame's position in the write order, so the
-pair tells you what the server saw and in which order; an attempt with no
+pair tells you what this backend sent and in which order; an attempt with no
 matching outcome is a write that never returned.
+
+`ok=true` means the frame reached the socket, not that WeCom accepted it. For
+the platform's verdict, match the frame's `req_id` against the `dir=in` line
+answering it and read that line's `errcode` — a frame can be written
+successfully and still be rejected there.
 
 ### CLI / Daemon
 
