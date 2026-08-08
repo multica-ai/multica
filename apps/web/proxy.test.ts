@@ -207,6 +207,55 @@ describe("proxy runtime upstream rewrites", () => {
 });
 
 describe("proxy root and locale handling", () => {
+  it("redirects a logged-in PWA launch on the marketing host to the last workspace", () => {
+    const res = proxy(
+      makeRequest(
+        "/?source=pwa",
+        {
+          multica_logged_in: "1",
+          last_workspace_slug: "acme",
+        },
+        "multica.ai",
+      ),
+    );
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(
+      "https://multica.ai/acme/issues?source=pwa",
+    );
+  });
+
+  it("redirects a logged-in PWA launch on an app host to the last workspace", () => {
+    expect(
+      redirectLocation("/?source=pwa", {
+        multica_logged_in: "1",
+        last_workspace_slug: "acme",
+      }),
+    ).toBe("https://app.multica.test/acme/issues?source=pwa");
+  });
+
+  it("redirects a logged-out PWA launch to login with the launch URL as next", () => {
+    const location = redirectLocation("/?source=pwa", {}, "multica.ai");
+
+    expect(location).not.toBeNull();
+    const url = new URL(location!);
+    expect(url.pathname).toBe("/login");
+    expect(url.searchParams.get("next")).toBe("/?source=pwa");
+  });
+
+  it("redirects a logged-in PWA launch without a last workspace to login", () => {
+    const location = redirectLocation(
+      "/?source=pwa",
+      { multica_logged_in: "1" },
+      "multica.ai",
+    );
+
+    expect(location).not.toBeNull();
+    const url = new URL(location!);
+    expect(url.pathname).toBe("/login");
+    expect(url.searchParams.get("next")).toBe("/?source=pwa");
+  });
+
   it("redirects logged-in root visits to the last workspace", () => {
     const res = proxy(
       makeRequest("/", {

@@ -25,7 +25,8 @@
     "lint": "turbo lint --filter=!@multica/mobile",
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",
-    "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
+    "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs",
+    "generate:pwa-icons": "node scripts/generate-pwa-icons.mjs"
   },
   "packageManager": "pnpm@10.28.2",
   "pnpm": {
@@ -46,6 +47,7 @@
     "@types/node": "catalog:",
     "@types/pg": "^8.20.0",
     "pg": "^8.20.0",
+    "sharp": "^0.35.3",
     "turbo": "^2.5.4",
     "typescript": "catalog:"
   }
