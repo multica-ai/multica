@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -337,8 +338,12 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 // isTerminalChildStatus reports whether a child issue status counts as
 // "finished" for stage-barrier purposes. Cancelled counts as terminal: a
 // cancelled sibling will never complete, so it must not hold a stage open.
+//
+// Keyed on the Category, not the token, so a custom "Shipped" status in the
+// done Category closes a stage exactly like the built-in does, and in_review /
+// blocked (in_progress Category) keep holding the stage open (MUL-4809).
 func isTerminalChildStatus(status string) bool {
-	return status == "done" || status == "cancelled"
+	return issuestatus.IsTerminalCategory(issuestatus.CategoryForStatusToken(status))
 }
 
 // siblingsAreStaged reports whether any child in the set carries an explicit

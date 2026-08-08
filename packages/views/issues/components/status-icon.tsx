@@ -1,5 +1,5 @@
-import type { IssueStatus } from "@multica/core/types";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
+import type { IssueStatus, StatusDetail } from "@multica/core/types";
+import { STATUS_CONFIG, statusThemeForColor } from "@multica/core/issues/config";
 
 // ---------------------------------------------------------------------------
 // Geometry constants (viewBox 0 0 14 14, center 7,7)
@@ -157,24 +157,48 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
 // Public component
 // ---------------------------------------------------------------------------
 
+/**
+ * Renders a status glyph.
+ *
+ * Legacy call sites pass only `status` (one of the 7 built-in tokens) and get the
+ * shape + color baked into STATUS_CONFIG. Catalog-aware call sites additionally
+ * pass `detail` (the issue's resolved `status_detail`) or an explicit
+ * `icon`/`color` pair, which is how a CUSTOM status renders with its configured
+ * shape and color (MUL-4809). Anything unknown degrades to the neutral Todo
+ * glyph rather than rendering nothing.
+ */
 export function StatusIcon({
   status,
   className = "h-4 w-4",
   inheritColor = false,
+  detail,
+  icon,
+  color,
 }: {
   status: IssueStatus | string;
   className?: string;
   inheritColor?: boolean;
+  detail?: StatusDetail | null;
+  icon?: string | null;
+  color?: string | null;
 }) {
+  const shapeKey = icon ?? detail?.icon ?? status;
+  const knownShape = shapeKey && shapeKey in STATUS_RENDERERS ? (shapeKey as IssueStatus) : null;
+  const Renderer = knownShape ? STATUS_RENDERERS[knownShape] : TodoIcon;
+
+  const colorToken = color ?? detail?.color ?? null;
   const knownStatus = status in STATUS_RENDERERS ? (status as IssueStatus) : null;
-  const cfg = knownStatus ? STATUS_CONFIG[knownStatus] : null;
-  const Renderer = knownStatus ? STATUS_RENDERERS[knownStatus] : TodoIcon;
+  const iconColor = colorToken
+    ? statusThemeForColor(colorToken).iconColor
+    : knownStatus
+      ? STATUS_CONFIG[knownStatus].iconColor
+      : "text-muted-foreground";
 
   return (
     <svg
       viewBox="0 0 14 14"
       fill="none"
-      className={`${className} ${inheritColor ? "" : cfg?.iconColor ?? "text-muted-foreground"} shrink-0`}
+      className={`${className} ${inheritColor ? "" : iconColor} shrink-0`}
     >
       <Renderer />
     </svg>

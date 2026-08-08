@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS issue_status_workspace_system_key_uidx;
