@@ -25,4 +25,21 @@ describe("descriptionPreview", () => {
       descriptionPreview("# Title\n\n**bold** text and [a link](https://example.com)"),
     ).toBe("Title bold text and a link");
   });
+
+  it("bounds long descriptions before they reach the board DOM", () => {
+    const description = "a".repeat(600);
+
+    const preview = descriptionPreview(description);
+
+    expect(preview).toBe(`${"a".repeat(299)}…`);
+    expect(preview).toHaveLength(300);
+  });
+
+  it("does not split a Unicode surrogate pair at the preview boundary", () => {
+    const description = `${"a".repeat(298)}🙂${"b".repeat(300)}`;
+
+    const preview = descriptionPreview(description);
+
+    expect(preview).toBe(`${"a".repeat(298)}…`);
+  });
 });
