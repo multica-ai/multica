@@ -846,6 +846,21 @@ type PinnedItem struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type PlatformExtensionRelease struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	ExtensionKey string             `json:"extension_key"`
+	Name         string             `json:"name"`
+	Version      string             `json:"version"`
+	Digest       string             `json:"digest"`
+	Manifest     []byte             `json:"manifest"`
+	RuntimeID    pgtype.UUID        `json:"runtime_id"`
+	SquadID      pgtype.UUID        `json:"squad_id"`
+	Resources    []byte             `json:"resources"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type Project struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

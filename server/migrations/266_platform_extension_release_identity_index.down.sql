@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY idx_platform_extension_release_workspace_key_version;

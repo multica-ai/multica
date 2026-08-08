@@ -1,0 +1,60 @@
+{
+  "schema_version": "platform.extension/v1",
+  "extension": {
+    "key": "research-team",
+    "name": "Research Team",
+    "version": "1.0.0",
+    "description": "Research and summarize a topic.",
+    "instructions": "Return an evidence-backed answer."
+  },
+  "leader": "lead-researcher",
+  "agents": [
+    {
+      "key": "lead-researcher",
+      "name": "Lead Researcher",
+      "description": "Plans and delegates research.",
+      "prompt": "Understand the request and delegate when useful."
+    }
+  ],
+  "skills": [
+    {
+      "key": "source-review",
+      "name": "Source Review",
+      "description": "Review source quality.",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "content": "---\nname: source-review\ndescription: Review source quality.\n---\n\nCheck evidence quality."
+        },
+        {
+          "path": "references/evidence.md",
+          "content": "Prefer primary sources."
+        }
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "name": "delegate.flow",
+      "description": "Delegation policy.",
+      "content": "Delegate independent investigations and synthesize the results.",
+      "metadata": {
+        "priority": 2,
+        "scope": "team"
+      }
+    },
+    {
+      "name": "summarize",
+      "description": "Summary command.",
+      "content": "Summarize findings with sources.",
+      "metadata": {
+        "priority": 1,
+        "scope": "team"
+      }
+    }
+  ],
+  "command_suffixes": {
+    "flow": [".flow"],
+    "tool": [".tool"]
+  }
+}

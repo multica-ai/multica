@@ -1,0 +1,1 @@
+DROP TABLE platform_extension_release;
