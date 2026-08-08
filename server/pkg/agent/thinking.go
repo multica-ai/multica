@@ -11,8 +11,8 @@ import (
 )
 
 // thinking.go discovers per-model reasoning/effort catalogs for the
-// claude, codex, and opencode backends so the daemon can advertise them to the
-// UI without hard-coding (and getting wrong) what's installed locally.
+// claude, codex, opencode, and pi backends so the daemon can advertise them to
+// the UI without hard-coding (and getting wrong) what's installed locally.
 //
 // MUL-2339: we deliberately do not flatten Claude's `low|medium|high|
 // xhigh|max` and Codex's `none|minimal|low|medium|high|xhigh|max|ultra`
@@ -759,6 +759,17 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"low":    true,
 		"medium": true,
 		"high":   true,
+	},
+	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
+	// the exact subset supported by each model before execution.
+	"pi": {
+		"off":     true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
 	},
 }
 

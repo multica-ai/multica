@@ -53,8 +53,9 @@ type ModelServiceTier struct {
 // ModelThinking carries the per-model reasoning/effort catalog
 // surfaced by an agent runtime. Values are runtime-native — Codex can emit
 // "none|minimal|low|medium|high|xhigh|max|ultra"; Claude emits
-// "low|medium|high|xhigh|max". The frontend renders SupportedLevels
-// as-is so what users see matches each CLI's own UI.
+// "low|medium|high|xhigh|max"; Pi emits
+// "off|minimal|low|medium|high|xhigh|max". The frontend renders
+// SupportedLevels as-is so what users see matches each CLI's own UI.
 type ModelThinking struct {
 	SupportedLevels []ThinkingLevel `json:"supported_levels"`
 	// DefaultLevel is the value the runtime picks when no override is
@@ -120,7 +121,7 @@ const modelCacheTTL = 60 * time.Second
 // pi, openclaw) it shells out with caching and falls back where the
 // provider has a safe static catalog.
 //
-// For claude, codex, and opencode, the catalog is augmented with per-model
+// For claude, codex, opencode, and pi, the catalog is augmented with per-model
 // thinking-level options discovered from the local CLI. Codex discovery
 // failures fall back to a model + thinking snapshot; providers without a safe
 // fallback leave Thinking nil, which makes the UI hide the thinking picker.
@@ -760,16 +761,235 @@ func openCodeThinkingLevelsFromVariants(variants map[string]opencodeModelVariant
 	return levels
 }
 
-// discoverPiModels runs `pi --list-models` and parses its output.
-// Older pi versions print the list to stderr; newer versions use
-// stdout. We capture both and parse whichever is non-empty.
+var piThinkingLevelLabels = map[string]string{
+	"off":     "Off",
+	"minimal": "Minimal",
+	"low":     "Low",
+	"medium":  "Medium",
+	"high":    "High",
+	"xhigh":   "Extra high",
+	"max":     "Max",
+}
+
+var piThinkingLevelOrder = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+type piRPCModel struct {
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Provider         string             `json:"provider"`
+	Reasoning        bool               `json:"reasoning"`
+	ThinkingLevelMap map[string]*string `json:"thinkingLevelMap"`
+}
+
+type piRPCState struct {
+	Model         *piRPCModel `json:"model"`
+	ThinkingLevel string      `json:"thinkingLevel"`
+}
+
+type piRPCResponse struct {
+	ID      string          `json:"id"`
+	Type    string          `json:"type"`
+	Success bool            `json:"success"`
+	Data    json.RawMessage `json:"data"`
+}
+
+// discoverPiModels asks Pi's RPC API for its machine-readable model catalog.
+// The RPC model objects carry the exact per-model reasoning metadata that the
+// human-readable `--list-models` table reduces to a yes/no column. Older Pi
+// versions and pi-family forks may not implement RPC, so discovery falls back
+// to the existing table parser without advertising a guessed thinking catalog.
 func discoverPiModels(ctx context.Context, executablePath string) ([]Model, error) {
 	if executablePath == "" {
 		executablePath = "pi"
 	}
-	if _, err := exec.LookPath(executablePath); err != nil {
+	lookedUp, err := exec.LookPath(executablePath)
+	if err != nil {
 		return []Model{}, nil
 	}
+	// RPC and the compatibility table fallback share one discovery budget.
+	// An old or broken RPC surface must not double the established 15-second
+	// model-list timeout before the UI gets an answer.
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if models, ok := discoverPiModelsRPC(runCtx, executablePath, lookedUp); ok {
+		return models, nil
+	}
+	return discoverPiModelsTable(runCtx, executablePath)
+}
+
+// discoverPiModelsRPC starts a short-lived Pi RPC session and requests both
+// the available models and current state. The state identifies the model Pi
+// will choose when Multica omits --model; its thinking level is the runtime's
+// effective default for that selected model.
+func discoverPiModelsRPC(ctx context.Context, executablePath, lookedUp string) ([]Model, bool) {
+	args := []string{
+		"--mode", "rpc",
+		"--no-session",
+		// Extensions stay enabled because Pi extensions can register providers
+		// and models; disabling them would make RPC discovery disagree with the
+		// catalog used by real task execution.
+		"--no-skills",
+		"--no-prompt-templates",
+		"--no-context-files",
+	}
+	argv0, cmdArgs := choosePiInvocation(executablePath, lookedUp, args, slog.Default())
+	cmd := exec.CommandContext(ctx, argv0, cmdArgs...)
+	hideAgentWindow(cmd)
+	cmd.WaitDelay = time.Second
+	cmd.Stderr = io.Discard
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, false
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return nil, false
+	}
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		return nil, false
+	}
+
+	encoder := json.NewEncoder(stdin)
+	requests := []map[string]string{
+		{"id": "multica-state", "type": "get_state"},
+		{"id": "multica-models", "type": "get_available_models"},
+	}
+	for _, request := range requests {
+		if err := encoder.Encode(request); err != nil {
+			_ = stdin.Close()
+			_ = cmd.Wait()
+			return nil, false
+		}
+	}
+
+	var (
+		rawModels  []piRPCModel
+		state      piRPCState
+		modelsDone bool
+		stateDone  bool
+	)
+	scanner := newAgentStreamScanner(stdout)
+	for scanner.Scan() {
+		var response piRPCResponse
+		if err := json.Unmarshal(scanner.Bytes(), &response); err != nil || response.Type != "response" {
+			continue
+		}
+		switch response.ID {
+		case "multica-state":
+			stateDone = true
+			if response.Success {
+				_ = json.Unmarshal(response.Data, &state)
+			}
+		case "multica-models":
+			modelsDone = true
+			if !response.Success {
+				continue
+			}
+			var payload struct {
+				Models []piRPCModel `json:"models"`
+			}
+			if err := json.Unmarshal(response.Data, &payload); err == nil {
+				rawModels = payload.Models
+			}
+		}
+		if modelsDone && stateDone {
+			break
+		}
+	}
+
+	// Pi's RPC loop waits for more commands while stdin remains open. EOF ends
+	// the throwaway session cleanly; the context remains a safety net for an
+	// older/forked CLI that ignores EOF or never completes both responses.
+	_ = stdin.Close()
+	_, _ = io.Copy(io.Discard, stdout)
+	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
+		return nil, false
+	}
+	if !modelsDone || len(rawModels) == 0 {
+		return nil, false
+	}
+	return piModelsFromRPC(rawModels, state), true
+}
+
+func piModelsFromRPC(rawModels []piRPCModel, state piRPCState) []Model {
+	defaultID := ""
+	if state.Model != nil && state.Model.Provider != "" && state.Model.ID != "" {
+		defaultID = state.Model.Provider + "/" + state.Model.ID
+	}
+
+	models := make([]Model, 0, len(rawModels))
+	seen := make(map[string]bool, len(rawModels))
+	for _, raw := range rawModels {
+		provider := strings.TrimSpace(raw.Provider)
+		modelID := strings.TrimSpace(raw.ID)
+		if provider == "" || modelID == "" {
+			continue
+		}
+		id := provider + "/" + modelID
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+
+		model := Model{
+			ID:       id,
+			Label:    id,
+			Provider: provider,
+			Default:  id == defaultID,
+			Thinking: piThinkingFromRPCModel(raw),
+		}
+		if model.Default && model.Thinking != nil && piThinkingSupports(model.Thinking, state.ThinkingLevel) {
+			model.Thinking.DefaultLevel = state.ThinkingLevel
+		}
+		models = append(models, model)
+	}
+	return models
+}
+
+// piThinkingFromRPCModel mirrors Pi's getSupportedThinkingLevels(model):
+// reasoning=false has no useful effort dial; off..high are available unless
+// explicitly mapped to null; xhigh/max require an explicit non-null mapping.
+func piThinkingFromRPCModel(model piRPCModel) *ModelThinking {
+	if !model.Reasoning {
+		return nil
+	}
+	levels := make([]ThinkingLevel, 0, len(piThinkingLevelOrder))
+	for _, value := range piThinkingLevelOrder {
+		mapped, present := model.ThinkingLevelMap[value]
+		if present && mapped == nil {
+			continue
+		}
+		if (value == "xhigh" || value == "max") && !present {
+			continue
+		}
+		levels = append(levels, ThinkingLevel{Value: value, Label: piThinkingLevelLabels[value]})
+	}
+	if len(levels) == 0 {
+		return nil
+	}
+	return &ModelThinking{SupportedLevels: levels}
+}
+
+func piThinkingSupports(thinking *ModelThinking, value string) bool {
+	if thinking == nil || value == "" {
+		return false
+	}
+	for _, level := range thinking.SupportedLevels {
+		if level.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+// discoverPiModelsTable runs the legacy human-readable catalog command.
+// Older pi versions print the list to stderr; newer versions use stdout. We
+// capture both and parse whichever is non-empty. The fallback intentionally
+// leaves Thinking nil because the table exposes only a yes/no capability bit.
+func discoverPiModelsTable(ctx context.Context, executablePath string) ([]Model, error) {
 	// Newer pi fetches its catalog from each configured provider over the
 	// network, so discovery time scales with provider count — a multi-provider
 	// setup measured ~4.6-4.8s, right at the old 5s cap. When jitter pushed it

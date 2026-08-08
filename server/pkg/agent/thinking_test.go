@@ -467,6 +467,12 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"opencode", "fast-mode", true},  // custom opencode.json variant names are valid
 		{"opencode", ".hidden", false},   // reject suspicious / malformed names server-side
 		{"opencode", "bad value", false}, // spaces are not valid variant names
+		{"pi", "", true},
+		{"pi", "off", true},
+		{"pi", "minimal", true},
+		{"pi", "max", true},
+		{"pi", "ultra", false},
+		{"pi", "future-level", false},
 		{"hermes", "", true},
 		{"hermes", "low", false}, // hermes' ACP surface exposes no effort dial
 		{"grok", "", true},
@@ -501,6 +507,7 @@ func TestThinkingControlSupported(t *testing.T) {
 		{"grok", true},
 		{"codex", true},    // dynamic catalog, validated per model by the daemon
 		{"opencode", true}, // dynamic variant names from opencode.json
+		{"pi", true},       // fixed tokens, per-model subset discovered over RPC
 		{"hermes", false},  // ACP adapter drops reasoning entirely (MUL-5770)
 		{"kimi", false},
 		{"qwenpaw", false},
@@ -521,7 +528,7 @@ func TestThinkingControlSupported(t *testing.T) {
 // reject a level while claiming the runtime supports one, or vice versa.
 func TestThinkingControlSupportedMatchesTokenGate(t *testing.T) {
 	t.Parallel()
-	providers := []string{"claude", "codebuddy", "grok", "codex", "opencode", "hermes", "kimi", "cursor"}
+	providers := []string{"claude", "codebuddy", "grok", "codex", "opencode", "pi", "hermes", "kimi", "cursor"}
 	// "medium" is in every fixed enum and is a well-formed dynamic token, so a
 	// provider with any reasoning control accepts it.
 	for _, provider := range providers {
@@ -556,6 +563,34 @@ func TestCodexAdvertisedLevelsArePersistable(t *testing.T) {
 // validator. Both the daemon's per-model guard and the server's API
 // layer call this; if it gets default-model wrong, any agent without an
 // explicit model set would have its thinking_level dropped silently.
+
+func TestValidateThinkingLevel_PiRPCPerModelCatalog(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake pi binary is a /bin/sh script")
+	}
+	fakePi := writeFakePiRPCModelsBinary(t)
+	ctx := context.Background()
+
+	check := func(model, value string, want bool) {
+		t.Helper()
+		ok, err := ValidateThinkingLevel(ctx, "pi", fakePi, model, value)
+		if err != nil {
+			t.Fatalf("ValidateThinkingLevel(pi, %q, %q): %v", model, value, err)
+		}
+		if ok != want {
+			t.Errorf("ValidateThinkingLevel(pi, %q, %q) = %v, want %v", model, value, ok, want)
+		}
+	}
+
+	check("openai-multi/gpt-5.6-sol", "high", true)
+	check("openai-multi/gpt-5.6-sol", "xhigh", false)
+	check("openai-multi/gpt-5.6-luna", "max", true)
+	check("openai-multi/gpt-5.6-luna", "medium", false)
+	check("openai-multi/plain-chat", "off", false)
+	check("", "max", true)     // current Pi model is Luna
+	check("", "medium", false) // Luna explicitly disables medium in the fixture
+	check("openai-multi/gpt-5.6-luna", "", true)
+}
 
 func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 	if runtime.GOOS == "windows" {
