@@ -473,6 +473,12 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"pi", "max", true},
 		{"pi", "ultra", false},
 		{"pi", "future-level", false},
+		{"kimi", "", true},
+		{"kimi", "low", true},
+		{"kimi", "max", true},
+		{"kimi", "future-level", true}, // exact support is checked against the daemon catalog
+		{"kimi", ".hidden", false},
+		{"kimi", "bad value", false},
 		{"hermes", "", true},
 		{"hermes", "low", false}, // hermes' ACP surface exposes no effort dial
 		{"grok", "", true},
@@ -509,7 +515,7 @@ func TestThinkingControlSupported(t *testing.T) {
 		{"opencode", true}, // dynamic variant names from opencode.json
 		{"pi", true},       // fixed tokens, per-model subset discovered over RPC
 		{"hermes", false},  // ACP adapter drops reasoning entirely (MUL-5770)
-		{"kimi", false},
+		{"kimi", true},     // dynamic catalog; ACP session/set_config_option applies it
 		{"qwenpaw", false},
 		{"", false},
 		{"not-a-runtime", false},

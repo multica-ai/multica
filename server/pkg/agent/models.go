@@ -121,10 +121,11 @@ const modelCacheTTL = 60 * time.Second
 // pi, openclaw) it shells out with caching and falls back where the
 // provider has a safe static catalog.
 //
-// For claude, codex, opencode, and pi, the catalog is augmented with per-model
-// thinking-level options discovered from the local CLI. Codex discovery
-// failures fall back to a model + thinking snapshot; providers without a safe
-// fallback leave Thinking nil, which makes the UI hide the thinking picker.
+// For claude, codex, opencode, pi, and kimi, the catalog is augmented with
+// per-model thinking-level options discovered from the local CLI. Codex
+// discovery failures fall back to a model + thinking snapshot; providers
+// without a safe fallback leave Thinking nil, which makes the UI hide the
+// thinking picker.
 //
 // executablePath lets the caller point at a non-default binary; pass
 // "" to use the provider's default name on PATH.
@@ -1151,21 +1152,262 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 	})
 }
 
-// discoverKimiModels spins up a throwaway `kimi acp` process and
-// drives the same minimal ACP handshake as Hermes to surface the
-// model catalog advertised by Kimi's `session/new` response. Kimi
-// ≤0.28 returns a `models` block (`availableModels`/`currentModelId`);
-// 0.29 moved the same catalog into `configOptions` (MUL-5239). The
-// shared parser accepts both, so the discovery path stays identical.
+// discoverKimiModels combines Kimi's ACP model catalog with the structured
+// per-model effort data from `kimi provider list --json`. The provider catalog
+// is the only authoritative source for per-model supportEfforts/defaultEffort,
+// because a session/new response only ever describes the single model that
+// session was created with.
 //
-// Failure modes (kimi missing, not logged in, config error) all
-// return an empty list so the UI falls back to manual entry.
+// Reading the effort catalog out of the session instead does not work, even
+// though Kimi (0.33.0) does refresh the thinking option after
+// session/set_model. The refreshed option arrives as a `session/update`
+// notification (`sessionUpdate: "config_option_update"`), and the requestACP
+// helper this file shares matches responses by id and drops notifications.
+// Consuming that notification would not be enough either: the option list Kimi
+// sends after switching to a low/high/max model still carries the previous
+// model's currentValue as a trailing entry (`[low, high, max, on]`), so using
+// it as a catalog would render a phantom level. supportEfforts has no such
+// residue.
+//
+// The ACP side is unchanged: Kimi ≤0.28 returns a `models` block
+// (`availableModels`/`currentModelId`) and 0.29 moved the same catalog into
+// `configOptions` (MUL-5239); the shared parser still accepts both, so the
+// discovery path stays identical. See parseACPConfigOptionModels.
+//
+// Effort selection is gated on the CLI build, because provider-list alone
+// cannot tell whether the runtime can act on what it advertises. Verified
+// against real binaries: 0.28.1 reports supportEfforts [low high max] for K3
+// exactly like 0.33.0 does, but its ACP only implements the on/off toggle, so
+// set_config_option("max") returns success while confirming "on". Gating on the
+// session's `thinking` config id cannot separate the two — 0.28.1 advertises
+// that id too. The version is the only honest signal, and the initialize
+// response already carries it, so this costs no extra process.
+//
+// Above that, support is decided per model and nothing else: a model that
+// provider-list does not list, or lists without efforts, keeps Thinking nil,
+// which hides the control for that model alone.
+//
+// Failure modes (kimi missing, not logged in, config error) return an empty
+// list so the UI falls back to manual entry.
 func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, error) {
-	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+	var acpVersion string
+	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:   "kimi",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kimi-discovery-",
+		inspectInit: func(initResult json.RawMessage) {
+			acpVersion = acpAgentInfoVersion(initResult)
+		},
 	})
+	if err != nil || len(models) == 0 {
+		return models, err
+	}
+	if !kimiSupportsThinkingEfforts(acpVersion) {
+		// Not an error and not worth a Warn: an older CLI still lists models and
+		// runs tasks, it just cannot be told which effort to use. Model discovery
+		// re-runs on every cache miss, so a Warn here would repeat forever.
+		slog.Debug("kimi CLI predates ACP effort selection; hiding thinking controls",
+			"detected_version", acpVersion,
+			"required_version", kimiMinThinkingEffortVersion,
+		)
+		return models, nil
+	}
+
+	perModel, err := discoverKimiProviderThinking(ctx, executablePath)
+	if err != nil {
+		// Do not include err or command output here: provider JSON can contain
+		// credentials. The fixed reason explains why thinking controls are hidden
+		// without leaking host or account data. Debug, not Warn: model discovery
+		// re-runs on every cache miss, so an older CLI would log this forever.
+		slog.Debug("kimi per-model thinking discovery unavailable; hiding thinking controls",
+			"reason", "provider_list_unavailable",
+		)
+		return models, nil
+	}
+	for i := range models {
+		if thinking, ok := perModel[models[i].ID]; ok {
+			models[i].Thinking = thinking
+		}
+	}
+	return models, nil
+}
+
+// kimiMinThinkingEffortVersion is the first Kimi Code CLI whose ACP surface
+// applies an effort level instead of a plain on/off toggle (upstream 0.29.0,
+// released 2026-07-22). Below it, `session/set_config_option` accepts
+// "low"/"high"/"max" without error and leaves the session on "on", so
+// advertising those levels would promise something the runtime cannot deliver.
+const kimiMinThinkingEffortVersion = "0.29.0"
+
+// kimiSupportsThinkingEfforts reports whether an ACP-reported Kimi version can
+// act on an effort level. An empty or unparsable version answers no: a build we
+// cannot identify (a fork, a wrapper, a future format) is not one we can
+// promise effort selection for, and hiding the picker only costs that build a
+// control it may not honour anyway. Tasks still run either way.
+func kimiSupportsThinkingEfforts(version string) bool {
+	detected, err := parseSemver(strings.TrimSpace(version))
+	if err != nil {
+		return false
+	}
+	minimum, err := parseSemver(kimiMinThinkingEffortVersion)
+	if err != nil {
+		return false
+	}
+	return !detected.lessThan(minimum)
+}
+
+// acpAgentInfoVersion pulls `agentInfo.version` out of an ACP initialize
+// result. ACP agents report their own build here (Kimi sends
+// {"name":"Kimi Code CLI","version":"0.33.0"}); an agent that omits it yields
+// "", which every caller must treat as "unknown", never as "new enough".
+func acpAgentInfoVersion(raw json.RawMessage) string {
+	var response struct {
+		AgentInfo struct {
+			Version string `json:"version"`
+		} `json:"agentInfo"`
+		AgentInfoSnake struct {
+			Version string `json:"version"`
+		} `json:"agent_info"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return ""
+	}
+	if version := strings.TrimSpace(response.AgentInfo.Version); version != "" {
+		return version
+	}
+	return strings.TrimSpace(response.AgentInfoSnake.Version)
+}
+
+func discoverKimiProviderThinking(ctx context.Context, executablePath string) (map[string]*ModelThinking, error) {
+	if executablePath == "" {
+		executablePath = "kimi"
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(runCtx, executablePath, "provider", "list", "--json")
+	hideAgentWindow(cmd)
+	cmd.Stderr = io.Discard
+	raw, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("kimi provider list: %w", err)
+	}
+	return parseKimiProviderThinking(raw)
+}
+
+type kimiProviderModel struct {
+	SupportEfforts      []string `json:"supportEfforts"`
+	SupportEffortsSnake []string `json:"support_efforts"`
+	DefaultEffort       string   `json:"defaultEffort"`
+	DefaultEffortSnake  string   `json:"default_effort"`
+}
+
+func parseKimiProviderThinking(raw []byte) (map[string]*ModelThinking, error) {
+	var response struct {
+		Models map[string]kimiProviderModel `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, fmt.Errorf("parse kimi provider catalog: %w", err)
+	}
+	if len(response.Models) == 0 {
+		return nil, fmt.Errorf("kimi provider catalog contained no models")
+	}
+
+	result := make(map[string]*ModelThinking, len(response.Models))
+	for modelID, model := range response.Models {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			continue
+		}
+		efforts := model.SupportEfforts
+		if len(efforts) == 0 {
+			efforts = model.SupportEffortsSnake
+		}
+		seen := make(map[string]bool, len(efforts))
+		levels := make([]ThinkingLevel, 0, len(efforts))
+		for _, rawEffort := range efforts {
+			effort := strings.TrimSpace(rawEffort)
+			if effort == "" || seen[effort] || !isValidDynamicThinkingValue(effort) {
+				continue
+			}
+			seen[effort] = true
+			levels = append(levels, ThinkingLevel{
+				Value: effort,
+				Label: kimiThinkingLabel(effort),
+			})
+		}
+		if len(levels) == 0 {
+			continue
+		}
+
+		defaultEffort := strings.TrimSpace(model.DefaultEffort)
+		if defaultEffort == "" {
+			defaultEffort = strings.TrimSpace(model.DefaultEffortSnake)
+		}
+		if !seen[defaultEffort] {
+			defaultEffort = ""
+		}
+		result[modelID] = &ModelThinking{
+			SupportedLevels: levels,
+			DefaultLevel:    defaultEffort,
+		}
+	}
+	return result, nil
+}
+
+func kimiThinkingLabel(value string) string {
+	switch value {
+	case "low":
+		return "Low"
+	case "medium":
+		return "Medium"
+	case "high":
+		return "High"
+	case "max":
+		return "Max"
+	default:
+		return strings.Title(value) //nolint:staticcheck
+	}
+}
+
+type acpConfigOptionState struct {
+	ID                string `json:"id"`
+	CurrentValue      string `json:"currentValue"`
+	CurrentValueSnake string `json:"current_value"`
+}
+
+// findACPConfigOption returns one exact config-id match from an ACP response.
+// Config ids are protocol identifiers, not display labels: category-only or
+// case-insensitive matches would advertise a control that execution cannot set.
+// Both camelCase and snake_case field spellings are accepted because ACP agents
+// in the wild emit both.
+func findACPConfigOption(raw json.RawMessage, configID string) (acpConfigOptionState, bool) {
+	var response struct {
+		ConfigOptions      []acpConfigOptionState `json:"configOptions"`
+		ConfigOptionsSnake []acpConfigOptionState `json:"config_options"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return acpConfigOptionState{}, false
+	}
+	options := append(response.ConfigOptions, response.ConfigOptionsSnake...)
+	for _, option := range options {
+		if option.ID == configID {
+			return option, true
+		}
+	}
+	return acpConfigOptionState{}, false
+}
+
+func acpConfigOptionCurrentValue(raw json.RawMessage, configID string) (string, bool) {
+	option, ok := findACPConfigOption(raw, configID)
+	if !ok {
+		return "", false
+	}
+	value := strings.TrimSpace(option.CurrentValue)
+	if value == "" {
+		value = strings.TrimSpace(option.CurrentValueSnake)
+	}
+	return value, value != ""
 }
 
 // discoverReasonixModels drives a short Reasonix ACP session and parses the
@@ -1271,6 +1513,13 @@ type acpDiscoveryProvider struct {
 	// ignores. CodeBuddy uses it to read its effort catalog out of the same
 	// handshake, which is why it needs no separate discovery call at all.
 	annotate func([]Model, json.RawMessage)
+	// inspectInit receives the raw initialize result before any session is
+	// created. It is for reading capability facts the handshake already
+	// carries — Kimi reads `agentInfo.version` to gate a feature on the CLI
+	// build — so a provider does not have to spend a second process asking the
+	// binary what it is. It cannot fail discovery: a provider that learns
+	// nothing useful here must degrade, not abort.
+	inspectInit func(json.RawMessage)
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
@@ -1409,6 +1658,9 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	})
 	if err != nil {
 		return fail("initialize", err)
+	}
+	if p.inspectInit != nil {
+		p.inspectInit(initResult)
 	}
 
 	// session/new requires a valid cwd — use a temp directory we
