@@ -26,6 +26,7 @@ interface TitleEditorProps {
   placeholder?: string;
   className?: string;
   autoFocus?: boolean;
+  required?: boolean;
   onSubmit?: () => void;
   /**
    * Fires on the configured `send` chord, independent of `onSubmit`'s plain
@@ -123,6 +124,7 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
       placeholder: placeholderText = "",
       className,
       autoFocus = false,
+      required = false,
       onSubmit,
       onSubmitShortcut,
       onBlur,
@@ -185,6 +187,7 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
           role: "textbox",
           "aria-multiline": "false",
           "aria-label": placeholderText || t(($) => $.title_editor.title_aria_label),
+          "aria-required": String(required),
         },
       },
       onUpdate: ({ editor: ed }) => {
