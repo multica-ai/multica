@@ -1722,9 +1722,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		} else {
 			skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
 			agentSkillCount = len(skills)
-			builtinSkills := h.TaskService.BuiltinSkills()
-			builtinSkillCount = len(builtinSkills)
-			skills = append(skills, builtinSkills...)
+			if runtime.Provider != platformExtensionProvider {
+				builtinSkills := h.TaskService.BuiltinSkills()
+				builtinSkillCount = len(builtinSkills)
+				skills = append(skills, builtinSkills...)
+			}
 			resp.Agent.Skills = skills
 		}
 	}

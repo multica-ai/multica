@@ -77,3 +77,80 @@ func TestClaimTaskByRuntimeForwardsPlatformRuntimeConfigRaw(t *testing.T) {
 		t.Fatalf("claim runtime_config = %#v, want %#v", got, want)
 	}
 }
+
+func TestClaimTaskByRuntimePlatformPreservesExactBoundSkills(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	for _, test := range []struct {
+		name                  string
+		provider              string
+		wantPlatformExactOnly bool
+	}{
+		{name: "platform", provider: platformExtensionProvider, wantPlatformExactOnly: true},
+		{name: "legacy", provider: "handler_test_runtime"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			runtimeID := createClaimReclaimRuntime(t, ctx, "Claim skill contract "+test.name)
+			if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET provider = $2 WHERE id = $1`, runtimeID, test.provider); err != nil {
+				t.Fatalf("set runtime provider: %v", err)
+			}
+			agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Claim skill contract "+test.name)
+
+			var skillID string
+			boundName := "claim-bound-" + test.name
+			if err := testPool.QueryRow(ctx, `
+				INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+				VALUES ($1, $2, 'bound skill', 'bound content', '{}'::jsonb, $3)
+				RETURNING id
+			`, testWorkspaceID, boundName, testUserID).Scan(&skillID); err != nil {
+				t.Fatalf("create bound skill: %v", err)
+			}
+			if _, err := testPool.Exec(ctx, `INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`, agentID, skillID); err != nil {
+				t.Fatalf("bind skill: %v", err)
+			}
+			t.Cleanup(func() {
+				testPool.Exec(ctx, `DELETE FROM agent_skill WHERE agent_id = $1 AND skill_id = $2`, agentID, skillID)
+				testPool.Exec(ctx, `DELETE FROM skill WHERE id = $1`, skillID)
+			})
+			seedQueuedIssueTask(t, ctx, agentID, runtimeID, issueID)
+
+			w := httptest.NewRecorder()
+			req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "claim-skill-contract-"+test.name)
+			req = withURLParam(req, "runtimeId", runtimeID)
+			testHandler.ClaimTaskByRuntime(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
+			}
+			var response struct {
+				Task *AgentTaskResponse `json:"task"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode claim: %v", err)
+			}
+			if response.Task == nil || response.Task.Agent == nil {
+				t.Fatalf("claim omitted task agent: %s", w.Body.String())
+			}
+			got := response.Task.Agent.Skills
+			if len(got) == 0 || got[0].ID != skillID || got[0].Name != boundName || got[0].Content != "bound content" {
+				t.Fatalf("bound skill changed or reordered: %+v", got)
+			}
+			if test.wantPlatformExactOnly {
+				if len(got) != 1 {
+					t.Fatalf("Platform claim skills = %+v, want exactly the bound Extension skill", got)
+				}
+				return
+			}
+
+			wantBuiltins := testHandler.TaskService.BuiltinSkills()
+			if len(wantBuiltins) == 0 {
+				t.Fatal("legacy regression fixture requires built-in skills")
+			}
+			if !reflect.DeepEqual(got[1:], wantBuiltins) {
+				t.Fatalf("legacy built-ins changed:\ngot=%+v\nwant=%+v", got[1:], wantBuiltins)
+			}
+		})
+	}
+}
