@@ -128,7 +128,8 @@
   "picker": {
     "no_project": "No project",
     "empty": "No projects yet",
-    "search_placeholder": "Search projects..."
+    "search_placeholder": "Search projects...",
+    "clear_aria": "Clear project"
   },
   "chip": {
     "fallback_label": "Project"

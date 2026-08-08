@@ -259,6 +259,7 @@ export function WecomAgentBindButton({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [botId, setBotId] = useState("");
   const [secret, setSecret] = useState("");
+  const [botName, setBotName] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const { data: listing } = useQuery({
@@ -298,6 +299,7 @@ export function WecomAgentBindButton({
     setDialogOpen(false);
     setBotId("");
     setSecret("");
+    setBotName("");
   }
 
   async function handleSubmit() {
@@ -306,12 +308,17 @@ export function WecomAgentBindButton({
     if (submitting || !agentId || !bot_id || !secretTrimmed) return;
     setSubmitting(true);
     try {
-      await api.registerWecomBYO(wsId, agentId, { bot_id, secret: secretTrimmed });
+      await api.registerWecomBYO(wsId, agentId, {
+        bot_id,
+        secret: secretTrimmed,
+        bot_name: botName.trim() || undefined,
+      });
       await qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
       toast.success(t(($) => $.wecom.byo_success_toast));
       setDialogOpen(false);
       setBotId("");
       setSecret("");
+      setBotName("");
     } catch (e) {
       // The server sends a stable `code` alongside the English sentence, so
       // the admin reads the failure in their own language. The sentence is
@@ -418,6 +425,25 @@ export function WecomAgentBindButton({
                 spellCheck={false}
                 disabled={submitting}
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="wecom-byo-bot-name">
+                {t(($) => $.wecom.byo_bot_name_label)}
+              </Label>
+              <Input
+                id="wecom-byo-bot-name"
+                data-testid="wecom-byo-bot-name"
+                value={botName}
+                onChange={(e) => setBotName(e.target.value)}
+                placeholder={t(($) => $.wecom.byo_bot_name_placeholder)}
+                autoComplete="off"
+                spellCheck={false}
+                disabled={submitting}
+              />
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.wecom.byo_bot_name_hint)}
+              </p>
             </div>
           </div>
 

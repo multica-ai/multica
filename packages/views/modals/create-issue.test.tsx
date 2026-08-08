@@ -999,9 +999,6 @@ describe("CreateIssueModal", () => {
     expect(onSwitchMode.mock.calls[0]?.[0]).toBeNull();
   });
 
-  // Manual → agent must forward the picked project so the new modal pins to
-  // the same target. Without this the agent panel re-seeds from its own
-  // persisted `lastProjectId` and silently routes the issue to a stale one.
   // Reporter scenario: backend rejects same-titled create with a 409 +
   // structured duplicate body. The user should land on a duplicate toast
   // pointing at the existing issue, not a generic "create failed" message.

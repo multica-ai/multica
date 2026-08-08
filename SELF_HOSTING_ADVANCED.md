@@ -425,6 +425,10 @@ NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
 ```
 
+> **`NEXT_PUBLIC_API_URL` and `REMOTE_API_URL` take the backend's origin — scheme + host (+ port) — and no path.** Write `https://api.example.com`, never `https://api.example.com/api`. The browser client appends its own prefixes, so a path is doubled: requests go to `/api/api/...` and every avatar, image and attachment resolves under `<your-path>/uploads/...`, which the backend does not serve — the app loads but data calls and images 404. A trailing `/api` is now stripped defensively, but any other path is kept, because a reverse proxy may legitimately mount the whole backend under a prefix.
+>
+> This bites on upgrade: before v0.4.10 `NEXT_PUBLIC_API_URL` was inert in the published images, so a wrong value sat in `.env` doing nothing. v0.4.10 wired it through, and the stale value took effect. If you upgraded and the UI loads but nothing else does, check this variable first, then recreate the frontend container (`docker compose ... up -d --force-recreate frontend`) so the new value is picked up.
+
 > **`COOKIE_DOMAIN` is required in this setup — omitting it breaks every write.** The web app authenticates with an HttpOnly `multica_auth` cookie plus a JS-readable `multica_csrf` cookie, and sends the CSRF value as an `X-CSRF-Token` header on every non-GET request. Both cookies are host-only unless `COOKIE_DOMAIN` is set, so a frontend on `app.example.com` cannot read a cookie issued by `api.example.com`. The header is then never sent and the backend rejects the request with `403 {"error":"CSRF validation failed"}` — while GET requests keep working, so the app renders but nothing can be created or edited.
 >
 > After changing `COOKIE_DOMAIN`, delete the existing `multica_auth` / `multica_csrf` cookies on **both** hosts and log in again. Stale host-only cookies otherwise sit alongside the new domain-scoped ones and the browser sends both.

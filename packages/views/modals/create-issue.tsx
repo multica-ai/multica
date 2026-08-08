@@ -81,7 +81,7 @@ import {
   parseWithFallback,
 } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { PillButton } from "../common/pill-button";
+import { ClearablePillButton, PillButton } from "../common/pill-button";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PropertyIcon } from "../common/property-icon";
 import {
@@ -208,6 +208,7 @@ export function ManualCreatePanel({
 }) {
   const { t } = useT("modals");
   const { t: tEditor } = useT("editor");
+  const { t: tProjects } = useT("projects");
   const router = useNavigation();
   const p = useWorkspacePaths();
   const workspaceName = useCurrentWorkspace()?.name;
@@ -943,7 +944,12 @@ export function ManualCreatePanel({
                 <ProjectPicker
                   projectId={projectId ?? null}
                   onUpdate={(u) => updateProject(u.project_id ?? undefined)}
-                  triggerRender={<PillButton />}
+                  triggerRender={
+                    <ClearablePillButton
+                      onClear={projectId ? () => updateProject(undefined) : undefined}
+                      clearLabel={tProjects(($) => $.picker.clear_aria)}
+                    />
+                  }
                   align="start"
                   open={fieldPickerOpen === "project" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}

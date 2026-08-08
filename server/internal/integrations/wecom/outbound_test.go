@@ -57,7 +57,7 @@ func newOutboundWithConn(t *testing.T, q outboundQueries) (*Outbound, pgtype.UUI
 	reg := newSendersRegistry()
 	instID := mustTestUUID(t)
 	conn := &recordingConn{}
-	reg.set(instID, newWSSender(conn, nil))
+	reg.set(instID, conn.autoAck(newWSSender(conn, nil)))
 	return NewOutbound(q, reg, slog.Default()), instID, conn
 }
 
