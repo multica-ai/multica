@@ -111,7 +111,7 @@
 **Files**
 
 - Add `server/internal/daemon/execenv/platform_agent_context.go` and tests.
-- Modify `execenv/execenv.go`, `context.go`, daemon `types.go`, claim response mapping, and `daemon.go` plumbing.
+- Modify `execenv/execenv.go`, `context.go`, and `daemon.go` plumbing; keep the existing raw `runtime_config` claim wire and add a regression test for it.
 
 **TDD cycle**
 
@@ -126,6 +126,7 @@
 **Files**
 
 - Add `packages/core/extensions/{index,types,schemas,queries,mutations}.ts` and tests.
+- Extend the shared `ApiClient` and its tests so Extension requests retain the existing auth, CSRF, workspace, client-identity, fallback-parse, and `ApiError` behavior.
 - Export the package from `packages/core/package.json`.
 
 **TDD cycle**
@@ -142,6 +143,7 @@
 - Add `packages/views/extensions` page and tests.
 - Add en, zh-Hans, ja, and ko `extensions.json`; update locale registries/types and package export.
 - Add `extensions()` to core paths/page registry, route icon mapping, sidebar Configure group, and related tests.
+- Reserve the `extensions` workspace slug and add `layout.nav.extensions` in all four existing locale files.
 - Add Desktop React Router route and Web Next.js page.
 
 **TDD cycle**
@@ -158,13 +160,16 @@
 - Raise Platform CLI minimum version in `server/pkg/agent/version.go` and update tests.
 - Extend `server/pkg/agent/platform_cli_integration_test.go`.
 - Rebuild the external CLI into `apps/desktop/resources/bin/platform-agent-cli` using the existing bundling script.
+- Make Desktop-owned Daemons default the bundled Runtime to Mock for this acceptance phase without overriding an explicit HTTP mode; pass the dev binary/mode through Turbo.
+- Add the external CLI six-target release/checksum build and teach Desktop smoke/release workflows to fetch a pinned artifact set before strict staging.
+- Harden staging and packaged-content tests to verify absolute regular executables, checksum, version, and target architecture.
 - Add `scripts/platform-extension-runtime-smoke.sh` if a reusable live harness is needed.
 
 **TDD cycle**
 
 1. Add a failing real-binary test that creates `AGENTS.md`, two Skills, and `.platform-agent/context.json`, executes through `agent.New("platform-agent-cli")`, and asserts context-aware output.
 2. Build with the pinned Go toolchain and verify `--version` and architecture.
-3. Run `PLATFORM_AGENT_CLI_INTEGRATION=1 go test ./pkg/agent -run 'PlatformCLIIntegration|PlatformAgent' -count=1` and Desktop bundling tests.
+3. Run `MULTICA_PLATFORM_AGENT_CLI_PATH=/absolute/path/to/platform-agent-cli MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration ./pkg/agent -run 'PlatformCLIIntegration|PlatformAgent' -count=1` and Desktop bundling tests.
 4. Commit CLI docs as `docs: document multica runtime integration`.
 5. Commit Multica changes as `test(runtime): cover imported extension execution`.
 
@@ -178,7 +183,7 @@
 **Acceptance cycle**
 
 1. Start the local server and Desktop Daemon with the bundled CLI; verify provider exactly `platform-agent-cli` and status Online.
-2. Import the real two-Agent/two-Skill/flow+runtime-Command fixture through the authenticated Import API used by the UI.
+2. Import a dedicated real two-Agent/two-Skill/flow+runtime-Command fixture through the authenticated Import API used by the UI.
 3. Verify one Release, one Squad, two Agents, two Skills, four bindings, correct leader/members, flow instructions, runtime Command sidecar source, and the same allocated Runtime on every Agent.
 4. Create/assign a real task to the imported Leader and wait for Daemon execution.
 5. Assert task completed and output includes Extension key/version, Agent key, `skills=2`, `commands=1`, and input.

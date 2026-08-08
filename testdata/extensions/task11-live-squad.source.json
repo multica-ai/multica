@@ -1,0 +1,79 @@
+{
+  "schema_version": "platform.extension/v1",
+  "extension": {
+    "key": "task11-live-squad",
+    "name": "Task11 Live Squad",
+    "version": "1.0.0",
+    "description": "Dedicated real Multica runtime acceptance squad.",
+    "instructions": "Complete the acceptance request with independently checked evidence."
+  },
+  "leader": "acceptance-leader",
+  "agents": [
+    {
+      "key": "acceptance-leader",
+      "name": "Acceptance Leader",
+      "description": "Owns the result and decides whether to delegate verification.",
+      "prompt": "Lead the acceptance task and return the verified final result."
+    },
+    {
+      "key": "acceptance-reviewer",
+      "name": "Acceptance Reviewer",
+      "description": "Independently checks runtime evidence and catches omissions.",
+      "prompt": "Review runtime evidence independently and report concrete findings."
+    }
+  ],
+  "skills": [
+    {
+      "key": "evidence-check",
+      "name": "Evidence Check",
+      "description": "Check evidence against explicit acceptance assertions.",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "content": "---\nname: evidence-check\ndescription: Check acceptance evidence.\n---\n\nVerify every claimed identifier, count, state, and output against the real runtime."
+        },
+        {
+          "path": "references/checklist.md",
+          "content": "# Checklist\n\nRequire runtime identity, native resource counts, sidecar context, and terminal task output."
+        }
+      ]
+    },
+    {
+      "key": "result-review",
+      "name": "Result Review",
+      "description": "Review the final result for completeness.",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "content": "---\nname: result-review\ndescription: Review the final acceptance result.\n---\n\nConfirm the final result includes every required Platform Extension runtime field."
+        }
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "name": "delegate.flow",
+      "description": "Runtime delegation policy.",
+      "content": "Delegate independent verification to the reviewer when useful.",
+      "metadata": {
+        "owner": "leader"
+      }
+    },
+    {
+      "name": "summarize",
+      "description": "Acceptance summary command.",
+      "content": "Return the final verified acceptance summary.",
+      "metadata": {
+        "format": "concise"
+      }
+    }
+  ],
+  "command_suffixes": {
+    "flow": [
+      ".flow"
+    ],
+    "tool": [
+      ".tool"
+    ]
+  }
+}
