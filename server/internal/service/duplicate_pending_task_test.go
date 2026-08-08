@@ -99,3 +99,60 @@ func TestEnqueueTaskForMentionCoalescesDuplicatePendingTask(t *testing.T) {
 		t.Fatalf("pending task count = %d, want exactly 1", n)
 	}
 }
+
+// TestEnqueueTaskForIssueCoalescesDuplicatePendingTask is the assignee-path
+// counterpart of the mention test above (#5914 follow-up). A concurrent
+// EnqueueTaskForIssue for the same (issue, assignee) that loses the race to an
+// existing pending task must return the typed ErrDuplicatePendingTask sentinel
+// — not a raw create-task error carrying the Postgres constraint name — and
+// must leave exactly one pending task behind. Before the fix this path logged
+// ERROR and wrapped the raw 23505 into "create task: %w", the exact leak the
+// mention path already fixed.
+func TestEnqueueTaskForIssueCoalescesDuplicatePendingTask(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, issueID := seedAttributionFixture(t, pool)
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+	})
+
+	issueStruct := db.Issue{
+		ID:           util.MustParseUUID(issueID),
+		AssigneeID:   util.MustParseUUID(agentID),
+		Priority:     "medium",
+		CreatorType:  "member",
+		CreatorID:    util.MustParseUUID(userID),
+		WorkspaceID:  util.MustParseUUID(workspaceID),
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+	}
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+
+	// First assignee enqueue creates the pending task.
+	if _, err := svc.EnqueueTaskForIssue(ctx, issueStruct); err != nil {
+		t.Fatalf("first EnqueueTaskForIssue: %v", err)
+	}
+
+	// Second enqueue for the same (issue, assignee) collides on the unique index.
+	_, err := svc.EnqueueTaskForIssue(ctx, issueStruct)
+	if !errors.Is(err, ErrDuplicatePendingTask) {
+		t.Fatalf("second EnqueueTaskForIssue: err = %v, want ErrDuplicatePendingTask", err)
+	}
+	// The returned error must NOT carry the raw Postgres constraint name or
+	// SQLSTATE — the exact leak the mention path already closed (#5914).
+	for _, leak := range []string{"idx_one_pending_task_per_issue_agent", "23505", "SQLSTATE", "duplicate key"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Fatalf("duplicate error leaked %q: %v", leak, err)
+		}
+	}
+
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued','dispatched')`,
+		issueID, agentID).Scan(&n); err != nil {
+		t.Fatalf("count pending tasks: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("pending task count = %d, want exactly 1", n)
+	}
+}
