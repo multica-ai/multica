@@ -114,6 +114,9 @@ func assertSnapshotEqual(t *testing.T, label string, want, got workdirSnapshot) 
 // pipeline (which would need a WorkspacesRoot, GC plumbing, etc.).
 func runPrepareLikeCycle(t *testing.T, workDir, envRoot, provider string, ctx TaskContextForEnv) {
 	t.Helper()
+	if provider == "platform-agent-cli" && ctx.PlatformAgentContext == nil {
+		ctx.PlatformAgentContext = validPlatformAgentContext("sidecar-round-trip")
+	}
 	manifest := &sidecarManifest{}
 	if err := writeContextFiles(workDir, provider, ctx, manifest); err != nil {
 		t.Fatalf("writeContextFiles(%s): %v", provider, err)
@@ -158,6 +161,7 @@ var allFileBasedProviders = []string{
 	"antigravity",
 	"qwen",
 	"qwenpaw",
+	"platform-agent-cli",
 }
 
 // TestPrepareThenCleanupSidecarsRoundTripEmptyWorkdir is the headline

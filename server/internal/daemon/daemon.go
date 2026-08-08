@@ -5696,6 +5696,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceContext:                 task.WorkspaceContext,
 		ConnectedApps:                    task.ConnectedApps,
 	}
+	if provider == "platform-agent-cli" {
+		if task.Agent == nil {
+			return TaskResult{}, fmt.Errorf("platform-agent-cli task has no agent payload")
+		}
+		platformContext, err := decodePlatformAgentRuntimeConfig(task.Agent.RuntimeConfig)
+		if err != nil {
+			return TaskResult{}, err
+		}
+		taskCtx.PlatformAgentContext = platformContext
+	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
 	// can't reclaim artifacts inside them mid-execution. We mark both the
@@ -5980,6 +5990,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
+		"MULTICA_RUNTIME_ID":   task.RuntimeID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
 		"TMPDIR":               taskTempDir,
 		"TMP":                  taskTempDir,

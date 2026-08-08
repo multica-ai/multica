@@ -118,13 +118,16 @@ type TaskContextForEnv struct {
 	AgentName                     string
 	AgentInstructions             string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills                   []SkillContextForEnv
-	DisabledRuntimeSkills         []RuntimeSkillRefForEnv
-	Repos                         []RepoContextForEnv     // workspace repos available for checkout
-	ProjectID                     string                  // active project for this task, when present
-	ProjectTitle                  string                  // human-readable project title
-	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
-	ProjectResources              []ProjectResourceForEnv // resources attached to the project
-	ChatSessionID                 string                  // non-empty for chat tasks
+	// PlatformAgentContext is the immutable Extension/Agent/Command snapshot
+	// written only for the platform-agent-cli provider.
+	PlatformAgentContext  *PlatformAgentContextForEnv
+	DisabledRuntimeSkills []RuntimeSkillRefForEnv
+	Repos                 []RepoContextForEnv     // workspace repos available for checkout
+	ProjectID             string                  // active project for this task, when present
+	ProjectTitle          string                  // human-readable project title
+	ProjectDescription    string                  // durable project-level context, rendered into the brief's Project Context section
+	ProjectResources      []ProjectResourceForEnv // resources attached to the project
+	ChatSessionID         string                  // non-empty for chat tasks
 	// ChatChannelType is the IM platform behind a chat session ("slack",
 	// "feishu", "wecom"); empty for a web/mobile chat. Any non-empty value
 	// means the reply leaves Multica for an external channel, so `multica
@@ -558,6 +561,10 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// case to avoid creating a stray manifest at the filesystem root.
 	manifest := &sidecarManifest{}
 	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task, manifest); err != nil {
+		if params.Provider == "platform-agent-cli" {
+			logger.Warn("execenv: refresh platform agent context failed; forcing fresh prepare", "error", err)
+			return nil
+		}
 		logger.Warn("execenv: refresh context files failed", "error", err)
 	}
 

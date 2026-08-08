@@ -144,6 +144,12 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // cloud-mode tasks whose envRoot is wiped wholesale by the GC loop — may
 // pass nil to skip the bookkeeping entirely.
 func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
+	if provider == "platform-agent-cli" {
+		if err := writePlatformAgentContext(workDir, ctx.PlatformAgentContext, manifest); err != nil {
+			return fmt.Errorf("platform agent context: %w", err)
+		}
+	}
+
 	if err := writeTaskContextMarker(workDir, ctx, manifest); err != nil {
 		return err
 	}
@@ -169,7 +175,7 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 		}
 	}
 
-	if len(ctx.AgentSkills) > 0 {
+	if len(ctx.AgentSkills) > 0 || provider == "platform-agent-cli" {
 		// Hermes materializes skills into its per-task HERMES_HOME/skills during
 		// Prepare (Hermes has no workspace-relative discovery), so it needs no
 		// workdir-local skills dir at all — skip the resolve too, to avoid
@@ -180,7 +186,7 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 				return fmt.Errorf("resolve skills dir: %w", err)
 			}
 			// Codex skills are written to codex-home in Prepare; skip here.
-			if provider != "codex" {
+			if provider != "codex" && len(ctx.AgentSkills) > 0 {
 				if err := writeSkillFiles(skillsDir, ctx.AgentSkills, manifest); err != nil {
 					return fmt.Errorf("write skill files: %w", err)
 				}
