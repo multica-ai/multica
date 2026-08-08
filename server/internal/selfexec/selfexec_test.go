@@ -115,6 +115,30 @@ func TestResolveWithRejectsInvalidFallback(t *testing.T) {
 	}
 }
 
+func TestIsEphemeralBuild(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "go run build", path: "/tmp/go-build2260624469/b001/exe/multica", want: true},
+		{name: "go test build", path: "/var/folders/x/T/go-build123/b001/daemon.test", want: true},
+		{name: "agent scoped TMPDIR", path: "/tmp/multica-task-abc/go-build99/b001/exe/multica", want: true},
+		{name: "windows separators", path: `C:\Users\dev\AppData\Local\Temp\go-build42\b001\exe\multica.exe`, want: true},
+		{name: "repo build output", path: "/src/multica/server/bin/multica", want: false},
+		{name: "homebrew install", path: "/opt/homebrew/bin/multica", want: false},
+		{name: "build cache root", path: "/Users/dev/Library/Caches/go-build/ab/abc-d", want: false},
+		{name: "unrelated prefix", path: "/src/go-builder/bin/multica", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsEphemeralBuild(tt.path); got != tt.want {
+				t.Fatalf("IsEphemeralBuild(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func writeTestExecutable(t *testing.T, dir, base string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {

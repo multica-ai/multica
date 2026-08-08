@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev dev-bootstrap dev-bootstrap-stop server daemon cli multica multica-bin build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -70,7 +70,7 @@ endef
 ##@ Help
 
 help: ## Show available make targets and common local workflows
-	@awk 'BEGIN {FS = ":.*## "; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nQuick start:\n  \033[36mmake dev\033[0m          Bootstrap the current checkout and start everything\n  \033[36mmake check\033[0m        Run the full local verification pipeline\n\nCheckout modes:\n  Main checkout uses \033[36m.env\033[0m\n  Worktrees use \033[36m.env.worktree\033[0m (generate with \033[36mmake worktree-env\033[0m)\n\n"} \
+	@awk 'BEGIN {FS = ":.*## "; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nQuick start:\n  \033[36mmake dev-bootstrap\033[0m  Clean checkout to a logged-in, daemon-attached environment\n  \033[36mmake dev\033[0m            Start backend + frontend only, in the foreground\n  \033[36mmake check\033[0m          Run the full local verification pipeline\n\nCheckout modes:\n  Main checkout uses \033[36m.env\033[0m\n  Worktrees use \033[36m.env.worktree\033[0m (generate with \033[36mmake worktree-env\033[0m)\n\n"} \
 		/^##@/ {printf "\n\033[1m%s\033[0m\n", substr($$0, 5); next} \
 		/^[a-zA-Z0-9_.-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -167,15 +167,19 @@ start: ## Start backend and frontend for the current checkout and run migrations
 	cd server && go run ./cmd/migrate up
 	@echo "Starting backend and frontend..."
 	@trap 'kill 0' EXIT; \
-		(cd server && go run ./cmd/server) & \
+		(cd server && go run -ldflags "-X main.commit=$(COMMIT)" ./cmd/server) & \
 		pnpm dev:web & \
 		wait
 
+# Stops LISTENERS only, and asks politely first. A bare `lsof -ti:PORT` also
+# matches every client connected to the port — the local daemon holds a
+# long-lived connection to the backend — so `kill -9` on that list took the
+# daemon down with the backend, silently. See scripts/port-guard.sh.
 stop: ## Stop backend and frontend processes for the current checkout
 	$(REQUIRE_ENV)
 	@echo "Stopping services..."
-	@-lsof -ti:$(PORT) | xargs kill -9 2>/dev/null
-	@-lsof -ti:$(FRONTEND_PORT) | xargs kill -9 2>/dev/null
+	@bash scripts/port-guard.sh stop $(PORT) backend
+	@bash scripts/port-guard.sh stop $(FRONTEND_PORT) frontend
 	@case "$(DATABASE_URL)" in \
 		""|*@localhost:*|*@localhost/*|*@127.0.0.1:*|*@127.0.0.1/*|*@\[::1\]:*|*@\[::1\]/*) \
 			echo "✓ App processes stopped. Shared PostgreSQL is still running on localhost:$(POSTGRES_PORT)." ;; \
@@ -252,14 +256,32 @@ check-worktree: ## Run the full verification pipeline for this worktree
 dev: ## Bootstrap this checkout end-to-end: create env if needed, ensure DB, migrate, start services
 	@bash scripts/dev.sh
 
+dev-bootstrap: ## Take this checkout to a logged-in, daemon-attached environment in one command
+	@bash scripts/dev-bootstrap.sh
+
+dev-bootstrap-stop: ## Stop everything `make dev-bootstrap` started (backend, frontend, daemon)
+	@bash scripts/dev-bootstrap.sh --stop
+
 server: ## Run only the Go server for the current checkout
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	cd server && go run ./cmd/server
 
-daemon: ## Restart the local agent daemon using the CLI's stored auth/session
-	@$(MAKE) multica MULTICA_ARGS="daemon restart --profile local"
+# The daemon must NOT run through `go run`. It records its own executable path
+# at startup and re-execs it for every task, and `go run` deletes that temp
+# binary as soon as the launcher exits — so a go-run daemon starts fine and then
+# fails every task with "no such file or directory". `daemon start` now refuses
+# such a binary outright; this target builds a real one first.
+DAEMON_ARGS ?= $(if $(strip $(MULTICA_ARGS)),$(MULTICA_ARGS),restart --profile local)
 
+daemon: multica-bin ## Run a daemon command from a built binary (ARGS, default: restart --profile local)
+	./server/bin/multica daemon $(DAEMON_ARGS)
+
+multica-bin: ## Build only the multica CLI into server/bin/multica
+	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
+
+# One-shot CLI commands are fine through `go run` (~2.4s warm). Long-lived
+# daemon processes are not — use `make daemon ARGS="..."` for those.
 cli: ## Run the multica CLI with ARGS or MULTICA_ARGS from source
 	@$(MAKE) multica MULTICA_ARGS="$(MULTICA_ARGS)"
 
@@ -270,9 +292,8 @@ VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
-build: ## Build the server, CLI, and migrate binaries into server/bin
+build: multica-bin ## Build the server, CLI, and migrate binaries into server/bin
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/server ./cmd/server
-	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
 	cd server && go build -o bin/migrate ./cmd/migrate
 
 test: ## Run Go tests after ensuring the target DB exists and migrations are applied

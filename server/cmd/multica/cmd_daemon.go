@@ -308,6 +308,31 @@ func requireDaemonAuth(profile string) error {
 	return nil
 }
 
+// requireDurableDaemonBinary rejects a daemon binary that the Go toolchain will
+// delete out from under the running daemon.
+//
+// The daemon records its own executable path at startup and re-execs it as the
+// execution-environment preparation helper for every task (see
+// daemon.defaultExecutionEnvironmentCommand). Launched through `go run`, that
+// path is a temp build that disappears as soon as the `go run` parent exits: the
+// daemon starts, registers, heartbeats — and then fails every task with
+// "fork/exec …/go-build…/exe/multica: no such file or directory", pointing
+// nowhere near the cause. Refuse at start, where the message can still explain
+// itself.
+func requireDurableDaemonBinary(exePath string) error {
+	if !selfexec.IsEphemeralBuild(exePath) {
+		return nil
+	}
+	return fmt.Errorf(
+		"daemon binary %s is a temporary `go run` build; Go deletes it when the launcher exits, "+
+			"so the daemon would start and then fail every task with \"no such file or directory\".\n"+
+			"Run the daemon from a built binary instead:\n"+
+			"  make daemon ARGS=\"start --profile <profile>\"   # builds server/bin/multica, then runs it\n"+
+			"  make multica-bin && server/bin/multica daemon start --profile <profile>",
+		exePath,
+	)
+}
+
 func runDaemonStart(cmd *cobra.Command, _ []string) error {
 	foreground, _ := cmd.Flags().GetBool("foreground")
 	if foreground {
@@ -341,6 +366,9 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	exePath, err := daemonExecutable()
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
+	}
+	if err := requireDurableDaemonBinary(exePath); err != nil {
+		return err
 	}
 
 	// Build child args: daemon start --foreground + forwarded flags.
@@ -666,6 +694,16 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 
 func runDaemonForeground(cmd *cobra.Command) error {
 	util.EnsureHiddenConsole()
+
+	// Also checked before spawning a background child, but this process is the
+	// one that records the helper path, so it verifies its own binary too —
+	// `daemon start --foreground` and any launcher that skips the parent path
+	// get the same fail-at-start guarantee.
+	if exePath, err := daemonExecutable(); err == nil {
+		if err := requireDurableDaemonBinary(exePath); err != nil {
+			return err
+		}
+	}
 
 	profile := resolveProfile(cmd)
 

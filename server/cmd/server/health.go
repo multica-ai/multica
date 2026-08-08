@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -36,6 +37,7 @@ type serverHealth struct {
 	cacheTTL           time.Duration
 	refreshMu          sync.Mutex
 	cache              atomic.Pointer[cachedReadiness]
+	identity           liveResponse
 }
 
 type cachedReadiness struct {
@@ -44,8 +46,17 @@ type cachedReadiness struct {
 	expiresAt  time.Time
 }
 
+// liveResponse identifies the process that answered, not just that something
+// did. Without this, restarting over a still-running instance is invisible: the
+// new process dies on the bind, the OLD one keeps serving, and /health returns
+// 200 throughout — so a caller can "verify" a restart and then keep testing the
+// previous build. StartedAt and PID make that provable; Commit names the build
+// (it stays "unknown" unless the binary was linked with -X main.commit).
 type liveResponse struct {
-	Status string `json:"status"`
+	Status    string `json:"status"`
+	Commit    string `json:"commit,omitempty"`
+	StartedAt string `json:"started_at,omitempty"`
+	PID       int    `json:"pid,omitempty"`
 }
 
 type readinessResponse struct {
@@ -58,6 +69,10 @@ type readinessChecks struct {
 	Migrations string `json:"migrations"`
 }
 
+// processStartedAt is fixed at package init, so /health reports when THIS
+// process came up regardless of how long wiring took.
+var processStartedAt = time.Now()
+
 func newServerHealth(pool *pgxpool.Pool) *serverHealth {
 	requiredMigrations, err := migrations.AllVersions()
 	return &serverHealth{
@@ -65,11 +80,18 @@ func newServerHealth(pool *pgxpool.Pool) *serverHealth {
 		requiredMigrations: requiredMigrations,
 		initErr:            err,
 		cacheTTL:           readinessCacheTTL,
+		// Rendered once: /health is on the hot path of every probe.
+		identity: liveResponse{
+			Status:    "ok",
+			Commit:    commit,
+			StartedAt: processStartedAt.UTC().Format(time.RFC3339),
+			PID:       os.Getpid(),
+		},
 	}
 }
 
 func (h *serverHealth) liveHandler(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, liveResponse{Status: "ok"})
+	writeJSON(w, http.StatusOK, h.identity)
 }
 
 func (h *serverHealth) readyHandler(w http.ResponseWriter, r *http.Request) {

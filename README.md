@@ -222,11 +222,16 @@ Contributors: start with the [Contributing Guide](CONTRIBUTING.md).
 **Prerequisites:** [Node.js](https://nodejs.org/) v20+, [pnpm](https://pnpm.io/) v10.28+, [Go](https://go.dev/) v1.26+, [Docker](https://www.docker.com/)
 
 ```bash
-make dev
+make dev-bootstrap
 ```
 
-`make dev` auto-detects your environment (main checkout or worktree), creates the env file,
-installs dependencies, sets up the database, runs migrations, and starts every service.
+`make dev-bootstrap` takes a clean checkout to a running environment you can log into: it
+auto-detects main checkout vs worktree, creates the env file, installs dependencies, sets up
+the database, runs migrations, starts every service, logs a dev user in, creates a workspace,
+and starts the local daemon — then prints the URL, the login, and the stop command
+(`make dev-bootstrap-stop`).
+
+Use `make dev` instead when you want only the backend and frontend, in the foreground.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, worktree support, testing, and
 troubleshooting. The iOS client lives in [`apps/mobile/`](apps/mobile/) — its

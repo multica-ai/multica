@@ -43,6 +43,14 @@ set +a
 # shellcheck disable=SC1091
 . scripts/local-env.sh
 
+# ---------- Port preflight ----------
+# Without this, starting over a running instance fails silently in the worst
+# possible way: the new processes die on the bind, the old ones keep serving,
+# and /health answers 200 the whole time — so the "restart" looks successful
+# while the previous build is still the one handling every request.
+bash scripts/port-guard.sh require-free "${PORT:-8080}" backend
+bash scripts/port-guard.sh require-free "${FRONTEND_PORT:-3000}" frontend
+
 # ---------- Install dependencies ----------
 if [ ! -d node_modules ]; then
   echo "==> Installing dependencies..."
@@ -63,6 +71,8 @@ echo "  Frontend: http://localhost:${FRONTEND_PORT:-3000}"
 echo ""
 
 trap 'kill 0' EXIT
-(cd server && go run ./cmd/server) &
+# Stamp the commit so /health can report which build is answering.
+COMMIT="$(git rev-parse --short HEAD 2> /dev/null || echo unknown)"
+(cd server && go run -ldflags "-X main.commit=${COMMIT}" ./cmd/server) &
 pnpm dev:web &
 wait

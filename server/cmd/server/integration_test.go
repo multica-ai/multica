@@ -215,10 +215,20 @@ func TestHealth(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var result map[string]string
-	json.NewDecoder(resp.Body).Decode(&result)
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
 	if result["status"] != "ok" {
-		t.Fatalf("expected status ok, got %s", result["status"])
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+	// Process identity: a caller must be able to tell WHICH process answered,
+	// otherwise a failed restart over a still-running instance reads as healthy.
+	if startedAt, _ := result["started_at"].(string); startedAt == "" {
+		t.Fatalf("expected started_at in health response, got %v", result)
+	}
+	if pid, _ := result["pid"].(float64); int(pid) != os.Getpid() {
+		t.Fatalf("expected pid %d in health response, got %v", os.Getpid(), result["pid"])
 	}
 }
 

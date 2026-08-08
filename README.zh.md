@@ -215,11 +215,15 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 **环境要求：**[Node.js](https://nodejs.org/) v20+、[pnpm](https://pnpm.io/) v10.28+、[Go](https://go.dev/) v1.26+、[Docker](https://www.docker.com/)
 
 ```bash
-make dev
+make dev-bootstrap
 ```
 
-`make dev` 会自己认出你在主 checkout 还是 worktree 里，然后创建 env 文件、装依赖、初始化数据库、
-跑迁移，最后把所有服务拉起来。
+`make dev-bootstrap` 一条命令把一个干净的 checkout 变成能直接登录进去用的环境：自己认出你在主
+checkout 还是 worktree 里，创建 env 文件、装依赖、初始化数据库、跑迁移、拉起所有服务，再帮你登录
+一个开发账号、建好 workspace、启动本地 daemon，最后把访问地址、登录方式和停止命令
+（`make dev-bootstrap-stop`）打印出来。
+
+只想在前台跑后端和前端的话，用 `make dev`。
 
 完整的开发流程、worktree 支持、测试和问题排查见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 iOS 客户端在 [`apps/mobile/`](apps/mobile/)，怎么编译装到自己 iPhone 上见它的

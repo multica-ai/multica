@@ -73,6 +73,8 @@ wait_for_port() {
 # Step 0: Ensure DB
 # --------------------------------------------------------------------------
 echo "==> Using env file: $ENV_FILE"
+echo "==> Verifying port guard (listener-only stop/preflight)..."
+bash scripts/port-guard.test.sh || { EXIT_CODE=1; exit 1; }
 echo "==> Checking PostgreSQL..."
 bash scripts/ensure-postgres.sh "$ENV_FILE"
 

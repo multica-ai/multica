@@ -76,11 +76,13 @@ Mobile is independent. It may import types and pure functions from `@multica/cor
 Use the repo scripts as the source of truth. Common commands:
 
 ```bash
-make dev              # auto-setup and start the app
+make dev-bootstrap    # clean checkout -> logged-in, daemon-attached environment
+make dev-bootstrap-stop
+make dev              # auto-setup and start backend + frontend (foreground)
 make start            # start backend + frontend
-make stop             # stop app processes for this checkout
+make stop             # stop the backend/frontend LISTENERS for this checkout
 make server           # run Go server only
-make daemon           # run local daemon
+make daemon           # build server/bin/multica, then run a daemon command via ARGS
 make test             # Go tests
 make sqlc             # regenerate sqlc code after SQL changes
 pnpm install
@@ -95,6 +97,8 @@ pnpm ui:add badge     # shadcn/Base UI component into packages/ui
 ```
 
 Worktrees share one PostgreSQL container and get isolated DB names/ports via `.env.worktree`. `make dev` auto-detects this. For manual setup use `make worktree-env`, `make setup-worktree`, and `make start-worktree`. `pnpm dev:desktop` additionally self-isolates per worktree (its own renderer port + app name) automatically, independent of `.env.worktree`.
+
+Never start a daemon through `go run` (`make cli ARGS="daemon start"`). It records its own executable path and re-execs it for every task, and `go run` deletes that binary when the launcher exits — the daemon then fails every task with `no such file or directory`. `daemon start` refuses such a binary; use `make daemon ARGS="..."` or `make dev-bootstrap`, which build `server/bin/multica` first.
 
 CI runs Node 22, Go 1.26.1, and a `pgvector/pgvector:pg17` PostgreSQL service.
 

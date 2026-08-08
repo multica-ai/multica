@@ -115,6 +115,18 @@ FORCE=1 make worktree-env
 From any checkout (main or worktree):
 
 ```bash
+make dev-bootstrap
+```
+
+This takes a clean checkout all the way to a usable environment: everything
+`make dev` does, plus a logged-in user, a workspace, a CLI profile, and a
+running daemon — then prints the URL, the login, and how to stop it. Stop it
+with `make dev-bootstrap-stop`. See
+[Full-Stack Isolated Testing](#full-stack-isolated-testing) for the details.
+
+If you only want backend + frontend in the foreground:
+
+```bash
 make dev
 ```
 
@@ -123,6 +135,8 @@ This single command:
 - auto-detects whether you're in a main checkout or a worktree
 - creates the appropriate env file (`.env` or `.env.worktree`) if it doesn't exist
 - checks that prerequisites (Node.js, pnpm, Go, Docker) are installed
+- refuses to start if the backend or frontend port is already served, instead of
+  dying on the bind while the old instance keeps answering
 - installs JavaScript dependencies
 - ensures the shared PostgreSQL container is running
 - creates the application database if it does not exist
@@ -263,12 +277,20 @@ make start
 make stop
 make check
 make dev
+make dev-bootstrap
+make dev-bootstrap-stop
 make test
 make migrate-up
 make migrate-down
 ```
 
-These generic targets require a valid env file in the current directory.
+These generic targets require a valid env file in the current directory
+(`make dev` and `make dev-bootstrap` create one if it is missing).
+
+`make stop` terminates only the processes **listening** on this checkout's
+backend and frontend ports, with `TERM` before `KILL`. It does not touch clients
+of those ports — notably the local daemon, which holds a long-lived connection
+to the backend and used to be killed along with it.
 
 ## How Database Creation Works
 
@@ -318,8 +340,13 @@ Notes:
 Run the local daemon:
 
 ```bash
-make daemon
+make daemon                                    # restart --profile local
+make daemon ARGS="start --profile my-profile"  # any daemon subcommand
 ```
+
+`make daemon` builds `server/bin/multica` first and runs the daemon from that
+binary — never through `go run`. See
+[Why the daemon must not run through `go run`](#why-the-daemon-must-not-run-through-go-run).
 
 The daemon authenticates using the CLI's stored token (`multica login`).
 It registers runtimes for all watched workspaces from the CLI config.
@@ -365,114 +392,71 @@ allocation.
 
 ### Start the Isolated Environment
 
-Run all steps from the worktree root (where the Makefile is).
-
-#### 1. Start backend, frontend, and database
+From the checkout root:
 
 ```bash
-make dev
+make dev-bootstrap
 ```
 
-Wait for the backend to be healthy:
+That is the whole flow. It runs, in order, the twelve steps that used to be
+manual — and where the order matters, it is the reason this is a script:
 
-```bash
-PORT=$(grep '^PORT=' .env.worktree 2>/dev/null || grep '^PORT=' .env | head -1 | cut -d= -f2)
-PORT=${PORT:-8080}
-SERVER="http://localhost:${PORT}"
+1. pins a durable `TMPDIR` (an agent's `TMPDIR` is deleted when its run ends)
+2. generates `.env` / `.env.worktree` with this directory's ports and database
+3. sets `MULTICA_DEV_VERIFICATION_CODE=888888` **before** the first launch, so
+   there is no start → edit → restart detour
+4. refuses to continue if either port is already served (see Troubleshooting)
+5. creates the database against `DATABASE_URL` rather than `docker exec`, which
+   is what makes it work when a native PostgreSQL owns 5432
+6. starts backend + frontend detached, in their own process group
+7. waits for `/health` and verifies the answering process is the one it started
+8. `send-code` once, `verify-code` once (retries lock the code out), then mints
+   a personal access token
+9. creates the workspace and marks onboarding complete
+10. writes `~/.multica/profiles/<profile>/config.json`
+11. builds `server/bin/multica` and starts the daemon from that binary
+12. prints the URL, the login, the profile, the logs, and the stop command
 
-for i in $(seq 1 30); do
-  curl -sf "$SERVER/health" > /dev/null 2>&1 && break
-  sleep 2
-done
-```
+Re-running it against an existing environment is safe: the env file, database,
+workspace, and profile are reused.
 
-#### 2. Create a test user and token (automated auth)
+Overrides, if you need them: `MULTICA_DEV_EMAIL`, `MULTICA_DEV_WORKSPACE_NAME`,
+`MULTICA_DEV_WORKSPACE_SLUG`, `MULTICA_DEV_TMPDIR`.
 
-For deterministic local automation, set `MULTICA_DEV_VERIFICATION_CODE=888888`
-in your env file before starting the backend:
+#### Why the daemon must not run through `go run`
 
-```bash
-curl -s -X POST "$SERVER/auth/send-code" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "dev@localhost"}'
+`make dev-bootstrap` builds `server/bin/multica` and starts the daemon from it,
+and `make daemon` does the same. This is not a preference.
 
-JWT=$(curl -s -X POST "$SERVER/auth/verify-code" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "dev@localhost", "code": "888888"}' | jq -r '.token')
+The daemon records its own executable path at startup and re-execs it as the
+execution-environment preparation helper for **every task**. Under `go run` that
+path is a temp build which the toolchain deletes as soon as the `go run` parent
+exits — so the daemon starts, registers, heartbeats, and then fails every task
+with `fork/exec /…/go-build…/exe/multica: no such file or directory`. `daemon
+start` now refuses such a binary up front rather than deferring the failure.
 
-PAT=$(curl -s -X POST "$SERVER/api/tokens" \
-  -H "Authorization: Bearer $JWT" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "auto-dev", "expires_in_days": 365}' | jq -r '.token')
-```
-
-#### 3. Create a workspace
-
-```bash
-WS=$(curl -s -X POST "$SERVER/api/workspaces" \
-  -H "Authorization: Bearer $PAT" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Dev", "slug": "dev"}' | jq -r '.id')
-```
-
-#### 4. Compute profile name and write CLI config
-
-```bash
-# Compute profile (see Dynamic Profile Naming above)
-WORKTREE_DIR="$(basename "$PWD")"
-SLUG="$(printf '%s' "$WORKTREE_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')"
-HASH="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
-OFFSET=$((HASH % 1000))
-PROFILE="dev-${SLUG}-${OFFSET}"
-
-FRONTEND_PORT=$(grep '^FRONTEND_PORT=' .env.worktree 2>/dev/null || grep '^FRONTEND_PORT=' .env | head -1 | cut -d= -f2)
-FRONTEND_PORT=${FRONTEND_PORT:-3000}
-
-CONFIG_DIR="$HOME/.multica/profiles/$PROFILE"
-mkdir -p "$CONFIG_DIR"
-
-cat > "$CONFIG_DIR/config.json" << EOF
-{
-  "server_url": "$SERVER",
-  "app_url": "http://localhost:${FRONTEND_PORT}",
-  "token": "$PAT",
-  "workspace_id": "$WS",
-  "watched_workspaces": [{"id": "$WS", "name": "Dev"}]
-}
-EOF
-```
-
-#### 5. Start the daemon from source
-
-```bash
-make cli ARGS="daemon start --profile $PROFILE"
-```
-
-The daemon runs from the current worktree's Go source, connecting to the
-local backend. Agent-executed `multica` commands automatically use the same
-binary (the daemon prepends its own directory to `PATH`).
+One-shot CLI commands through `make cli` (`go run`) are unaffected — nothing
+records a path that has to outlive the process.
 
 ### Stop the Isolated Environment
 
 ```bash
-# Compute profile (same formula)
-PROFILE="dev-$(printf '%s' "$(basename "$PWD")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')-$(( $(printf '%s' "$PWD" | cksum | awk '{print $1}') % 1000 ))"
+make dev-bootstrap-stop
+```
 
-# 1. Stop daemon
-make cli ARGS="daemon stop --profile $PROFILE"
+Stops the daemon, the backend, and the frontend. PostgreSQL, the database, the
+workspace, and the CLI profile are deliberately left in place — they are what
+makes the next `make dev-bootstrap` fast.
 
-# 2. Stop backend + frontend
-make stop            # main checkout
-make stop-worktree   # worktree checkout
+`make stop` / `make stop-worktree` stop only the backend and frontend listeners
+and deliberately leave a running daemon alive.
 
-# 3. (Optional) Stop shared PostgreSQL
-make db-down
+For a full reset:
 
-# 4. (Optional) Clean build artifacts
-make clean
-
-# 5. (Optional) Remove profile config
-rm -rf "$HOME/.multica/profiles/$PROFILE"
+```bash
+make db-reset                                  # drop + recreate this env's database
+make clean                                     # build artifacts
+rm -rf "$HOME/.multica/profiles/<profile>"     # CLI profile (printed by bootstrap)
 ```
 
 ### Desktop App Local Testing
@@ -606,6 +590,34 @@ make worktree-env
 make setup-worktree
 make start-worktree
 ```
+
+### Port Already in Use
+
+`make dev` / `make dev-bootstrap` refuse to start when the backend or frontend
+port already has a listener, and print which process owns it and when it
+started. Take the message literally — this is the failure that used to be
+invisible: the new process dies on the bind, the **old** one keeps serving, and
+`/health` answers 200 throughout, so a "restart" looks successful while the
+previous build handles every request.
+
+```bash
+make stop            # main checkout
+make stop-worktree   # worktree checkout
+```
+
+### Am I Talking to the Process I Just Started?
+
+`GET /health` identifies the process that answered:
+
+```console
+$ curl -s http://localhost:8080/health
+{"status":"ok","commit":"d09019cd9","started_at":"2026-08-07T08:30:04Z","pid":35518}
+```
+
+If `started_at` predates your restart, you are talking to a leftover instance —
+a 200 alone never proves otherwise. `commit` is populated by `make dev`,
+`make start`, and `make build`; it stays `unknown` for a bare
+`go run ./cmd/server`.
 
 ### App Stops but PostgreSQL Keeps Running
 

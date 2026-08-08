@@ -58,7 +58,10 @@ jobs:
               - 'scripts/install.ps1'
               - 'scripts/check.sh'
               - 'scripts/dev.sh'
+              - 'scripts/dev-bootstrap.sh'
               - 'scripts/local-env.sh'
+              - 'scripts/port-guard.sh'
+              - 'scripts/port-guard.test.sh'
               - '.env.example'
               - 'docker-compose.selfhost.yml'
               - 'docker-compose.selfhost.build.yml'
@@ -148,6 +151,13 @@ jobs:
       - name: Test self-host env derivation
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/selfhost-config.test.sh
+
+      # Pins the listener-only contract behind `make stop` and the `make dev`
+      # port preflight: a bare lsof lookup also matches CLIENTS of the port, so
+      # stopping the backend used to kill the daemon connected to it.
+      - name: Test port guard
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: bash scripts/port-guard.test.sh
 
       - name: Verify reserved-slugs.ts is up to date
         if: ${{ needs.changes.outputs.frontend == 'true' }}

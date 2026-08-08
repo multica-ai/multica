@@ -417,6 +417,46 @@ func TestDaemonStartBackgroundReportsEarlyChildExit(t *testing.T) {
 	}
 }
 
+// TestDaemonStartRejectsEphemeralGoRunBinary pins the fail-at-start contract
+// for `make cli ARGS="daemon start"`-style launches, where the daemon binary is
+// a `go run` temp build. The daemon would come up fine and then fail every task
+// with "fork/exec …/go-build…/exe/multica: no such file or directory" once Go
+// deleted the build directory, so start must refuse while it can still say why.
+func TestDaemonStartRejectsEphemeralGoRunBinary(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	goRunBin := filepath.Join(t.TempDir(), "go-build2260624469", "b001", "exe", "multica")
+	orig := daemonExecutable
+	daemonExecutable = func() (string, error) { return goRunBin, nil }
+	t.Cleanup(func() { daemonExecutable = orig })
+
+	const profile = "go-run-test"
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{Token: "mul_fake"}, profile); err != nil {
+		t.Fatalf("SaveCLIConfigForProfile: %v", err)
+	}
+
+	cmd := &cobra.Command{Use: "start"}
+	cmd.Flags().Bool("foreground", false, "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("server-url", "", "")
+	if err := cmd.Flags().Set("profile", profile); err != nil {
+		t.Fatalf("set profile flag: %v", err)
+	}
+
+	err := runDaemonStart(cmd, nil)
+	if err == nil {
+		t.Fatal("runDaemonStart() = nil, want refusal for a `go run` build")
+	}
+	for _, want := range []string{"go run", goRunBin, "make daemon"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want it to mention %q", err, want)
+		}
+	}
+	if _, statErr := os.Stat(daemonPIDPathForProfile(profile)); statErr == nil {
+		t.Fatal("start wrote a PID file; it must refuse before spawning anything")
+	}
+}
+
 // TestDaemonRestartUnauthenticatedFailsBeforeStopping pins the ordering that
 // makes `daemon restart` safe when the user is not logged in: the auth check
 // must run BEFORE the stop phase. Otherwise restart kills the running daemon
