@@ -96,9 +96,11 @@ describe("IssueChip", () => {
     ).not.toBeInTheDocument();
 
     const mention = screen.getByText("MUL-3405");
-    expect(mention).toHaveClass("issue-mention", "text-primary");
-    // One class per assertion: multi-argument `.not.toHaveClass` inverts an
-    // `every()`, so it passes when only one of the listed classes is absent.
+    // One class per assertion: multi-argument `.toHaveClass`/`.not.toHaveClass`
+    // inverts an `every()`, so it can pass when only one listed class matches.
+    expect(mention).toHaveClass("issue-mention");
+    expect(mention).toHaveClass("text-brand");
+    expect(mention).not.toHaveClass("text-primary");
     expect(mention).not.toHaveClass("border");
     expect(mention).not.toHaveClass("text-caption");
   });

@@ -53,7 +53,13 @@ const BASE_CLASS =
 // It also deliberately omits `min-w-0 truncate`, which the boxed variants need.
 // A bare identifier is short and should wrap with the sentence around it; an
 // ellipsis mid-prose would read as damage. Do not "restore" truncation here.
-const PLAIN_CLASS = "issue-mention text-primary hover:underline";
+//
+// Uses `text-brand` (the link color token, see prose.css `.rich-text-editor a`)
+// rather than `text-primary`: `--primary` is a solid FILL color for buttons
+// and is near-white in dark mode, which made this render indistinguishable
+// from surrounding prose. `--brand` is the token this codebase actually uses
+// for link-colored text.
+const PLAIN_CLASS = "issue-mention text-brand hover:underline";
 
 export function IssueChip({ issueId, fallbackLabel, variant = "full", className }: IssueChipProps) {
   const wsId = useWorkspaceId();
