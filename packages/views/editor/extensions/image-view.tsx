@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+// CEREBRO-PATCH(image-resize-controls): FIR-4699 Phase 5 — useRef for the figure.
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
@@ -10,6 +11,9 @@ import {
   Link as LinkIcon,
   Paperclip,
   Trash2,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -19,6 +23,8 @@ import { ZoomableImage, AttachmentChip } from "@multica/cerebro-ui";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(image-view-gallery): FIR-2710 — inline images join the surface image gallery.
 import { useGalleryImage } from "@multica/cerebro-attachments/views";
+// CEREBRO-PATCH(image-resize-controls): FIR-4699 Phase 5 — corner resize handles.
+import { ImageResizeControls } from "@multica/cerebro-editor-image";
 import { useT } from "../../i18n";
 import { useAttachmentDownloadResolver } from "../attachment-download-context";
 
@@ -70,6 +76,10 @@ function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps
   const alt = (node.attrs.alt as string) || "";
   const title = node.attrs.title as string | undefined;
   const uploading = node.attrs.uploading as boolean;
+  // CEREBRO-PATCH(image-resize-controls): FIR-4699 Phase 5 — inline size/align.
+  const widthPct = node.attrs.widthPct as number | null;
+  const align = node.attrs.align as string | null;
+  const figureRef = useRef<HTMLElement>(null);
   const { openByUrl } = useAttachmentDownloadResolver();
 
   const [lightbox, setLightbox] = useState(false);
@@ -125,6 +135,11 @@ function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps
     // CEREBRO-PATCH(image-view-gallery): FIR-2710 — register this image with the surface gallery via ref.
     <NodeViewWrapper className="image-node" ref={gallery.ref}>
       <figure
+        // CEREBRO-PATCH(image-resize-controls): FIR-4699 Phase 5 — width is a
+        // percentage of the text column; alignment rides a data- attribute.
+        ref={figureRef}
+        data-align={align || undefined}
+        style={widthPct ? { width: `${widthPct}%` } : undefined}
         className={cn(
           "image-figure",
           selected && isEditable && "image-selected",
@@ -139,6 +154,10 @@ function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps
           className={cn("image-content", uploading && "image-uploading")}
           draggable={false}
         />
+        {/* CEREBRO-PATCH(image-resize-controls): FIR-4699 Phase 5 — corner handles when selected. */}
+        {isEditable && selected && !uploading && (
+          <ImageResizeControls editor={editor} figureRef={figureRef} />
+        )}
         {!uploading && (
           <div
             className="image-toolbar"
@@ -158,6 +177,30 @@ function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps
             >
               <LinkIcon className="size-3.5" />
             </button>
+            {/* CEREBRO-PATCH(image-resize-controls): FIR-4699 Phase 5 — inline alignment. */}
+            {isEditable &&
+              (
+                [
+                  ["left", AlignLeft, "Align left"],
+                  ["center", AlignCenter, "Align center"],
+                  ["right", AlignRight, "Align right"],
+                ] as const
+              ).map(([value, Icon, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={cn(align === value && "image-toolbar-active")}
+                  onClick={() =>
+                    editor
+                      .chain()
+                      .setImageAlign(align === value ? null : value)
+                      .run()
+                  }
+                  title={label}
+                >
+                  <Icon className="size-3.5" />
+                </button>
+              ))}
             {isEditable && (
               <button
                 type="button"

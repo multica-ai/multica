@@ -1,6 +1,20 @@
 import Image from "@tiptap/extension-image";
+import type { CommandProps } from "@tiptap/core";
 import { ReactNodeViewRenderer, type ReactNodeViewProps } from "@tiptap/react";
 import type { ComponentType } from "react";
+
+declare module "@tiptap/core" {
+  interface Commands<ReturnType> {
+    cerebroImage: {
+      /** Set the inline width (percent of the text column); null clears it. */
+      setImageWidthPct: (widthPct: number | null) => ReturnType;
+      /** Set the inline alignment; null clears it. */
+      setImageAlign: (
+        align: "left" | "center" | "right" | null,
+      ) => ReturnType;
+    };
+  }
+}
 
 /**
  * Dependencies injected from `@multica/views`, which owns the React node view
@@ -99,6 +113,23 @@ export function createImageExtension(deps: ImageExtensionDeps) {
     },
     addNodeView() {
       return ReactNodeViewRenderer(imageView);
+    },
+    // Inline placement commands the resize handles and the floating image menu
+    // call. Both update the selected image in place; passing null clears the
+    // attribute so the image serialises back to plain `![alt](url)`.
+    addCommands() {
+      const name = this.name;
+      return {
+        ...this.parent?.(),
+        setImageWidthPct:
+          (widthPct: number | null) =>
+          ({ commands }: CommandProps) =>
+            commands.updateAttributes(name, { widthPct }),
+        setImageAlign:
+          (align: "left" | "center" | "right" | null) =>
+          ({ commands }: CommandProps) =>
+            commands.updateAttributes(name, { align }),
+      };
     },
     renderMarkdown: (node: { attrs?: Record<string, unknown> }) => {
       const src = (node.attrs?.src as string) || "";

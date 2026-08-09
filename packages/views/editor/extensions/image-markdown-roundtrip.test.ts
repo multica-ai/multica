@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
+import { ImageCaption } from "@multica/cerebro-editor-image";
 import { ImageExtension } from "./index";
 
 const IMAGE_URL = "https://cdn.example.com/screen.png";
@@ -17,6 +18,7 @@ function makeEditor() {
     extensions: [
       StarterKit,
       ImageExtension,
+      ImageCaption,
       Markdown.configure({ indentation: { style: "space", size: 3 } }),
     ],
   });
@@ -123,5 +125,31 @@ describe("ImageExtension inline resize round-trip (Phase 5)", () => {
     expect(out.trim()).toBe(IMAGE_MD);
     expect(out).not.toContain("<img");
     expect(out).not.toContain("data-width-pct");
+  });
+});
+
+describe("ImageCaption markdown round-trip (Phase 5)", () => {
+  const CAPTION_MD = `<figcaption>A caption</figcaption>`;
+
+  it("round-trips a caption as a <figcaption> block", () => {
+    const [out] = roundTripMany(CAPTION_MD, 1);
+    expect(out?.trim()).toBe(CAPTION_MD);
+  });
+
+  it("keeps a captioned image stable across repeated round-trips", () => {
+    const captioned = [
+      `<img src="${IMAGE_URL}" alt="screen" data-width-pct="55" data-align="center">`,
+      "",
+      CAPTION_MD,
+    ].join("\n");
+    const outputs = roundTripMany(captioned, 4);
+    expect(new Set(outputs).size).toBe(1);
+    expect(outputs[0]).toContain('data-width-pct="55"');
+    expect(outputs[0]).toContain(CAPTION_MD);
+  });
+
+  it("leaves an image with no caption free of any <figcaption>", () => {
+    const out = roundTripMany(IMAGE_MD, 1)[0] ?? "";
+    expect(out).not.toContain("figcaption");
   });
 });

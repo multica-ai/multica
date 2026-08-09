@@ -447,3 +447,54 @@
     height: 1.5rem;
   }
 }
+
+/* CEREBRO-PATCH(image-resize-css): FIR-4699 Phase 5 — inline image resize, align
+   and selection. Neutral by design: FIR-4028 reserves brand colour for three
+   places and a selection ring is not one, so the selected image uses a white
+   inner ring + a --foreground outer ring (a double outline that stays legible on
+   any photo), overriding attachment.css's brand outline. Width rides an inline
+   percentage set by the node view; alignment rides a data- attribute so it needs
+   no style attribute through the read-only sanitizer. */
+
+/* Selection: replace the brand outline with the neutral double ring. */
+.rich-text-editor .image-figure.image-selected .image-content {
+  outline: none;
+  box-shadow: 0 0 0 1px #fff, 0 0 0 3px var(--foreground);
+}
+
+/* Corner resize handles (shown only while the image is selected). */
+.rich-text-editor .image-resize-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border: 1px solid var(--foreground);
+  border-radius: 2px;
+  z-index: 2;
+}
+.rich-text-editor .image-resize-handle-nw { top: -5px; left: -5px; cursor: nwse-resize; }
+.rich-text-editor .image-resize-handle-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+.rich-text-editor .image-resize-handle-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+.rich-text-editor .image-resize-handle-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+
+/* Alignment: the figure is an inline-block inside the block .image-node wrapper,
+   so its horizontal placement is the wrapper's text-align. Default (no
+   data-align) stays centered via media.css. */
+.rich-text-editor .image-node:has(> .image-figure[data-align="left"]) { text-align: left; }
+.rich-text-editor .image-node:has(> .image-figure[data-align="right"]) { text-align: right; }
+.rich-text-editor .image-node:has(> .image-figure[data-align="center"]) { text-align: center; }
+
+/* Active alignment button in the hover toolbar. */
+.rich-text-editor .image-toolbar button.image-toolbar-active {
+  background: color-mix(in srgb, white 25%, transparent);
+}
+
+/* Caption below an inline image (FIR-4699 Phase 5). A separate block node, so it
+   sits under the figure in the flow; drawn in --muted-foreground, which the
+   contrast audit measured at 4.83:1 on --background (passes 4.5:1 for text). */
+.rich-text-editor figcaption.image-caption {
+  color: var(--muted-foreground);
+  font-size: 0.875em;
+  text-align: center;
+  margin-top: 0.25rem;
+}

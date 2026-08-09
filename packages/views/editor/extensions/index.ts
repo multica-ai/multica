@@ -26,8 +26,8 @@ import { common, createLowlight } from "lowlight";
 import Placeholder from "@tiptap/extension-placeholder";
 import Link from "@tiptap/extension-link";
 import Typography from "@tiptap/extension-typography";
-// CEREBRO-PATCH(editor-image-resize): FIR-4699 Phase 5 — image node factory.
-import { createImageExtension } from "@multica/cerebro-editor-image";
+// CEREBRO-PATCH(editor-image-resize): FIR-4699 Phase 5 — image node factory + caption node.
+import { createImageExtension, ImageCaption } from "@multica/cerebro-editor-image";
 import TaskItem from "@tiptap/extension-task-item"; // CEREBRO-PATCH(todo-list-editor): register editable task list nodes.
 import { TaskList } from "@tiptap/extension-list";
 import TableRow from "@tiptap/extension-table-row";
@@ -178,6 +178,8 @@ export function createEditorExtensions(
     // markdownPaste's handlePaste is a catch-all that returns true.
     LinkExtension,
     ImageExtension,
+    // CEREBRO-PATCH(editor-image-caption): FIR-4699 Phase 5 — editable <figcaption> below an inline image.
+    ImageCaption,
     TaskItem.configure({ nested: true }),
     Table.configure({ resizable: false }),
     TableRow,
