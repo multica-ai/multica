@@ -34,6 +34,10 @@ describe("cerebro feature flag grouping", () => {
     }
   });
 
+  it("ships the editor toolbar on", () => {
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_editor_toolbar).toBe(true);
+  });
+
   it("uses member override semantics by default", () => {
     expect(CEREBRO_FLAG_DEFAULTS.cerebro_member_override).toBe(true);
   });

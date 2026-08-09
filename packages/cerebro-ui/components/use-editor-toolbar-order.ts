@@ -5,46 +5,52 @@ import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import {
   EDITOR_TOOLBAR_ORDER_KEY,
-  readEditorToolbarOrder,
+  readEditorToolbarRow,
   type EditorToolbarActionId,
+  type EditorToolbarRow,
 } from "./editor-toolbar-preferences";
 
 export function useEditorToolbarOrder() {
   const user = useAuthStore((state) => state.user);
   const setUser = useAuthStore((state) => state.setUser);
-  const savedOrder = useMemo(
-    () =>
-      readEditorToolbarOrder(
-        user?.preferences?.[EDITOR_TOOLBAR_ORDER_KEY],
-      ),
+  const saved = useMemo(
+    () => readEditorToolbarRow(user?.preferences?.[EDITOR_TOOLBAR_ORDER_KEY]),
     [user?.preferences],
   );
-  const [optimisticOrder, setOptimisticOrder] =
-    useState<EditorToolbarActionId[] | null>(null);
+  const [optimistic, setOptimistic] = useState<EditorToolbarRow | null>(null);
 
   useEffect(() => {
-    setOptimisticOrder(null);
-  }, [savedOrder]);
+    setOptimistic(null);
+  }, [saved]);
 
-  const saveOrder = useCallback(
-    async (nextOrder: EditorToolbarActionId[]) => {
-      setOptimisticOrder(nextOrder);
+  const saveRow = useCallback(
+    async (next: EditorToolbarRow) => {
+      setOptimistic(next);
       try {
         const updated = await api.updateMyPreferences({
-          [EDITOR_TOOLBAR_ORDER_KEY]: nextOrder,
+          [EDITOR_TOOLBAR_ORDER_KEY]: next,
         });
         setUser(updated);
       } catch (error) {
-        setOptimisticOrder(null);
+        setOptimistic(null);
         throw error;
       }
     },
     [setUser],
   );
 
+  const row = optimistic ?? saved;
+
+  const saveOrder = useCallback(
+    (order: EditorToolbarActionId[]) => saveRow({ ...row, order }),
+    [row, saveRow],
+  );
+
   return {
-    order: optimisticOrder ?? savedOrder,
+    order: row.order,
+    hidden: row.hidden,
     saveOrder,
+    saveRow,
     canSave: Boolean(user),
   };
 }

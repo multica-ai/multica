@@ -5035,6 +5035,9 @@ importers:
 
   packages/cerebro-ui:
     dependencies:
+      '@multica/cerebro-app-kit':
+        specifier: workspace:*
+        version: link:../cerebro-app-kit
       '@multica/core':
         specifier: workspace:*
         version: link:../core

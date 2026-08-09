@@ -15,10 +15,15 @@ test.describe("FIR-4139 — the comment box floats next to the marked text", () 
 
   test.beforeEach(async ({ page }) => {
     api = await createTestApi();
+    // FIR-4028 put the formatting toolbar behind a flag, and this spec drives
+    // the toolbar's Comment button. Turn it on for this workspace rather than
+    // depending on the release default, which moves.
+    await api.setWorkspaceFeatureFlag("cerebro_editor_toolbar", true);
     await loginAsDefault(page);
   });
 
   test.afterEach(async () => {
+    await api.setWorkspaceFeatureFlag("cerebro_editor_toolbar", false);
     await api.cleanup();
   });
 

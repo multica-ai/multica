@@ -58,12 +58,31 @@ export const EditorImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps
 
 const FieldImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
   function FieldImageTray(
-    { defaultValue, onUpdate, onUploadFile, className, ...rest },
+    { defaultValue, onUpdate, onUploadFile, onEditorReady, className, ...rest },
     ref,
   ) {
     const innerRef = useRef<ContentEditorRef>(null);
     const onUpdateRef = useRef(onUpdate);
     onUpdateRef.current = onUpdate;
+
+    // `getMarkdown()` answers "" for every note while the inner editor has no
+    // live instance, so anything that persists during that window writes an
+    // empty body over real content. Track the instance rather than a
+    // "mounted once" flag: a remount destroys the editor and builds a new one,
+    // and only a live instance can be trusted to report the body.
+    const editorRef = useRef<Parameters<
+      NonNullable<ContentEditorProps["onEditorReady"]>
+    >[0] | null>(null);
+    const onEditorReadyRef = useRef(onEditorReady);
+    onEditorReadyRef.current = onEditorReady;
+    const handleEditorReady = useCallback<
+      NonNullable<ContentEditorProps["onEditorReady"]>
+    >((editor) => {
+      editorRef.current = editor;
+      onEditorReadyRef.current?.(editor);
+    }, []);
+    const editorIsLive = () =>
+      Boolean(editorRef.current && !editorRef.current.isDestroyed);
 
     const preview = useAttachmentPreview();
 
@@ -117,6 +136,10 @@ const FieldImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
         mountedRef.current = true;
         return;
       }
+      // The editor's own onUpdate always has a live instance behind it; this is
+      // the only path that can fire while there is none, and the body it would
+      // read then is "" regardless of what the note actually holds.
+      if (!editorIsLive()) return;
       emit();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [traySignature]);
@@ -261,6 +284,7 @@ const FieldImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
             onUpdate={handleUpdate}
             onUploadFile={onUploadFile}
             {...rest}
+            onEditorReady={handleEditorReady}
           />
           {dragOver && <FileDropOverlay />}
         </div>

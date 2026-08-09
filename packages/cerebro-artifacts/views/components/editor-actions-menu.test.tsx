@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { Pin, Trash2, MessageSquare } from "lucide-react";
+import { Pin, Trash2, MessageSquare, Type } from "lucide-react";
 
 import { EditorActionsMenu } from "./editor-actions-menu";
 
@@ -51,5 +51,50 @@ describe("EditorActionsMenu", () => {
     expect(
       screen.getByRole("button", { name: /actions/i }),
     ).toBeInTheDocument();
+  });
+
+  // FIR-4028 slice 8 — Text size leaves the action row for this menu, so the
+  // menu needs a choice item: one label, several mutually exclusive values.
+  it("keeps the trigger when the only surviving item is a choice", () => {
+    render(
+      <EditorActionsMenu
+        triggerLabel="Note actions"
+        items={[
+          {
+            key: "text-size",
+            label: "Text size",
+            icon: Type,
+            value: "1",
+            options: [
+              { value: "0", label: "Small" },
+              { value: "1", label: "Medium" },
+              { value: "2", label: "Large" },
+            ],
+            onValueChange: () => {},
+          },
+        ]}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /note actions/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("ignores a choice item that has no options, rather than rendering an empty submenu", () => {
+    const { container } = render(
+      <EditorActionsMenu
+        items={[
+          {
+            key: "text-size",
+            label: "Text size",
+            icon: Type,
+            value: "1",
+            options: [],
+            onValueChange: () => {},
+          },
+        ]}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
   });
 });

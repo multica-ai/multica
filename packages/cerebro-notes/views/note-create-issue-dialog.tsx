@@ -27,10 +27,15 @@ export function NoteCreateIssueDialog({
   note,
   open,
   onOpenChange,
+  seedText,
 }: {
   note: Note;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  // FIR-4028 slice 8 — opened from "Create issue from selection" in the
+  // editor's right-click menu: the selected text seeds the title and the
+  // description instead of the whole note.
+  seedText?: string | null;
 }) {
   const createIssue = useCreateIssue();
   const addReference = useAddNoteReference(note.id);
@@ -44,12 +49,18 @@ export function NoteCreateIssueDialog({
   // Re-seed the title from the note each time the dialog opens, so it tracks
   // edits the user made to the note since last time.
   React.useEffect(() => {
-    if (open) {
-      setTitle(firstLineTitle(note));
-      setUseNoteContent(true);
-      setDescription("");
+    if (!open) return;
+    const seed = seedText?.trim();
+    if (seed) {
+      setTitle(truncate(seed.split("\n")[0] ?? seed, 80));
+      setUseNoteContent(false);
+      setDescription(seed);
+      return;
     }
-  }, [open, note]);
+    setTitle(firstLineTitle(note));
+    setUseNoteContent(true);
+    setDescription("");
+  }, [open, note, seedText]);
 
   const handleCreate = async () => {
     const trimmed = title.trim();
@@ -96,7 +107,7 @@ export function NoteCreateIssueDialog({
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2 text-base">
             <ListPlus className="size-4" />
-            Create issue from note
+            {seedText?.trim() ? "Create issue from selection" : "Create issue from note"}
           </SheetTitle>
         </SheetHeader>
         <div className="flex flex-1 flex-col gap-4 py-4">

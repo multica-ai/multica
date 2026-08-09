@@ -4,7 +4,6 @@ import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Plus,
-  Search,
   Pin,
   Trash2,
   NotebookPen,
@@ -24,11 +23,10 @@ import {
   GitMerge,
   Users,
   PenLine,
-  Minus,
+  Type,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
-import { Badge } from "@multica/ui/components/ui/badge";
 import {
   Sheet,
   SheetContent,
@@ -43,6 +41,7 @@ import {
   EditorActionsMenu,
   EntityMetaHeader,
   FindReplaceBar,
+  FolderBreadcrumb,
   FolderMoveDialog,
   FolderSuggestionBanner,
   buildFolderChoices,
@@ -68,7 +67,10 @@ import {
   ReadonlyContent,
 } from "@multica/views/editor";
 import { EditorImageTray } from "@multica/cerebro-composer";
-import { EditorFormattingToolbar } from "@multica/cerebro-ui";
+import {
+  EditorContextMenu,
+  EditorFormattingToolbar,
+} from "@multica/cerebro-ui";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -104,6 +106,8 @@ import {
 import type { ArtifactFolder } from "@multica/core/types";
 import {
   NoteListSection,
+  NoteSearchField,
+  stepNoteId,
   NOTE_DND_TYPE,
   type OwnerInfo,
 } from "./note-list-section";
@@ -287,6 +291,17 @@ export function NotesPage({
   const pinned = visibleNotes.filter((n) => n.pinned);
   const rest = visibleNotes.filter((n) => !n.pinned);
 
+  // FIR-4028 slice 9: up and down walk the list in the order it is drawn —
+  // pinned first, then the rest — while the caret stays in the search field.
+  function stepSelection(delta: 1 | -1) {
+    const next = stepNoteId(
+      [...pinned, ...rest].map((n) => n.id),
+      selectedId,
+      delta,
+    );
+    if (next) setSelectedId(next);
+  }
+
   function dropNoteInFolder(noteId: string, folderId: string | null) {
     setNoteFolder.mutate({ id: noteId, folderId });
   }
@@ -408,6 +423,7 @@ export function NotesPage({
             searching={searching}
             search={search}
             onSearch={setSearch}
+            onStep={stepSelection}
             onNavigate={setFolderId}
             onDropNote={dropNoteInFolder}
           />
@@ -432,7 +448,7 @@ export function NotesPage({
                   myId={myId}
                   members={members}
                   folderNameById={folderNameById}
-                  currentFolderId={folderId}
+                  currentFolderId={searching ? null : folderId}
                   onMove={setMoveNote}
                 />
               )}
@@ -444,7 +460,10 @@ export function NotesPage({
                 myId={myId}
                 members={members}
                 folderNameById={folderNameById}
-                currentFolderId={folderId}
+                // While searching the list is flat across every folder, so the
+                // folder is information again rather than a repeat of where you
+                // are standing. FIR-4028 slice 9.
+                currentFolderId={searching ? null : folderId}
                 onMove={setMoveNote}
               />
             </>
@@ -465,6 +484,7 @@ export function NotesPage({
               note={selected}
               wsId={wsId}
               onBack={() => setSelectedId(null)}
+              onOpenFolder={setFolderId}
               initialCommentId={initialCommentForSelected}
             />
           ) : (
@@ -526,6 +546,7 @@ export function NotesPage({
   );
 }
 
+
 // FolderRail (TECH-3637): the navigable folder menu at the top of the notes
 // rail. It holds the note search, a breadcrumb of where you are, and the
 // subfolders of the current folder. Clicking a folder drills in (the list
@@ -539,6 +560,7 @@ function FolderRail({
   searching,
   search,
   onSearch,
+  onStep,
   onNavigate,
   onDropNote,
 }: {
@@ -548,6 +570,7 @@ function FolderRail({
   searching: boolean;
   search: string;
   onSearch: (v: string) => void;
+  onStep: (delta: 1 | -1) => void;
   onNavigate: (id: string | null) => void;
   onDropNote: (noteId: string, folderId: string | null) => void;
 }) {
@@ -633,16 +656,9 @@ function FolderRail({
   return (
     <div className="space-y-2 border-b p-2">
       {/* Search moved here from the top bar (TECH-3637): it's part of the
-          folder/list menu, and searches notes across every folder. */}
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(e) => onSearch(e.target.value)}
-          placeholder="Search notes…"
-          className="h-8 w-full pl-8"
-        />
-      </div>
+          folder/list menu, and searches notes across every folder. FIR-4028
+          slice 9: the arrow keys step through the results from inside it. */}
+      <NoteSearchField value={search} onChange={onSearch} onStep={onStep} />
 
       {/* Breadcrumb: All notes › Folder › Subfolder, each clickable to jump. */}
       <div className="flex flex-wrap items-center gap-0.5 px-0.5 text-[12px] text-muted-foreground">
@@ -808,11 +824,16 @@ export function NoteEditor({
   wsId,
   onBack,
   onOpenFull,
+  onOpenFolder,
   initialCommentId,
 }: {
   note: Note;
   wsId: string;
   onBack: () => void;
+  // FIR-4028 slice 8: a crumb in the folder path was clicked — scope the note
+  // list to that folder. Undefined where there is no list to scope (the inbox
+  // detail pane), and the path then renders as plain text.
+  onOpenFolder?: (folderId: string | null) => void;
   // TECH-3690: when set, renders an "Open full" button in the action bar that
   // jumps to the full Notes surface. Used when the editor is embedded in the
   // inbox detail pane; undefined on the full Notes page (already full).
@@ -832,6 +853,7 @@ export function NoteEditor({
   // exist because people could not write at the same time.
   const liveCollabEnabled = useFeatureFlag("cerebro_note_live_collab");
   const commentsEnabled = useFeatureFlag("cerebro_note_comments");
+  const editorToolbarEnabled = useFeatureFlag("cerebro_editor_toolbar");
   const versionsEnabled = useFeatureFlag("cerebro_note_versions");
   // FIR-2595 point 3: scope the note's @mention picker to people with access.
   const scopedMentions = useFeatureFlag("cerebro_note_scoped_mentions");
@@ -923,6 +945,9 @@ export function NoteEditor({
   // Add-reference + create-issue are launched from the "⋯" menu (TECH-3690).
   const [addRefOpen, setAddRefOpen] = React.useState(false);
   const [creatingIssue, setCreatingIssue] = React.useState(false);
+  // FIR-4028 slice 8 — "Create issue from selection" seeds the dialog with the
+  // selected text; the "..." menu entry seeds it with the whole note (null).
+  const [issueSeed, setIssueSeed] = React.useState<string | null>(null);
   const [editor, setEditor] = React.useState<Editor | null>(null);
   const [activeAnchorId, setActiveAnchorId] = React.useState<string | null>(null);
   const [draftQuote, setDraftQuote] = React.useState<string | null>(null);
@@ -1043,7 +1068,6 @@ export function NoteEditor({
     artifactFoldersOptions(wsId, { kind: "note" }),
   );
   const setNoteFolder = useSetNoteFolder();
-  const currentFolder = folders.find((f) => f.id === note.folder_id) ?? null;
   const [folderSearch, setFolderSearch] = React.useState("");
   const folderChoices = React.useMemo(() => {
     // Same depth-ordered, path-carrying list the shared move picker uses, so
@@ -1232,21 +1256,20 @@ export function NoteEditor({
           </Button>
         )}
 
-        {/* Folder first (request 4 — "folders must be on row 1"). Only the
-            owner may move a note; everyone else sees a read-only folder badge
+        {/* Folder first (request 4 — "folders must be on row 1"). FIR-4028
+            slice 8: the whole path, not just the innermost folder's name, and
+            each crumb scopes the note list to that folder. Only the owner may
+            move a note, so only the owner gets the chevron with the tree
             (FIR-1460, request 2). */}
-        {isOwner ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              nativeButton={false}
-              render={
-                <Badge variant="outline" className="cursor-pointer gap-1.5">
-                  <Folder className="size-3" />
-                  {currentFolder ? currentFolder.name : "No folder"}
-                </Badge>
-              }
-            />
-            <DropdownMenuContent align="start" className="w-56">
+        <FolderBreadcrumb
+          folders={folders}
+          folderId={note.folder_id}
+          rootLabel="All notes"
+          onOpenFolder={onOpenFolder}
+          className="shrink-0"
+        >
+          {isOwner && (
+            <>
               <div className="p-1" onKeyDown={(e) => e.stopPropagation()}>
                 <Input
                   value={folderSearch}
@@ -1270,14 +1293,9 @@ export function NoteEditor({
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : (
-          <Badge variant="outline" className="gap-1.5">
-            <Folder className="size-3" />
-            {currentFolder ? currentFolder.name : "No folder"}
-          </Badge>
-        )}
+            </>
+          )}
+        </FolderBreadcrumb>
 
 
         {/* Comments button: surfaces directly in the action bar so the count
@@ -1300,22 +1318,27 @@ export function NoteEditor({
           </Button>
         )}
 
-        <div className="flex items-center rounded-md border">
-          <Button size="icon-sm" variant="ghost" aria-label="Decrease note font size" disabled={fontScale === 0} onClick={() => changeFontScale((fontScale - 1) as 0 | 1 | 2)}>
-            <Minus className="size-3.5" />
-          </Button>
-          <span className="px-1 text-xs text-muted-foreground">Text</span>
-          <Button size="icon-sm" variant="ghost" aria-label="Increase note font size" disabled={fontScale === 2} onClick={() => changeFontScale((fontScale + 1) as 0 | 1 | 2)}>
-            <Plus className="size-3.5" />
-          </Button>
-        </div>
-
         {/* Everything else lives behind one shared "⋯" menu — the same
             component the Documents view uses (FIR-1647, request 5 + 6). */}
         <EditorActionsMenu
           triggerLabel="Note actions"
           className="ml-auto"
           items={[
+            // FIR-4028 slice 8 — Text size leaves the action row. It is a
+            // personal reading preference, not something about the note, and
+            // the row has no width to spare on a phone.
+            {
+              key: "text-size",
+              label: "Text size",
+              icon: Type,
+              value: String(fontScale),
+              options: [
+                { value: "0", label: "Small" },
+                { value: "1", label: "Medium" },
+                { value: "2", label: "Large" },
+              ],
+              onValueChange: (v) => changeFontScale(Number(v) as 0 | 1 | 2),
+            },
             // FIR-2595: Copy link — a shareable URL to this note. Available to
             // everyone, so anyone viewing a note can hand the link on.
             {
@@ -1356,7 +1379,10 @@ export function NoteEditor({
               key: "create-issue",
               label: "Create issue",
               icon: ListPlus,
-              onSelect: () => setCreatingIssue(true),
+              onSelect: () => {
+                setIssueSeed(null);
+                setCreatingIssue(true);
+              },
             },
             // FIR-1317: per-note conflict-merge toggle. Visible directly in the
             // note so any user can switch it on/off without touching workspace settings.
@@ -1438,8 +1464,6 @@ export function NoteEditor({
             issueId={note.issue_id}
             projectId={note.project_id}
           />
-
-          <NoteReferences noteId={note.id} />
 
           {/* FIR-2697 part 2 — a pending agent folder suggestion for this note.
               A note is an artifact, so it reuses the Documents banner. */}
@@ -1545,12 +1569,27 @@ export function NoteEditor({
                   <span>{presenceLabel(live.peers)}</span>
                 </div>
               )}
-              <EditorFormattingToolbar
+              {editorToolbarEnabled && (
+                <EditorFormattingToolbar
+                  editor={editor}
+                  onCommentOnSelection={
+                    commentsEnabled ? startCommentOnSelection : undefined
+                  }
+                />
+              )}
+              {/* FIR-4028 slice 8 — right-click on a selection leads with
+                  Comment. With nothing selected the browser's own menu opens
+                  instead; the block menu that belongs there is track B's, and
+                  its registration is track B's edit. */}
+              <EditorContextMenu
+                className="flex min-h-0 flex-1 flex-col"
                 editor={editor}
-                onCommentOnSelection={
-                  commentsEnabled ? startCommentOnSelection : undefined
-                }
-              />
+                onComment={commentsEnabled ? startCommentOnSelection : undefined}
+                onCreateIssue={(text) => {
+                  setIssueSeed(text);
+                  setCreatingIssue(true);
+                }}
+              >
               <EditorImageTray
                 key={`${note.id}:${replaceToken}`}
                 ref={editorRef}
@@ -1559,7 +1598,7 @@ export function NoteEditor({
                 onUploadFile={uploadWithToast}
                 onBlur={() => saveBody(editorRef.current?.getMarkdown() ?? "")}
                 onEditorReady={setEditor}
-                showBubbleMenu={false}
+                showBubbleMenu={!editorToolbarEnabled}
                 onCommentOnSelection={
                   commentsEnabled ? startCommentOnSelection : undefined
                 }
@@ -1568,18 +1607,23 @@ export function NoteEditor({
                 placeholder="Just start writing… (type “@” to mention a person, agent or issue)"
                 className="min-h-[50vh] flex-1"
               />
+              </EditorContextMenu>
             </div>
           )}
           </div>
           </div>
         </div>
 
-        {/* Heading navigation ("Oversigt") + word/character count, shared with
-            the Documents view (TECH-3637). Hidden below lg and when there are
-            <2 headings. */}
-        <div className="hidden shrink-0 overflow-auto py-6 pr-4 lg:block">
-          <DocumentToolsSidebar body={liveBody} contentRef={contentScrollRef} />
-        </div>
+        {/* Heading navigation + word/character count + References, shared with
+            the Documents view (TECH-3637). FIR-4028 slice 7: an edge-triggered
+            overlay on desktop (⌘⇧O or hover the pane's right edge) and the
+            existing Sheet on a phone — so it costs no writing width and the
+            References list stays reachable at every viewport. */}
+        <DocumentToolsSidebar
+          body={liveBody}
+          contentRef={contentScrollRef}
+          references={<NoteReferences noteId={note.id} />}
+        />
 
         {/* Desktop: comments as an inline side rail. FIR-2826 — wider default
             and drag-resizable via the handle on its left edge. */}
@@ -1666,6 +1710,7 @@ export function NoteEditor({
       />
       <NoteCreateIssueDialog
         note={note}
+        seedText={issueSeed}
         open={creatingIssue}
         onOpenChange={setCreatingIssue}
       />
@@ -1708,4 +1753,3 @@ export function NoteEditor({
     </div>
   );
 }
-

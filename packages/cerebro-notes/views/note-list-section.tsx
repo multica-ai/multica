@@ -1,14 +1,18 @@
 "use client";
 
+import * as React from "react";
 import {
   ArrowLeftRight,
   Folder,
+  ListChecks,
   MessageSquare,
   MoreHorizontal,
   Pin,
+  Search,
   User,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -44,6 +48,71 @@ export function previewBody(note: Note): string {
   // body rather than repeating the heading.
   const startsWithTitle = !note.title.trim() && lines.length > 0 ? 1 : 0;
   return lines.slice(startsWithTitle).join(" ") || "Empty note";
+}
+
+// FIR-4028 slice 9: a checklist is the one thing in a note body whose state a
+// row can show without opening it. Markdown task syntax only — a "- [ ]" line
+// written by the editor's task list or typed by hand.
+const TASK_LINE = /^\s*[-*]\s+\[[ xX]\]/gm;
+
+export function taskProgress(
+  note: Pick<Note, "body">,
+): { done: number; total: number } | null {
+  const items = note.body.match(TASK_LINE);
+  if (!items) return null;
+  return {
+    done: items.filter((line) => /\[[xX]\]/.test(line)).length,
+    total: items.length,
+  };
+}
+
+/**
+ * The note one step up or down the rendered list. Clamps at both ends rather
+ * than wrapping: an arrow key that silently jumps from the last note back to
+ * the first reads as a glitch, not as navigation.
+ */
+export function stepNoteId(
+  ids: string[],
+  currentId: string | null,
+  delta: 1 | -1,
+): string | null {
+  if (ids.length === 0) return null;
+  const at = currentId ? ids.indexOf(currentId) : -1;
+  if (at === -1) return ids[0]!;
+  const next = Math.min(Math.max(at + delta, 0), ids.length - 1);
+  return ids[next]!;
+}
+
+/**
+ * The note search field. Up and down walk the list from inside it, so a search
+ * and the note it found are one continuous movement — `preventDefault` keeps
+ * the caret where it is and focus never leaves the field.
+ */
+export function NoteSearchField({
+  value,
+  onChange,
+  onStep,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onStep: (delta: 1 | -1) => void;
+}) {
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+          e.preventDefault();
+          onStep(e.key === "ArrowDown" ? 1 : -1);
+        }}
+        placeholder="Search notes…"
+        className="h-8 w-full pl-8"
+      />
+    </div>
+  );
 }
 
 export function NoteListSection({
@@ -83,6 +152,48 @@ export function NoteListSection({
           n.folder_id && n.folder_id !== currentFolderId
             ? folderNameById.get(n.folder_id)
             : undefined;
+        const tasks = taskProgress(n);
+        // One list, joined by dots — each fact decides only whether it is worth
+        // showing, never which of the others came before it.
+        const facts = [
+          folderName && (
+            <>
+              <Folder className="size-3" />
+              <span className="max-w-[9rem] truncate">{folderName}</span>
+            </>
+          ),
+          // FIR-2595: per-note visibility ("Only you" / share) is removed —
+          // folders drive who can open and edit a note. Show the owner when it
+          // isn't you (FIR-1460, request 1).
+          n.owner_id && n.owner_id !== myId && (
+            <>
+              <User className="size-3" />
+              <span className="truncate">
+                {ownerName(n.owner_id, myId, members)}
+              </span>
+            </>
+          ),
+          // FIR-4028 slice 9: how much of the note's checklist is done.
+          tasks && (
+            <>
+              <ListChecks className="size-3" />
+              <span title={`${tasks.done} of ${tasks.total} tasks done`}>
+                {tasks.done}/{tasks.total}
+              </span>
+            </>
+          ),
+          // FIR-2145: comment count indicator — only shown when > 0.
+          n.comment_count > 0 && (
+            <>
+              <MessageSquare className="size-3" />
+              <span
+                title={`${n.comment_count} ${n.comment_count === 1 ? "comment" : "comments"}`}
+              >
+                {n.comment_count}
+              </span>
+            </>
+          ),
+        ].filter(Boolean);
         return (
           <div
             key={n.id}
@@ -108,34 +219,12 @@ export function NoteListSection({
                 {previewBody(n)}
               </div>
               <div className="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-                {folderName && (
-                  <>
-                    <Folder className="size-3" />
-                    <span className="max-w-[9rem] truncate">{folderName}</span>
-                  </>
-                )}
-                {/* FIR-2595: per-note visibility ("Only you" / share) is removed —
-                    folders drive who can open and edit a note. Show the owner when
-                    it isn't you (FIR-1460, request 1). */}
-                {n.owner_id && n.owner_id !== myId && (
-                  <>
-                    {folderName && <span className="opacity-50">·</span>}
-                    <User className="size-3" />
-                    <span className="truncate">
-                      {ownerName(n.owner_id, myId, members)}
-                    </span>
-                  </>
-                )}
-                {/* FIR-2145: comment count indicator — only shown when > 0. */}
-                {n.comment_count > 0 && (
-                  <>
-                    {(folderName || (n.owner_id && n.owner_id !== myId)) && (
-                      <span className="opacity-50">·</span>
-                    )}
-                    <MessageSquare className="size-3" />
-                    <span>{n.comment_count}</span>
-                  </>
-                )}
+                {facts.map((fact, i) => (
+                  <React.Fragment key={i}>
+                    {i > 0 && <span className="opacity-50">·</span>}
+                    {fact}
+                  </React.Fragment>
+                ))}
               </div>
             </button>
             {/* Sibling of the row button, never nested inside it. Always visible

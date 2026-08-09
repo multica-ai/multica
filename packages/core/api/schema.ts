@@ -1,5 +1,32 @@
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import { type Logger, noopLogger } from "../logger";
+
+// CEREBRO-PATCH(editor-toolbar-preference): accept legacy and expanded toolbar preference values.
+const EditorToolbarActionIdSchema = z.enum([
+  "bold",
+  "link",
+  "heading",
+  "highlight",
+  "taskList",
+  "comment",
+  "italic",
+  "strike",
+  "bulletList",
+  "orderedList",
+  "blockquote",
+  "code",
+  "indent",
+  "outdent",
+  "lists",
+]);
+
+export const EditorToolbarPreferenceSchema = z.union([
+  z.array(EditorToolbarActionIdSchema),
+  z.object({
+    order: z.array(EditorToolbarActionIdSchema),
+    hidden: z.array(EditorToolbarActionIdSchema),
+  }),
+]);
 
 // Module-level logger for schema warnings. Defaults to no-op so test
 // runs don't spam stderr; the platform layer wires a real logger via

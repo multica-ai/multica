@@ -15,6 +15,12 @@ const currentMember = vi.hoisted(() => ({
   userId: "user-1" as string | null,
   role: "member" as string | null,
 }));
+const featureFlags = vi.hoisted(() => ({ editorToolbar: false }));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: (key: string) =>
+    key === "cerebro_editor_toolbar" ? featureFlags.editorToolbar : false,
+}));
 
 vi.mock("@multica/cerebro-artifacts/core", () => ({
   artifactDetailOptions: (_wsId: string, id: string) => ({
@@ -129,6 +135,11 @@ vi.mock("@multica/cerebro-ui", () => ({
       {editor ? "Ready" : "Loading"}
     </div>
   ),
+  // FIR-4028 slice 8 — the right-click wrapper is a Base UI context menu; here
+  // it only has to render the editor it wraps.
+  EditorContextMenu: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="editor-context-menu">{children}</div>
+  ),
 }));
 
 import { DocumentViewPage } from "./document-view-page";
@@ -176,9 +187,18 @@ describe("DocumentViewPage markdown body", () => {
     navigationPush.mockClear();
     currentMember.userId = "user-1";
     currentMember.role = "member";
+    featureFlags.editorToolbar = false;
+  });
+
+  it("keeps selection formatting available when the editor toolbar flag is off", async () => {
+    renderPage(artifact());
+
+    expect(await screen.findByTestId("bubble-menu-setting")).toHaveTextContent("true");
+    expect(screen.queryByRole("toolbar", { name: "Formatting toolbar" })).not.toBeInTheDocument();
   });
 
   it("renders owned markdown documents as an inline editor and autosaves body changes", async () => {
+    featureFlags.editorToolbar = true;
     renderPage(artifact());
 
     expect(screen.getByLabelText("Markdown editor")).toHaveValue(

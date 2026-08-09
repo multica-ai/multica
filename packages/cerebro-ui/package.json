@@ -17,6 +17,7 @@
     "./hooks/use-nav-scroll-state": "./hooks/use-nav-scroll-state.ts"
   },
   "dependencies": {
+    "@multica/cerebro-app-kit": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@tanstack/react-query": "catalog:",

@@ -14,7 +14,9 @@ export { EditableTitle } from "./editable-title";
 export {
   EditorActionsMenu,
   type EditorActionItem,
+  type EditorActionChoice,
 } from "./editor-actions-menu";
+export { FolderBreadcrumb, folderPathChain } from "./folder-breadcrumb";
 export {
   EntityMetaHeader,
   formatDateTime,

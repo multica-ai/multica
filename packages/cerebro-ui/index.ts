@@ -28,7 +28,15 @@ export { AccessDiagnostics } from "./components/access-diagnostics";
 export { TaskAccessDisclosure } from "./components/task-access-disclosure";
 export {
   DEFAULT_EDITOR_TOOLBAR_ORDER,
+  EDITOR_TOOLBAR_LIST_TYPE_KEY,
   EDITOR_TOOLBAR_ORDER_KEY,
-  readEditorToolbarOrder,
+  readEditorToolbarRow,
   type EditorToolbarActionId,
+  type EditorToolbarRow,
 } from "./components/editor-toolbar-preferences";
+export {
+  EditorContextMenu,
+  buildEditorContextItems,
+  type EditorContextItem,
+  type EditorContextOption,
+} from "./components/editor-context-menu";

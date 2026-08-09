@@ -53,7 +53,10 @@ import { EntityMetaHeader } from "../components/entity-meta-header";
 import { FindReplaceBar } from "../components/find-replace-bar";
 import { FolderSuggestionBanner } from "../components/folder-suggestion-banner";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { EditorFormattingToolbar } from "@multica/cerebro-ui";
+import {
+  EditorContextMenu,
+  EditorFormattingToolbar,
+} from "@multica/cerebro-ui";
 import type { Artifact } from "@multica/core/types";
 
 // The live editor instance ContentEditor hands back via onEditorReady. Derived
@@ -159,6 +162,7 @@ function MarkdownDocumentEditor({
   value,
   remountToken,
   editor,
+  toolbarEnabled,
   onSave,
   onBodyChange,
   onEditorReady,
@@ -171,6 +175,7 @@ function MarkdownDocumentEditor({
   value: string;
   remountToken: number;
   editor: DocumentEditorInstance | null;
+  toolbarEnabled: boolean;
   onSave: (body: string) => Promise<void>;
   onBodyChange?: (body: string) => void;
   // FIR-1621 — same select-and-comment bridge the Notes editor uses. onEditorReady
@@ -247,10 +252,12 @@ function MarkdownDocumentEditor({
           )}
         </div>
       </div>
-      <EditorFormattingToolbar
-        editor={editor}
-        onCommentOnSelection={onCommentOnSelection}
-      />
+      {toolbarEnabled && (
+        <EditorFormattingToolbar
+          editor={editor}
+          onCommentOnSelection={onCommentOnSelection}
+        />
+      )}
       <div className="min-h-[65vh] bg-background px-4 py-4 md:px-6 md:py-5">
         <ContentEditor
           key={`${artifact.id}:${remountToken}`}
@@ -258,7 +265,7 @@ function MarkdownDocumentEditor({
           onUpdate={handleUpdate}
           onEditorReady={onEditorReady}
           onCommentOnSelection={onCommentOnSelection}
-          showBubbleMenu={false}
+          showBubbleMenu={!toolbarEnabled}
           debounceMs={800}
           placeholder="Just start writing…"
           // FIR-1621 — Documents are full-page surfaces, so the editor fills the
@@ -304,6 +311,7 @@ export function DocumentViewPage({
   // flag the Notes editor uses; the panel itself shows the agent-collaboration
   // controls only when cerebro_note_agent_collab is also on.
   const commentsEnabled = useFeatureFlag("cerebro_note_comments");
+  const editorToolbarEnabled = useFeatureFlag("cerebro_editor_toolbar");
   const agentCollabEnabled = useFeatureFlag("cerebro_note_agent_collab");
   const [showComments, setShowComments] = React.useState(false);
   // FIR-2697 — version history for this document (reuses the note version engine).
@@ -565,15 +573,6 @@ export function DocumentViewPage({
             document. Notes render the same banner with surface='note'. */}
         <FolderSuggestionBanner artifactId={artifact.id} canResolve={canEdit} />
 
-        {/* FIR-1621 (2.1) — couple this document/PDF/file to an issue or chat,
-            so its comments can be sent to that destination's agent. Same picker
-            as notes; available for every document kind. */}
-        {agentCollabEnabled && renderReferences && (
-          <div className="mt-3 max-w-xl">
-            {renderReferences({ artifactId: artifact.id })}
-          </div>
-        )}
-
         <div className="mt-6 flex gap-6">
           <div className="min-w-0 flex-1">
             {artifact.format === "md" && canEdit && findOpen && (
@@ -586,11 +585,22 @@ export function DocumentViewPage({
             )}
             <div ref={contentRef}>
               {artifact.format === "md" && canEdit ? (
+                // FIR-4028 slice 8 — the same right-click menu the Notes editor
+                // gets, so both surfaces behave alike. Documents have no
+                // "create issue from selection" path today, so that item is
+                // absent here rather than dead.
+                <EditorContextMenu
+                  editor={editor}
+                  onComment={
+                    commentsEnabled ? startCommentOnSelection : undefined
+                  }
+                >
                 <MarkdownDocumentEditor
                   artifact={artifact}
                   value={docBody || artifact.body}
                   remountToken={replaceToken}
                   editor={editor}
+                  toolbarEnabled={editorToolbarEnabled}
                   onSave={handleSaveMarkdownBody}
                   onBodyChange={setDocBody}
                   onEditorReady={handleEditorReady}
@@ -598,6 +608,7 @@ export function DocumentViewPage({
                     commentsEnabled ? startCommentOnSelection : undefined
                   }
                 />
+                </EditorContextMenu>
               ) : (
                 // FIR-3190 — readonly documents (tables, PDFs, etc.) were missing the
                 // same 70ch-cap override the editable path already applies above,
@@ -609,7 +620,21 @@ export function DocumentViewPage({
           {/* Desktop: comments as an inline side rail (FIR-1621), available for
               every document kind — not just markdown — so a PDF or uploaded file
               can be commented on too. Mobile uses a Sheet instead (below). */}
-          {commentsEnabled && renderComments && showComments && !isMobile ? (
+          {/* FIR-4028 slice 7 — the tools panel is an overlay now, so it no
+              longer competes with the comments rail for width and both can be
+              open at once. It also carries References (FIR-1621, 2.1): the
+              coupling picker every document kind gets, PDFs and uploads
+              included, which is why this renders for every format. */}
+          <DocumentToolsSidebar
+            body={artifact.format === "md" ? docBody || artifact.body : ""}
+            contentRef={contentRef}
+            references={
+              agentCollabEnabled && renderReferences
+                ? renderReferences({ artifactId: artifact.id })
+                : undefined
+            }
+          />
+          {commentsEnabled && renderComments && showComments && !isMobile && (
             <div className="w-80 shrink-0 border-l">
               {renderComments({
                 artifactId: artifact.id,
@@ -626,13 +651,6 @@ export function DocumentViewPage({
                 onClose: closeComments,
               })}
             </div>
-          ) : (
-            artifact.format === "md" && (
-              <DocumentToolsSidebar
-                body={docBody || artifact.body}
-                contentRef={contentRef}
-              />
-            )
           )}
         </div>
 

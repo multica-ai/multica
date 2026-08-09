@@ -53,6 +53,8 @@ export type CerebroFlagKey =
   // bold dot), and a channel is marked read on scrolling past, not on open.
   | "cerebro_channel_unread_smart"
   | "cerebro_notes"
+  // FIR-4028: rebuilt Notes/Documents formatting toolbar. Off until Phase 9.
+  | "cerebro_editor_toolbar"
   // FIR-2022: full-text search over notes/documents AND their comments, surfaced
   // as a dedicated "Notes" scope in the app's global search. The CLI/MCP search
   // tools call the same endpoint and are not gated by this flag; this flag only
@@ -506,6 +508,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // the Notes nav entry, quick-capture, the notes list/editor surface, and the
   // Notes box in the dynamic inbox.
   cerebro_notes: false,
+  // FIR-4028: ON. The formatting row above the editor, its settings screen and
+  // the keyboard-docked phone row. OFF restores the selection bubble menu.
+  cerebro_editor_toolbar: true,
   // FIR-1590: OFF until the folder access picker is QA'd on staging. Server
   // enforcement is always correct (folders default to "Whole team"); this flag
   // only gates the UI that lets a user restrict a folder.
@@ -1000,6 +1005,13 @@ export interface CerebroFlagDefinition {
  * the user within each group (see CEREBRO_FLAG_GROUPS for group order).
  */
 export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
+  {
+    key: "cerebro_editor_toolbar",
+    label: "Editor formatting toolbar",
+    group: "workspace",
+    description:
+      "Show the rebuilt formatting toolbar in Notes and Documents. Off keeps the toolbar hidden while the existing selection bubble menu remains available.",
+  },
   {
     key: "cerebro_service_tokens",
     label: "Service tokens",

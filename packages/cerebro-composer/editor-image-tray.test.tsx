@@ -21,11 +21,22 @@ const { innerUploadFile } = vi.hoisted(() => ({ innerUploadFile: vi.fn() }));
 vi.mock("@multica/views/editor", async () => {
   const react = await import("react");
   const ContentEditor = react.forwardRef(function ContentEditor(
-    props: { defaultValue?: string; onUpdate?: (md: string) => void },
+    props: {
+      defaultValue?: string;
+      onUpdate?: (md: string) => void;
+      onEditorReady?: (editor: unknown) => void;
+    },
     ref: React.Ref<unknown>,
   ) {
-    const { defaultValue = "", onUpdate } = props;
+    const { defaultValue = "", onUpdate, onEditorReady } = props;
     const contentRef = react.useRef(defaultValue);
+    // The real ContentEditor announces its editor instance once Tiptap has
+    // built it. EditorImageTray refuses to persist before that, so the stub has
+    // to make the same announcement or nothing is ever saved.
+    react.useEffect(() => {
+      onEditorReady?.({ isDestroyed: false });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     react.useImperativeHandle(ref, () => ({
       getMarkdown: () => contentRef.current,
       clearContent: () => {

@@ -43,6 +43,13 @@
   ],
   "flags": [
     {
+      "key": "cerebro_editor_toolbar",
+      "label": "Editor formatting toolbar",
+      "description": "Show the rebuilt formatting toolbar in Notes and Documents. Off keeps the toolbar hidden while the existing selection bubble menu remains available.",
+      "group": "workspace",
+      "default": true
+    },
+    {
       "key": "cerebro_service_tokens",
       "label": "Service tokens",
       "description": "Add a Service tokens section to Settings → Tokens: owners and admins mint workspace-bound, read-only, expiring and revocable API keys (msv_) for external systems and agents. Off disables management and every existing token immediately.",

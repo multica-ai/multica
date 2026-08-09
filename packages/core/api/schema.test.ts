@@ -669,3 +669,26 @@ describe("parseWithFallback", () => {
     expect(out).toBe(fallback);
   });
 });
+
+describe("EditorToolbarPreferenceSchema", () => {
+  it("accepts both the legacy array and new preference object", async () => {
+    const { EditorToolbarPreferenceSchema } = await import("./schema");
+
+    expect(EditorToolbarPreferenceSchema.safeParse(["bold"]).success).toBe(true);
+    expect(
+      EditorToolbarPreferenceSchema.safeParse({
+        order: ["bold", "lists"],
+        hidden: ["comment"],
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each([null, { order: null, hidden: [] }, { order: ["unknown"], hidden: [] }])(
+    "rejects malformed toolbar preference %j",
+    (value) => {
+      return import("./schema").then(({ EditorToolbarPreferenceSchema }) => {
+        expect(EditorToolbarPreferenceSchema.safeParse(value).success).toBe(false);
+      });
+    },
+  );
+});
