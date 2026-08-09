@@ -79,6 +79,37 @@ var rejectionErrCodes = map[int]struct{}{
 	40013: {}, // 不合法的CorpID — the identity half of the pair is not valid
 }
 
+// classifySubscribeAck turns a non-zero errcode on an aibot_subscribe ack into
+// one of the two sentinels above.
+//
+// Both readers of that ack go through here — this probe at install time, and
+// the channel's own handshake on every reconnect (wecom_channel.go). It is one
+// function rather than two copies of the same map lookup so the two cannot
+// give different answers to the same code: a 45009 throttle that is
+// "unverifiable, wait" at install time must not be "somebody go fix this
+// installation" on the connect path.
+//
+// log receives the codes we do not recognize; nil falls back to the default
+// logger.
+func classifySubscribeAck(log *slog.Logger, errCode int, errMsg string) error {
+	if _, rejected := rejectionErrCodes[errCode]; rejected {
+		// The one answer the admin can act on, and the only branch that
+		// blames their credentials.
+		return fmt.Errorf("%w (errcode %d: %s)", ErrCredentialsRejected, errCode, errMsg)
+	}
+	// Unknown non-zero: throttling, a platform-side failure, or a code WeCom
+	// added since. Fail closed rather than blame the secret. The raw pair is
+	// logged here so an operator can see it even if the caller only surfaces
+	// the sentinel, and carried on the error so the caller's own log line has
+	// it too.
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Warn("wecom: unrecognized subscribe errcode, treating as unverifiable",
+		"errcode", errCode, "errmsg", errMsg)
+	return fmt.Errorf("%w (subscribe returned errcode %d: %s)", ErrCredentialsUnverifiable, errCode, errMsg)
+}
+
 // credentialProbeTimeout bounds the whole probe. It has to cover a dial and
 // one round trip and nothing else, and it is spent with the admin watching a
 // spinner, so it is short. Sized off the connection's own two constants
@@ -162,19 +193,7 @@ func (p *handshakeProbe) Probe(ctx context.Context, botID, secret string) error 
 			continue
 		}
 		if env.ErrCode != 0 {
-			if _, rejected := rejectionErrCodes[env.ErrCode]; rejected {
-				// The one answer the admin can act on, and the only branch
-				// that blames their credentials.
-				return fmt.Errorf("%w (errcode %d: %s)", ErrCredentialsRejected, env.ErrCode, env.ErrMsg)
-			}
-			// Unknown non-zero: throttling, a platform-side failure, or a code
-			// WeCom added since. Fail closed rather than blame the secret. The
-			// raw pair is logged here so an operator can see it even if the
-			// caller only surfaces the sentinel, and carried on the error so
-			// the handler's own log line has it too.
-			slog.Warn("wecom credential probe: unrecognized subscribe errcode, treating as unverifiable",
-				"errcode", env.ErrCode, "errmsg", env.ErrMsg)
-			return fmt.Errorf("%w (subscribe returned errcode %d: %s)", ErrCredentialsUnverifiable, env.ErrCode, env.ErrMsg)
+			return classifySubscribeAck(slog.Default(), env.ErrCode, env.ErrMsg)
 		}
 		return nil
 	}

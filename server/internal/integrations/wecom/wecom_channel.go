@@ -317,19 +317,19 @@ func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 // not quietly discard the messages it could not reach.
 const callbackQueueDepth = 64
 
-// errSubscribeRejected marks a handshake the server refused on its merits —
-// bad credentials, a bot that no longer exists, a bot whose long connection is
-// off. It is separated from every other connection failure because only this
-// one needs a person: it repeats identically on every backoff until somebody
-// fixes the installation, while a dial failure or a timeout usually recovers
-// on its own. An operator watching one number cannot tell "our network
-// blipped" from "this tenant's bot has been broken since Tuesday".
-var errSubscribeRejected = errors.New("wecom: subscribe rejected")
-
 // subscribe sends the aibot_subscribe frame and waits (up to
 // subscribeTimeout) for the server's ack. The ack shape is a frame with
-// echoed headers.req_id + errcode; errcode == 0 means good, anything else
-// is fatal (bad credentials / bot doesn't exist).
+// echoed headers.req_id + errcode; errcode == 0 means good.
+//
+// A non-zero errcode goes through classifySubscribeAck — the same function the
+// install-time credential probe uses on the same ack, so the two cannot answer
+// the same code differently. 40001 / 40013 come back as ErrCredentialsRejected:
+// the refusal that repeats identically on every backoff until somebody fixes
+// the installation. Every other non-zero code is ErrCredentialsUnverifiable,
+// because a throttle (45009, 45033) or a platform-side failure clears on its
+// own, and counting one as a credential failure would page an operator about a
+// tenant whose bot is fine. Both sentinels are exported, so channel/engine —
+// which is what receives this error out of Connect() — can branch on them.
 func (c *wecomChannel) subscribe(ctx context.Context, conn wsConn, sender *wsSender, log *slog.Logger) error {
 	reqID := newReqID()
 	if err := sender.write(map[string]any{
@@ -369,7 +369,7 @@ func (c *wecomChannel) subscribe(ctx context.Context, conn wsConn, sender *wsSen
 			continue
 		}
 		if env.ErrCode != 0 {
-			return fmt.Errorf("%w: errcode=%d errmsg=%s", errSubscribeRejected, env.ErrCode, env.ErrMsg)
+			return classifySubscribeAck(log, env.ErrCode, env.ErrMsg)
 		}
 		return nil
 	}
