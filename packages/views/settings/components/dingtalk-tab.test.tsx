@@ -20,8 +20,18 @@ const installationsRef = vi.hoisted(() => ({
     install_supported: true,
   },
 }));
+const agentsRef = vi.hoisted(() => ({
+  current: [
+    { id: "agent-1", name: "Agent One", archived_at: null },
+    { id: "agent-2", name: "Agent Two", archived_at: null },
+  ],
+}));
+const groupRoutesRef = vi.hoisted(() => ({
+  current: { routes: [] as unknown[] },
+}));
 const mockRegisterBYO = vi.hoisted(() => vi.fn());
 const mockDeleteInstallation = vi.hoisted(() => vi.fn());
+const mockUpdateGroupRoute = vi.hoisted(() => vi.fn());
 const mockOpenExternal = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
 
@@ -30,6 +40,8 @@ vi.mock("@tanstack/react-query", () => ({
     if (opts.enabled === false) return { data: undefined, isLoading: false };
     const key = JSON.stringify(opts.queryKey);
     if (key.includes("members")) return { data: membersRef.current, isLoading: false };
+    if (key.includes("agents")) return { data: agentsRef.current, isLoading: false };
+    if (key.includes("group-routes")) return { data: groupRoutesRef.current, isLoading: false };
     if (key.includes("installations")) return { data: installationsRef.current, isLoading: false };
     return { data: undefined, isLoading: false };
   },
@@ -41,6 +53,7 @@ vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"], queryFn: vi.fn() }),
+  agentListOptions: () => ({ queryKey: ["agents"], queryFn: vi.fn() }),
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
@@ -65,13 +78,21 @@ vi.mock("@multica/core/dingtalk", () => ({
     queryKey: ["dingtalk", "installations"],
     queryFn: vi.fn(),
   }),
-  dingtalkKeys: { installations: (wsId: string) => ["dingtalk", "installations", wsId] },
+  dingtalkGroupRoutesOptions: () => ({
+    queryKey: ["dingtalk", "group-routes"],
+    queryFn: vi.fn(),
+  }),
+  dingtalkKeys: {
+    installations: (wsId: string) => ["dingtalk", "installations", wsId],
+    groupRoutes: (wsId: string) => ["dingtalk", "group-routes", wsId],
+  },
 }));
 
 vi.mock("@multica/core/api", () => ({
   api: {
     registerDingTalkBYO: mockRegisterBYO,
     deleteDingTalkInstallation: mockDeleteInstallation,
+    updateDingTalkGroupRoute: mockUpdateGroupRoute,
   },
 }));
 
@@ -108,6 +129,7 @@ function resetFixtures() {
   vi.clearAllMocks();
   membersRef.current = [{ user_id: "user-1", role: "owner" }];
   installationsRef.current = { installations: [], configured: true, install_supported: true };
+  groupRoutesRef.current = { routes: [] };
 }
 
 describe("DingTalkAgentBindButton", () => {
@@ -206,5 +228,26 @@ describe("DingTalkTab", () => {
     };
     renderUI(<DingTalkTab />);
     expect(screen.queryByText(/Invalid Date/i)).toBeNull();
+  });
+
+  it("lists a discovered group with its fixed Agent", () => {
+    installationsRef.current = {
+      installations: [{ id: "i1", agent_id: "agent-1", status: "active" }],
+      configured: true,
+      install_supported: true,
+    };
+    groupRoutesRef.current = {
+      routes: [{
+        id: "route-1",
+        installation_id: "i1",
+        conversation_id: "cid-platform",
+        conversation_title: "Platform team",
+        agent_id: "agent-2",
+      }],
+    };
+    renderUI(<DingTalkTab />);
+    expect(screen.getByText("Platform team")).toBeTruthy();
+    expect(screen.getByText("cid-platform")).toBeTruthy();
+    expect(screen.getByText("Agent Two")).toBeTruthy();
   });
 });

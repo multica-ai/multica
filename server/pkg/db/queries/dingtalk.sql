@@ -2,6 +2,123 @@
 -- tables are shared, but these replacement semantics belong to DingTalk's BYO
 -- AppKey model and deliberately stay out of the shared channel query surface.
 
+-- name: ResolveDingTalkInstallationForInboundGroup :one
+-- Resolve the robot installation by the AppKey stamped onto the Stream event,
+-- then discover the group route on first contact. The INSERT default is the
+-- installation's agent; a later admin reassignment survives subsequent inbound
+-- events because the conflict update refreshes only the human-readable title.
+-- This single statement closes the first-message race for a newly observed
+-- group and returns the group-specific agent alongside the installation.
+WITH installation AS (
+    SELECT *
+    FROM channel_installation
+    WHERE channel_type = 'dingtalk'
+      AND config ->> 'app_id' = sqlc.arg(app_id)::text
+), group_route AS (
+    INSERT INTO dingtalk_group_route (
+        workspace_id, installation_id, conversation_id,
+        conversation_title, agent_id
+    )
+    SELECT
+        i.workspace_id, i.id, sqlc.arg(conversation_id)::text,
+        sqlc.arg(conversation_title)::text, i.agent_id
+    FROM installation i
+    ON CONFLICT (installation_id, conversation_id) DO UPDATE SET
+        conversation_title = CASE
+            WHEN EXCLUDED.conversation_title = '' THEN dingtalk_group_route.conversation_title
+            ELSE EXCLUDED.conversation_title
+        END,
+        updated_at = CASE
+            WHEN EXCLUDED.conversation_title <> ''
+             AND EXCLUDED.conversation_title IS DISTINCT FROM dingtalk_group_route.conversation_title
+                THEN now()
+            ELSE dingtalk_group_route.updated_at
+        END
+    RETURNING agent_id
+)
+SELECT i.*, r.agent_id AS route_agent_id
+FROM installation i
+CROSS JOIN group_route r;
+
+-- name: ListDingTalkGroupRoutesByWorkspace :many
+SELECT r.*
+FROM dingtalk_group_route r
+JOIN channel_installation i ON i.id = r.installation_id
+WHERE r.workspace_id = sqlc.arg(workspace_id)
+  AND i.workspace_id = sqlc.arg(workspace_id)
+  AND i.channel_type = 'dingtalk'
+ORDER BY r.discovered_at ASC;
+
+-- name: ReassignDingTalkGroupRoute :one
+-- Reassigning a group must also sever its existing chat-session binding. The
+-- next message creates a fresh session for the new agent, so transcripts and
+-- pending outbound updates cannot cross agent boundaries. The old chat session
+-- remains as history; only its DingTalk route and outbound card state are
+-- removed. The target agent existence/workspace/archive check is repeated here
+-- so a concurrent archive or delete cannot create a dangling route.
+WITH target AS (
+    SELECT r.*, r.agent_id AS previous_agent_id
+    FROM dingtalk_group_route r
+    WHERE r.id = sqlc.arg(id)
+      AND r.workspace_id = sqlc.arg(workspace_id)
+      AND EXISTS (
+          SELECT 1 FROM agent a
+          WHERE a.id = sqlc.arg(agent_id)
+            AND a.workspace_id = sqlc.arg(workspace_id)
+            AND a.kind = 'user'
+            AND a.archived_at IS NULL
+      )
+    FOR UPDATE
+), updated AS (
+    UPDATE dingtalk_group_route r
+    SET agent_id = sqlc.arg(agent_id), updated_at = now()
+    FROM target t
+    WHERE r.id = t.id
+    RETURNING r.*, t.previous_agent_id
+), cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding b
+    USING updated u
+    WHERE u.previous_agent_id IS DISTINCT FROM u.agent_id
+      AND b.installation_id = u.installation_id
+      AND b.channel_chat_id = u.conversation_id
+    RETURNING b.chat_session_id
+), cleared_outbound_cards AS (
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+)
+SELECT id, workspace_id, installation_id, conversation_id,
+       conversation_title, agent_id, discovered_at, updated_at
+FROM updated;
+
+-- name: DingTalkGroupRouteMatchesAgent :one
+SELECT EXISTS (
+    SELECT 1 FROM dingtalk_group_route
+    WHERE installation_id = sqlc.arg(installation_id)
+      AND conversation_id = sqlc.arg(conversation_id)::text
+      AND agent_id = sqlc.arg(agent_id)
+) AS matches;
+
+-- name: DeleteDingTalkStaleGroupChatBinding :one
+-- A route reassignment normally removes the group's binding in the same query.
+-- An inbound message that resolved immediately before the reassignment can,
+-- however, finish creating its old-agent binding immediately afterwards. Every
+-- subsequent group message runs this guard before EnsureSession: a missing or
+-- different agent stamp retires that late/legacy binding so the new route can
+-- never inherit the old agent's transcript.
+WITH cleared AS (
+    DELETE FROM channel_chat_session_binding b
+    WHERE b.installation_id = sqlc.arg(installation_id)
+      AND b.channel_type = 'dingtalk'
+      AND b.channel_chat_id = sqlc.arg(conversation_id)::text
+      AND COALESCE(b.config ->> 'agent_id', '') <> sqlc.arg(agent_id)::uuid::text
+    RETURNING b.chat_session_id
+), cleared_outbound_cards AS (
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared)
+)
+SELECT count(*)::bigint AS cleared_count
+FROM cleared;
+
 -- name: LockDingTalkInstallationOwner :exec
 -- Serializes install / replacement decisions for one logical
 -- (workspace, agent, channel) slot. A different-AppKey replacement deletes the
@@ -51,6 +168,10 @@ cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding
     WHERE installation_id IN (SELECT id FROM retired)
     RETURNING chat_session_id
+),
+cleared_group_routes AS (
+    DELETE FROM dingtalk_group_route
+    WHERE installation_id IN (SELECT id FROM retired)
 ),
 cleared_outbound_cards AS (
     DELETE FROM channel_outbound_card_message

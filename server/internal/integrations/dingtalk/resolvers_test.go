@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -12,12 +13,51 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-type captureChatSession struct {
-	append engine.AppendInput
-	media  engine.BindMediaInput
+type fakeInstallationQueries struct {
+	groupParams db.ResolveDingTalkInstallationForInboundGroupParams
+	groupRow    db.ResolveDingTalkInstallationForInboundGroupRow
 }
 
-func (c *captureChatSession) EnsureSession(context.Context, engine.EnsureSessionInput) (pgtype.UUID, error) {
+type fakeSessionQueries struct {
+	params     db.DeleteDingTalkStaleGroupChatBindingParams
+	matches    []bool
+	matchCalls int
+}
+
+func (f *fakeSessionQueries) DingTalkGroupRouteMatchesAgent(context.Context, db.DingTalkGroupRouteMatchesAgentParams) (bool, error) {
+	if f.matchCalls < len(f.matches) {
+		match := f.matches[f.matchCalls]
+		f.matchCalls++
+		return match, nil
+	}
+	f.matchCalls++
+	return true, nil
+}
+
+func (f *fakeSessionQueries) DeleteDingTalkStaleGroupChatBinding(_ context.Context, params db.DeleteDingTalkStaleGroupChatBindingParams) (int64, error) {
+	f.params = params
+	return 0, nil
+}
+
+func (f *fakeInstallationQueries) GetChannelInstallationByAppID(context.Context, db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error) {
+	return db.ChannelInstallation{}, pgx.ErrNoRows
+}
+
+func (f *fakeInstallationQueries) ResolveDingTalkInstallationForInboundGroup(_ context.Context, params db.ResolveDingTalkInstallationForInboundGroupParams) (db.ResolveDingTalkInstallationForInboundGroupRow, error) {
+	f.groupParams = params
+	return f.groupRow, nil
+}
+
+type captureChatSession struct {
+	ensure      engine.EnsureSessionInput
+	ensureCalls int
+	append      engine.AppendInput
+	media       engine.BindMediaInput
+}
+
+func (c *captureChatSession) EnsureSession(_ context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error) {
+	c.ensure = in
+	c.ensureCalls++
 	return pgtype.UUID{}, nil
 }
 func (c *captureChatSession) MarkPendingFresh(context.Context, pgtype.UUID) error { return nil }
@@ -34,6 +74,34 @@ func TestNewDingTalkResolverSetUsesDatabaseBackedIssueOrigin(t *testing.T) {
 	set := NewDingTalkResolverSet(nil, nil, nil, nil, nil)
 	if set.OriginType != originDingTalkChat {
 		t.Fatalf("OriginType = %q, want %q", set.OriginType, originDingTalkChat)
+	}
+}
+
+func TestInstallationResolverRoutesGroupToGroupAgent(t *testing.T) {
+	var installationID, workspaceID, defaultAgentID, routeAgentID, installerID pgtype.UUID
+	installationID.Bytes[0], workspaceID.Bytes[0], defaultAgentID.Bytes[0], routeAgentID.Bytes[0], installerID.Bytes[0] = 1, 2, 3, 4, 5
+	installationID.Valid, workspaceID.Valid, defaultAgentID.Valid, routeAgentID.Valid, installerID.Valid = true, true, true, true, true
+	fake := &fakeInstallationQueries{groupRow: db.ResolveDingTalkInstallationForInboundGroupRow{
+		ID: installationID, WorkspaceID: workspaceID, AgentID: defaultAgentID,
+		InstallerUserID: installerID, Status: "active", RouteAgentID: routeAgentID,
+	}}
+	raw, _ := json.Marshal(dingtalkRawEvent{AppID: "app-key", ConversationTitle: "Platform team"})
+	resolved, err := (&installationResolver{q: fake}).ResolveInstallation(context.Background(), channel.InboundMessage{
+		Source: channel.Source{ChatID: "cid-platform", ChatType: channel.ChatTypeGroup},
+		Raw:    raw,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.ID != installationID || resolved.WorkspaceID != workspaceID || resolved.AgentID != routeAgentID || resolved.InstallerUserID != installerID || !resolved.Active {
+		t.Fatalf("resolved group installation = %+v", resolved)
+	}
+	if fake.groupParams.AppID != "app-key" || fake.groupParams.ConversationID != "cid-platform" || fake.groupParams.ConversationTitle != "Platform team" {
+		t.Fatalf("group lookup params = %+v", fake.groupParams)
+	}
+	platform, ok := resolved.Platform.(db.ChannelInstallation)
+	if !ok || platform.AgentID != defaultAgentID {
+		t.Fatalf("platform installation must retain default agent: %#v", resolved.Platform)
 	}
 }
 
@@ -88,7 +156,7 @@ func TestDingTalkSessionRouting_P2PCarriesStaffID(t *testing.T) {
 		ChatType: channel.ChatTypeP2P,
 		SenderID: "staff-7",
 	}}
-	key, cfg := dingtalkSessionRouting(msg)
+	key, cfg := dingtalkSessionRouting(msg, pgtype.UUID{})
 	if key != "cid-1" {
 		t.Errorf("binding key = %q, want conversation id", key)
 	}
@@ -107,7 +175,7 @@ func TestDingTalkSessionRouting_GroupOmitsStaffID(t *testing.T) {
 		ChatType: channel.ChatTypeGroup,
 		SenderID: "staff-7",
 	}}
-	_, cfg := dingtalkSessionRouting(msg)
+	_, cfg := dingtalkSessionRouting(msg, pgtype.UUID{})
 	var dc dingtalkBindingConfig
 	_ = json.Unmarshal(cfg, &dc)
 	if dc.ConversationType != convTypeGroup || dc.StaffID != "" {
@@ -120,7 +188,7 @@ func TestOutboundTarget_RoundTripsBindingConfig(t *testing.T) {
 		ChatID:   "cid-3",
 		ChatType: channel.ChatTypeP2P,
 		SenderID: "staff-3",
-	}})
+	}}, pgtype.UUID{})
 	target := outboundTarget(db.ChannelChatSessionBinding{ChannelChatID: "cid-3", Config: cfg})
 	if target.ConversationType != convTypeP2P || target.StaffID != "staff-3" || target.ConversationID != "cid-3" {
 		t.Errorf("round-tripped target = %+v", target)
@@ -131,5 +199,47 @@ func TestOutboundTarget_FallsBackToChatID(t *testing.T) {
 	target := outboundTarget(db.ChannelChatSessionBinding{ChannelChatID: "cid-4"})
 	if target.ConversationType != convTypeGroup || target.ConversationID != "cid-4" {
 		t.Errorf("missing config must fall back to a group send on chat id: %+v", target)
+	}
+}
+
+func TestSessionBinder_ClearsStaleGroupBindingAndStampsAgent(t *testing.T) {
+	var installationID, agentID pgtype.UUID
+	installationID.Bytes[0], agentID.Bytes[0] = 8, 9
+	installationID.Valid, agentID.Valid = true, true
+	queries := &fakeSessionQueries{}
+	capture := &captureChatSession{}
+	binder := &sessionBinder{q: queries, session: capture}
+	if _, err := binder.EnsureSession(context.Background(), engine.EnsureSessionParams{
+		Installation: engine.ResolvedInstallation{ID: installationID, AgentID: agentID},
+		Message: channel.InboundMessage{Source: channel.Source{
+			ChatID: "cid-routed", ChatType: channel.ChatTypeGroup,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if queries.params.InstallationID != installationID || queries.params.ConversationID != "cid-routed" || queries.params.AgentID != agentID {
+		t.Fatalf("stale binding guard params = %+v", queries.params)
+	}
+	var cfg dingtalkBindingConfig
+	if err := json.Unmarshal(capture.ensure.BindingConfig, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AgentID == "" {
+		t.Fatalf("group binding config did not stamp routed agent: %+v", cfg)
+	}
+}
+
+func TestSessionBinder_StopsWhenGroupRouteChanged(t *testing.T) {
+	queries := &fakeSessionQueries{matches: []bool{false}}
+	capture := &captureChatSession{}
+	binder := &sessionBinder{q: queries, session: capture}
+	_, err := binder.EnsureSession(context.Background(), engine.EnsureSessionParams{
+		Installation: engine.ResolvedInstallation{ID: pgtype.UUID{Valid: true}, AgentID: pgtype.UUID{Valid: true}},
+		Message: channel.InboundMessage{Source: channel.Source{
+			ChatID: "cid-reassigned", ChatType: channel.ChatTypeGroup,
+		}},
+	})
+	if err == nil || capture.ensureCalls != 0 {
+		t.Fatalf("route change err=%v ensure calls=%d, want error before session creation", err, capture.ensureCalls)
 	}
 }

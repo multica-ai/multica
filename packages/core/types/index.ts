@@ -192,9 +192,12 @@ export type {
 } from "./slack";
 export type {
   DingTalkInstallation,
+  DingTalkGroupRoute,
   ListDingTalkInstallationsResponse,
+  ListDingTalkGroupRoutesResponse,
   RegisterDingTalkBYORequest,
   RedeemDingTalkBindingTokenResponse,
+  UpdateDingTalkGroupRouteRequest,
 } from "./dingtalk";
 export type {
   WecomInstallation,

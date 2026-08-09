@@ -11,6 +11,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -36,7 +37,7 @@ func NewDingTalkResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.O
 		Installation: &installationResolver{q: q},
 		Identity:     &identityResolver{q: q},
 		Dedup:        &deduper{q: q},
-		Session: &sessionBinder{session: engine.NewChatSession(q, tx, TypeDingTalk, engine.SessionTitles{
+		Session: &sessionBinder{q: q, session: engine.NewChatSession(q, tx, TypeDingTalk, engine.SessionTitles{
 			Group:    "DingTalk group",
 			Direct:   "DingTalk direct message",
 			Fallback: "DingTalk chat",
@@ -72,6 +73,7 @@ type dingtalkBindingConfig struct {
 	ConversationType string `json:"conversation_type"`
 	ConversationID   string `json:"conversation_id"`
 	StaffID          string `json:"staff_id,omitempty"`
+	AgentID          string `json:"agent_id,omitempty"`
 }
 
 // dingtalkSessionRouting derives the session-isolation key and the outbound
@@ -79,11 +81,12 @@ type dingtalkBindingConfig struct {
 // conversation (1:1 or group) is one continuous session keyed by its
 // conversation id; the config carries everything the outbound path needs to send
 // back.
-func dingtalkSessionRouting(msg channel.InboundMessage) (bindingKey string, config []byte) {
+func dingtalkSessionRouting(msg channel.InboundMessage, agentID pgtype.UUID) (bindingKey string, config []byte) {
 	chatID := msg.Source.ChatID
 	cfg := dingtalkBindingConfig{
 		ConversationType: convTypeGroup,
 		ConversationID:   chatID,
+		AgentID:          util.UUIDToString(agentID),
 	}
 	if msg.Source.ChatType == channel.ChatTypeP2P {
 		cfg.ConversationType = convTypeP2P
@@ -132,12 +135,38 @@ func nullText(s string) pgtype.Text {
 
 // ---- installation routing ----
 
-type installationResolver struct{ q *db.Queries }
+type installationQueries interface {
+	GetChannelInstallationByAppID(ctx context.Context, arg db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error)
+	ResolveDingTalkInstallationForInboundGroup(ctx context.Context, arg db.ResolveDingTalkInstallationForInboundGroupParams) (db.ResolveDingTalkInstallationForInboundGroupRow, error)
+}
+
+type installationResolver struct{ q installationQueries }
 
 func (r *installationResolver) ResolveInstallation(ctx context.Context, msg channel.InboundMessage) (engine.ResolvedInstallation, error) {
 	raw, err := decodeDingTalkRaw(msg)
 	if err != nil {
 		return engine.ResolvedInstallation{}, err
+	}
+	if msg.Source.ChatType == channel.ChatTypeGroup {
+		row, err := r.q.ResolveDingTalkInstallationForInboundGroup(ctx, db.ResolveDingTalkInstallationForInboundGroupParams{
+			AppID:             raw.AppID,
+			ConversationID:    msg.Source.ChatID,
+			ConversationTitle: raw.ConversationTitle,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return engine.ResolvedInstallation{}, engine.ErrInstallationNotFound
+			}
+			return engine.ResolvedInstallation{}, err
+		}
+		inst := db.ChannelInstallation{
+			ID: row.ID, WorkspaceID: row.WorkspaceID, AgentID: row.AgentID,
+			ChannelType: row.ChannelType, Config: row.Config, Status: row.Status,
+			WsLeaseToken: row.WsLeaseToken, WsLeaseExpiresAt: row.WsLeaseExpiresAt,
+			InstallerUserID: row.InstallerUserID, InstalledAt: row.InstalledAt,
+			CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		}
+		return resolvedInstallation(inst, row.RouteAgentID), nil
 	}
 	// Route by the AppKey the receiving connection stamped into the envelope.
 	// Each installation has its own Stream connection, so the stamped AppKey
@@ -153,14 +182,18 @@ func (r *installationResolver) ResolveInstallation(ctx context.Context, msg chan
 		}
 		return engine.ResolvedInstallation{}, err
 	}
+	return resolvedInstallation(inst, inst.AgentID), nil
+}
+
+func resolvedInstallation(inst db.ChannelInstallation, agentID pgtype.UUID) engine.ResolvedInstallation {
 	return engine.ResolvedInstallation{
 		ID:              inst.ID,
 		WorkspaceID:     inst.WorkspaceID,
-		AgentID:         inst.AgentID,
+		AgentID:         agentID,
 		InstallerUserID: inst.InstallerUserID,
 		Active:          inst.Status == "active",
 		Platform:        inst,
-	}, nil
+	}
 }
 
 // ---- identity ----
@@ -236,11 +269,19 @@ type chatSession interface {
 	BindMediaRefs(ctx context.Context, in engine.BindMediaInput) error
 }
 
-type sessionBinder struct{ session chatSession }
+type sessionQueries interface {
+	DingTalkGroupRouteMatchesAgent(ctx context.Context, arg db.DingTalkGroupRouteMatchesAgentParams) (bool, error)
+	DeleteDingTalkStaleGroupChatBinding(ctx context.Context, arg db.DeleteDingTalkStaleGroupChatBindingParams) (int64, error)
+}
+
+type sessionBinder struct {
+	q       sessionQueries
+	session chatSession
+}
 
 func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessionParams) (pgtype.UUID, error) {
-	bindingKey, config := dingtalkSessionRouting(p.Message)
-	return r.session.EnsureSession(ctx, engine.EnsureSessionInput{
+	bindingKey, config := dingtalkSessionRouting(p.Message, p.Installation.AgentID)
+	input := engine.EnsureSessionInput{
 		WorkspaceID:    p.Installation.WorkspaceID,
 		AgentID:        p.Installation.AgentID,
 		InstallationID: p.Installation.ID,
@@ -248,7 +289,49 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 		BindingKey:     bindingKey,
 		BindingConfig:  config,
 		ChatType:       p.Message.Source.ChatType,
-	})
+	}
+	if p.Message.Source.ChatType != channel.ChatTypeGroup || r.q == nil {
+		return r.session.EnsureSession(ctx, input)
+	}
+
+	routeParams := db.DingTalkGroupRouteMatchesAgentParams{
+		InstallationID: p.Installation.ID,
+		ConversationID: bindingKey,
+		AgentID:        p.Installation.AgentID,
+	}
+	staleParams := db.DeleteDingTalkStaleGroupChatBindingParams(routeParams)
+	for attempt := 0; attempt < 3; attempt++ {
+		matches, err := r.q.DingTalkGroupRouteMatchesAgent(ctx, routeParams)
+		if err != nil {
+			return pgtype.UUID{}, fmt.Errorf("verify dingtalk group route: %w", err)
+		}
+		if !matches {
+			return pgtype.UUID{}, errors.New("dingtalk: group route changed while processing message")
+		}
+		if _, err := r.q.DeleteDingTalkStaleGroupChatBinding(ctx, staleParams); err != nil {
+			return pgtype.UUID{}, fmt.Errorf("retire stale dingtalk group session: %w", err)
+		}
+
+		sessionID, err := r.session.EnsureSession(ctx, input)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		matches, err = r.q.DingTalkGroupRouteMatchesAgent(ctx, routeParams)
+		if err != nil {
+			return pgtype.UUID{}, fmt.Errorf("recheck dingtalk group route: %w", err)
+		}
+		if !matches {
+			return pgtype.UUID{}, errors.New("dingtalk: group route changed while creating session")
+		}
+		retired, err := r.q.DeleteDingTalkStaleGroupChatBinding(ctx, staleParams)
+		if err != nil {
+			return pgtype.UUID{}, fmt.Errorf("recheck dingtalk group session: %w", err)
+		}
+		if retired == 0 {
+			return sessionID, nil
+		}
+	}
+	return pgtype.UUID{}, errors.New("dingtalk: group session route did not stabilize")
 }
 
 func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {

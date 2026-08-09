@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -29,6 +30,21 @@ type DingTalkInstallationResponse struct {
 	UpdatedAt       string `json:"updated_at"`
 }
 
+// DingTalkGroupRouteResponse is one group discovered from a Stream callback.
+// The conversation id is returned for diagnostics, but clients should use the
+// stable route id for updates. Credentials and callback payloads are never
+// exposed.
+type DingTalkGroupRouteResponse struct {
+	ID                string `json:"id"`
+	WorkspaceID       string `json:"workspace_id"`
+	InstallationID    string `json:"installation_id"`
+	ConversationID    string `json:"conversation_id"`
+	ConversationTitle string `json:"conversation_title"`
+	AgentID           string `json:"agent_id"`
+	DiscoveredAt      string `json:"discovered_at"`
+	UpdatedAt         string `json:"updated_at"`
+}
+
 func dingtalkInstallationToResponse(row db.ChannelInstallation) DingTalkInstallationResponse {
 	return DingTalkInstallationResponse{
 		ID:              uuidToString(row.ID),
@@ -40,6 +56,111 @@ func dingtalkInstallationToResponse(row db.ChannelInstallation) DingTalkInstalla
 		CreatedAt:       row.CreatedAt.Time.UTC().Format(time.RFC3339),
 		UpdatedAt:       row.UpdatedAt.Time.UTC().Format(time.RFC3339),
 	}
+}
+
+func dingtalkGroupRouteToResponse(row db.DingtalkGroupRoute) DingTalkGroupRouteResponse {
+	return DingTalkGroupRouteResponse{
+		ID:                uuidToString(row.ID),
+		WorkspaceID:       uuidToString(row.WorkspaceID),
+		InstallationID:    uuidToString(row.InstallationID),
+		ConversationID:    row.ConversationID,
+		ConversationTitle: row.ConversationTitle,
+		AgentID:           uuidToString(row.AgentID),
+		DiscoveredAt:      row.DiscoveredAt.Time.UTC().Format(time.RFC3339),
+		UpdatedAt:         row.UpdatedAt.Time.UTC().Format(time.RFC3339),
+	}
+}
+
+// ListDingTalkGroupRoutes (GET /api/workspaces/{id}/dingtalk/group-routes)
+// lists groups the robot has observed. It is member-visible like installation
+// listing; only owner/admin callers may reassign a route.
+func (h *Handler) ListDingTalkGroupRoutes(w http.ResponseWriter, r *http.Request) {
+	if h.DingTalkInstall == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"routes": []DingTalkGroupRouteResponse{}})
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListDingTalkGroupRoutesByWorkspace(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list dingtalk group routes")
+		return
+	}
+	out := make([]DingTalkGroupRouteResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, dingtalkGroupRouteToResponse(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"routes": out})
+}
+
+// UpdateDingTalkGroupRouteRequest selects the one agent that handles messages
+// from a discovered DingTalk group.
+type UpdateDingTalkGroupRouteRequest struct {
+	AgentID string `json:"agent_id"`
+}
+
+// UpdateDingTalkGroupRoute (PATCH
+// /api/workspaces/{id}/dingtalk/group-routes/{routeId}) reassigns a discovered
+// group. The query atomically removes the old chat binding when the agent
+// changes, preventing the new agent from inheriting the old transcript.
+func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Request) {
+	if h.DingTalkInstall == nil {
+		writeError(w, http.StatusServiceUnavailable, "dingtalk integration not configured")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	routeUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "routeId"), "route id")
+	if !ok {
+		return
+	}
+	var body UpdateDingTalkGroupRouteRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	agentUUID, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(body.AgentID), "agent_id")
+	if !ok {
+		return
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID: agentUUID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found in this workspace")
+		return
+	}
+	if agent.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "an archived agent cannot handle a DingTalk group")
+		return
+	}
+	row, err := h.Queries.ReassignDingTalkGroupRoute(r.Context(), db.ReassignDingTalkGroupRouteParams{
+		ID: routeUUID, WorkspaceID: wsUUID, AgentID: agentUUID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "dingtalk group route not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update dingtalk group route")
+		return
+	}
+	h.publish(protocol.EventDingTalkGroupRouteUpdated, uuidToString(wsUUID), "user", userID, map[string]any{
+		"id": uuidToString(row.ID),
+	})
+	writeJSON(w, http.StatusOK, dingtalkGroupRouteToResponse(db.DingtalkGroupRoute{
+		ID: row.ID, WorkspaceID: row.WorkspaceID, InstallationID: row.InstallationID,
+		ConversationID: row.ConversationID, ConversationTitle: row.ConversationTitle,
+		AgentID: row.AgentID, DiscoveredAt: row.DiscoveredAt, UpdatedAt: row.UpdatedAt,
+	}))
 }
 
 // ListDingTalkInstallations (GET /api/workspaces/{id}/dingtalk/installations) is

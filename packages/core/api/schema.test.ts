@@ -318,6 +318,26 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listDingTalkGroupRoutes", () => {
+    it("falls back to an empty list when the response is malformed", async () => {
+      stubFetchJson({ routes: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroupRoutes("ws-1")).resolves.toEqual({ routes: [] });
+    });
+
+    it("defaults fields missing from an older or partial route row", async () => {
+      stubFetchJson({ routes: [{ id: "route-1", agent_id: "agent-2" }] });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkGroupRoutes("ws-1");
+      expect(res.routes[0]).toMatchObject({
+        id: "route-1",
+        agent_id: "agent-2",
+        conversation_title: "",
+        installation_id: "",
+      });
+    });
+  });
+
   describe("getConfig", () => {
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({
