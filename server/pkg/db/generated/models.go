@@ -230,6 +230,7 @@ type Attachment struct {
 	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
 	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
 	Classification string             `json:"classification"`
+	ArtifactID     pgtype.UUID        `json:"artifact_id"`
 }
 
 type Autopilot struct {

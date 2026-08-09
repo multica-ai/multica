@@ -1,11 +1,12 @@
 -- CEREBRO-PATCH(sqlc-attachment): cerebro modification of upstream file
+-- CEREBRO-PATCH(document-image-attachments): FIR-4699 — artifact_id on CreateAttachment.
 -- name: CreateAttachment :one
 INSERT INTO attachment (
-  id, workspace_id, issue_id, comment_id, chat_session_id, chat_message_id,
+  id, workspace_id, issue_id, comment_id, chat_session_id, chat_message_id, artifact_id,
   uploader_type, uploader_id, filename, url, content_type, size_bytes
 )
 VALUES (
-  $1, $2, sqlc.narg(issue_id), sqlc.narg(comment_id), sqlc.narg(chat_session_id), sqlc.narg(chat_message_id),
+  $1, $2, sqlc.narg(issue_id), sqlc.narg(comment_id), sqlc.narg(chat_session_id), sqlc.narg(chat_message_id), sqlc.narg(artifact_id),
   $3, $4, $5, $6, $7, $8
 )
 RETURNING *;
@@ -13,6 +14,12 @@ RETURNING *;
 -- name: ListAttachmentsByIssue :many
 SELECT * FROM attachment
 WHERE issue_id = $1 AND workspace_id = $2
+ORDER BY created_at ASC;
+
+-- CEREBRO-PATCH(document-image-attachments): FIR-4699 — artifact_id column + list/link queries for document images.
+-- name: ListAttachmentsByArtifact :many
+SELECT * FROM attachment
+WHERE artifact_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC;
 
 -- name: ListAttachmentsByComment :many
@@ -79,6 +86,13 @@ UPDATE attachment
 SET issue_id = $1
 WHERE workspace_id = $2
   AND issue_id IS NULL
+  AND id = ANY($3::uuid[]);
+
+-- name: LinkAttachmentsToArtifact :exec
+UPDATE attachment
+SET artifact_id = $1
+WHERE workspace_id = $2
+  AND artifact_id IS NULL
   AND id = ANY($3::uuid[]);
 
 -- name: DeleteAttachment :exec

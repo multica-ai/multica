@@ -3521,13 +3521,15 @@ export class ApiClient {
   // File Upload & Attachments
   async uploadFile(
     file: File,
-    opts?: { issueId?: string; commentId?: string; chatSessionId?: string },
+    // CEREBRO-PATCH(document-image-attachments): FIR-4699 — artifactId binds a document image to its note.
+    opts?: { issueId?: string; commentId?: string; chatSessionId?: string; artifactId?: string },
   ): Promise<Attachment> {
     const formData = new FormData();
     formData.append("file", file);
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
     if (opts?.chatSessionId) formData.append("chat_session_id", opts.chatSessionId);
+    if (opts?.artifactId) formData.append("artifact_id", opts.artifactId); // CEREBRO-PATCH(document-image-attachments): FIR-4699.
 
     const rid = createRequestId();
     const start = Date.now();

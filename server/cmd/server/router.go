@@ -2136,6 +2136,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.With(h.RequirePlatformCapability("manage_artifacts")).Get("/", h.SearchArtifacts)
 				r.With(h.RequirePlatformCapability("manage_artifacts")).Post("/", h.CreateArtifact)
 				r.With(h.RequirePlatformCapability("manage_artifacts")).Get("/{id}", h.GetArtifact)
+				// CEREBRO-PATCH(document-image-attachments): FIR-4699 — list a document's images.
+				r.With(h.RequirePlatformCapability("manage_artifacts")).Get("/{id}/attachments", h.ListArtifactAttachments)
 				r.With(h.RequirePlatformCapability("manage_artifacts")).Put("/{id}", h.UpdateArtifact)
 				r.With(h.RequirePlatformCapability("manage_artifacts")).Put("/{id}/scope", h.UpdateArtifactScope)
 				r.With(h.RequirePlatformCapability("manage_artifacts")).Put("/{id}/folder", h.MoveArtifactToFolder)

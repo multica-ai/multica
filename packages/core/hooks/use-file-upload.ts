@@ -15,6 +15,7 @@ export interface UploadContext {
   issueId?: string;
   commentId?: string;
   chatSessionId?: string;
+  artifactId?: string; // CEREBRO-PATCH(document-image-attachments): FIR-4699 document image owner.
 }
 
 export function useFileUpload(
@@ -35,6 +36,7 @@ export function useFileUpload(
           issueId: ctx?.issueId,
           commentId: ctx?.commentId,
           chatSessionId: ctx?.chatSessionId,
+          artifactId: ctx?.artifactId, // CEREBRO-PATCH(document-image-attachments): FIR-4699.
         });
         return { ...att, link: att.url };
       } finally {

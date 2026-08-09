@@ -3,6 +3,22 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-4699 — Document image attachments
+
+- `document-image-attachments` gives a document (artifact) image an owner row.
+  Server: reads and validates the optional `artifact_id` upload field against the
+  caller's workspace in `server/internal/handler/file.go` (mirrors `issue_id`),
+  carries it on `AttachmentResponse`, and registers
+  `GET /api/artifacts/{id}/attachments` in `server/cmd/server/router.go`
+  (handler in the fork file `server/internal/handler/artifact_attachments_cerebro.go`).
+  Client: adds the optional `artifactId` to `uploadFile()` in
+  `packages/core/api/client.ts` and to `UploadContext` in
+  `packages/core/hooks/use-file-upload.ts`.
+- **Why:** without `attachment.artifact_id` a document image is an orphan row
+  scoped only to the workspace — it cannot be listed for its document or cleaned
+  up when the document is deleted. Width, alignment and caption stay in
+  `artifact.body`; this column is the owner link only.
+
 ## FIR-4293 — Shared access diagnostics and frozen Task Mandate explanation
 
 - `runtime-access-diagnostics` adds the shared read-only Runtime contract to

@@ -13,14 +13,14 @@ import (
 
 const createAttachment = `-- name: CreateAttachment :one
 INSERT INTO attachment (
-  id, workspace_id, issue_id, comment_id, chat_session_id, chat_message_id,
+  id, workspace_id, issue_id, comment_id, chat_session_id, chat_message_id, artifact_id,
   uploader_type, uploader_id, filename, url, content_type, size_bytes
 )
 VALUES (
-  $1, $2, $9, $10, $11, $12,
+  $1, $2, $9, $10, $11, $12, $13,
   $3, $4, $5, $6, $7, $8
 )
-RETURNING id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification
+RETURNING id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification, artifact_id
 `
 
 type CreateAttachmentParams struct {
@@ -36,9 +36,11 @@ type CreateAttachmentParams struct {
 	CommentID     pgtype.UUID `json:"comment_id"`
 	ChatSessionID pgtype.UUID `json:"chat_session_id"`
 	ChatMessageID pgtype.UUID `json:"chat_message_id"`
+	ArtifactID    pgtype.UUID `json:"artifact_id"`
 }
 
 // CEREBRO-PATCH(sqlc-attachment): cerebro modification of upstream file
+// CEREBRO-PATCH(document-image-attachments): FIR-4699 — artifact_id on CreateAttachment.
 func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (Attachment, error) {
 	row := q.db.QueryRow(ctx, createAttachment,
 		arg.ID,
@@ -53,6 +55,7 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 		arg.CommentID,
 		arg.ChatSessionID,
 		arg.ChatMessageID,
+		arg.ArtifactID,
 	)
 	var i Attachment
 	err := row.Scan(
@@ -70,6 +73,7 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 		&i.ChatMessageID,
 		&i.ChatSessionID,
 		&i.Classification,
+		&i.ArtifactID,
 	)
 	return i, err
 }
@@ -89,7 +93,7 @@ func (q *Queries) DeleteAttachment(ctx context.Context, arg DeleteAttachmentPara
 }
 
 const getAttachment = `-- name: GetAttachment :one
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification, artifact_id FROM attachment
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -116,8 +120,28 @@ func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (A
 		&i.ChatMessageID,
 		&i.ChatSessionID,
 		&i.Classification,
+		&i.ArtifactID,
 	)
 	return i, err
+}
+
+const linkAttachmentsToArtifact = `-- name: LinkAttachmentsToArtifact :exec
+UPDATE attachment
+SET artifact_id = $1
+WHERE workspace_id = $2
+  AND artifact_id IS NULL
+  AND id = ANY($3::uuid[])
+`
+
+type LinkAttachmentsToArtifactParams struct {
+	ArtifactID  pgtype.UUID   `json:"artifact_id"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	Column3     []pgtype.UUID `json:"column_3"`
+}
+
+func (q *Queries) LinkAttachmentsToArtifact(ctx context.Context, arg LinkAttachmentsToArtifactParams) error {
+	_, err := q.db.Exec(ctx, linkAttachmentsToArtifact, arg.ArtifactID, arg.WorkspaceID, arg.Column3)
+	return err
 }
 
 const linkAttachmentsToChatMessage = `-- name: LinkAttachmentsToChatMessage :exec
@@ -228,8 +252,56 @@ func (q *Queries) ListAttachmentURLsByIssueOrComments(ctx context.Context, issue
 	return items, nil
 }
 
+const listAttachmentsByArtifact = `-- name: ListAttachmentsByArtifact :many
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification, artifact_id FROM attachment
+WHERE artifact_id = $1 AND workspace_id = $2
+ORDER BY created_at ASC
+`
+
+type ListAttachmentsByArtifactParams struct {
+	ArtifactID  pgtype.UUID `json:"artifact_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// CEREBRO-PATCH(document-image-attachments): FIR-4699 — artifact_id column + list/link queries for document images.
+func (q *Queries) ListAttachmentsByArtifact(ctx context.Context, arg ListAttachmentsByArtifactParams) ([]Attachment, error) {
+	rows, err := q.db.Query(ctx, listAttachmentsByArtifact, arg.ArtifactID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Attachment{}
+	for rows.Next() {
+		var i Attachment
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.CommentID,
+			&i.UploaderType,
+			&i.UploaderID,
+			&i.Filename,
+			&i.Url,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.CreatedAt,
+			&i.ChatMessageID,
+			&i.ChatSessionID,
+			&i.Classification,
+			&i.ArtifactID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAttachmentsByChatMessage = `-- name: ListAttachmentsByChatMessage :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification, artifact_id FROM attachment
 WHERE chat_message_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -263,6 +335,7 @@ func (q *Queries) ListAttachmentsByChatMessage(ctx context.Context, arg ListAtta
 			&i.ChatMessageID,
 			&i.ChatSessionID,
 			&i.Classification,
+			&i.ArtifactID,
 		); err != nil {
 			return nil, err
 		}
@@ -275,7 +348,7 @@ func (q *Queries) ListAttachmentsByChatMessage(ctx context.Context, arg ListAtta
 }
 
 const listAttachmentsByChatMessageIDs = `-- name: ListAttachmentsByChatMessageIDs :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification, artifact_id FROM attachment
 WHERE chat_message_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -309,6 +382,7 @@ func (q *Queries) ListAttachmentsByChatMessageIDs(ctx context.Context, arg ListA
 			&i.ChatMessageID,
 			&i.ChatSessionID,
 			&i.Classification,
+			&i.ArtifactID,
 		); err != nil {
 			return nil, err
 		}
@@ -321,7 +395,7 @@ func (q *Queries) ListAttachmentsByChatMessageIDs(ctx context.Context, arg ListA
 }
 
 const listAttachmentsByComment = `-- name: ListAttachmentsByComment :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification, artifact_id FROM attachment
 WHERE comment_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -355,6 +429,7 @@ func (q *Queries) ListAttachmentsByComment(ctx context.Context, arg ListAttachme
 			&i.ChatMessageID,
 			&i.ChatSessionID,
 			&i.Classification,
+			&i.ArtifactID,
 		); err != nil {
 			return nil, err
 		}
@@ -367,7 +442,7 @@ func (q *Queries) ListAttachmentsByComment(ctx context.Context, arg ListAttachme
 }
 
 const listAttachmentsByCommentIDs = `-- name: ListAttachmentsByCommentIDs :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification, artifact_id FROM attachment
 WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -401,6 +476,7 @@ func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, arg ListAttac
 			&i.ChatMessageID,
 			&i.ChatSessionID,
 			&i.Classification,
+			&i.ArtifactID,
 		); err != nil {
 			return nil, err
 		}
@@ -413,7 +489,7 @@ func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, arg ListAttac
 }
 
 const listAttachmentsByIssue = `-- name: ListAttachmentsByIssue :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_message_id, chat_session_id, classification, artifact_id FROM attachment
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -447,6 +523,7 @@ func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachment
 			&i.ChatMessageID,
 			&i.ChatSessionID,
 			&i.Classification,
+			&i.ArtifactID,
 		); err != nil {
 			return nil, err
 		}

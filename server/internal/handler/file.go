@@ -69,6 +69,7 @@ type AttachmentResponse struct {
 	CommentID     *string `json:"comment_id"`
 	ChatSessionID *string `json:"chat_session_id"`
 	ChatMessageID *string `json:"chat_message_id"`
+	ArtifactID    *string `json:"artifact_id"` // CEREBRO-PATCH(document-image-attachments): FIR-4699 document image owner.
 	UploaderType  string  `json:"uploader_type"`
 	UploaderID    string  `json:"uploader_id"`
 	Filename      string  `json:"filename"`
@@ -111,6 +112,11 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 	if a.ChatMessageID.Valid {
 		s := uuidToString(a.ChatMessageID)
 		resp.ChatMessageID = &s
+	}
+	// CEREBRO-PATCH(document-image-attachments): FIR-4699 document image owner.
+	if a.ArtifactID.Valid {
+		s := uuidToString(a.ArtifactID)
+		resp.ArtifactID = &s
 	}
 	return resp
 }
@@ -362,6 +368,19 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			params.ChatMessageID = msg.ID
+		}
+		// CEREBRO-PATCH(document-image-attachments): FIR-4699 — validate artifact_id in the caller's workspace, exactly like issue_id.
+		if artifactID := r.FormValue("artifact_id"); artifactID != "" {
+			artifactUUID, ok := parseUUIDOrBadRequest(w, artifactID, "artifact_id")
+			if !ok {
+				return
+			}
+			artifact, err := h.Queries.GetArtifact(r.Context(), db.GetArtifactParams{ID: artifactUUID, WorkspaceID: parseUUID(workspaceID)})
+			if err != nil {
+				writeError(w, http.StatusForbidden, "invalid artifact_id")
+				return
+			}
+			params.ArtifactID = artifact.ID
 		}
 
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
