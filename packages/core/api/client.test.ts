@@ -2067,4 +2067,13 @@ describe("ApiClient terminal capability", () => {
     expect(config.url).not.toContain("super-secret-token");
     expect(config.token).toBe("super-secret-token");
   });
+
+  it("uses the realtime proxy path for same-origin web terminals", () => {
+    const client = new ApiClient("");
+
+    expect(client.getTaskTerminalWebSocketConfig("task/1")).toEqual({
+      url: "ws://localhost/ws/tasks/task%2F1/terminal",
+      token: null,
+    });
+  });
 });

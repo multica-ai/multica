@@ -901,6 +901,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Get("/api/tasks/{taskId}/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
 		h.TaskTerminalWebSocket(mc, pr, slugResolver, w, r)
 	})
+	// Same-origin web clients use the established /ws proxy namespace so PTY
+	// upgrades traverse the same reverse-proxy path as the realtime socket.
+	// Keep the /api route above for direct backend and native clients.
+	r.Get("/ws/tasks/{taskId}/terminal", func(w http.ResponseWriter, r *http.Request) {
+		h.TaskTerminalWebSocket(mc, pr, slugResolver, w, r)
+	})
 
 	// Local file serving (when using local storage). Served through the
 	// handler so /uploads/* carries the same preview security headers as the

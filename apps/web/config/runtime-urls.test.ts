@@ -275,6 +275,11 @@ describe("runtimeRewriteDestination", () => {
         REMOTE_API_URL: "http://backend:8080",
       }),
     ).toBe("http://backend:8080/ws");
+    expect(
+      runtimeRewriteDestination("/ws/tasks/task-1/terminal", {
+        REMOTE_API_URL: "http://backend:8080",
+      }),
+    ).toBe("http://backend:8080/ws/tasks/task-1/terminal");
   });
 });
 

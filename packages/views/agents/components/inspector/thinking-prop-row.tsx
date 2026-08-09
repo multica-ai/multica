@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { Brain } from "lucide-react";
 import type { RuntimeModel } from "@multica/core/types";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { PropRow } from "../../../common/prop-row";
@@ -77,6 +78,7 @@ export function ThinkingSettingField({
   model,
   value,
   canEdit,
+  showUnavailable = false,
   onChange,
 }: {
   label: ReactNode;
@@ -86,8 +88,13 @@ export function ThinkingSettingField({
   model: string;
   value: string;
   canEdit: boolean;
+  /** Keep the row visible with an explicit capability status. The settings
+   *  page enables this so an offline runtime cannot make reasoning look
+   *  implicitly configured; compact creation flows may keep hiding it. */
+  showUnavailable?: boolean;
   onChange: (next: string) => Promise<void> | void;
 }) {
+  const { t } = useT("agents");
   const modelsQuery = useQuery(
     runtimeModelsOptions(runtimeOnline ? runtimeId : null),
   );
@@ -95,7 +102,31 @@ export function ThinkingSettingField({
   const entry = pickModelEntry(models, model, provider);
   const levels = entry?.thinking?.supported_levels ?? [];
 
-  if (levels.length === 0 && !value) return null;
+  if (levels.length === 0 && !value) {
+    if (!showUnavailable) return null;
+
+    const status = !runtimeId
+      ? t(($) => $.pickers.thinking_runtime_required)
+      : !runtimeOnline
+        ? t(($) => $.pickers.thinking_runtime_offline)
+        : modelsQuery.isPending
+          ? t(($) => $.pickers.thinking_discovering)
+          : modelsQuery.isError || modelsQuery.data?.supported === false
+            ? t(($) => $.pickers.thinking_unavailable)
+            : t(($) => $.pickers.thinking_unsupported);
+
+    return (
+      <SettingsRow label={label} size="select-wide">
+        <div
+          aria-disabled="true"
+          className="flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-body text-muted-foreground"
+        >
+          <Brain className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">{status}</span>
+        </div>
+      </SettingsRow>
+    );
+  }
 
   return (
     <SettingsRow label={label} size="select-wide">

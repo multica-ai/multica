@@ -2015,7 +2015,16 @@ export class ApiClient {
   getTaskTerminalWebSocketConfig(taskId: string): TerminalWebSocketConfig {
     const browserOrigin = typeof window === "undefined" ? "http://localhost" : window.location.origin;
     const base = this.baseUrl || browserOrigin;
-    const url = new URL(`/api/tasks/${encodeURIComponent(taskId)}/terminal/ws`, base);
+    // Same-origin web deployments already proxy their realtime transport at
+    // /ws. Reuse that proven upgrade path for PTY traffic: generic HTTP
+    // reverse proxies (notably Next's runtime rewrite in self-hosted mode)
+    // may accept /api fetches while leaving an upgraded /api WebSocket
+    // handshake pending forever. Explicit API origins and native clients keep
+    // the original direct backend route for backwards compatibility.
+    const path = this.baseUrl
+      ? `/api/tasks/${encodeURIComponent(taskId)}/terminal/ws`
+      : `/ws/tasks/${encodeURIComponent(taskId)}/terminal`;
+    const url = new URL(path, base);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     const workspaceSlug = getCurrentSlug();
     if (workspaceSlug) url.searchParams.set("workspace_slug", workspaceSlug);

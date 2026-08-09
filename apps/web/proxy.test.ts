@@ -184,6 +184,12 @@ describe("proxy runtime upstream rewrites", () => {
       expect(res.headers.get("x-middleware-rewrite")).toBe(
         "http://backend:8080/ws",
       );
+
+      const terminal = proxy(makeRequest("/ws/tasks/task-1/terminal"));
+      expect(terminal.status).toBe(200);
+      expect(terminal.headers.get("x-middleware-rewrite")).toBe(
+        "http://backend:8080/ws/tasks/task-1/terminal",
+      );
     } finally {
       restoreEnv("REMOTE_API_URL", previous);
     }

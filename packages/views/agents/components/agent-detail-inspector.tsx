@@ -282,6 +282,7 @@ export function AgentDetailInspector({
             model={agent.model ?? ""}
             value={agent.thinking_level ?? ""}
             canEdit={canEdit}
+            showUnavailable
             onChange={(thinkingLevel) =>
               update({ thinking_level: thinkingLevel })
             }

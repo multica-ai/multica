@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   terminalOpen: vi.fn(),
   terminalWrite: vi.fn(),
   terminalDispose: vi.fn(),
+  terminalLoadAddon: vi.fn(),
   fit: vi.fn(),
   clientConnect: vi.fn(),
   clientDisconnect: vi.fn(),
@@ -18,6 +19,12 @@ const mocks = vi.hoisted(() => ({
   clientCtrlC: vi.fn(),
   clientInput: vi.fn(),
   terminalOnData: null as ((data: string) => void) | null,
+  terminalKeyHandler: null as ((event: KeyboardEvent) => boolean) | null,
+  searchFindNext: vi.fn(() => true),
+  searchFindPrevious: vi.fn(() => true),
+  searchClear: vi.fn(),
+  webglDispose: vi.fn(),
+  terminalOptions: null as Record<string, unknown> | null,
   handlers: null as Record<string, (...args: unknown[]) => void> | null,
   resizeCallback: null as (() => void) | null,
   mobile: false,
@@ -46,12 +53,19 @@ vi.mock("@multica/core/terminal", () => ({
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
+    constructor(options: Record<string, unknown>) {
+      mocks.terminalOptions = options;
+    }
     cols = 120;
     rows = 32;
-    loadAddon() {}
+    unicode = { activeVersion: "6" };
+    loadAddon = mocks.terminalLoadAddon;
     open = mocks.terminalOpen;
     write = mocks.terminalWrite;
     dispose = mocks.terminalDispose;
+    attachCustomKeyEventHandler(callback: (event: KeyboardEvent) => boolean) {
+      mocks.terminalKeyHandler = callback;
+    }
     onData(callback: (data: string) => void) {
       mocks.terminalOnData = callback;
       return { dispose: vi.fn() };
@@ -65,10 +79,37 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 
+vi.mock("@xterm/addon-search", () => ({
+  SearchAddon: class {
+    findNext = mocks.searchFindNext;
+    findPrevious = mocks.searchFindPrevious;
+    clearDecorations = mocks.searchClear;
+  },
+}));
+
+vi.mock("@xterm/addon-unicode11", () => ({
+  Unicode11Addon: class {},
+}));
+
+vi.mock("@xterm/addon-web-links", () => ({
+  WebLinksAddon: class {},
+}));
+
+vi.mock("@xterm/addon-webgl", () => ({
+  WebglAddon: class {
+    dispose = mocks.webglDispose;
+    onContextLoss() {
+      return { dispose: vi.fn() };
+    }
+  },
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.handlers = null;
   mocks.terminalOnData = null;
+  mocks.terminalKeyHandler = null;
+  mocks.terminalOptions = null;
   mocks.resizeCallback = null;
   mocks.mobile = false;
   vi.stubGlobal(
@@ -113,6 +154,7 @@ describe("AgentTerminal", () => {
     await act(async () => {});
 
     expect(mocks.terminalOpen).toHaveBeenCalledTimes(1);
+    expect(mocks.terminalOptions?.["allowProposedApi"]).toBe(true);
     expect(mocks.clientConnect).toHaveBeenCalledTimes(1);
     expect(mocks.fit).toHaveBeenCalled();
     expect(mocks.clientResize).toHaveBeenCalledWith(120, 32);
@@ -130,8 +172,28 @@ describe("AgentTerminal", () => {
     act(() =>
       mocks.handlers?.["onControl"]?.({ controller: true, leaseToken: "lease" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Ctrl+C" }));
+    fireEvent.click(screen.getByRole("button", { name: "Terminal actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Send Ctrl+C" }));
     expect(mocks.clientCtrlC).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search terminal" }));
+    const search = screen.getByRole("textbox", { name: "Search terminal" });
+    fireEvent.change(search, { target: { value: "Codex" } });
+    expect(mocks.searchFindNext).toHaveBeenCalledWith("Codex", { incremental: true });
+    fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
+    expect(mocks.searchFindPrevious).toHaveBeenCalledWith("Codex");
+    fireEvent.click(screen.getByRole("button", { name: "Close search" }));
+    expect(mocks.searchClear).toHaveBeenCalled();
+
+    let browserFindSuppressed = false;
+    act(() => {
+      browserFindSuppressed =
+        mocks.terminalKeyHandler?.(
+          new KeyboardEvent("keydown", { key: "f", metaKey: true }),
+        ) === false;
+    });
+    expect(browserFindSuppressed).toBe(true);
+    expect(screen.getByRole("textbox", { name: "Search terminal" })).toBeInTheDocument();
 
     view.unmount();
     expect(mocks.clientDisconnect).toHaveBeenCalledTimes(1);

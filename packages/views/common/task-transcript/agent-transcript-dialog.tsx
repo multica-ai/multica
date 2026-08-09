@@ -670,7 +670,12 @@ export function AgentTranscriptDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="!max-w-4xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
+        className={cn(
+          "flex flex-col !p-0 !gap-0 overflow-hidden",
+          hasTerminal
+            ? "!max-w-[calc(100vw-1.5rem)] !w-[calc(100vw-1.5rem)] !max-h-[calc(100vh-1.5rem)] !h-[calc(100vh-1.5rem)]"
+            : "!max-w-4xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)]",
+        )}
         showCloseButton={false}
       >
         <DialogTitle className="sr-only">
@@ -841,7 +846,13 @@ export function AgentTranscriptDialog({
         </div>
 
         {variant === "cockpit" && terminalSlot && (
-          <div className="flex shrink-0 items-center gap-1 border-b px-4 py-1.5" role="tablist">
+          <div
+            className={cn(
+              "flex shrink-0 items-center gap-1 border-b px-4 py-1.5",
+              cockpitTab === "terminal" && "border-slate-800 bg-[#0d131f]",
+            )}
+            role="tablist"
+          >
             {(["terminal", "transcript", "files"] as const).map((tab) => (
               <Button
                 key={tab}
