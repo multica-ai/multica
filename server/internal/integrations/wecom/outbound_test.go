@@ -121,8 +121,8 @@ func (f *fakeOutboundQueries) failStampNotSet(taskID string) {
 		taskID + ", but this rig never set channelIngested. Say where the question was asked: " +
 		"channelIngested: askedOverWecom() for one typed in the room, askedInTheWebUI() for one " +
 		"typed in Multica. There is no default — the failure-notice path delivers unless the " +
-		"stamp is set, and the answer-path gate #6591 adds delivers only when it is, so either " +
-		"zero value would let one of those two pass a test that never stated what it meant."
+		"stamp is set, and the answer path delivers only when it is, so either zero value " +
+		"would let one of those two pass a test that never stated what it meant."
 	if f.t == nil {
 		panic(msg)
 	}
@@ -364,6 +364,111 @@ func TestProcessEvent_DoesNotPushAWebUIAnswerIntoTheRoom(t *testing.T) {
 	conn.mu.Unlock()
 	if n != 0 {
 		t.Fatalf("a web-UI answer was pushed into the WeCom chat (%d frame(s) written)", n)
+	}
+}
+
+// TestAWebUIAnswerDoesNotConsumeTheRoomsBubble is the other half of the case
+// above, and the reason the gate sits where it does.
+//
+// That test pins that nothing is SENT. It would still pass with the gate moved
+// below sayEnding, because sealing a bubble is not sending a message: the
+// asker in the room would lose the reply they are watching for and no
+// assertion there would notice. This one is about what the answer TAKES on its
+// way to being refused.
+//
+// So the room has a live question of its own here — a bubble open, waiting on
+// an answer — and the installer's browser question finishes first against the
+// session they share. Everything WeCom-side has to come out of it untouched:
+// the round still open, its bubble still unsealed, the ledger holding no
+// record of a run this adapter never ingested, and not a word in the chat.
+func TestAWebUIAnswerDoesNotConsumeTheRoomsBubble(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+
+	// The room asks something. Its bubble is open and its round is waiting.
+	rig.ran(t, "REQ-1", 1, "task-1")
+
+	// The installer asks the same session something in their browser, and that
+	// run finishes first.
+	rig.q.fileTask(t, taskUUID(t, "task-2"))
+	rig.q.channelIngested = askedInTheWebUI()
+	if err := rig.out.processEvent(context.Background(), events.Event{
+		ChatSessionID: bubbleSession,
+		TaskID:        taskUUID(t, "task-2"),
+		Payload:       protocol.ChatDonePayload{Content: "the salary band for that role is 42k"},
+	}); err != nil {
+		t.Fatalf("a browser question's answer is refused at the gate, so nothing is attempted "+
+			"and there is nothing to report: %v", err)
+	}
+
+	if rig.streams.depth() != 1 {
+		t.Fatalf("the room holds %d open rounds, want 1 — a browser question's answer retired the "+
+			"round the room is still waiting on, so the answer to the question they actually "+
+			"asked now has nowhere to land", rig.streams.depth())
+	}
+	frames := rig.conn.streamFrames(t)
+	if len(frames) != 1 {
+		t.Fatalf("the room's bubble has %d frames, want the 1 that opened it — a browser "+
+			"question's answer wrote into a bubble the room opened for its own question", len(frames))
+	}
+	if frames[0]["finish"] == true {
+		t.Fatalf("the room's bubble was sealed by a browser question's answer — the asker is " +
+			"looking at an ending to a question they never asked, and the reply they were " +
+			"waiting for has nowhere left to go")
+	}
+	if got := pushedTexts(t, rig.conn); len(got) != 0 {
+		t.Fatalf("the room was told %q about a question typed in Multica", got)
+	}
+	if rig.streams.knowsRound(bubbleSessionID(t), taskUUID(t, "task-2")) {
+		t.Fatalf("the ledger has a record of a browser run — owed and the open list are what " +
+			"the failure path reads as proof of where a question was asked, so a refused answer " +
+			"that files itself there hands the run permission to speak in the room later")
+	}
+}
+
+// TestAGateThatCannotAnswerDoesNotCostTheAskerTheirBubble is what holds the
+// ordering in place, and it is the room's OWN question that pays if it slips.
+//
+// The test above cannot do that job on its own. A browser run carries its own
+// task id, the round matcher is strict about ids, and so a browser answer
+// finds no round to take whichever side of sayEnding the gate sits on — it
+// passes either way. The case where the take actually lands on the room's
+// bubble is the case where the id DOES match, and the gate still refuses:
+// fails-closed, when the stamp cannot be read at all.
+//
+// Put the gate after the take and this is what the asker gets. sayEnding
+// consumes the round, the gate then refuses, and the delivery that would have
+// sealed the bubble never runs — leaving a spinner on screen that nothing owns
+// any more, for the one question in this session that really was asked in the
+// room. Ahead of the take, the refusal costs nothing: the round is still open
+// and the next publisher of its ending can still speak for it.
+func TestAGateThatCannotAnswerDoesNotCostTheAskerTheirBubble(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+
+	// The room asks, and this is its own round — the id on the answer is the
+	// one the flush bound, so the take will match it.
+	rig.ran(t, "REQ-1", 1, "task-1")
+
+	// The database stops answering the one question the gate asks.
+	rig.q.originErr = errors.New("connection reset by peer")
+	if err := rig.out.processEvent(context.Background(), events.Event{
+		ChatSessionID: bubbleSession,
+		TaskID:        taskUUID(t, "task-1"),
+		Payload:       protocol.ChatDonePayload{Content: "the answer the room is waiting for"},
+	}); err == nil {
+		t.Fatalf("an origin the gate could not establish was treated as an answer it could deliver")
+	}
+
+	if rig.streams.depth() != 1 {
+		t.Fatalf("the room holds %d open rounds, want 1 — the gate refused AFTER the take, so the "+
+			"asker's bubble was consumed by a delivery that then never ran, and they are left "+
+			"watching a spinner no ending can reach", rig.streams.depth())
+	}
+	frames := rig.conn.streamFrames(t)
+	if len(frames) != 1 || frames[0]["finish"] == true {
+		t.Fatalf("the room's bubble is %v, want the single unsealed frame that opened it — a "+
+			"refusal must leave the round exactly as it found it", frames)
 	}
 }
 

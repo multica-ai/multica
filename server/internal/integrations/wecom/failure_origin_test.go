@@ -440,13 +440,18 @@ func TestAnotherChannelsFailureNeverReachesTheTaskRow(t *testing.T) {
 // TestAWebRunsUndeliveredAnswerDoesNotBuyItTheRoomsVoice is the fix.
 //
 // The installer asks in their browser, against a session the room also uses.
-// The answer to THAT question is pushed at the room already (no origin gate on
-// the answer path until #6591) and here it does not even land — the socket is
-// down. Nothing was owed, nothing was consumed, nothing was said. If that alone
-// puts the run on owed, its later task:failed walks straight through the gate
-// on "local evidence" and tells everyone in the room that a question they never
-// saw has gone wrong — with no database read, so no fix on the row side can
-// reach it.
+// The origin gate turns that answer away before anything WeCom-side is
+// touched: nothing owed, nothing consumed, nothing said. If a delivery attempt
+// could put the run on owed instead, its later task:failed would walk straight
+// through the gate on "local evidence" and tell everyone in the room that a
+// question they never saw has gone wrong — with no database read, so no fix on
+// the row side could reach it.
+//
+// The answer is still driven through processEvent rather than skipped, and the
+// socket is still taken down under it, because that is what makes this test
+// fail if the origin gate is ever moved back behind the take: the answer would
+// reach deliverAnswer, the dead socket would fail it, and the ledger would be
+// asked to record an ending for a run this adapter never ingested.
 func TestAWebRunsUndeliveredAnswerDoesNotBuyItTheRoomsVoice(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
@@ -465,8 +470,9 @@ func TestAWebRunsUndeliveredAnswerDoesNotBuyItTheRoomsVoice(t *testing.T) {
 		ChatSessionID: bubbleSession,
 		TaskID:        taskUUID(t, "task-2"),
 		Payload:       protocol.ChatDonePayload{Content: "the salary band for that role is 42k"},
-	}); err == nil {
-		t.Fatalf("the answer reported itself delivered with no connection to send it on")
+	}); err != nil {
+		t.Fatalf("a browser question's answer is refused at the gate, so nothing is attempted "+
+			"and there is nothing to report: %v", err)
 	}
 	rig.senders.set(rig.instID, rig.conn.sender) // the socket comes back
 
@@ -479,14 +485,18 @@ func TestAWebRunsUndeliveredAnswerDoesNotBuyItTheRoomsVoice(t *testing.T) {
 			"failed to deliver has just written itself its own permission to speak in the room")
 	}
 
+	// Everything read up to here belongs to the answer path. What the failure
+	// path asks on its own is the tail after this mark.
+	beforeFailure := len(rig.q.originAsked())
+
 	rig.failed(t, "task-2", false)
 
 	if got := pushedTexts(t, rig.conn); len(got) != 0 {
 		t.Fatalf("the room was told %q about a run nobody in it started — everyone in the chat "+
 			"just learned that a question they never saw had gone wrong", got)
 	}
-	if asked := rig.q.originAsked(); len(asked) != 1 || asked[0] != taskUUID(t, "task-2") {
-		t.Fatalf("the origin gate read the channel_ingested stamp for %v, want exactly [%s] — "+
+	if asked := rig.q.originAsked()[beforeFailure:]; len(asked) != 1 || asked[0] != taskUUID(t, "task-2") {
+		t.Fatalf("the failure path read the channel_ingested stamp for %v, want exactly [%s] — "+
 			"a run with no round and no promise of this adapter's has to be decided by the row, "+
 			"and this one skipped the check on evidence it manufactured for itself",
 			asked, taskUUID(t, "task-2"))

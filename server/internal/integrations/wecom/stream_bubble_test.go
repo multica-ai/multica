@@ -254,10 +254,18 @@ func (r *bubbleRig) reconnect() *bubbleConn {
 
 // runStarted is the debounced flush reporting the task it created for a batch,
 // the way Router.flushChatRun does after EnqueueChatTask returns.
+//
+// That flush only ever runs for messages this adapter ingested, so the run it
+// creates was asked in the room by construction — which is the answer both
+// origin gates want, and the reason it is stated here rather than in every
+// test. A test modelling a question typed in Multica does not come through
+// here; it says so itself with askedInTheBrowser.
 func (r *bubbleRig) runStarted(t *testing.T, batch engine.RunBatchID, taskName string) {
 	t.Helper()
 	r.typing.OnRunStarted(context.Background(), bubbleSessionID(t), batch, mustParseTestUUID(t, taskName))
 	r.boundRuns[batch] = taskUUID(t, taskName)
+	r.q.fileTask(t, taskUUID(t, taskName))
+	r.q.channelIngested = askedOverWecom()
 }
 
 // ran is the common case: a message arrives and the flush 3s later creates its

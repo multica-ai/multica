@@ -186,19 +186,31 @@ func TestTheRetryAnswerLandsInTheBubbleTheFirstAttemptOpened(t *testing.T) {
 // TestTheRetryLookupIsNotPaidForOnEveryAnswer keeps the extra read honest: it
 // happens only when the id on the event matches no round in a session that
 // still has one open.
+//
+// Two readers want the task row on this path now. The origin gate reads it for
+// every answer it lets through, and that read is not optional — it is what
+// keeps a web question's answer out of the room. So the gate's one read is the
+// floor, and what this test measures is whether the round matcher adds a
+// second on top of it.
 func TestTheRetryLookupIsNotPaidForOnEveryAnswer(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
 	rig.ran(t, "REQ-C1", 1, "task-1")
-	rig.answer(t, "the agent reply", "task-1")
 
-	if rig.q.taskGets != 0 {
-		t.Fatalf("an answer that matched its own round still read %d task row(s)", rig.q.taskGets)
+	before := rig.q.taskGets
+	rig.answer(t, "the agent reply", "task-1")
+	if got := rig.q.taskGets - before; got != 1 {
+		t.Fatalf("an answer that matched its own round read %d task rows, want 1 (the origin gate's) — "+
+			"the retry lookup was paid for on an answer that already named its own round", got)
 	}
-	// Nothing open now, so an unmatched ending must not read a row either.
+	// Nothing open now, so an unmatched ending must not reach the matcher
+	// either. It never gets that far: task-3 was never filed, so the gate
+	// refuses it on the read it was always going to make.
+	before = rig.q.taskGets
 	rig.answer(t, "a late stray", "task-3")
-	if rig.q.taskGets != 0 {
-		t.Fatalf("an ending for a session with no open round read %d task row(s)", rig.q.taskGets)
+	if got := rig.q.taskGets - before; got != 1 {
+		t.Fatalf("an ending for a session with no open round read %d task rows, want 1 "+
+			"(the origin gate's, which finds no row and stops there)", got)
 	}
 }
 

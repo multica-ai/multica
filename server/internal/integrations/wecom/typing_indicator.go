@@ -80,12 +80,10 @@ type taskLookup interface {
 // taskOrigin is the task row plus where the run's input came from. The typing
 // indicator needs both halves: the row to resolve an auto-retry clone and to
 // recover a session no publisher put on the event, and the provenance stamp to
-// decide whether a failed run's notice belongs in the WeCom room at all. On
-// this branch the failure
-// notice is the only thing that asks — outbound.go pushes an answer into the
-// room without reading the stamp, and the gate that makes it read is #6591's,
-// not here. Kept apart from taskLookup because the round matcher and the
-// outbound subscriber only ever need the row. *db.Queries satisfies it.
+// decide whether a failed run's notice belongs in the WeCom room at all.
+// outbound.go asks the same stamp about an answer, through its own
+// outboundQueries. Kept apart from taskLookup because the round matcher only
+// ever needs the row. *db.Queries satisfies it.
 type taskOrigin interface {
 	taskLookup
 	engine.ChannelProvenanceQueries
@@ -426,8 +424,9 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 	// there. Announcing it here would tell everyone in the room that something
 	// they never saw has gone wrong. Asked BEFORE the bubble is taken, because
 	// a gate placed after the take has already sealed a WeCom round's bubble
-	// with a web run's ending. Nothing else asks on this branch: outbound.go
-	// finishes an answer without the check until #6591 lands.
+	// with a web run's ending. The answer path orders its own gate the same
+	// way, ahead of sayEnding — see the block above the gate in
+	// outbound.go's processEvent.
 	if !m.failureBelongsOnWecom(dbCtx, sessionID, taskID) {
 		return
 	}
@@ -450,10 +449,9 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 // bus, carrying the same session — nothing in the event says which surface
 // asked.
 //
-// The answer has the same exposure and no gate on this branch: outbound.go
-// delivers a completion to the room whatever asked for it. #6591 puts the same
-// engine.TaskInputIsChannelIngested call on that path, so once both are in,
-// the two endings of a run are decided by one stamp.
+// The answer has the same exposure, and outbound.go makes the same
+// engine.TaskInputIsChannelIngested call before it consumes the round. The two
+// endings of a run are decided by one stamp.
 //
 // This is an authorization check on writing into somebody else's group chat,
 // so uncertainty is not permission. A lookup that did not answer is not
