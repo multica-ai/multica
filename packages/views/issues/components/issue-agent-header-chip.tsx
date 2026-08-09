@@ -1,7 +1,8 @@
 "use client";
 
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { ChevronRight, History } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -14,7 +15,12 @@ import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask } from "@multica/core/types";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
-import { ActiveTaskRow } from "./execution-log-section";
+import {
+  ActiveTaskRow,
+  isActiveTask,
+  PastTaskRow,
+  sortPastTasks,
+} from "./execution-log-section";
 import { useT } from "../../i18n";
 
 // Per-issue "is an agent working on this right now?" chip for the issue
@@ -56,24 +62,16 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
     refetchOnWindowFocus: true,
   });
 
-  const { running, queued } = useMemo(() => {
+  const { running, queued, past } = useMemo(() => {
     const running: AgentTask[] = [];
     const queued: AgentTask[] = [];
     // The list is already issue-scoped by the endpoint, so only the status
     // split matters here.
     for (const task of tasks) {
       if (task.status === "running") running.push(task);
-      else if (
-        task.status === "queued" ||
-        task.status === "dispatched" ||
-        // Daemon-parked on a busy local_directory — still active, just
-        // waiting on a path lock. Belongs in the live chip, not dropped.
-        task.status === "waiting_local_directory"
-      )
-        queued.push(task);
-      // Terminal statuses are the execution log's story, not the live chip's.
+      else if (isActiveTask(task)) queued.push(task);
     }
-    return { running, queued };
+    return { running, queued, past: sortPastTasks(tasks) };
   }, [tasks]);
 
   const [openedTranscriptTaskSnapshot, setOpenedTranscriptTaskSnapshot] =
@@ -83,16 +81,20 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
       openedTranscriptTaskSnapshot
     : null;
 
-  // No active work → render nothing.
-  if (running.length === 0 && queued.length === 0 && !openedTranscriptTask) return null;
+  const hasActive = running.length > 0 || queued.length > 0;
+
+  // No active work and no historical context → render nothing. A terminal run
+  // is still a useful header affordance because it keeps the run list nearby.
+  if (!hasActive && past.length === 0 && !openedTranscriptTask) return null;
 
   return (
     <>
-      {running.length > 0 || queued.length > 0 ? (
+      {hasActive || past.length > 0 ? (
         <ActiveChip
           issueId={issueId}
           running={running}
           queued={queued}
+          past={past}
           onTranscriptOpenChange={(task, open) => {
             setOpenedTranscriptTaskSnapshot(open ? task : null);
           }}
@@ -119,6 +121,7 @@ interface ActiveChipProps {
   issueId: string;
   running: AgentTask[];
   queued: AgentTask[];
+  past: AgentTask[];
   onTranscriptOpenChange: (task: AgentTask, open: boolean) => void;
 }
 
@@ -126,32 +129,44 @@ function ActiveChip({
   issueId,
   running,
   queued,
+  past,
   onTranscriptOpenChange,
 }: ActiveChipProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
 
   const activeTasks = [...running, ...queued];
+  const hasActive = activeTasks.length > 0;
   const agentIds = [...new Set(activeTasks.map((task) => task.agent_id))];
   const anyRunning = running.length > 0;
   const isSingle = agentIds.length === 1;
-  // Copy must follow the actual state: "is working" only when something is
-  // truly running. With nothing running (queued / dispatched / parked on a
-  // path lock) the chip reads "is queued" so a not-yet-started agent isn't
-  // mislabelled as working.
-  const label = isSingle
-    ? t(
-        ($) =>
-          anyRunning ? $.agent_live.is_working : $.agent_live.is_queued,
-        { name: getActorName("agent", agentIds[0] ?? "") },
-      )
-    : t(
-        ($) =>
-          anyRunning
-            ? $.agent_activity.hover_header
-            : $.agent_activity.hover_header_queued,
-        { count: agentIds.length },
-      );
+  const historyLabel = t(($) => $.execution_log.history);
+  // Copy follows the actual state. With no active task the same control is a
+  // calm historical-runs entry, rather than pretending a terminal task is
+  // still working.
+  const label = !hasActive
+    ? historyLabel
+    : isSingle
+      ? t(
+          ($) =>
+            anyRunning ? $.agent_live.is_working : $.agent_live.is_queued,
+          { name: getActorName("agent", agentIds[0] ?? "") },
+        )
+      : t(
+          ($) =>
+            anyRunning
+              ? $.agent_activity.hover_header
+              : $.agent_activity.hover_header_queued,
+          { count: agentIds.length },
+        );
+
+  // The history list opens immediately when it is the only thing the chip can
+  // show. When live work appears, put history back behind its sibling row so
+  // the active signal remains the first thing in the popover.
+  const [showPast, setShowPast] = useState(() => !hasActive);
+  useEffect(() => {
+    setShowPast(!hasActive);
+  }, [hasActive]);
 
   return (
     <div className="flex items-center gap-1">
@@ -184,12 +199,16 @@ function ActiveChip({
             />
           }
         >
-          <AgentAvatarStack
-            agentIds={agentIds}
-            size="sm"
-            max={3}
-            opacity={anyRunning ? "full" : "half"}
-          />
+          {hasActive ? (
+            <AgentAvatarStack
+              agentIds={agentIds}
+              size="sm"
+              max={3}
+              opacity={anyRunning ? "full" : "half"}
+            />
+          ) : (
+            <History className="size-3.5 shrink-0" aria-hidden="true" />
+          )}
           <span
             className={`min-w-0 truncate text-caption ${anyRunning ? "text-info" : "text-muted-foreground"}`}
           >
@@ -198,13 +217,15 @@ function ActiveChip({
         </PopoverTrigger>
         <PopoverContent align="end" keepMounted className="w-80">
           <div className="text-caption font-medium text-muted-foreground">
-            {t(
-              ($) =>
-                anyRunning
-                  ? $.agent_activity.hover_header
-                  : $.agent_activity.hover_header_queued,
-              { count: agentIds.length },
-            )}
+            {hasActive
+              ? t(
+                  ($) =>
+                    anyRunning
+                      ? $.agent_activity.hover_header
+                      : $.agent_activity.hover_header_queued,
+                  { count: agentIds.length },
+                )
+              : historyLabel}
           </div>
           <div className="flex flex-col gap-0.5">
             {activeTasks.map((task) => (
@@ -217,6 +238,36 @@ function ActiveChip({
                 }}
               />
             ))}
+            {past.length > 0 && (
+              <>
+                {activeTasks.length > 0 && <div className="my-1.5 border-t border-border/60" />}
+                <button
+                  type="button"
+                  aria-expanded={showPast}
+                  aria-label={historyLabel}
+                  onClick={() => setShowPast((open) => !open)}
+                  className="flex w-full items-center gap-1 rounded px-1 py-1 text-caption text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+                >
+                  <ChevronRight
+                    className={`!size-3 shrink-0 stroke-[2.5] transition-transform ${showPast ? "rotate-90" : ""}`}
+                  />
+                  <History className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 truncate">{historyLabel}</span>
+                  <span className="ml-auto shrink-0 tabular-nums">{past.length}</span>
+                </button>
+                {showPast && (
+                  <div
+                    className="mt-0.5 space-y-0.5 border-l border-border/60 pl-3"
+                    role="group"
+                    aria-label={historyLabel}
+                  >
+                    {past.map((task) => (
+                      <PastTaskRow key={task.id} task={task} issueId={issueId} />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </PopoverContent>
       </Popover>
