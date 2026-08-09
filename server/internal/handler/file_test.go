@@ -1466,7 +1466,7 @@ func TestGetAttachmentContent_TooLarge(t *testing.T) {
 	defer func() { testHandler.Storage = origStorage }()
 
 	// One byte over the limit. Allocate ASCII so io.ReadAll has work to do.
-	big := bytes.Repeat([]byte("a"), maxPreviewTextSize+1)
+	big := bytes.Repeat([]byte("a"), int(maxPreviewTextSize()+1))
 	id := seedPreviewAttachment(t, store, "huge-key.txt", "huge.txt", "text/plain", big)
 
 	req, w := newPreviewRequest(t, id, testWorkspaceID)
@@ -1833,5 +1833,32 @@ func TestServeLocalUpload_NonLocalStorage404(t *testing.T) {
 	h.ServeLocalUpload(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestParseByteSize(t *testing.T) {
+	cases := []struct {
+		name   string
+		val    string
+		wantN  int64
+		wantOK bool
+	}{
+		{"valid bytes", "104857600", 104857600, true},
+		{"empty", "", 0, false},
+		{"whitespace only", "   ", 0, false},
+		{"zero", "0", 0, false},
+		{"negative", "-500", 0, false},
+		{"non-numeric", "100MB", 0, false},
+		{"invalid syntax", "abc", 0, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TEST_PARSE_BYTE_SIZE_VAR", tc.val)
+			gotN, gotOK := parseByteSize("TEST_PARSE_BYTE_SIZE_VAR")
+			if gotN != tc.wantN || gotOK != tc.wantOK {
+				t.Errorf("parseByteSize() = (%v, %v), want (%v, %v)", gotN, gotOK, tc.wantN, tc.wantOK)
+			}
+		})
 	}
 }

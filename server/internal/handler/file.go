@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -31,7 +33,30 @@ var extContentTypes = map[string]string{
 	".wasm": "application/wasm",
 }
 
-const maxUploadSize = 100 << 20 // 100 MB
+// defaultMaxUploadSize is the cap for POST /api/upload-file bodies when
+// MULTICA_MAX_UPLOAD_SIZE is unset or invalid.
+const defaultMaxUploadSize = 100 << 20 // 100 MB
+
+// maxUploadSizeBytes is the cached result of maxUploadSize(); it is set once
+// on first call and never re-read, mirroring AuthTokenTTL().
+var maxUploadSizeBytes int64
+
+// maxUploadSizeOnce guards maxUploadSizeBytes.
+var maxUploadSizeOnce sync.Once
+
+// maxUploadSize returns the maximum accepted upload body size in bytes.
+// It reads MULTICA_MAX_UPLOAD_SIZE (plain byte count) on first call and
+// caches the value. When unset or not a positive integer the default of
+// 100 MB is used.
+func maxUploadSize() int64 {
+	maxUploadSizeOnce.Do(func() {
+		maxUploadSizeBytes = defaultMaxUploadSize
+		if n, ok := parseByteSize("MULTICA_MAX_UPLOAD_SIZE"); ok {
+			maxUploadSizeBytes = n
+		}
+	})
+	return maxUploadSizeBytes
+}
 
 const defaultAttachmentDownloadURLTTL = 30 * time.Minute
 
@@ -44,11 +69,48 @@ const (
 	attachmentDownloadModeProxy      attachmentDownloadMode = "proxy"
 )
 
-// maxPreviewTextSize caps the body the preview proxy will load into memory
-// for text-based types. Anything larger returns 413 and the UI falls back
-// to "please download". Sized so a typical README/source-file fits but a
-// 100 MB log dump can't blow up the renderer.
-const maxPreviewTextSize = 2 << 20 // 2 MB
+// defaultMaxPreviewTextSize caps the body the preview proxy will load into
+// memory for text-based types. Anything larger returns 413 and the UI falls
+// back to "please download". Sized so a typical README/source-file fits but
+// a 100 MB log dump can't blow up the renderer.
+const defaultMaxPreviewTextSize = 2 << 20 // 2 MB
+
+// maxPreviewTextSizeBytes is the cached result of maxPreviewTextSize(); it is
+// set once on first call and never re-read.
+var maxPreviewTextSizeBytes int64
+
+// maxPreviewTextSizeOnce guards maxPreviewTextSizeBytes.
+var maxPreviewTextSizeOnce sync.Once
+
+// maxPreviewTextSize returns the maximum inline-preview body size in bytes.
+// It reads MULTICA_MAX_PREVIEW_SIZE (plain byte count) on first call and
+// caches the value. Unset or invalid falls back to the default of 2 MB.
+func maxPreviewTextSize() int64 {
+	maxPreviewTextSizeOnce.Do(func() {
+		maxPreviewTextSizeBytes = defaultMaxPreviewTextSize
+		if n, ok := parseByteSize("MULTICA_MAX_PREVIEW_SIZE"); ok {
+			maxPreviewTextSizeBytes = n
+		}
+	})
+	return maxPreviewTextSizeBytes
+}
+
+// parseByteSize parses an environment variable containing a plain byte-count
+// integer (no suffixes — e.g. "5242880" for 5 MiB). Returns the parsed value
+// and false when the variable is empty, zero, negative, or non-numeric. On
+// invalid input the caller falls back to its default and logs a warning.
+func parseByteSize(envVar string) (int64, bool) {
+	raw := strings.TrimSpace(os.Getenv(envVar))
+	if raw == "" {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 {
+		slog.Warn("invalid byte-size env, using default", "env", envVar, "value", raw)
+		return 0, false
+	}
+	return n, true
+}
 
 // ---------------------------------------------------------------------------
 // Response types
@@ -379,9 +441,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := h.resolveWorkspaceID(r)
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize())
 
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+	if err := r.ParseMultipartForm(maxUploadSize()); err != nil {
 		writeError(w, http.StatusBadRequest, "file too large or invalid multipart form")
 		return
 	}
@@ -1227,15 +1289,15 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer reader.Close()
 
-	// LimitReader to maxPreviewTextSize+1 so we can detect "exactly at the
+	// LimitReader to maxPreviewTextSize()+1 so we can detect "exactly at the
 	// limit" vs "exceeds the limit" by checking the returned length.
-	body, err := io.ReadAll(io.LimitReader(reader, maxPreviewTextSize+1))
+	body, err := io.ReadAll(io.LimitReader(reader, maxPreviewTextSize()+1))
 	if err != nil {
 		slog.Error("failed to read attachment body for preview", "id", attachmentID, "error", err)
 		writeError(w, http.StatusBadGateway, "failed to read attachment body")
 		return
 	}
-	if len(body) > maxPreviewTextSize {
+	if len(body) > int(maxPreviewTextSize()) {
 		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
 		return
 	}
