@@ -1091,6 +1091,42 @@ func (q *Queries) HasPendingChatTurnForSession(ctx context.Context, chatSessionI
 	return has_pending, err
 }
 
+const isPoolChatExecutionHead = `-- name: IsPoolChatExecutionHead :one
+SELECT EXISTS (
+  SELECT 1 FROM agent_task_queue AS task
+  WHERE task.id = $1::uuid
+    AND task.chat_session_id = $2::uuid
+    AND task.runtime_binding_mode = 'pool'
+    AND task.status = 'waiting_runtime'
+    AND task.session_affinity_state IN ('none', 'pinned')
+    AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS other
+      WHERE other.chat_session_id = task.chat_session_id
+        AND other.id <> task.id
+        AND other.status IN (
+          'waiting_runtime', 'queued', 'deferred', 'dispatched', 'running',
+          'waiting_local_directory'
+        )
+        AND other.session_affinity_state <> 'unresolved'
+    )
+) AS is_head
+`
+
+type IsPoolChatExecutionHeadParams struct {
+	TaskID        pgtype.UUID `json:"task_id"`
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+}
+
+// Task 11 replaces this conservative guard with the shared canonical head
+// selector. Until then, fail closed whenever another resolved nonterminal row
+// exists; unresolved tails are never placement candidates.
+func (q *Queries) IsPoolChatExecutionHead(ctx context.Context, arg IsPoolChatExecutionHeadParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isPoolChatExecutionHead, arg.TaskID, arg.ChatSessionID)
+	var is_head bool
+	err := row.Scan(&is_head)
+	return is_head, err
+}
+
 const linkChatMessageToTask = `-- name: LinkChatMessageToTask :exec
 UPDATE chat_message
 SET task_id = $2
@@ -2088,6 +2124,36 @@ func (q *Queries) LockChatSessionsByWorkspace(ctx context.Context, workspaceID p
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockPoolChatSessionForPlacement = `-- name: LockPoolChatSessionForPlacement :one
+SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id FROM chat_session
+WHERE id = $1::uuid
+FOR UPDATE
+`
+
+func (q *Queries) LockPoolChatSessionForPlacement(ctx context.Context, chatSessionID pgtype.UUID) (ChatSession, error) {
+	row := q.db.QueryRow(ctx, lockPoolChatSessionForPlacement, chatSessionID)
+	var i ChatSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.CreatorID,
+		&i.Title,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnreadSince,
+		&i.RuntimeID,
+		&i.LastReadAt,
+		&i.IsAgentIntro,
+		&i.PinnedAt,
+		&i.ProjectID,
+	)
+	return i, err
 }
 
 const markChatSessionRead = `-- name: MarkChatSessionRead :exec

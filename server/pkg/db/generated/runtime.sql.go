@@ -136,6 +136,22 @@ func (q *Queries) CountActiveAgentsByRuntime(ctx context.Context, runtimeID pgty
 	return count, err
 }
 
+const countRuntimeCapacityBearingTasks = `-- name: CountRuntimeCapacityBearingTasks :one
+SELECT count(*) FROM agent_task_queue
+WHERE runtime_id = $1::uuid
+  AND status IN (
+    'queued', 'deferred', 'dispatched', 'running',
+    'waiting_local_directory'
+  )
+`
+
+func (q *Queries) CountRuntimeCapacityBearingTasks(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countRuntimeCapacityBearingTasks, runtimeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUndrainedTasksByRuntimeOrAgent = `-- name: CountUndrainedTasksByRuntimeOrAgent :one
 SELECT count(*) FROM agent_task_queue
 WHERE (runtime_id = ANY($1::uuid[]) OR agent_id = ANY($2::uuid[]))
@@ -588,6 +604,62 @@ func (q *Queries) GetAgentRuntimes(ctx context.Context, ids []pgtype.UUID) ([]Ag
 	return items, nil
 }
 
+const getPinnedPoolRuntimeCandidate = `-- name: GetPinnedPoolRuntimeCandidate :one
+SELECT ar.id, ar.workspace_id, ar.daemon_id, ar.name, ar.runtime_mode, ar.provider, ar.status, ar.device_info, ar.metadata, ar.last_seen_at, ar.created_at, ar.updated_at, ar.owner_id, ar.legacy_daemon_id, ar.visibility, ar.profile_id, ar.custom_name, ar.capabilities FROM agent_runtime AS ar
+JOIN member AS m
+  ON m.workspace_id = ar.workspace_id
+ AND m.user_id = $1::uuid
+WHERE ar.id = $2::uuid
+  AND ar.workspace_id = $3::uuid
+  AND ar.status = 'online'
+  AND ar.capabilities @> $4::text[]
+  AND (
+    m.role IN ('owner', 'admin')
+    OR ar.owner_id = $1::uuid
+    OR ar.visibility = 'public'
+  )
+`
+
+type GetPinnedPoolRuntimeCandidateParams struct {
+	RequesterUserID pgtype.UUID `json:"requester_user_id"`
+	RuntimeID       pgtype.UUID `json:"runtime_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	RequirementsAll []string    `json:"requirements_all"`
+}
+
+// Session affinity deliberately ignores occupancy: once eligible and alive,
+// the Task joins the Runtime's existing queue rather than switching machines.
+func (q *Queries) GetPinnedPoolRuntimeCandidate(ctx context.Context, arg GetPinnedPoolRuntimeCandidateParams) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, getPinnedPoolRuntimeCandidate,
+		arg.RequesterUserID,
+		arg.RuntimeID,
+		arg.WorkspaceID,
+		arg.RequirementsAll,
+	)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+		&i.CustomName,
+		&i.Capabilities,
+	)
+	return i, err
+}
+
 const listAgentRuntimes = `-- name: ListAgentRuntimes :many
 SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, capabilities FROM agent_runtime
 WHERE workspace_id = $1
@@ -748,6 +820,106 @@ func (q *Queries) ListPoolCapabilityDependentIDs(ctx context.Context, runtimeID 
 	for rows.Next() {
 		var i ListPoolCapabilityDependentIDsRow
 		if err := rows.Scan(&i.TaskID, &i.AgentID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPoolRuntimeCandidates = `-- name: ListPoolRuntimeCandidates :many
+SELECT ar.id, ar.workspace_id, ar.daemon_id, ar.name, ar.runtime_mode, ar.provider, ar.status, ar.device_info, ar.metadata, ar.last_seen_at, ar.created_at, ar.updated_at, ar.owner_id, ar.legacy_daemon_id, ar.visibility, ar.profile_id, ar.custom_name, ar.capabilities, count(fixed_agent.id)::bigint AS fixed_binding_count
+FROM agent_runtime AS ar
+JOIN member AS m
+  ON m.workspace_id = ar.workspace_id
+ AND m.user_id = $1::uuid
+LEFT JOIN agent AS fixed_agent
+  ON fixed_agent.runtime_id = ar.id
+ AND fixed_agent.runtime_binding_mode = 'fixed'
+ AND fixed_agent.archived_at IS NULL
+WHERE ar.workspace_id = $2::uuid
+  AND ar.status = 'online'
+  AND ar.capabilities @> $3::text[]
+  AND (
+    m.role IN ('owner', 'admin')
+    OR ar.owner_id = $1::uuid
+    OR ar.visibility = 'public'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_task_queue AS occupied
+    WHERE occupied.runtime_id = ar.id
+      AND occupied.status IN (
+        'queued', 'deferred', 'dispatched', 'running',
+        'waiting_local_directory'
+      )
+  )
+GROUP BY ar.id
+ORDER BY
+  CASE
+    WHEN ar.runtime_mode = 'local'
+     AND ar.owner_id = $1::uuid THEN 0
+    ELSE 1
+  END,
+  ar.last_seen_at DESC NULLS LAST,
+  fixed_binding_count ASC,
+  ar.created_at ASC,
+  ar.id ASC
+LIMIT $4
+`
+
+type ListPoolRuntimeCandidatesParams struct {
+	RequesterUserID pgtype.UUID `json:"requester_user_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	RequirementsAll []string    `json:"requirements_all"`
+	RuntimeLimit    int32       `json:"runtime_limit"`
+}
+
+type ListPoolRuntimeCandidatesRow struct {
+	AgentRuntime      AgentRuntime `json:"agent_runtime"`
+	FixedBindingCount int64        `json:"fixed_binding_count"`
+}
+
+// Fresh placement only. Authorization, capability, strict DB idle and the
+// complete deterministic rank all precede the bound. Liveness is filtered in
+// Go, in this order, before any placement transaction begins.
+func (q *Queries) ListPoolRuntimeCandidates(ctx context.Context, arg ListPoolRuntimeCandidatesParams) ([]ListPoolRuntimeCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, listPoolRuntimeCandidates,
+		arg.RequesterUserID,
+		arg.WorkspaceID,
+		arg.RequirementsAll,
+		arg.RuntimeLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPoolRuntimeCandidatesRow{}
+	for rows.Next() {
+		var i ListPoolRuntimeCandidatesRow
+		if err := rows.Scan(
+			&i.AgentRuntime.ID,
+			&i.AgentRuntime.WorkspaceID,
+			&i.AgentRuntime.DaemonID,
+			&i.AgentRuntime.Name,
+			&i.AgentRuntime.RuntimeMode,
+			&i.AgentRuntime.Provider,
+			&i.AgentRuntime.Status,
+			&i.AgentRuntime.DeviceInfo,
+			&i.AgentRuntime.Metadata,
+			&i.AgentRuntime.LastSeenAt,
+			&i.AgentRuntime.CreatedAt,
+			&i.AgentRuntime.UpdatedAt,
+			&i.AgentRuntime.OwnerID,
+			&i.AgentRuntime.LegacyDaemonID,
+			&i.AgentRuntime.Visibility,
+			&i.AgentRuntime.ProfileID,
+			&i.AgentRuntime.CustomName,
+			&i.AgentRuntime.Capabilities,
+			&i.FixedBindingCount,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -945,6 +1117,38 @@ func (q *Queries) LockPoolCapabilityDependents(ctx context.Context, taskIds []pg
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockPoolRuntimeForPlacement = `-- name: LockPoolRuntimeForPlacement :one
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, capabilities FROM agent_runtime
+WHERE id = $1::uuid
+FOR UPDATE SKIP LOCKED
+`
+
+func (q *Queries) LockPoolRuntimeForPlacement(ctx context.Context, runtimeID pgtype.UUID) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, lockPoolRuntimeForPlacement, runtimeID)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+		&i.CustomName,
+		&i.Capabilities,
+	)
+	return i, err
 }
 
 const lockRuntimeForCapabilityRegistration = `-- name: LockRuntimeForCapabilityRegistration :one
@@ -1581,6 +1785,127 @@ type UpdatePinnedPoolTaskWaitReasonParams struct {
 
 func (q *Queries) UpdatePinnedPoolTaskWaitReason(ctx context.Context, arg UpdatePinnedPoolTaskWaitReasonParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, updatePinnedPoolTaskWaitReason, arg.Reason, arg.TaskID)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
+const updatePinnedPoolTaskWaitReasonCAS = `-- name: UpdatePinnedPoolTaskWaitReasonCAS :one
+UPDATE agent_task_queue
+SET wait_reason = $1
+WHERE id = $2::uuid
+  AND status = $3
+  AND runtime_id IS NOT DISTINCT FROM $4::uuid
+  AND agent_id = $5::uuid
+  AND chat_session_id IS NOT DISTINCT FROM $6::uuid
+  AND runtime_binding_mode = $7
+  AND placement_workspace_id = $8::uuid
+  AND runtime_requester_user_id = $9::uuid
+  AND runtime_requirements = $10::jsonb
+  AND session_affinity_state = $11
+  AND session_affinity_runtime_id IS NOT DISTINCT FROM $12::uuid
+  AND explicit_fresh_session = $13
+  AND wait_reason IS NOT DISTINCT FROM $14::text
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session
+`
+
+type UpdatePinnedPoolTaskWaitReasonCASParams struct {
+	Reason                           pgtype.Text `json:"reason"`
+	TaskID                           pgtype.UUID `json:"task_id"`
+	ExpectedStatus                   string      `json:"expected_status"`
+	ExpectedRuntimeID                pgtype.UUID `json:"expected_runtime_id"`
+	ExpectedAgentID                  pgtype.UUID `json:"expected_agent_id"`
+	ExpectedChatSessionID            pgtype.UUID `json:"expected_chat_session_id"`
+	ExpectedRuntimeBindingMode       string      `json:"expected_runtime_binding_mode"`
+	ExpectedPlacementWorkspaceID     pgtype.UUID `json:"expected_placement_workspace_id"`
+	ExpectedRuntimeRequesterUserID   pgtype.UUID `json:"expected_runtime_requester_user_id"`
+	ExpectedRuntimeRequirements      []byte      `json:"expected_runtime_requirements"`
+	ExpectedSessionAffinityState     string      `json:"expected_session_affinity_state"`
+	ExpectedSessionAffinityRuntimeID pgtype.UUID `json:"expected_session_affinity_runtime_id"`
+	ExpectedExplicitFreshSession     bool        `json:"expected_explicit_fresh_session"`
+	ExpectedWaitReason               pgtype.Text `json:"expected_wait_reason"`
+}
+
+// A diagnosis is made from an unlocked scheduler snapshot. Every field that
+// participates in placement must still match before that diagnosis is stored;
+// otherwise an affinity/requester/requirements race would attach a stale
+// Runtime reason to a different routing snapshot.
+func (q *Queries) UpdatePinnedPoolTaskWaitReasonCAS(ctx context.Context, arg UpdatePinnedPoolTaskWaitReasonCASParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, updatePinnedPoolTaskWaitReasonCAS,
+		arg.Reason,
+		arg.TaskID,
+		arg.ExpectedStatus,
+		arg.ExpectedRuntimeID,
+		arg.ExpectedAgentID,
+		arg.ExpectedChatSessionID,
+		arg.ExpectedRuntimeBindingMode,
+		arg.ExpectedPlacementWorkspaceID,
+		arg.ExpectedRuntimeRequesterUserID,
+		arg.ExpectedRuntimeRequirements,
+		arg.ExpectedSessionAffinityState,
+		arg.ExpectedSessionAffinityRuntimeID,
+		arg.ExpectedExplicitFreshSession,
+		arg.ExpectedWaitReason,
+	)
 	var i AgentTaskQueue
 	err := row.Scan(
 		&i.ID,

@@ -206,6 +206,98 @@ func (q *Queries) ArchiveAgentsByRuntime(ctx context.Context, arg ArchiveAgentsB
 	return items, nil
 }
 
+const assignWaitingPoolTask = `-- name: AssignWaitingPoolTask :one
+WITH candidate AS (
+  SELECT id FROM agent_task_queue
+  WHERE id = $2::uuid
+    AND status = 'waiting_runtime'
+    AND runtime_id IS NULL
+    AND runtime_binding_mode = 'pool'
+    AND placement_workspace_id = $3::uuid
+    AND session_affinity_state IN ('none', 'pinned')
+  FOR UPDATE SKIP LOCKED
+)
+UPDATE agent_task_queue AS task
+SET runtime_id = $1::uuid,
+    status = 'queued',
+    wait_reason = NULL
+FROM candidate
+WHERE task.id = candidate.id
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.runtime_binding_mode, task.runtime_requirements, task.placement_workspace_id, task.runtime_requester_user_id, task.session_affinity_state, task.session_affinity_runtime_id, task.explicit_fresh_session
+`
+
+type AssignWaitingPoolTaskParams struct {
+	RuntimeID            pgtype.UUID `json:"runtime_id"`
+	TaskID               pgtype.UUID `json:"task_id"`
+	PlacementWorkspaceID pgtype.UUID `json:"placement_workspace_id"`
+}
+
+func (q *Queries) AssignWaitingPoolTask(ctx context.Context, arg AssignWaitingPoolTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, assignWaitingPoolTask, arg.RuntimeID, arg.TaskID, arg.PlacementWorkspaceID)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
 const cancelAgentTask = `-- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
@@ -4739,6 +4831,94 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 	return items, nil
 }
 
+const listPoolTasksByIDs = `-- name: ListPoolTasksByIDs :many
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session FROM agent_task_queue
+WHERE id = ANY($1::uuid[])
+ORDER BY id ASC
+`
+
+// Sweep promotion is one bounded UPDATE. Re-read its at-most-64 returned IDs
+// in one statement so verification cannot fail halfway through the committed
+// promotion set.
+func (q *Queries) ListPoolTasksByIDs(ctx context.Context, taskIds []pgtype.UUID) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listPoolTasksByIDs, taskIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.RuntimeBindingMode,
+			&i.RuntimeRequirements,
+			&i.PlacementWorkspaceID,
+			&i.RuntimeRequesterUserID,
+			&i.SessionAffinityState,
+			&i.SessionAffinityRuntimeID,
+			&i.ExplicitFreshSession,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listQueuedClaimCandidatesByRuntime = `-- name: ListQueuedClaimCandidatesByRuntime :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
@@ -4927,6 +5107,39 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntimes(ctx context.Context, runti
 	return items, nil
 }
 
+const listRuntimePoolSweepWorkspaces = `-- name: ListRuntimePoolSweepWorkspaces :many
+SELECT id FROM workspace
+WHERE $1::uuid IS NULL
+   OR id > $1::uuid
+ORDER BY id ASC
+LIMIT $2
+`
+
+type ListRuntimePoolSweepWorkspacesParams struct {
+	AfterWorkspaceID pgtype.UUID `json:"after_workspace_id"`
+	WorkspaceLimit   int32       `json:"workspace_limit"`
+}
+
+func (q *Queries) ListRuntimePoolSweepWorkspaces(ctx context.Context, arg ListRuntimePoolSweepWorkspacesParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listRuntimePoolSweepWorkspaces, arg.AfterWorkspaceID, arg.WorkspaceLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTasksByIssue = `-- name: ListTasksByIssue :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session FROM agent_task_queue
 WHERE issue_id = $1
@@ -5064,6 +5277,102 @@ func (q *Queries) ListUserAgentsByRuntimeForUpdate(ctx context.Context, runtimeI
 			&i.ServiceTier,
 			&i.RuntimeBindingMode,
 			&i.RuntimeRequirements,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWaitingPoolTasks = `-- name: ListWaitingPoolTasks :many
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session FROM agent_task_queue
+WHERE placement_workspace_id = $1::uuid
+  AND runtime_binding_mode = 'pool'
+  AND status = 'waiting_runtime'
+  AND session_affinity_state IN ('none', 'pinned')
+ORDER BY priority DESC, created_at ASC, id ASC
+LIMIT $2
+`
+
+type ListWaitingPoolTasksParams struct {
+	PlacementWorkspaceID pgtype.UUID `json:"placement_workspace_id"`
+	ScanLimit            int32       `json:"scan_limit"`
+}
+
+// Bounded to exactly one placement Workspace. PostgreSQL owns priority/FIFO;
+// callers preserve this order and unresolved Chat tails never enter placement.
+func (q *Queries) ListWaitingPoolTasks(ctx context.Context, arg ListWaitingPoolTasksParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listWaitingPoolTasks, arg.PlacementWorkspaceID, arg.ScanLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.RuntimeBindingMode,
+			&i.RuntimeRequirements,
+			&i.PlacementWorkspaceID,
+			&i.RuntimeRequesterUserID,
+			&i.SessionAffinityState,
+			&i.SessionAffinityRuntimeID,
+			&i.ExplicitFreshSession,
 		); err != nil {
 			return nil, err
 		}
@@ -5429,6 +5738,75 @@ func (q *Queries) LockAgentForAutopilotAssignment(ctx context.Context, arg LockA
 		&i.ServiceTier,
 		&i.RuntimeBindingMode,
 		&i.RuntimeRequirements,
+	)
+	return i, err
+}
+
+const lockPoolAgentForPlacement = `-- name: LockPoolAgentForPlacement :one
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, runtime_binding_mode, runtime_requirements FROM agent
+WHERE id = $1::uuid
+FOR UPDATE
+`
+
+func (q *Queries) LockPoolAgentForPlacement(ctx context.Context, agentID pgtype.UUID) (Agent, error) {
+	row := q.db.QueryRow(ctx, lockPoolAgentForPlacement, agentID)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.ComposioToolkitAllowlist,
+		&i.PermissionMode,
+		&i.Kind,
+		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+	)
+	return i, err
+}
+
+const lockPoolPlacementMember = `-- name: LockPoolPlacementMember :one
+SELECT id, workspace_id, user_id, role, created_at FROM member
+WHERE workspace_id = $1::uuid
+  AND user_id = $2::uuid
+FOR UPDATE
+`
+
+type LockPoolPlacementMemberParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	RequesterUserID pgtype.UUID `json:"requester_user_id"`
+}
+
+func (q *Queries) LockPoolPlacementMember(ctx context.Context, arg LockPoolPlacementMemberParams) (Member, error) {
+	row := q.db.QueryRow(ctx, lockPoolPlacementMember, arg.WorkspaceID, arg.RequesterUserID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -5908,6 +6286,109 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 // due deferred tasks across the runtime set in one UPDATE.
 func (q *Queries) PromoteDueDeferredTasksForRuntimes(ctx context.Context, runtimeIds []pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, promoteDueDeferredTasksForRuntimes, runtimeIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.RuntimeBindingMode,
+			&i.RuntimeRequirements,
+			&i.PlacementWorkspaceID,
+			&i.RuntimeRequesterUserID,
+			&i.SessionAffinityState,
+			&i.SessionAffinityRuntimeID,
+			&i.ExplicitFreshSession,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const promoteDuePoolDeferredTasksForWorkspace = `-- name: PromoteDuePoolDeferredTasksForWorkspace :many
+UPDATE agent_task_queue
+SET status = 'waiting_runtime',
+    wait_reason = 'no_eligible_runtime'
+WHERE id IN (
+  SELECT id FROM agent_task_queue
+  WHERE placement_workspace_id = $1::uuid
+    AND runtime_binding_mode = 'pool'
+    AND status = 'deferred'
+    AND fire_at <= $2::timestamptz
+    AND session_affinity_state <> 'unresolved'
+  ORDER BY fire_at ASC, id ASC
+  LIMIT $3
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session
+`
+
+type PromoteDuePoolDeferredTasksForWorkspaceParams struct {
+	PlacementWorkspaceID pgtype.UUID        `json:"placement_workspace_id"`
+	Now                  pgtype.Timestamptz `json:"now"`
+	PromoteLimit         int32              `json:"promote_limit"`
+}
+
+func (q *Queries) PromoteDuePoolDeferredTasksForWorkspace(ctx context.Context, arg PromoteDuePoolDeferredTasksForWorkspaceParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, promoteDuePoolDeferredTasksForWorkspace, arg.PlacementWorkspaceID, arg.Now, arg.PromoteLimit)
 	if err != nil {
 		return nil, err
 	}

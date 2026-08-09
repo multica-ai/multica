@@ -1224,3 +1224,31 @@ WHERE workspace_id = $1
   AND status = 'active'
 ORDER BY created_at ASC
 LIMIT 1;
+
+-- name: LockPoolChatSessionForPlacement :one
+SELECT * FROM chat_session
+WHERE id = sqlc.arg(chat_session_id)::uuid
+FOR UPDATE;
+
+-- name: IsPoolChatExecutionHead :one
+-- Task 11 replaces this conservative guard with the shared canonical head
+-- selector. Until then, fail closed whenever another resolved nonterminal row
+-- exists; unresolved tails are never placement candidates.
+SELECT EXISTS (
+  SELECT 1 FROM agent_task_queue AS task
+  WHERE task.id = sqlc.arg(task_id)::uuid
+    AND task.chat_session_id = sqlc.arg(chat_session_id)::uuid
+    AND task.runtime_binding_mode = 'pool'
+    AND task.status = 'waiting_runtime'
+    AND task.session_affinity_state IN ('none', 'pinned')
+    AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS other
+      WHERE other.chat_session_id = task.chat_session_id
+        AND other.id <> task.id
+        AND other.status IN (
+          'waiting_runtime', 'queued', 'deferred', 'dispatched', 'running',
+          'waiting_local_directory'
+        )
+        AND other.session_affinity_state <> 'unresolved'
+    )
+) AS is_head;

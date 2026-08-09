@@ -69,6 +69,79 @@ INSERT INTO agent (
 )
 RETURNING *;
 
+-- name: ListWaitingPoolTasks :many
+-- Bounded to exactly one placement Workspace. PostgreSQL owns priority/FIFO;
+-- callers preserve this order and unresolved Chat tails never enter placement.
+SELECT * FROM agent_task_queue
+WHERE placement_workspace_id = sqlc.arg(placement_workspace_id)::uuid
+  AND runtime_binding_mode = 'pool'
+  AND status = 'waiting_runtime'
+  AND session_affinity_state IN ('none', 'pinned')
+ORDER BY priority DESC, created_at ASC, id ASC
+LIMIT sqlc.arg(scan_limit);
+
+-- name: ListPoolTasksByIDs :many
+-- Sweep promotion is one bounded UPDATE. Re-read its at-most-64 returned IDs
+-- in one statement so verification cannot fail halfway through the committed
+-- promotion set.
+SELECT * FROM agent_task_queue
+WHERE id = ANY(sqlc.arg(task_ids)::uuid[])
+ORDER BY id ASC;
+
+-- name: LockPoolPlacementMember :one
+SELECT * FROM member
+WHERE workspace_id = sqlc.arg(workspace_id)::uuid
+  AND user_id = sqlc.arg(requester_user_id)::uuid
+FOR UPDATE;
+
+-- name: LockPoolAgentForPlacement :one
+SELECT * FROM agent
+WHERE id = sqlc.arg(agent_id)::uuid
+FOR UPDATE;
+
+-- name: AssignWaitingPoolTask :one
+WITH candidate AS (
+  SELECT id FROM agent_task_queue
+  WHERE id = sqlc.arg(task_id)::uuid
+    AND status = 'waiting_runtime'
+    AND runtime_id IS NULL
+    AND runtime_binding_mode = 'pool'
+    AND placement_workspace_id = sqlc.arg(placement_workspace_id)::uuid
+    AND session_affinity_state IN ('none', 'pinned')
+  FOR UPDATE SKIP LOCKED
+)
+UPDATE agent_task_queue AS task
+SET runtime_id = sqlc.arg(runtime_id)::uuid,
+    status = 'queued',
+    wait_reason = NULL
+FROM candidate
+WHERE task.id = candidate.id
+RETURNING task.*;
+
+-- name: ListRuntimePoolSweepWorkspaces :many
+SELECT id FROM workspace
+WHERE sqlc.narg(after_workspace_id)::uuid IS NULL
+   OR id > sqlc.narg(after_workspace_id)::uuid
+ORDER BY id ASC
+LIMIT sqlc.arg(workspace_limit);
+
+-- name: PromoteDuePoolDeferredTasksForWorkspace :many
+UPDATE agent_task_queue
+SET status = 'waiting_runtime',
+    wait_reason = 'no_eligible_runtime'
+WHERE id IN (
+  SELECT id FROM agent_task_queue
+  WHERE placement_workspace_id = sqlc.arg(placement_workspace_id)::uuid
+    AND runtime_binding_mode = 'pool'
+    AND status = 'deferred'
+    AND fire_at <= sqlc.arg(now)::timestamptz
+    AND session_affinity_state <> 'unresolved'
+  ORDER BY fire_at ASC, id ASC
+  LIMIT sqlc.arg(promote_limit)
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
 -- name: CreateAgentBuilder :one
 -- One hidden builder agent per creation session. Keeping the execution carrier
 -- session-scoped freezes its model/runtime configuration when multiple builder

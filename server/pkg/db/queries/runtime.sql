@@ -92,6 +92,28 @@ WHERE id = @task_id
   AND session_affinity_state = 'pinned'
 RETURNING *;
 
+-- name: UpdatePinnedPoolTaskWaitReasonCAS :one
+-- A diagnosis is made from an unlocked scheduler snapshot. Every field that
+-- participates in placement must still match before that diagnosis is stored;
+-- otherwise an affinity/requester/requirements race would attach a stale
+-- Runtime reason to a different routing snapshot.
+UPDATE agent_task_queue
+SET wait_reason = sqlc.arg(reason)
+WHERE id = sqlc.arg(task_id)::uuid
+  AND status = sqlc.arg(expected_status)
+  AND runtime_id IS NOT DISTINCT FROM sqlc.narg('expected_runtime_id')::uuid
+  AND agent_id = sqlc.arg(expected_agent_id)::uuid
+  AND chat_session_id IS NOT DISTINCT FROM sqlc.narg('expected_chat_session_id')::uuid
+  AND runtime_binding_mode = sqlc.arg(expected_runtime_binding_mode)
+  AND placement_workspace_id = sqlc.arg(expected_placement_workspace_id)::uuid
+  AND runtime_requester_user_id = sqlc.arg(expected_runtime_requester_user_id)::uuid
+  AND runtime_requirements = sqlc.arg(expected_runtime_requirements)::jsonb
+  AND session_affinity_state = sqlc.arg(expected_session_affinity_state)
+  AND session_affinity_runtime_id IS NOT DISTINCT FROM sqlc.narg('expected_session_affinity_runtime_id')::uuid
+  AND explicit_fresh_session = sqlc.arg(expected_explicit_fresh_session)
+  AND wait_reason IS NOT DISTINCT FROM sqlc.narg('expected_wait_reason')::text
+RETURNING *;
+
 -- name: GetAgentRuntimeForWorkspace :one
 SELECT * FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2;
@@ -459,3 +481,75 @@ WHERE status = 'offline'
     WHERE agent.runtime_id = agent_runtime.id
   )
 RETURNING id, workspace_id;
+
+-- name: ListPoolRuntimeCandidates :many
+-- Fresh placement only. Authorization, capability, strict DB idle and the
+-- complete deterministic rank all precede the bound. Liveness is filtered in
+-- Go, in this order, before any placement transaction begins.
+SELECT sqlc.embed(ar), count(fixed_agent.id)::bigint AS fixed_binding_count
+FROM agent_runtime AS ar
+JOIN member AS m
+  ON m.workspace_id = ar.workspace_id
+ AND m.user_id = sqlc.arg(requester_user_id)::uuid
+LEFT JOIN agent AS fixed_agent
+  ON fixed_agent.runtime_id = ar.id
+ AND fixed_agent.runtime_binding_mode = 'fixed'
+ AND fixed_agent.archived_at IS NULL
+WHERE ar.workspace_id = sqlc.arg(workspace_id)::uuid
+  AND ar.status = 'online'
+  AND ar.capabilities @> sqlc.arg(requirements_all)::text[]
+  AND (
+    m.role IN ('owner', 'admin')
+    OR ar.owner_id = sqlc.arg(requester_user_id)::uuid
+    OR ar.visibility = 'public'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_task_queue AS occupied
+    WHERE occupied.runtime_id = ar.id
+      AND occupied.status IN (
+        'queued', 'deferred', 'dispatched', 'running',
+        'waiting_local_directory'
+      )
+  )
+GROUP BY ar.id
+ORDER BY
+  CASE
+    WHEN ar.runtime_mode = 'local'
+     AND ar.owner_id = sqlc.arg(requester_user_id)::uuid THEN 0
+    ELSE 1
+  END,
+  ar.last_seen_at DESC NULLS LAST,
+  fixed_binding_count ASC,
+  ar.created_at ASC,
+  ar.id ASC
+LIMIT sqlc.arg(runtime_limit);
+
+-- name: GetPinnedPoolRuntimeCandidate :one
+-- Session affinity deliberately ignores occupancy: once eligible and alive,
+-- the Task joins the Runtime's existing queue rather than switching machines.
+SELECT ar.* FROM agent_runtime AS ar
+JOIN member AS m
+  ON m.workspace_id = ar.workspace_id
+ AND m.user_id = sqlc.arg(requester_user_id)::uuid
+WHERE ar.id = sqlc.arg(runtime_id)::uuid
+  AND ar.workspace_id = sqlc.arg(workspace_id)::uuid
+  AND ar.status = 'online'
+  AND ar.capabilities @> sqlc.arg(requirements_all)::text[]
+  AND (
+    m.role IN ('owner', 'admin')
+    OR ar.owner_id = sqlc.arg(requester_user_id)::uuid
+    OR ar.visibility = 'public'
+  );
+
+-- name: LockPoolRuntimeForPlacement :one
+SELECT * FROM agent_runtime
+WHERE id = sqlc.arg(runtime_id)::uuid
+FOR UPDATE SKIP LOCKED;
+
+-- name: CountRuntimeCapacityBearingTasks :one
+SELECT count(*) FROM agent_task_queue
+WHERE runtime_id = sqlc.arg(runtime_id)::uuid
+  AND status IN (
+    'queued', 'deferred', 'dispatched', 'running',
+    'waiting_local_directory'
+  );
