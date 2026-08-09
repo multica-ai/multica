@@ -18,6 +18,47 @@ func (s *stubWakeup) NotifyTaskAvailable(runtimeID, taskID string) {
 	s.calls = append(s.calls, struct{ runtimeID, taskID string }{runtimeID, taskID})
 }
 
+// TestNotifyRuntimeMayHaveWork_BumpsBeforeWakeup covers the agent runtime
+// migration path (MUL-5758). Nothing is enqueued and nothing finishes there —
+// existing queued/deferred rows are re-pointed onto the runtime their agents
+// just moved to — so the target runtime can be sitting on an "empty" verdict
+// recorded before it inherited that work. Without the same bump-then-wake the
+// enqueue path uses, those tasks wait for the cache TTL instead of being
+// claimed, which is exactly the stall the migration exists to prevent.
+func TestNotifyRuntimeMayHaveWork_BumpsBeforeWakeup(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	cache := NewEmptyClaimCache(rdb)
+	wakeup := &stubWakeup{}
+
+	svc := &TaskService{EmptyClaim: cache, Wakeup: wakeup}
+
+	runtimeID := testUUID(11)
+	runtimeKey := util.UUIDToString(runtimeID)
+
+	ctx := context.Background()
+	cache.MarkEmpty(ctx, runtimeKey, cache.CurrentVersion(ctx, runtimeKey))
+	if !cache.IsEmpty(ctx, runtimeKey) {
+		t.Fatal("precondition: cache should report empty after MarkEmpty under current version")
+	}
+
+	svc.NotifyRuntimeMayHaveWork(runtimeID)
+
+	if cache.IsEmpty(ctx, runtimeKey) {
+		t.Fatal("NotifyRuntimeMayHaveWork must Bump the version so the inherited work is not hidden by a stale empty verdict")
+	}
+	if got := len(wakeup.calls); got != 1 {
+		t.Fatalf("expected 1 wakeup call, got %d", got)
+	}
+	if wakeup.calls[0].runtimeID != runtimeKey {
+		t.Fatalf("wakeup runtime mismatch: got %q want %q", wakeup.calls[0].runtimeID, runtimeKey)
+	}
+	// No task id: the hint means "this runtime may have claimable work now",
+	// not "claim this specific row" — a migration can move many at once.
+	if wakeup.calls[0].taskID != "" {
+		t.Fatalf("expected an empty task id hint, got %q", wakeup.calls[0].taskID)
+	}
+}
+
 // TestNotifyTaskAvailable_BumpsBeforeWakeup pins the contract noted in
 // the EmptyClaimCache docs: the version Bump MUST run before the
 // daemon WS wakeup, otherwise the wakeup-driven claim could read a

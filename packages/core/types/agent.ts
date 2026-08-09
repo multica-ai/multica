@@ -1289,3 +1289,83 @@ export interface RuntimeLocalSkillImportResult {
   skill?: Skill;
   conflict?: RuntimeLocalSkillImportConflict;
 }
+
+// ---------------------------------------------------------------------------
+// Bulk agent operations (MUL-5758)
+// ---------------------------------------------------------------------------
+
+/** Why one agent in a bulk request was left alone. Skips are reported per
+ *  agent instead of failing the request, so "select everything, act on what
+ *  you may" works. Widen with care: UI switches on this need a default. */
+export type BulkAgentSkipReason =
+  | "forbidden"
+  | "not_found"
+  | "already_on_target";
+
+export interface BulkAgentSkip {
+  agent_id: string;
+  /** Absent for `not_found` — an unresolvable id has no name to disclose. */
+  name?: string;
+  reason: BulkAgentSkipReason;
+}
+
+/** One agent the migration moved, or would move on a dry run. The `cleared_*`
+ *  fields carry the values being discarded so the confirmation dialog can name
+ *  them rather than clearing runtime-native settings silently. */
+export interface MigratedAgentResult {
+  agent_id: string;
+  name: string;
+  cleared_model?: string;
+  cleared_thinking_level?: string;
+  cleared_service_tier?: string;
+}
+
+export interface MigrateAgentsToRuntimeRequest {
+  agent_ids: string[];
+  /** Set only by the Runtime detail entry point: the runtime whose agent set
+   *  the user confirmed. The server re-derives it inside the transaction and
+   *  refuses with `runtime_migration_plan_changed` if it drifted. */
+  expected_source_runtime_id?: string;
+  /** Defaults to true server-side. */
+  clear_model_settings?: boolean;
+  /** Optional uniform replacement applied to every migrated agent instead of
+   *  clearing to the runtime default. thinking_level / service_tier are
+   *  model-native: the server rejects them without `model`, and rejects all
+   *  three when `clear_model_settings` is false. */
+  model?: string;
+  thinking_level?: string;
+  service_tier?: string;
+  /** Run every check and count, write nothing. Backs the confirmation dialog. */
+  dry_run?: boolean;
+}
+
+export interface MigrateAgentsToRuntimeResponse {
+  target_runtime_id: string;
+  dry_run: boolean;
+  migrated: MigratedAgentResult[];
+  skipped: BulkAgentSkip[];
+  /** 'queued' / 'deferred' tasks moved onto the target runtime. */
+  tasks_migrated: number;
+  /** 'dispatched' / 'running' / 'waiting_local_directory' tasks left where a
+   *  daemon already owns them. */
+  tasks_staying_active: number;
+}
+
+export interface MergeAgentsEnvRequest {
+  agent_ids: string[];
+  /** Keys to add or overwrite. Every other key on the agent is left alone. */
+  set: Record<string, string>;
+}
+
+export interface MergeAgentsEnvResult {
+  agent_id: string;
+  name: string;
+  added_keys: string[];
+  overwritten_keys: string[];
+  key_count: number;
+}
+
+export interface MergeAgentsEnvResponse {
+  results: MergeAgentsEnvResult[];
+  skipped: BulkAgentSkip[];
+}

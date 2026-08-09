@@ -18,6 +18,8 @@ import type {
   ChatMessage,
   ChatDraftRestoresResponse,
   ChatPendingTask,
+  MergeAgentsEnvResponse,
+  MigrateAgentsToRuntimeResponse,
   PrioritizeQueuedChatTaskResponse,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
@@ -2163,6 +2165,67 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   error: "invalid model discovery response",
   created_at: "",
   updated_at: "",
+};
+
+// ---------------------------------------------------------------------------
+// Bulk agent operations (MUL-5758)
+// ---------------------------------------------------------------------------
+
+// `reason` stays a plain string so a reason added server-side still parses;
+// the UI switches on it with a default branch.
+const BulkAgentSkipSchema = z.object({
+  agent_id: z.string(),
+  name: z.string().optional(),
+  reason: z.string().default("forbidden"),
+}).loose();
+
+const MigratedAgentResultSchema = z.object({
+  agent_id: z.string(),
+  name: z.string().default(""),
+  cleared_model: z.string().optional(),
+  cleared_thinking_level: z.string().optional(),
+  cleared_service_tier: z.string().optional(),
+}).loose();
+
+export const MigrateAgentsToRuntimeResponseSchema = z.object({
+  target_runtime_id: z.string().default(""),
+  dry_run: z.boolean().default(false),
+  migrated: z.array(MigratedAgentResultSchema).default([]),
+  skipped: z.array(BulkAgentSkipSchema).default([]),
+  tasks_migrated: z.number().default(0),
+  tasks_staying_active: z.number().default(0),
+}).loose();
+
+// Fallback for an unparseable migration response. Every list is empty and
+// every count is zero, so a drifted contract degrades to "we cannot tell you
+// what happened" rather than to a confident wrong summary — in particular it
+// never claims tasks moved. The caller still refetches the agent list, so the
+// real state re-renders from the server on the next read.
+export const MALFORMED_MIGRATE_AGENTS_RESPONSE: MigrateAgentsToRuntimeResponse = {
+  target_runtime_id: "",
+  dry_run: false,
+  migrated: [],
+  skipped: [],
+  tasks_migrated: 0,
+  tasks_staying_active: 0,
+};
+
+const MergeAgentsEnvResultSchema = z.object({
+  agent_id: z.string(),
+  name: z.string().default(""),
+  added_keys: z.array(z.string()).default([]),
+  overwritten_keys: z.array(z.string()).default([]),
+  key_count: z.number().default(0),
+}).loose();
+
+export const MergeAgentsEnvResponseSchema = z.object({
+  results: z.array(MergeAgentsEnvResultSchema).default([]),
+  skipped: z.array(BulkAgentSkipSchema).default([]),
+}).loose();
+
+export const MALFORMED_MERGE_AGENTS_ENV_RESPONSE: MergeAgentsEnvResponse = {
+  results: [],
+  skipped: [],
 };
 
 export const DingTalkInstallationSchema = z.object({

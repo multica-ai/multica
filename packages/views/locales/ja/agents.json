@@ -102,6 +102,7 @@
     "cancelled_tasks_toast_other": "作業 {{count}} 件をキャンセルしました",
     "cancel_failed_toast": "作業をキャンセルできませんでした",
     "cancel_dialog_title": "\"{{name}}\" のすべての作業をキャンセルしますか？",
+    "cancel_dialog_title_bulk_other": "{{count}} 件のエージェントのすべての作業をキャンセルしますか？",
     "cancel_dialog_no_tasks": "キャンセルできるアクティブな作業がありません。",
     "cancel_dialog_running_other": "実行中 {{count}} 件",
     "cancel_dialog_queued_other": "待機中 {{count}} 件",
@@ -113,7 +114,34 @@
     "archive_dialog_title": "\"{{name}}\" をアーカイブしますか？",
     "archive_dialog_description": "このエージェントは割り当てやメンションができなくなり、アクティブな作業はすべてキャンセルされます。履歴はすべて保持され、後で復元できます。",
     "archive_dialog_cancel": "キャンセル",
-    "archive_dialog_confirm": "アーカイブ"
+    "archive_dialog_confirm": "アーカイブ",
+    "switch_runtime": "ランタイム / モデルを切り替え",
+    "inject_env": "環境変数を追加"
+  },
+  "migrate_dialog": {
+    "title_single": "\"{{name}}\" のランタイム / モデルを切り替え",
+    "title_bulk_other": "{{count}} 件のエージェントのランタイム / モデルを切り替え",
+    "tasks_migrating_other": "待機中の作業 {{count}} 件が新しいランタイムへ移ります。",
+    "tasks_staying_other": "実行中の作業 {{count}} 件は完了まで現在のランタイムに残ります。",
+    "model_section_title": "切り替え後のモデル（任意・空欄ならランタイムのデフォルト）",
+    "blocker_no_target": "まず移行先のランタイムを選択してください。",
+    "blocker_no_agents": "エージェントがすべて未選択です。少なくとも 1 件チェックしてください。",
+    "target_offline": "このランタイムはオフラインです。再接続するまで作業は待機します。",
+    "cancel": "キャンセル",
+    "confirm": "適用",
+    "success_toast_other": "{{count}} 件のエージェントに適用 · 待機中の作業 {{tasks}} 件を移動",
+    "skipped_toast_other": "{{count}} 件をスキップしました",
+    "failed_toast": "ランタイムの切り替えに失敗しました"
+  },
+  "inject_env_dialog": {
+    "title_single": "「{{name}}」に環境変数を追加",
+    "title_bulk_other": "{{count}} 件のエージェントに環境変数を追加",
+    "description": "入力したキーだけが追加・上書きされます。他の変数はそのまま残り、既存の値がここに表示されることはありません。",
+    "current_key_count_other": "変数 {{count}} 件",
+    "confirm": "適用",
+    "success_toast": "{{agents}} 件のエージェントに適用 · 追加 {{added}} 件 · 上書き {{overwritten}} 件",
+    "skipped_toast_other": "{{count}} 件をスキップしました",
+    "failed_toast": "環境変数の更新に失敗しました"
   },
   "detail": {
     "back_to_agents": "エージェント",
@@ -847,6 +875,7 @@
   },
   "actions": {
     "selected_other": "{{count}} 件選択中",
-    "clear_selection": "選択を解除"
+    "clear_selection": "選択を解除",
+    "menu": "アクション"
   }
 }

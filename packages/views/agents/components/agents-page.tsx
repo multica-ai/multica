@@ -233,6 +233,8 @@ export function rowMatchesFilters(
  */
 import { isAccessChangeReady } from "@multica/core/agents";
 import { AgentBatchToolbar } from "./agent-batch-toolbar";
+import { SwitchAgentRuntimeDialog } from "./switch-agent-runtime-dialog";
+import { InjectAgentEnvDialog } from "./inject-agent-env-dialog";
 export { isAccessChangeReady };
 
 export interface AgentsPageProps {
@@ -796,6 +798,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     new Set(),
   );
   const [search, setSearch] = useState("");
+  // The two quick-action dialogs are owned here, not by the row menu or the
+  // toolbar, so one agent and N agents open the identical component. Holding
+  // the agent array (rather than ids) also keeps the dialog rendering the set
+  // the user acted on even if a refetch reorders the list underneath.
+  const [runtimeDialogAgents, setRuntimeDialogAgents] = useState<Agent[]>([]);
+  const [envDialogAgents, setEnvDialogAgents] = useState<Agent[]>([]);
 
   const rawScope = useAgentsViewStore((s) => s.scope);
   const scope = AGENT_SCOPES.includes(rawScope) ? rawScope : "mine";
@@ -1173,6 +1181,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                             presence={row.presence}
                             canManage={row.canManage}
                             onDuplicate={handleDuplicate}
+                            onSwitchRuntime={(agent) =>
+                              setRuntimeDialogAgents([agent])
+                            }
+                            onInjectEnv={(agent) =>
+                              setEnvDialogAgents([agent])
+                            }
                           />
                         </span>
                       </ListGridCell>
@@ -1190,7 +1204,39 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         members={members}
         currentUserId={currentUser?.id ?? null}
         onClear={() => setSelectedIds(new Set())}
+        onSwitchRuntime={(targets) =>
+          setRuntimeDialogAgents(targets.map((r) => r.agent))
+        }
+        onInjectEnv={(targets) =>
+          setEnvDialogAgents(targets.map((r) => r.agent))
+        }
       />
+
+      {runtimeDialogAgents.length > 0 && (
+        <SwitchAgentRuntimeDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setRuntimeDialogAgents([]);
+          }}
+          agents={runtimeDialogAgents}
+          runtimes={runtimes}
+          members={members}
+          currentUserId={currentUser?.id ?? null}
+          wsId={wsId}
+          onMigrated={() => setSelectedIds(new Set())}
+        />
+      )}
+
+      {envDialogAgents.length > 0 && (
+        <InjectAgentEnvDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setEnvDialogAgents([]);
+          }}
+          agents={envDialogAgents}
+          wsId={wsId}
+        />
+      )}
 
     </div>
   );

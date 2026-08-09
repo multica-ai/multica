@@ -4922,6 +4922,17 @@ func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
 	s.notifyRuntimeMayHaveWork(task.RuntimeID, util.UUIDToString(task.ID))
 }
 
+// NotifyRuntimeMayHaveWork is the exported form, for callers that make an
+// EXISTING task claimable by a runtime that did not previously own it — today
+// the agent runtime migration, which re-points queued/deferred rows onto their
+// agents' new runtime (MUL-5758). Nothing was enqueued and nothing finished, so
+// neither NotifyTaskEnqueued nor NotifyTaskFinished fits, but the target
+// runtime can still be holding an "empty" claim verdict that would keep the
+// inherited work unclaimed until the TTL expired.
+func (s *TaskService) NotifyRuntimeMayHaveWork(runtimeID pgtype.UUID) {
+	s.notifyRuntimeMayHaveWork(runtimeID, "")
+}
+
 // notifyRuntimeMayHaveWork is the shared bump-before-wakeup primitive for both
 // fresh enqueues and terminal transitions that can unblock queued work.
 func (s *TaskService) notifyRuntimeMayHaveWork(runtimeID pgtype.UUID, taskID string) {

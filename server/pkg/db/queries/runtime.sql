@@ -33,6 +33,22 @@ SELECT * FROM agent_runtime
 WHERE id = $1
 FOR UPDATE;
 
+-- name: LockAgentRuntimeForWorkspace :one
+-- Workspace-scoped LockAgentRuntime, for callers that lock a runtime id taken
+-- from a REQUEST BODY rather than from an already-authorized path param
+-- (MUL-5758: the migration endpoint's expected_source_runtime_id).
+--
+-- The unscoped variant above is safe only because its callers resolved the
+-- runtime through the path and checked membership against that runtime's own
+-- workspace. A body-supplied id has had no such check, so locking it unscoped
+-- would let a caller authorized in workspace A take a lock on — and then read
+-- through — a runtime in workspace B. Returning no rows for an id outside the
+-- workspace makes "belongs to someone else" and "does not exist"
+-- indistinguishable to the caller.
+SELECT * FROM agent_runtime
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: GetAgentRuntimeForWorkspace :one
 SELECT * FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2;

@@ -36,6 +36,21 @@ vi.mock("./inspector/service-tier-setting-field", () => ({
   ServiceTierSettingField: () => <div data-testid="service-tier-field" />,
 }));
 
+// The runtime field routes through the migration endpoint (MUL-5758), which
+// pulls in the workspace id and a mutation hook this form-shape test does not
+// exercise.
+vi.mock("@multica/core/hooks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/hooks")>()),
+  useWorkspaceId: () => "workspace-1",
+}));
+
+vi.mock("@multica/core/runtimes/mutations", () => ({
+  useMigrateAgentsToRuntime: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+}));
+
 const agent = {
   id: "agent-1",
   workspace_id: "workspace-1",

@@ -109,6 +109,19 @@ var agentEnvSetCmd = &cobra.Command{
 	RunE:  runAgentEnvSet,
 }
 
+// `env merge` is the additive counterpart to `env set`. `set` replaces the
+// whole map, which cannot inject a key without first reading every existing
+// value back (a plaintext read that also writes a reveal audit row); `merge`
+// writes only the keys given and leaves the rest alone. Deleting keys stays
+// with `set`, matching the UI split where the detail page owns full env
+// management and the quick dialog only injects.
+var agentEnvMergeCmd = &cobra.Command{
+	Use:   "merge <agent-id> [agent-id...]",
+	Short: "Add or overwrite specific env keys on one or more agents, leaving other keys untouched",
+	Args:  cobra.MinimumNArgs(1),
+	RunE:  runAgentEnvMerge,
+}
+
 var agentSkillsListCmd = &cobra.Command{
 	Use:   "list <agent-id>",
 	Short: "List skills assigned to an agent",
@@ -148,6 +161,7 @@ func init() {
 
 	agentEnvCmd.AddCommand(agentEnvGetCmd)
 	agentEnvCmd.AddCommand(agentEnvSetCmd)
+	agentEnvCmd.AddCommand(agentEnvMergeCmd)
 
 	// agent list
 	agentListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -243,6 +257,14 @@ func init() {
 	agentEnvSetCmd.Flags().Bool("custom-env-stdin", false, "Read the replacement custom_env JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
 	agentEnvSetCmd.Flags().String("custom-env-file", "", "Read the replacement custom_env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
 	agentEnvSetCmd.Flags().String("output", "json", "Output format: json or table")
+
+	// agent env merge. Same three secret-safe input channels as `env set`;
+	// the payload means "add or overwrite these keys" rather than "this is
+	// the whole map".
+	agentEnvMergeCmd.Flags().String("custom-env", "", "Keys to add or overwrite as a JSON object, e.g. '{\"KEY\":\"value\"}'. Treated as secret material — values passed on the command line are visible to shell history and 'ps'; prefer --custom-env-stdin or --custom-env-file for real secrets.")
+	agentEnvMergeCmd.Flags().Bool("custom-env-stdin", false, "Read the keys to add or overwrite from stdin as a JSON object. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
+	agentEnvMergeCmd.Flags().String("custom-env-file", "", "Read the keys to add or overwrite from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
+	agentEnvMergeCmd.Flags().String("output", "json", "Output format: json or table")
 }
 
 // resolveProfile returns the --profile flag value (empty string means default profile).
@@ -1088,6 +1110,68 @@ func runAgentEnvSet(cmd *cobra.Command, args []string) error {
 
 	env, _ := result["custom_env"].(map[string]any)
 	fmt.Printf("Env updated for agent %s (%d keys)\n", args[0], len(env))
+	return nil
+}
+
+// runAgentEnvMerge adds or overwrites the given keys across one or more agents
+// via PATCH /api/agents/env. Unlike runAgentEnvSet it never needs the agents'
+// existing values, so injecting a shared key into a fleet leaves no reveal
+// audit trail and pulls no secrets onto this machine.
+//
+// Agents the caller may not manage are reported as skipped by the server
+// rather than failing the request, matching the UI's bulk contract.
+func runAgentEnvMerge(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	set, ok, err := resolveCustomEnv(cmd)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("specify the keys via --custom-env, --custom-env-stdin, or --custom-env-file")
+	}
+	if len(set) == 0 {
+		return fmt.Errorf("nothing to merge; pass at least one key (use `agent env set` to clear an agent's env)")
+	}
+
+	body := map[string]any{"agent_ids": args, "set": set}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var result struct {
+		Results []struct {
+			AgentID         string   `json:"agent_id"`
+			Name            string   `json:"name"`
+			AddedKeys       []string `json:"added_keys"`
+			OverwrittenKeys []string `json:"overwritten_keys"`
+			KeyCount        int      `json:"key_count"`
+		} `json:"results"`
+		Skipped []struct {
+			AgentID string `json:"agent_id"`
+			Name    string `json:"name"`
+			Reason  string `json:"reason"`
+		} `json:"skipped"`
+	}
+	if err := client.PatchJSON(ctx, "/api/agents/env", body, &result); err != nil {
+		return fmt.Errorf("merge agent env: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	for _, r := range result.Results {
+		fmt.Printf("%s: %d added, %d overwritten (%d keys total)\n",
+			r.Name, len(r.AddedKeys), len(r.OverwrittenKeys), r.KeyCount)
+	}
+	for _, s := range result.Skipped {
+		fmt.Printf("skipped %s: %s\n", s.AgentID, s.Reason)
+	}
 	return nil
 }
 

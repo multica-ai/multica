@@ -21,37 +21,67 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
-import { Archive, ArchiveRestore, Loader2, X } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import {
+  Archive,
+  ArchiveRestore,
+  ChevronUp,
+  KeyRound,
+  Loader2,
+  MonitorCog,
+  Square,
+  Users,
+  X,
+} from "lucide-react";
 import { useT } from "../../i18n";
 import { AccessPicker, type AccessChange } from "./inspector/access-picker";
 import type { AgentListRow } from "./agents-page";
 
 /**
- * Floating batch-toolbar for the agents list page. Renders archive/restore
- * actions (existing) and a "Set access scope" action (new, MUL-4302 / 2026-07-14)
- * that opens a single confirmation dialog with an embedded AccessPicker.
+ * Floating batch-toolbar for the agents list page: a selection count plus one
+ * "Actions" menu holding every bulk operation (MUL-5758 follow-up). The flat
+ * button row it replaces stopped scaling at five actions; a menu grows by one
+ * item per new operation and keeps the bar a fixed width in every locale.
  *
- * The bulk action is gated by `isOwnedByMe` (not `canManage`) to match the
- * backend's owner-only write gate for `permission_mode` / `invocation_targets`.
- * Non-owned selected agents are skipped; the skip count is shown in both the
- * dialog summary and the partial-failure toast.
+ * Menu items are always rendered (when their lifecycle state applies) and
+ * disabled when no selected row qualifies, so users learn one stable menu
+ * instead of a layout that reshuffles with each selection.
+ *
+ * Permission gates mirror the server's, per action: set access is gated by
+ * `isOwnedByMe` (owner-only write for `permission_mode` / `invocation_targets`,
+ * MUL-4302), the rest by `canManage`. Rows that fail a gate are dropped from
+ * that action's hand-off rather than sent and skipped.
  */
 export function AgentBatchToolbar({
   rows,
   members,
   currentUserId,
   onClear,
+  onSwitchRuntime,
+  onInjectEnv,
 }: {
   rows: AgentListRow[];
   members: MemberWithUser[];
   currentUserId: string | null;
   onClear: () => void;
+  // Bulk quick actions. Like the row menu, the toolbar only announces intent —
+  // the page owns the dialogs so the single-agent and bulk paths mount the
+  // exact same component.
+  onSwitchRuntime: (rows: AgentListRow[]) => void;
+  onInjectEnv: (rows: AgentListRow[]) => void;
 }) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const shouldReduceMotion = useReducedMotion() ?? false;
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmAccess, setConfirmAccess] = useState(false);
   const [accessChange, setAccessChange] = useState<AccessChange | null>(null);
   const [busy, setBusy] = useState(false);
@@ -74,6 +104,23 @@ export function AgentBatchToolbar({
   }, []);
 
   const allManageable = rows.every((r) => r.canManage);
+  // Runtime switch and env injection are gated on canManage (agent owner or
+  // workspace admin) rather than isOwnedByMe — that is the rule the server
+  // applies to both. Non-manageable rows are dropped from the hand-off rather
+  // than sent and skipped, so the dialog's counts describe what will actually
+  // happen. Archived rows are excluded for the same reason the row menu hides
+  // these actions on them.
+  const manageableActiveRows = rows.filter(
+    (r) => r.canManage && !r.agent.archived_at,
+  );
+  const anyManageableActive = manageableActiveRows.length > 0;
+  // Same gate the row menu applies to its stop item: manageable, active, and
+  // actually holding running or queued work — cancelling an idle agent's tasks
+  // is a no-op the user should not be offered.
+  const stoppableRows = manageableActiveRows.filter(
+    (r) =>
+      (r.presence?.runningCount ?? 0) + (r.presence?.queuedCount ?? 0) > 0,
+  );
   const ownedRows = rows.filter((r) => r.isOwnedByMe);
   const anyOwned = ownedRows.length > 0;
   const anyActive = rows.some((r) => !r.agent.archived_at);
@@ -87,6 +134,7 @@ export function AgentBatchToolbar({
   useEffect(() => {
     if (rows.length > 0) return;
     setConfirmArchive(false);
+    setConfirmCancel(false);
     setConfirmAccess(false);
     setAccessChange(null);
   }, [rows.length]);
@@ -108,6 +156,39 @@ export function AgentBatchToolbar({
         }),
       );
     }
+  };
+
+  // Not routed through runBatch: the success toast reports the summed number
+  // of cancelled tasks, which needs each call's `{ cancelled }` payload.
+  const applyCancelTasksBulk = async () => {
+    setBusy(true);
+    const settled = await Promise.allSettled(
+      stoppableRows.map((row) => api.cancelAgentTasks(row.agent.id)),
+    );
+    const cancelled = settled.reduce(
+      (n, s) => (s.status === "fulfilled" ? n + s.value.cancelled : n),
+      0,
+    );
+    const firstFailure = settled.find((s) => s.status === "rejected") as
+      | PromiseRejectedResult
+      | undefined;
+    invalidate();
+    onClear();
+    setBusy(false);
+    setConfirmCancel(false);
+    if (firstFailure) {
+      toast.error(
+        firstFailure.reason instanceof Error
+          ? firstFailure.reason.message
+          : String(firstFailure.reason),
+      );
+      return;
+    }
+    toast.success(
+      cancelled === 0
+        ? t(($) => $.row_actions.no_tasks_to_cancel_toast)
+        : t(($) => $.row_actions.cancelled_tasks_toast, { count: cancelled }),
+    );
   };
 
   const runBatch = async (
@@ -185,45 +266,87 @@ export function AgentBatchToolbar({
           </button>
         </div>
 
-        {anyArchived && (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!allManageable || busy}
-            onClick={() =>
-              runBatch(
-                (id) => api.restoreAgent(id),
-                rows.filter((r) => !!r.agent.archived_at),
-              )
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="ghost" size="sm" disabled={busy}>
+                {busy ? (
+                  <Loader2 className="mr-1 size-3.5 animate-spin" />
+                ) : null}
+                {t(($) => $.actions.menu)}
+                <ChevronUp className="ml-1 size-3.5 text-muted-foreground" />
+              </Button>
             }
-          >
-            <ArchiveRestore className="mr-1 size-3.5" />
-            {t(($) => $.row_actions.restore)}
-          </Button>
-        )}
-        {anyActive && (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!anyOwned || busy}
-            onClick={() => setAccessDialogOpen(true)}
-          >
-            {t(($) => $.row_actions.set_access)}
-          </Button>
-        )}
-        {/* Archive sits last: it is the destructive action, kept furthest from
-            the other batch actions. */}
-        {anyActive && (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!allManageable || busy}
-            onClick={() => setConfirmArchive(true)}
-          >
-            <Archive className="mr-1 size-3.5" />
-            {t(($) => $.row_actions.archive)}
-          </Button>
-        )}
+          />
+          {/* Opens upward: the bar is anchored to the bottom of the list. */}
+          <DropdownMenuContent side="top" align="end" sideOffset={8}>
+            {anyActive && (
+              <DropdownMenuItem
+                disabled={stoppableRows.length === 0}
+                onClick={() => setConfirmCancel(true)}
+              >
+                <Square className="h-3.5 w-3.5" />
+                {t(($) => $.row_actions.cancel_all_tasks)}
+              </DropdownMenuItem>
+            )}
+            {anyActive && (
+              <DropdownMenuItem
+                disabled={!anyManageableActive}
+                onClick={() => onSwitchRuntime(manageableActiveRows)}
+              >
+                <MonitorCog className="h-3.5 w-3.5" />
+                {t(($) => $.row_actions.switch_runtime)}
+              </DropdownMenuItem>
+            )}
+            {anyActive && (
+              <DropdownMenuItem
+                disabled={!anyManageableActive}
+                onClick={() => onInjectEnv(manageableActiveRows)}
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                {t(($) => $.row_actions.inject_env)}
+              </DropdownMenuItem>
+            )}
+            {anyActive && (
+              <DropdownMenuItem
+                disabled={!anyOwned}
+                onClick={() => setAccessDialogOpen(true)}
+              >
+                <Users className="h-3.5 w-3.5" />
+                {t(($) => $.row_actions.set_access)}
+              </DropdownMenuItem>
+            )}
+            {anyArchived && (
+              <DropdownMenuItem
+                disabled={!allManageable}
+                onClick={() =>
+                  runBatch(
+                    (id) => api.restoreAgent(id),
+                    rows.filter((r) => !!r.agent.archived_at),
+                  )
+                }
+              >
+                <ArchiveRestore className="h-3.5 w-3.5" />
+                {t(($) => $.row_actions.restore)}
+              </DropdownMenuItem>
+            )}
+            {/* Archive sits last behind a separator: it is the destructive
+                action, kept furthest from the routine ones. */}
+            {anyActive && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  disabled={!allManageable}
+                  onClick={() => setConfirmArchive(true)}
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                  {t(($) => $.row_actions.archive)}
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
             </motion.div>
           </div>
         )}
@@ -272,6 +395,47 @@ export function AgentBatchToolbar({
                 <Loader2 className="mr-1 size-3.5 animate-spin" />
               ) : null}
               {t(($) => $.row_actions.archive_dialog_confirm)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>}
+
+      {/* Bulk cancel-tasks confirm dialog. Counts stoppable agents, not
+          selected rows: it states what the confirm button will actually do. */}
+      {rows.length > 0 && <Dialog open={confirmCancel} onOpenChange={setConfirmCancel}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {t(($) => $.row_actions.cancel_dialog_title_bulk, {
+                count: stoppableRows.length,
+              })}
+            </DialogTitle>
+            <DialogDescription>
+              {t(($) => $.row_actions.cancel_dialog_running_note)}
+              {t(($) => $.row_actions.cancel_dialog_irreversible)}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => setConfirmCancel(false)}
+            >
+              {t(($) => $.row_actions.cancel_dialog_keep)}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={busy}
+              onClick={applyCancelTasksBulk}
+            >
+              {busy ? (
+                <Loader2 className="mr-1 size-3.5 animate-spin" />
+              ) : null}
+              {t(($) => $.row_actions.cancel_dialog_confirm)}
             </Button>
           </DialogFooter>
         </DialogContent>

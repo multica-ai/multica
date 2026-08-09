@@ -185,7 +185,8 @@
     "running_chip_one": "· {{count}} running",
     "running_chip_other": "· {{count}} running",
     "queued_chip_one": "· {{count}} queued",
-    "queued_chip_other": "· {{count}} queued"
+    "queued_chip_other": "· {{count}} queued",
+    "migrate_agents": "Migrate agents"
   },
   "detail_page": {
     "not_found_title": "Runtime not found",

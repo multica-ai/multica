@@ -33,6 +33,10 @@ import type {
   UpdateAgentRequest,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
+  MergeAgentsEnvRequest,
+  MergeAgentsEnvResponse,
+  MigrateAgentsToRuntimeRequest,
+  MigrateAgentsToRuntimeResponse,
   AgentTask,
   AgentActivityBucket,
   AgentRunCount,
@@ -344,6 +348,10 @@ import {
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  MigrateAgentsToRuntimeResponseSchema,
+  MALFORMED_MIGRATE_AGENTS_RESPONSE,
+  MergeAgentsEnvResponseSchema,
+  MALFORMED_MERGE_AGENTS_ENV_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1610,6 +1618,60 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ expected_active_agent_ids: expectedActiveAgentIds }),
     });
+  }
+
+  // Moves agents onto `runtimeId` (the TARGET) and brings their unclaimed
+  // tasks along, in one server-side transaction. One call serves the single
+  // agent and the bulk cases — a single agent is just a one-element
+  // `agent_ids` — so the row menu, the batch toolbar, the detail inspector and
+  // the Runtime page cannot drift apart.
+  //
+  // Pass `dry_run: true` to get the exact task split and skip list without
+  // writing; the confirmation dialog needs that because no client-side
+  // projection can produce it (presence folds 'dispatched' into "queued" and
+  // omits 'deferred' entirely).
+  //
+  // Throws on the 409 `runtime_migration_plan_changed` like any other non-2xx.
+  // The error body carries `active_agents` as an identity-only planning list
+  // ({agent_id, name}) restricted to agents the caller may see — never the
+  // agent resource, which would ship mcp_config and instructions through a
+  // path with no redaction. The caller re-renders and reconfirms.
+  async migrateAgentsToRuntime(
+    runtimeId: string,
+    body: MigrateAgentsToRuntimeRequest,
+  ): Promise<MigrateAgentsToRuntimeResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/migrate-agents`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    return parseWithFallback(
+      raw,
+      MigrateAgentsToRuntimeResponseSchema,
+      MALFORMED_MIGRATE_AGENTS_RESPONSE,
+      { endpoint: "POST /api/runtimes/{id}/migrate-agents" },
+    );
+  }
+
+  // Adds or overwrites env keys across one or more agents, leaving every key
+  // the caller did not name untouched. Distinct from updateAgentEnv, which
+  // replaces an agent's map wholesale and therefore cannot inject without
+  // first revealing every existing secret.
+  //
+  // The response names only the keys the caller submitted and never carries a
+  // value.
+  async mergeAgentsEnv(
+    body: MergeAgentsEnvRequest,
+  ): Promise<MergeAgentsEnvResponse> {
+    const raw = await this.fetch<unknown>("/api/agents/env", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return parseWithFallback(
+      raw,
+      MergeAgentsEnvResponseSchema,
+      MALFORMED_MERGE_AGENTS_ENV_RESPONSE,
+      { endpoint: "PATCH /api/agents/env" },
+    );
   }
 
   async updateRuntime(

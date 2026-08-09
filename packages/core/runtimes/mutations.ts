@@ -65,3 +65,57 @@ export function useUpdateRuntime(wsId: string) {
     },
   });
 }
+
+// Moves agents onto a target runtime and brings their unclaimed tasks along
+// (MUL-5758). Serves every entry point: the Agent List row menu and batch
+// toolbar, the agent detail inspector's runtime field, and the Runtime detail
+// page's "migrate agents" flow.
+//
+// Invalidation mirrors useUnbindAgentsAndDeleteRuntime because the same three
+// projections move: runtimes (each side's agent count), workspace agents (the
+// runtime column, and the model / thinking values this clears) and the agent
+// task snapshot (queued rows now belong to a different runtime). The snapshot
+// one is easy to miss and load-bearing — presence is derived from it, so
+// without it the list keeps attributing migrated work to the old runtime until
+// the next refetch.
+//
+// `dry_run` requests are NOT routed here: they write nothing, so they must not
+// invalidate anything. The dialog calls api.migrateAgentsToRuntime directly for
+// its preview.
+export function useMigrateAgentsToRuntime(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      targetRuntimeId,
+      agentIds,
+      expectedSourceRuntimeId,
+      clearModelSettings,
+      model,
+      thinkingLevel,
+      serviceTier,
+    }: {
+      targetRuntimeId: string;
+      agentIds: string[];
+      expectedSourceRuntimeId?: string;
+      clearModelSettings?: boolean;
+      /** Optional uniform replacement for the cleared model settings; see
+       *  MigrateAgentsToRuntimeRequest. */
+      model?: string;
+      thinkingLevel?: string;
+      serviceTier?: string;
+    }) =>
+      api.migrateAgentsToRuntime(targetRuntimeId, {
+        agent_ids: agentIds,
+        expected_source_runtime_id: expectedSourceRuntimeId,
+        clear_model_settings: clearModelSettings,
+        model,
+        thinking_level: thinkingLevel,
+        service_tier: serviceTier,
+      }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
+    },
+  });
+}

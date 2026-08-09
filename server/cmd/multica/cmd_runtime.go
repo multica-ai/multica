@@ -68,6 +68,27 @@ var runtimeDeleteCmd = &cobra.Command{
 	RunE: runRuntimeDelete,
 }
 
+// migrate-agents is the CLI form of the UI's "switch runtime" / "migrate
+// agents" action. The runtime in the path is the TARGET; --agent names the
+// agents to move onto it.
+var runtimeMigrateAgentsCmd = &cobra.Command{
+	Use:   "migrate-agents <target-runtime-id>",
+	Short: "Move agents onto a runtime, bringing their queued work with them",
+	Long: "Move one or more agents onto the target runtime.\n\n" +
+		"Queued and deferred tasks move with the agents; tasks a runtime is already running stay " +
+		"where they are until they finish. Model, thinking level and service tier are runtime-native " +
+		"and get cleared so the new runtime resolves its own defaults.\n\n" +
+		"An agent already on the target runtime is NOT skipped: this command writes the state you " +
+		"asked for, so such an agent stays put and has its model settings cleared like every other " +
+		"agent in the request. Pass only the agents you intend to rebind. To set a model instead of " +
+		"clearing it, follow up with 'multica agent update <agent-id> --model <id>' — this command " +
+		"has no --model flag yet.\n\n" +
+		"Agents you may not manage are reported as skipped rather than failing the request. " +
+		"Use --dry-run to see the exact effect first.",
+	Args: exactArgs(1),
+	RunE: runRuntimeMigrateAgents,
+}
+
 func init() {
 	runtimeCmd.AddCommand(runtimeListCmd)
 	runtimeCmd.AddCommand(runtimeUsageCmd)
@@ -75,9 +96,16 @@ func init() {
 	runtimeCmd.AddCommand(runtimeUpdateCmd)
 	runtimeCmd.AddCommand(runtimeRenameCmd)
 	runtimeCmd.AddCommand(runtimeDeleteCmd)
+	runtimeCmd.AddCommand(runtimeMigrateAgentsCmd)
 
 	// runtime list
 	runtimeListCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// runtime migrate-agents
+	runtimeMigrateAgentsCmd.Flags().StringArray("agent", nil, "Agent id to move onto the target runtime (repeatable)")
+	runtimeMigrateAgentsCmd.Flags().String("from", "", "Source runtime id. When set, the server re-derives that runtime's agent set inside the transaction and refuses if it changed since you listed it.")
+	runtimeMigrateAgentsCmd.Flags().Bool("dry-run", false, "Report what would move without changing anything")
+	runtimeMigrateAgentsCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// runtime usage
 	runtimeUsageCmd.Flags().String("output", "table", "Output format: table or json")
@@ -421,4 +449,89 @@ func printRuntimeDeleteResult(cmd *cobra.Command, result map[string]any) error {
 	}
 	fmt.Fprintf(os.Stderr, "Runtime %s deleted.\n", strVal(result, "id"))
 	return nil
+}
+
+func runRuntimeMigrateAgents(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	agentIDs, _ := cmd.Flags().GetStringArray("agent")
+	if len(agentIDs) == 0 {
+		return fmt.Errorf("specify at least one agent with --agent <agent-id>")
+	}
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	source, _ := cmd.Flags().GetString("from")
+
+	body := map[string]any{"agent_ids": agentIDs, "dry_run": dryRun}
+	if source != "" {
+		body["expected_source_runtime_id"] = source
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var result struct {
+		TargetRuntimeID string `json:"target_runtime_id"`
+		DryRun          bool   `json:"dry_run"`
+		Migrated        []struct {
+			AgentID              string `json:"agent_id"`
+			Name                 string `json:"name"`
+			ClearedModel         string `json:"cleared_model"`
+			ClearedThinkingLevel string `json:"cleared_thinking_level"`
+			ClearedServiceTier   string `json:"cleared_service_tier"`
+		} `json:"migrated"`
+		Skipped []struct {
+			AgentID string `json:"agent_id"`
+			Name    string `json:"name"`
+			Reason  string `json:"reason"`
+		} `json:"skipped"`
+		TasksMigrated      int64 `json:"tasks_migrated"`
+		TasksStayingActive int64 `json:"tasks_staying_active"`
+	}
+	if err := client.PostJSON(ctx, "/api/runtimes/"+args[0]+"/migrate-agents", body, &result); err != nil {
+		return fmt.Errorf("migrate agents: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	verb := "Moved"
+	if result.DryRun {
+		verb = "Would move"
+	}
+	fmt.Printf("%s %d agent(s) onto runtime %s\n", verb, len(result.Migrated), result.TargetRuntimeID)
+	for _, m := range result.Migrated {
+		cleared := strings.Join(nonEmptyValues(m.ClearedModel, m.ClearedThinkingLevel, m.ClearedServiceTier), ", ")
+		if cleared != "" {
+			fmt.Printf("  %s (clears %s)\n", m.Name, cleared)
+		} else {
+			fmt.Printf("  %s\n", m.Name)
+		}
+	}
+	fmt.Printf("Queued tasks moving: %d · running tasks staying put: %d\n",
+		result.TasksMigrated, result.TasksStayingActive)
+	for _, s := range result.Skipped {
+		name := s.Name
+		if name == "" {
+			name = s.AgentID
+		}
+		fmt.Printf("  skipped %s: %s\n", name, s.Reason)
+	}
+	return nil
+}
+
+// nonEmptyValues drops blank entries so a "clears ..." summary never renders
+// stray separators for settings the agent did not have.
+func nonEmptyValues(values ...string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
