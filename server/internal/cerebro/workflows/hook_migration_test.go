@@ -31,6 +31,24 @@ func TestHookMigrationDefinesCompletePersistenceModel(t *testing.T) {
 	}
 }
 
+func TestWorkflowHookContractMigrationBackfillsPublishedAndDraftPolicies(t *testing.T) {
+	raw, err := os.ReadFile("../../../migrations/9176_cerebro_workflow_hook_contracts.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, contract := range []string{
+		"contract_rule TEXT NOT NULL",
+		"contract_satisfy TEXT NOT NULL",
+		"UPDATE cerebro_workflow_hook_policy",
+		"UPDATE cerebro_workflow_hook_draft_revision",
+	} {
+		if !strings.Contains(sql, contract) {
+			t.Errorf("contract migration missing %q", contract)
+		}
+	}
+}
+
 func TestHookMigrationsAddConditionModeWithAllDefault(t *testing.T) {
 	entries, err := os.ReadDir("../../../migrations")
 	if err != nil {

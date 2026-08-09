@@ -17,6 +17,21 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("HookEditor", () => {
+  it("edits the rule and how to satisfy it", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(<HookEditor initialHook={createHookDraft()} onSave={onSave} />);
+
+    await user.type(screen.getByRole("textbox", { name: "Rule" }), "An unfinished issue needs a continuation.");
+    await user.type(screen.getByRole("textbox", { name: "How to satisfy it" }), "Create a wakeup or mark the issue blocked.");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      contract_rule: "An unfinished issue needs a continuation.",
+      contract_satisfy: "Create a wakeup or mark the issue blocked.",
+    }));
+  });
+
   it("renders the three grouped steps in order", () => {
     render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
     const chain = screen.getByLabelText("Hook chain");
@@ -48,6 +63,8 @@ describe("HookEditor", () => {
   it("treats an empty filter as always and stays valid without conditions", () => {
     const valid = {
       ...createHookDraft(), name: "Guide comments", events: ["before.message.send" as const],
+      contract_rule: "Comments must follow the workspace guidance.",
+      contract_satisfy: "Write a compliant comment.",
       bindings: [{ kind: "workspace" as const, value: "" }],
       conditions: [],
       decision: "allow" as const,
@@ -113,6 +130,8 @@ describe("HookEditor", () => {
   it("keeps Publish disabled until dry-run evidence exists", () => {
     const valid = {
       ...createHookDraft(), name: "Guard completion", events: ["before.task.complete" as const],
+      contract_rule: "Tasks need a continuing outcome before completion.",
+      contract_satisfy: "Continue the issue before completing the task.",
       bindings: [{ kind: "workspace" as const, value: "" }],
       conditions: [{ field: "issue.status", operator: "eq", value: "todo" }],
       decision: "block" as const, requirement: "Continue the issue",
@@ -187,6 +206,8 @@ describe("HookEditor", () => {
     const hook = {
       ...createHookDraft(),
       name: "Notify owner",
+      contract_rule: "The issue owner must be notified before completion.",
+      contract_satisfy: "Notify the issue owner.",
       events: ["before.task.complete" as const],
       bindings: [{ kind: "issue" as const, value: "private-issue-id" }],
       conditions: [{ field: "issue.status", operator: "eq", value: "in_review" }],
@@ -236,6 +257,8 @@ describe("HookEditor", () => {
     const user = userEvent.setup();
     const valid = {
       ...createHookDraft(), id: "hook-1", name: "Guard completion", events: ["before.task.complete" as const],
+      contract_rule: "Tasks need a continuing outcome before completion.",
+      contract_satisfy: "Continue the issue before completing the task.",
       family_id: "family-1",
       bindings: [{ kind: "workspace" as const, value: "" }],
       conditions: [{ field: "issue.status", operator: "eq", value: "todo" }],
@@ -268,6 +291,8 @@ describe("HookEditor", () => {
     const onPublish = vi.fn();
     const valid = {
       ...createHookDraft(), id: "hook-1", name: "Guard completion", events: ["before.task.complete" as const],
+      contract_rule: "Tasks need a continuing outcome before completion.",
+      contract_satisfy: "Continue the issue before completing the task.",
       family_id: "family-1", bindings: [{ kind: "workspace" as const, value: "" }],
       conditions: [{ field: "issue.status", operator: "eq", value: "todo" }],
       decision: "block" as const, requirement: "Continue the issue",

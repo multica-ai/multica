@@ -55,7 +55,7 @@ func TestVersionOneEventMatrixUsesSharedMatcherDecisionActionAndAuditContract(t 
 			if result.Decision != HookRequire || len(result.Matches) != 1 || len(result.ActionResults) != 1 || result.ActionResults[0].Status != HookActionSuccess {
 				t.Fatalf("shared contract result = %#v", result)
 			}
-			if result.Matches[0].SourceScope.Kind != HookScopeWorkspace || result.Matches[0].PolicyID != "parity" || result.RunID == "" || store.RunCount() != 1 {
+			if result.Matches[0].SourceScope.Kind != HookScopeWorkspace || result.Matches[0].PolicyID != "parity" || result.Matches[0].PolicyName != "parity" || result.RunID == "" || store.RunCount() != 1 {
 				t.Fatalf("audit contract result = %#v runs=%d", result, store.RunCount())
 			}
 		})
@@ -212,7 +212,7 @@ func TestHookEngineBlockWinsAndRequirementsAreCombined(t *testing.T) {
 	if result.Decision != HookBlock {
 		t.Fatalf("decision = %q, want block", result.Decision)
 	}
-	if !reflect.DeepEqual(result.Requirements, []string{"Create a wakeup", "Record a continuation", "Complete the required hook outcome."}) {
+	if !reflect.DeepEqual(result.Requirements, []string{"require-a: Create a wakeup", "require-b: Record a continuation", "block: Complete the required hook outcome."}) {
 		t.Fatalf("requirements = %#v", result.Requirements)
 	}
 	if !reflect.DeepEqual(result.MatchedConditions, []Condition{
@@ -382,7 +382,7 @@ func newTestHookPolicy(id string, decision HookDecision, mode HookMode, binding 
 		requirement = "Complete the required hook outcome."
 	}
 	return HookPolicy{
-		ID: id, Version: 1, Name: id, Mode: mode, FailMode: HookFailWarn,
+		ID: id, Version: 1, Name: id, ContractRule: "The matching event follows this hook.", ContractSatisfy: "Complete the configured outcome.", Mode: mode, FailMode: HookFailWarn,
 		Events:   []HookEventType{HookBeforeTaskComplete, HookBeforePromptAssemble, HookOnError},
 		Bindings: []HookBinding{binding},
 		Handlers: []HookHandler{{ID: "handler-1", Decision: decision, Requirement: requirement}},

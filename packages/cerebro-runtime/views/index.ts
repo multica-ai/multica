@@ -44,7 +44,10 @@ export {
 export { usePauseRuntime, useUnpauseRuntime } from "./use-pause-mutations";
 export { isInterruptionReason } from "./task-failure-severity";
 // FIR-3782: human copy for all 21 canonical task failure reasons.
-export { resolveFailureReasonLabel } from "./failure-reason-label";
+export {
+  resolveFailureReasonLabel,
+  resolveWorkflowGateWarningLabel,
+} from "./failure-reason-label";
 // FIR-3782: failure summary card for a failed run's transcript.
 export { RunFailureCard } from "./components/run-failure-card";
 // FIR-4073: "which agent, which run" line under an alert row. Pure formatter,

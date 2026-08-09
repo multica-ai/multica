@@ -5,16 +5,34 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 var (
 	ErrTaskContinuationRequired         = errors.New("task completion requires an actual continuation")
 	ErrTaskCompletionContextUnavailable = errors.New("task completion context is unavailable")
 )
+
+type TaskCompletionGuidance = service.WorkflowCompletionGuidance
+
+var TaskCompletionGuidanceFromError = service.WorkflowCompletionGuidanceFromError
+
+type taskCompletionGuidanceError struct {
+	guidance service.WorkflowCompletionGuidance
+}
+
+func (e taskCompletionGuidanceError) Error() string {
+	return fmt.Sprintf("%s: %s", ErrTaskContinuationRequired, e.guidance.Requirement)
+}
+
+func (e taskCompletionGuidanceError) Unwrap() error { return ErrTaskContinuationRequired }
+
+func (e taskCompletionGuidanceError) WorkflowCompletionGuidance() service.WorkflowCompletionGuidance {
+	return e.guidance
+}
 
 type TaskContinuationKind string
 
@@ -59,6 +77,7 @@ type TaskCompletionContextStore interface {
 	WorkflowHooksEnabled(context.Context, pgtype.UUID) (bool, error)
 	LoadTaskCompletionContext(context.Context, pgtype.UUID) (TaskCompletionContext, error)
 	ResolveContinuation(context.Context, TaskCompletionContext) (*TaskContinuation, error)
+	NotifyCompletionWarning(context.Context, TaskCompletionContext, service.WorkflowCompletionGuidance) error
 }
 
 type HookEvaluator interface {
@@ -69,8 +88,6 @@ type TaskCompletionGate struct {
 	store          TaskCompletionContextStore
 	evaluator      HookEvaluator
 	featureEnabled bool
-	mu             sync.Mutex
-	attempts       map[string]int
 }
 
 func NewTaskCompletionGate(store TaskCompletionContextStore, evaluator HookEvaluator, serverFeatureEnabled ...bool) *TaskCompletionGate {
@@ -78,7 +95,7 @@ func NewTaskCompletionGate(store TaskCompletionContextStore, evaluator HookEvalu
 	if len(serverFeatureEnabled) > 0 {
 		enabled = serverFeatureEnabled[0]
 	}
-	return &TaskCompletionGate{store: store, evaluator: evaluator, featureEnabled: enabled, attempts: make(map[string]int)}
+	return &TaskCompletionGate{store: store, evaluator: evaluator, featureEnabled: enabled}
 }
 
 func (g *TaskCompletionGate) BeforeComplete(ctx context.Context, taskID pgtype.UUID, result []byte) ([]byte, error) {
@@ -110,7 +127,7 @@ func (g *TaskCompletionGate) BeforeComplete(ctx context.Context, taskID pgtype.U
 	if err != nil {
 		return result, err
 	}
-	attempt := g.nextAttempt(completion.TaskID)
+	attempt := completionAttempt(result)
 	event := HookEvent{
 		EventID: fmt.Sprintf("%s:agent-stop:%d", completion.TaskID, attempt), Type: HookBeforeAgentStop,
 		WorkspaceID: completion.WorkspaceID, ProjectID: completion.ProjectID, WorkflowID: completion.WorkflowID,
@@ -144,11 +161,19 @@ func (g *TaskCompletionGate) BeforeComplete(ctx context.Context, taskID pgtype.U
 	if continuation != nil {
 		return result, nil
 	}
-	requirement := "create a wakeup, member request, dispatch, handoff, or mark the issue blocked"
+	requirement := "Create a wakeup, ask or notify a member, dispatch an agent or squad, create a handoff, or set the issue to blocked."
 	if len(evaluation.Requirements) > 0 {
 		requirement = evaluation.Requirements[0]
 	}
-	return result, fmt.Errorf("%w: %s", ErrTaskContinuationRequired, requirement)
+	guidance := completionGuidance(requirement, attempt, evaluation)
+	if attempt == 1 {
+		return result, taskCompletionGuidanceError{guidance: guidance}
+	}
+	result, err = withCompletionWarning(result, guidance)
+	if err == nil {
+		_ = g.store.NotifyCompletionWarning(ctx, completion, guidance)
+	}
+	return result, err
 }
 
 func combineCompletionEvaluations(results ...HookResult) HookResult {
@@ -158,16 +183,47 @@ func combineCompletionEvaluations(results ...HookResult) HookResult {
 		combined.Decision = strongerDecision(combined.Decision, result.Decision)
 		combined.WouldDecision = strongerDecision(combined.WouldDecision, result.WouldDecision)
 		combined.Requirements = append(combined.Requirements, result.Requirements...)
+		combined.Matches = append(combined.Matches, result.Matches...)
 		combined.Warning = result.Warning
 	}
 	return combined
 }
 
-func (g *TaskCompletionGate) nextAttempt(taskID string) int {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.attempts[taskID]++
-	return g.attempts[taskID]
+func completionGuidance(requirement string, attempt int, evaluation HookResult) service.WorkflowCompletionGuidance {
+	guidance := service.WorkflowCompletionGuidance{
+		Code:         "workflow_gate_rejected",
+		Requirement:  requirement,
+		Alternatives: completionAlternatives(),
+		Attempt:      attempt,
+	}
+	for _, match := range evaluation.Matches {
+		if !match.DryRun && (match.Decision == HookBlock || match.Decision == HookRequire) {
+			guidance.HookID = match.PolicyID
+			guidance.HookName = match.PolicyName
+			break
+		}
+	}
+	return guidance
+}
+
+func completionAttempt(result []byte) int {
+	var payload struct {
+		Attempt int `json:"completion_attempt"`
+	}
+	if json.Unmarshal(result, &payload) == nil && payload.Attempt > 1 {
+		return payload.Attempt
+	}
+	return 1
+}
+
+func completionAlternatives() []string {
+	return []string{
+		"Create a wakeup.",
+		"Ask or notify a member.",
+		"Dispatch an agent or squad.",
+		"Create a handoff.",
+		"Set the issue to blocked.",
+	}
 }
 
 func isTerminalIssueStatus(status string) bool {
@@ -189,5 +245,16 @@ func withTaskContinuation(result []byte, continuation TaskContinuation) ([]byte,
 		}
 	}
 	payload["continuation"] = continuation
+	return json.Marshal(payload)
+}
+
+func withCompletionWarning(result []byte, warning service.WorkflowCompletionGuidance) ([]byte, error) {
+	payload := map[string]any{}
+	if len(result) > 0 {
+		if err := json.Unmarshal(result, &payload); err != nil {
+			return result, err
+		}
+	}
+	payload["completion_warning"] = warning
 	return json.Marshal(payload)
 }

@@ -3,7 +3,6 @@ package workflows
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/commentquality"
@@ -128,7 +127,7 @@ func TestQualityGateRejectBlocksEvenUnderFailModeWarn(t *testing.T) {
 	if result.Decision != HookRequire {
 		t.Fatalf("decision = %q, want require (blocked) even under fail_mode: warn", result.Decision)
 	}
-	if len(result.Requirements) != 1 || !strings.Contains(result.Requirements[0], "konklusion") {
+	if len(result.Requirements) != 1 || result.Requirements[0] != "q-gate: Start med en konklusion." {
 		t.Fatalf("requirements = %#v, want the judge fix", result.Requirements)
 	}
 }

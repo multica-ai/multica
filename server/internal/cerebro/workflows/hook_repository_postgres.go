@@ -27,7 +27,7 @@ func NewPostgresHookRepository(db cerebrodb.DBTX) *PostgresHookRepository {
 	return &PostgresHookRepository{db: db, managedWorkspaces: make(map[string]struct{})}
 }
 
-const hookPolicyColumns = `id, family_id, workspace_id, name, description, policy_version,
+const hookPolicyColumns = `id, family_id, workspace_id, name, description, contract_rule, contract_satisfy, policy_version,
 mode, fail_mode, condition_mode, event_types, conditions, baseline_at, published_at,
 created_by_id, created_by_type, published_by_id, created_at, updated_at`
 
@@ -149,13 +149,15 @@ func (r *PostgresHookRepository) ensureManagedPolicies(ctx context.Context, work
 		handler := policy.Handlers[0]
 		if _, err := r.db.Exec(ctx, `
 			INSERT INTO cerebro_workflow_hook_policy (
-				id, family_id, workspace_id, name, description, policy_version,
+				id, family_id, workspace_id, name, description, contract_rule, contract_satisfy, policy_version,
 				mode, fail_mode, event_types, conditions, published_at,
 				created_by_id, created_by_type, published_by_id
-			) VALUES ($1,$1,$2,$3,$4,1,'managed','closed',$5,$6,now(),$7,'member',$7)
+			) VALUES ($1,$1,$2,$3,$4,$5,$6,1,'managed','closed',$7,$8,now(),$9,'member',$9)
 			ON CONFLICT (id) DO UPDATE SET
 				name=EXCLUDED.name,
 				description=EXCLUDED.description,
+				contract_rule=EXCLUDED.contract_rule,
+				contract_satisfy=EXCLUDED.contract_satisfy,
 				fail_mode='closed',
 				event_types=EXCLUDED.event_types,
 				conditions=EXCLUDED.conditions,
@@ -165,17 +167,21 @@ func (r *PostgresHookRepository) ensureManagedPolicies(ctx context.Context, work
 			WHERE (
 				cerebro_workflow_hook_policy.name,
 				cerebro_workflow_hook_policy.description,
+				cerebro_workflow_hook_policy.contract_rule,
+				cerebro_workflow_hook_policy.contract_satisfy,
 				cerebro_workflow_hook_policy.fail_mode,
 				cerebro_workflow_hook_policy.event_types,
 				cerebro_workflow_hook_policy.conditions
 			) IS DISTINCT FROM (
 				EXCLUDED.name,
 				EXCLUDED.description,
+				EXCLUDED.contract_rule,
+				EXCLUDED.contract_satisfy,
 				EXCLUDED.fail_mode,
 				EXCLUDED.event_types,
 				EXCLUDED.conditions
 			)
-		`, policyID, wsID, policy.Name, policy.Description, events, conditions, ownerID); err != nil {
+		`, policyID, wsID, policy.Name, policy.Description, policy.ContractRule, policy.ContractSatisfy, events, conditions, ownerID); err != nil {
 			return fmt.Errorf("upsert managed hook policy %q: %w", definition.Key, err)
 		}
 
@@ -547,6 +553,9 @@ func (r *PostgresHookRepository) familyResponse(ctx context.Context, db cerebrod
 			value := lastRun.Time
 			policy.LastRunAt = &value
 		}
+		if err := r.loadSevenDayMetricsWith(ctx, db, &policy); err != nil {
+			return HookPolicy{}, err
+		}
 		policy.CanPublish = policy.ObservedRuns > 0 && baseline.Valid
 	} else if family.ActivePolicyID.Valid {
 		var err error
@@ -767,9 +776,9 @@ func (r *PostgresHookRepository) insertVersion(ctx context.Context, workspaceID 
 	eventsJSON, _ := json.Marshal(policy.Events)
 	conditionsJSON, _ := json.Marshal(policy.Conditions)
 	insert := `INSERT INTO cerebro_workflow_hook_policy
-(family_id, workspace_id, name, description, policy_version, mode, fail_mode, condition_mode, event_types, conditions, created_by_id, created_by_type)
-VALUES ($1,$2,$3,$4,$5,'dry_run',$6,$7,$8,$9,$10,$11) RETURNING ` + hookPolicyColumns
-	created, _, err := scanHookPolicy(r.db.QueryRow(ctx, insert, familyUUID, wsID, policy.Name, policy.Description, version, policy.FailMode, policy.ConditionMode, eventsJSON, conditionsJSON, actorID, actor.Type))
+(family_id, workspace_id, name, description, contract_rule, contract_satisfy, policy_version, mode, fail_mode, condition_mode, event_types, conditions, created_by_id, created_by_type)
+VALUES ($1,$2,$3,$4,$5,$6,$7,'dry_run',$8,$9,$10,$11,$12,$13) RETURNING ` + hookPolicyColumns
+	created, _, err := scanHookPolicy(r.db.QueryRow(ctx, insert, familyUUID, wsID, policy.Name, policy.Description, policy.ContractRule, policy.ContractSatisfy, version, policy.FailMode, policy.ConditionMode, eventsJSON, conditionsJSON, actorID, actor.Type))
 	if err != nil {
 		return HookPolicy{}, err
 	}
@@ -868,7 +877,14 @@ func (r *PostgresHookRepository) loadPolicyMetricsWith(ctx context.Context, db c
 	}
 	var count int
 	var lastRun pgtype.Timestamptz
-	if err := db.QueryRow(ctx, `SELECT COUNT(*), MAX(created_at) FROM cerebro_workflow_hook_run WHERE policy_id=$1`, id).Scan(&count, &lastRun); err != nil {
+	if err := db.QueryRow(ctx, `SELECT COUNT(*), MAX(created_at),
+		COUNT(*) FILTER (WHERE created_at >= now() - interval '7 days'
+			AND COALESCE(would_decision, decision) IN ('allow', 'modify')),
+		COUNT(*) FILTER (WHERE created_at >= now() - interval '7 days'
+			AND COALESCE(would_decision, decision) IN ('block', 'require'))
+		FROM cerebro_workflow_hook_run WHERE policy_id=$1`, id).Scan(
+		&count, &lastRun, &policy.PassCount7D, &policy.BlockCount7D,
+	); err != nil {
 		return err
 	}
 	policy.ObservedRuns = count
@@ -878,6 +894,21 @@ func (r *PostgresHookRepository) loadPolicyMetricsWith(ctx context.Context, db c
 	}
 	policy.CanPublish = policy.Mode == HookModeDryRun && count > 0 && policy.BaselineAt != nil
 	return nil
+}
+
+func (r *PostgresHookRepository) loadSevenDayMetricsWith(ctx context.Context, db cerebrodb.DBTX, policy *HookPolicy) error {
+	id, err := util.ParseUUID(policy.ID)
+	if err != nil {
+		return err
+	}
+	return db.QueryRow(ctx, `SELECT
+		COUNT(*) FILTER (WHERE COALESCE(would_decision, decision) IN ('allow', 'modify')),
+		COUNT(*) FILTER (WHERE COALESCE(would_decision, decision) IN ('block', 'require'))
+		FROM cerebro_workflow_hook_run
+		WHERE (policy_id=$1 OR draft_revision_id=$1)
+		  AND created_at >= now() - interval '7 days'`, id).Scan(
+		&policy.PassCount7D, &policy.BlockCount7D,
+	)
 }
 
 func (r *PostgresHookRepository) Publish(ctx context.Context, workspaceID, id, actorID string) (HookPolicy, error) {
@@ -908,31 +939,34 @@ func (r *PostgresHookRepository) Publish(ctx context.Context, workspaceID, id, a
 		if !draft.CanPublish {
 			return HookPolicy{}, ErrHookPublishPrerequisite
 		}
+		if !hasReadableHookContract(draft) {
+			return HookPolicy{}, ErrHookContractRequired
+		}
 		canonicalizeWorkspaceBindings(&draft, workspaceID)
 		eventsJSON, _ := json.Marshal(draft.Events)
 		conditionsJSON, _ := json.Marshal(draft.Conditions)
 		var published HookPolicy
 		published, _, err = scanHookPolicy(tx.QueryRow(ctx, `
 			UPDATE cerebro_workflow_hook_policy
-			SET name=$4, description=$5, mode='enforce', fail_mode=$6,
-			    condition_mode=$7, event_types=$8, conditions=$9,
-			    published_by_id=$10, published_at=now(), updated_at=now()
+			SET name=$4, description=$5, contract_rule=$6, contract_satisfy=$7,
+			    mode='enforce', fail_mode=$8, condition_mode=$9, event_types=$10, conditions=$11,
+			    published_by_id=$12, published_at=now(), updated_at=now()
 			WHERE family_id=$1 AND workspace_id=$2 AND policy_version=$3
 			  AND mode='dry_run'
 			RETURNING `+hookPolicyColumns,
-			family.ID, wsID, draft.Version, draft.Name, draft.Description,
+			family.ID, wsID, draft.Version, draft.Name, draft.Description, draft.ContractRule, draft.ContractSatisfy,
 			draft.FailMode, draft.ConditionMode, eventsJSON, conditionsJSON,
 			publisherID,
 		))
 		if errors.Is(err, pgx.ErrNoRows) {
 			published, _, err = scanHookPolicy(tx.QueryRow(ctx, `
 				INSERT INTO cerebro_workflow_hook_policy
-					(family_id,workspace_id,name,description,policy_version,mode,fail_mode,
+					(family_id,workspace_id,name,description,contract_rule,contract_satisfy,policy_version,mode,fail_mode,
 					 condition_mode,event_types,conditions,baseline_at,published_by_id,published_at,
 					 created_by_id,created_by_type)
-				VALUES ($1,$2,$3,$4,$5,'enforce',$6,$7,$8,$9,now(),$10,now(),$10,'member')
+				VALUES ($1,$2,$3,$4,$5,$6,$7,'enforce',$8,$9,$10,$11,now(),$12,now(),$12,'member')
 				RETURNING `+hookPolicyColumns,
-				family.ID, wsID, draft.Name, draft.Description, draft.Version,
+				family.ID, wsID, draft.Name, draft.Description, draft.ContractRule, draft.ContractSatisfy, draft.Version,
 				draft.FailMode, draft.ConditionMode, eventsJSON, conditionsJSON, publisherID,
 			))
 		}
@@ -1358,13 +1392,13 @@ type hookRowScanner interface {
 func scanHookPolicy(row hookRowScanner) (HookPolicy, pgtype.UUID, error) {
 	var id, familyID, workspaceID, createdByID, publishedByID pgtype.UUID
 	var version int32
-	var mode, failMode, conditionMode, name, description, createdByType string
+	var mode, failMode, conditionMode, name, description, contractRule, contractSatisfy, createdByType string
 	var eventJSON, conditionsJSON []byte
 	var baselineAt, publishedAt, createdAt, updatedAt pgtype.Timestamptz
-	if err := row.Scan(&id, &familyID, &workspaceID, &name, &description, &version, &mode, &failMode, &conditionMode, &eventJSON, &conditionsJSON, &baselineAt, &publishedAt, &createdByID, &createdByType, &publishedByID, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&id, &familyID, &workspaceID, &name, &description, &contractRule, &contractSatisfy, &version, &mode, &failMode, &conditionMode, &eventJSON, &conditionsJSON, &baselineAt, &publishedAt, &createdByID, &createdByType, &publishedByID, &createdAt, &updatedAt); err != nil {
 		return HookPolicy{}, pgtype.UUID{}, err
 	}
-	policy := HookPolicy{ID: util.UUIDToString(id), Version: int(version), Name: name, Description: description, Mode: HookMode(mode), FailMode: HookFailMode(failMode), ConditionMode: HookConditionMode(conditionMode), CreatedByID: util.UUIDToString(createdByID), CreatedByType: createdByType, UpdatedAt: updatedAt.Time}
+	policy := HookPolicy{ID: util.UUIDToString(id), Version: int(version), Name: name, Description: description, ContractRule: contractRule, ContractSatisfy: contractSatisfy, Mode: HookMode(mode), FailMode: HookFailMode(failMode), ConditionMode: HookConditionMode(conditionMode), CreatedByID: util.UUIDToString(createdByID), CreatedByType: createdByType, UpdatedAt: updatedAt.Time}
 	if baselineAt.Valid {
 		baseline := baselineAt.Time
 		policy.BaselineAt = &baseline

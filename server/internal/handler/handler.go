@@ -170,13 +170,14 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-issue-status-workflow-gate): FIR-3692 routes
 	// status changes for active Chain v2 issues through Workflow Hooks.
 	IssueStatusWorkflowGate IssueStatusWorkflowGateInvoker
-	RuntimeHookEvents       RuntimeHookEventEvaluator // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 daemon-to-server hook event channel.
+	RuntimeHookEvents       RuntimeHookEventEvaluator  // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 daemon-to-server hook event channel.
+	WorkflowHookRules       WorkflowHookRuleResolver   // CEREBRO-PATCH(workflow-hook-house-rules): live contracts for the claimed agent and issue.
 	CommentSessionMode      CommentSessionModeRecorder // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 persist selected Mode inside comment transaction.
 	SessionModeProfiles     interface {
 		Active(context.Context, pgtype.UUID, sessionmode.Mode) (sessionmode.Config, error)
 	} // CEREBRO-PATCH(session-mode-config): claim-time published snapshot resolver.
 	SessionModeEvalRunner SessionModeEvalRunner // CEREBRO-PATCH(session-mode-evals): FIR-4047 runs a Mode's evaluations at task completion.
-	RoundReplyObserver RoundReplyObserver // CEREBRO-PATCH(cerebro-rounds): observe handled snapshot items without blocking normal comment triggers.
+	RoundReplyObserver    RoundReplyObserver    // CEREBRO-PATCH(cerebro-rounds): observe handled snapshot items without blocking normal comment triggers.
 	// CEREBRO-PATCH(handler-channel-create-guard): FIR-2660 restrict channel creation to owners/admins.
 	ChannelCreateGuard ChannelCreateGuardInvoker
 	// CEREBRO-PATCH(handler-channel-perms): TECH-3698 per-channel permission gate (rename/add-remove/leave).

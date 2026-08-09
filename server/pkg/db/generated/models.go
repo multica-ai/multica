@@ -2346,24 +2346,26 @@ type CerebroWorkflowHookHandler struct {
 }
 
 type CerebroWorkflowHookPolicy struct {
-	ID            pgtype.UUID        `json:"id"`
-	FamilyID      pgtype.UUID        `json:"family_id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Name          string             `json:"name"`
-	Description   string             `json:"description"`
-	PolicyVersion int32              `json:"policy_version"`
-	Mode          string             `json:"mode"`
-	FailMode      string             `json:"fail_mode"`
-	EventTypes    []byte             `json:"event_types"`
-	Conditions    []byte             `json:"conditions"`
-	BaselineAt    pgtype.Timestamptz `json:"baseline_at"`
-	PublishedAt   pgtype.Timestamptz `json:"published_at"`
-	CreatedByID   pgtype.UUID        `json:"created_by_id"`
-	CreatedByType string             `json:"created_by_type"`
-	PublishedByID pgtype.UUID        `json:"published_by_id"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	ConditionMode string             `json:"condition_mode"`
+	ID              pgtype.UUID        `json:"id"`
+	FamilyID        pgtype.UUID        `json:"family_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	PolicyVersion   int32              `json:"policy_version"`
+	Mode            string             `json:"mode"`
+	FailMode        string             `json:"fail_mode"`
+	EventTypes      []byte             `json:"event_types"`
+	Conditions      []byte             `json:"conditions"`
+	BaselineAt      pgtype.Timestamptz `json:"baseline_at"`
+	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	CreatedByID     pgtype.UUID        `json:"created_by_id"`
+	CreatedByType   string             `json:"created_by_type"`
+	PublishedByID   pgtype.UUID        `json:"published_by_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ConditionMode   string             `json:"condition_mode"`
+	ContractRule    string             `json:"contract_rule"`
+	ContractSatisfy string             `json:"contract_satisfy"`
 }
 
 type CerebroWorkflowHookRun struct {

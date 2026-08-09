@@ -2,10 +2,37 @@ package workflows
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
+
+func TestManagedPoliciesExposePlainLanguageContracts(t *testing.T) {
+	const workspaceID = "11111111-1111-1111-1111-111111111111"
+	for _, definition := range managedHookPolicies(workspaceID) {
+		raw, err := json.Marshal(definition.Policy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var policy map[string]any
+		if err := json.Unmarshal(raw, &policy); err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(stringValue(policy["contract_rule"])) == "" {
+			t.Errorf("managed hook %q has no contract_rule", definition.Key)
+		}
+		if strings.TrimSpace(stringValue(policy["contract_satisfy"])) == "" {
+			t.Errorf("managed hook %q has no contract_satisfy", definition.Key)
+		}
+	}
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return text
+}
 
 func TestManagedMessagePoliciesOwnEveryMigratedCommentDecision(t *testing.T) {
 	const workspaceID = "11111111-1111-1111-1111-111111111111"

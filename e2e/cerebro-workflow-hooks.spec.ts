@@ -30,6 +30,8 @@ function transportPolicy(overrides: Record<string, unknown> = {}) {
     version: 5,
     name: "Require a next step",
     description: "No agent stops without a registered continuation",
+    contract_rule: "Agents must register a next step before stopping.",
+    contract_satisfy: "Register a continuation before stopping.",
     mode: "dry_run",
     fail_mode: "closed",
     events: ["before.task.complete"],
@@ -47,6 +49,8 @@ function transportPolicy(overrides: Record<string, unknown> = {}) {
       actions: [{ type: "audit.record", config: { event: "continuation_required" } }],
     }],
     observed_run_count: 1,
+    pass_count_7d: 18,
+    block_count_7d: 3,
     can_publish: true,
     updated_at: "2026-07-15T08:00:00Z",
     last_run_at: "2026-07-15T08:00:00Z",
@@ -209,6 +213,8 @@ test.describe("FIR-3321 Workflow Hooks Live/Draft delivery", () => {
     for (const state of ["Off", "Draft", "Enforced", "Enforced · Draft changes", "Managed"]) {
       await expect(page.getByText(state, { exact: true }).first()).toBeVisible();
     }
+    await expect(page.getByText("18 passed").first()).toBeVisible();
+    await expect(page.getByText("3 blocked").first()).toBeVisible();
     await capture(page, testInfo, "overview-desktop");
 
     await page.goto(`/${slug}/workflows/hooks/new`);
@@ -221,6 +227,21 @@ test.describe("FIR-3321 Workflow Hooks Live/Draft delivery", () => {
     await expect(page.getByRole("option", { name: "Judge gate" })).toBeVisible();
     await page.getByRole("option", { name: "Notify member" }).click();
     await expect(page.getByLabel("Member")).toBeVisible();
+  });
+
+  test("readable contracts persist from the editor to the hooks overview", async ({ page }) => {
+    const slug = "e2e-workspace";
+    await page.goto(`/${slug}/workflows/hooks/${FAMILY_ID}`);
+
+    await expect(page.getByRole("textbox", { name: "Rule" })).toHaveValue("Agents must register a next step before stopping.");
+    await page.getByRole("textbox", { name: "Rule" }).fill("Runs must leave a visible next step.");
+    await page.getByRole("textbox", { name: "How to satisfy it" }).fill("Register a continuation before stopping.");
+    await page.getByRole("button", { name: "Save draft" }).click();
+
+    await page.goto(`/${slug}/workflows/hooks`);
+    const card = page.getByRole("button", { name: /Require a next step Runs must leave a visible next step/ });
+    await expect(card).toBeVisible();
+    await expect(card).toContainText("Register a continuation before stopping.");
   });
 });
 

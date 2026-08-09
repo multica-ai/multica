@@ -20,12 +20,24 @@ type HookAuthorizer interface {
 }
 
 type HookAPI struct {
-	repository HookRepository
-	authorizer HookAuthorizer
+	repository                HookRepository
+	authorizer                HookAuthorizer
+	activeRules               *ActiveRuleService
+	activeRuleContextResolver ActiveRuleContextResolver
+}
+
+func (h *HookAPI) WithActiveRuleContextResolver(resolver ActiveRuleContextResolver) *HookAPI {
+	h.activeRuleContextResolver = resolver
+	return h
 }
 
 func NewHookAPI(repository HookRepository, authorizer HookAuthorizer) *HookAPI {
-	return &HookAPI{repository: repository, authorizer: authorizer}
+	return &HookAPI{repository: repository, authorizer: authorizer, activeRules: NewActiveRuleService(repository)}
+}
+
+func (h *HookAPI) WithActiveRuleService(service *ActiveRuleService) *HookAPI {
+	h.activeRules = service
+	return h
 }
 
 // Routes returns the complete workflow-hook HTTP surface. Keeping route
@@ -34,6 +46,7 @@ func (h *HookAPI) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", h.List)
 	r.Post("/", h.Create)
+	r.Get("/active-rules", h.ListActiveRules)
 	r.Get("/{id}", h.Get)
 	r.Put("/{id}", h.Update)
 	r.Delete("/{id}", h.Delete)
@@ -45,6 +58,34 @@ func (h *HookAPI) Routes() http.Handler {
 	r.Get("/{id}/effective", h.Effective)
 	r.Get("/{id}/runs", h.Runs)
 	return r
+}
+
+func (h *HookAPI) ListActiveRules(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, ok := h.authorize(w, r, HookPermissionRead)
+	if !ok {
+		return
+	}
+	agentID := strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	issueID := strings.TrimSpace(r.URL.Query().Get("issue_id"))
+	if agentID == "" || issueID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id and issue_id are required")
+		return
+	}
+	scope := ActiveRuleContext{WorkspaceID: workspaceID, AgentID: agentID, IssueID: issueID}
+	if h.activeRuleContextResolver != nil {
+		var err error
+		scope, err = h.activeRuleContextResolver.Resolve(r.Context(), workspaceID, agentID, issueID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "agent_id and issue_id must identify records in this workspace")
+			return
+		}
+	}
+	rules, err := h.activeRules.List(r.Context(), scope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list active hook rules")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rules": rules})
 }
 
 func (h *HookAPI) Events(w http.ResponseWriter, r *http.Request) {
@@ -294,6 +335,12 @@ func validateHookForExecution(policy *HookPolicy, workspaceID string) error {
 	}
 	if strings.TrimSpace(policy.Name) == "" {
 		return fmt.Errorf("workflow hook name is required")
+	}
+	if strings.TrimSpace(policy.ContractRule) == "" {
+		return fmt.Errorf("workflow hook contract_rule is required")
+	}
+	if strings.TrimSpace(policy.ContractSatisfy) == "" {
+		return fmt.Errorf("workflow hook contract_satisfy is required")
 	}
 	if len(policy.Events) == 0 {
 		return fmt.Errorf("at least one workflow hook trigger is required")

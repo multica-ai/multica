@@ -706,7 +706,8 @@ var codexDesktopAppBundlePaths = func() []string {
 // block startup — if the shell takes longer than this, we proceed without
 // shell-resolved fallbacks and the daemon falls back to the same behaviour
 // it had before this code was added.
-const loginShellResolveTimeout = 3 * time.Second
+// CEREBRO-PATCH(login-shell-resolver-test-budget): tests may raise the deadline under saturated CI.
+var loginShellResolveTimeout = 3 * time.Second
 
 // loginShellResolveWaitDelay is the hard cap that runs *after*
 // loginShellResolveTimeout has elapsed and `CommandContext` has signalled the

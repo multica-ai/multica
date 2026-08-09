@@ -17,6 +17,9 @@ import (
 // file) because the shell-layer corruption it guards against is not specific
 // to any one provider (MUL-2904).
 func BuildPrompt(task Task, provider string) string {
+	if task.CompletionGuidance != nil { // CEREBRO-PATCH(workflow-hook-completion-guidance): route the retry to the Cerebro-owned corrective prompt.
+		return buildCompletionGuidancePrompt(task)
+	}
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}

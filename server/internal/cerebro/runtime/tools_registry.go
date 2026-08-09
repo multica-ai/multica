@@ -313,6 +313,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "get_workflow_hook", Description: "Get one Workflow hook policy by UUID. CLI-runtime MCP tool over GET /api/cerebro/workflow-hooks/{id}.", Status: ToolStatusExcluded},
 	{Name: "get_effective_workflow_hooks", Description: "Explain the effective bindings for one Workflow hook. CLI-runtime MCP tool over GET /api/cerebro/workflow-hooks/{id}/effective.", Status: ToolStatusExcluded},
 	{Name: "handoff_session", Description: "Hand off a session: resolve its thread (closing the session) and store a handoff brief on it.", Status: ToolStatusExcluded},
+	{Name: "list_active_hook_rules", Description: "List the live Workflow hook contracts that apply to an agent on an issue. CLI-runtime MCP tool over GET /api/cerebro/workflow-hooks/active-rules.", Status: ToolStatusExcluded},
 	{Name: "list_artifact_folders", Description: "List artifact folders in the workspace.", Status: ToolStatusExcluded},
 	{Name: "list_artifacts", Description: "List workspace artifacts.", Status: ToolStatusNewlyImplemented},
 	{Name: "list_attachments", Description: "List file attachments on a Multica issue or chat message.", Status: ToolStatusNewlyImplemented},

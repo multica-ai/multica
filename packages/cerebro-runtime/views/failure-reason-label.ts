@@ -36,6 +36,7 @@ const REASON_LABELS: Readonly<Record<string, string>> = {
   "agent_error.runtime_missing_executable":
     "The agent program is not installed on that computer",
   "agent_error.unknown": "The agent failed for an unrecognised reason",
+  workflow_gate_rejected: "Stopped by Workflow hook",
 };
 
 const AGENT_ERROR_PREFIX = "agent_error.";
@@ -65,4 +66,15 @@ export function resolveFailureReasonLabel(
   const humanized = humanizeToken(reason);
   if (humanized.length === 0) return null;
   return humanized.charAt(0).toUpperCase() + humanized.slice(1);
+}
+
+/** A completed run can carry a non-failing Workflow hook warning in result. */
+export function resolveWorkflowGateWarningLabel(result: unknown): string | null {
+  if (result == null || typeof result !== "object") return null;
+  const warning = (result as { completion_warning?: unknown }).completion_warning;
+  if (warning == null || typeof warning !== "object") return null;
+  const record = warning as { code?: unknown; hook_name?: unknown };
+  if (record.code !== "workflow_gate_rejected") return null;
+  const hookName = typeof record.hook_name === "string" ? record.hook_name.trim() : "";
+  return hookName ? `Stopped by hook: ${hookName}` : "Stopped by Workflow hook";
 }

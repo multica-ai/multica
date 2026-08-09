@@ -869,6 +869,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	toolExecutor.Hooks = workflowHooksFeature.Evaluator                            // CEREBRO-PATCH(workflow-hooks-tool-failure-wire): FIR-3692 tool failures emit Workflow events.
 	h.CommentTargetGuard = cerebrocommentguard.New(workflowHooksFeature.Evaluator) // CEREBRO-PATCH(router-comment-workflow-gate): FIR-3692 before.message.send is the only comment decision path.
 	h.RuntimeHookEvents = workflowHooksFeature.Evaluator                           // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 evaluate authenticated runtime-layer events.
+	h.WorkflowHookRules = workflowHooksFeature                                     // CEREBRO-PATCH(workflow-hook-house-rules): claim-time contracts share the Workflow hook source.
 	workflowHooksFeature.AssignGate.Attach(bus)                                    // CEREBRO-PATCH(issue-assign-gate-wire): FIR-4183 before.issue.assigned fires from the issue:updated broadcast.
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop): FIR-2283 — plug the Issue workflow bridge (workflow_type=="issue_loop": save -> Compile -> materialize the dispatch/gate/escalate rules) and the control-strip/approval seam onto the compiled delivery gate.
 	cerebroIssueLoopColumns := cerebroworkflows.NewIssueLoopColumnStore(pool)
@@ -915,7 +916,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroRecurringIssueHandler := cerebrorecurringissue.NewHandler(cerebroQueries, pool, queries)
 	// CEREBRO-PATCH(cerebro-sessions-routes): FIR-1741 issue comment sessions handler instance.
 	cerebroSessionsHandler := cerebrosessions.NewHandler(pool, queries, h.TaskService, bus).WithHooks(workflowHooksFeature.Evaluator) // CEREBRO-PATCH(cerebro-sessions-routes): FIR-2021 inject TaskService+bus for one-command handoff start-new; FIR-3692 Workflow decides the handoff
-	h.CommentSessionMode = cerebroSessionsHandler                                           // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 transactional Mode seam.
+	h.CommentSessionMode = cerebroSessionsHandler                                                                                     // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 transactional Mode seam.
 	cerebroSessionModeStore := cerebrosessionmode.NewStore(pool)
 	cerebroSessionModeHandler := cerebrosessionmode.NewHandler(cerebroSessionModeStore) // CEREBRO-PATCH(session-mode-config): FIR-3111 Settings-managed version registry.
 	h.SessionModeProfiles = cerebroSessionModeStore

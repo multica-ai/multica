@@ -1,8 +1,36 @@
 import { describe, expect, it } from "vitest";
 import { createHookDraft } from "./hook-types";
-import { parseHookListResponse, parseHookResponse, parseHookRunsResponse, toHookTransport } from "./hook-api";
+import { parseActiveHookRulesResponse, parseHookListResponse, parseHookResponse, parseHookRunsResponse, toHookTransport } from "./hook-api";
 
 describe("workflow hook API compatibility", () => {
+  it("parses the agent-scoped active-rules response", () => {
+    expect(parseActiveHookRulesResponse({ rules: [{
+      id: "rule-1", name: "Require a next step",
+      contract_rule: "Runs must leave a visible next step.",
+      contract_satisfy: "Register a continuation before stopping.",
+      events: ["before.task.complete"],
+      scope: { kind: "agent", value: "agent-1" },
+    }] })).toEqual({ rules: [expect.objectContaining({ id: "rule-1", name: "Require a next step" })] });
+  });
+
+  it("round-trips the plain-language contract", () => {
+    const parsed = parseHookResponse({
+      id: "contract", version: 1, name: "Guard completion", mode: "dry_run", fail_mode: "warn",
+      contract_rule: "An unfinished issue needs a continuation.",
+      contract_satisfy: "Create a wakeup or mark the issue blocked.",
+      events: [], bindings: [], conditions: [], handlers: [],
+    });
+
+    expect(parsed).toEqual(expect.objectContaining({
+      contract_rule: "An unfinished issue needs a continuation.",
+      contract_satisfy: "Create a wakeup or mark the issue blocked.",
+    }));
+    expect(toHookTransport(parsed)).toEqual(expect.objectContaining({
+      contract_rule: "An unfinished issue needs a continuation.",
+      contract_satisfy: "Create a wakeup or mark the issue blocked.",
+    }));
+  });
+
   it("defaults legacy policies to all conditions and round-trips any", () => {
     const legacy = parseHookResponse({
       id: "legacy", version: 1, name: "Legacy", mode: "dry_run", fail_mode: "warn",
@@ -126,6 +154,8 @@ describe("workflow hook API compatibility", () => {
       conditions: [{ field: "attempt", op: "lt", value: 3 }],
       handlers: [{ id: "h1", decision: "block", requirement: "Choose one", actions: [{ type: "continuation.require" }] }],
       observed_run_count: 4,
+      pass_count_7d: 18,
+      block_count_7d: 3,
       can_publish: true,
       updated_at: "2026-07-15T08:00:00Z",
       last_run_at: "2026-07-16T09:30:00Z",
@@ -133,6 +163,8 @@ describe("workflow hook API compatibility", () => {
     expect(parsed.bindings).toEqual([{ kind: "model", value: "claude-opus-4-6" }]);
     expect(parsed.conditions[0]).toEqual(expect.objectContaining({ operator: "lt", value: "3" }));
     expect(parsed.baseline_run_count).toBe(4);
+    expect(parsed.pass_count_7d).toBe(18);
+    expect(parsed.block_count_7d).toBe(3);
     expect(parsed.last_run_at).toBe("2026-07-16T09:30:00Z");
   });
 

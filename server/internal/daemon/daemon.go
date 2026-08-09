@@ -3096,7 +3096,9 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 
 	// CEREBRO-PATCH(daemon-task-account-usage): JEH-881/JEH-1365 parse the task
 	d.maybeReportAccountUsage(ctx, task.RuntimeID, result.Comment, result.Logs, result.Usage, taskLog) // CEREBRO-PATCH(daemon-task-account-token-usage): include exact task tokens in account usage telemetry.
-	d.reportTaskResult(ctx, task.ID, result, taskLog)
+	if guidance := d.reportTaskResult(ctx, task.ID, result, taskLog); guidance != nil {                // CEREBRO-PATCH(workflow-hook-completion-guidance): give the live agent one corrective turn.
+		result = d.guideTaskCompletionOnce(runCtx, ctx, task, provider, slot, result, guidance, taskLog)
+	}
 
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the parent record (issue / chat session / autopilot run /
@@ -3256,11 +3258,12 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 // the agent may have built a real session before getting stuck, and we want
 // the next chat turn to resume there rather than start over and "forget"
 // the conversation.
-func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
+func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) (guidance *CompletionGuidance) { // CEREBRO-PATCH(workflow-hook-completion-guidance-result): return recoverable gate guidance to the live run.
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
-		err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir)
+		var err error
+		guidance, err = d.client.CompleteTaskWithGuidance(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir, result.CompletionAttempt) // CEREBRO-PATCH(workflow-hook-completion-guidance-result): preserve a rejected completion as guidance.
 		if err == nil {
 			return
 		}
@@ -3316,6 +3319,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			taskLog.Error("report failed task failed", "error", err)
 		}
 	}
+	return
 }
 
 // gcMetaForTask classifies a finished task and produces a GCMeta of the right
@@ -3706,6 +3710,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentName:                        agentName,
 		AgentInstructions:                instructions,
 		AgentSkills:                      convertSkillsForEnv(skills),
+		ActiveHookRules:                  activeHookRulesForEnv(task.ActiveHookRules), // CEREBRO-PATCH(workflow-hook-house-rules): carry claim-time contracts into the shared brief.
 		Repos:                            convertReposForEnv(task.Repos),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
@@ -3868,7 +3873,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// "start task failed: <…>" string and the same failure_reason
 	// taxonomy as before — see MUL-2946 for the classifier contract.
 	// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); StartTask is the last pre-start step bounded by prepareCtx. Drop on next upstream sync.
-	if err := d.client.StartTask(prepareCtx, task.ID); err != nil {
+	if err := d.startTaskUnlessGuided(prepareCtx, task); err != nil { // CEREBRO-PATCH(workflow-hook-completion-guidance-start): do not restart an already-running task for its corrective turn.
 		stopPrepareLease()
 		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
 	}

@@ -46,6 +46,22 @@ type ChatHistoryMessage struct {
 	Content string `json:"content"`
 }
 
+type ActiveHookRuleData struct {
+	Name            string   `json:"name"`
+	ContractRule    string   `json:"contract_rule"`
+	ContractSatisfy string   `json:"contract_satisfy"`
+	Events          []string `json:"events"`
+}
+
+type CompletionGuidance struct {
+	Code         string   `json:"code"`
+	HookID       string   `json:"hook_id,omitempty"`
+	HookName     string   `json:"hook_name,omitempty"`
+	Requirement  string   `json:"requirement"`
+	Alternatives []string `json:"alternatives"`
+	Attempt      int      `json:"attempt"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -176,7 +192,10 @@ type Task struct {
 	// CEREBRO-PATCH(daemon-memory-autorecall): FIR-1794 layer 3 — automatically recalled memories shipped at claim time when cerebro_memory is on.
 	MemoryContext string `json:"memory_context,omitempty"`
 	// CEREBRO-PATCH(daemon-task-workpad-brief): FIR-3659 — true when the workspace's cerebro_workpad flag is on, so the brief includes the Workpad protocol section.
-	WorkpadBriefEnabled bool `json:"workpad_brief_enabled,omitempty"`
+	WorkpadBriefEnabled      bool                 `json:"workpad_brief_enabled,omitempty"`
+	ActiveHookRules          []ActiveHookRuleData `json:"active_hook_rules,omitempty"` // CEREBRO-PATCH(workflow-hook-house-rules): applicable live contracts for this task.
+	CompletionGuidance       *CompletionGuidance  `json:"-"`                           // CEREBRO-PATCH(workflow-hook-completion-guidance): one focused corrective turn before completion.
+	CompletionOriginalAnswer string               `json:"-"`
 	// CEREBRO-PATCH(daemon-task-tools-brief): FIR-4500 — true when the workspace's cerebro_tools_brief flag is off, so the brief drops the Connections & MCP tools section.
 	ToolsBriefDisabled bool `json:"tools_brief_disabled,omitempty"`
 	// CEREBRO-PATCH(rounds-answer-snapshots): FIR-3179 — no Round-only daemon task flag; Round replies use the standard task shape.
@@ -283,16 +302,17 @@ type ModelUsageEventEntry = agent.ModelUsageEvent
 
 // TaskResult is the outcome of executing a task.
 type TaskResult struct {
-	Status        string                 `json:"status"`
-	Comment       string                 `json:"comment"`
-	BranchName    string                 `json:"branch_name,omitempty"`
-	EnvType       string                 `json:"env_type,omitempty"`
-	SessionID     string                 `json:"session_id,omitempty"`   // Claude session ID for future resumption
-	WorkDir       string                 `json:"work_dir,omitempty"`     // working directory used during execution
-	EnvRoot       string                 `json:"-"`                      // env root dir for writing GC metadata (not sent to server)
-	FailureReason string                 `json:"-"`                      // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
-	UsageEvents   []ModelUsageEventEntry `json:"usage_events,omitempty"` // CEREBRO-PATCH(daemon-model-usage-events): FIR-3337 native call events; aggregate fallback is added at report time.
-	Usage         []TaskUsageEntry       `json:"usage,omitempty"`        // per-model token usage
+	Status            string                 `json:"status"`
+	Comment           string                 `json:"comment"`
+	BranchName        string                 `json:"branch_name,omitempty"`
+	EnvType           string                 `json:"env_type,omitempty"`
+	SessionID         string                 `json:"session_id,omitempty"`   // Claude session ID for future resumption
+	WorkDir           string                 `json:"work_dir,omitempty"`     // working directory used during execution
+	EnvRoot           string                 `json:"-"`                      // env root dir for writing GC metadata (not sent to server)
+	FailureReason     string                 `json:"-"`                      // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
+	CompletionAttempt int                    `json:"-"`                      // CEREBRO-PATCH(workflow-hook-completion-guidance): 2 only for the single corrective completion.
+	UsageEvents       []ModelUsageEventEntry `json:"usage_events,omitempty"` // CEREBRO-PATCH(daemon-model-usage-events): FIR-3337 native call events; aggregate fallback is added at report time.
+	Usage             []TaskUsageEntry       `json:"usage,omitempty"`        // per-model token usage
 	// CEREBRO-PATCH(daemon-task-result-logs): JEH-1365 — verbose log content
 	// accumulated during the run (not sent to server; used for quota-signal parsing).
 	Logs string `json:"-"`

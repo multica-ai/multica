@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ var (
 	ErrHookEventNotFound       = errors.New("workflow hook retained event not found")
 	ErrHookEventNotRetainable  = errors.New("workflow hook event type is not retainable")
 	ErrManagedHookLocked       = errors.New("managed workflow hook is locked")
+	ErrHookContractRequired    = errors.New("workflow hook requires a plain-language contract before publish")
 )
 
 type HookJournalEvent struct {
@@ -272,6 +274,9 @@ func (r *MemoryHookRepository) Publish(_ context.Context, workspaceID, id, _ str
 	if row.observedRuns == 0 || row.baselineAt.IsZero() {
 		return HookPolicy{}, ErrHookPublishPrerequisite
 	}
+	if !hasReadableHookContract(*row.draft) {
+		return HookPolicy{}, ErrHookContractRequired
+	}
 	published := *row.draft
 	canonicalizeWorkspaceBindings(&published, workspaceID)
 	published.ID = uuid.NewString()
@@ -283,6 +288,10 @@ func (r *MemoryHookRepository) Publish(_ context.Context, workspaceID, id, _ str
 	row.draft = nil
 	row.disabled = false
 	return memoryPolicyResponse(row), nil
+}
+
+func hasReadableHookContract(policy HookPolicy) bool {
+	return strings.TrimSpace(policy.ContractRule) != "" && strings.TrimSpace(policy.ContractSatisfy) != ""
 }
 
 func memoryPolicyResponse(row *memoryHookPolicy) HookPolicy {

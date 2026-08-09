@@ -200,7 +200,7 @@ func TestBridge_WorkflowHookToolsAreAvailableToGatewayRegistry(t *testing.T) {
 	reg := NewRegistry(nil)
 	RegisterBridgedMCPTools(reg, srv, DefaultInAppAdminDenylist(), true)
 	for _, name := range []string{
-		"list_workflow_hooks", "get_workflow_hook", "create_workflow_hook", "update_workflow_hook",
+		"list_workflow_hooks", "list_active_hook_rules", "get_workflow_hook", "create_workflow_hook", "update_workflow_hook",
 		"test_workflow_hook", "publish_workflow_hook", "get_effective_workflow_hooks", "list_workflow_hook_runs",
 	} {
 		if !reg.hasTool(name) {

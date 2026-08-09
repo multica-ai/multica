@@ -2,17 +2,58 @@ package workflows
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
 type PostgresTaskCompletionStore struct {
 	db cerebrodb.DBTX
+}
+
+func (s *PostgresTaskCompletionStore) NotifyCompletionWarning(ctx context.Context, in TaskCompletionContext, warning service.WorkflowCompletionGuidance) error {
+	issueID, err := util.ParseUUID(in.IssueID)
+	if err != nil {
+		return err
+	}
+	agentID, err := util.ParseUUID(in.AgentID)
+	if err != nil {
+		return err
+	}
+	details, err := json.Marshal(map[string]string{
+		"task_id": in.TaskID, "hook_id": warning.HookID, "hook_name": warning.HookName,
+		"requirement": warning.Requirement,
+	})
+	if err != nil {
+		return err
+	}
+	hookName := warning.HookName
+	if hookName == "" {
+		hookName = "a Workflow hook"
+	}
+	body := fmt.Sprintf("The run completed with a warning from %s: %s", hookName, strings.TrimPrefix(warning.Requirement, warning.HookName+": "))
+	_, err = s.db.Exec(ctx, `
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id, type, severity, issue_id,
+    title, body, actor_type, actor_id, details, route
+)
+SELECT i.workspace_id, 'member', i.creator_id, 'workflow_gate_rejected', 'attention', i.id,
+       'Workflow hook warning', $2, 'agent', $3, $4, 'inbox'
+FROM issue i
+WHERE i.id=$1 AND i.creator_type='member'
+  AND NOT EXISTS (
+      SELECT 1 FROM inbox_item n
+      WHERE n.issue_id=i.id AND n.type='workflow_gate_rejected'
+        AND n.details->>'task_id'=$5
+  )`, issueID, body, agentID, details, in.TaskID)
+	return err
 }
 
 func NewPostgresTaskCompletionStore(db cerebrodb.DBTX) *PostgresTaskCompletionStore {

@@ -2351,6 +2351,10 @@
       "exempt": "read-only — wraps GET /api/cerebro/commands"
     },
     {
+      "id": "list_active_hook_rules",
+      "exempt": "read-only — wraps GET /api/cerebro/workflow-hooks/active-rules"
+    },
+    {
       "id": "list_eval_bindings",
       "exempt": "read-only — wraps GET /api/cerebro/evals/bindings"
     },

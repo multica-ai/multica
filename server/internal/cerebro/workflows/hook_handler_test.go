@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,17 @@ import (
 )
 
 const hookTestWorkspaceID = "11111111-1111-1111-1111-111111111111"
+
+func TestValidateHookForExecutionRequiresReadableContract(t *testing.T) {
+	policy := newTestHookPolicy("", HookRequire, HookModeDryRun, HookBinding{Kind: HookScopeWorkspace, ID: hookTestWorkspaceID})
+	policy.Name = "Guard completion"
+	policy.ContractRule = ""
+	policy.ContractSatisfy = ""
+	policy.Handlers[0].Actions = []HookAction{{Type: "audit.record", Config: map[string]any{"event": "hook.test"}}}
+	if err := validateHookForExecution(&policy, hookTestWorkspaceID); err == nil || !strings.Contains(err.Error(), "contract_rule") {
+		t.Fatalf("validation error = %v, want missing contract_rule", err)
+	}
+}
 
 func TestHookAPIAllowsFreshAgentReadButDeniesWrite(t *testing.T) {
 	repo := NewMemoryHookRepository()
@@ -512,6 +524,7 @@ func TestHookAPITestQualifiesOnlyTheExactSavedDraftRevision(t *testing.T) {
 
 	newer, err := repo.Update(ctx, hookTestWorkspaceID, HookPermissionActor{Type: "member", ID: "member-1"}, saved.ID, HookPolicy{
 		Name: saved.Name, Events: saved.Events, Bindings: saved.Bindings, ConditionMode: saved.ConditionMode,
+		ContractRule: saved.ContractRule, ContractSatisfy: saved.ContractSatisfy,
 		Handlers: saved.Handlers, FailMode: saved.FailMode, Revision: saved.Revision,
 	})
 	if err != nil {
@@ -547,6 +560,38 @@ func TestHookAPIMalformedIDAndWorkspaceIsolationFailSafely(t *testing.T) {
 	if missingRecorder.Code != http.StatusNotFound {
 		t.Fatalf("cross-workspace status = %d", missingRecorder.Code)
 	}
+}
+
+func TestHookAPIListsActiveRulesForAnAgentAndIssue(t *testing.T) {
+	repo := NewMemoryHookRepository()
+	policy := activeRulePolicy("active-rule", "Completion rule", HookBinding{Kind: HookScopeModel, ID: "gpt-5"})
+	repo.Seed(hookTestWorkspaceID, policy)
+	auth := &fakeHookAuthorizer{allow: map[HookPermission]bool{HookPermissionRead: true}}
+	resolver := activeRuleContextResolverFunc(func(_ context.Context, workspaceID, agentID, issueID string) (ActiveRuleContext, error) {
+		return ActiveRuleContext{WorkspaceID: workspaceID, AgentID: agentID, IssueID: issueID, Model: "gpt-5", ProjectID: "project-1"}, nil
+	})
+	router := hookTestRouter(NewHookAPI(repo, auth).WithActiveRuleService(NewActiveRuleService(repo)).WithActiveRuleContextResolver(resolver))
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, hookRequest(t, http.MethodGet, "/active-rules?agent_id=agent-1&issue_id=issue-1", nil, "member-1", false))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Rules []ActiveHookRule `json:"rules"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Rules) != 1 || response.Rules[0].Name != policy.Name {
+		t.Fatalf("rules = %#v, want active policy", response.Rules)
+	}
+}
+
+type activeRuleContextResolverFunc func(context.Context, string, string, string) (ActiveRuleContext, error)
+
+func (f activeRuleContextResolverFunc) Resolve(ctx context.Context, workspaceID, agentID, issueID string) (ActiveRuleContext, error) {
+	return f(ctx, workspaceID, agentID, issueID)
 }
 
 func TestHookAPIDisablesAndDeletesEditableHooks(t *testing.T) {

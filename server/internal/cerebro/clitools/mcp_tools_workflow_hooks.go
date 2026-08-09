@@ -43,6 +43,26 @@ func registerWorkflowHookTools(srv *mcp.Server, client *cli.APIClient) {
 		"required": []string{"event_id", "revision"},
 	}
 	registerHookGet(srv, client, "list_workflow_hooks", "List visible Workflow hooks.", "", false)
+	srv.RegisterTool(mcp.Tool{Name: "list_active_hook_rules", Description: "List the enforcing Workflow hook rules that apply to an agent on an issue.", InputSchema: map[string]any{
+		"type": "object", "required": []string{"agent_id", "issue_id"}, "properties": map[string]any{
+			"agent_id": map[string]any{"type": "string"}, "issue_id": map[string]any{"type": "string"},
+		},
+	}}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		agentID, err := requireString(args, "agent_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		issueID, err := requireString(args, "issue_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		path := "/api/cerebro/workflow-hooks/active-rules?agent_id=" + url.QueryEscape(agentID) + "&issue_id=" + url.QueryEscape(issueID)
+		var out any
+		if err := client.GetJSON(ctx, path, &out); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(out)
+	})
 	registerHookGet(srv, client, "get_workflow_hook", "Get one Workflow hook.", "", true)
 	registerHookMutation(srv, client, "create_workflow_hook", "Create a Workflow hook in Dry run.", httpPost, "", hookSchema, false)
 	registerHookMutation(srv, client, "update_workflow_hook", "Update a Workflow hook as a new Dry run version.", httpPut, "", hookSchema, true)

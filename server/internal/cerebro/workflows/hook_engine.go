@@ -98,7 +98,7 @@ policyLoop:
 		result.MatchedConditions = append(result.MatchedConditions, matchedConditions...)
 		for _, handler := range policy.Handlers {
 			match := HookMatch{
-				PolicyID: policy.ID, Version: policy.Version, HandlerID: handler.ID,
+				PolicyID: policy.ID, PolicyName: policy.Name, Version: policy.Version, HandlerID: handler.ID,
 				SourceScope: binding, Decision: handler.Decision,
 				DryRun:      policy.Mode == HookModeDryRun,
 				Idempotency: fmt.Sprintf("%s:%d:%s", key, policy.Version, handler.ID), MatchedAt: e.now(),
@@ -113,7 +113,7 @@ policyLoop:
 			}
 			result.Decision = strongerDecision(result.Decision, handler.Decision)
 			if handler.Requirement != "" {
-				result.Requirements = append(result.Requirements, handler.Requirement)
+				result.Requirements = append(result.Requirements, policy.Name+": "+handler.Requirement)
 			}
 			for field, value := range handler.Modifications {
 				if containsString(event.MutableFields, field) {
@@ -148,7 +148,7 @@ policyLoop:
 					if decision, requirement, ok := actionGateVerdict(actionResult.Result); ok {
 						result.Decision = strongerDecision(result.Decision, decision)
 						if requirement != "" {
-							result.Requirements = append(result.Requirements, requirement)
+							result.Requirements = append(result.Requirements, policy.Name+": "+requirement)
 						}
 					}
 				}
@@ -188,7 +188,6 @@ func timeoutResult(policies []HookPolicy) HookResult {
 	}
 	return HookResult{Evaluated: true, Decision: HookAllow, TimedOut: true}
 }
-
 
 // actionGateVerdict reads a decision an action reports on success. A quality
 // gate that judged the content bad returns {"decision":"require"|"block",

@@ -62,6 +62,8 @@ export interface WorkflowHook {
   version: number;
   name: string;
   description: string;
+  contract_rule: string;
+  contract_satisfy: string;
   mode: HookMode;
   fail_mode: HookFailMode;
   events: HookEventType[];
@@ -72,6 +74,8 @@ export interface WorkflowHook {
   requirement: string;
   actions: HookActionDraft[];
   baseline_run_count: number;
+  pass_count_7d: number;
+  block_count_7d: number;
   can_publish?: boolean;
   last_run_at?: string;
   lifecycle: HookLifecycle;
@@ -132,6 +136,8 @@ export function createHookDraft(): WorkflowHook {
     version: 1,
     name: "",
     description: "",
+    contract_rule: "",
+    contract_satisfy: "",
     mode: "dry_run",
     fail_mode: "warn",
     events: [],
@@ -142,6 +148,8 @@ export function createHookDraft(): WorkflowHook {
     requirement: "",
     actions: [],
     baseline_run_count: 0,
+    pass_count_7d: 0,
+    block_count_7d: 0,
     can_publish: false,
     lifecycle: { state: "draft", live_unchanged_by_draft: false },
     compatible_events: [],

@@ -49,27 +49,29 @@ func TestScanHookPolicyReadsConditionMode(t *testing.T) {
 	now := pgtype.Timestamptz{Valid: true}
 
 	row := hookRowScannerFunc(func(dest ...any) error {
-		if len(dest) != 18 {
-			return fmt.Errorf("scan destination count = %d, want 18 including condition_mode", len(dest))
+		if len(dest) != 20 {
+			return fmt.Errorf("scan destination count = %d, want 20 including readable contracts", len(dest))
 		}
 		*dest[0].(*pgtype.UUID) = id
 		*dest[1].(*pgtype.UUID) = familyID
 		*dest[2].(*pgtype.UUID) = workspaceID
 		*dest[3].(*string) = "Any condition"
 		*dest[4].(*string) = ""
-		*dest[5].(*int32) = 1
-		*dest[6].(*string) = string(HookModeDryRun)
-		*dest[7].(*string) = string(HookFailWarn)
-		*dest[8].(*string) = string(HookConditionAny)
-		*dest[9].(*[]byte) = []byte(`[]`)
-		*dest[10].(*[]byte) = []byte(`[]`)
-		*dest[11].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-		*dest[12].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-		*dest[13].(*pgtype.UUID) = createdByID
-		*dest[14].(*string) = "agent"
-		*dest[15].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[16].(*pgtype.Timestamptz) = now
-		*dest[17].(*pgtype.Timestamptz) = now
+		*dest[5].(*string) = "A readable rule"
+		*dest[6].(*string) = "A readable outcome"
+		*dest[7].(*int32) = 1
+		*dest[8].(*string) = string(HookModeDryRun)
+		*dest[9].(*string) = string(HookFailWarn)
+		*dest[10].(*string) = string(HookConditionAny)
+		*dest[11].(*[]byte) = []byte(`[]`)
+		*dest[12].(*[]byte) = []byte(`[]`)
+		*dest[13].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+		*dest[14].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+		*dest[15].(*pgtype.UUID) = createdByID
+		*dest[16].(*string) = "agent"
+		*dest[17].(*pgtype.UUID) = pgtype.UUID{}
+		*dest[18].(*pgtype.Timestamptz) = now
+		*dest[19].(*pgtype.Timestamptz) = now
 		return nil
 	})
 

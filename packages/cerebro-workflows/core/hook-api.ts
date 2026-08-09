@@ -26,9 +26,10 @@ const hookJournalEventSchema = z.object({
 const hookPolicySchema = z.object({
   id: z.string().optional(), family_id: z.string().optional(), draft_series_id: z.string().optional(), revision: z.number().int().positive().optional(),
   version: z.number().int().positive(), name: z.string(), description: z.string().optional().default(""),
+  contract_rule: z.string().optional().default(""), contract_satisfy: z.string().optional().default(""),
   mode: z.enum(["off", "dry_run", "enforce", "managed"]), fail_mode: z.enum(["open", "closed", "warn"]),
   events: z.array(z.string()), bindings: z.array(hookBindingSchema), condition_mode: z.enum(["all", "any"]).optional().default("all"), conditions: z.array(hookConditionSchema).optional().default([]), handlers: z.array(hookHandlerSchema),
-  observed_run_count: z.number().int().nonnegative().optional().default(0), can_publish: z.boolean().optional().default(false), updated_at: z.string().optional(), last_run_at: z.string().optional(),
+  observed_run_count: z.number().int().nonnegative().optional().default(0), pass_count_7d: z.number().int().nonnegative().optional().default(0), block_count_7d: z.number().int().nonnegative().optional().default(0), can_publish: z.boolean().optional().default(false), updated_at: z.string().optional(), last_run_at: z.string().optional(),
   lifecycle: hookLifecycleSchema.optional(),
   compatible_events: z.array(hookJournalEventSchema).optional().default([]),
 });
@@ -41,6 +42,15 @@ const hookListSchema = z.object({
   hooks: z.array(z.unknown()),
   partial_errors: z.array(hookPartialErrorSchema).optional().default([]),
 });
+const activeHookRuleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  contract_rule: z.string(),
+  contract_satisfy: z.string(),
+  events: z.array(z.string()),
+  scope: z.object({ kind: z.string(), value: z.string() }),
+});
+const activeHookRulesSchema = z.object({ rules: z.array(activeHookRuleSchema) });
 
 type HookPolicyTransport = z.infer<typeof hookPolicySchema>;
 export type HookPartialError = z.infer<typeof hookPartialErrorSchema>;
@@ -48,8 +58,9 @@ export interface HookListResult {
   hooks: WorkflowHook[];
   partial_errors: HookPartialError[];
 }
+export type ActiveHookRule = z.infer<typeof activeHookRuleSchema>;
 export interface HookWriteTransport {
-  name: string; description: string; mode: "dry_run"; fail_mode: WorkflowHook["fail_mode"];
+  name: string; description: string; contract_rule: string; contract_satisfy: string; mode: "dry_run"; fail_mode: WorkflowHook["fail_mode"];
   revision?: number;
   events: HookEventType[]; bindings: Array<{ kind: WorkflowHook["bindings"][number]["kind"]; id: string }>;
   condition_mode: WorkflowHook["condition_mode"];
@@ -63,6 +74,7 @@ function fromTransport(policy: HookPolicyTransport): WorkflowHook {
   return {
     id: policy.id, family_id: policy.family_id, draft_series_id: policy.draft_series_id, revision: policy.revision,
     version: policy.version, name: policy.name, description: policy.description,
+    contract_rule: policy.contract_rule, contract_satisfy: policy.contract_satisfy,
 		mode: policy.mode, fail_mode: policy.fail_mode === "open" ? "warn" : policy.fail_mode,
     events: policy.events.filter((event): event is HookEventType => typeof event === "string") as HookEventType[],
     bindings: policy.bindings.map((binding) => ({ kind: binding.kind, value: binding.id })),
@@ -71,6 +83,8 @@ function fromTransport(policy: HookPolicyTransport): WorkflowHook {
     decision: handler.decision, requirement: handler.requirement,
     actions: handler.actions.map((action) => ({ type: action.type, label: humaniseAction(action.type), config: action.config })),
     baseline_run_count: policy.observed_run_count,
+	pass_count_7d: policy.pass_count_7d,
+	block_count_7d: policy.block_count_7d,
 	can_publish: policy.can_publish,
     last_run_at: policy.last_run_at,
     lifecycle: policy.lifecycle ?? legacyLifecycle(policy),
@@ -105,7 +119,7 @@ export function parseHookListResponse(raw: unknown): HookListResult {
 
 export function toHookTransport(hook: WorkflowHook): HookWriteTransport {
   return {
-    name: hook.name, description: hook.description, mode: "dry_run", fail_mode: hook.fail_mode === "open" ? "warn" : hook.fail_mode,
+    name: hook.name, description: hook.description, contract_rule: hook.contract_rule, contract_satisfy: hook.contract_satisfy, mode: "dry_run", fail_mode: hook.fail_mode === "open" ? "warn" : hook.fail_mode,
     revision: hook.revision,
     events: hook.events, bindings: hook.bindings.map((binding) => ({ kind: binding.kind, id: binding.value })),
     condition_mode: hook.condition_mode,
@@ -122,6 +136,15 @@ export function toHookTransport(hook: WorkflowHook): HookWriteTransport {
 
 export async function fetchWorkflowHooks(): Promise<HookListResult> {
   return parseHookListResponse(await api.cerebroRequest<unknown>("/api/cerebro/workflow-hooks"));
+}
+export function parseActiveHookRulesResponse(raw: unknown): { rules: ActiveHookRule[] } {
+  const parsed = parseWithFallback<z.infer<typeof activeHookRulesSchema> | null>(raw, activeHookRulesSchema, null, { endpoint: "activeWorkflowHookRules" });
+  if (!parsed) throw new Error("Active Workflow hook rules response is malformed");
+  return parsed;
+}
+export async function fetchActiveHookRules(agentId: string, issueId: string): Promise<{ rules: ActiveHookRule[] }> {
+  const params = new URLSearchParams({ agent_id: agentId, issue_id: issueId });
+  return parseActiveHookRulesResponse(await api.cerebroRequest<unknown>(`/api/cerebro/workflow-hooks/active-rules?${params.toString()}`));
 }
 export async function fetchWorkflowHook(id: string): Promise<WorkflowHook> {
   return parseHookResponse(await api.cerebroRequest<unknown>(`/api/cerebro/workflow-hooks/${encodeURIComponent(id)}`));

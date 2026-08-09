@@ -8,6 +8,32 @@ import { HooksPage } from "./hooks-page";
 afterEach(cleanup);
 
 describe("HooksPage", () => {
+  it("shows the rule and how to satisfy it on each Hook", () => {
+    const hook = Object.assign(createHookDraft(), {
+      id: "contract",
+      name: "Guard completion",
+      contract_rule: "An unfinished issue needs a continuation.",
+      contract_satisfy: "Create a wakeup or mark the issue blocked.",
+    });
+    render(<HooksPage onOpenHook={vi.fn()} hooks={[hook]} />);
+
+    expect(screen.getByText("An unfinished issue needs a continuation.")).toBeInTheDocument();
+    expect(screen.getByText("Create a wakeup or mark the issue blocked.")).toBeInTheDocument();
+  });
+
+  it("shows seven-day pass and block counts on each Hook", () => {
+	const hook = Object.assign(createHookDraft(), {
+		id: "metrics",
+		name: "Guard completion",
+		pass_count_7d: 18,
+		block_count_7d: 3,
+	});
+	render(<HooksPage onOpenHook={vi.fn()} hooks={[hook]} />);
+
+	expect(screen.getByText("18 passed")).toBeInTheDocument();
+	expect(screen.getByText("3 blocked")).toBeInTheDocument();
+  });
+
   it("shows one-line chains, last run, and all four states", () => {
     const base = createHookDraft();
     render(<HooksPage onOpenHook={vi.fn()} hooks={[

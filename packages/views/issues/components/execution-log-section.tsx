@@ -17,13 +17,16 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 // CEREBRO-PATCH(runtime-pause-queued-ui): FIR-2717 — show runtime-pause detail on the queued execution-log status.
-import {
-  parseRuntimePauseWaitReason,
-  runtimePauseQueuedLabel,
-} from "@multica/cerebro-runtime/views";
 // CEREBRO-PATCH(interrupted-not-failed): a run stopped by a daemon restart / runtime pause / rate-limit is auto-retried, not broken — render it amber, not red "Failed".
 // CEREBRO-PATCH(failure-reason-copy): FIR-3782 — resolve all 21 backend reasons; the upstream map covers 6 and rendered the rest blank.
-import { isInterruptionReason, resolveFailureReasonLabel } from "@multica/cerebro-runtime/views";
+// CEREBRO-PATCH(workflow-hook-completion-warning): FIR-4797 — render a completed task's non-failing Workflow hook warning.
+import {
+  isInterruptionReason,
+  parseRuntimePauseWaitReason,
+  resolveFailureReasonLabel,
+  resolveWorkflowGateWarningLabel,
+  runtimePauseQueuedLabel,
+} from "@multica/cerebro-runtime/views";
 import { useT } from "../../i18n";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
 
@@ -359,6 +362,8 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const label = useStatusLabel(task);
   const trigger = useTriggerText(task);
   const time = task.completed_at ? timeAgo(task.completed_at) : "—";
+  // CEREBRO-PATCH(workflow-hook-completion-warning): completion is green; the one-time unmet requirement remains visibly amber.
+  const workflowWarning = resolveWorkflowGateWarningLabel(task.result);
   // CEREBRO-PATCH(interrupted-not-failed): label interruptions as "Interrupted, retrying" so a run that already delivered does not read as a hard failure.
   const failureLabel =
     task.status === "failed" && task.failure_reason
@@ -392,10 +397,11 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   return (
     <RowShell task={task}>
       <TriggerText text={trigger} />
-      <RowStatus title={failureLabel ?? label}>
-        <TaskStatusIcon status={task.status} failureReason={task.failure_reason} />
+      {/* CEREBRO-PATCH(workflow-hook-completion-warning): keep completion green while showing the unmet hook as an amber warning. */}
+      <RowStatus title={workflowWarning ?? failureLabel ?? label}>
+        {workflowWarning ? <PauseCircle className="h-3.5 w-3.5 shrink-0 text-warning" /> : <TaskStatusIcon status={task.status} failureReason={task.failure_reason} />}
         {/* CEREBRO-PATCH(failure-reason-visible): FIR-3782 — the reason was sr-only, so a failed run showed only a red icon. */}
-        <span className={failureLabel ? "truncate text-destructive" : "sr-only"}>{failureLabel ?? label}</span>
+        <span className={workflowWarning ? "truncate text-warning" : failureLabel ? "truncate text-destructive" : "sr-only"}>{workflowWarning ?? failureLabel ?? label}</span>
         <span className="text-muted-foreground">{time}</span>
       </RowStatus>
       <RowActions>

@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -188,5 +189,58 @@ func TestPostgresHookRepositoryRunsReturnsCompleteExplanation(t *testing.T) {
 	got := runs[0]
 	if got.FailMode != HookFailWarn || !reflect.DeepEqual(got.Result.MatchedConditions, policy.Conditions) || !reflect.DeepEqual(got.Result.Requirements, []string{"Add delivery evidence"}) {
 		t.Fatalf("explanation = %#v", got)
+	}
+}
+
+func TestPostgresHookRepositoryReportsSevenDayPassAndBlockCounts(t *testing.T) {
+	pool := openWorkflowIntegrationPool(t)
+	ctx := context.Background()
+	fixture := setupWorkflowIntegrationFixture(t, pool)
+	repo := NewPostgresHookRepository(pool)
+	workspaceID := uuidString(fixture.workspaceID)
+	policy := newTestHookPolicy("", HookRequire, HookModeDryRun, HookBinding{Kind: HookScopeWorkspace})
+	created, err := repo.Create(ctx, workspaceID, HookPermissionActor{Type: "member", ID: uuidString(fixture.userID)}, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidenceRun := HookRunRecord{
+		PolicyID: created.ID, PolicyVersion: created.Version,
+		Event:    HookEvent{EventID: "metrics-evidence", Type: HookBeforeTaskComplete, WorkspaceID: workspaceID},
+		Result:   HookResult{Decision: HookAllow, WouldDecision: HookRequire, Matches: []HookMatch{{PolicyID: created.ID, Decision: HookRequire, DryRun: true}}},
+		FailMode: created.FailMode,
+	}
+	retained, err := repo.CaptureEvent(ctx, workspaceID, evidenceRun.Event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.RecordTestEvidence(ctx, workspaceID, retained.ID, evidenceRun); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := repo.Get(ctx, workspaceID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.PassCount7D != 0 || draft.BlockCount7D != 1 {
+		t.Fatalf("draft pass=%d block=%d, want 0 and 1", draft.PassCount7D, draft.BlockCount7D)
+	}
+	published, err := repo.Publish(ctx, workspaceID, created.ID, uuidString(fixture.userID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, decision := range []HookDecision{HookAllow, HookBlock} {
+		if err := repo.RecordRun(ctx, workspaceID, HookRunRecord{
+			PolicyID: published.ID, PolicyVersion: published.Version,
+			Event:  HookEvent{EventID: fmt.Sprintf("metrics-%d", index), Type: HookBeforeTaskComplete, WorkspaceID: workspaceID},
+			Result: HookResult{Decision: decision},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := repo.Get(ctx, workspaceID, published.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PassCount7D != 1 || got.BlockCount7D != 1 {
+		t.Fatalf("pass=%d block=%d, want 1 and 1", got.PassCount7D, got.BlockCount7D)
 	}
 }

@@ -1616,6 +1616,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			h.applyGraphifyNudge(r.Context(), &resp, issue)
 			// CEREBRO-PATCH(daemon-workpad-brief): include the Workpad protocol section when cerebro_workpad is on (FIR-3659)
 			h.applyWorkpadBrief(r.Context(), &resp, issue)
+			// CEREBRO-PATCH(workflow-hook-house-rules): resolve the same applicable contracts used by API, MCP, and UI.
+			h.applyWorkflowHookRules(r.Context(), &resp, issue)
 			// CEREBRO-PATCH(daemon-tools-brief): drop the Connections & MCP tools brief section when cerebro_tools_brief is off (FIR-4500)
 			h.applyToolsBrief(r.Context(), &resp, issue)
 		}
@@ -2343,10 +2345,11 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 
 // CompleteTask marks a running task as completed.
 type TaskCompleteRequest struct {
-	PRURL     string `json:"pr_url"`
-	Output    string `json:"output"`
-	SessionID string `json:"session_id"` // Claude session ID for future resumption
-	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	PRURL             string `json:"pr_url"`
+	Output            string `json:"output"`
+	SessionID         string `json:"session_id"`         // Claude session ID for future resumption
+	WorkDir           string `json:"work_dir"`           // working directory used during execution
+	CompletionAttempt int    `json:"completion_attempt"` // CEREBRO-PATCH(workflow-hook-completion-guidance): survives a server restart between the two completion attempts.
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
@@ -2368,6 +2371,9 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir)
 	if err != nil {
 		slog.Warn("complete task failed", "task_id", taskID, "error", err)
+		if writeWorkflowCompletionGuidance(w, err) { // CEREBRO-PATCH(workflow-hook-completion-guidance): keep the task running while the agent satisfies the hook.
+			return
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -2563,7 +2569,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 				"cache_read_ratio", float64(u.CacheReadTokens)/float64(totalInput),
 			)
 		}
-		h.projectAnalyticsRun(r.Context(), taskID)                  // CEREBRO-PATCH(analytics-projection): FIR-2996 refresh canonical usage after cost writes.
+		h.projectAnalyticsRun(r.Context(), taskID) // CEREBRO-PATCH(analytics-projection): FIR-2996 refresh canonical usage after cost writes.
 	}
 	if len(normalizedEvents) > 0 {
 		h.logModelUsageEventShadowReconciliation(r.Context(), task.ID)

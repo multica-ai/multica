@@ -2,7 +2,9 @@ package workflows
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
@@ -69,10 +71,15 @@ func managedHookPolicies(workspaceID string) []managedHookPolicyDefinition {
 	binding := HookBinding{Kind: HookScopeWorkspace, ID: workspaceID}
 	managed := func(key, name, description string, events []HookEventType, conditions []Condition, decision HookDecision, requirement string, modifications map[string]any) managedHookPolicyDefinition {
 		id := uuid.NewSHA1(managedHookNamespace, []byte(workspaceID+":"+key)).String()
+		contractSatisfy := strings.TrimSpace(requirement)
+		if contractSatisfy == "" {
+			contractSatisfy = "The platform handles matching events automatically."
+		}
 		return managedHookPolicyDefinition{
 			Key: key,
 			Policy: HookPolicy{
 				ID: id, Version: 1, Name: name, Description: description,
+				ContractRule: description, ContractSatisfy: contractSatisfy,
 				Mode: HookModeManaged, FailMode: HookFailClosed,
 				Events: events, Bindings: []HookBinding{binding},
 				Conditions: conditions,
@@ -226,7 +233,7 @@ func managedHookPolicies(workspaceID string) []managedHookPolicyDefinition {
 	sort.Strings(reasons)
 	for _, reason := range reasons {
 		route := routes[reason]
-		definitions = append(definitions, managed(
+		definition := managed(
 			"failure.task."+reason,
 			"Route task failure: "+reason,
 			"Selects the task failure action, retry boundary, session handling, and user-facing message.",
@@ -240,7 +247,10 @@ func managedHookPolicies(workspaceID string) []managedHookPolicyDefinition {
 				"retry_limit":    int(route.RetryLimit),
 				"user_message":   route.UserMessage,
 			},
-		))
+		)
+		definition.Policy.ContractRule = fmt.Sprintf("When a task fails with %s, the platform applies the %s action.", reason, route.Action)
+		definition.Policy.ContractSatisfy = "No agent action is required; the platform handles this failure automatically."
+		definitions = append(definitions, definition)
 	}
 	return definitions
 }

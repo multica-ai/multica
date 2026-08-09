@@ -13,7 +13,7 @@ import {
   regenerateInboundToken,
   regenerateOutboundSecret,
 } from "./api";
-import { fetchWorkflowHook, fetchWorkflowHookRuns, fetchWorkflowHooks } from "./hook-api";
+import { fetchActiveHookRules, fetchWorkflowHook, fetchWorkflowHookRuns, fetchWorkflowHooks } from "./hook-api";
 
 export const cerebroWorkflowsKeys = {
   all: (wsId: string) => ["cerebro", "workflows", wsId] as const,
@@ -34,6 +34,7 @@ export const workflowHookKeys = {
 	list: (wsId: string) => [...workflowHookKeys.all(wsId), "list"] as const,
 	detail: (wsId: string, id: string) => [...workflowHookKeys.all(wsId), "detail", id] as const,
 	runs: (wsId: string, id: string) => [...workflowHookKeys.all(wsId), "runs", id] as const,
+	activeRules: (wsId: string, agentId: string, issueId: string) => [...workflowHookKeys.all(wsId), "active-rules", agentId, issueId] as const,
 };
 
 export function workflowHooksListOptions(wsId: string) {
@@ -46,6 +47,14 @@ export function workflowHookDetailOptions(wsId: string, id: string) {
 
 export function workflowHookRunsOptions(wsId: string, id: string) {
 	return queryOptions({ queryKey: workflowHookKeys.runs(wsId, id), queryFn: () => fetchWorkflowHookRuns(id), enabled: !!wsId && !!id });
+}
+
+export function activeHookRulesOptions(wsId: string, agentId: string, issueId: string) {
+	return queryOptions({
+		queryKey: workflowHookKeys.activeRules(wsId, agentId, issueId),
+		queryFn: () => fetchActiveHookRules(agentId, issueId),
+		enabled: !!wsId && !!agentId && !!issueId,
+	});
 }
 
 export function cerebroWorkflowsListOptions(wsId: string) {

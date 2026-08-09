@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveFailureReasonLabel } from "./failure-reason-label";
+import { resolveFailureReasonLabel, resolveWorkflowGateWarningLabel } from "./failure-reason-label";
 
 describe("resolveFailureReasonLabel", () => {
   it("labels every platform-side reason", () => {
@@ -41,5 +41,25 @@ describe("resolveFailureReasonLabel", () => {
     expect(resolveFailureReasonLabel("")).toBeNull();
     expect(resolveFailureReasonLabel(null)).toBeNull();
     expect(resolveFailureReasonLabel(undefined)).toBeNull();
+  });
+});
+
+describe("resolveWorkflowGateWarningLabel", () => {
+  it("names the Hook that warned without turning the run into a failure", () => {
+    expect(resolveWorkflowGateWarningLabel({
+      output: "done",
+      completion_warning: {
+        code: "workflow_gate_rejected",
+        hook_id: "hook-1",
+        hook_name: "Require evidence before an agent run stops",
+        requirement: "Create a wakeup",
+        attempt: 2,
+      },
+    })).toBe("Stopped by hook: Require evidence before an agent run stops");
+  });
+
+  it("ignores malformed or unrelated task results", () => {
+    expect(resolveWorkflowGateWarningLabel(null)).toBeNull();
+    expect(resolveWorkflowGateWarningLabel({ completion_warning: { code: "other" } })).toBeNull();
   });
 });

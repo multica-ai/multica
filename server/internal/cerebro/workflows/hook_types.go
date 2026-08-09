@@ -119,6 +119,8 @@ type HookPolicy struct {
 	Version          int                `json:"version"`
 	Name             string             `json:"name"`
 	Description      string             `json:"description,omitempty"`
+	ContractRule     string             `json:"contract_rule"`
+	ContractSatisfy  string             `json:"contract_satisfy"`
 	Mode             HookMode           `json:"mode"`
 	FailMode         HookFailMode       `json:"fail_mode"`
 	Events           []HookEventType    `json:"events"`
@@ -131,6 +133,8 @@ type HookPolicy struct {
 	UpdatedAt        time.Time          `json:"updated_at,omitempty"`
 	LastRunAt        *time.Time         `json:"last_run_at,omitempty"`
 	ObservedRuns     int                `json:"observed_run_count"`
+	PassCount7D      int                `json:"pass_count_7d"`
+	BlockCount7D     int                `json:"block_count_7d"`
 	BaselineAt       *time.Time         `json:"baseline_at,omitempty"`
 	CanPublish       bool               `json:"can_publish"`
 	Lifecycle        HookLifecycle      `json:"lifecycle"`
@@ -177,6 +181,7 @@ type HookEvent struct {
 
 type HookMatch struct {
 	PolicyID    string       `json:"policy_id"`
+	PolicyName  string       `json:"policy_name,omitempty"`
 	Version     int          `json:"version"`
 	HandlerID   string       `json:"handler_id"`
 	SourceScope HookBinding  `json:"source_scope"`

@@ -140,7 +140,12 @@ function actionSummary(action: WorkflowHook["actions"][number], directory: HookS
 }
 
 function templateHook(patch: Partial<WorkflowHook>): WorkflowHook {
-  return { ...createHookDraft(), ...patch };
+  return {
+    ...createHookDraft(),
+    contract_rule: patch.description ?? patch.name ?? "",
+    contract_satisfy: patch.requirement ?? "Complete the configured actions.",
+    ...patch,
+  };
 }
 
 export const HOOK_TEMPLATES: ReadonlyArray<{ id: string; title: string; description: string; hook: WorkflowHook }> = [

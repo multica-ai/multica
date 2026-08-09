@@ -13,7 +13,8 @@ func TestWorkflowHookMCPRegistersCompleteContract(t *testing.T) {
 	tools := server.Tools()
 	want := map[string]bool{
 		"list_workflow_hooks": false, "get_workflow_hook": false,
-		"create_workflow_hook": false, "update_workflow_hook": false,
+		"list_active_hook_rules": false,
+		"create_workflow_hook":   false, "update_workflow_hook": false,
 		"test_workflow_hook": false, "publish_workflow_hook": false,
 		"get_effective_workflow_hooks": false, "list_workflow_hook_runs": false,
 	}

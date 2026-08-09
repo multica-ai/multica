@@ -9,6 +9,8 @@ import "testing"
 // handshake. Every provider measured through that channel then reported
 // not_measured with zero tools and every task claim failed with HTTP 500.
 func TestMulticaProbeEnv_UsesDaemonProfileIdentity(t *testing.T) {
+	t.Setenv("MULTICA_TOKEN", "")
+	t.Setenv("MULTICA_SERVER_URL", "")
 	original, originalURL := probeIdentity()
 	t.Cleanup(func() { setProbeIdentity(original, originalURL) })
 

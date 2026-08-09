@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,15 +135,65 @@ func TestTaskCompletionGateEmitsAgentStopAndTaskCompleteThroughTheSameAttemptCei
 	}
 }
 
-func TestTaskCompletionGateNeverTurnsFailedRemediationIntoCompletion(t *testing.T) {
+func TestTaskCompletionGateGuidesOnceThenWarns(t *testing.T) {
 	store := &fakeCompletionContextStore{context: nonTerminalCompletionContext()}
-	evaluator := &fakeHookEvaluator{result: HookResult{Decision: HookBlock}}
+	evaluator := &fakeHookEvaluator{result: HookResult{Decision: HookBlock, Requirements: []string{"Create a wakeup"}, Matches: []HookMatch{{PolicyID: "hook-1", PolicyName: "Require evidence before an agent run stops", Decision: HookBlock}}}}
 	gate := NewTaskCompletionGate(store, evaluator)
 	taskID := pgtype.UUID{Bytes: [16]byte{4}, Valid: true}
-	for attempt := 1; attempt <= 4; attempt++ {
-		if _, err := gate.BeforeComplete(context.Background(), taskID, nil); !errors.Is(err, ErrTaskContinuationRequired) {
-			t.Fatalf("attempt %d error = %v", attempt, err)
-		}
+
+	_, err := gate.BeforeComplete(context.Background(), taskID, []byte(`{"output":"original answer"}`))
+	if !errors.Is(err, ErrTaskContinuationRequired) {
+		t.Fatalf("first attempt error = %v", err)
+	}
+	guidance, ok := TaskCompletionGuidanceFromError(err)
+	if !ok {
+		t.Fatalf("first attempt did not return structured guidance: %T %v", err, err)
+	}
+	if guidance.Attempt != 1 || guidance.Requirement != "Create a wakeup" || len(guidance.Alternatives) < 5 {
+		t.Fatalf("guidance = %#v", guidance)
+	}
+
+	got, err := gate.BeforeComplete(context.Background(), taskID, []byte(`{"output":"original answer","completion_attempt":2}`))
+	if err != nil {
+		t.Fatalf("second attempt must warn, not fail: %v", err)
+	}
+	var payload struct {
+		Output  string `json:"output"`
+		Warning struct {
+			Code        string `json:"code"`
+			Requirement string `json:"requirement"`
+			Attempt     int    `json:"attempt"`
+			HookID      string `json:"hook_id"`
+			HookName    string `json:"hook_name"`
+		} `json:"completion_warning"`
+	}
+	if err := json.Unmarshal(got, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Output != "original answer" || payload.Warning.Code != "workflow_gate_rejected" || payload.Warning.Requirement != "Create a wakeup" || payload.Warning.Attempt != 2 || payload.Warning.HookID != "hook-1" || payload.Warning.HookName != "Require evidence before an agent run stops" {
+		t.Fatalf("warned completion = %#v", payload)
+	}
+	if len(store.notifications) != 1 || store.notifications[0].HookName != payload.Warning.HookName {
+		t.Fatalf("notifications = %#v", store.notifications)
+	}
+}
+
+func TestTaskCompletionGateSecondAttemptSurvivesServerRestart(t *testing.T) {
+	store := &fakeCompletionContextStore{context: nonTerminalCompletionContext()}
+	evaluator := &fakeHookEvaluator{result: HookResult{Decision: HookBlock, Requirements: []string{"Create a wakeup"}}}
+
+	firstGate := NewTaskCompletionGate(store, evaluator)
+	if _, err := firstGate.BeforeComplete(context.Background(), pgtype.UUID{Bytes: [16]byte{10}, Valid: true}, []byte(`{"output":"original answer"}`)); !errors.Is(err, ErrTaskContinuationRequired) {
+		t.Fatalf("first attempt error = %v", err)
+	}
+
+	secondGateAfterRestart := NewTaskCompletionGate(store, evaluator)
+	got, err := secondGateAfterRestart.BeforeComplete(context.Background(), pgtype.UUID{Bytes: [16]byte{10}, Valid: true}, []byte(`{"output":"original answer","completion_attempt":2}`))
+	if err != nil {
+		t.Fatalf("second attempt after restart must warn, not re-guide: %v", err)
+	}
+	if !strings.Contains(string(got), `"completion_warning"`) || !strings.Contains(string(got), `"attempt":2`) {
+		t.Fatalf("warned completion = %s", got)
 	}
 }
 
@@ -189,6 +240,12 @@ type fakeCompletionContextStore struct {
 	featureCalls    int
 	featureDisabled bool
 	featureErr      error
+	notifications   []TaskCompletionGuidance
+}
+
+func (s *fakeCompletionContextStore) NotifyCompletionWarning(_ context.Context, _ TaskCompletionContext, warning TaskCompletionGuidance) error {
+	s.notifications = append(s.notifications, warning)
+	return nil
 }
 
 func (s *fakeCompletionContextStore) LoadTaskCompletionContext(context.Context, pgtype.UUID) (TaskCompletionContext, error) {

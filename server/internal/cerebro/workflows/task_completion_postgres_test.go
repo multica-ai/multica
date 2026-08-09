@@ -2,6 +2,8 @@ package workflows
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -75,6 +77,66 @@ func TestLoadTaskCompletionContextSilentRun(t *testing.T) {
 				t.Fatalf("SilentRun = %v, want %v", got.SilentRun, tc.wantSilent)
 			}
 		})
+	}
+}
+
+func TestNotifyCompletionWarningCreatesOneInboxItemForIssueCreator(t *testing.T) {
+	pool := openWorkflowIntegrationPool(t)
+	ctx := context.Background()
+	fixture := setupWorkflowIntegrationFixture(t, pool)
+	issueID := insertWorkflowIntegrationIssue(t, pool, fixture, "Hook warning", "in_progress", 2, pgtype.UUID{})
+
+	var runtimeID, agentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status)
+		VALUES ($1, 'Hook warning runtime', 'cloud', 'codex', 'online') RETURNING id
+	`, fixture.workspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("insert runtime: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id, status)
+		VALUES ($1, 'Hook warning agent', 'cloud', $2, 'idle') RETURNING id
+	`, fixture.workspaceID, runtimeID).Scan(&agentID); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+	taskID := insertSilentRunTask(t, pool, agentID, issueID, runtimeID)
+	store := NewPostgresTaskCompletionStore(pool)
+	completion, err := store.LoadTaskCompletionContext(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warning := TaskCompletionGuidance{
+		Code: "workflow_gate_rejected", Requirement: "Require evidence before an agent run stops: Create a wakeup", Attempt: 2,
+		HookID: "11111111-1111-1111-1111-111111111111", HookName: "Require evidence before an agent run stops",
+	}
+	if err := store.NotifyCompletionWarning(ctx, completion, warning); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.NotifyCompletionWarning(ctx, completion, warning); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	var title, body string
+	var details []byte
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM inbox_item
+		WHERE issue_id=$1 AND type='workflow_gate_rejected'
+	`, issueID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT title, body, details FROM inbox_item
+		WHERE issue_id=$1 AND type='workflow_gate_rejected' LIMIT 1
+	`, issueID).Scan(&title, &body, &details); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(details, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || title != "Workflow hook warning" || body != "The run completed with a warning from Require evidence before an agent run stops: Create a wakeup" || strings.Count(body, warning.HookName) != 1 || decoded["task_id"] != completion.TaskID || decoded["hook_name"] != warning.HookName {
+		t.Fatalf("count=%d title=%q body=%q details=%#v", count, title, body, decoded)
 	}
 }
 

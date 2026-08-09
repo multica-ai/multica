@@ -22,8 +22,21 @@ describe("workflow hook validation", () => {
       conditions: [{ field: "made.up", operator: "eq", value: "x" }],
       decision: "block" as const,
       requirement: "Add a continuation",
-      actions: [{ type: "audit.record", label: "Record audit event", config: {} }],
+      actions: [{ type: "audit.record", label: "Record audit event", config: { event: "hook.test" } }],
     };
     expect(validateHookStep(hook, "when")).toEqual({ valid: false, message: "Choose a filter field available for the selected trigger." });
+  });
+
+  it("requires both plain-language contract lines before publish", () => {
+    const hook = Object.assign(createHookDraft(), {
+      name: "Guard completion",
+      events: ["before.task.complete" as const],
+      bindings: [{ kind: "workspace" as const, value: "" }],
+      decision: "require" as const,
+      requirement: "Add a continuation",
+      actions: [{ type: "audit.record", label: "Record audit event", config: { event: "hook.test" } }],
+    });
+
+    expect(validateHook(hook)).toEqual({ valid: false, message: "Explain the rule in plain language." });
   });
 });

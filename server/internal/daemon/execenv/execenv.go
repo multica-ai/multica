@@ -102,6 +102,7 @@ type TaskContextForEnv struct {
 	AgentName               string
 	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills             []SkillContextForEnv
+	ActiveHookRules         []ActiveHookRuleForEnv  // CEREBRO-PATCH(workflow-hook-house-rules): live contracts resolved for this agent and issue
 	Repos                   []RepoContextForEnv     // workspace repos available for checkout
 	ProjectID               string                  // issue's project, when present
 	ProjectTitle            string                  // human-readable project title

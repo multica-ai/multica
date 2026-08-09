@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -79,7 +80,11 @@ func TestMemoryHookRepositoryPublishPromotesDraftAndClearsDraftPointer(t *testin
 	live.FamilyID = "family-1"
 	live.Version = 4
 	repo.Seed("workspace-1", live)
-	draft, err := repo.Update(ctx, "workspace-1", actor, live.ID, HookPolicy{Name: "Draft v5"})
+	draft, err := repo.Update(ctx, "workspace-1", actor, live.ID, HookPolicy{
+		Name:            "Draft v5",
+		ContractRule:    "Tasks must meet the completion rule.",
+		ContractSatisfy: "Meet the completion rule before publishing.",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,6 +118,22 @@ func TestMemoryHookRepositoryPublishPromotesDraftAndClearsDraftPointer(t *testin
 	}
 	if compatibility.ID != published.ID || compatibility.FamilyID != draft.FamilyID {
 		t.Fatalf("published Draft compatibility projection = %#v", compatibility)
+	}
+}
+
+func TestMemoryHookRepositoryRejectsPublishingWithoutReadableContract(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryHookRepository()
+	actor := HookPermissionActor{Type: "member", ID: "member-1"}
+	draft, err := repo.Create(ctx, "workspace-1", actor, HookPolicy{Name: "Unreadable Draft"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.RecordObservedRun("workspace-1", draft.ID)
+	repo.MarkBaselineFresh("workspace-1", draft.ID)
+
+	if _, err := repo.Publish(ctx, "workspace-1", draft.ID, actor.ID); err == nil || !strings.Contains(err.Error(), "plain-language contract") {
+		t.Fatalf("publish error = %v, want missing plain-language contract", err)
 	}
 }
 

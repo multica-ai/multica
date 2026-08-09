@@ -76,6 +76,8 @@ function actionConfigurationError(action: WorkflowHook["actions"][number]): stri
 
 export function validateHook(hook: WorkflowHook): HookValidationResult {
   if (!hook.name.trim()) return { valid: false, message: "Name this hook." };
+  if (!hook.contract_rule.trim()) return { valid: false, message: "Explain the rule in plain language." };
+  if (!hook.contract_satisfy.trim()) return { valid: false, message: "Explain how to satisfy the rule." };
   for (const step of ["when", "guide", "actions"] as const) {
     const result = validateHookStep(hook, step);
     if (!result.valid) return result;

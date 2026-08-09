@@ -5,7 +5,13 @@
 // in a cerebro-prefixed file so the intent survives upstream syncs. (TECH-3602)
 package daemon
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+// CEREBRO-PATCH(login-shell-resolver-test-budget): keep real shell probes above the production startup budget under saturated CI.
+func init() { loginShellResolveTimeout = 10 * time.Second }
 
 // TestLoadConfig_AutoUpdateDefault_ForkRemoteOn is the regression guard for
 // TECH-3602: a fork daemon pointed at a real (non-loopback) self-hosted server

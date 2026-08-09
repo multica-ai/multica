@@ -474,6 +474,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString(ctxText)
 		b.WriteString("\n\n")
 	}
+	b.WriteString(cerebroHouseRulesBrief(ctx.ActiveHookRules)) // CEREBRO-PATCH(workflow-hook-house-rules): show the live contracts that apply to this task
 
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")

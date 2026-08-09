@@ -21,7 +21,8 @@ type HookFeature struct {
 	FailureGate    *TaskFailureGate
 	// AssignGate fires before.issue.assigned when an issue is handed to an
 	// agent (FIR-4183). It subscribes to the bus itself — see its Attach.
-	AssignGate *IssueAssignGate
+	AssignGate  *IssueAssignGate
+	ActiveRules *ActiveRuleService
 }
 
 func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store, evalStore EvalStore) *HookFeature {
@@ -39,13 +40,24 @@ func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store, evalStore Eva
 	}
 	evaluator := NewWorkspaceHookEvaluator(hookFeatureEnabled(), engine).
 		WithWorkspaceFlags(NewPostgresWorkspaceFlagResolver(db))
+	activeRules := NewActiveRuleService(repository).
+		WithServerEnabled(hookFeatureEnabled()).
+		WithWorkspaceFlags(NewPostgresWorkspaceFlagResolver(db))
 	return &HookFeature{
-		API:            NewHookAPI(repository, authorizer),
+		API:            NewHookAPI(repository, authorizer).WithActiveRuleService(activeRules).WithActiveRuleContextResolver(NewPostgresActiveRuleContextResolver(db)),
 		Evaluator:      evaluator,
 		CompletionGate: NewTaskCompletionGate(NewPostgresTaskCompletionStore(db), evaluator, hookFeatureEnabled()),
 		FailureGate:    NewTaskFailureGate(NewPostgresTaskFailureContextStore(db), evaluator, hookFeatureEnabled()),
 		AssignGate:     NewIssueAssignGate(evaluator),
+		ActiveRules:    activeRules,
 	}
+}
+
+func (f *HookFeature) RulesForContext(ctx context.Context, scope ActiveRuleContext) ([]ActiveHookRule, error) {
+	if f == nil || f.ActiveRules == nil {
+		return []ActiveHookRule{}, nil
+	}
+	return f.ActiveRules.List(ctx, scope)
 }
 
 func hookFeatureEnabled() bool {
