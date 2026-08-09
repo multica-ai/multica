@@ -106,6 +106,28 @@ func TestManagerInputReplayResizeAndExit(t *testing.T) {
 	}
 }
 
+func TestManagerStartEmitsSessionRegistrationBeforeOutput(t *testing.T) {
+	events := make(chan Event, 32)
+	m := NewManager(Options{OnEvent: func(event Event) { events <- event }})
+	sessionID := uuid.New()
+	s, err := m.Start(context.Background(), StartRequest{
+		SessionID: sessionID, TaskID: "task", WorkspaceID: "workspace", RuntimeID: "runtime", Provider: "fake", Command: helperCommand(t, "sleep"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+
+	select {
+	case event := <-events:
+		if event.Type != "session" || event.SessionID != sessionID || event.Status != "running" {
+			t.Fatalf("first event = %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for session registration")
+	}
+}
+
 func TestManagerStopTerminatesProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PTY is unsupported")

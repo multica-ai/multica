@@ -181,7 +181,7 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (*Session, error)
 	}
 	m.sessions[req.SessionID] = s
 	m.mu.Unlock()
-	m.emit(Event{Type: "state", SessionID: req.SessionID, TaskID: req.TaskID, IssueID: req.IssueID, AgentID: req.AgentID, WorkspaceID: req.WorkspaceID, RuntimeID: req.RuntimeID, DaemonID: req.DaemonID, Provider: req.Provider, Generation: req.Generation, StructuredObservation: req.StructuredObservation, Cols: req.Cols, Rows: req.Rows, Status: "running"})
+	m.emit(Event{Type: "session", SessionID: req.SessionID, TaskID: req.TaskID, IssueID: req.IssueID, AgentID: req.AgentID, WorkspaceID: req.WorkspaceID, RuntimeID: req.RuntimeID, DaemonID: req.DaemonID, Provider: req.Provider, Generation: req.Generation, StructuredObservation: req.StructuredObservation, Cols: req.Cols, Rows: req.Rows, Status: "running"})
 	go s.readLoop()
 	go s.waitLoop()
 	go func() {
