@@ -155,7 +155,7 @@
     "copied": "已复制 Webhook payload",
     "copied_short": "已复制",
     "copy_failed": "复制失败",
-    "truncated_marker": "[已截断 — 点击「复制」获取完整 payload]"
+    "truncated_marker": "[已截断——点击\"复制\"获取完整 payload]"
   },
   "trigger_kind": {
     "schedule": "时间表",
@@ -169,7 +169,7 @@
     "webhook_url_label": "Webhook URL",
     "show_url": "显示 URL",
     "hide_url": "隐藏 URL",
-    "hidden_url_aria": "Webhook URL 已隐藏 — 点击显示",
+    "hidden_url_aria": "Webhook URL 已隐藏——点击显示",
     "copy_url": "复制 URL",
     "url_copied": "已复制 Webhook URL",
     "url_copy_failed": "复制失败",
@@ -233,7 +233,7 @@
       "in_progress": "重放中...",
       "toast_success": "已重放该投递",
       "toast_failed": "重放失败",
-      "disabled_invalid_signature": "无法重放 — 签名校验失败",
+      "disabled_invalid_signature": "无法重放——签名校验失败",
       "disabled_rejected": "无法重放已拒绝的投递",
       "disabled_queued": "投递仍在排队，处理完成后再重放"
     }

@@ -56,7 +56,7 @@ import {
   type Squad,
 } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
-import { PillButton } from "../common/pill-button";
+import { ClearablePillButton, PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { DueDatePicker, PriorityIcon, PriorityPicker } from "../issues/components";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
@@ -115,6 +115,7 @@ export function AgentCreatePanel({
   setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
+  const { t: tProjects } = useT("projects");
   const sendShortcut = useShortcut("send");
   const workspaceName = useCurrentWorkspace()?.name;
   const workspacePaths = useWorkspacePaths();
@@ -165,8 +166,6 @@ export function AgentCreatePanel({
   const lastActorType = useQuickCreateStore((s) => s.lastActorType);
   const lastActorId = useQuickCreateStore((s) => s.lastActorId);
   const setLastActor = useQuickCreateStore((s) => s.setLastActor);
-  const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
-  const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
   const visibleFields = useIssueCreateSettingsStore((s) => s.quickCreateFields);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
@@ -249,14 +248,16 @@ export function AgentCreatePanel({
     return visibleSquads.find((s) => s.id === actor.id);
   }, [actor, visibleSquads]);
 
-  // Unfinished selections live in the shared issue-create draft. Last-successful
-  // actor/project values remain separate fallbacks, so closing a draft never
-  // overwrites the defaults established by an actual create.
+  // Unfinished selections live in the shared issue-create draft. The
+  // last-successful actor remains a separate fallback, so closing a draft
+  // never overwrites the default established by an actual create.
+  //
+  // Project has exactly two seeds, both carrying explicit user intent: the
+  // project page (or manual panel) the modal was opened from, and the user's
+  // own unfinished draft. It is deliberately NOT seeded from the last create
+  // — see quick-create-store (MUL-5862).
   const [projectId, setProjectId] = useState<string | null>(() => {
-    const seed =
-      (data?.project_id as string | undefined) ??
-      draft.shared.projectId ??
-      lastProjectId;
+    const seed = (data?.project_id as string | undefined) ?? draft.shared.projectId;
     return seed ?? null;
   });
   const [priority, setPriority] = useState<IssuePriority>(
@@ -266,6 +267,12 @@ export function AgentCreatePanel({
     (data?.due_date as string | undefined) ?? draft.shared.dueDate,
   );
   const [fieldPickerOpen, setFieldPickerOpen] = useState<QuickCreateField | null>(null);
+  // Local state + shared draft always move together, so both the picker rows
+  // and the pill's quick-clear go through here.
+  const commitProject = (next: string | null) => {
+    setProjectId(next);
+    setShared({ projectId: next ?? undefined });
+  };
 
   // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
   // opened from the "Add sub issue" entry on an existing issue. We carry it
@@ -280,9 +287,9 @@ export function AgentCreatePanel({
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
   // a `projectId` that isn't in the list means the project was deleted in
-  // another session. Clear local state, the unfinished draft, and the
-  // last-successful preference; dropping any persisted copy would make the
-  // next open re-seed and submit the same dead value.
+  // another session. Clear local state AND the unfinished draft — the draft
+  // is the only persisted copy left, and leaving it would make the next open
+  // re-seed and submit the same dead value.
   useEffect(() => {
     if (!projectsLoaded || projectId === null) return;
     if (projects.some((p) => p.id === projectId)) return;
@@ -290,16 +297,7 @@ export function AgentCreatePanel({
     if (draft.shared.projectId === projectId) {
       setShared({ projectId: undefined });
     }
-    if (lastProjectId === projectId) setLastProjectId(null);
-  }, [
-    projectsLoaded,
-    projects,
-    projectId,
-    draft.shared.projectId,
-    lastProjectId,
-    setShared,
-    setLastProjectId,
-  ]);
+  }, [projectsLoaded, projects, projectId, draft.shared.projectId, setShared]);
 
   // Mark the persisted draft's active mode so a later reopen and any reader of
   // the unified draft know which form is being edited.
@@ -419,7 +417,6 @@ export function AgentCreatePanel({
           ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
         });
         setLastActor(actor.type, actor.id);
-        setLastProjectId(projectId);
         setLastMode("agent");
         toast.success(t(($) => $.create_issue.agent.toast_sent), {
           duration: 4000,
@@ -658,12 +655,13 @@ export function AgentCreatePanel({
             fieldPickerOpen === "project") && (
             <ProjectPicker
               projectId={projectId}
-              onUpdate={(u) => {
-                const next = u.project_id ?? null;
-                setProjectId(next);
-                setShared({ projectId: next ?? undefined });
-              }}
-              triggerRender={<PillButton />}
+              onUpdate={(u) => commitProject(u.project_id ?? null)}
+              triggerRender={
+                <ClearablePillButton
+                  onClear={projectId !== null ? () => commitProject(null) : undefined}
+                  clearLabel={tProjects(($) => $.picker.clear_aria)}
+                />
+              }
               align="start"
               open={fieldPickerOpen === "project" ? true : undefined}
               onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}

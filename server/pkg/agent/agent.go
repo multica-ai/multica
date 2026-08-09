@@ -69,10 +69,14 @@ type ExecOptions struct {
 	// knows the resume is gone, and the backend covers only the case the daemon
 	// cannot see — a live resume RPC rejected mid-run.
 	ResumeContinuityNotice string
-	ExtraArgs              []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
-	CustomArgs             []string        // per-agent CLI arguments appended after ExtraArgs
-	QwenpawWorkspace       string          // per-task QwenPaw workspace directory (passed as --workspace to qwenpaw acp); empty when not applicable
-	McpConfig              json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	// ExtraArgs is honoured only by backends that opt in by reading it; the
+	// rest ignore it. Deliberately not enumerated here — the previous list
+	// went stale as backends were added, which is how MULTICA_QWENPAW_ARGS
+	// shipped plumbed but dropped. Grep for ExtraArgs to see today's set.
+	ExtraArgs        []string        // daemon-wide default CLI arguments appended before CustomArgs
+	CustomArgs       []string        // per-agent CLI arguments appended after ExtraArgs
+	QwenpawWorkspace string          // per-task QwenPaw workspace directory (passed as --workspace to qwenpaw acp); empty when not applicable
+	McpConfig        json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
 	// medium|high|xhigh", OpenCode's model variant names). Empty means
@@ -228,6 +232,16 @@ type Config struct {
 	RuntimeID      string
 	DaemonVersion  string
 	CodexVersion   string
+	// BuiltinRuntime reports that ExecutablePath is the provider's own
+	// discovered binary rather than a custom runtime profile's command. A
+	// custom profile keeps its protocol family as the provider, so the
+	// provider name cannot distinguish the two: `protocol_family: hermes`
+	// with `command_name: jcode` arrives as "hermes" while being an
+	// unrelated implementation. Backends use this to scope
+	// compatibility exceptions that were verified against a specific
+	// vendor's binary; it defaults to false so an unset caller fails
+	// closed onto standard behavior.
+	BuiltinRuntime bool
 }
 
 // New creates a Backend for the given agent type.

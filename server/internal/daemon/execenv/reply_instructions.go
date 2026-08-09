@@ -36,7 +36,7 @@ func BuildNewCommentsHint(issueID, triggerCommentID, triggerThreadID, newComment
 		return fmt.Sprintf(
 			"%d new comment(s) on this issue since your last run — don't read them all blindly. "+
 				"Start with the thread your triggering comment is in: "+
-				"`multica issue comment list %s --thread %s --since %s --output json` "+
+				"`multica issue comment list %s --thread %s --since %s --compact --output json` "+
 				"(swap `--since` for `--tail 30` if you need the full thread, not just the delta). "+
 				"Only if you need context from the other threads, rerun it without `--thread` for the issue-wide catch-up.\n\n",
 			newCommentCount, issueID, threadID, newCommentsSince,
@@ -47,7 +47,7 @@ func BuildNewCommentsHint(issueID, triggerCommentID, triggerThreadID, newComment
 	// issue-wide catch-up.
 	return fmt.Sprintf(
 		"%d new comment(s) on this issue since your last run. Catch up: "+
-			"`multica issue comment list %s --since %s --output json`.\n\n",
+			"`multica issue comment list %s --since %s --compact --output json`.\n\n",
 		newCommentCount, issueID, newCommentsSince,
 	)
 }
@@ -73,7 +73,7 @@ func BuildResumedCommentsHint(issueID, triggerCommentID, triggerThreadID string)
 			"No other new comments on this issue since your last run. "+
 			"If your reply depends on thread context, do not rely only on resumed session memory — "+
 			"first pull the triggering conversation with: "+
-			"`multica issue comment list %s --thread %s --tail 30 --output json`.\n\n",
+			"`multica issue comment list %s --thread %s --tail 30 --compact --output json`.\n\n",
 		issueID, threadID,
 	)
 }
@@ -103,7 +103,7 @@ func BuildColdCommentsHint(issueID, triggerCommentID, triggerThreadID string) st
 	// routing value (MUL-5721 OPT-1).
 	return fmt.Sprintf(
 		"Read the triggering conversation first: "+
-			"`multica issue comment list %s --thread %s --tail 30 --output json` "+
+			"`multica issue comment list %s --thread %s --tail 30 --compact --output json` "+
 			"(that thread's root + its 30 newest replies). "+
 			"Need cross-thread background? Rerun with `--roots-only --summary` replacing `--thread ... --tail 30` "+
 			"to scan the other threads cheaply, and expand only what looks relevant.\n\n",
@@ -162,11 +162,11 @@ func activeThreadID(triggerThreadID, triggerCommentID string) string {
 //
 // provider is retained for caller symmetry and future per-provider tweaks; the
 // guardrail itself is intentionally identical across providers and hosts.
-func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) string {
+func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string, squadLeader bool) string {
 	if triggerCommentID == "" {
 		return ""
 	}
-	return buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID)
+	return buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID, squadLeader)
 }
 
 // buildCommentReplyInstructionsSlim is the compressed reply-instructions
@@ -182,10 +182,18 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 // canonical `## Comment Formatting` section the same brief carries, so
 // repeating it inline at every comment-triggered step 7 would be
 // duplication, not signal.
-func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID string) string {
+func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID string, squadLeader bool) string {
+	// The squad leader's `no_action` exit (recorded via `squad activity`) is
+	// the one path where posting no comment is correct — the imperative must
+	// carry its own carve-out so a later line never contradicts the
+	// no_action rule injected above it (MUL-5442 #6493 review).
+	lead := "Post your reply as a comment — always use the trigger comment ID below, "
+	if squadLeader {
+		lead = "Unless your outcome is `no_action`, post your reply as a comment — always use the trigger comment ID below, "
+	}
 	if runtimeGOOS == "windows" {
 		return fmt.Sprintf(
-			"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
+			lead+
 				"do NOT reuse --parent values from previous turns in this session.\n\n"+
 				"Write the body file first — never pipe via `--content-stdin` (PowerShell drops non-ASCII; full rules: ## Comment Formatting above):\n\n"+
 				"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
@@ -195,7 +203,7 @@ func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID strin
 		)
 	}
 	return fmt.Sprintf(
-		"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
+		lead+
 			"do NOT reuse --parent values from previous turns in this session.\n\n"+
 			"Write the body file first (rules: ## Comment Formatting above — MUL-2904 / #4182):\n\n"+
 			"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
@@ -213,12 +221,12 @@ type ThreadReplyTarget struct {
 	ParentID string
 }
 
-// BuildMultiThreadCommentReplyInstructions is the reply cookbook for a run whose
-// coalesced comments span MORE THAN ONE root thread (MUL-4348). It deliberately
-// overrides the general "post exactly one comment per run" guidance for this
-// specific run: three unrelated questions raised in three separate threads must
-// land as three in-thread answers, not one merged blob posted under a single
-// thread (or as a stray root comment).
+// BuildMultiThreadCommentReplyInstructions is the reply fan-out block for a run
+// whose coalesced comments span MORE THAN ONE root thread (MUL-4348). It
+// deliberately overrides the general "post exactly one comment per run"
+// guidance for this specific run: three unrelated questions raised in three
+// separate threads must land as three in-thread answers, not one merged blob
+// posted under a single thread (or as a stray root comment).
 //
 // The grouping is computed server-side, so same-thread follow-ups never reach
 // here — they collapse to a single target upstream and take the ordinary
@@ -227,8 +235,20 @@ type ThreadReplyTarget struct {
 // thread: the "multiple @mentions in one thread" case is already consolidated
 // before this instruction is emitted, so a per-thread fan-out cannot split it.
 //
+// The block carries only what is multi-thread-SPECIFIC: the fan-out
+// announcement + override, the posting order, the per-thread `--parent`
+// targets, and the one mechanical delta (a DISTINCT body file per thread).
+// The posting mechanism itself — body file → `--content-file` → cleanup, the
+// inline/`--content-stdin` bans, the `\n`-escape rule, and the OS-specific
+// cleanup command — lives once in the brief's `## Comment Formatting`; this
+// block used to restate all of it plus two example command pairs, triple-
+// writing the same cookbook for ~1KB extra per multi-thread turn (MUL-5825).
+// Dropping the embedded commands also removes the only OS-dependent text, so
+// the block no longer branches on runtimeGOOS: `## Comment Formatting` keeps
+// the OS split.
+//
 // Returns "" for fewer than two targets; callers keep the single-parent path.
-func BuildMultiThreadCommentReplyInstructions(issueID string, targets []ThreadReplyTarget) string {
+func BuildMultiThreadCommentReplyInstructions(issueID string, targets []ThreadReplyTarget, squadLeader bool) string {
 	if issueID == "" || len(targets) < 2 {
 		return ""
 	}
@@ -238,37 +258,22 @@ func BuildMultiThreadCommentReplyInstructions(issueID string, targets []ThreadRe
 		targetLines += fmt.Sprintf("%d. thread %s → reply with `--parent %s`\n", i+1, tgt.ThreadID, tgt.ParentID)
 	}
 
-	// File-hygiene guidance mirrors buildCommentReplyInstructionsSlim, but the
-	// agent must use a DISTINCT body file per thread so one reply's content can
-	// never leak into another's.
-	var cookbook string
-	if runtimeGOOS == "windows" {
-		cookbook = fmt.Sprintf(
-			"For EACH thread above, write that reply's body to its own UTF-8 file with your file-write tool, then post it with `--content-file` (do NOT use inline `--content` or a `--content-stdin` HEREDOC — see ## Comment Formatting above for why). Use a DISTINCT file per thread (never reuse one file) and remove each after posting:\n\n"+
-				"    multica issue comment add %s --parent <thread-1-parent> --content-file ./reply-1.md\n"+
-				"    Remove-Item ./reply-1.md\n"+
-				"    multica issue comment add %s --parent <thread-2-parent> --content-file ./reply-2.md\n"+
-				"    Remove-Item ./reply-2.md\n\n",
-			issueID, issueID,
-		)
-	} else {
-		cookbook = fmt.Sprintf(
-			"For EACH thread above, write that reply's body to its own UTF-8 file with your file-write tool, then post it with `--content-file` (do NOT use inline `--content` or a `--content-stdin` HEREDOC — see ## Comment Formatting above for why). Use a DISTINCT file per thread (never reuse one file) and remove each after posting:\n\n"+
-				"    multica issue comment add %s --parent <thread-1-parent> --content-file ./reply-1.md\n"+
-				"    rm ./reply-1.md\n"+
-				"    multica issue comment add %s --parent <thread-2-parent> --content-file ./reply-2.md\n"+
-				"    rm ./reply-2.md\n\n",
-			issueID, issueID,
-		)
+	// Same carve-out as the single-thread cookbook (MUL-5442 #6493 review):
+	// the leader's no_action exit must not be contradicted by this later
+	// imperative, and the scope sentence must govern the ENTIRE fan-out
+	// block — every obligation below ("multiple replies are required", the
+	// posting order, the per-thread file rule) sits under the "Otherwise" —
+	// not just the first verb. Ordinary agents keep the unconditional form
+	// byte-for-byte.
+	lead := "This run coalesced comments from %d DISTINCT threads. Post ONE reply per thread"
+	if squadLeader {
+		lead = "This run coalesced comments from %d DISTINCT threads. **If your outcome is `no_action`, skip this ENTIRE fan-out block — post no replies at all and exit via `multica squad activity` as your leader rules direct; everything below applies only otherwise.** Otherwise, post ONE reply per thread"
 	}
-
 	return fmt.Sprintf(
-		"This run coalesced comments from %d DISTINCT threads. Post ONE reply per thread — %d replies in total — each threaded under its own conversation. This OVERRIDES the general \"post exactly one comment per run\" guidance: for THIS run multiple replies are required and correct. Do NOT merge separate threads into a single comment, and do NOT post more than one reply in the same thread.\n\n"+
-			"Post the replies in the order listed below — OLDEST thread first, the newest (triggering) thread LAST — so they land in chronological order. Do NOT answer the newest/triggering comment first.\n\n"+
-			"Reply targets, in the order to post them (use the exact `--parent` for each — do NOT reuse `--parent` values from previous turns in this session):\n"+
+		lead+" — %d in total. This OVERRIDES the \"post exactly one comment per run\" rule: for THIS run multiple replies are required and correct. Do NOT merge separate threads into one comment or post twice in the same thread.\n\n"+
+			"Reply targets, in posting order — OLDEST thread first, the newest (triggering) thread LAST. Use the exact `--parent` for each; never reuse a `--parent` from an earlier turn:\n"+
 			"%s\n"+
-			"%s"+
-			"Do NOT write literal `\\n` escapes to simulate line breaks; each file preserves real newlines.\n",
-		len(targets), len(targets), targetLines, cookbook,
+			"Write and post each reply exactly as `## Comment Formatting` above directs, with ONE multi-thread delta: use a DISTINCT body file per thread (./reply-1.md, ./reply-2.md, …) so one reply's content can never leak into another's.\n",
+		len(targets), len(targets), targetLines,
 	)
 }

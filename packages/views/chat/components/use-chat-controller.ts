@@ -5,7 +5,6 @@ import {
   useInfiniteQuery,
   useQuery,
   useQueryClient,
-  type InfiniteData,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -34,6 +33,7 @@ import {
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import {
   enqueuePendingChatTask,
   hideQueuedChatMessages,
@@ -46,7 +46,6 @@ import type {
   Agent,
   Attachment,
   ChatMessage,
-  ChatMessagesPage,
   ChatPendingTask,
 } from "@multica/core/types";
 import { useT } from "../../i18n";
@@ -188,37 +187,6 @@ export function seedAcceptedPendingTask(
 
 const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
 
-function appendChatMessageToLatestPageCache(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  message: ChatMessage,
-) {
-  qc.setQueryData<InfiniteData<ChatMessagesPage>>(
-    chatKeys.messagesPage(sessionId),
-    (old) => {
-      if (!old) {
-        return {
-          pages: [{
-            messages: [message],
-            limit: 50,
-            has_more: false,
-            next_cursor: null,
-          }],
-          pageParams: [null],
-        };
-      }
-      if (old.pages.some((page) => page.messages.some((m) => m.id === message.id))) {
-        return old;
-      }
-      return {
-        ...old,
-        pages: old.pages.map((page, index) =>
-          index === 0 ? { ...page, messages: [...page.messages, message] } : page,
-        ),
-      };
-    },
-  );
-}
 
 /**
  * Layout-agnostic chat controller. Holds every piece of chat conversation
@@ -592,11 +560,11 @@ export function useChatController(opts?: { isActive?: boolean }) {
         created_at: result.created_at,
         attachments: draftAttachments,
       };
-      appendChatMessageToLatestPageCache(qc, sessionId, sent);
-      qc.setQueryData<ChatMessage[]>(
-        chatKeys.messages(sessionId),
-        (old) => (old ? [...old, sent] : [sent]),
-      );
+      // Single door into the message caches (MUL-5711): idempotent by id, so
+      // this row and the chat:message echo of the same send converge in either
+      // arrival order, and this richer row (it carries the draft attachments)
+      // is never downgraded by the echo, which has no attachments field.
+      upsertChatMessageToCaches(qc, sessionId, sent, { seedIfMissing: true });
       seedAcceptedPendingTask(qc, sessionId, {
         task_id: result.task_id,
         created_at: result.created_at,

@@ -73,7 +73,17 @@ var autoUpdateInitialDelay = 2 * time.Minute
 // re-exec. One fork/exec per tick, machine-level (not per workspace, not per
 // runtime), so the cost is fixed no matter how big the daemon's workload is.
 // Overridable for tests.
-var selfReloadCheckInterval = 5 * time.Minute
+//
+// The value bounds how long a user waits after replacing the binary themselves,
+// not how often we ship: the "is there a new release" question belongs to
+// DefaultAutoUpdateCheckInterval, and only that one should track release
+// cadence. It also compounds, because a tick that lands while the daemon is
+// busy defers to the next one rather than interrupting a task — so the wait is
+// really "the first tick that is both due and idle". Ten minutes keeps the
+// average wait around five and the multiplier tolerable on a busy host; an hour
+// would not, and would put us back in sight of the "I upgraded and nothing
+// happened" problem this check exists to remove.
+var selfReloadCheckInterval = 10 * time.Minute
 
 // selfReloadProbeTimeout bounds the `--version` fork/exec. Generous: the point
 // of the timeout is to stop a wedged binary from parking the loop goroutine,

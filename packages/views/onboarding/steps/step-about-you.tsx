@@ -1,9 +1,6 @@
 "use client";
 
-import { useRef } from "react";
 import {
-  ArrowLeft,
-  ArrowRight,
   Brain,
   Briefcase,
   Code2,
@@ -21,10 +18,11 @@ import {
   User,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
-import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import type { QuestionnaireAnswers, Role, UseCase } from "@multica/core/onboarding";
-import { DragStrip } from "@multica/views/platform";
-import { StepHeader } from "../components/step-header";
+import {
+  StepFooter,
+  StepHeading,
+} from "../components/step-shell";
 import {
   IconOptionCard,
   IconOtherOptionCard,
@@ -35,10 +33,10 @@ import { useT } from "../../i18n";
 /**
  * Step 1 — "About you": role (single-select) and use case
  * (multi-select) on ONE screen. They were separate steps once, but
- * they share the same eyebrow, the same consumer (the Helper "About
- * me" context block built by `buildUserContextSection`), and neither
- * deserves a full screen of its own — merging them cut the onboarding
- * progress bar from five steps to three.
+ * they share the same eyebrow and neither deserves a full screen of
+ * its own — merging them cut the onboarding progress bar from five
+ * steps to three. The answers remain useful for product personalization
+ * and onboarding analytics, independent of agent creation.
  *
  * Answering is optional per group:
  *   - Continue is enabled as soon as EITHER group has a committed
@@ -58,17 +56,13 @@ export function StepAboutYou({
   onChange,
   onAdvance,
   onSkip,
-  onBack,
 }: {
   answers: QuestionnaireAnswers;
   onChange: (patch: Partial<QuestionnaireAnswers>) => void;
   onAdvance: () => void;
   onSkip: () => void;
-  onBack?: () => void;
 }) {
   const { t } = useT("onboarding");
-  const mainRef = useRef<HTMLElement>(null);
-  const fadeStyle = useScrollFade(mainRef);
 
   const roleOptions: QuestionOption[] = [
     { slug: "engineer", icon: <Code2 className="h-4 w-4" />, label: t(($) => $.questions.role.engineer) },
@@ -94,9 +88,8 @@ export function StepAboutYou({
     { slug: "other", icon: <MoreHorizontal className="h-4 w-4" />, label: t(($) => $.questions.use_case.other), isOther: true },
   ];
 
-  // Role stays single-select — downstream personalization (the Helper
-  // "About me" block, the tailored intro slides) wants one primary
-  // identity, not a blend.
+  // Role stays single-select — downstream personalization wants one
+  // primary identity, not a blend.
   const roleSelected: readonly string[] = answers.role ? [answers.role] : [];
   const roleOtherFilled = (answers.role_other ?? "").trim().length > 0;
   const roleAnswered =
@@ -179,96 +172,55 @@ export function StepAboutYou({
     : t(($) => $.step_question.hint_pick);
 
   return (
-    <div className="animate-onboarding-enter flex h-full min-h-0 flex-col bg-background">
-      <DragStrip />
-      <header className="flex shrink-0 items-center gap-4 bg-background px-6 py-3 sm:px-10 md:px-14 lg:px-16">
-        {onBack ? (
-          <button
-            type="button"
-            onClick={onBack}
-            className="flex items-center gap-1.5 text-body text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            {t(($) => $.common.back)}
-          </button>
-        ) : (
-          <span aria-hidden className="w-0" />
-        )}
-        <div className="flex-1">
-          <StepHeader currentStep="about_you" />
-        </div>
-      </header>
+    <>
+      <div className="flex flex-col gap-8 pt-2 sm:pt-6">
+        <StepHeading title={t(($) => $.questions.about_you.question)} />
 
-      <main
-        ref={mainRef}
-        style={fadeStyle}
-        className="min-h-0 flex-1 overflow-y-auto"
-      >
-        <div className="mx-auto w-full max-w-[920px] px-6 py-10 sm:px-10 md:px-14 lg:py-14">
-          <div className="mb-2 text-caption font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            {t(($) => $.questions.eyebrow_about_you)}
-          </div>
-          <h1 className="text-balance font-serif text-display font-medium leading-[1.15] tracking-tight text-foreground">
-            {t(($) => $.questions.about_you.question)}
-          </h1>
+        <QuestionGroup
+          question={t(($) => $.questions.role.question)}
+          options={roleOptions}
+          selectedSlugs={roleSelected}
+          otherValue={answers.role_other ?? ""}
+          onOtherChange={(v) => onChange({ role_other: v })}
+          otherPlaceholder={t(($) => $.questions.role.other_placeholder)}
+          onAnswer={pickRole}
+          onConfirm={confirmAdvance}
+        />
 
-          <QuestionGroup
-            number={1}
-            question={t(($) => $.questions.role.question)}
-            options={roleOptions}
-            selectedSlugs={roleSelected}
-            otherValue={answers.role_other ?? ""}
-            onOtherChange={(v) => onChange({ role_other: v })}
-            otherPlaceholder={t(($) => $.questions.role.other_placeholder)}
-            onAnswer={pickRole}
-            onConfirm={confirmAdvance}
-          />
+        <QuestionGroup
+          question={t(($) => $.questions.use_case.question)}
+          options={useCaseOptions}
+          selectedSlugs={useCaseSlugs}
+          otherValue={answers.use_case_other ?? ""}
+          onOtherChange={(v) => onChange({ use_case_other: v })}
+          otherPlaceholder={t(($) => $.questions.use_case.other_placeholder)}
+          onAnswer={toggleUseCase}
+          onConfirm={confirmAdvance}
+          multiSelect
+        />
 
-          <QuestionGroup
-            number={2}
-            question={t(($) => $.questions.use_case.question)}
-            options={useCaseOptions}
-            selectedSlugs={useCaseSlugs}
-            otherValue={answers.use_case_other ?? ""}
-            onOtherChange={(v) => onChange({ use_case_other: v })}
-            otherPlaceholder={t(($) => $.questions.use_case.other_placeholder)}
-            onAnswer={toggleUseCase}
-            onConfirm={confirmAdvance}
-            multiSelect
-          />
+      </div>
 
-          <div className="mt-10 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
-            <span
-              aria-live="polite"
-              className="mr-auto text-caption text-muted-foreground"
-            >
-              {footerHint}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button size="lg" variant="secondary" onClick={handleSkip}>
-                {t(($) => $.common.skip)}
-              </Button>
-              <Button size="lg" disabled={!canContinue} onClick={confirmAdvance}>
-                {t(($) => $.common.continue)}
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      </main>
-    </div>
+      <StepFooter hint={footerHint}>
+        <Button className="w-full" disabled={!canContinue} onClick={confirmAdvance}>
+          {t(($) => $.common.continue)}
+        </Button>
+        <Button variant="ghost" className="w-full" onClick={handleSkip}>
+          {t(($) => $.common.skip)}
+        </Button>
+      </StepFooter>
+    </>
   );
 }
 
 StepAboutYou.displayName = "StepAboutYou";
 
 /**
- * One question group: mono index + sub-question heading + option card
- * grid. Selection semantics live in the parent's handlers; this stays
- * a layout shell so both groups render identically.
+ * One question group: sub-question label + a single column of option cards.
+ * Selection semantics live in the parent's handlers; this stays a layout
+ * shell so both groups render identically.
  */
 function QuestionGroup({
-  number,
   question,
   options,
   selectedSlugs,
@@ -279,7 +231,6 @@ function QuestionGroup({
   onConfirm,
   multiSelect = false,
 }: {
-  number: number;
   question: string;
   options: readonly QuestionOption[];
   selectedSlugs: readonly string[];
@@ -297,19 +248,12 @@ function QuestionGroup({
     : false;
 
   return (
-    <section className="mt-10">
-      <div className="flex items-baseline gap-3">
-        <span aria-hidden className="font-mono text-caption text-muted-foreground">
-          {String(number).padStart(2, "0")}
-        </span>
-        <h2 className="text-title font-medium leading-snug text-foreground">
-          {question}
-        </h2>
-      </div>
+    <section className="flex flex-col gap-3">
+      <h2 className="text-label font-medium text-foreground">{question}</h2>
       <fieldset
         role={multiSelect ? "group" : "radiogroup"}
         aria-label={question}
-        className="m-0 mt-4 grid grid-cols-1 gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+        className="m-0 flex flex-row flex-wrap gap-2 p-0"
       >
         {options.map((option) =>
           option.isOther ? (

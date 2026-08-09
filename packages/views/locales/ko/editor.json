@@ -72,7 +72,8 @@
     "no_results": "결과 없음",
     "group_current": "현재 페이지",
     "group_recent": "최근 본 항목",
-    "group_search": "검색 결과"
+    "group_search": "검색 결과",
+    "group_cancelled": "취소됨"
   },
   "code_block": {
     "copy_code": "코드 복사",

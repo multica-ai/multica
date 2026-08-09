@@ -116,7 +116,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         {
           title: "\u9996\u6b21\u542f\u52a8\u81ea\u52a8\u6ce8\u518c",
           description:
-            "Multica \u626b\u63cf\u672c\u673a\u7684 15 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Cursor\u3001Copilot\u3001Hermes\u3001Kimi\u3001Reasonix\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3001Qoder\u3001Trae CLI\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
+            "Multica \u626b\u63cf\u672c\u673a\u7684 20 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Copilot\u3001Cursor\u3001DevEco Code\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 15 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、Codex、Cursor、Copilot、Hermes、Kimi、Reasonix、Kiro CLI、OpenCode、OpenClaw、Pi、Qoder、Trae CLI）。本机已安装的工具会被自动注册成运行时。",
+          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 20 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DevEco Code、Grok、Hermes、Kimi、Kiro CLI、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI）。本机已安装的工具会被自动注册成运行时。",
       },
       {
         title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a 智能体",
@@ -192,7 +192,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
-          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 15 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Cursor\u3001Copilot\u3001Hermes\u3001Kimi\u3001Reasonix\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3001Qoder\u3001Trae CLI\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
+          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 20 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Copilot\u3001Cursor\u3001DevEco Code\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
@@ -293,6 +293,67 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.4.21",
+        date: "2026-08-07",
+        title: "企业微信机器人、全新 Analytics 页面、prompt 继续瘦身",
+        changes: [],
+        features: [
+          "智能体可以入驻企业微信，私聊或在群里 @ 它就能用。",
+          "新的 Analytics 页面把花费和报错分成两个标签页，各有自己的图表。",
+          "频道里用 /issue 建任务，图片会留在描述里，位置和你发的一样。",
+        ],
+        improvements: [
+          "智能体每次读取讨论的数据更精简，留给工作的空间更多。",
+          "搜索和 @ 选择器里，已取消的内容不再排在进行中的前面。",
+          "Analytics 的筛选器选完即关，图表上的大数字也不再被裁掉。",
+          "等待本地目录的智能体显示为空闲，而不是一直忙碌。",
+          "文档补上了企业微信和 QwenPaw 的接入说明。",
+        ],
+        fixes: [
+          "平板和折叠屏上，收件箱和聊天不再被挤成一条窄缝。",
+          "任务失败时，频道里会告诉你失败的原因。",
+          "智能体没有产出时，不再回一句占位的空话。",
+          "你自己发的聊天消息，在其他窗口和设备上也会稳定出现。",
+          "你停掉的运行也会计入运行时长和任务数。",
+          "普通智能体不会再被误认成 Squad 领队。",
+          "CodeBuddy 启动时会带上你配置的 MCP 服务。",
+          "远程 MCP 服务不再在部分运行时里被悄悄忽略。",
+          "OpenCode 空手而归的运行不再显示为成功。",
+          "Windows 上提示词很长的 OpenCode 任务也能正常启动。",
+          "Windows 上的 Codex 任务现在可以正常提交代码。",
+          "Kimi 的用量和花费不再偶发漏记。",
+        ],
+      },
+      {
+        version: "0.4.20",
+        date: "2026-08-06",
+        title: "钉钉机器人、Mika 带你上手、每次运行的 token 花费",
+        changes: [],
+        features: [
+          "智能体可以入驻钉钉，私聊或在群里 @ 它就能用。",
+          "注册完成后 Mika 已经在等你，还有卡片帮你开第一个任务。",
+          "执行记录里能看到每次运行的花费，以及整个任务的合计。",
+          "静音评论通知后，@ 到你的消息依然会送达。",
+          "手机上聊天以全屏打开，输入框会浮在键盘上方。",
+          "手动替换 multica 或 Agent CLI 后自动生效，不用重启。",
+        ],
+        improvements: [
+          "智能体每次运行读取的说明更短，留给工作的空间更多。",
+          "不支持推理强度的运行时会直接说明，而不是提示取值无效。",
+          "手机上任务详情和讨论列表能用到更多屏幕空间。",
+          "执行记录的标题不再换行，始终保持一行。",
+        ],
+        fixes: [
+          "在聊天里用 /issue 建任务，图片会作为附件一起带过去。",
+          "任务不会再因为一次登录失败就被永久卡住。",
+          "自定义运行时的模型列表会从它自己的程序读出来。",
+          "桌面端不再改动你终端 CLI 自己的配置。",
+          "OpenCode 会话在某次工具调用失败后还能继续。",
+          "Windows 上的 Pi 智能体能稳定启动，不再卡在提示词上。",
+          "Kimi、Grok、Kiro、Qoder、Trae CLI 等运行时的用量和花费都能统计到。",
+        ],
+      },
       {
         version: "0.4.19",
         date: "2026-08-05",
@@ -1686,7 +1747,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         features: [
           "父任务会在子任务完成时自动收到更新，并通知对应负责人",
           "任务列表新增实时智能体工作状态，支持详情查看和工作中筛选",
-          "新用户完成设置后，会进入由 Multica Helper 引导的欢迎体验",
+          "新用户完成设置后，会进入 Mika 的交互式引导，先完成一个真实任务，再按需添加 specialist",
           "官网新增 Contact Sales 流程，支持商务邮箱提交和防滥用保护",
           "桌面端支持 macOS 触控板前进/后退手势",
         ],

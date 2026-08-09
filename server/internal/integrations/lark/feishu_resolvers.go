@@ -222,11 +222,15 @@ func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.Append
 
 func (r *feishuSessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) error {
 	return r.session.BindMediaRefs(ctx, engine.BindMediaInput{
-		MessageID:   p.MessageID,
-		SessionID:   p.SessionID,
-		WorkspaceID: p.WorkspaceID,
-		Sender:      p.Sender,
-		MediaRefs:   p.MediaRefs,
+		MessageID:            p.MessageID,
+		SessionID:            p.SessionID,
+		WorkspaceID:          p.WorkspaceID,
+		Sender:               p.Sender,
+		IssueID:              p.IssueID,
+		IssueDescriptionBase: p.IssueDescriptionBase,
+		IssueCommandText:     p.IssueCommandText,
+		Body:                 p.Body,
+		MediaRefs:            p.MediaRefs,
 	})
 }
 

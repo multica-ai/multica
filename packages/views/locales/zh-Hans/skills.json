@@ -301,7 +301,7 @@
     "conflict_locked_creator": "该 skill 由 {{creator}} 创建，只能由创建者通过本地导入覆盖；如需修改请到 Skill 详情页编辑。",
     "conflict_locked": "该 skill 只能由创建者通过本地导入覆盖；如需修改请到 Skill 详情页编辑。",
     "conflict_overwrite": "覆盖",
-    "conflict_rename": "改名",
+    "conflict_rename": "重命名",
     "conflict_skip": "跳过",
     "conflict_cancel": "取消",
     "conflict_overwrite_all": "全部覆盖",

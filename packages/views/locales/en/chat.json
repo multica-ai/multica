@@ -151,6 +151,26 @@
     "summarize_today": "Summarize what I did today",
     "plan_next": "Plan what to work on next"
   },
+  "onboarding_cards": {
+    "aria_label": "Ways to start",
+    "cta": "Start",
+    "board": {
+      "title": "Get a board up in minutes",
+      "desc": "Tell me the goal — I'll create the project, split the issues, and set priorities.",
+      "prompt": "Turn our current goals into a project board"
+    },
+    "delegate": {
+      "title": "Hand me one thing first",
+      "desc": "A quick piece of research, say — results come back as an issue and a report.",
+      "prompt": "Take one thing off my plate: run a quick piece of research and send the results back as a report"
+    },
+    "digest": {
+      "title": "Let the daily digest write itself",
+      "desc": "A morning summary of workspace progress, straight to your inbox.",
+      "prompt": "Set up a daily automation that posts a morning summary of workspace progress"
+    },
+    "digest_badge": "Daily 9:00"
+  },
   "no_agent_banner": "You need an agent to start chatting.",
   "archived_agent_banner": "{{name}} has been archived — this conversation is read-only.",
   "runtime_required_banner": {

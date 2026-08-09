@@ -299,6 +299,18 @@ function QwenLogo({ className }: { className: string }) {
   return <img src={qwenLogoSrc} alt="" aria-hidden className={className} />;
 }
 
+// QwenPaw — the standalone mark lifted from the official wordmark
+// (agentscope-ai/QwenPaw, console/public/logo-light.svg, Apache-2.0). Upstream
+// ships a black light-theme mark and a white dark-theme one; currentColor gets
+// the same result from a single path.
+function QwenPawLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="-4.5 4 132 132" fill="currentColor" className={className}>
+      <path d="M0,69.98228499999999C0,104.210785,27.535208,131.96455,61.494133,131.96455C69.605812,131.96455,77.3424,130.36953,84.434273,127.48661L74.130531,109.50395C70.145035,110.80365,65.901604,111.5125,61.494133,111.5125C38.776711,111.5125,20.290945,92.880051,20.290945,69.98228499999999C20.290945,47.084499,38.776711,28.452009,61.494133,28.452009C84.21154,28.452009,102.69729,47.084499,102.69729,69.98228499999999C102.69729,79.174469,99.719872,87.669563,94.679405,94.557785L90.764221,87.71682C90.248428,86.818863,89.287231,86.25174,88.255692,86.25174L78.010559,86.25174C76.979034,86.25174,76.017838,86.807045,75.502052,87.71682L72.899734,92.253815C72.383965,93.163589,72.383965,94.274223,72.899734,95.172188L76.33432,101.162422L79.780609,107.176353L89.955383,124.91094L94.022957,132L94.081589,132L116.09566,131.89367L105.452,113.30843C116.30666,102.13131,123,86.842484,123,69.970448L122.97652,69.98228499999999C122.97652,35.753796,95.453049,8,61.494133,8C27.535208,8,0,35.753796,0,69.98228499999999Z" />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -344,6 +356,8 @@ export function ProviderLogo({
       return <GrokLogo className={className} />;
     case "qwen":
       return <QwenLogo className={className} />;
+    case "qwenpaw":
+      return <QwenPawLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

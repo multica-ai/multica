@@ -66,7 +66,6 @@ import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useChatStore } from "@multica/core/chat";
 import { api, ApiError } from "@multica/core/api";
-import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
@@ -587,9 +586,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     ))}
                     {!workspaceCreationDisabled && (
                       <DropdownMenuItem
-                        onClick={() =>
-                          useModalStore.getState().open("create-workspace")
-                        }
+                        onClick={() => push(paths.newWorkspace())}
                       >
                         <Plus className="h-3.5 w-3.5" />
                         {t(($) => $.sidebar.create_workspace)}

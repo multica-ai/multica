@@ -698,7 +698,10 @@ function DateSubContent({
         <DropdownMenuLabel>{t(($) => $.filters.date_field)}</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={field} onValueChange={(next) => setFieldValue(next as IssueDateField)}>
           {(["created_at", "updated_at"] as const).map((option) => (
-            <DropdownMenuRadioItem key={option} value={option}>
+            // Picking the date field is a parameter for the presets below, not
+            // the final action — keep the menu open so the user can continue
+            // to a preset or the custom range.
+            <DropdownMenuRadioItem key={option} value={option} closeOnClick={false}>
               {t(($) => $.filters[DATE_FIELD_LABEL_KEY[option]])}
             </DropdownMenuRadioItem>
           ))}

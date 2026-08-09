@@ -27,6 +27,15 @@
       "hint": "보통 몇 초 정도 걸립니다. 데몬이 워크스페이스에 등록되는 중입니다."
     }
   },
+  "mika_setup": {
+    "title": "런타임이 준비되었습니다. Mika와 시작하세요.",
+    "description": "Mika가 목표를 태스크로 구체화하고 적합한 에이전트를 조율하며, 워크플로에 필요할 때 재사용 가능한 specialist 추가를 돕습니다.",
+    "action": "Mika와 시작",
+    "failed": "Mika를 시작하지 못했습니다",
+    "dialog_title": "Mika를 어디에서 실행할까요?",
+    "dialog_description": "Mika가 사용할 런타임을 선택하세요. 나중에 설정에서 변경할 수 있습니다.",
+    "cancel": "취소"
+  },
   "machine": {
     "search_placeholder": "기기 검색...",
     "filters": {

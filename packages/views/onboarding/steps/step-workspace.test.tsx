@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enOnboarding from "../../locales/en/onboarding.json";
@@ -68,7 +68,7 @@ function renderStep({
       selector({ workspaceCreationDisabled: disabled, daemonAppUrl }),
   );
   return render(
-    <StepWorkspace existing={existing} onCreated={vi.fn()} onBack={vi.fn()} />,
+    <StepWorkspace existing={existing} onCreated={vi.fn()} />,
     { wrapper: I18nWrapper },
   );
 }
@@ -129,8 +129,8 @@ describe("StepWorkspace — DISABLE_WORKSPACE_CREATION gate", () => {
     ).not.toBeInTheDocument();
 
     // Resume picker still shows the existing workspace card (its name
-    // appears multiple times across avatar / card / side panel — at least
-    // one is enough to know the card is rendered), but the "Create a new
+    // appears in both the avatar and the card label — at least one is
+    // enough to know the card is rendered), but the "Create a new
     // workspace" radio card is gone entirely.
     expect(screen.getAllByText("Acme").length).toBeGreaterThan(0);
     expect(
@@ -160,5 +160,25 @@ describe("StepWorkspace — workspace URL prefix", () => {
     });
     expect(screen.getByText("multica.example.com/")).toBeInTheDocument();
     expect(screen.queryByText("multica.ai/")).not.toBeInTheDocument();
+  });
+});
+
+describe("StepWorkspace — random workspace identity", () => {
+  it("fills the name and a suffixed URL from the celestial list", () => {
+    renderStep({ existing: null, disabled: false });
+
+    fireEvent.click(screen.getByRole("button", { name: "Random" }));
+
+    const name = screen.getByLabelText("Workspace name") as HTMLInputElement;
+    const slug = screen.getByLabelText("URL") as HTMLInputElement;
+    const expectedSlugPrefix = name.value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+
+    expect(name.value).not.toBe("");
+    expect(slug.value).toMatch(
+      new RegExp(`^${expectedSlugPrefix}-[a-z0-9]{4}$`),
+    );
   });
 });

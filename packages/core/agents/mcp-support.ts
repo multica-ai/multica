@@ -20,6 +20,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "qoder",
   "qoderclicn",
   "qwen",
+  "qwenpaw",
   "traecli",
 ]);
 

@@ -124,7 +124,11 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
   if (activeTasks.length === 0 && pastTasks.length === 0) return null;
 
   return (
-    <div>
+    // `@container/execution-log`: the header's three items only fit side by
+    // side above a certain width, and the width that decides it is the
+    // sidebar's — a resizable 260–420px panel — not the viewport's. See
+    // IssueUsageTotal for the tier this container drives.
+    <div className="@container/execution-log">
       {/* Header is two independent targets, not one: the label + chevron
           collapse the section, the total on the right opens the usage
           breakdown. Nesting a button inside a button is invalid HTML, so they
@@ -132,12 +136,19 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
       <div className="mb-2 flex w-full items-center gap-1">
         <button
           type="button"
-          className={`flex min-w-0 items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors hover:bg-accent/70 ${
+          className={`flex min-w-0 items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-caption font-medium transition-colors hover:bg-accent/70 ${
             open ? "" : "text-muted-foreground hover:text-foreground"
           }`}
           onClick={() => setOpen(!open)}
         >
-          {t(($) => $.execution_log.section)}
+          {/* The section label is the one item here that may shrink, so it
+              carries the nowrap + ellipsis pair. Without it the squeezed
+              button broke "Execution log" across two lines (MUL-5804) — a
+              section heading that reflows is a layout bug, not a narrow
+              column. The tier below keeps the ellipsis from ever showing at
+              the panel's 260px minimum; it is the backstop for a longer
+              translation, not the everyday state. */}
+          <span className="truncate">{t(($) => $.execution_log.section)}</span>
           <ChevronRight
             className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${
               open ? "rotate-90" : ""
@@ -211,6 +222,14 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
 // Renders nothing when no run on the issue has recorded usage — an issue whose
 // runs all predate usage reporting gets its old header back rather than a
 // "0 · $0.00" that would read as "this was free".
+//
+// Narrow sections drop the token figure and keep the cost. Something has to
+// give at the narrow end — the header's full form needs ~246px next to the
+// active-run chip and the sidebar's 260px minimum leaves 228px — and the token
+// count is the piece whose absence costs least: the cost answers "what has
+// this issue spent", and the exact token split is a click away in the dialog
+// this opens. It is a figure that yields, never a figure's digits: a clipped
+// "$31.1…" would read as a different number than the issue actually spent.
 export function IssueUsageTotal({
   tasks,
   alone,
@@ -232,6 +251,17 @@ export function IssueUsageTotal({
   );
   if (!total) return null;
 
+  // Two thresholds because the header has two shapes, and the tier should cost
+  // the reader a figure only where the row genuinely runs out: beside the
+  // active-run chip the full form needs ~246px, alone ~218px. Written as whole
+  // literal classes — Tailwind scans source text, so a composed string would
+  // generate neither. `@max-…` (rather than showing at `@min-…`) is what makes
+  // a host that renders this outside the section's `@container` degrade to the
+  // full form instead of silently losing the tokens forever.
+  const narrowTier = alone
+    ? "@max-[14rem]/execution-log:hidden"
+    : "@max-[16rem]/execution-log:hidden";
+
   return (
     <Tooltip>
       <TooltipTrigger
@@ -240,8 +270,10 @@ export function IssueUsageTotal({
           alone ? "ml-auto" : ""
         }`}
       >
-        <span className="font-medium">{formatTokens(total.tokens)}</span>
-        <span className="text-faint-foreground">·</span>
+        <span className={`font-medium ${narrowTier}`}>
+          {formatTokens(total.tokens)}
+        </span>
+        <span className={`text-faint-foreground ${narrowTier}`}>·</span>
         <span className="text-muted-foreground">{formatUsd(total.cost)}</span>
       </TooltipTrigger>
       <TooltipContent>{t(($) => $.execution_log.usage_total_tooltip)}</TooltipContent>

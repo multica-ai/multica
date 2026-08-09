@@ -12,6 +12,7 @@ import type { Label } from "./label";
 export type WSEventType =
   | "issue:created"
   | "issue:updated"
+  | "issue_attachments:changed"
   | "issue:deleted"
   | "comment:created"
   | "comment:updated"
@@ -123,6 +124,10 @@ export interface IssueDeletedPayload {
 export interface IssueLabelsChangedPayload {
   issue_id: string;
   labels: Label[];
+}
+
+export interface IssueAttachmentsChangedPayload {
+  issue_id: string;
 }
 
 export interface IssueMetadataChangedPayload {
@@ -319,6 +324,8 @@ export interface TaskFailedPayload {
   issue_id: string;
   chat_session_id?: string;
   status: string;
+  failure_reason?: string;
+  retry_pending?: boolean;
 }
 
 export interface TaskCancelledPayload {
@@ -501,6 +508,7 @@ export interface WSEventPayloadMap {
   "issue:created": IssueCreatedPayload;
   "issue:updated": IssueUpdatedPayload;
   "issue:deleted": IssueDeletedPayload;
+  "issue_attachments:changed": IssueAttachmentsChangedPayload;
   "issue_labels:changed": IssueLabelsChangedPayload;
   "issue_properties:changed": IssuePropertiesChangedPayload;
   "property:created": PropertyChangedPayload;

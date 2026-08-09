@@ -27,6 +27,7 @@ import type {
   SearchProjectResult,
 } from "@multica/core/types";
 import { api } from "@multica/core/api";
+import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import {
   openCreateIssueWithPreference,
   selectRecentIssues,
@@ -124,6 +125,99 @@ function IssueAssigneeAvatar({
       profileLink={false}
       className="shrink-0"
     />
+  );
+}
+
+// Project / issue rows are rendered from three groups (Projects, Issues,
+// Cancelled — see the partition note on the results list), so the row markup
+// lives in one component each instead of being duplicated per group.
+function ProjectResultRow({
+  project,
+  query,
+  onSelect,
+}: {
+  project: SearchProjectResult;
+  query: string;
+  onSelect: (value: string) => void;
+}) {
+  return (
+    <CommandPrimitive.Item
+      key={`project:${project.id}`}
+      value={`project:${project.id}`}
+      onSelect={onSelect}
+      className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+    >
+      <div className="flex items-center gap-2.5">
+        <ProjectIcon project={project} size="md" />
+        <span className="truncate">
+          <HighlightText text={project.title} query={query} />
+        </span>
+        <span
+          className={`ml-auto text-caption shrink-0 ${PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.color ?? "text-muted-foreground"}`}
+        >
+          {PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.label ?? project.status}
+        </span>
+      </div>
+      {project.match_source === "description" && project.matched_snippet && (
+        <div className="flex items-start gap-2 pl-[26px]">
+          <span className="text-caption text-muted-foreground truncate">
+            <HighlightText text={project.matched_snippet} query={query} />
+          </span>
+        </div>
+      )}
+    </CommandPrimitive.Item>
+  );
+}
+
+function IssueResultRow({
+  issue,
+  query,
+  onSelect,
+}: {
+  issue: SearchIssueResult;
+  query: string;
+  onSelect: (value: string) => void;
+}) {
+  return (
+    <CommandPrimitive.Item
+      key={issue.id}
+      value={issue.id}
+      onSelect={onSelect}
+      className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+    >
+      <div className="flex items-center gap-2.5">
+        <StatusIcon status={issue.status} className="size-4 shrink-0" />
+        <span className="text-caption text-muted-foreground shrink-0">
+          {issue.identifier}
+        </span>
+        <span className="min-w-0 flex-1 truncate">
+          <HighlightText text={issue.title} query={query} />
+        </span>
+        <IssueAssigneeAvatar
+          assigneeType={issue.assignee_type}
+          assigneeId={issue.assignee_id}
+        />
+      </div>
+      {issue.matched_description_snippet && (
+        <div className="flex items-start gap-2 pl-[26px]">
+          <FileText className="size-3 shrink-0 text-muted-foreground mt-0.5" />
+          <span className="text-caption text-muted-foreground truncate">
+            <HighlightText
+              text={issue.matched_description_snippet}
+              query={query}
+            />
+          </span>
+        </div>
+      )}
+      {issue.matched_comment_snippet && (
+        <div className="flex items-start gap-2 pl-[26px]">
+          <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
+          <span className="text-caption text-muted-foreground truncate">
+            <HighlightText text={issue.matched_comment_snippet} query={query} />
+          </span>
+        </div>
+      )}
+    </CommandPrimitive.Item>
   );
 }
 
@@ -377,6 +471,19 @@ export function SearchCommand() {
     results.projects.length > 0 ||
     filteredMembers.length > 0;
 
+  // Cross-type cancelled demotion (MUL-5824). The two searches are ranked
+  // independently server-side, so the partition has to happen here, where they
+  // are aggregated for display. See the render note on the results list.
+  const partitionedResults = useMemo(
+    () =>
+      partitionAggregatedSearchResults({
+        issues: results.issues,
+        projects: results.projects,
+        query,
+      }),
+    [results, query],
+  );
+
   // Close on single ESC — capture phase fires before base-ui Dialog's handlers
   useEffect(() => {
     if (!open) return;
@@ -625,96 +732,70 @@ export function SearchCommand() {
                 </CommandPrimitive.Empty>
               )}
 
-            {!isLoading && results.projects.length > 0 && (
+            {/*
+              Render order is the cross-type cancelled partition (MUL-5824):
+              live projects → live issues → one trailing Cancelled section
+              holding cancelled projects then cancelled issues. Projects and
+              issues arrive as two independently ranked responses, so per-type
+              ordering is not enough — the whole Projects group used to render
+              above the whole Issues group, letting one cancelled project be the
+              first row of the list. Keeping cancelled rows in a single trailing
+              section is the only arrangement where no cancelled row of either
+              type can precede a live row of the other. Direct hits stay in
+              their live section (see partitionAggregatedSearchResults).
+            */}
+            {!isLoading && partitionedResults.liveProjects.length > 0 && (
               <CommandPrimitive.Group
                 heading={t(($) => $.groups.projects)}
                 className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-caption [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
               >
-                {results.projects.map((project) => (
-                  <CommandPrimitive.Item
+                {partitionedResults.liveProjects.map((project) => (
+                  <ProjectResultRow
                     key={`project:${project.id}`}
-                    value={`project:${project.id}`}
+                    project={project}
+                    query={query}
                     onSelect={handleSelect}
-                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <ProjectIcon project={project} size="md" />
-                      <span className="truncate">
-                        <HighlightText text={project.title} query={query} />
-                      </span>
-                      <span
-                        className={`ml-auto text-caption shrink-0 ${PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.color ?? "text-muted-foreground"}`}
-                      >
-                        {PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.label ?? project.status}
-                      </span>
-                    </div>
-                    {project.match_source === "description" &&
-                      project.matched_snippet && (
-                        <div className="flex items-start gap-2 pl-[26px]">
-                          <span className="text-caption text-muted-foreground truncate">
-                            <HighlightText
-                              text={project.matched_snippet}
-                              query={query}
-                            />
-                          </span>
-                        </div>
-                      )}
-                  </CommandPrimitive.Item>
+                  />
                 ))}
               </CommandPrimitive.Group>
             )}
 
-            {!isLoading && results.issues.length > 0 && (
+            {!isLoading && partitionedResults.liveIssues.length > 0 && (
               <CommandPrimitive.Group
                 heading={t(($) => $.groups.issues)}
                 className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-caption [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
               >
-                {results.issues.map((issue) => (
-                  <CommandPrimitive.Item
+                {partitionedResults.liveIssues.map((issue) => (
+                  <IssueResultRow
                     key={issue.id}
-                    value={issue.id}
+                    issue={issue}
+                    query={query}
                     onSelect={handleSelect}
-                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <StatusIcon
-                        status={issue.status}
-                        className="size-4 shrink-0"
-                      />
-                      <span className="text-caption text-muted-foreground shrink-0">
-                        {issue.identifier}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">
-                        <HighlightText text={issue.title} query={query} />
-                      </span>
-                      <IssueAssigneeAvatar
-                        assigneeType={issue.assignee_type}
-                        assigneeId={issue.assignee_id}
-                      />
-                    </div>
-                    {issue.matched_description_snippet && (
-                      <div className="flex items-start gap-2 pl-[26px]">
-                        <FileText className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                        <span className="text-caption text-muted-foreground truncate">
-                          <HighlightText
-                            text={issue.matched_description_snippet}
-                            query={query}
-                          />
-                        </span>
-                      </div>
-                    )}
-                    {issue.matched_comment_snippet && (
-                      <div className="flex items-start gap-2 pl-[26px]">
-                        <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                        <span className="text-caption text-muted-foreground truncate">
-                          <HighlightText
-                            text={issue.matched_comment_snippet}
-                            query={query}
-                          />
-                        </span>
-                      </div>
-                    )}
-                  </CommandPrimitive.Item>
+                  />
+                ))}
+              </CommandPrimitive.Group>
+            )}
+
+            {!isLoading && partitionedResults.hasCancelled && (
+              <CommandPrimitive.Group
+                heading={t(($) => $.groups.cancelled)}
+                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-caption [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+              >
+                {partitionedResults.cancelledProjects.map((project) => (
+                  <ProjectResultRow
+                    key={`project:${project.id}`}
+                    project={project}
+                    query={query}
+                    onSelect={handleSelect}
+                  />
+                ))}
+                {partitionedResults.cancelledIssues.map((issue) => (
+                  <IssueResultRow
+                    key={issue.id}
+                    issue={issue}
+                    query={query}
+                    onSelect={handleSelect}
+                  />
                 ))}
               </CommandPrimitive.Group>
             )}

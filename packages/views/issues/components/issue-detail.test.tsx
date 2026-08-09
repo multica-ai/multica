@@ -180,6 +180,7 @@ vi.mock("../../editor", async () => ({
   ) {
     const initialValue = syncedValue ?? defaultValue ?? "";
     const valueRef = useRef(initialValue);
+    const baseRef = useRef(initialValue);
     const [editorValue, setEditorValue] = useState(initialValue);
     useEffect(() => {
       contentEditorMounts.count += 1;
@@ -189,6 +190,7 @@ vi.mock("../../editor", async () => ({
     useEffect(() => {
       if (syncedValue === undefined) return;
       valueRef.current = syncedValue;
+      baseRef.current = syncedValue;
       setEditorValue(syncedValue);
     }, [syncedValue]);
     useImperativeHandle(ref, () => ({
@@ -213,7 +215,7 @@ vi.mock("../../editor", async () => ({
         onChange={(e) => {
           valueRef.current = e.target.value;
           setEditorValue(e.target.value);
-          onUpdate?.(e.target.value);
+          onUpdate?.(e.target.value, baseRef.current);
         }}
         placeholder={placeholder}
         data-testid="rich-text-editor"
@@ -664,6 +666,38 @@ describe("IssueDetail (shared)", () => {
     expect(
       screen.getAllByRole("generic").some((el) => el.getAttribute("data-slot") === "skeleton"),
     ).toBe(true);
+  });
+
+  it("gives the skeleton the same horizontal gutters as the loaded column", async () => {
+    // The skeleton is the loaded column's stand-in, so a gutter change has to
+    // land on both or the column jumps sideways at the moment the issue
+    // arrives. Horizontal only: the loaded column also reserves the chat
+    // launcher's corner at its bottom, which the skeleton has no scroll to
+    // reach.
+    const horizontalGutters = (el: Element | null) =>
+      (el?.className ?? "")
+        .split(/\s+/)
+        .filter((cls) => /(^|:)px-/.test(cls))
+        .sort();
+
+    mockApiObj.getIssue.mockReturnValue(new Promise(() => {}));
+    const loadingRender = renderIssueDetail();
+    const skeletonGutters = horizontalGutters(
+      loadingRender.container.querySelector(".max-w-4xl"),
+    );
+    loadingRender.unmount();
+
+    mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    const { container } = renderIssueDetail();
+    await waitFor(() => {
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    });
+
+    // Non-empty guard: without it a renamed column class passes vacuously.
+    expect(skeletonGutters.length).toBeGreaterThan(0);
+    expect(skeletonGutters).toEqual(
+      horizontalGutters(container.querySelector(".max-w-4xl")),
+    );
   });
 
   it("renders comment bodies without Base UI collapsible panels", async () => {
@@ -1557,7 +1591,10 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => {
       expect(mockApiObj.updateIssue).toHaveBeenCalledWith(
         "issue-1",
-        expect.objectContaining({ description: "" }),
+        expect.objectContaining({
+          description: "",
+          description_base: "Add JWT auth to the backend",
+        }),
       );
     });
   });

@@ -71,7 +71,7 @@
     "model": "모델",
     "created": "생성일",
     "owner": "소유자",
-    "access": "액세스"
+    "access": "접근 권한"
   },
   "row": {
     "you": "나",
@@ -339,7 +339,14 @@
     "instructions": {
       "intro": "모든 작업에 사용할 System Prompt를 설정하세요. Markdown을 지원합니다.",
       "system_prompt_label": "System Prompt",
-      "placeholder": "이 에이전트의 역할, 전문성, 작업 방식을 정의하세요.\n\n# 예시\n당신은 React와 TypeScript에 특화된 프런트엔드 엔지니어입니다.\n\n## 작업 방식\n- 작고 집중된 PR을 작성합니다. 논리적 변경 단위마다 커밋 하나를 사용합니다\n- 상속보다 조합을 선호합니다\n- 새 컴포넌트에는 항상 단위 테스트를 추가합니다\n\n## 제약\n- 명시적인 승인 없이 shared/ 타입을 수정하지 않습니다\n- features/의 기존 컴포넌트 패턴을 따릅니다"
+      "placeholder": "이 에이전트의 역할, 전문성, 작업 방식을 정의하세요.\n\n# 예시\n당신은 React와 TypeScript에 특화된 프런트엔드 엔지니어입니다.\n\n## 작업 방식\n- 작고 집중된 PR을 작성합니다. 논리적 변경 단위마다 커밋 하나를 사용합니다\n- 상속보다 조합을 선호합니다\n- 새 컴포넌트에는 항상 단위 테스트를 추가합니다\n\n## 제약\n- 명시적인 승인 없이 shared/ 타입을 수정하지 않습니다\n- features/의 기존 컴포넌트 패턴을 따릅니다",
+      "system_layer_label": "Multica가 관리",
+      "system_layer_hint": "Multica 릴리스마다 업데이트됩니다. 편집할 수 없으며, 아래에 작성한 내용은 절대 덮어쓰이지 않습니다.",
+      "system_layer_show": "보기",
+      "system_layer_hide": "접기",
+      "workspace_notes_label": "워크스페이스 메모",
+      "workspace_notes_intro": "팀의 컨텍스트와 선호를 아래에 추가하세요. Multica가 이 에이전트를 위해 관리하는 지침 위에 적용됩니다. Markdown을 지원합니다.",
+      "workspace_notes_placeholder": "이 에이전트가 항상 알아야 할 내용을 적으세요.\n\n# 예시\n메인 저장소는 github.com/acme/platform입니다.\n채팅은 한국어로 해도 태스크는 영어로 작성하세요.\n금요일에는 배포하지 않습니다."
     },
     "env": {
       "intro_readonly": "에이전트 프로세스가 시작될 때 주입됩니다. 워크스페이스 소유자와 관리자만 값을 읽거나 수정할 수 있으며, 모든 공개와 수정은 워크스페이스 감사 로그에 기록됩니다.",
@@ -446,7 +453,7 @@
       "delete_action": "Server 삭제",
       "invalid_json": "잘못된 JSON: {{error}}",
       "save_failed_toast": "MCP config를 저장하지 못했습니다",
-      "redacted_title": "설정됨 - 현재 보기에서는 숨김",
+      "redacted_title": "설정됨 — 보기에서 숨김",
       "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다."
     },
     "composio_mcp": {
@@ -537,7 +544,7 @@
     "activity": {
       "status": {
         "queued": "대기 중",
-        "dispatched": "전달됨",
+        "dispatched": "디스패치됨",
         "waiting_local_directory": "디렉터리 대기 중",
         "running": "실행 중",
         "completed": "성공",
@@ -687,7 +694,7 @@
     "status_waiting": "대기 중",
     "trigger_initial": "최초 실행",
     "trigger_comment": "댓글에서",
-    "trigger_autopilot": "Autopilot",
+    "trigger_autopilot": "오토파일럿",
     "trigger_retry": "재시도",
     "trigger_chat": "채팅에서",
     "trigger_quick_create": "빠른 생성",
@@ -729,7 +736,7 @@
     "filter_active_count_other": "필터 {{count}}개",
     "clear_filters": "필터 지우기",
     "section_availability": "가용성",
-    "section_access": "액세스",
+    "section_access": "접근 권한",
     "section_runtime": "런타임",
     "display": "표시",
     "sort_by": "정렬",
@@ -771,7 +778,7 @@
       "identity_hint": "알아보기 쉬운 이름과 간결한 목적을 지정하세요.",
       "behavior": "동작 및 기능",
       "behavior_hint": "작업 방식을 정의하고 사용할 워크스페이스 스킬을 추가하세요.",
-      "execution": "실행",
+      "execution": "실행 설정",
       "execution_hint": "에이전트를 실행할 위치를 선택하고 필요하면 런타임 기본 모델, 추론 수준, 속도를 변경하세요.",
       "access": "접근 권한",
       "access_hint": "이 에이전트를 실행할 수 있는 사용자를 설정합니다. 나중에 변경할 수 있습니다."

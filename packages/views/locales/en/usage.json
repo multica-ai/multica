@@ -1,6 +1,10 @@
 {
-  "title": "Usage",
-  "subtitle": "Token spend and agent activity across this workspace.",
+  "title": "Analytics",
+  "tab_usage": "Usage",
+  "header": {
+    "timezone_and_updated": "{{tz}} · updated {{time}}",
+    "refresh": "Refresh"
+  },
   "filter": {
     "project_label": "Project",
     "all_projects": "All projects",
@@ -30,7 +34,6 @@
     "metric_tokens": "Tokens",
     "metric_time": "Time",
     "metric_tasks": "Tasks",
-    "metric_errors": "Errors",
     "no_data": "No usage in this window.",
     "metric_label": "Metric"
   },
@@ -43,6 +46,11 @@
     "partial_label": "{{range}} (partial · {{covered}} / 7 days)"
   },
   "errors": {
+    "kpi_failed_label": "Failed tasks · {{days}}D",
+    "kpi_failed_hint": "Of {{total}} runs",
+    "kpi_rate_label": "Failure rate · {{days}}D",
+    "kpi_agents_label": "Agents affected · {{days}}D",
+    "kpi_agents_hint": "Worst {{name}} · {{count}}",
     "tooltip_rate": "Error rate",
     "class": {
       "auth": "Auth",

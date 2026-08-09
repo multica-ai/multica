@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -113,6 +114,7 @@ func TestRefreshAgentStatusFromTasks(t *testing.T) {
 	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
 
 	queries := db.New(testPool)
+	taskService := service.NewTaskService(queries, testPool, nil, events.New())
 
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to seed idle agent status: %v", err)
@@ -124,6 +126,28 @@ func TestRefreshAgentStatusFromTasks(t *testing.T) {
 	}
 	if agent.Status != "working" {
 		t.Fatalf("expected dispatched task to refresh agent status to working, got %q", agent.Status)
+	}
+
+	if _, err := taskService.MarkTaskWaitingLocalDirectory(ctx, parseUUID(taskID), "test path busy"); err != nil {
+		t.Fatalf("MarkTaskWaitingLocalDirectory failed: %v", err)
+	}
+	agent, err = queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("GetAgent after local-directory wait failed: %v", err)
+	}
+	if agent.Status != "idle" {
+		t.Fatalf("expected waiter-only agent status idle, got %q", agent.Status)
+	}
+
+	if _, err := taskService.StartTask(ctx, parseUUID(taskID)); err != nil {
+		t.Fatalf("StartTask from local-directory wait failed: %v", err)
+	}
+	agent, err = queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("GetAgent after StartTask failed: %v", err)
+	}
+	if agent.Status != "working" {
+		t.Fatalf("expected running task to restore agent status working, got %q", agent.Status)
 	}
 
 	if _, err := testPool.Exec(ctx, `
@@ -143,6 +167,56 @@ func TestRefreshAgentStatusFromTasks(t *testing.T) {
 	}
 	if agent.Status != "idle" {
 		t.Fatalf("expected cancelled-only task set to refresh agent status to idle, got %q", agent.Status)
+	}
+}
+
+func TestStartTaskSkipsUnchangedAgentStatusWriteAndBroadcast(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "dispatched")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	var updatedAtBefore time.Time
+	if err := testPool.QueryRow(ctx, `
+		UPDATE agent
+		SET status = 'working', updated_at = now() - interval '1 hour'
+		WHERE id = $1
+		RETURNING updated_at
+	`, agentID).Scan(&updatedAtBefore); err != nil {
+		t.Fatalf("seed working agent status: %v", err)
+	}
+
+	bus := events.New()
+	statusEvents := 0
+	bus.Subscribe("agent:status", func(events.Event) {
+		statusEvents++
+	})
+	taskService := service.NewTaskService(db.New(testPool), testPool, nil, bus)
+
+	if _, err := taskService.StartTask(ctx, parseUUID(taskID)); err != nil {
+		t.Fatalf("StartTask from dispatched failed: %v", err)
+	}
+
+	var (
+		status         string
+		updatedAtAfter time.Time
+	)
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, updated_at FROM agent WHERE id = $1
+	`, agentID).Scan(&status, &updatedAtAfter); err != nil {
+		t.Fatalf("load agent after StartTask: %v", err)
+	}
+	if status != "working" {
+		t.Fatalf("agent status after StartTask = %q, want working", status)
+	}
+	if !updatedAtAfter.Equal(updatedAtBefore) {
+		t.Fatalf("unchanged status rewrote updated_at: before=%s after=%s", updatedAtBefore, updatedAtAfter)
+	}
+	if statusEvents != 0 {
+		t.Fatalf("unchanged status broadcasts = %d, want 0", statusEvents)
 	}
 }
 
@@ -214,6 +288,15 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 			}
 			if e.WorkspaceID != testWorkspaceID {
 				t.Fatalf("expected WorkspaceID %s, got %s", testWorkspaceID, e.WorkspaceID)
+			}
+			if e.TaskID != taskID {
+				t.Fatalf("expected envelope TaskID %s, got %s", taskID, e.TaskID)
+			}
+			if payload["error"] != "task timed out" {
+				t.Fatalf("expected deliverable error %q, got %v", "task timed out", payload["error"])
+			}
+			if payload["failure_reason"] != "timeout" || payload["retry_pending"] != false {
+				t.Fatalf("unexpected failure metadata: reason=%v retry_pending=%v", payload["failure_reason"], payload["retry_pending"])
 			}
 			foundEvent = true
 			break

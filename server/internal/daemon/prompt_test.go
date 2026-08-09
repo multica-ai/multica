@@ -249,6 +249,8 @@ func TestBuildPromptSquadLeaderNoActionForMemberTrigger(t *testing.T) {
 		TriggerCommentContent: "LGTM",
 		TriggerAuthorType:     "member",
 		TriggerAuthorName:     "Bohan",
+		IsLeaderTask:          true,
+		LeaderRoleResolved:    true,
 		Agent: &AgentData{
 			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
 		},
@@ -271,6 +273,8 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 		TriggerCommentContent: "Deploy complete.",
 		TriggerAuthorType:     "agent",
 		TriggerAuthorName:     "deploy-boy",
+		IsLeaderTask:          true,
+		LeaderRoleResolved:    true,
 		Agent: &AgentData{
 			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
 		},
@@ -278,6 +282,165 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	out := BuildPrompt(task, "claude")
 	if !strings.Contains(out, "Squad leader no_action rule") {
 		t.Errorf("buildCommentPrompt must inject squad leader no_action rule for agent-triggered comments, got:\n%s", out)
+	}
+}
+
+// TestTaskIsSquadLeaderReadsProtocolFields pins the role signal to the wire
+// fields a current server sets when (and only when) it injects a squad-leader
+// briefing, and pins the legacy fallback to what BOTH pre-capability server
+// shapes require: those before #4951 (briefing injected, is_leader_task never
+// sent) and those after it (flag sent, but no guarantee a briefing came with
+// it).
+//
+// Two regressions live in this table. The "current" instructions-only row is
+// MUL-5811 itself: the previous implementation grepped Instructions for the
+// briefing heading, so any agent whose own instructions used that heading was
+// promoted to squad leader. The "legacy" rows are the inverse — reading the
+// fields unconditionally would demote a real leader on an un-upgraded server
+// to a plain worker and drop the whole operating protocol.
+func TestTaskIsSquadLeaderReadsProtocolFields(t *testing.T) {
+	t.Parallel()
+
+	// What an agent's Instructions look like once the server has appended the
+	// briefing — and what an ordinary agent that merely writes about squads
+	// looks like. They are indistinguishable by text, which is the point.
+	const briefed = "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER..."
+	const plain = "You are a regular agent."
+
+	cases := []struct {
+		name string
+		task Task
+		want bool
+	}{
+		// --- current server: leader_role_resolved advertises that
+		// is_leader_task / squad_id are authoritative ---
+		{
+			name: "current: issue-bound leader task",
+			task: Task{LeaderRoleResolved: true, IsLeaderTask: true, Agent: &AgentData{Instructions: briefed}},
+			want: true,
+		},
+		{
+			name: "current: quick-create routed through a squad picker",
+			task: Task{LeaderRoleResolved: true, SquadID: "5f7f7c12-b579-4c6d-aaa0-8ae1d7e72b61", Agent: &AgentData{Instructions: briefed}},
+			want: true,
+		},
+		{
+			name: "current: leader flag without agent payload",
+			task: Task{LeaderRoleResolved: true, IsLeaderTask: true},
+			want: true,
+		},
+		{
+			name: "current: ordinary agent whose own instructions carry the protocol heading",
+			task: Task{LeaderRoleResolved: true, Agent: &AgentData{Instructions: briefed}},
+			want: false,
+		},
+		{
+			// Briefing withheld by the claim's defensive gate (squad deleted /
+			// leader swapped): the server clears the flag, so no leader role.
+			name: "current: withheld briefing leaves no leader signal",
+			task: Task{LeaderRoleResolved: true, Agent: &AgentData{Instructions: plain}},
+			want: false,
+		},
+		// --- legacy server: no capability, so the injected briefing is the
+		// only evidence of the role that server ever produced ---
+		{
+			name: "legacy: real leader recognised by the injected briefing",
+			task: Task{Agent: &AgentData{Instructions: briefed}},
+			want: true,
+		},
+		{
+			name: "legacy: ordinary agent",
+			task: Task{Agent: &AgentData{Instructions: plain}},
+			want: false,
+		},
+		{
+			// Server in [#4951, this change): it sends is_leader_task but can
+			// still withhold the briefing. Without a roster or a protocol
+			// there is nothing to lead, so the absent briefing wins.
+			name: "legacy: leader flag but briefing withheld",
+			task: Task{IsLeaderTask: true, Agent: &AgentData{Instructions: plain}},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := taskIsSquadLeader(tc.task); got != tc.want {
+				t.Fatalf("taskIsSquadLeader(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildPromptProtocolHeadingInInstructionsIsNotALeader is the end-to-end
+// negative regression for MUL-5811: on a current server, a plain agent that
+// happens to document a "## Squad Operating Protocol" section in its own
+// instructions must get the ordinary comment prompt — no squad activity
+// obligation, no silent-exit licence, and the unconditional reply imperative
+// intact.
+func TestBuildPromptProtocolHeadingInInstructionsIsNotALeader(t *testing.T) {
+	t.Parallel()
+
+	out := BuildPrompt(Task{
+		IssueID:               "issue-123",
+		TriggerCommentID:      "comment-456",
+		TriggerCommentContent: "please take a look",
+		TriggerAuthorType:     "member",
+		TriggerAuthorName:     "Bohan",
+		LeaderRoleResolved:    true,
+		Agent: &AgentData{
+			Name:         "Docs writer",
+			Instructions: "I document squads.\n\n## Squad Operating Protocol\n\nHow leaders dispatch work...",
+		},
+	}, "claude")
+
+	for _, banned := range []string{
+		"Squad leader no_action rule",
+		"multica squad activity",
+		"DO NOT post any comment",
+		"Unless your outcome is `no_action`",
+	} {
+		if strings.Contains(out, banned) {
+			t.Fatalf("ordinary agent prompt leaked squad-leader rule %q\n---\n%s", banned, out)
+		}
+	}
+	if !strings.Contains(out, "Post your reply as a comment") {
+		t.Fatalf("ordinary agent prompt lost the unconditional reply imperative\n---\n%s", out)
+	}
+}
+
+// TestBuildPromptLegacyServerKeepsBriefingBasedLeaderRole is the other half of
+// the compatibility contract. A server predating `leader_role_resolved` still
+// injects the briefing but never sends is_leader_task on claim (#4951), so an
+// upgraded daemon that trusted the fields alone would demote a real squad
+// leader to a plain worker and drop the entire operating protocol. Absent
+// capability must keep the legacy briefing-marker inference.
+func TestBuildPromptLegacyServerKeepsBriefingBasedLeaderRole(t *testing.T) {
+	t.Parallel()
+
+	out := BuildPrompt(Task{
+		IssueID:               "issue-123",
+		TriggerCommentID:      "comment-456",
+		TriggerCommentContent: "LGTM",
+		TriggerAuthorType:     "member",
+		TriggerAuthorName:     "Bohan",
+		// No LeaderRoleResolved and no IsLeaderTask — an old server sends
+		// neither, and the injected briefing is the only evidence it produced.
+		Agent: &AgentData{
+			Name:         "Lead",
+			Instructions: "You lead the team.\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
+		},
+	}, "claude")
+
+	for _, want := range []string{
+		"Squad leader no_action rule",
+		"multica squad activity",
+		"DO NOT post any comment",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("legacy-server leader prompt lost %q\n---\n%s", want, out)
+		}
 	}
 }
 
@@ -551,10 +714,9 @@ func TestBuildChatPromptAudience(t *testing.T) {
 }
 
 func TestBuildChatPromptAgentIntro(t *testing.T) {
-	// The proactive self-introduction chat (MUL-4230) has no user message: the
-	// prompt must tell the agent to open the conversation itself, and must NOT
-	// carry the generic "respond to their message" framing or an empty
-	// "User message:" section that would confuse the agent.
+	// Historical proactive-introduction sessions remain readable even though
+	// new agent creation no longer creates one. Their message-less first turn
+	// must not receive the generic "respond to their message" framing.
 	out := buildChatPrompt(Task{ChatSessionID: "sess-1", ChatIntro: true})
 	for _, want := range []string{
 		"You were just created",
@@ -685,7 +847,7 @@ func TestBuildChatPromptSlashSkills(t *testing.T) {
 func TestBuildPromptDefaultScansRootsFirst(t *testing.T) {
 	out := BuildPrompt(Task{IssueID: "issue-default-1"}, "claude")
 	for _, s := range []string{
-		"multica issue comment list issue-default-1 --roots-only --summary --output json",
+		"multica issue comment list issue-default-1 --roots-only --summary --compact --output json",
 		"--since",
 	} {
 		if !strings.Contains(out, s) {
@@ -772,7 +934,7 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 		t.Errorf("hint must discourage blindly reading every new comment, got:\n%s", out)
 	}
 	// Parent thread first: the --thread <trigger> read is the prioritized action.
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --since "+since+" --output json") {
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --since "+since+" --compact --output json") {
 		t.Errorf("hint must point at the triggering (parent) thread --since read first, got:\n%s", out)
 	}
 	if !strings.Contains(out, "--tail 30") {
@@ -812,7 +974,7 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	if strings.Contains(out, "new comment(s) since your last run") {
 		t.Errorf("no since-delta hint should render on cold start, got:\n%s", out)
 	}
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --output json") {
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --compact --output json") {
 		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
 	}
 	// MUL-5372: cross-thread background is a cheap roots scan. The hint names
@@ -855,7 +1017,7 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 		"No other new comments on this issue since your last run",
 		"If your reply depends on thread context",
 		"do not rely only on resumed session memory",
-		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("resumed/no-delta prompt missing %q\n--- output ---\n%s", want, out)
@@ -947,7 +1109,7 @@ func TestBuildCommentPromptCoalescedIDsOnlyFallback(t *testing.T) {
 		task.NewCommentsSince = "2026-08-03T06:00:00Z"
 		out := BuildPrompt(task, "claude")
 
-		want := "multica issue comment list issue-fallback-1 --since 2026-08-03T06:00:00Z --output json"
+		want := "multica issue comment list issue-fallback-1 --since 2026-08-03T06:00:00Z --compact --output json"
 		if !strings.Contains(out, want) {
 			t.Errorf("id-only fallback should prefetch the window with %q, got:\n%s", want, out)
 		}
@@ -1000,7 +1162,7 @@ func assertBoundedIDOnlyFallback(t *testing.T, out string) {
 	// id is reachable without knowing its thread; paging keeps it reachable even
 	// when it is older than the tail window.
 	for _, want := range []string{
-		"multica issue comment list issue-fallback-1 --thread <comment-id> --tail 30 --output json",
+		"multica issue comment list issue-fallback-1 --thread <comment-id> --tail 30 --compact --output json",
 		"accepts a reply id",
 		"Next reply cursor",
 		"--before-id",
@@ -1156,6 +1318,16 @@ func TestBuildCommentPromptCrossThreadFansOutReplies(t *testing.T) {
 	// The single-parent cookbook must NOT be used when fanning out.
 	if strings.Contains(out, "always use the trigger comment ID below") {
 		t.Errorf("cross-thread prompt must not emit the single-parent reply cookbook, got:\n%s", out)
+	}
+	// MUL-5825: the fan-out block points at the brief's `## Comment
+	// Formatting` for the posting mechanism instead of restating it, so the
+	// assembled cross-thread prompt carries no `comment add` example commands
+	// at all — the `--parent` targets plus the pointer are the whole recipe.
+	if strings.Contains(out, "multica issue comment add") {
+		t.Errorf("cross-thread prompt re-grew embedded comment-add commands (mechanism lives in ## Comment Formatting — MUL-5825), got:\n%s", out)
+	}
+	if !strings.Contains(out, "`## Comment Formatting`") {
+		t.Errorf("cross-thread prompt must point at the brief's Comment Formatting mechanism, got:\n%s", out)
 	}
 
 	// Chronological ordering (MUL-4348 test-round-2 problem #1): replies must be

@@ -684,6 +684,108 @@ func (q *Queries) DeleteChannelUserBindingsByWorkspaceMember(ctx context.Context
 	return err
 }
 
+const findChannelBindingForMember = `-- name: FindChannelBindingForMember :one
+SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = $1
+  AND b.multica_user_id = $2
+  AND b.channel_type = $3
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC
+LIMIT 1
+`
+
+type FindChannelBindingForMemberParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ChannelType   string      `json:"channel_type"`
+}
+
+// Outbound notification lookup: given a Multica member and a channel_type,
+// return the (installation, channel_user_id) that outbound push should
+// target. The wecom smart-bot inbox-notification path uses this to decide
+// whether to deliver via the bot at all — no row means "unbound member,
+// fall back to the legacy path (TOF/RTX)".
+//
+// If a member has bound multiple installations of the same channel_type in
+// one workspace (multi-bot org), the most-recently-bound wins — matches
+// FindReusableChannelUserBinding's tiebreak so the two lookups agree.
+func (q *Queries) FindChannelBindingForMember(ctx context.Context, arg FindChannelBindingForMemberParams) (ChannelUserBinding, error) {
+	row := q.db.QueryRow(ctx, findChannelBindingForMember, arg.WorkspaceID, arg.MulticaUserID, arg.ChannelType)
+	var i ChannelUserBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.Config,
+		&i.BoundAt,
+	)
+	return i, err
+}
+
+const findLiveChannelBindingToken = `-- name: FindLiveChannelBindingToken :one
+SELECT token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at, consumed_at, created_at FROM channel_binding_token
+WHERE installation_id = $1
+  AND channel_type = $2
+  AND channel_user_id = $3
+  AND consumed_at IS NULL
+  AND expires_at > now()
+  AND created_at >= now() - $4::interval
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindLiveChannelBindingTokenParams struct {
+	InstallationID pgtype.UUID     `json:"installation_id"`
+	ChannelType    string          `json:"channel_type"`
+	ChannelUserID  string          `json:"channel_user_id"`
+	MintInterval   pgtype.Interval `json:"mint_interval"`
+}
+
+// Mint guard: the newest token for this platform user that is still
+// unconsumed, unexpired, and recent enough that the link already sitting in
+// their chat is the one to point back at. Without it every message from an
+// unbound user mints another row, so a user who keeps typing at a bot they
+// have not linked yet writes one row per message. This narrows that to
+// roughly one row per window; it is not a hard guarantee, since the caller
+// runs this and the insert as two statements.
+//
+// `mint_interval` is the caller's throttle window (see
+// wecom.BindingTokenMintInterval). It is subtracted from now() rather than
+// passed in as an absolute cutoff so the whole window is measured on the
+// database clock: created_at is stamped by the column default, and comparing
+// it against an application-side timestamp would let clock skew between the
+// two stretch or shrink the window. The consumed_at / expires_at predicates
+// keep an already-redeemed or stale token from suppressing a mint the user
+// actually needs.
+//
+// idx_channel_binding_token_installation covers the installation_id prefix;
+// the rest is a filter over that installation's live tokens, which is a small
+// set because nothing here outlives the 15-minute TTL.
+func (q *Queries) FindLiveChannelBindingToken(ctx context.Context, arg FindLiveChannelBindingTokenParams) (ChannelBindingToken, error) {
+	row := q.db.QueryRow(ctx, findLiveChannelBindingToken,
+		arg.InstallationID,
+		arg.ChannelType,
+		arg.ChannelUserID,
+		arg.MintInterval,
+	)
+	var i ChannelBindingToken
+	err := row.Scan(
+		&i.TokenHash,
+		&i.WorkspaceID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const findReusableChannelUserBinding = `-- name: FindReusableChannelUserBinding :one
 SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
 JOIN channel_installation ci ON ci.id = b.installation_id
@@ -969,6 +1071,60 @@ func (q *Queries) GetChannelInstallationOwnerByAppID(ctx context.Context, arg Ge
 	return i, err
 }
 
+const getChannelInstallationSlotOwnerByAppID = `-- name: GetChannelInstallationSlotOwnerByAppID :one
+SELECT ci.id, ci.workspace_id, ci.agent_id, ci.status,
+       a.archived_at AS agent_archived_at,
+       (a.id IS NOT NULL)::boolean AS agent_exists,
+       (w.id IS NOT NULL)::boolean AS workspace_exists
+FROM channel_installation ci
+LEFT JOIN agent a ON a.id = ci.agent_id
+LEFT JOIN workspace w ON w.id = ci.workspace_id
+WHERE ci.channel_type = $1
+  AND ci.config ->> 'app_id' = $2::text
+`
+
+type GetChannelInstallationSlotOwnerByAppIDParams struct {
+	ChannelType string `json:"channel_type"`
+	AppID       string `json:"app_id"`
+}
+
+type GetChannelInstallationSlotOwnerByAppIDRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	Status          string             `json:"status"`
+	AgentArchivedAt pgtype.Timestamptz `json:"agent_archived_at"`
+	AgentExists     bool               `json:"agent_exists"`
+	WorkspaceExists bool               `json:"workspace_exists"`
+}
+
+// Everything the install path needs to classify the current holder of a
+// (channel_type, config->>'app_id') slot BEFORE it acts on it, in one read.
+// Distinct from GetChannelInstallationOwnerByAppID, which is the after-the-fact
+// "name the conflict" read and INNER JOINs the agent away.
+//
+// Here the joins are LEFT so an ORPHAN row survives the read: with no FKs
+// (MUL-3515 §4) an installation outlives a deleted workspace or agent, and the
+// caller has to tell "orphan, reclaimable" apart from "live owner, refuse".
+// workspace_exists / agent_exists carry that; status and agent_archived_at
+// carry the rest of ReclaimDeadChannelInstallationByAppID's own definition of
+// dead, so the caller can predict what the reclaim would do without running it.
+// pgx.ErrNoRows means the slot is free.
+func (q *Queries) GetChannelInstallationSlotOwnerByAppID(ctx context.Context, arg GetChannelInstallationSlotOwnerByAppIDParams) (GetChannelInstallationSlotOwnerByAppIDRow, error) {
+	row := q.db.QueryRow(ctx, getChannelInstallationSlotOwnerByAppID, arg.ChannelType, arg.AppID)
+	var i GetChannelInstallationSlotOwnerByAppIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.Status,
+		&i.AgentArchivedAt,
+		&i.AgentExists,
+		&i.WorkspaceExists,
+	)
+	return i, err
+}
+
 const getChannelOutboundCardByTask = `-- name: GetChannelOutboundCardByTask :one
 SELECT id, chat_session_id, task_id, channel_type, channel_chat_id, channel_card_message_id, status, last_patched_at, created_at FROM channel_outbound_card_message
 WHERE task_id = $1
@@ -1222,6 +1378,35 @@ func (q *Queries) ListChannelInstallationsByWorkspace(ctx context.Context, arg L
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockChannelInstallationAppIDSlot = `-- name: LockChannelInstallationAppIDSlot :exec
+SELECT pg_advisory_xact_lock(
+    hashtext($1::text),
+    hashtext($2::text)
+)
+`
+
+type LockChannelInstallationAppIDSlotParams struct {
+	ChannelType string `json:"channel_type"`
+	AppID       string `json:"app_id"`
+}
+
+// Serializes everything an install does to one (channel_type, config->>'app_id')
+// routing slot: read the current owner, decide, reclaim, upsert. Taken as the
+// first statement of the install transaction and released by COMMIT/ROLLBACK,
+// so the owner read below cannot go stale under a concurrent install or
+// reconnect — a plain read-then-write leaves a TOCTOU window in which two
+// callers both see "no live owner" and both go on to touch the slot.
+//
+// Two-key form: the first key namespaces by channel so a feishu app_id and a
+// wecom bot id that hash alike do not serialize against each other. hashtext
+// collisions inside one channel only cost extra serialization, never
+// correctness. pg_advisory_xact_lock (not pg_try_) so a second caller waits
+// its turn rather than failing.
+func (q *Queries) LockChannelInstallationAppIDSlot(ctx context.Context, arg LockChannelInstallationAppIDSlotParams) error {
+	_, err := q.db.Exec(ctx, lockChannelInstallationAppIDSlot, arg.ChannelType, arg.AppID)
+	return err
 }
 
 const markChannelInboundDedupProcessed = `-- name: MarkChannelInboundDedupProcessed :execrows

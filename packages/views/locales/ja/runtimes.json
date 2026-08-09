@@ -27,6 +27,15 @@
       "hint": "通常は数秒かかります。デーモンがワークスペースに登録しています。"
     }
   },
+  "mika_setup": {
+    "title": "ランタイムの準備ができました。Mika と始めましょう。",
+    "description": "Mika は目標をタスクに落とし込み、適切なエージェントを調整し、ワークフローに必要な再利用可能な specialist の追加を支援します。",
+    "action": "Mika と始める",
+    "failed": "Mika を開始できませんでした",
+    "dialog_title": "Mika をどこで実行しますか？",
+    "dialog_description": "Mika が使うランタイムを選んでください。後から設定で変更できます。",
+    "cancel": "キャンセル"
+  },
   "machine": {
     "search_placeholder": "マシンを検索…",
     "filters": {

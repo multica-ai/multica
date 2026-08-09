@@ -54,7 +54,7 @@
   },
   "runtime_filter": {
     "all": "全部运行时",
-    "section_local": "本机",
+    "section_local": "本地",
     "section_remote": "远程",
     "section_cloud": "云端",
     "agent_count_other": "{{count}} 个智能体",
@@ -71,7 +71,7 @@
     "model": "模型",
     "created": "创建时间",
     "owner": "Owner",
-    "access": "访问范围"
+    "access": "访问权限"
   },
   "row": {
     "you": "你",
@@ -164,7 +164,7 @@
     "section_details": "详情",
     "section_details_hint": "只读的所有权和生命周期信息。",
     "section_skills": "Skills",
-    "section_integrations": "外部集成",
+    "section_integrations": "集成",
     "prop_runtime": "运行时",
     "prop_model": "模型",
     "prop_thinking": "思考",
@@ -235,7 +235,7 @@
     "label": "模型",
     "select_runtime_first": "请先选择运行时",
     "default_provider": "默认（提供方）",
-    "runtime_offline_manual": "运行时离线 —— 请手动输入",
+    "runtime_offline_manual": "运行时离线——请手动输入",
     "managed_by_runtime_title": "模型选择由该运行时管理。",
     "managed_by_runtime_hint": "请在运行时主机上配置模型（例如 Hermes 会从自身配置文件读取）。",
     "discovery_failed": "发现失败",
@@ -297,7 +297,7 @@
       "identity_hint": "为智能体设置容易识别的名称和简洁的用途。",
       "behavior": "行为与能力",
       "behavior_hint": "定义它的工作方式，并添加可使用的工作区 skill。",
-      "execution": "运行方式",
+      "execution": "执行配置",
       "execution_hint": "选择智能体使用的运行时，也可以覆盖运行时的默认模型、思考等级和速度。",
       "access": "访问权限",
       "access_hint": "控制谁可以运行此智能体，创建后仍可修改。"
@@ -306,7 +306,7 @@
     "speed_label": "速度",
     "access": {
       "private": {
-        "title": "只有我",
+        "title": "仅自己",
         "description": "只有你可以运行此智能体。"
       },
       "workspace": {
@@ -383,7 +383,7 @@
       "public_workspace_option": "工作区内所有人",
       "public_members_group": "指定成员",
       "public_members_empty": "没有可选择的工作区成员",
-      "public_targets_empty_hint": "至少勾选下方一项 —— 否则该智能体仍为私有。"
+      "public_targets_empty_hint": "至少勾选下方一项——否则该智能体仍为私有。"
     },
     "runtime_label": "运行时",
     "runtime_filter_mine": "我的",
@@ -392,7 +392,7 @@
     "runtime_none": "暂无可用运行时",
     "runtime_cloud_badge": "云端",
     "runtime_private_badge": "私有",
-    "runtime_private_locked_tooltip": "私有运行时——只有 runtime 所有者或工作区管理员可在其上创建智能体。如果需要共享，请联系所有者切换为「公开」。",
+    "runtime_private_locked_tooltip": "私有运行时——只有 runtime 所有者或工作区管理员可在其上创建智能体。如果需要共享，请联系所有者切换为\"公开\"。",
     "runtime_search_placeholder": "搜索机器…",
     "runtime_no_results": "没有匹配的机器",
     "runtime_group_online": "{{online}}/{{total}} 在线",
@@ -402,7 +402,7 @@
     "cancel": "取消",
     "create_failed_toast": "创建智能体失败",
     "skill_attach_failed_toast": "智能体已创建，但 skill 关联失败：{{error}}",
-    "squad_join_failed_toast": "智能体「{{name}}」已创建，但加入小队失败：{{error}}。你可以在 Members 标签里手动添加。",
+    "squad_join_failed_toast": "智能体\"{{name}}\"已创建，但加入小队失败：{{error}}。你可以在 Members 标签里手动添加。",
     "instructions": {
       "label": "指令",
       "placeholder_blank": "点击撰写指令…",
@@ -413,7 +413,7 @@
     "skills_section": {
       "label": "Skills",
       "placeholder": "从工作区添加 skill",
-      "selected_other": "已选 {{count}} 个 —— 点击修改",
+      "selected_other": "已选 {{count}} 个——点击修改",
       "collapse": "收起",
       "list_empty_multi": "工作区还没有 skill。请先创建或导入一个。",
       "list_loading": "加载中…",
@@ -438,7 +438,14 @@
     "instructions": {
       "intro": "设置每个 task 都会使用的 System Prompt，支持 Markdown。",
       "system_prompt_label": "System Prompt",
-      "placeholder": "定义这个智能体的角色、专长和工作风格。\n\n# 示例\n你是一名专注 React 和 TypeScript 的前端工程师。\n\n## 工作风格\n- 写小而聚焦的 PR —— 每个逻辑变更一个 commit\n- 优先组合而不是继承\n- 新组件总是配单元测试\n\n## 约束\n- 未经明确批准不要修改 shared/ 下的 type\n- 遵循 features/ 中现有的组件模式"
+      "placeholder": "定义这个智能体的角色、专长和工作风格。\n\n# 示例\n你是一名专注 React 和 TypeScript 的前端工程师。\n\n## 工作风格\n- 写小而聚焦的 PR——每个逻辑变更一个 commit\n- 优先组合而不是继承\n- 新组件总是配单元测试\n\n## 约束\n- 未经明确批准不要修改 shared/ 下的 type\n- 遵循 features/ 中现有的组件模式",
+      "system_layer_label": "由 Multica 维护",
+      "system_layer_hint": "随 Multica 版本更新。你无法编辑这部分，你在下面写的内容也永远不会被覆盖。",
+      "system_layer_show": "查看",
+      "system_layer_hide": "收起",
+      "workspace_notes_label": "工作区补充",
+      "workspace_notes_intro": "在下面补充你们团队的上下文和偏好，它们会叠加在 Multica 为这个智能体维护的指令之上。支持 Markdown。",
+      "workspace_notes_placeholder": "写下这个智能体应该始终知道的上下文。\n\n# 示例\n我们的主仓库是 github.com/acme/platform。\n即使聊天用中文，任务也一律用英文写。\n周五不部署。"
     },
     "env": {
       "intro_readonly": "在智能体进程启动时注入。只有工作区所有者 / 管理员可以查看或编辑值；每次解锁和编辑都会写入工作区审计日志。",
@@ -545,7 +552,7 @@
       "delete_action": "删除 Server",
       "invalid_json": "JSON 无效：{{error}}",
       "save_failed_toast": "保存 MCP 配置失败",
-      "redacted_title": "已配置 —— 当前账号无权查看",
+      "redacted_title": "已配置——对你隐藏",
       "redacted_hint": "只有智能体所有者或工作区管理员可以读取该配置。"
     },
     "composio_mcp": {
@@ -554,18 +561,18 @@
       "load_failed": "无法加载你已连接的应用，请稍后重试。",
       "empty_title": "还没有已连接的应用",
       "empty_hint": "你还没连接任何第三方服务。先去授权一个，再回到这里勾选允许。",
-      "empty_link_to_settings": "去 设置 → 集成 连一个",
+      "empty_link_to_settings": "去 \"设置 → 集成\" 连一个",
       "connected": "已连接",
       "toggle_aria": "允许该 agent 使用 {{toolkit}}",
       "saving": "正在保存…",
       "save_failed_toast": "保存失败，请重试",
-      "redacted_title": "已配置 —— 对你隐藏",
+      "redacted_title": "已配置——对你隐藏",
       "redacted_hint": "只有该 agent 的创建者才能查看或修改它可使用的应用。",
-      "shared_warning": "该智能体已共享。能够运行该智能体的人可以通过它使用你在此启用的 Composio 应用。如果这些应用涉及敏感数据，请改用「私有」或缩小访问范围。",
+      "shared_warning": "该智能体已共享。能够运行该智能体的人可以通过它使用你在此启用的 Composio 应用。如果这些应用涉及敏感数据，请改用\"私有\"或缩小访问范围。",
       "workspace_warning": "公开给工作区：工作区内任何成员都可以通过该智能体使用这些 Composio 应用。"
     },
     "runtime_config": {
-      "intro": "选择 OpenClaw 运行时执行该智能体每一回合的方式。Local 模式让智能体直接在 daemon 进程内运行；Gateway 模式则把每一回合转发到一个 OpenClaw Gateway —— 适合 daemon 宿主只是轻量协调机、希望真正算力落在更强的远端机器上的场景。",
+      "intro": "选择 OpenClaw 运行时执行该智能体每一回合的方式。Local 模式让智能体直接在 daemon 进程内运行；Gateway 模式则把每一回合转发到一个 OpenClaw Gateway——适合 daemon 宿主只是轻量协调机、希望真正算力落在更强的远端机器上的场景。",
       "mode_label": "路由模式",
       "mode_local": "Local",
       "mode_gateway": "Gateway",
@@ -578,7 +585,7 @@
       "port_invalid": "端口必须是正整数。",
       "token_label": "鉴权 Token",
       "token_placeholder": "Gateway 颁发的 bearer token",
-      "token_masked_placeholder": "已保存 —— 输入新值可轮换，留空则保留原 token",
+      "token_masked_placeholder": "已保存——输入新值可轮换，留空则保留原 token",
       "tls_label": "启用 TLS",
       "tls_hint": "用 https:// 代替 http:// 连接",
       "saved_toast": "路由配置已保存",
@@ -622,7 +629,7 @@
       "add_dialog_search_placeholder": "搜索 skill",
       "add_dialog_empty": "全部工作区 skill 都已分配。",
       "add_dialog_no_match": "没有匹配的 skill。",
-      "add_dialog_empty_partial": "已无可添加的 skill —— 全部都已分配给该智能体。",
+      "add_dialog_empty_partial": "已无可添加的 skill——全部都已分配给该智能体。",
       "add_dialog_saving": "添加中…",
       "add_dialog_confirm_default": "添加",
       "add_dialog_confirm_other": "添加 {{count}} 个 skill",
@@ -631,12 +638,12 @@
     },
     "integrations": {
       "intro": "把这个智能体连接到外部聊天平台，让大家在自己熟悉的工具里直接与它协作。",
-      "members_note": "只有工作区的所有者和管理员才能把智能体连接到外部聊天平台。你可以在「设置 → 集成」中查看已连接的 Bot。"
+      "members_note": "只有工作区的所有者和管理员才能把智能体连接到外部聊天平台。你可以在\"设置 → 集成\"中查看已连接的 Bot。"
     },
     "activity": {
       "status": {
         "queued": "排队中",
-        "dispatched": "已分发",
+        "dispatched": "已派发",
         "waiting_local_directory": "等待目录",
         "running": "进行中",
         "completed": "成功",
@@ -730,7 +737,7 @@
     "public_group": "公开访问",
     "owner_only_readonly": "只有该智能体的所有者可以更改谁能调用它。",
     "members_empty": "没有可选择的工作区成员",
-    "composio_switch_hint": "提示 —— 该智能体已启用 Composio 应用。共享后，所有获得访问权限的人都可以通过该智能体使用这些应用。"
+    "composio_switch_hint": "提示——该智能体已启用 Composio 应用。共享后，所有获得访问权限的人都可以通过该智能体使用这些应用。"
   },
   "profile_card": {
     "unavailable": "智能体不可用",
@@ -786,7 +793,7 @@
     "status_waiting": "等待中",
     "trigger_initial": "初次运行",
     "trigger_comment": "评论触发",
-    "trigger_autopilot": "Autopilot",
+    "trigger_autopilot": "自动化",
     "trigger_retry": "重试",
     "trigger_chat": "来自对话",
     "trigger_quick_create": "快速创建",
@@ -828,7 +835,7 @@
     "filter_active_count_other": "{{count}} 项筛选",
     "clear_filters": "清除筛选",
     "section_availability": "可用性",
-    "section_access": "访问范围",
+    "section_access": "访问权限",
     "section_runtime": "运行时",
     "display": "显示",
     "sort_by": "排序",

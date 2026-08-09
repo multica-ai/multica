@@ -22,8 +22,8 @@ export const SOURCE_BACKFILL_MAX_DISMISSALS = 3;
  * demonstrably delivered value (agents finished real work) before
  * spending goodwill on it. Answer rates for "how did you hear about
  * us" prompts are also materially better after an activation moment
- * than at signup. 3 ≈ one Helper starter-task batch, so an engaged
- * new user typically crosses it within the first session.
+ * than at signup. Three completed issues are enough evidence that an
+ * engaged new user has experienced the core workflow.
  *
  * The count itself comes from `agentCompletedIssueCountOptions` in
  * `./queries.ts`; the modal combines it with `needsSourceBackfill`.

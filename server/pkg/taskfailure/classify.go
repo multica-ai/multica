@@ -178,9 +178,22 @@ func Classify(rawError string) Reason {
 	//    Note this only catches deadlines that arrive as a bare string;
 	//    callers holding the error value should classify structurally
 	//    instead (see taskRunFailureReason in daemon/daemon.go).
+	//    "opencode stream ended" is the shared prefix of every failure the
+	//    OpenCode terminal-signal guard raises (pkg/agent/opencode.go): a step
+	//    left open at EOF, a continuation that never started, and a run that
+	//    ended on a step with no text, no tool call and no reported usage.
+	//    All three mean the same thing — the provider stream died and
+	//    `opencode run` still exited 0 — which is this bucket by definition,
+	//    and being resume-safe the retry continues the truncated session
+	//    instead of redoing the work. Before this they landed in
+	//    agent_error.process_failure (the word "signal" in "terminal signal"
+	//    matching rule 13 by accident) and agent_error.unknown respectively;
+	//    neither is on the retry allowlist, so a transient cut ended the task
+	//    outright and max_attempts never applied (#6522).
 	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
 	case containsAny(lower,
 		"stream disconnected",
+		opencodeStreamEndedPrefix,
 		"connection closed",
 		"mid-response",
 		"error sending request",
@@ -320,6 +333,29 @@ var legacyContextOverflowReasons = map[string]bool{
 	"agent_error":              true,
 }
 
+// opencodeStreamEndedPrefix opens every failure the OpenCode terminal-signal
+// guard raises (pkg/agent/opencode.go). Exactly one code path emits it, and it
+// is a PREFIX of the whole error rather than a phrase somewhere inside it, so
+// its presence identifies the failure outright.
+const opencodeStreamEndedPrefix = "opencode stream ended"
+
+// legacyOpencodeStreamEndedReasons are the buckets a daemon predating rule 7's
+// entry lands these errors in: process_failure for the two "terminal signal"
+// variants, whose word "signal" its rule 13 matches by accident, unknown for
+// anything its rules miss, and the pre-MUL-1949 coarse agent_error.
+//
+// Wider than legacyContextOverflowReasons on purpose, and the witness is why.
+// That rule leaves refined reasons alone because a phrase appearing somewhere
+// in an error blob says less than the bucket an earlier rule already picked.
+// Here the witness is the guard's own message from its first character, so the
+// old bucket cannot be describing some other, better-identified cause — it is
+// the same failure under a label that predates knowing what it was.
+var legacyOpencodeStreamEndedReasons = map[string]bool{
+	string(ReasonAgentProcessFailure): true,
+	string(ReasonAgentUnknown):        true,
+	"agent_error":                     true,
+}
+
 // NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
 // onto the taxonomy this server understands, using the raw error text as the
 // witness. It returns the reason unchanged when nothing applies.
@@ -351,6 +387,18 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	if legacyContextOverflowReasons[reason] &&
 		containsAny(strings.ToLower(rawError), contextWindowExceededWitnesses...) {
 		return ReasonAgentContextOverflow
+	}
+	// #6522: the same gap once more. Rule 7 only decides where these land when
+	// THIS server classifies them, and it classifies only when the daemon sent
+	// no reason at all. An installed daemon predating that entry reports a
+	// non-empty agent_error.process_failure instead, which the empty-reason
+	// branch in FailTask deliberately skips — so the run stays off the retry
+	// allowlist on exactly the un-upgraded hosts most likely to be hitting a
+	// flaky provider. Upgrading here makes the retry work the moment the server
+	// deploys, without waiting on the daemon fleet.
+	if legacyOpencodeStreamEndedReasons[reason] &&
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawError)), opencodeStreamEndedPrefix) {
+		return ReasonAgentProviderNetwork
 	}
 	return Reason(reason)
 }

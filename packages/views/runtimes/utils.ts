@@ -107,16 +107,37 @@ export function isVersionNewer(latest: string, current: string): boolean {
   return false;
 }
 
+const TOKEN_UNITS = [
+  { divisor: 1, suffix: "" },
+  { divisor: 1_000, suffix: "K" },
+  { divisor: 1_000_000, suffix: "M" },
+  { divisor: 1_000_000_000, suffix: "B" },
+  { divisor: 1_000_000_000_000, suffix: "T" },
+] as const;
+
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000) {
-    const m = n / 1_000_000;
-    return m % 1 < 0.05 ? `${Math.round(m)}M` : `${m.toFixed(1)}M`;
+  const magnitude = Math.abs(n);
+  let unitIndex = TOKEN_UNITS.findLastIndex(
+    ({ divisor }) => magnitude >= divisor,
+  );
+  unitIndex = Math.max(unitIndex, 0);
+
+  if (unitIndex === 0) return n.toLocaleString();
+
+  let unit = TOKEN_UNITS[unitIndex]!;
+  let scaled = n / unit.divisor;
+
+  // Promote values that round across a unit boundary (999,999 -> 1M), so a
+  // compact label never renders as 1000K / 1000M and grows unnecessarily.
+  if (
+    Math.abs(Number(scaled.toFixed(1))) >= 1_000 &&
+    unitIndex < TOKEN_UNITS.length - 1
+  ) {
+    unit = TOKEN_UNITS[unitIndex + 1]!;
+    scaled = n / unit.divisor;
   }
-  if (n >= 1_000) {
-    const k = n / 1_000;
-    return k % 1 < 0.05 ? `${Math.round(k)}K` : `${k.toFixed(1)}K`;
-  }
-  return n.toLocaleString();
+
+  return `${Number(scaled.toFixed(1))}${unit.suffix}`;
 }
 
 // Cents below $100, whole dollars above — two decimals on a four-figure spend

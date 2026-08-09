@@ -1577,3 +1577,126 @@ func TestPrepareOpenclawConfigNewSchemaEmptyRegistry(t *testing.T) {
 		t.Errorf("defaults.workspace not set")
 	}
 }
+
+// TestExpandOpenclawPathTildeSeparators — `openclaw config file` shortens the
+// home prefix using its host OS's separator, so Windows reports
+// `~\.openclaw\openclaw.json`. Matching only `~/` left that form unexpanded;
+// because `~\...` is not absolute it was then joined onto the daemon's working
+// directory, yielding a path that could never exist. The resulting stat miss
+// was indistinguishable from a fresh install, so the wrapper dropped the
+// user's $include and every task lost its model providers and auth profiles
+// (issue #6630).
+func TestExpandOpenclawPathTildeSeparators(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("USERPROFILE", fakeHome)
+
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{name: "posix separator", in: "~/.openclaw/openclaw.json"},
+		{name: "windows separator", in: `~\.openclaw\openclaw.json`},
+		{name: "bare tilde", in: "~"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := expandOpenclawPath(tc.in)
+			if err != nil {
+				t.Fatalf("expandOpenclawPath(%q): %v", tc.in, err)
+			}
+			if strings.Contains(got, "~") {
+				t.Errorf("expandOpenclawPath(%q) = %q, want the tilde expanded (a literal ~ can never stat)", tc.in, got)
+			}
+			if !strings.HasPrefix(got, fakeHome) {
+				t.Errorf("expandOpenclawPath(%q) = %q, want it rooted at the home dir %q", tc.in, got, fakeHome)
+			}
+		})
+	}
+}
+
+// TestPrepareOpenclawConfigExpandsWindowsTilde — end-to-end guard for #6630:
+// the reporter's exact `openclaw config file` output (a config-warning banner
+// followed by a Windows-shortened path) must still produce a wrapper that
+// $includes the user's config.
+func TestPrepareOpenclawConfigExpandsWindowsTilde(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("USERPROFILE", fakeHome)
+
+	// filepath.Join normalizes the reported remainder to the host separator,
+	// so build the expected target the same way the production path does and
+	// materialize it. On non-Windows hosts that is a single oddly-named file;
+	// the assertion under test is the tilde expansion, not the separator.
+	wantPath := filepath.Join(fakeHome, `.openclaw\openclaw.json`)
+	if err := os.MkdirAll(filepath.Dir(wantPath), 0o755); err != nil {
+		t.Fatalf("mkdir user cfg dir: %v", err)
+	}
+	if err := os.WriteFile(wantPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	banner := "|\no  Config warnings ---------------------------------+\n" +
+		"|  - plugins.entries.duckduckgo: plugin not found  |\n" +
+		"+--------------------------------------------------+\n" +
+		`~\.openclaw\openclaw.json` + "\n"
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {stdout: banner},
+		"config get agents.list --json": {stdout: "null"},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	include, ok := got["$include"].([]any)
+	if !ok {
+		t.Fatalf("wrapper has no $include — the user's models and auth profiles would be lost: %#v", got)
+	}
+	if include[0] != wantPath {
+		t.Errorf("$include[0] = %v, want %q", include[0], wantPath)
+	}
+	if result.IncludeRoot != filepath.Dir(wantPath) {
+		t.Errorf("IncludeRoot = %q, want %q", result.IncludeRoot, filepath.Dir(wantPath))
+	}
+}
+
+// TestPrepareOpenclawConfigWarnsWhenActiveConfigMissing — discovery used to be
+// silent, so a wrapper written without $include left no trace in the daemon
+// log and could only be diagnosed by reading the generated file. A fresh
+// install legitimately lands here too, but the consequence (no user models or
+// auth profiles for this task) is worth a warning either way.
+func TestPrepareOpenclawConfigWarnsWhenActiveConfigMissing(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "absent", "openclaw.json")
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: missing + "\n"},
+	})
+
+	var logs strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin, Logger: logger})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "openclaw active config not found") {
+		t.Errorf("missing active config was not warned about; log was:\n%s", out)
+	}
+	if !strings.Contains(out, "include_target=none") {
+		t.Errorf("prepared-config log should record include_target=none; log was:\n%s", out)
+	}
+	if result.IncludeRoot != "" {
+		t.Errorf("IncludeRoot = %q, want empty", result.IncludeRoot)
+	}
+}

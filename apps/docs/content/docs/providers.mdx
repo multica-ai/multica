@@ -30,7 +30,6 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
 | Hermes | `hermes` | ✓ | ✓ | per-task `HERMES_HOME/skills/` |
 | Kimi CLI | `kimi` | ✓ | ✓ | `.kimi/skills/` |
-| Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Kiro CLI | `kiro-cli` | ✓ | ✓ | `.kiro/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
@@ -38,6 +37,8 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | `.qwen/skills/` |
+| QwenPaw | `qwenpaw` | ✓ | ✓ | per-task workspace `skills/` |
+| Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 
 "Multica-managed MCP" means you can define MCP servers in the agent configuration and Multica passes them to the tool before a run. It does not mean the tool has no other way to configure MCP.
@@ -47,6 +48,8 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 When you create an agent, the model list comes from the corresponding runtime. Some tools expose a fixed set of model names; others return available models based on local configuration, the signed-in account, and subscription entitlements.
 
 If you do not pick a model, Multica uses the tool's own default. If the list is empty, confirm the runtime is online and the tool is signed in, then refresh the model list.
+
+QwenPaw is the one exception: it does not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in QwenPaw's own configuration instead. An empty model list is expected there and is not a sign that the runtime is offline.
 
 <Callout type="info">
 Different tools may use different model names. After switching AI coding tools, the previous model value is invalid in the new tool and needs to be selected again.

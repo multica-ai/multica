@@ -30,7 +30,6 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 | Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
 | Hermes | `hermes` | ✓ | ✓ | 单次执行的 `HERMES_HOME/skills/` |
 | Kimi CLI | `kimi` | ✓ | ✓ | `.kimi/skills/` |
-| Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Kiro CLI | `kiro-cli` | ✓ | ✓ | `.kiro/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
@@ -38,6 +37,8 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 | Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | `.qwen/skills/` |
+| QwenPaw | `qwenpaw` | ✓ | ✓ | 单次执行的工作区 `skills/` |
+| Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 
 "Multica 管理 MCP" 表示你可以在智能体配置中填写 MCP server，由 Multica 在执行前传给对应工具。它不代表该工具本身没有其他 MCP 配置方式。
@@ -47,6 +48,8 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 创建智能体时，模型列表来自对应的运行时。有些工具提供固定的模型名称，有些会根据本机配置、登录账号和订阅权益返回可用模型。
 
 不选择模型时，Multica 使用该工具的默认设置。列表为空时，先确认运行时在线并且工具已经登录，再刷新模型列表。
+
+QwenPaw 是唯一的例外：它不接受在 Multica 侧选择的模型，因此选择框不可用，显示为"由运行时管理"。请改在 QwenPaw 自身的配置里选择模型。它的模型列表为空属于正常情况，并不表示运行时离线。
 
 <Callout type="info">
 不同工具可能使用不同的模型名称。更换 AI 编程工具后，原有的模型值在新工具中无效，需要重新选择。

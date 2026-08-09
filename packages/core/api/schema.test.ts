@@ -293,6 +293,31 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listDingTalkInstallations", () => {
+    it("falls back to a safe empty shape when the response is malformed", async () => {
+      // `installations` with the wrong type triggers the fallback; the panel
+      // must not white-screen on `configured`/`install_supported`.
+      stubFetchJson({ installations: "not-an-array", configured: true });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
+      expect(res).toEqual({ installations: [], configured: false });
+    });
+
+    it("tolerates an old-server row and a missing install_supported flag", async () => {
+      stubFetchJson({
+        installations: [{ id: "dt-1", status: "active" }],
+        configured: true,
+        // install_supported omitted (predates the flag) -> undefined, not a crash
+        future_field: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
+      expect(res.installations).toHaveLength(1);
+      expect(res.configured).toBe(true);
+      expect(res.install_supported).toBeUndefined();
+    });
+  });
+
   describe("getConfig", () => {
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({
@@ -599,6 +624,100 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.cronPreview({ expr: "0 9 * * *", tz: "UTC" });
       expect(res).toEqual({ next_runs: null });
+    });
+  });
+
+  describe("cloud billing", () => {
+    it("falls back to an empty balance when the response is malformed", async () => {
+      stubFetchJson({ balance_micro: "not-a-number" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getCloudBillingBalance()).resolves.toEqual({
+        owner_id: "",
+        balance_micro: 0,
+        balance_credit: 0,
+        updated_at: "",
+      });
+    });
+
+    it("falls back to an empty transactions page when items are malformed", async () => {
+      stubFetchJson({ items: "not-an-array", total: 1, page: 1, page_size: 20 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listCloudBillingTransactions()).resolves.toEqual({
+        items: [],
+        total: 0,
+        page: 1,
+        page_size: 20,
+      });
+    });
+
+    it("falls back to an empty batches page when items are malformed", async () => {
+      stubFetchJson({ items: "not-an-array", total: 1, page: 1, page_size: 20 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listCloudBillingBatches()).resolves.toEqual({
+        items: [],
+        total: 0,
+        page: 1,
+        page_size: 20,
+      });
+    });
+
+    it("falls back to an empty top-ups page when items are malformed", async () => {
+      stubFetchJson({ items: "not-an-array", total: 1, page: 1, page_size: 20 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listCloudBillingTopups()).resolves.toEqual({
+        items: [],
+        total: 0,
+        page: 1,
+        page_size: 20,
+      });
+    });
+
+    it("falls back to no price tiers when the response is not an array", async () => {
+      stubFetchJson({ tiers: [] });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listCloudBillingPriceTiers()).resolves.toEqual([]);
+    });
+
+    it("falls back to an empty checkout session when the response is malformed", async () => {
+      stubFetchJson({ order_id: 123 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.createCloudBillingCheckoutSession({ tier_id: "starter" }),
+      ).resolves.toEqual({
+        order_id: "",
+        session_id: "",
+        url: "",
+      });
+    });
+
+    it("falls back to a pending checkout status when the response is malformed", async () => {
+      stubFetchJson({ status: 123 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getCloudBillingCheckoutSession("cs_test")).resolves.toEqual({
+        order_id: "",
+        status: "pending",
+        amount_cents: 0,
+        credits: 0,
+        bonus_credits: 0,
+        currency: "usd",
+        tier_id: "",
+      });
+    });
+
+    it("falls back to an empty portal URL when the response is malformed", async () => {
+      stubFetchJson({ url: 123 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.createCloudBillingPortalSession()).resolves.toEqual({
+        url: "",
+      });
     });
   });
 });

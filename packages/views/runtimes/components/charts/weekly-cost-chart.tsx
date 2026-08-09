@@ -43,7 +43,7 @@ export function WeeklyCostChart({ data }: { data: WeeklyCostStackData[] }) {
           axisLine={false}
           tickMargin={8}
           tickFormatter={(v: number) => `$${v}`}
-          width={50}
+          width="auto"
         />
         <ChartTooltip
           content={

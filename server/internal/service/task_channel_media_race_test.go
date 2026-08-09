@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // raceInjectTxStarter wraps the pool so the transaction handed to
@@ -133,5 +135,147 @@ func TestEnqueueChatTaskDefersWhenMediaMessageCommitsDuringEnqueue(t *testing.T)
 	}
 	if status != "queued" {
 		t.Fatalf("promoted task status = %q, want queued", status)
+	}
+}
+
+func TestDeferredChannelIssueTaskPromotesAfterMediaSettlement(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, assignee_type, assignee_id, creator_type, creator_id, number)
+		VALUES ($1, 'Channel media', 'todo', 'none', 'agent', $2, 'member', $3, 880001)
+		RETURNING id`, workspaceID, agentID, userID).Scan(&issueID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	bus := events.New()
+	queued := 0
+	bus.Subscribe(protocol.EventTaskQueued, func(events.Event) { queued++ })
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: bus}
+	deadline := time.Now().Add(time.Minute)
+	task, err := svc.EnqueueDeferredChannelIssueTask(ctx, db.Issue{
+		ID:           issueID,
+		WorkspaceID:  util.MustParseUUID(workspaceID),
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:   util.MustParseUUID(agentID),
+		CreatorType:  "member",
+		CreatorID:    util.MustParseUUID(userID),
+		Priority:     "none",
+	}, deadline)
+	if err != nil {
+		t.Fatalf("EnqueueDeferredChannelIssueTask: %v", err)
+	}
+	if task.Status != "deferred" || !task.FireAt.Valid {
+		t.Fatalf("task = status %q fire_at %v, want deferred", task.Status, task.FireAt)
+	}
+	if queued != 0 {
+		t.Fatalf("queued events before media settlement = %d, want 0", queued)
+	}
+	hasPending, err := q.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: util.MustParseUUID(agentID),
+	})
+	if err != nil || !hasPending {
+		t.Fatalf("media-gated task pending check = %v, %v; want true, nil", hasPending, err)
+	}
+	hasActive, err := q.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: util.MustParseUUID(agentID),
+	})
+	if err != nil || !hasActive {
+		t.Fatalf("media-gated task active check = %v, %v; want true, nil", hasActive, err)
+	}
+	var commentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
+		VALUES ($1, $2, 'member', $3, 'More context') RETURNING id`, issueID, workspaceID, userID).Scan(&commentID); err != nil {
+		t.Fatalf("seed comment: %v", err)
+	}
+	merged, err := q.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+		IssueID:                 issueID,
+		AgentID:                 util.MustParseUUID(agentID),
+		NewTriggerCommentID:     commentID,
+		NewOriginatorUserID:     util.MustParseUUID(userID),
+		NewAccountableUserID:    util.MustParseUUID(userID),
+		NewOriginatorSource:     pgtype.Text{String: "direct_human", Valid: true},
+		NewTriggerEvidenceKind:  pgtype.Text{String: "comment", Valid: true},
+		NewTriggerEvidenceRefID: commentID,
+	})
+	if err != nil || merged.ID != task.ID {
+		t.Fatalf("merge into media-gated task = %+v, %v; want task %s", merged, err, util.UUIDToString(task.ID))
+	}
+
+	if err := svc.PromoteDeferredChannelIssueTask(ctx, task.ID); err != nil {
+		t.Fatalf("PromoteDeferredChannelIssueTask: %v", err)
+	}
+	if queued != 1 {
+		t.Fatalf("queued events after promotion = %d, want 1", queued)
+	}
+	var status string
+	var fireAt pgtype.Timestamptz
+	if err := pool.QueryRow(ctx, `SELECT status, fire_at FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&status, &fireAt); err != nil {
+		t.Fatalf("load promoted task: %v", err)
+	}
+	if status != "queued" || fireAt.Valid {
+		t.Fatalf("promoted task = status %q fire_at %v, want queued with no deadline", status, fireAt)
+	}
+	if err := svc.PromoteDeferredChannelIssueTask(ctx, task.ID); err != nil {
+		t.Fatalf("idempotent promotion: %v", err)
+	}
+	if queued != 1 {
+		t.Fatalf("queued events after idempotent promotion = %d, want 1", queued)
+	}
+}
+
+func TestDeferredChannelIssueTaskConflictsWithQueuedSiblingAtDatabase(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+
+	var indexDefinition string
+	if err := pool.QueryRow(ctx, `SELECT pg_get_indexdef('idx_one_pending_task_per_issue_agent_v2'::regclass)`).Scan(&indexDefinition); err != nil {
+		t.Fatalf("load pending-task index: %v", err)
+	}
+	if !strings.Contains(indexDefinition, "channel_issue_media_pending") {
+		t.Skip("channel-media pending-task uniqueness migration is not applied")
+	}
+
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, assignee_type, assignee_id, creator_type, creator_id, number)
+		VALUES ($1, 'Channel media uniqueness', 'todo', 'none', 'agent', $2, 'member', $3, 880002)
+		RETURNING id`, workspaceID, agentID, userID).Scan(&issueID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	task, err := svc.EnqueueDeferredChannelIssueTask(ctx, db.Issue{
+		ID:           issueID,
+		WorkspaceID:  util.MustParseUUID(workspaceID),
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:   util.MustParseUUID(agentID),
+		CreatorType:  "member",
+		CreatorID:    util.MustParseUUID(userID),
+		Priority:     "none",
+	}, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("EnqueueDeferredChannelIssueTask: %v", err)
+	}
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)`, task.AgentID, task.RuntimeID, issueID)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" || pgErr.ConstraintName != "idx_one_pending_task_per_issue_agent_v2" {
+		t.Fatalf("queued sibling insert error = %v, want unique violation on pending-task index", err)
 	}
 }

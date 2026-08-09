@@ -97,6 +97,13 @@
       ]
     },
     {
+      "label": "DingTalk account-bind route",
+      "description": "`/dingtalk/bind` is a global pre-workspace route where a member links their DingTalk identity. Reserve the prefix so a workspace slug cannot shadow it.",
+      "slugs": [
+        "dingtalk"
+      ]
+    },
+    {
       "label": "Backend ops / observability",
       "description": "`/health`, `/readyz`, `/healthz`, and `/ws` exist on the backend host; reserving them on the workspace slug space prevents naming confusion if/when these paths are ever proxied through the web origin.",
       "slugs": [
