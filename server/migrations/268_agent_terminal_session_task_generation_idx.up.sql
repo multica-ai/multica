@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY agent_terminal_session_task_generation_idx ON agent_terminal_session(task_id, generation);

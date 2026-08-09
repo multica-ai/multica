@@ -120,6 +120,9 @@ type Config struct {
 	CodebuddyArgs                  []string
 	QwenArgs                       []string
 	QwenpawArgs                    []string
+	PTYEnabled                     bool
+	PTYRuntimeAllowlist            []string
+	PTYWorkspaceAllowlist          []string
 
 	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
 	// executable path to use for that profile on THIS machine (MUL-3284).
@@ -248,6 +251,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	ptyEnabled := boolFromEnv("MULTICA_PTY_ENABLED", false)
+	ptyRuntimeAllowlist := csvValuesFromEnv("MULTICA_PTY_RUNTIME_ALLOWLIST", []string{"codex"})
+	ptyWorkspaceAllowlist := csvValuesFromEnv("MULTICA_PTY_WORKSPACE_ALLOWLIST", nil)
 
 	// Host info
 	host, err := os.Hostname()
@@ -493,8 +499,32 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodebuddyArgs:                  codebuddyArgs,
 		QwenArgs:                       qwenArgs,
 		QwenpawArgs:                    qwenpawArgs,
+		PTYEnabled:                     ptyEnabled,
+		PTYRuntimeAllowlist:            ptyRuntimeAllowlist,
+		PTYWorkspaceAllowlist:          ptyWorkspaceAllowlist,
 		ProfileCommandOverrides:        profileCommandOverrides,
 	}, nil
+}
+
+func csvValuesFromEnv(name string, fallback []string) []string {
+	raw, present := os.LookupEnv(name)
+	if !present || strings.TrimSpace(raw) == "" {
+		return append([]string(nil), fallback...)
+	}
+	seen := make(map[string]struct{})
+	values := make([]string, 0)
+	for _, part := range strings.Split(raw, ",") {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
 }
 
 // officialCloudHost is the hostname of Multica's hosted cloud. It's the only

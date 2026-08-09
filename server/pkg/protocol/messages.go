@@ -10,6 +10,10 @@ const (
 	// Gated so only daemons+servers that both support it route claim over WS;
 	// everyone else keeps using the HTTP claim endpoint.
 	DaemonCapabilityRPCV1 = "rpc-v1"
+	// DaemonCapabilityTerminalPTYV1 advertises support for the dedicated,
+	// versioned Web PTY data plane. Availability for a particular task is still
+	// negotiated through terminal metadata and the server/daemon feature gates.
+	DaemonCapabilityTerminalPTYV1 = "terminal-pty-v1"
 
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:

@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	daemonterminal "github.com/multica-ai/multica/server/internal/daemon/terminal"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -289,11 +290,14 @@ type repoCacheBackend interface {
 
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
-	cfg        Config
-	client     *Client
-	repoCache  repoCacheBackend
-	skillCache *SkillBundleCache
-	logger     *slog.Logger
+	cfg               Config
+	client            *Client
+	repoCache         repoCacheBackend
+	skillCache        *SkillBundleCache
+	logger            *slog.Logger
+	terminalManager   *daemonterminal.Manager
+	terminalEvents    chan daemonterminal.Event
+	terminalConnected atomic.Bool
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -584,6 +588,10 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
+	if cfg.PTYEnabled {
+		d.terminalEvents = make(chan daemonterminal.Event, 4096)
+		d.terminalManager = daemonterminal.NewManager(daemonterminal.Options{OnEvent: d.enqueueTerminalEvent})
+	}
 	return d
 }
 
@@ -1725,6 +1733,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
+	if d.terminalManager != nil {
+		defer d.terminalManager.StopAll()
+		go d.terminalConnectionLoop(ctx)
+	}
 
 	// Preflight succeeded and the background loops are up: the daemon has
 	// registered its runtimes and can now claim and run tasks. Flip /health
@@ -6105,14 +6117,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
-	taskLog.Info("starting agent",
-		"provider", provider,
-		"workdir", env.WorkDir,
-		"model", entry.Model,
-		"reused", reused,
-	)
-	if task.PriorSessionID != "" {
-		taskLog.Info("resuming session", "session_id", task.PriorSessionID)
+	ptyMode := d.ptyTaskAllowed(provider, task.WorkspaceID, usesCustomProfileCommand)
+	if !ptyMode {
+		taskLog.Info("starting agent",
+			"provider", provider,
+			"workdir", env.WorkDir,
+			"model", entry.Model,
+			"reused", reused,
+		)
+		if task.PriorSessionID != "" {
+			taskLog.Info("resuming session", "session_id", task.PriorSessionID)
+		}
 	}
 
 	taskStart := time.Now()
@@ -6278,6 +6293,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			"target_task", shortID(task.RegenerateQuickActionsFor),
 		)
 		return TaskResult{Status: "completed", Comment: "", WorkDir: env.WorkDir, EnvRoot: env.RootDir}, nil
+	}
+
+	if ptyMode {
+		return d.runInteractivePTYTask(ctx, task, entry.Path, env, agentEnv, prompt, execOpts, taskLog)
 	}
 
 	taskLog.Debug("invoking backend",
