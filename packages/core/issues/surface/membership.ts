@@ -43,7 +43,18 @@ export function issueChangedDims(
       (has("assignee_id") && (!base || base.assignee_id !== p.assignee_id)) ||
       (has("assignee_type") && (!base || base.assignee_type !== p.assignee_type)),
     project: has("project_id") && (!base || base.project_id !== p.project_id),
-    status: has("status") && p.status !== undefined && (!base || base.status !== p.status),
+    // status_id is the authoritative status: moving between two custom statuses
+    // in the SAME Category leaves the legacy `status` token unchanged, so keying
+    // only off `status` misses that move and the settle/reconcile leaves the
+    // issue in its old column (MUL-4809). The StatusPicker sends status_id, so
+    // this is the common path, not an edge case.
+    status:
+      (has("status") &&
+        p.status !== undefined &&
+        (!base || base.status !== p.status)) ||
+      (has("status_id") &&
+        p.status_id !== undefined &&
+        (!base || base.status_id !== p.status_id)),
   };
 }
 

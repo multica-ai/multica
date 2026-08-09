@@ -21,6 +21,15 @@ const (
 	// key as enabled so installed v0.4.0 desktop clients, which still gate the
 	// switch on this config decision, receive the permanently enabled behavior.
 	agentSkillTogglesCompat = "agents_skill_toggles"
+	// AutopilotTaskDrivenRuns is the two-phase rollout gate for finalizing
+	// create_issue autopilot runs off task outcome (MUL-4809 §4.1). Default OFF:
+	// the process finalizes create_issue runs the legacy way (issue status →
+	// SyncRunFromIssue) so it stays consistent with old pods whose terminal SQL is
+	// unguarded. Phase 1 deploys this binary with the gate off and drains old pods;
+	// Phase 2 flips FF_AUTOPILOT_TASK_DRIVEN_RUNS=true so all pods (now on guarded
+	// CAS SQL) switch to task-driven finalization together. Server-only; not a
+	// frontend public flag. Delete once fully rolled out.
+	AutopilotTaskDrivenRuns = "autopilot_task_driven_runs"
 	// resourceLabelsCompat is no longer a release flag. Keep publishing the key
 	// as enabled for installed desktop clients from v0.4.0 through at least
 	// v0.4.15, every release shipped before this change. Unlike the skill-toggle
@@ -36,6 +45,14 @@ var frontendPublicFlags = []string{
 
 func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, ComposioMCPApps, false)
+}
+
+// AutopilotTaskDrivenRunsEnabled reports whether create_issue autopilot runs are
+// finalized off task outcome (the new path) rather than issue status (legacy).
+// Default OFF for the two-phase rollout (MUL-4809 §4.1). Nil-safe: a nil Service
+// returns the default.
+func AutopilotTaskDrivenRunsEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, AutopilotTaskDrivenRuns, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

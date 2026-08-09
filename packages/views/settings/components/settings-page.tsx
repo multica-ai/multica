@@ -15,6 +15,7 @@ import {
   Tags,
   Keyboard,
   ListTodo,
+  CircleDashed,
   Zap,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
@@ -36,6 +37,7 @@ import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { PropertiesTab } from "./properties-tab";
+import { StatusesTab } from "./statuses-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { CollapsedNavTrigger } from "../../layout/page-header";
@@ -61,6 +63,7 @@ const WORKSPACE_TAB_KEYS = [
   "members",
   "labels",
   "properties",
+  "statuses",
   "quick_actions",
 ] as const;
 const WORKSPACE_TAB_VALUES = {
@@ -72,6 +75,7 @@ const WORKSPACE_TAB_VALUES = {
   members: "members",
   labels: "labels",
   properties: "properties",
+  statuses: "statuses",
   quick_actions: "quick-actions",
 } as const;
 const WORKSPACE_TAB_ICONS = {
@@ -83,6 +87,7 @@ const WORKSPACE_TAB_ICONS = {
   members: Users,
   labels: Tags,
   properties: SlidersHorizontal,
+  statuses: CircleDashed,
   quick_actions: Zap,
 } as const;
 
@@ -222,7 +227,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
 
       {/* Right content */}
       <div className="min-w-0 flex-1 md:overflow-y-auto">
-        <div className={`mx-auto w-full p-4 sm:p-6 md:p-8 ${activeTab === "labels" || activeTab === "properties" || activeTab === "quick-actions"
+        <div className={`mx-auto w-full p-4 sm:p-6 md:p-8 ${activeTab === "labels" || activeTab === "properties" || activeTab === "statuses" || activeTab === "quick-actions"
               ? "max-w-5xl"
               : "max-w-3xl"}`}>
           <TabsContent value="profile"><AccountTab /></TabsContent>
@@ -240,6 +245,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="members"><MembersTab /></TabsContent>
           <TabsContent value="labels"><LabelsTab /></TabsContent>
           <TabsContent value="properties"><PropertiesTab /></TabsContent>
+          <TabsContent value="statuses"><StatusesTab /></TabsContent>
           <TabsContent value="quick-actions"><QuickActionsTab /></TabsContent>
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>

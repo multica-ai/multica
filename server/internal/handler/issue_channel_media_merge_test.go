@@ -325,3 +325,160 @@ func TestDescriptionUpdateLockSerializesLaterChannelMediaAppend(t *testing.T) {
 		t.Fatalf("final description = %q, want %q", description, want)
 	}
 }
+
+// A combined status + description update must STILL run the channel-media
+// merge (MUL-4809). The status-write path takes its own status-lock
+// transaction; when the branch chain routed a combined request to that path
+// exclusively, the merge was skipped and channel media appended after the
+// editor's base was silently dropped.
+func TestUpdateIssueMergesChannelMediaWhenStatusAlsoChanges(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("requires test database")
+	}
+	// status_id is only written on a seeded workspace; seed so the double-write
+	// assertion below is meaningful rather than vacuously NULL.
+	ensureTestWorkspaceStatuses(t)
+	ctx := context.Background()
+
+	create := httptest.NewRecorder()
+	testHandler.CreateIssue(create, newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":       "Status plus description merge",
+		"description": "Original",
+		"status":      "todo",
+		"priority":    "none",
+	}))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create issue: status %d: %s", create.Code, create.Body.String())
+	}
+	var created IssueResponse
+	if err := json.NewDecoder(create.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	attachmentID := uuid.New().String()
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO attachment (
+			id, workspace_id, issue_id, uploader_type, uploader_id,
+			filename, url, content_type, size_bytes
+		) VALUES ($1, $2, $3, 'member', $4, 'diagram.png', $5, 'image/png', 3)
+	`, attachmentID, testWorkspaceID, created.ID, testUserID, "https://cdn.example.test/"+attachmentID); err != nil {
+		t.Fatalf("insert channel attachment: %v", err)
+	}
+	block := channelmedia.Block(attachmentID, "diagram.png", true)
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET description = $1, updated_at = now() WHERE id = $2`,
+		channelmedia.Append("Original", block), created.ID); err != nil {
+		t.Fatalf("append remote channel media: %v", err)
+	}
+
+	// Status AND description in one request — the combination that regressed.
+	update := httptest.NewRecorder()
+	updateReq := withURLParam(newRequest(http.MethodPut, "/api/issues/"+created.ID, map[string]any{
+		"description":      "Original with local edit",
+		"description_base": "Original",
+		"status":           "in_progress",
+	}), "id", created.ID)
+	testHandler.UpdateIssue(update, updateReq)
+	if update.Code != http.StatusOK {
+		t.Fatalf("update issue: status %d: %s", update.Code, update.Body.String())
+	}
+	var merged IssueResponse
+	if err := json.NewDecoder(update.Body).Decode(&merged); err != nil {
+		t.Fatalf("decode merged issue: %v", err)
+	}
+
+	if merged.Description == nil || !strings.Contains(*merged.Description, "Original with local edit") {
+		t.Fatalf("local edit lost: %#v", merged.Description)
+	}
+	// The regression: media appended after the base was dropped entirely.
+	if !strings.Contains(*merged.Description, channelmedia.DownloadPath(attachmentID)) {
+		t.Fatalf("channel media dropped by a combined status+description update: %#v", merged.Description)
+	}
+	// The status write must still have landed, in the same transaction.
+	if merged.Status != "in_progress" {
+		t.Fatalf("status = %q, want in_progress", merged.Status)
+	}
+	if merged.StatusID == nil {
+		t.Fatal("combined update must still double-write status_id")
+	}
+}
+
+// Same composition for the batch path: a batch that sets status AND description
+// must merge channel media rather than take the status branch alone.
+func TestBatchUpdateMergesChannelMediaWhenStatusAlsoChanges(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("requires test database")
+	}
+	// status_id is only written on a seeded workspace; seed so the double-write
+	// assertion below is meaningful rather than vacuously NULL.
+	ensureTestWorkspaceStatuses(t)
+	ctx := context.Background()
+
+	create := httptest.NewRecorder()
+	testHandler.CreateIssue(create, newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":       "Batch status plus description merge",
+		"description": "Original",
+		"status":      "todo",
+		"priority":    "none",
+	}))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create issue: status %d: %s", create.Code, create.Body.String())
+	}
+	var created IssueResponse
+	if err := json.NewDecoder(create.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	attachmentID := uuid.New().String()
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO attachment (
+			id, workspace_id, issue_id, uploader_type, uploader_id,
+			filename, url, content_type, size_bytes
+		) VALUES ($1, $2, $3, 'member', $4, 'diagram.png', $5, 'image/png', 3)
+	`, attachmentID, testWorkspaceID, created.ID, testUserID, "https://cdn.example.test/"+attachmentID); err != nil {
+		t.Fatalf("insert channel attachment: %v", err)
+	}
+	block := channelmedia.Block(attachmentID, "diagram.png", true)
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET description = $1 WHERE id = $2`,
+		channelmedia.Append("Original", block), created.ID); err != nil {
+		t.Fatalf("append remote channel media: %v", err)
+	}
+
+	batch := httptest.NewRecorder()
+	testHandler.BatchUpdateIssues(batch, newRequest(http.MethodPost, "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{created.ID},
+		"updates": map[string]any{
+			"description": "Batch edit",
+			"status":      "in_progress",
+		},
+	}))
+	if batch.Code != http.StatusOK {
+		t.Fatalf("batch update: status %d: %s", batch.Code, batch.Body.String())
+	}
+
+	var description string
+	var status string
+	var statusID *string
+	if err := testPool.QueryRow(ctx,
+		`SELECT description, status, status_id::text FROM issue WHERE id = $1`, created.ID,
+	).Scan(&description, &status, &statusID); err != nil {
+		t.Fatalf("read issue: %v", err)
+	}
+	if !strings.Contains(description, "Batch edit") {
+		t.Fatalf("batch edit lost: %q", description)
+	}
+	if !strings.Contains(description, channelmedia.DownloadPath(attachmentID)) {
+		t.Fatalf("channel media dropped by a combined batch status+description update: %q", description)
+	}
+	if status != "in_progress" {
+		t.Fatalf("status = %q, want in_progress", status)
+	}
+	if statusID == nil {
+		t.Fatal("combined batch update must still double-write status_id")
+	}
+}

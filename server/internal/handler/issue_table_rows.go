@@ -458,6 +458,9 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		issueIDs[index] = row.issue.ID
 	}
 	labelsByIssue := baseHandler.labelsByIssue(r.Context(), compiled.workspaceID, issueIDs)
+	// Resolve the catalog status in one round-trip so a Table row renders a custom
+	// status by its own name/icon/color instead of the legacy token (MUL-4809).
+	statusDetails := baseHandler.statusDetailsByIssue(r.Context(), compiled.workspaceID, issueIDs)
 	responseRows := make([]issueTableRowResponse, len(scanned))
 	for index, row := range scanned {
 		issue := issueListRowToResponse(row.issue, prefix)
@@ -466,6 +469,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 			labels = []LabelResponse{}
 		}
 		issue.Labels = &labels
+		applyStatusDetail(&issue, statusDetails)
 		responseRows[index] = issueTableRowResponse{
 			Issue:            issue,
 			DirectChildCount: row.childCount,

@@ -1132,10 +1132,10 @@ func publishStatusChange(bus *events.Bus, issueID, newStatus, prevStatus string)
 }
 
 // TestNotification_StatusChange_ArchivesStaleTaskFailed verifies that when an
-// issue transitions into a terminal status (in_review/done/cancelled), any
-// existing task_failed inbox rows for that issue are archived for every
-// affected member recipient, an inbox:batch-archived event fires per
-// recipient, and sibling notifications on the same issue are untouched.
+// issue reaches a terminal Category (done/cancelled), any existing task_failed
+// inbox rows for that issue are archived for every affected member recipient, an
+// inbox:batch-archived event fires per recipient, and sibling notifications on the
+// same issue are untouched.
 func TestNotification_StatusChange_ArchivesStaleTaskFailed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
@@ -1193,7 +1193,7 @@ func TestNotification_StatusChange_ArchivesStaleTaskFailed(t *testing.T) {
 		batchArchived = append(batchArchived, e)
 	})
 
-	publishStatusChange(bus, issueID, "in_review", "in_progress")
+	publishStatusChange(bus, issueID, "done", "in_progress")
 
 	// task_failed rows are archived for both recipients.
 	for _, recipient := range []string{testUserID, subID} {
@@ -1280,6 +1280,47 @@ func TestNotification_StatusChange_NonTerminalKeepsTaskFailed(t *testing.T) {
 	}
 }
 
+// TestNotification_StatusChange_InReviewKeepsTaskFailed verifies MUL-4809 §4.2:
+// in_review is an in_progress-Category status, not a terminal one, so moving an
+// issue to in_review must NOT archive its task_failed inbox rows. This is the
+// removal of the old in_review special-case — dismissal now keys off the terminal
+// Category (done/cancelled) alone.
+func TestNotification_StatusChange_InReviewKeepsTaskFailed(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskFailed,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		Payload: map[string]any{
+			"task_id":  "00000000-0000-0000-0000-bbbbbbbbbbbb",
+			"agent_id": "00000000-0000-0000-0000-aaaaaaaaaaaa",
+			"issue_id": issueID,
+		},
+	})
+
+	if active, _ := countInboxByTypeForRecipient(t, testUserID, "task_failed"); active != 1 {
+		t.Fatalf("precondition: expected 1 active task_failed row, got %d", active)
+	}
+
+	publishStatusChange(bus, issueID, "in_review", "in_progress")
+
+	// in_review is in_progress Category, so the failure row must stay active.
+	active, archived := countInboxByTypeForRecipient(t, testUserID, "task_failed")
+	if active != 1 || archived != 0 {
+		t.Fatalf("expected task_failed row to remain active after in_review transition, got active=%d archived=%d", active, archived)
+	}
+}
+
 // TestNotification_StatusChange_ReopenSurfacesNewTaskFailed verifies that
 // after a terminal-status auto-archive, a status flip back to in_progress
 // followed by a new task failure produces a fresh, visible task_failed row.
@@ -1310,13 +1351,13 @@ func TestNotification_StatusChange_ReopenSurfacesNewTaskFailed(t *testing.T) {
 	})
 
 	// First terminal transition archives the original failure.
-	publishStatusChange(bus, issueID, "in_review", "in_progress")
+	publishStatusChange(bus, issueID, "done", "in_progress")
 	if active, archived := countInboxByTypeForRecipient(t, testUserID, "task_failed"); active != 0 || archived != 1 {
 		t.Fatalf("after terminal transition: expected active=0 archived=1, got active=%d archived=%d", active, archived)
 	}
 
 	// Reviewer kicks the issue back; a rerun fails again.
-	publishStatusChange(bus, issueID, "in_progress", "in_review")
+	publishStatusChange(bus, issueID, "in_progress", "done")
 	bus.Publish(events.Event{
 		Type:        protocol.EventTaskFailed,
 		WorkspaceID: testWorkspaceID,

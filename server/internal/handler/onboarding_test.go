@@ -241,6 +241,10 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 		testUserID,
 	)
 
+	// A real workspace has its status catalog seeded at creation, before onboarding
+	// runs; seed the raw-SQL test workspace so the shim resolves a real status_id.
+	ensureTestWorkspaceStatuses(t)
+
 	body := map[string]string{
 		"workspace_id": testWorkspaceID,
 		"runtime_id":   testRuntimeID,
@@ -290,13 +294,14 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 		assigneeType  string
 		assigneeID    string
 		issueStatus   string
+		issueStatusID *string
 		issuePriority string
 	)
 	if err := testPool.QueryRow(ctx, `
-		SELECT title, assignee_type, assignee_id, status, priority
+		SELECT title, assignee_type, assignee_id, status, status_id::text, priority
 		  FROM issue
 		 WHERE id = $1
-	`, resp.IssueID).Scan(&issueTitle, &assigneeType, &assigneeID, &issueStatus, &issuePriority); err != nil {
+	`, resp.IssueID).Scan(&issueTitle, &assigneeType, &assigneeID, &issueStatus, &issueStatusID, &issuePriority); err != nil {
 		t.Fatalf("lookup onboarding issue: %v", err)
 	}
 	if issueTitle != onboardingIssueTitle {
@@ -307,6 +312,12 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	}
 	if issueStatus != "todo" || issuePriority != "high" {
 		t.Fatalf("issue status/priority = %s/%s, want todo/high", issueStatus, issuePriority)
+	}
+	// MUL-4809 P0-3: the onboarding shim is a leaked create entrypoint — it writes
+	// the issue via a direct qtx.CreateIssue, not IssueService.Create. On a seeded
+	// workspace it must still double-write status_id, not leave it NULL.
+	if issueStatusID == nil || *issueStatusID == "" {
+		t.Fatal("onboarding issue left status_id NULL — the shim did not double-write through the catalog")
 	}
 
 	var (
@@ -510,6 +521,10 @@ func TestBootstrapOnboardingNoRuntimeCreatesSingleGuideIssue(t *testing.T) {
 		testUserID,
 	)
 
+	// A real workspace has its status catalog seeded at creation, before onboarding
+	// runs; seed the raw-SQL test workspace so the shim resolves a real status_id.
+	ensureTestWorkspaceStatuses(t)
+
 	body := map[string]string{
 		"workspace_id": testWorkspaceID,
 	}
@@ -532,14 +547,15 @@ func TestBootstrapOnboardingNoRuntimeCreatesSingleGuideIssue(t *testing.T) {
 		assigneeType  string
 		assigneeID    string
 		issueStatus   string
+		issueStatusID *string
 		issuePriority string
 		description   string
 	)
 	if err := testPool.QueryRow(ctx, `
-		SELECT title, assignee_type, assignee_id, status, priority, description
+		SELECT title, assignee_type, assignee_id, status, status_id::text, priority, description
 		  FROM issue
 		 WHERE id = $1
-	`, resp.IssueID).Scan(&issueTitle, &assigneeType, &assigneeID, &issueStatus, &issuePriority, &description); err != nil {
+	`, resp.IssueID).Scan(&issueTitle, &assigneeType, &assigneeID, &issueStatus, &issueStatusID, &issuePriority, &description); err != nil {
 		t.Fatalf("lookup no-runtime onboarding issue: %v", err)
 	}
 	if issueTitle != noRuntimeIssueTitle {
@@ -550,6 +566,11 @@ func TestBootstrapOnboardingNoRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	}
 	if issueStatus != "todo" || issuePriority != "high" {
 		t.Fatalf("issue status/priority = %s/%s, want todo/high", issueStatus, issuePriority)
+	}
+	// MUL-4809 P0-3: the no-runtime shim is also a leaked create entrypoint; on a
+	// seeded workspace it must double-write status_id, not leave it NULL.
+	if issueStatusID == nil || *issueStatusID == "" {
+		t.Fatal("no-runtime onboarding issue left status_id NULL — the shim did not double-write through the catalog")
 	}
 	for _, want := range []string{
 		"Try Multica first",
