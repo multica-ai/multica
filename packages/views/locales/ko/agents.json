@@ -354,6 +354,8 @@
       "intro_prefix": "에이전트 프로세스가 시작될 때 주입됩니다(예: ",
       "intro_separator": ", ",
       "intro_suffix": ").",
+      "paste_hint": "키 필드에 KEY=value 형식의 줄을 붙여넣으면 여러 환경 변수를 추가할 수 있습니다.",
+      "paste_invalid_toast": "붙여넣은 환경 변수를 파싱할 수 없습니다",
       "key_placeholder": "KEY",
       "value_placeholder": "value",
       "show_value_aria": "값 표시",

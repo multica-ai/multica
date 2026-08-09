@@ -463,6 +463,8 @@
       "intro_prefix": "Injected into the agent process at launch (e.g. ",
       "intro_separator": ", ",
       "intro_suffix": ").",
+      "paste_hint": "Paste KEY=value lines into a key field to add multiple variables.",
+      "paste_invalid_toast": "Couldn't parse pasted environment variables",
       "key_placeholder": "KEY",
       "value_placeholder": "value",
       "show_value_aria": "Show value",

@@ -453,6 +453,8 @@
       "intro_prefix": "在智能体进程启动时注入（例如 ",
       "intro_separator": "、",
       "intro_suffix": "）。",
+      "paste_hint": "将 KEY=value 格式的内容粘贴到 key 输入框，即可添加多个环境变量。",
+      "paste_invalid_toast": "无法解析粘贴的环境变量",
       "key_placeholder": "KEY",
       "value_placeholder": "值",
       "show_value_aria": "显示值",

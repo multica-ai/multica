@@ -1,21 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import {
-  Eye,
-  EyeOff,
-  Loader2,
-  Lock,
-  Plus,
-  Save,
-  Trash2,
-} from "lucide-react";
+import type { ClipboardEvent } from "react";
+import { Eye, EyeOff, Loader2, Lock, Plus, Save, Trash2 } from "lucide-react";
 import { api } from "@multica/core/api";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
+import { isEnvFilePaste, parseEnvFile } from "./env-file";
 
 // Env values never reach this component until the user clicks
 // "Reveal & edit" — the agent resource feed no longer carries
@@ -42,7 +36,7 @@ function envMapToEntries(env: Record<string, string>): EnvEntry[] {
 }
 
 function entriesToEnvMap(entries: EnvEntry[]): Record<string, string> {
-  const map: Record<string, string> = {};
+  const map = Object.create(null) as Record<string, string>;
   for (const entry of entries) {
     const key = entry.key.trim();
     if (key) {
@@ -130,6 +124,39 @@ export function EnvTab({
     );
   };
 
+  const handleEnvPaste = (
+    index: number,
+    event: ClipboardEvent<HTMLInputElement>,
+  ) => {
+    const text = event.clipboardData.getData("text/plain");
+    const assignments = parseEnvFile(text);
+    if (!assignments) {
+      if (isEnvFilePaste(text)) {
+        event.preventDefault();
+        toast.error(t(($) => $.tab_body.env.paste_invalid_toast));
+      }
+      return;
+    }
+
+    event.preventDefault();
+    setRevealed((prev) => {
+      const currentEntries = prev ?? [];
+      const currentEntry = currentEntries[index];
+      const pastedEntries = assignments.map(({ key, value }, pasteIndex) => ({
+        id: pasteIndex === 0 && currentEntry ? currentEntry.id : nextEnvId++,
+        key,
+        value,
+        visible: false,
+      }));
+
+      return [
+        ...currentEntries.slice(0, index),
+        ...pastedEntries,
+        ...currentEntries.slice(index + 1),
+      ];
+    });
+  };
+
   const toggleEnvVisibility = (index: number) => {
     setRevealed((prev) =>
       (prev ?? []).map((entry, i) =>
@@ -214,17 +241,20 @@ export function EnvTab({
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
-        <p className="text-caption text-muted-foreground">
-          {t(($) => $.tab_body.env.intro_prefix)}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro">
-            {"ANTHROPIC_API_KEY"}
-          </code>
-          {t(($) => $.tab_body.env.intro_separator)}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro">
-            {"ANTHROPIC_BASE_URL"}
-          </code>
-          {t(($) => $.tab_body.env.intro_suffix)}
-        </p>
+        <div className="space-y-1 text-caption text-muted-foreground">
+          <p>
+            {t(($) => $.tab_body.env.intro_prefix)}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro">
+              {"ANTHROPIC_API_KEY"}
+            </code>
+            {t(($) => $.tab_body.env.intro_separator)}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro">
+              {"ANTHROPIC_BASE_URL"}
+            </code>
+            {t(($) => $.tab_body.env.intro_suffix)}
+          </p>
+          <p>{t(($) => $.tab_body.env.paste_hint)}</p>
+        </div>
         <Button
           type="button"
           variant="outline"
@@ -244,6 +274,7 @@ export function EnvTab({
               <Input
                 value={entry.key}
                 onChange={(e) => updateEnvEntry(index, "key", e.target.value)}
+                onPaste={(event) => handleEnvPaste(index, event)}
                 placeholder={t(($) => $.tab_body.env.key_placeholder)}
                 className="w-[40%] font-mono text-caption"
               />
@@ -261,7 +292,11 @@ export function EnvTab({
                   type="button"
                   onClick={() => toggleEnvVisibility(index)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  aria-label={entry.visible ? t(($) => $.tab_body.env.hide_value_aria) : t(($) => $.tab_body.env.show_value_aria)}
+                  aria-label={
+                    entry.visible
+                      ? t(($) => $.tab_body.env.hide_value_aria)
+                      : t(($) => $.tab_body.env.show_value_aria)
+                  }
                 >
                   {entry.visible ? (
                     <EyeOff className="h-3.5 w-3.5" />
@@ -290,7 +325,9 @@ export function EnvTab({
 
       <div className="flex items-center justify-end gap-3">
         {dirty && (
-          <span className="text-caption text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+          <span className="text-caption text-muted-foreground">
+            {t(($) => $.tab_body.common.unsaved_changes)}
+          </span>
         )}
         <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
           {saving ? (

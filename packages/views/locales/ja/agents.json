@@ -346,6 +346,8 @@
       "intro_prefix": "エージェントプロセスの起動時に注入されます（例: ",
       "intro_separator": ", ",
       "intro_suffix": "）。",
+      "paste_hint": "KEY=value 形式の行をキー欄に貼り付けると、複数の環境変数を追加できます。",
+      "paste_invalid_toast": "貼り付けた環境変数を解析できませんでした",
       "key_placeholder": "KEY",
       "value_placeholder": "value",
       "show_value_aria": "値を表示",
