@@ -353,6 +353,47 @@ SELECT id FROM chat_session
 WHERE id = $1
 FOR UPDATE;
 
+-- name: LockChatSessionForEnqueue :one
+-- The chat-task enqueue's answer to archiving, and the one lock on this row
+-- that a concurrent inbound message must NOT wait behind.
+--
+-- The channel run trigger is debounced, so the message is persisted the moment
+-- it arrives and the task row is created a window later. An archive committing
+-- inside that window cancels the tasks it can see — there are none yet — and
+-- deletes the channel binding, and the flush then enqueues onto a conversation
+-- the user closed. ClaimAgentTask does not read chat_session.status, so the
+-- daemon runs it. Taking this lock as the enqueue transaction's first
+-- statement and re-reading status under it makes both interleavings safe:
+-- enqueue-then-archive is caught by the archive's cancel, archive-then-enqueue
+-- is refused here.
+--
+-- FOR NO KEY UPDATE, not the FOR UPDATE the delete / runtime-bind / draft locks
+-- take, and the difference is the point. Those three want to block concurrent
+-- INSERTs that reference this row: FOR UPDATE conflicts with the FOR KEY SHARE
+-- an FK insert takes on its parent, which is exactly how LockChatSessionForDelete
+-- stops a send from slipping a task in between its cancel and its delete. This
+-- lock wants the opposite. Every inbound channel message is an INSERT into
+-- chat_message, FK'd to this same row, and the flush it eventually triggers
+-- holds this lock for the whole enqueue — under FOR UPDATE the room's next
+-- message would block behind the previous message's enqueue. FOR NO KEY UPDATE
+-- does not conflict with FOR KEY SHARE, so appends keep flowing, while it still
+-- conflicts with FOR UPDATE and with FOR NO KEY UPDATE — which is what
+-- SetChatSessionArchived's UPDATE (status is not a key column) and the delete
+-- path's lock take. So the archive and the delete still serialise against this
+-- enqueue in both directions, which is all this guard needs.
+--
+-- Returns the whole row, not just the id, for the same reason
+-- LockChatSessionForDraftWrite does: the caller must re-check status INSIDE the
+-- transaction, because an enqueue blocked here resumes holding the row it read
+-- before blocking — and the archive is what it was blocked on.
+--
+-- Same row and same position (first statement) as the other three, so the
+-- repo-wide chat_session -> agent_task_queue order is unchanged and no new
+-- deadlock edge is introduced.
+SELECT * FROM chat_session
+WHERE id = $1
+FOR NO KEY UPDATE;
+
 -- name: LockChatSessionForDraftWrite :one
 -- The autosave half of the agent_builder_draft protocol, and the writer's
 -- answer to LockChatSessionForDelete.

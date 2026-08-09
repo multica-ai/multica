@@ -575,12 +575,15 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 		case bindingErr == nil:
 			// Bound, and the delete below is about to drop that binding.
 			// ClaimAgentTask does not read chat_session.status, so a task
-			// queued before the archive stays claimable after it — and once
-			// the binding row is gone the runtime brief describes a private
-			// web chat while the channel adapter still holds the chat id and
-			// posts the answer into the group. The person who archived the
-			// conversation never sees it happen. Cancel in the same tx that
-			// drops the binding, as DeleteChatSession does.
+			// queued before the archive stays claimable after it: the daemon
+			// runs a turn on a conversation the user closed, spending runtime
+			// and quota and writing assistant messages into an archived chat.
+			// The binding is gone by then, so the brief describes the run as a
+			// private web chat — the misattribution the history note below
+			// exists to prevent — while the outbound senders, which resolve
+			// their destination through that same deleted row, have no route
+			// left to deliver on. Cancel in the same tx that drops the
+			// binding, as DeleteChatSession does.
 			//
 			// The query is not limited to never-started work: it also matches
 			// dispatched, running, waiting_local_directory and deferred, which

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -128,7 +129,13 @@ func (h *Handler) respondChatHistory(w http.ResponseWriter, r *http.Request, ses
 			// lets an archive land between them and produce a response whose
 			// channel_type names a platform while its note says there is no
 			// channel.
-			channelType := h.sessionChannelType(r.Context(), sessionID)
+			channelType, bindingErr := h.sessionChannelType(r.Context(), sessionID)
+			if bindingErr != nil {
+				slog.Error("chat session channel binding read failed", append(logger.RequestAttrs(r),
+					"error", bindingErr, "chat_session_id", uuidToString(sessionID))...)
+				writeError(w, http.StatusInternalServerError, "failed to read chat session channel binding")
+				return
+			}
 			writeJSON(w, http.StatusOK, ChatChannelHistoryResponse{
 				ChannelType: channelType,
 				Messages:    []channel.HistoryMessage{},
@@ -202,13 +209,23 @@ func noHistoryNote(channelType string) string {
 // none. Channel-agnostic on purpose: a per-platform lookup here would go blind
 // the next time a channel is added, which is exactly how the note above came
 // to be wrong.
-func (h *Handler) sessionChannelType(ctx context.Context, sessionID pgtype.UUID) string {
+//
+// Only "no such row" means "no channel". Any other failure is us being unable
+// to tell, and answering "" there hands the agent the very note this change
+// removes — a WeCom or Lark session told it is web-only, on a 200, because a
+// connection blipped. The caller reports that rather than guessing, the same
+// way the archive path refuses to guess about the same read.
+func (h *Handler) sessionChannelType(ctx context.Context, sessionID pgtype.UUID) (string, error) {
 	if h.Queries == nil || !sessionID.Valid {
-		return ""
+		return "", nil
 	}
 	binding, err := h.Queries.GetChannelChatSessionBindingBySessionAny(ctx, sessionID)
-	if err != nil {
-		return ""
+	switch {
+	case err == nil:
+		return binding.ChannelType, nil
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", nil
+	default:
+		return "", err
 	}
-	return binding.ChannelType
 }

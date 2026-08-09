@@ -1112,6 +1112,42 @@ func TestRouter_FlushArchived_ClearsTyping(t *testing.T) {
 	}
 }
 
+// TestRouter_FlushSessionArchived_ClearsTypingAndSaysNothing pins what the
+// flush does with the refusal EnqueueChatTask returns when the session was
+// archived while the debounce window was still open. Two things have to be
+// true, and the second is the one worth a test: the typing indicator must be
+// cleared here (no task will exist, so the bus-driven clear can never fire),
+// and nothing may be posted back — the archive deleted the channel binding
+// before this flush ran, so a notice would be addressed to a room that is no
+// longer bound to this conversation. The error is not one of the two the
+// switch names, so it falls to the default log branch and says nothing, which
+// is the behaviour this test holds in place.
+func TestRouter_FlushSessionArchived_ClearsTypingAndSaysNothing(t *testing.T) {
+	h := newHarness(t)
+	h.tasks.err = service.ErrChatSessionArchived
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.typing.settledCalls() == 1 }) {
+		t.Fatalf("an archived-session flush must clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
+	}
+	// The ingest ACK is the only reply this message is entitled to; anything
+	// else came from the flush. Waiting the window out is the assertion —
+	// waitFor returns false only if it never happened.
+	spoke := func() (Result, bool) {
+		for _, r := range h.replier.calls() {
+			if r.Outcome != OutcomeIngested {
+				return r, true
+			}
+		}
+		return Result{}, false
+	}
+	if waitFor(200*time.Millisecond, func() bool { _, ok := spoke(); return ok }) {
+		reply, _ := spoke()
+		t.Fatalf("archived-session flush posted %q into a room the archive had already unbound", reply.Outcome)
+	}
+}
+
 func TestRouter_FlushSuccess_DoesNotClearTyping(t *testing.T) {
 	h := newHarness(t)
 	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {

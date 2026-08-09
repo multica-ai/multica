@@ -1559,8 +1559,8 @@ var ErrChatQuickActionsStale = errors.New("chat quick actions: refresh target is
 // quota-spending pass (MUL-5149).
 var ErrChatQuickActionsBusy = errors.New("chat quick actions: session busy")
 
-// ErrChatSessionArchived signals that a direct-chat send lost a race with
-// archiving the session and therefore must not persist a new turn.
+// ErrChatSessionArchived signals that a send or a debounced channel flush lost
+// a race with archiving the session and therefore must not persist a new turn.
 var ErrChatSessionArchived = errors.New("chat task: session archived")
 
 // EnqueueChatTask creates a task-owned input batch for a chat session. Channel
@@ -1570,9 +1570,9 @@ var ErrChatSessionArchived = errors.New("chat task: session archived")
 //
 // Errors split into two layers:
 //
-//   - Productizable rejections (agent archived, no runtime) return
-//     the sentinel errors above. Callers (e.g. the Lark dispatcher)
-//     can errors.Is them to decide a user-visible outcome.
+//   - Productizable rejections (agent archived, no runtime, session
+//     archived) return the sentinel errors above. Callers (e.g. the Lark
+//     dispatcher) can errors.Is them to decide a user-visible outcome.
 //
 //   - Infrastructure failures (DB load / insert errors) are wrapped
 //     as ordinary errors. The caller should treat them as retryable
@@ -1625,6 +1625,35 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+	// Refuse to enqueue onto a session that has been archived, the same guard
+	// the direct-send path takes. This is the one enqueue path with a delay in
+	// front of it: the channel run trigger is debounced by
+	// DefaultChatRunBatchWindow, so the message is persisted immediately and
+	// the task row is only created here, up to a window later. An archive
+	// committing inside that window cancels the tasks it can see — there are
+	// none yet — and drops the channel binding, and without this check the
+	// flush then inserts a fresh task on a conversation the user closed.
+	// ClaimAgentTask does not read chat_session.status either, so the daemon
+	// would run it: quota and runtime spent on a closed conversation, new
+	// assistant turns written into an archived chat, the agent flipped back to
+	// 'working', and the brief describing the run as a private web chat
+	// because the binding is already gone.
+	//
+	// The lock is what makes the check hold — the caller's copy of the session
+	// was loaded before the transaction opened and can already be stale, the
+	// same reason the send path re-reads the agent under its lock. It is
+	// deliberately FOR NO KEY UPDATE rather than the send path's FOR UPDATE;
+	// see LockChatSessionForEnqueue for why the channel path cannot afford to
+	// block the inbound appends FOR UPDATE would. Taken as the transaction's
+	// first statement, so the chat_session -> agent_task_queue order is
+	// unchanged and no new deadlock edge appears.
+	currentSession, err := qtx.LockChatSessionForEnqueue(ctx, chatSession.ID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("lock chat session: %w", err)
+	}
+	if currentSession.Status != "active" {
+		return db.AgentTaskQueue{}, ErrChatSessionArchived
+	}
 	mediaPendingUntil, err := qtx.GetChannelMediaPendingUntil(ctx, chatSession.ID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
