@@ -700,6 +700,13 @@ func (e *streamError) Unusable() bool {
 
 // streamUnusable is the package-level predicate over any error, so callers do
 // not each re-implement the type assertion.
+//
+// Only a verdict from the server counts. A write that failed, an ack that
+// never came, errNoLiveConnection from a registry holding no socket for the
+// installation — none of those is in here, because none of them says anything
+// about the stream. A req_id belongs to the turn and not to the connection it
+// arrived on (measured 2026-08-09; sendersRegistry.stream), so a missing socket
+// is a fact about this moment rather than about the bubble.
 func streamUnusable(err error) bool {
 	var se *streamError
 	if errors.As(err, &se) {

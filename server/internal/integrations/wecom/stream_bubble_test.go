@@ -93,6 +93,22 @@ func (c *bubbleConn) streamFrames(t *testing.T) []map[string]any {
 	return out
 }
 
+// streamReqIDs returns the callback req_id each stream frame echoed, in write
+// order. It is what WeCom matches a frame to a turn by, and the only thing
+// that says a frame written on one connection is addressed to a turn that
+// arrived on another.
+func (c *bubbleConn) streamReqIDs() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []string
+	for _, f := range c.frames {
+		if f.Cmd == cmdRespondMsg {
+			out = append(out, f.Headers.ReqID)
+		}
+	}
+	return out
+}
+
 // pushes returns the decoded aibot_send_msg bodies — the "as a new message"
 // path, which a working bubble must NOT take.
 func (c *bubbleConn) pushes(t *testing.T) []map[string]any {
@@ -217,6 +233,18 @@ func (r *bubbleRig) ask(t *testing.T, reqID string, batch engine.RunBatchID) {
 			Raw:    raw,
 		},
 		bubbleSessionID(t), batch)
+}
+
+// reconnect swaps the installation's live socket the way the Supervisor does
+// after a drop: a new wsSender over a new conn, registered under the same
+// installation id. Nothing touches the store — it is built at boot, not per
+// connection, so the handles it holds are still there afterwards.
+func (r *bubbleRig) reconnect() *bubbleConn {
+	conn := &bubbleConn{}
+	sender := newWSSender(conn, nil)
+	conn.sender = sender
+	r.senders.set(r.instID, sender)
+	return conn
 }
 
 // runStarted is the debounced flush reporting the task it created for a batch,
@@ -360,6 +388,55 @@ func TestTheAnswerReplacesTheBubbleInPlace(t *testing.T) {
 	}
 	if pushes := rig.conn.pushes(t); len(pushes) != 0 {
 		t.Errorf("the answer also went out as %d plain message(s); the user reads it twice", len(pushes))
+	}
+}
+
+// An agent run lasts minutes and a long connection does not always. The bubble
+// has to survive a reconnect, because WeCom scopes a callback's req_id to the
+// turn rather than to the socket it arrived on — measured 2026-08-09, see
+// sendersRegistry.stream — and the answer is written to whichever sender the
+// installation holds when it is ready, not to the one that opened the bubble.
+//
+// This pins our half of that: the closing frame goes out on the socket that
+// exists now, still addressed to the turn that came in on the old one. The
+// server's half is not something a test in this package can reach, which is
+// why the measurement is written down where the behaviour depends on it.
+func TestTheAnswerClosesTheBubbleOverTheNextConnection(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ran(t, "REQ-RECONNECT", 1, "task-1")
+
+	opened := rig.conn.streamFrames(t)
+	if len(opened) != 1 {
+		t.Fatalf("got %d stream frames before the drop, want the opening one", len(opened))
+	}
+	dropped := rig.conn
+	next := rig.reconnect()
+
+	rig.answer(t, "the agent reply", "task-1")
+
+	if after := dropped.streamFrames(t); len(after) != 1 {
+		t.Fatalf("the closing frame was written to the connection that is gone (%d frames there now); it reaches nobody and the user keeps the spinner", len(after))
+	}
+	closing := next.streamFrames(t)
+	if len(closing) != 1 {
+		t.Fatalf("got %d stream frames on the new connection, want the closing one", len(closing))
+	}
+	if closing[0]["id"] != opened[0]["id"] {
+		t.Fatalf("the answer opened a second bubble (%v) on the new connection instead of finishing the first (%v)",
+			closing[0]["id"], opened[0]["id"])
+	}
+	if reqIDs := next.streamReqIDs(); len(reqIDs) != 1 || reqIDs[0] != "REQ-RECONNECT" {
+		t.Fatalf("the closing frame echoed %v, want the req_id of the callback that opened the turn — WeCom refuses any other value", reqIDs)
+	}
+	if closing[0]["finish"] != true {
+		t.Error("the answer did not seal the bubble")
+	}
+	if closing[0]["content"] != "the agent reply" {
+		t.Errorf("sealed content = %q, want the agent reply", closing[0]["content"])
+	}
+	if pushes := next.pushes(t); len(pushes) != 0 {
+		t.Errorf("the answer degraded to %d plain message(s) across the reconnect instead of landing in the bubble the question opened", len(pushes))
 	}
 }
 

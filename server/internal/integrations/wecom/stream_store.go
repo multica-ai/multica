@@ -49,10 +49,20 @@ package wecom
 // IN-MEMORY IS THE RIGHT STORAGE, and deliberately so. One bot is one long
 // connection, and the Supervisor's WS lease already guarantees at most one
 // replica holds it, so a handle is only ever useful in the process that
-// created it. A restart loses the handles, which is exactly right: the socket
-// the req_ids belonged to is gone too, so the answers fall back to plain
-// messages — degraded, not corrupted. Persisting them would buy nothing and
-// promise a bubble no surviving socket could write to.
+// created it. A restart loses the handles and the answers fall back to plain
+// messages — degraded, not corrupted. Persisting them would be a trade rather
+// than a fix: a stored handle still inside the window would be writable from
+// the new process, at the cost of a row per bubble and a sweep to retire them,
+// to save a fallback message on the restart that lands mid-run.
+//
+// A RECONNECT IS NOT A RESTART, and the difference is why this store is built
+// once at boot, outside the connection loop (router.go). A handle outlives the
+// socket it was made on, and WeCom scopes a callback's req_id to the turn
+// rather than to that socket (measured 2026-08-09; sendersRegistry.stream
+// carries the detail), so the bubble a question opened before a drop is closed
+// by the answer over the next connection. A store rebuilt per connection, or
+// emptied when one ends, would leave every reconnect's bubbles spinning with
+// nothing left that could close them.
 //
 // Replay is not this file's problem. WeCom redelivers callbacks after a
 // reconnect, but a redelivered frame loses the dedup claim in
