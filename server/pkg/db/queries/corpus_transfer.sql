@@ -203,10 +203,26 @@ SET cleanup_pending = false,
     cleanup_next_attempt_at = NULL,
     cleanup_last_error = NULL,
     updated_at = now()
-WHERE workspace_id = sqlc.arg('workspace_id')
-  AND id = sqlc.arg('id')
-  AND cleanup_pending
-  AND cleanup_lease_token = sqlc.arg('cleanup_lease_token')
+WHERE corpus_transfer.workspace_id = sqlc.arg('workspace_id')
+  AND corpus_transfer.id = sqlc.arg('id')
+  AND corpus_transfer.cleanup_pending
+  AND corpus_transfer.cleanup_lease_token = sqlc.arg('cleanup_lease_token')
+  AND EXISTS (
+      SELECT 1 FROM workspace
+      WHERE workspace.id = corpus_transfer.workspace_id
+  )
+RETURNING *;
+
+-- name: DeleteOrphanedCorpusTransferAfterCleanup :one
+DELETE FROM corpus_transfer
+WHERE corpus_transfer.workspace_id = sqlc.arg('workspace_id')
+  AND corpus_transfer.id = sqlc.arg('id')
+  AND corpus_transfer.cleanup_pending
+  AND corpus_transfer.cleanup_lease_token = sqlc.arg('cleanup_lease_token')
+  AND NOT EXISTS (
+      SELECT 1 FROM workspace
+      WHERE workspace.id = corpus_transfer.workspace_id
+  )
 RETURNING *;
 
 -- name: GetConfirmedCorpusTransferContent :one

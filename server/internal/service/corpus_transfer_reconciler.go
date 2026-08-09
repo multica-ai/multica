@@ -36,6 +36,7 @@ type CorpusTransferCleanupQueries interface {
 	RetryCorpusTransferCleanup(context.Context, db.RetryCorpusTransferCleanupParams) (db.CorpusTransfer, error)
 	ScheduleCorpusTransferCleanupPass(context.Context, db.ScheduleCorpusTransferCleanupPassParams) (db.CorpusTransfer, error)
 	CompleteCorpusTransferCleanup(context.Context, db.CompleteCorpusTransferCleanupParams) (db.CorpusTransfer, error)
+	DeleteOrphanedCorpusTransferAfterCleanup(context.Context, db.DeleteOrphanedCorpusTransferAfterCleanupParams) (db.CorpusTransfer, error)
 }
 
 // CorpusTransferReconciler consumes durable cleanup intents for failed or
@@ -114,13 +115,36 @@ func (r *CorpusTransferReconciler) settle(ctx context.Context, row db.CorpusTran
 			WorkspaceID: row.WorkspaceID, ID: row.ID, CleanupLeaseToken: leaseToken,
 		})
 	} else {
-		_, err = r.Queries.CompleteCorpusTransferCleanup(ctx, db.CompleteCorpusTransferCleanupParams{
-			WorkspaceID: row.WorkspaceID, ID: row.ID, CleanupLeaseToken: leaseToken,
-		})
+		err = r.complete(ctx, row, leaseToken)
 	}
 	if err != nil && ctx.Err() == nil {
 		r.logger().Error("corpus transfer cleanup result persistence failed", "error", err)
 	}
+}
+
+// complete retains evidence for a live workspace but removes the ledger once
+// workspace teardown has handed the external object to this reconciler. The
+// second orphan delete closes the race where workspace deletion commits
+// between the first orphan check and the live-workspace completion update.
+func (r *CorpusTransferReconciler) complete(ctx context.Context, row db.CorpusTransfer, leaseToken pgtype.UUID) error {
+	deleteParams := db.DeleteOrphanedCorpusTransferAfterCleanupParams{
+		WorkspaceID: row.WorkspaceID, ID: row.ID, CleanupLeaseToken: leaseToken,
+	}
+	if _, err := r.Queries.DeleteOrphanedCorpusTransferAfterCleanup(ctx, deleteParams); err == nil {
+		return nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+
+	_, err := r.Queries.CompleteCorpusTransferCleanup(ctx, db.CompleteCorpusTransferCleanupParams{
+		WorkspaceID: row.WorkspaceID, ID: row.ID, CleanupLeaseToken: leaseToken,
+	})
+	if err == nil || !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+
+	_, err = r.Queries.DeleteOrphanedCorpusTransferAfterCleanup(ctx, deleteParams)
+	return err
 }
 
 func corpusTransferCleanupBackoff(attempt int32) time.Duration {

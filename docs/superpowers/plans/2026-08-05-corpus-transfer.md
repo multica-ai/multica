@@ -78,20 +78,20 @@ git commit -m "feat(corpus): add canonical package core"
 ### Task 2: Durable transfer and ACK schema
 
 **Files:**
-- Create: `server/migrations/257_corpus_transfer.up.sql`
-- Create: `server/migrations/257_corpus_transfer.down.sql`
-- Create: `server/migrations/258_corpus_transfer_primary_index.up.sql`
-- Create: `server/migrations/258_corpus_transfer_primary_index.down.sql`
-- Create: `server/migrations/259_corpus_transfer_primary_key.up.sql`
-- Create: `server/migrations/259_corpus_transfer_primary_key.down.sql`
-- Create: `server/migrations/260_corpus_transfer_idempotency_index.up.sql`
-- Create: `server/migrations/260_corpus_transfer_idempotency_index.down.sql`
-- Create: `server/migrations/261_corpus_transfer_ack.up.sql`
-- Create: `server/migrations/261_corpus_transfer_ack.down.sql`
-- Create: `server/migrations/262_corpus_transfer_ack_primary_index.up.sql`
-- Create: `server/migrations/262_corpus_transfer_ack_primary_index.down.sql`
-- Create: `server/migrations/263_corpus_transfer_ack_primary_key.up.sql`
-- Create: `server/migrations/263_corpus_transfer_ack_primary_key.down.sql`
+- Create: `server/migrations/265_corpus_transfer.up.sql`
+- Create: `server/migrations/265_corpus_transfer.down.sql`
+- Create: `server/migrations/266_corpus_transfer_primary_index.up.sql`
+- Create: `server/migrations/266_corpus_transfer_primary_index.down.sql`
+- Create: `server/migrations/267_corpus_transfer_primary_key.up.sql`
+- Create: `server/migrations/267_corpus_transfer_primary_key.down.sql`
+- Create: `server/migrations/268_corpus_transfer_idempotency_index.up.sql`
+- Create: `server/migrations/268_corpus_transfer_idempotency_index.down.sql`
+- Create: `server/migrations/269_corpus_transfer_ack.up.sql`
+- Create: `server/migrations/269_corpus_transfer_ack.down.sql`
+- Create: `server/migrations/270_corpus_transfer_ack_primary_index.up.sql`
+- Create: `server/migrations/270_corpus_transfer_ack_primary_index.down.sql`
+- Create: `server/migrations/271_corpus_transfer_ack_primary_key.up.sql`
+- Create: `server/migrations/271_corpus_transfer_ack_primary_key.down.sql`
 - Create: `server/pkg/db/queries/corpus_transfer.sql`
 - Generated: `server/pkg/db/generated/corpus_transfer.sql.go`
 - Generated: `server/pkg/db/generated/models.go`
