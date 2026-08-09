@@ -107,6 +107,18 @@
     "gantt": "甘特图",
     "swimlane": "泳道"
   },
+  "saved_views": {
+    "menu_label": "已保存视图",
+    "menu_tooltip": "已保存视图",
+    "empty": "暂无已保存视图。可将当前筛选与布局保存为可复用的视图。",
+    "apply": "应用",
+    "rename": "重命名",
+    "delete": "删除",
+    "save_current": "保存当前视图…",
+    "name_placeholder": "视图名称",
+    "save": "保存",
+    "cancel": "取消"
+  },
   "table": {
     "select_all": "选择所有可见任务",
     "select_issue": "选择 {{identifier}}",

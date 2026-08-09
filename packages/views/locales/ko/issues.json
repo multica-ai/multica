@@ -107,6 +107,18 @@
     "gantt": "간트",
     "swimlane": "스윔레인"
   },
+  "saved_views": {
+    "menu_label": "저장된 보기",
+    "menu_tooltip": "저장된 보기",
+    "empty": "저장된 보기가 아직 없습니다. 현재 필터와 레이아웃을 재사용 가능한 보기로 저장하세요.",
+    "apply": "적용",
+    "rename": "이름 바꾸기",
+    "delete": "삭제",
+    "save_current": "현재 보기 저장…",
+    "name_placeholder": "보기 이름",
+    "save": "저장",
+    "cancel": "취소"
+  },
   "table": {
     "select_all": "표시된 모든 태스크 선택",
     "select_issue": "{{identifier}} 선택",
