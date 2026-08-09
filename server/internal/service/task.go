@@ -23,6 +23,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/internal/runtimepool"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
@@ -33,13 +34,14 @@ import (
 )
 
 type TaskService struct {
-	Queries   *db.Queries
-	TxStarter TxStarter
-	Hub       *realtime.Hub
-	Bus       *events.Bus
-	Analytics analytics.Client
-	Metrics   *obsmetrics.BusinessMetrics
-	Wakeup    TaskWakeupNotifier
+	Queries     *db.Queries
+	TxStarter   TxStarter
+	Hub         *realtime.Hub
+	Bus         *events.Bus
+	Analytics   analytics.Client
+	Metrics     *obsmetrics.BusinessMetrics
+	Wakeup      TaskWakeupNotifier
+	RuntimePool RuntimePoolScheduler
 	// FeatureFlags is the server-side toggle router. Nil is valid and returns
 	// each call site's default.
 	FeatureFlags *featureflag.Service
@@ -75,6 +77,17 @@ type TaskService struct {
 	analyticsContextCache map[string]analytics.TaskContext
 	analyticsContextOrder []string
 }
+
+// RuntimePoolScheduler is the post-persistence placement seam. Implementations
+// commit assignments before returning; TaskService owns all resulting events
+// and daemon wakeups so none can escape a rolled-back transaction.
+type RuntimePoolScheduler interface {
+	AssignWaiting(context.Context, runtimepool.AssignRequest) (runtimepool.AssignResult, error)
+	SweepWaiting(context.Context, int) ([]runtimepool.AssignResult, error)
+}
+
+var errRuntimePoolSchedulerUnavailable = errors.New("runtime pool scheduler is unavailable")
+var errRuntimePoolTaskLookupUnavailable = errors.New("runtime pool task lookup is unavailable")
 
 // ComposioOverlayBuilder is the seam TaskService uses to build the per-task
 // MCP overlay at enqueue time. Implemented by
@@ -2125,6 +2138,99 @@ func (s *TaskService) BroadcastCancelledTasks(ctx context.Context, cancelled []d
 // BroadcastTaskQueued emits a post-commit queue invalidation for clients.
 func (s *TaskService) BroadcastTaskQueued(ctx context.Context, task db.AgentTaskQueue) {
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+}
+
+// AssignPoolWorkspace asks the scheduler to place a bounded batch from one
+// Workspace, then publishes only the results that the scheduler has already
+// committed. FocusTaskID lets a newly-created Task become observable even when
+// it remains unassigned and therefore is absent from the scheduler's result.
+func (s *TaskService) AssignPoolWorkspace(ctx context.Context, workspaceID, focusTaskID pgtype.UUID) (runtimepool.AssignResult, error) {
+	if s == nil || s.RuntimePool == nil {
+		return runtimepool.AssignResult{}, errRuntimePoolSchedulerUnavailable
+	}
+
+	result, err := s.RuntimePool.AssignWaiting(ctx, runtimepool.AssignRequest{
+		WorkspaceID: workspaceID,
+		FocusTaskID: focusTaskID,
+		Limit:       runtimepool.AssignmentBatchLimit,
+	})
+	published := s.publishPoolAssignmentResult(ctx, result)
+	if focusTaskID.Valid {
+		focusKey := util.UUIDToString(focusTaskID)
+		if _, ok := published[focusKey]; !ok {
+			focusTask, stillWaiting, lookupErr := s.focusedWaitingPoolTask(ctx, workspaceID, focusTaskID)
+			if lookupErr != nil {
+				return result, errors.Join(err, lookupErr)
+			}
+			if stillWaiting {
+				s.publishTaskEvent(protocol.EventTaskWaitingRuntime, util.UUIDToString(workspaceID), focusTask)
+			}
+		}
+	}
+	return result, err
+}
+
+func (s *TaskService) focusedWaitingPoolTask(ctx context.Context, workspaceID, taskID pgtype.UUID) (db.AgentTaskQueue, bool, error) {
+	if s.Queries == nil {
+		return db.AgentTaskQueue{}, false, errRuntimePoolTaskLookupUnavailable
+	}
+	task, err := s.Queries.GetAgentTask(ctx, taskID)
+	if err != nil {
+		return db.AgentTaskQueue{}, false, fmt.Errorf("load focused runtime pool task: %w", err)
+	}
+	if task.RuntimeBindingMode != runtimepool.BindingPool || task.Status != runtimepool.StatusWaitingRuntime {
+		return db.AgentTaskQueue{}, false, nil
+	}
+	if !workspaceID.Valid || !task.PlacementWorkspaceID.Valid || task.PlacementWorkspaceID != workspaceID {
+		return db.AgentTaskQueue{}, false, errors.New("focused runtime pool task workspace mismatch")
+	}
+	return task, true, nil
+}
+
+// WakePoolWorkspace retries placement without manufacturing a focused waiting
+// event. Callers use it after a Workspace scheduling condition improves.
+func (s *TaskService) WakePoolWorkspace(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := s.AssignPoolWorkspace(ctx, workspaceID, pgtype.UUID{})
+	return err
+}
+
+// SweepRuntimePool publishes every committed partial result even when a later
+// Workspace fails, then returns the scheduler error to the sweeper.
+func (s *TaskService) SweepRuntimePool(ctx context.Context, workspaceLimit int) error {
+	if s == nil || s.RuntimePool == nil {
+		return nil
+	}
+	results, err := s.RuntimePool.SweepWaiting(ctx, workspaceLimit)
+	for _, result := range results {
+		s.publishPoolAssignmentResult(ctx, result)
+	}
+	return err
+}
+
+// publishPoolAssignmentResult is the shared post-commit publication path for
+// immediate placement, wakeups, and periodic recovery. Assigned wins if a
+// malformed result repeats a Task in both slices, and every Task is emitted at
+// most once.
+func (s *TaskService) publishPoolAssignmentResult(ctx context.Context, result runtimepool.AssignResult) map[string]struct{} {
+	published := make(map[string]struct{}, len(result.Assigned)+len(result.PromotedWaiting))
+	for _, task := range result.Assigned {
+		taskKey := util.UUIDToString(task.ID)
+		if _, ok := published[taskKey]; ok {
+			continue
+		}
+		published[taskKey] = struct{}{}
+		s.BroadcastTaskQueued(ctx, task)
+		s.NotifyTaskEnqueued(ctx, task)
+	}
+	for _, task := range result.PromotedWaiting {
+		taskKey := util.UUIDToString(task.ID)
+		if _, ok := published[taskKey]; ok {
+			continue
+		}
+		published[taskKey] = struct{}{}
+		s.broadcastTaskEvent(ctx, protocol.EventTaskWaitingRuntime, task)
+	}
+	return published
 }
 
 func (s *TaskService) CaptureCancelledTasks(ctx context.Context, cancelled []db.AgentTaskQueue) {

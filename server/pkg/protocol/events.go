@@ -32,6 +32,7 @@ const (
 	// snapshot, so the granularity here is "what does the user want to see
 	// change" — not "every internal status flip".
 	EventTaskQueued                = "task:queued"                  // ∅ → queued (enqueue / retry create)
+	EventTaskWaitingRuntime        = "task:waiting_runtime"         // ∅/deferred → waiting_runtime (Pool awaiting placement)
 	EventTaskDispatch              = "task:dispatch"                // queued → dispatched (daemon claim)
 	EventTaskRunning               = "task:running"                 // dispatched → running (daemon started)
 	EventTaskWaitingLocalDirectory = "task:waiting_local_directory" // dispatched → waiting_local_directory (daemon parked on a busy local_directory path)
