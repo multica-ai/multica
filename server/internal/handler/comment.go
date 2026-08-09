@@ -3030,12 +3030,17 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				addTarget(commentMentionTarget{TargetType: "squad", TargetID: m.ID, Status: status, ReasonCode: reason})
 				continue
 			}
+			// Verify leader agent is ready (has runtime, not archived, runtime online).
 			agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 				ID:          leaderID,
 				WorkspaceID: issue.WorkspaceID,
 			})
 			if err != nil {
 				blockTarget("squad", m.ID, ReasonTargetUnavailable)
+				continue
+			}
+			ready, _, err := service.AgentReadiness(ctx, h.Queries, agent)
+			if err != nil || !ready {
 				continue
 			}
 			// Private-leader gate first (enumeration-safe: a caller who cannot
@@ -3092,6 +3097,10 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			// Do not reveal whether the id exists (it may be a private agent in
 			// another workspace): the generic invocation_not_allowed is returned.
 			blockTarget("agent", m.ID, ReasonInvocationNotAllowed)
+			continue
+		}
+		ready, _, err := service.AgentReadiness(ctx, h.Queries, agent)
+		if err != nil || !ready {
 			continue
 		}
 		// Private-agent gate first, before any archived/runtime state is read.

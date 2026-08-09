@@ -1229,13 +1229,14 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
 	}
-	if agent.ArchivedAt.Valid {
-		slog.Debug("mention task enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
-		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	ready, reason, err := AgentReadiness(ctx, s.Queries, agent)
+	if err != nil {
+		slog.Error("mention task enqueue failed: could not check readiness", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("check agent readiness: %w", err)
 	}
-	if !agent.RuntimeID.Valid {
-		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
-		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	if !ready {
+		slog.Error("mention task enqueue failed: "+reason, "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is not ready: %s", reason)
 	}
 
 	// An explicit mention / thread-parent / squad-leader hop from an
