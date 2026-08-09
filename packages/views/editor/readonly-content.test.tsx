@@ -79,6 +79,9 @@ vi.mock("../issues/hooks", () => ({
 }));
 
 vi.mock("./extensions/image-view", () => ({
+  // ImageView is imported by extensions/index.ts (FIR-4699 Phase 5 wires it
+  // into createImageExtension). The mock must export both names.
+  ImageView: () => null,
   ImageLightbox: () => null,
 }));
 

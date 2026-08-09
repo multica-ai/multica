@@ -26,7 +26,8 @@ import { common, createLowlight } from "lowlight";
 import Placeholder from "@tiptap/extension-placeholder";
 import Link from "@tiptap/extension-link";
 import Typography from "@tiptap/extension-typography";
-import Image from "@tiptap/extension-image";
+// CEREBRO-PATCH(editor-image-resize): FIR-4699 Phase 5 — image node factory.
+import { createImageExtension } from "@multica/cerebro-editor-image";
 import TaskItem from "@tiptap/extension-task-item"; // CEREBRO-PATCH(todo-list-editor): register editable task list nodes.
 import { TaskList } from "@tiptap/extension-list";
 import TableRow from "@tiptap/extension-table-row";
@@ -82,57 +83,13 @@ const LinkExtension = Link.extend({ inclusive: false }).configure({
   defaultProtocol: "https",
 });
 
-export const ImageExtension = Image.extend({
-  addAttributes() {
-    return {
-      ...this.parent?.(),
-      uploading: {
-        default: false,
-        renderHTML: (attrs: Record<string, unknown>) =>
-          attrs.uploading ? { "data-uploading": "" } : {},
-        parseHTML: (el: HTMLElement) => el.hasAttribute("data-uploading"),
-      },
-      // Intrinsic pixel dimensions, captured on upload (file-upload.ts). The
-      // browser uses width/height on <img> to compute aspect-ratio and reserve
-      // the box before the image decodes, so inserting an image causes no
-      // layout shift (and the post-insert scrollIntoView stays correct). Not
-      // serialized to markdown — `renderMarkdown` only emits src/alt/title — so
-      // round-trips stay clean.
-      width: {
-        default: null,
-        renderHTML: (attrs: Record<string, unknown>) =>
-          attrs.width ? { width: attrs.width as number } : {},
-        parseHTML: (el: HTMLElement) => {
-          const w = parseInt(el.getAttribute("width") || "", 10);
-          return Number.isFinite(w) ? w : null;
-        },
-      },
-      height: {
-        default: null,
-        renderHTML: (attrs: Record<string, unknown>) =>
-          attrs.height ? { height: attrs.height as number } : {},
-        parseHTML: (el: HTMLElement) => {
-          const h = parseInt(el.getAttribute("height") || "", 10);
-          return Number.isFinite(h) ? h : null;
-        },
-      },
-    };
-  },
-  addNodeView() {
-    return ReactNodeViewRenderer(ImageView);
-  },
-  renderMarkdown: (node: any) => {
-    const src = node.attrs?.src || "";
-    const alt = escapeMarkdownLabel(node.attrs?.alt || "");
-    const title = node.attrs?.title;
-    if (title) {
-      return `![${alt}](${src} "${title}")`;
-    }
-    return `![${alt}](${src})`;
-  },
-}).configure({
-  inline: false,
-  allowBase64: false,
+// CEREBRO-PATCH(editor-image-resize): FIR-4699 Phase 5 — the image node (upload
+// flag, intrinsic dimensions, inline resize/align + size-dependent markdown)
+// lives in @multica/cerebro-editor-image; wire it with the view-owned node view
+// and escaper so this package stays a leaf of the dependency graph.
+export const ImageExtension = createImageExtension({
+  imageView: ImageView,
+  escapeMarkdownLabel,
 });
 
 export interface EditorExtensionsOptions {

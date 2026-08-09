@@ -86,3 +86,42 @@ describe("ImageExtension markdown round-trip", () => {
     expect(findParagraphTexts(reparsed)).toEqual(["after"]);
   });
 });
+
+describe("ImageExtension inline resize round-trip (Phase 5)", () => {
+  const SIZED = `<img src="${IMAGE_URL}" alt="screen" data-width-pct="55" data-align="center">`;
+
+  it("round-trips a resized + aligned image through the HTML form", () => {
+    const [out] = roundTripMany(SIZED, 1);
+    expect(out).toContain('data-width-pct="55"');
+    expect(out).toContain('data-align="center"');
+    expect(out).not.toContain("![");
+  });
+
+  it("round-trips width alone and alignment alone", () => {
+    const [wOnly] = roundTripMany(
+      `<img src="${IMAGE_URL}" alt="screen" data-width-pct="50">`,
+      1,
+    );
+    expect(wOnly).toContain('data-width-pct="50"');
+    expect(wOnly).not.toContain("data-align");
+
+    const [aOnly] = roundTripMany(
+      `<img src="${IMAGE_URL}" alt="screen" data-align="right">`,
+      1,
+    );
+    expect(aOnly).toContain('data-align="right"');
+    expect(aOnly).not.toContain("data-width-pct");
+  });
+
+  it("keeps a sized image stable across repeated round-trips", () => {
+    const outputs = roundTripMany(SIZED, 4);
+    expect(new Set(outputs).size).toBe(1);
+  });
+
+  it("leaves an untouched image byte-identical to ![alt](url)", () => {
+    const out = roundTripMany(IMAGE_MD, 1)[0] ?? "";
+    expect(out.trim()).toBe(IMAGE_MD);
+    expect(out).not.toContain("<img");
+    expect(out).not.toContain("data-width-pct");
+  });
+});
