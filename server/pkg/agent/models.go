@@ -1919,12 +1919,12 @@ func acpModelLabel(name, modelID string) string {
 }
 
 // discoverAntigravityModels runs `agy models` and returns the catalog the
-// installed Antigravity CLI advertises (one display name per line).
+// installed Antigravity CLI advertises (one model record per line).
 //
 // Unlike cursor / pi / opencode there is deliberately NO static fallback.
-// agy's `--model` takes the exact human display string (e.g.
-// "Claude Opus 4.6 (Thinking)") and silently no-ops on any value it doesn't
-// recognise — empty output, exit 0 — so a guessed static list would risk
+// agy's `--model` takes the exact identifier advertised by the installed CLI
+// and silently no-ops on any value it doesn't recognise — empty output, exit
+// 0 — so a guessed static list would risk
 // offering a model the installed CLI can't honour, turning a typo into a
 // "successful" empty run. On any discovery failure we return an empty
 // catalog instead; agent.model stays unset and agy resolves its own
@@ -1950,24 +1950,34 @@ func discoverAntigravityModels(ctx context.Context, executablePath string) ([]Mo
 	return parseAntigravityModels(string(out)), nil
 }
 
-// parseAntigravityModels turns `agy models` output — one model display name
-// per line — into Model entries. The display string IS the value `--model`
-// expects, so ID and Label are identical and the daemon ships opts.Model
-// verbatim. Blank and duplicate lines are skipped.
+// parseAntigravityModels turns `agy models` output into Model entries. agy
+// 1.1.11 emits "id<TAB>display label" while older versions emit one value per
+// line. For legacy output the value remains both ID and Label. Blank lines and
+// duplicate IDs are skipped.
 func parseAntigravityModels(output string) []Model {
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var models []Model
 	seen := map[string]bool{}
 	for scanner.Scan() {
-		name := strings.TrimSpace(scanner.Text())
-		if name == "" || seen[name] {
+		raw := scanner.Text()
+		id := strings.TrimSpace(raw)
+		label := id
+		if idField, remaining, ok := strings.Cut(raw, "\t"); ok {
+			id = strings.TrimSpace(idField)
+			labelField, _, _ := strings.Cut(remaining, "\t")
+			label = strings.TrimSpace(labelField)
+			if label == "" {
+				label = id
+			}
+		}
+		if id == "" || seen[id] {
 			continue
 		}
-		seen[name] = true
+		seen[id] = true
 		models = append(models, Model{
-			ID:       name,
-			Label:    name,
+			ID:       id,
+			Label:    label,
 			Provider: "antigravity",
 		})
 	}

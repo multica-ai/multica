@@ -1775,6 +1775,32 @@ func TestParseAntigravityModels(t *testing.T) {
 	}
 }
 
+// TestParseAntigravityModelsTabSeparated covers the catalog format introduced
+// by agy 1.1.11: the first tab-delimited field is the value accepted by
+// --model, while the second field is the human-readable picker label.
+func TestParseAntigravityModelsTabSeparated(t *testing.T) {
+	t.Parallel()
+
+	out := strings.Join([]string{
+		"gemini-3.6-flash-high\tGemini 3.6 Flash (High)",
+		"claude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)\tfuture metadata is ignored",
+		"gemini-3.6-flash-high\tDuplicate label is ignored",
+	}, "\n")
+
+	got := parseAntigravityModels(out)
+	want := []Model{
+		{ID: "gemini-3.6-flash-high", Label: "Gemini 3.6 Flash (High)", Provider: "antigravity"},
+		{ID: "claude-opus-4-6-thinking", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseAntigravityModels = %+v, want %+v", got, want)
+	}
+
+	if err := antigravityModelError("gemini-3.6-flash-high", got); err != nil {
+		t.Fatalf("exact model slug from tab-separated catalog was rejected: %v", err)
+	}
+}
+
 // TestParseAntigravityModelsEmpty pins that empty / whitespace-only output
 // yields no models (so cachedDiscovery treats it as a transient miss and
 // retries rather than caching a blank catalog).

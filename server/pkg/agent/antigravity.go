@@ -472,7 +472,7 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 // returns nil otherwise. An empty `available` means discovery couldn't produce
 // a catalog (agy missing, transient failure) — we fail OPEN there and let agy
 // resolve the value, so a discovery hiccup never blocks a run. The match is
-// exact because agy's --model wants the precise display string; a near-miss
+// exact because agy's --model wants the precise catalog identifier; a near-miss
 // (extra space, dropped suffix) is correctly rejected since agy would silently
 // no-op on it anyway.
 func antigravityModelError(model string, available []Model) error {
