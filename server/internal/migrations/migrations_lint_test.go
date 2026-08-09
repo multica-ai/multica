@@ -146,6 +146,61 @@ func TestRuntimePoolEraIndexMigrationsStayConcurrentAndSingleStatement(t *testin
 	}
 }
 
+func TestRuntimePoolIndexSwapsBuildReplacementBeforeDroppingPreviousVersion(t *testing.T) {
+	dir := realMigrationsDir(t)
+	testCases := []struct {
+		name            string
+		buildFile       string
+		dropFile        string
+		restoreFile     string
+		replacementName string
+		previousName    string
+	}{
+		{
+			name:            "issue_pending_v3_over_v2",
+			buildFile:       "272_pending_issue_agent_pool_v3.up.sql",
+			dropFile:        "273_drop_pending_issue_agent_v2.up.sql",
+			restoreFile:     "273_drop_pending_issue_agent_v2.down.sql",
+			replacementName: "idx_one_pending_task_per_issue_agent_v3",
+			previousName:    "idx_one_pending_task_per_issue_agent_v2",
+		},
+		{
+			name:            "chat_pending_v4_over_v3",
+			buildFile:       "274_chat_pending_pool_v4.up.sql",
+			dropFile:        "275_drop_chat_pending_v3.up.sql",
+			restoreFile:     "275_drop_chat_pending_v3.down.sql",
+			replacementName: "idx_agent_task_queue_chat_pending_v4",
+			previousName:    "idx_agent_task_queue_chat_pending_v3",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			buildPrefix := migrationPrefixFromFilename(t, tc.buildFile)
+			dropPrefix := migrationPrefixFromFilename(t, tc.dropFile)
+			if buildPrefix >= dropPrefix {
+				t.Fatalf("replacement build prefix %d must precede old-index drop prefix %d", buildPrefix, dropPrefix)
+			}
+
+			build := readMigrationForLint(t, filepath.Join(dir, tc.buildFile))
+			if !strings.Contains(build, "CREATE") || !strings.Contains(build, "INDEX CONCURRENTLY IF NOT EXISTS "+strings.ToUpper(tc.replacementName)) {
+				t.Fatalf("%s does not concurrently build %s", tc.buildFile, tc.replacementName)
+			}
+			drop := readMigrationForLint(t, filepath.Join(dir, tc.dropFile))
+			if !strings.Contains(drop, "DROP INDEX CONCURRENTLY "+strings.ToUpper(tc.previousName)) {
+				t.Fatalf("%s does not concurrently drop %s", tc.dropFile, tc.previousName)
+			}
+			restore := readMigrationForLint(t, filepath.Join(dir, tc.restoreFile))
+			if !strings.Contains(restore, "CREATE") || !strings.Contains(restore, "INDEX CONCURRENTLY "+strings.ToUpper(tc.previousName)) {
+				t.Fatalf("%s does not restore %s before reverse migration removes the replacement", tc.restoreFile, tc.previousName)
+			}
+			if strings.Contains(restore, "IF NOT EXISTS") {
+				t.Fatalf("%s must fail closed on a same-name INVALID leftover", tc.restoreFile)
+			}
+		})
+	}
+}
+
 func migrationStemsByPrefix(t *testing.T) map[string][]string {
 	t.Helper()
 
@@ -160,6 +215,32 @@ func migrationStemsByPrefix(t *testing.T) map[string][]string {
 		stemsByPrefix[match[1]] = append(stemsByPrefix[match[1]], stem)
 	}
 	return stemsByPrefix
+}
+
+func migrationPrefixFromFilename(t *testing.T, name string) int {
+	t.Helper()
+	match := migrationPrefixPattern.FindStringSubmatch(name)
+	if match == nil {
+		t.Fatalf("migration %s has no numeric prefix", name)
+	}
+	prefix, err := strconv.Atoi(match[1])
+	if err != nil {
+		t.Fatalf("parse migration prefix for %s: %v", name, err)
+	}
+	return prefix
+}
+
+func readMigrationForLint(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements := sqlStatementsForLint(string(raw))
+	if len(statements) != 1 {
+		t.Fatalf("%s has %d top-level statements, want 1", filepath.Base(path), len(statements))
+	}
+	return strings.ToUpper(strings.Join(strings.Fields(statements[0]), " "))
 }
 
 func migrationFilesForLint(t *testing.T, pattern string) []string {

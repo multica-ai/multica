@@ -73,6 +73,11 @@ var preMigrationHooks = map[string]preMigrationHook{
 	"268_comment_followup_id_unique":                        cleanupInvalidConcurrentIndexHook("idx_agent_comment_followup_obligation_id"),
 	"270_comment_followup_agent_comment_unique":             cleanupInvalidConcurrentIndexHook("idx_agent_comment_followup_obligation_agent_comment"),
 	"271_comment_followup_fifo_index":                       cleanupInvalidConcurrentIndexHook("idx_agent_comment_followup_obligation_fifo"),
+	"272_pending_issue_agent_pool_v3":                       cleanupInvalidConcurrentIndexHook("idx_one_pending_task_per_issue_agent_v3"),
+	"274_chat_pending_pool_v4":                              cleanupInvalidConcurrentIndexHook("idx_agent_task_queue_chat_pending_v4"),
+	"276_waiting_runtime_workspace_index":                   cleanupInvalidConcurrentIndexHook("idx_agent_task_queue_waiting_runtime_workspace"),
+	"277_runtime_pool_occupancy_index":                      cleanupInvalidConcurrentIndexHook("idx_agent_task_queue_runtime_capacity"),
+	"278_runtime_pool_deferred_due_index":                   cleanupInvalidConcurrentIndexHook("idx_agent_task_queue_pool_deferred_due"),
 }
 
 // cleanupInvalidConcurrentIndexHook removes an INVALID index left by an

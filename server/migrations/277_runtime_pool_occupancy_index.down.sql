@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY idx_agent_task_queue_runtime_capacity;

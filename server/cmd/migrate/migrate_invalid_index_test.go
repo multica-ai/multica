@@ -136,6 +136,177 @@ func TestRuntimePoolConcurrentIndexHooksRepairInvalidIndexes(t *testing.T) {
 	}
 }
 
+func TestRuntimePoolConcurrentIndexHooks(t *testing.T) {
+	testCases := []struct {
+		version   string
+		indexName string
+		unique    bool
+		keys      string
+		predicate string
+	}{
+		{
+			version:   "272_pending_issue_agent_pool_v3",
+			indexName: "idx_one_pending_task_per_issue_agent_v3",
+			unique:    true,
+			keys:      "(issue_id, agent_id)",
+			predicate: "WHERE status IN ('queued', 'dispatched') OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true') OR status = 'waiting_runtime'",
+		},
+		{
+			version:   "274_chat_pending_pool_v4",
+			indexName: "idx_agent_task_queue_chat_pending_v4",
+			keys:      "(chat_session_id, priority DESC, created_at ASC, id ASC)",
+			predicate: "WHERE chat_session_id IS NOT NULL AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred', 'waiting_runtime')",
+		},
+		{
+			version:   "276_waiting_runtime_workspace_index",
+			indexName: "idx_agent_task_queue_waiting_runtime_workspace",
+			keys:      "(placement_workspace_id, priority DESC, created_at ASC, id ASC)",
+			predicate: "WHERE status = 'waiting_runtime'",
+		},
+		{
+			version:   "277_runtime_pool_occupancy_index",
+			indexName: "idx_agent_task_queue_runtime_capacity",
+			keys:      "(runtime_id)",
+			predicate: "WHERE status IN ('queued', 'deferred', 'dispatched', 'running', 'waiting_local_directory')",
+		},
+		{
+			version:   "278_runtime_pool_deferred_due_index",
+			indexName: "idx_agent_task_queue_pool_deferred_due",
+			keys:      "(placement_workspace_id, fire_at ASC, id ASC)",
+			predicate: "WHERE runtime_binding_mode = 'pool' AND status = 'deferred'",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.version+"/registered", func(t *testing.T) {
+			if preMigrationHooks[tc.version] == nil {
+				t.Fatalf("production hook is not registered for %s", tc.version)
+			}
+		})
+	}
+	if t.Failed() {
+		return
+	}
+
+	pool := pooltestdb.Open(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	for _, tc := range testCases {
+		t.Run(tc.version+"/invalid_cleanup_and_valid_preservation", func(t *testing.T) {
+			suffix := fmt.Sprintf("%d_%d", time.Now().UnixNano(), rand.Uint32())
+			schema := "migrate_pool_scheduler_idx_" + suffix
+			schemaIdent := pgx.Identifier{schema}.Sanitize()
+			if _, err := pool.Exec(ctx, "CREATE SCHEMA "+schemaIdent); err != nil {
+				t.Fatalf("create schema: %v", err)
+			}
+			t.Cleanup(func() {
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cleanupCancel()
+				if _, err := pool.Exec(cleanupCtx, "DROP SCHEMA IF EXISTS "+schemaIdent+" CASCADE"); err != nil {
+					t.Logf("drop schema %s: %v", schema, err)
+				}
+			})
+
+			tableName := pgx.Identifier{schema, "agent_task_queue"}.Sanitize()
+			if _, err := pool.Exec(ctx, "CREATE TABLE "+tableName+` (
+				id UUID NOT NULL DEFAULT gen_random_uuid(),
+				issue_id UUID,
+				agent_id UUID NOT NULL DEFAULT gen_random_uuid(),
+				chat_session_id UUID,
+				status TEXT NOT NULL DEFAULT 'queued',
+				context JSONB NOT NULL DEFAULT '{}'::jsonb,
+				priority INT NOT NULL DEFAULT 0,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				placement_workspace_id UUID,
+				runtime_id UUID,
+				runtime_binding_mode TEXT NOT NULL DEFAULT 'fixed',
+				fire_at TIMESTAMPTZ
+			)`); err != nil {
+				t.Fatalf("create task table: %v", err)
+			}
+
+			sentinelName := "idx_runtime_pool_valid_sentinel"
+			if _, err := pool.Exec(ctx, "CREATE INDEX CONCURRENTLY "+pgx.Identifier{sentinelName}.Sanitize()+" ON "+tableName+" (id)"); err != nil {
+				t.Fatalf("create valid sentinel index: %v", err)
+			}
+			scopedPool := pooltestdb.OpenWithSearchPath(t, schema, "public")
+			unique := ""
+			if tc.unique {
+				unique = "UNIQUE "
+			}
+			createIndex := "CREATE " + unique + "INDEX CONCURRENTLY " +
+				pgx.Identifier{tc.indexName}.Sanitize() + " ON " + tableName + " " + tc.keys + " " + tc.predicate
+
+			blocker, err := pool.Acquire(ctx)
+			if err != nil {
+				t.Fatalf("acquire blocker: %v", err)
+			}
+			blockerTx, err := blocker.Begin(ctx)
+			if err != nil {
+				blocker.Release()
+				t.Fatalf("begin blocker: %v", err)
+			}
+			blockerStatus := "deferred"
+			if tc.version == "276_waiting_runtime_workspace_index" {
+				blockerStatus = "waiting_runtime"
+			}
+			if _, err := blockerTx.Exec(ctx, "INSERT INTO "+tableName+` (
+				issue_id, chat_session_id, status, context, placement_workspace_id,
+				runtime_id, runtime_binding_mode, fire_at
+			) VALUES (
+				gen_random_uuid(), gen_random_uuid(), $1,
+				'{"channel_issue_media_pending":true}'::jsonb, gen_random_uuid(),
+				gen_random_uuid(), 'pool', now()
+			)`, blockerStatus); err != nil {
+				_ = blockerTx.Rollback(ctx)
+				blocker.Release()
+				t.Fatalf("block concurrent index wait phase: %v", err)
+			}
+
+			builder, err := scopedPool.Acquire(ctx)
+			if err != nil {
+				_ = blockerTx.Rollback(ctx)
+				blocker.Release()
+				t.Fatalf("acquire builder: %v", err)
+			}
+			if _, err := builder.Exec(ctx, "SET statement_timeout = '2s'"); err != nil {
+				builder.Release()
+				_ = blockerTx.Rollback(ctx)
+				blocker.Release()
+				t.Fatalf("set statement timeout: %v", err)
+			}
+			_, buildErr := builder.Exec(ctx, createIndex)
+			if _, err := builder.Exec(ctx, "SET statement_timeout = DEFAULT"); err != nil {
+				t.Logf("reset statement timeout: %v", err)
+			}
+			builder.Release()
+			_ = blockerTx.Rollback(ctx)
+			blocker.Release()
+			if buildErr == nil {
+				t.Fatal("interrupted concurrent index build unexpectedly succeeded")
+			}
+
+			assertIndexValidity(t, pool, schema, tc.indexName, false)
+			assertIndexValidity(t, pool, schema, sentinelName, true)
+			if err := preMigrationHooks[tc.version](ctx, scopedPool); err != nil {
+				t.Fatalf("cleanup invalid index before %s: %v", tc.version, err)
+			}
+			assertIndexAbsent(t, pool, schema, tc.indexName)
+			assertIndexValidity(t, pool, schema, sentinelName, true)
+
+			if _, err := scopedPool.Exec(ctx, createIndex); err != nil {
+				t.Fatalf("rebuild valid target index: %v", err)
+			}
+			if err := preMigrationHooks[tc.version](ctx, scopedPool); err != nil {
+				t.Fatalf("run hook against valid %s: %v", tc.indexName, err)
+			}
+			assertIndexValidity(t, pool, schema, tc.indexName, true)
+			assertIndexValidity(t, pool, schema, sentinelName, true)
+		})
+	}
+}
+
 func TestRunMigrationsRepairsInvalidConcurrentIndexBeforeRetry(t *testing.T) {
 	pool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
