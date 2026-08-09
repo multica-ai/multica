@@ -1334,6 +1334,9 @@ type kimiProviderModel struct {
 // Catalogs that omit `capabilities` entirely (older CLIs, forks) keep the
 // pre-capabilities behavior — efforts only, nothing synthesized — so the rule
 // only ever adds off/on on catalogs that state the model can honour them.
+// An explicit empty list is not the same thing: it states the model has no
+// capabilities, thinking included, so it hides the control. Only a missing
+// (or null) field falls back.
 func parseKimiProviderThinking(raw []byte) (map[string]*ModelThinking, error) {
 	var response struct {
 		Models map[string]kimiProviderModel `json:"models"`
@@ -1368,7 +1371,7 @@ func parseKimiProviderThinking(raw []byte) (map[string]*ModelThinking, error) {
 				Label: kimiThinkingLabel(value),
 			})
 		}
-		if len(model.Capabilities) > 0 {
+		if model.Capabilities != nil {
 			if !kimiHasCapability(model.Capabilities, "thinking") {
 				continue
 			}

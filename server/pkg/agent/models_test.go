@@ -153,6 +153,10 @@ func TestParseKimiProviderThinkingCapabilities(t *testing.T) {
       "capabilities": ["tool_use"],
       "supportEfforts": ["low", "high"]
     },
+    "kimi-code/k2-empty-capabilities": {
+      "capabilities": [],
+      "supportEfforts": ["low", "high"]
+    },
     "kimi-code/legacy-no-capabilities": {
       "supportEfforts": ["low", "high"],
       "defaultEffort": "low"
@@ -212,6 +216,13 @@ func TestParseKimiProviderThinkingCapabilities(t *testing.T) {
 	// thinking option, whatever efforts the catalog claims.
 	if thinking, ok := got["kimi-code/k2-instruct"]; ok {
 		t.Fatalf("model without thinking capability = %+v, want no entry", thinking)
+	}
+
+	// An explicit empty capabilities list is a statement, not an omission:
+	// no capabilities means no thinking, so no control — the legacy
+	// fallback is reserved for catalogs that lack the field entirely.
+	if thinking, ok := got["kimi-code/k2-empty-capabilities"]; ok {
+		t.Fatalf("model with empty capabilities = %+v, want no entry", thinking)
 	}
 
 	// No capabilities field at all (older CLI, fork): exactly the
