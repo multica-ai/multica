@@ -264,6 +264,23 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					"actual", sessionID,
 				)
 			}
+			// The resume response also carries the session's configOptions —
+			// the state the session will actually run with. With no configured
+			// level ("Follow CLI config"), Multica deliberately sends nothing,
+			// and ACP has no unset semantics (verified on 0.34.0: null, "",
+			// "default", "unset" and a missing value are all -32602), so the
+			// session keeps whatever level it already has — possibly one an
+			// earlier turn set explicitly. An empty thinking_level therefore
+			// resolves to the CLI's own config only on sessions this backend
+			// creates; on a resumed session it means "leave the session as it
+			// is". This log line is what makes that kept state visible.
+			if opts.ThinkingLevel == "" {
+				if level, ok := acpConfigOptionCurrentValue(result, "thinking"); ok {
+					b.cfg.Logger.Info("kimi resumed session keeps its existing thinking level; no override is configured and ACP cannot reset one to the CLI default",
+						"level", level,
+					)
+				}
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
