@@ -37,10 +37,13 @@ package wecom
 // What a round's ending is allowed to record, and when, is the ending ledger's
 // contract further down. Read it before adding a caller.
 //
-// The rounds stay ordered by batch id, which is the order the runs execute in:
-// the engine serializes chat tasks per session (ClaimAgentTask), so the oldest
-// round is the running one and everything behind it is waiting. That ordering
-// is what QueuedBehind reads; nothing else depends on it any more.
+// The rounds are kept sorted by batch id (insertLocked), which for one session
+// reads as the order its runs execute in: the engine serializes chat tasks per
+// session (ClaimAgentTask), so the oldest round is the running one and
+// everything behind it is waiting. Nothing consumes that order, though —
+// QueuedBehind compares batch ids rather than list positions, and it is
+// decided once when the round opens and never revised. The sorting is for
+// whoever reads the list, not for a caller that depends on it.
 //
 // The catch is req_id. Every frame of one stream has to echo the req_id of the
 // aibot_msg_callback that started the turn, and that value is only ever seen
@@ -1054,8 +1057,55 @@ func (s *streamStore) knowsRound(sessionID pgtype.UUID, taskID string) bool {
 	return false
 }
 
-// remembered reports how many rounds are on file past their bubble.
-// Diagnostics, and the cheap rejection at the head of the failure subscriber.
+// holding reports whether this store has anything on file anywhere: a round on
+// some session's open list, painted or not, or a session's ended note. It is
+// the "nothing here to close" test at the head of the two ending subscribers.
+//
+// Unpainted rounds count, and that is the point. depth() screens on painted
+// because it answers "how many bubbles are on screen"; a round bound to a run
+// whose opening frame is still in flight has no bubble yet and is exactly the
+// one whose ending must not be dropped — retiring it is what makes the late
+// paint a no-op (open returns roundFinished), and skipping it leaves a spinner
+// nothing will ever close.
+func (s *streamStore) holding() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.ended) > 0 {
+		return true
+	}
+	for _, rounds := range s.sessions {
+		if len(rounds) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// knowsSession reports whether this process holds anything at all for a
+// session: a round on the open list, or a note left by one that has ended.
+// Both are written only by this adapter's inbound path, so either settles that
+// the session is WeCom's without asking the database.
+//
+// Weaker than knowsRound, and for a different job. knowsRound answers "did
+// THIS run come from the room", which is an authorization question and has to
+// name the run. This one answers "is this session ours at all", which is what
+// keeps another channel's failed run off the database entirely.
+func (s *streamStore) knowsSession(sessionID pgtype.UUID) bool {
+	key := util.UUIDToString(sessionID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.sessions[key]) > 0 {
+		return true
+	}
+	note, ok := s.ended[key]
+	return ok && s.now().Sub(note.at) <= roundMemory
+}
+
+// remembered reports how many SESSIONS hold a note — one per session, however
+// many of its rounds are on it. Diagnostics, and the "this process knows
+// nothing at all" check at the head of the two ending subscribers; neither
+// wants a round count, so none is kept.
 func (s *streamStore) remembered() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

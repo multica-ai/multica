@@ -729,8 +729,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				wecomTyping := wecom.NewTypingIndicator(wecom.TypingIndicatorConfig{
 					Senders: wecomSenders,
 					Streams: wecomStreams,
-					// A sweeper's task:failed names a task and not a chat
-					// session, so the session is read back off the task row.
+					// The origin gate. A failure notice is written into a
+					// group chat, so before saying one the adapter reads the
+					// run's input batch to establish the question was asked
+					// over WeCom and not by the installer in their own
+					// browser — both runs fail on this same bus carrying the
+					// same session. Also backs the retry-clone lookup, and a
+					// fallback read of the session off the task row for a
+					// task:failed that carries none.
 					Tasks: queries,
 					// A run that fails after its bubble is gone — the guard
 					// closed it at five minutes, or the process restarted

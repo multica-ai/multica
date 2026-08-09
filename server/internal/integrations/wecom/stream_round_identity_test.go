@@ -659,3 +659,44 @@ func TestOpenIsIgnoredWithoutABatch(t *testing.T) {
 		t.Fatalf("a message with no run batch wrote %d stream frames", got)
 	}
 }
+
+// TestACancelRetiresARoundWhoseBubbleIsStillInFlight covers the ordering the
+// two facts arrive in when the slower one is the bubble.
+//
+// The Router detaches OnIngested, so a round can be bound to its run before
+// the opening frame has landed — the entry exists with a task and no bubble,
+// which roundEntry documents as an ordinary state. A cancel arriving in that
+// window is the run's LAST event: cancellation publishes no chat:done and no
+// task:failed, so if the round is not retired here nothing will ever retire
+// it, and the opening frame landing a moment later paints a spinner with no
+// closer. The guard replaces it five minutes on with "还在处理，完成后我再单独
+// 回复你" — a promise of a separate reply, about a run the user themselves
+// stopped.
+//
+// The subscriber used to return before looking, because its cheap rejection
+// counted PAINTED rounds and there were none anywhere in the process. This is
+// that gap: one round, unpainted, and nothing else on file.
+func TestACancelRetiresARoundWhoseBubbleIsStillInFlight(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	// The flush wins the race: the run is bound, its opening frame has not
+	// been written yet, and nothing else in this process holds a round.
+	rig.runStarted(t, 1, "task-1")
+
+	rig.cancelled(t, "task-1")
+
+	// The ingest goroutine finally gets to the socket. Retiring the round is
+	// what it reads: open sees the batch on the note's finished list and
+	// paints nothing.
+	rig.ask(t, "REQ-1", 1)
+
+	if frames := rig.conn.streamFrames(t); len(frames) != 0 {
+		t.Fatalf("the opening frame painted %d bubble(s) for a run that was cancelled before it "+
+			"landed; a cancel publishes no chat:done and no task:failed, so there is no ending "+
+			"left to close them and the guard can only replace them with a promise of a reply "+
+			"that will never come", len(frames))
+	}
+	if got := rig.streams.depth(); got != 0 {
+		t.Fatalf("%d bubble(s) on screen for a cancelled run, want 0", got)
+	}
+}

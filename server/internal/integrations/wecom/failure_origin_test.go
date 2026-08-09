@@ -28,6 +28,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -377,5 +379,50 @@ func TestTheOriginOfARetryCloneIsItsParentsBatch(t *testing.T) {
 	}
 	if got := pushedTexts(t, rig.conn); len(got) != 1 || got[0] != streamCopyFailed {
 		t.Fatalf("the asker read %q, want [%q]", got, streamCopyFailed)
+	}
+}
+
+// TestAnotherChannelsFailureNeverReachesTheTaskRow is the cost side of the
+// same gate, and it is a correctness question dressed as a performance one.
+//
+// task:failed is published for every run in the deployment, and the bus is
+// synchronous — this subscriber runs on the publisher's goroutine, so whatever
+// it does before concluding "not mine" is charged to a failure that has
+// nothing to do with WeCom, and every listener registered behind it waits.
+//
+// engine.TaskInputIsChannelIngested cannot be what turns those away: it
+// reports whether the input came from A channel, not from THIS one, so a
+// failed Slack run passes it and used to be rejected two queries later by a
+// binding lookup that found no WeCom row. The binding row is what actually
+// answers "is this session ours", so it is asked first, and a run this adapter
+// has nothing to do with must not reach the task row at all.
+//
+// The query counts are the assertion rather than a stopwatch: they are what
+// "returns promptly" means here, and they do not flake on a loaded machine.
+func TestAnotherChannelsFailureNeverReachesTheTaskRow(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	// A failed Slack run. The row is real and its input IS channel-ingested,
+	// so the origin gate would answer "deliver" if it were ever asked.
+	rig.askedInTheRoom(t, "task-1")
+	// What makes it Slack's: no WeCom binding for this session.
+	rig.q.sessionErr = pgx.ErrNoRows
+
+	rig.failed(t, "task-1", false)
+
+	if rig.q.taskGets != 0 {
+		t.Fatalf("the task row was read %d time(s) for a failed run on a session with no WeCom "+
+			"binding — another channel's failure has to cost this adapter one lookup, not three, "+
+			"and it is paying for it on the publisher's goroutine", rig.q.taskGets)
+	}
+	if asked := rig.q.originAsked(); len(asked) != 0 {
+		t.Fatalf("the channel_ingested stamp was read for %v — a run on a session this adapter "+
+			"is not bound to never had an origin worth establishing", asked)
+	}
+	if got := pushedTexts(t, rig.conn); len(got) != 0 {
+		t.Fatalf("the room was told %q about another channel's failed run", got)
+	}
+	if frames := rig.conn.streamFrames(t); len(frames) != 0 {
+		t.Fatalf("another channel's failed run wrote %d stream frames here, want none", len(frames))
 	}
 }

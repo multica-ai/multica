@@ -69,20 +69,23 @@ const (
 // subscriber, neither of which has a caller's context to inherit.
 const streamCloseTimeout = 10 * time.Second
 
-// taskLookup resolves a task id to the chat session it belongs to.
-// task:failed's sweeper publisher carries no session, so it has to come off
-// the task row. *db.Queries satisfies it.
+// taskLookup resolves a task id to the chat session it belongs to. Both
+// publishers of task:failed stamp the session whenever the task row has one,
+// so this is the fallback for a payload that does not, and the row the round
+// matcher reads to resolve an auto-retry clone. *db.Queries satisfies it.
 type taskLookup interface {
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 }
 
 // taskOrigin is the task row plus where the run's input came from. The typing
-// indicator needs both halves: the row to find the chat session behind a
-// sweeper's task:failed, and the provenance stamp to decide whether a failed
-// run's notice belongs in the WeCom room at all — the same question outbound.go
-// asks before pushing an answer there. Kept apart from taskLookup because the
-// round matcher and the outbound subscriber only ever need the row.
-// *db.Queries satisfies it.
+// indicator needs both halves: the row to resolve an auto-retry clone and to
+// recover a session no publisher put on the event, and the provenance stamp to
+// decide whether a failed run's notice belongs in the WeCom room at all. On
+// this branch the failure
+// notice is the only thing that asks — outbound.go pushes an answer into the
+// room without reading the stamp, and the gate that makes it read is #6591's,
+// not here. Kept apart from taskLookup because the round matcher and the
+// outbound subscriber only ever need the row. *db.Queries satisfies it.
 type taskOrigin interface {
 	taskLookup
 	engine.ChannelProvenanceQueries
@@ -120,10 +123,10 @@ type TypingIndicatorConfig struct {
 	Streams *streamStore
 	Logger  *slog.Logger
 
-	// Tasks resolves a task id to its chat session, for the task:failed the
-	// sweepers publish without one, and answers where that run's input came
-	// from. Nil limits failure handling to the events that carry a session,
-	// and leaves the origin question unanswerable — see failureBelongsOnWecom
+	// Tasks answers where a run's input came from, and resolves a task id to
+	// its chat session for a task:failed that carries none. Nil leaves the
+	// origin question unanswerable, so every failed run this process holds no
+	// round for is refused rather than announced — see failureBelongsOnWecom
 	// for what this manager does when it cannot ask.
 	Tasks taskOrigin
 
@@ -176,9 +179,12 @@ type TypingIndicatorWiring struct {
 	// it every handler returns on its first line, so no bubble is ever closed
 	// by any ending.
 	Streams bool
-	// Tasks resolves a task id to its chat session. Without it the sweepers'
-	// task:failed — which names a task and no session — resolves to nothing
-	// and the bubble behind a swept run is never closed.
+	// Tasks reads the run's input batch, which is what establishes that the
+	// question was asked over WeCom and not by the installer in their own
+	// browser. Without it every failed run this process holds no round for is
+	// refused instead of announced, so a run that outlived its bubble tells
+	// the user nothing. It also resolves an auto-retry clone to the round its
+	// parent opened, and recovers the session for a task:failed carrying none.
 	Tasks bool
 	// Bindings finds the chat behind a session when no round is on file.
 	// Without it a run that fails after its bubble is gone (guard closed it at
@@ -346,16 +352,15 @@ func (m *TypingIndicatorManager) Register(bus *events.Bus) {
 // handleTaskFailed says a run died, in the bubble if there still is one and as
 // a plain message if there is not.
 //
-// task:failed has two publishers and they do not agree on the payload.
-// broadcastTaskEvent, which FailTask uses, carries chat_session_id.
-// HandleFailedTasks — every sweeper, recover-orphans, and the daemon heartbeat
-// timeout — carries task_id, agent_id, issue_id, status and failure_reason, and
-// no session anywhere. That second publisher is the whole crashed-daemon path,
-// so without the task-id fallback the bubble spins on until the guard replaces
-// it with "still working, I'll reply separately" — a promise about a run that
-// has been dead for five minutes. The fallback stays on this side of the
-// boundary: the adapter carries its own routing rather than widening a payload
-// three other consumers read.
+// Both publishers of task:failed stamp chat_session_id when the task row has
+// one: service.taskEvent, which FailTask goes through, and the sweeper's own
+// envelope in HandleFailedTasks (recover-orphans and the daemon heartbeat
+// timeout come down that path). So the session is normally on the event, and
+// sessionFor's read of it off the task row is a fallback for a payload neither
+// publisher produces today. It is kept because a bubble left spinning is a
+// failure nobody reports: five minutes on, the guard replaces it with "still
+// working, I'll reply separately" — a promise about a run that has been dead
+// the whole time.
 //
 // The bubble is not the whole of it. A handle is consumed by whichever ending
 // gets there first, and the guard is allowed to be that one at the five-minute
@@ -380,36 +385,75 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 	if retryPending(e) {
 		return
 	}
-	if m.bindings == nil && m.streams.depth() == 0 && m.streams.remembered() == 0 {
-		// Nothing open, nothing owed, and no way to find a chat: no reason to
-		// read a row for someone else's run.
+	if m.bindings == nil && !m.streams.holding() {
+		// Nothing on file, and no way to find a chat: no reason to read a row
+		// for someone else's run.
 		return
 	}
 	sessionID, ok := m.sessionFor(e)
 	if !ok {
 		return // an issue / autopilot run, with no chat session and no bubble
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
-	defer cancel()
 	taskID := taskIDFromEvent(e)
+
+	// Everything this handler asks a database runs on the goroutine that
+	// published the event, so it gets the subscriber's own budget rather than
+	// the ten seconds a closing frame may spend on the wire. See
+	// taskLookupTimeout.
+	dbCtx, cancelDB := context.WithTimeout(context.Background(), taskLookupTimeout)
+	defer cancelDB()
+
+	// Is this session WeCom's at all? Asked first, and cheapest first, because
+	// task:failed fires for every run in the deployment — Slack's, Lark's,
+	// DingTalk's, the web UI's — and none of them are worth a query here.
+	//
+	// A session this process holds a round or a note for is ours on local
+	// evidence, at no cost. Everything else has to ask the binding row, and
+	// that one lookup is the answer: engine.TaskInputIsChannelIngested cannot
+	// give it, because it reports whether the input came from A channel, not
+	// from this one — a failed Slack run passes it. The address is carried
+	// down to sayTheRunFailed so the same row is not read twice.
+	var bound roundAddress
+	if !m.streams.knowsSession(sessionID) {
+		found, ours := m.addressFromBinding(dbCtx, sessionID)
+		if !ours {
+			return
+		}
+		bound = found
+	}
+
 	// A run started in the browser against this same session gets its notice
 	// there. Announcing it here would tell everyone in the room that something
-	// they never saw has gone wrong. Asked BEFORE the bubble is taken, for the
-	// reason outbound.go asks before finishing one: a gate placed after the
-	// take has already sealed a WeCom round's bubble with a web run's ending.
-	if !m.failureBelongsOnWecom(ctx, sessionID, taskID) {
+	// they never saw has gone wrong. Asked BEFORE the bubble is taken, because
+	// a gate placed after the take has already sealed a WeCom round's bubble
+	// with a web run's ending. Nothing else asks on this branch: outbound.go
+	// finishes an answer without the check until #6591 lands.
+	if !m.failureBelongsOnWecom(dbCtx, sessionID, taskID) {
 		return
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
+	defer cancel()
 	m.rounds().sayEnding(ctx, sessionID, byTask(taskID), roundOver,
-		func(t roundTurn) (roundAddress, error) { return m.sayTheRunFailed(ctx, sessionID, t) })
+		func(t roundTurn) (roundAddress, error) {
+			if !t.HasBubble && !t.Addr.known() && bound.known() {
+				t.Addr = bound
+			}
+			return m.sayTheRunFailed(ctx, sessionID, t)
+		})
 }
 
-// failureBelongsOnWecom asks the question outbound.go asks of an answer: did
-// this run's input come from the channel? The engine makes the INSTALLER the
-// creator of a group's chat_session, so that session appears in their own
-// Multica chat list and they can ask it something in a browser. Both runs fail
-// the same way, on the same bus, carrying the same session — nothing in the
-// event says which surface asked.
+// failureBelongsOnWecom asks where this run's input came from: the channel, or
+// somewhere else? The engine makes the INSTALLER the creator of a group's
+// chat_session, so that session appears in their own Multica chat list and they
+// can ask it something in a browser. Both runs fail the same way, on the same
+// bus, carrying the same session — nothing in the event says which surface
+// asked.
+//
+// The answer has the same exposure and no gate on this branch: outbound.go
+// delivers a completion to the room whatever asked for it. #6591 puts the same
+// engine.TaskInputIsChannelIngested call on that path, so once both are in,
+// the two endings of a run are decided by one stamp.
 //
 // This is an authorization check on writing into somebody else's group chat,
 // so uncertainty is not permission. A lookup that did not answer is not
@@ -491,7 +535,13 @@ func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
 	if m.streams == nil {
 		return
 	}
-	if m.streams.depth() == 0 && m.streams.remembered() == 0 {
+	// Anything on file at all, not just anything painted. A round bound to a
+	// run whose opening frame is still in flight has no bubble yet; returning
+	// here would leave it on the open list, and the frame landing afterwards
+	// would paint a spinner with no ending left to close it — the cancel is
+	// the last event this run produces. Retiring the round instead makes that
+	// late paint a no-op.
+	if !m.streams.holding() {
 		return
 	}
 	sessionID, ok := m.sessionFor(e)
@@ -583,6 +633,8 @@ func (m *TypingIndicatorManager) sayAsPlainMessage(ctx context.Context, sessionI
 // the same two queries outbound.go makes when an answer has no bubble to land
 // in. A session with no wecom binding is not ours to speak in: this subscriber
 // sees every failed run on a shared bus, including Slack's and the web UI's.
+// That makes it the ownership test as much as the address, which is why
+// handleTaskFailed asks it before spending anything on the task row.
 func (m *TypingIndicatorManager) addressFromBinding(ctx context.Context, sessionID pgtype.UUID) (roundAddress, bool) {
 	if m.bindings == nil {
 		return roundAddress{}, false
@@ -649,10 +701,17 @@ func (m *TypingIndicatorManager) sessionFor(e events.Event) (pgtype.UUID, bool) 
 	return task.ChatSessionID, task.ChatSessionID.Valid
 }
 
-// taskLookupTimeout is the whole budget this subscriber may spend on somebody
-// else's goroutine. The bus is synchronous: a task:failed subscriber runs on
-// the goroutine that published the event, and a sweeper tick is not ours to
-// hold while a loaded pool answers.
+// taskLookupTimeout is the whole database budget this subscriber may spend on
+// somebody else's goroutine — the session lookup, the binding row and the
+// origin gate together. The bus is synchronous: a task:failed subscriber runs
+// on the goroutine that published the event, and a sweeper tick is not ours to
+// hold while a loaded pool answers. streamCloseTimeout is the separate, longer
+// budget for putting words on the wire once the decision has been made.
+//
+// A pool too slow to answer inside it costs a failure notice for a run this
+// process holds no record of. The case worth protecting does not depend on it:
+// a round with an open bubble or an outstanding promise is proved ours from
+// memory and never reaches these queries — see failureBelongsOnWecom.
 const taskLookupTimeout = 800 * time.Millisecond
 
 // taskIDFromEvent prefers the envelope's routing hint and falls back to the
