@@ -1,5 +1,7 @@
 # Platform Extension Squad Runtime Implementation Plan
 
+> **Follow-up:** 本计划已经完成的导入时固定 Runtime 基线保持不变。通用 Runtime Pool、调用时分配与 Session Affinity 的增量实施使用 `docs/superpowers/plans/2026-08-09-runtime-pool-session-affinity.md`。
+
 > **Execution mode:** Subagent-Driven Development in the current session. Every feature task uses red-green-refactor, then spec-compliance and code-quality review.
 
 **Goal:** Import a Platform Extension into Multica as native Agents, Skills, and a Squad; automatically bind it to an online idle `platform-agent-cli` Runtime; execute a real Multica task through the bundled CLI with imported Agent, Skill, and Command context.

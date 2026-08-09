@@ -1,8 +1,12 @@
 # Platform Extension 到 Multica Squad 运行态设计
 
+> **增量规范（2026-08-09）：** 本文记录已经实现并验收的导入时 fixed Runtime 历史基线。凡本文要求“新 Release 导入时选择/绑定/返回一个具体 Runtime”的陈述，均由 [`2026-08-09-runtime-pool-session-affinity-design.md`](./2026-08-09-runtime-pool-session-affinity-design.md) 取代，明确包括 §1.1、§1.3、§2.1–§2.4、§5.2、§5.4、§5.5、§9.2 中 `PLATFORM_RUNTIME_UNAVAILABLE` 的新导入语义、§10 的固定路由假设、§11.2/§11.4 的固定绑定验收、§12.2 的动态分配非目标和 §13 的导入时分配决策。既有 Release 继续遵守本文 fixed 行为；本文其余 Extension、CLI、Skill、Command、Sidecar 和 Squad 契约继续有效。
+
 ## 1. 需求分析
 
 ### 1.1 业务目标
+
+> 本节中的导入时 Runtime 选择仅描述既有 fixed Release；新 Release 在调用时使用 Runtime Pool。
 
 将平台中的 `Agent + Skill + Command = Extension` 接入 Multica，形成一条可以在桌面客户端验证的完整链路：
 
@@ -28,6 +32,8 @@
 - Extension 不作为一个整体交给 CLI 执行。它只在导入时转换，运行时仍然是 Multica Native Squad 中的单 Agent 任务。
 
 ### 1.3 验收场景
+
+> 本节是 fixed 基线验收。Pool Release 的权威验收见 2026-08-09 增量 Spec。
 
 1. 启动 Multica Desktop 和本机 Daemon。
 2. Runtimes 页面能看到内置的 `Platform Agent CLI` Runtime 为 Online。
@@ -60,7 +66,7 @@
 
 ### 2.4 决策
 
-采用方案 B。运行时分配是 Extension 导入的一部分，不改写 Multica 的任务路由模型。未找到空闲 Runtime 时返回 `409 PLATFORM_RUNTIME_UNAVAILABLE`，不选择忙碌 Runtime，不降级到 Codex 或其他 Provider。
+历史基线采用方案 B，并已经完成真实验收。2026-08-09 起，新 Release 改用显式 Pool Agent：导入不再选择 Runtime；首次调用从通用 Runtime Pool 动态分配，后续调用保持 Session Affinity。既有 Release 继续使用本节的 fixed 行为，避免静默迁移。权威增量决策见 2026-08-09 Runtime Pool Spec。
 
 ## 3. 总体架构
 
@@ -244,6 +250,8 @@ Multica 导入 API 同时接受 `platform.extension/v1` 和 `multica.extension-b
 
 ### 5.2 持久化
 
+> 本节的非空 `runtime_id` 完成形态仅适用于 fixed Release；Pool Release 使用 `squad_id` 非空、`runtime_id` 为空的判别约束。
+
 新增 `platform_extension_release`：
 
 | 字段 | 含义 |
@@ -273,6 +281,8 @@ Multica 导入 API 同时接受 `platform.extension/v1` 和 `multica.extension-b
 
 ### 5.4 空闲 Runtime 选择
 
+> 本节仅适用于已经导入的 fixed Release。新 Release 不在导入时选择 Runtime，改由 Runtime Pool Spec 的调用时 allocator 处理。
+
 候选 Runtime 必须同时满足：
 
 1. `workspace_id` 等于目标 Workspace。
@@ -292,6 +302,8 @@ Multica 导入 API 同时接受 `platform.extension/v1` 和 `multica.extension-b
 在导入事务中对选中 Runtime 行使用 `FOR UPDATE SKIP LOCKED`，防止同时导入竞争同一候选行。该锁仅保护导入分配，不将 Runtime 变为独占资源。
 
 ### 5.5 原生资源转换
+
+> 本节的 Agent 固定 Runtime 绑定仅适用于 fixed Release；Pool Agent 显式使用 `runtime_binding_mode=pool`。
 
 1. 为每个 Skill 创建 workspace Skill，根 `SKILL.md` 作为 content，其余文件作为 `skill_file`。
 2. 为每个 Agent 创建 Multica Agent，提示词写入 `instructions`，Runtime 绑定为分配结果。
@@ -599,13 +611,15 @@ React Query 保存 Extension 服务端状态；不新增 Zustand 服务端缓存
 ### 12.2 本次不实现
 
 - MCP 或其他工具执行 Command。
-- 每任务动态跨 Runtime 负载均衡。
+- 基线版本不实现每任务动态跨 Runtime 负载均衡；该限制已由 2026-08-09 Runtime Pool 增量 Spec 取代。
 - CLI 内部 Squad 调度器。
 - 细粒度 Agent-Skill 推断。
 - 修改 Codex App Server 标准方法或事件格式。
 - 将 `platform-agent-cli` 源码复制进 Multica 仓库；Multica 仅按其他 Runtime 的方式打包外部产物。
 
 ## 13. 关键决策记录
+
+> 表中导入时 Runtime 分配是 fixed 历史决策；新 Release 以 2026-08-09 增量 Spec 的调用时 Pool 分配为准。
 
 | 决策 | 结果 | 原因 |
 | --- | --- | --- |
