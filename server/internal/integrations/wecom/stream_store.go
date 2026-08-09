@@ -247,9 +247,12 @@ func (h streamHandle) address() roundAddress {
 //	I3. EVERY TERMINAL PATH ENDS IN WORDS OR LEAVES THE RUN OWED AN ENDING. No
 //	    path may both stay silent and clear the record. A delivery that failed
 //	    puts a claimed promise back where it was, and for a round this store
-//	    knows the chat of it records that the run is still owed one — so the
-//	    next publisher of the same news says it, rather than finding it filed
-//	    as already said.
+//	    WAS HOLDING it records that the run is still owed one — so the next
+//	    publisher of the same news says it, rather than finding it filed as
+//	    already said. A run this store held no round for leaves no trace: it
+//	    was owed nothing here, and a debt filed against it would be
+//	    indistinguishable from the inbound path's own record of the round —
+//	    which is what knowsRound reads as proof of where a question was asked.
 //
 // sayEnding is the only way the ledger is written, and it takes the delivery as
 // an argument rather than handing out the right to speak. A caller cannot hold
@@ -267,8 +270,10 @@ func (h streamHandle) address() roundAddress {
 // errNothingToSay is how a delivery reports that it declined to speak: a cancel
 // for a round this process has no record of, an empty completion nobody is owed
 // an ending for, a session with no WeCom binding at all. Nothing reached the
-// user, so under I1 nothing is recorded — and unlike a refused send it is not
-// worth a warning, because no words were ever going out.
+// user, so under I1 nothing is recorded as SAID — and unlike a refused send it
+// is not worth a warning, because no words were ever going out. It is not the
+// same as nothing having happened: a round this store was holding has had its
+// bubble consumed either way, so I3 still leaves that run owed an ending.
 var errNothingToSay = errors.New("wecom: nothing to say for this round")
 
 // roundTurn is what the ledger hands a delivery for the length of one ending:
@@ -336,6 +341,22 @@ type pendingEnding struct {
 	// owedAt is where in owed the promise sat when it was claimed, or -1 if
 	// nothing was claimed. It is what I3 restores.
 	owedAt int
+	// held says this ending was reserved from a round this store actually had:
+	// one takeAtLocked lifted off the open list, or one whose promise was still
+	// on the note. Both are written only by this adapter's inbound path — a
+	// bubble opened by a message it ingested, named by the flush that answered
+	// it — so it is the run-level fact "this run was asked in the room".
+	//
+	// It is what separates the two failed deliveries. A round this store held
+	// has lost its bubble to the attempt, so I3 leaves the run owed an ending
+	// and the next publisher says it. A run this store held NOTHING for lost
+	// nothing: forgottenLocked took no handle and consumed no promise, and it
+	// reached here only because some subscriber tried to speak for a run on a
+	// shared bus. Filing a debt for that one would put a run this adapter never
+	// ingested on owed — where knowsRound reads it as proof the question was
+	// asked in the room, and hands the failure gate a permission the database
+	// was supposed to decide.
+	held bool
 }
 
 // endedRound is what a session keeps once a handle is gone: where the round
@@ -754,7 +775,7 @@ func (s *streamStore) takeAtLocked(key string, i int, ending roundEnding) (round
 		addr = note.addr
 	}
 
-	pending := pendingEnding{key: key, taskID: entry.taskID, ending: ending, owedAt: -1}
+	pending := pendingEnding{key: key, taskID: entry.taskID, ending: ending, owedAt: -1, held: true}
 	promised := false
 	if entry.taskID != "" {
 		pending.live = true
@@ -788,12 +809,16 @@ func (s *streamStore) takeAtLocked(key string, i int, ending roundEnding) (round
 //	say returns nil            — the words were accepted for sending. The
 //	                             promise is settled, the run goes on told, and
 //	                             a guard's ending files the promise it just made.
-//	say returns an error       — nothing reached the user. The ledger goes back
-//	                             exactly as it was (I3): a claimed promise
-//	                             returns to owed, and nothing is told, so the
-//	                             next publisher of the same news can still say
-//	                             it. errNothingToSay is the deliberate case and
-//	                             is recorded the same way — as nothing.
+//	say returns an error       — nothing reached the user, so nothing is told
+//	                             (I1) and the next publisher of the same news
+//	                             can still say it. A claimed promise returns to
+//	                             where it sat, and a round this store was
+//	                             holding is left owed an ending even if it was
+//	                             owed none before (I3) — its bubble went with
+//	                             the attempt. A run this store held no round for
+//	                             is left exactly as it was found: untouched.
+//	                             errNothingToSay is the deliberate case and is
+//	                             recorded the same way.
 //
 // The address say returns is where it actually spoke, which is how a delivery
 // that found its own chat in the binding row teaches the note an address it did
@@ -905,7 +930,7 @@ func (s *streamStore) beginEndingLocked(key string, k roundKey, ending roundEndi
 	note.at = s.now()
 	s.ended[key] = note
 	return roundTurn{Addr: note.addr, Promised: true, Verdict: roundOwesAnEnding},
-		pendingEnding{live: true, key: key, taskID: taskID, ending: ending, owedAt: at},
+		pendingEnding{live: true, key: key, taskID: taskID, ending: ending, owedAt: at, held: true},
 		false
 }
 
@@ -922,7 +947,8 @@ func (s *streamStore) beginEndingLocked(key string, k roundKey, ending roundEndi
 // No note is created or touched HERE, and nothing joins speaking, because at
 // this point there is no evidence the session is even WeCom's — this subscriber
 // sees every failed run on a shared bus. Only words that actually reached a
-// WeCom chat produce a note. Caller holds s.mu.
+// WeCom chat produce a note; a delivery that FAILED writes nothing at all, which
+// is what the pending's held flag carries down to endEnding. Caller holds s.mu.
 func (s *streamStore) forgottenLocked(key, taskID string, ending roundEnding, worthResolving bool) (roundTurn, pendingEnding, bool) {
 	turn := roundTurn{Verdict: roundForgotten}
 	if taskID == "" {
@@ -934,10 +960,16 @@ func (s *streamStore) forgottenLocked(key, taskID string, ending roundEnding, wo
 // endEnding is the other half of sayEnding: it records the delivery's account
 // of itself, and it is where all three invariants are actually paid.
 //
-// delivered is the whole of the decision. False puts the ledger back exactly as
-// beginEndingLocked found it — the promise returns to owed, nothing reaches
-// told — which is I3, and is what makes a send refused during a reconnect
-// window a retry rather than a loss.
+// delivered is the whole of the decision. False reaches told for nothing (I1)
+// and returns a claimed promise to exactly where it sat, which is what makes a
+// send refused during a reconnect window a retry rather than a loss. For a
+// round this store was holding it goes one step further and leaves the run owed
+// an ending it was not owed before (I3): the bubble was consumed whether or not
+// the words landed, so only a later ending can put anything under it.
+//
+// False for a run this store held no round for writes nothing whatsoever — see
+// held on pendingEnding for why that asymmetry is the point rather than an
+// omission.
 func (s *streamStore) endEnding(p pendingEnding, addr roundAddress, delivered bool) {
 	if !p.live {
 		return
@@ -964,13 +996,22 @@ func (s *streamStore) endEnding(p pendingEnding, addr roundAddress, delivered bo
 		switch {
 		case p.owedAt >= 0:
 			note.owed = restoreRun(note.owed, p.owedAt, p.taskID)
-		case note.addr.known():
-			// Nothing was claimed, and nothing landed. If the round had a bubble
-			// it has just been consumed, so what the user is looking at is a
-			// spinner nothing will ever seal — and this store knows the chat it
-			// is in. Recording the run as owed is what makes the next publisher
-			// of its ending say the words there instead of finding the round
-			// gone and going quiet.
+		case p.held && note.addr.known():
+			// A round this store was holding, nothing claimed, nothing landed.
+			// Its bubble has just been consumed, so what the user is looking at
+			// is a spinner nothing will ever seal — and this store knows the
+			// chat it is in. Recording the run as owed is what makes the next
+			// publisher of its ending say the words there instead of finding
+			// the round gone and going quiet.
+			//
+			// held is what keeps this off a run that was never this adapter's.
+			// The address is a SESSION-level fact — one earlier WeCom round
+			// leaves it on the note and it outlives every round after — so
+			// without held, an answer the installer asked for in their browser,
+			// whose delivery this replica could not make, would file itself as
+			// owed on a session it merely shares. knowsRound would then read
+			// that debt as proof the question came from the room and wave the
+			// run's failure notice into the chat with no database check at all.
 			note.owed = note.owe(p.taskID)
 		}
 		s.ended[p.key] = note
@@ -1023,11 +1064,19 @@ func (s *streamStore) wasTold(sessionID pgtype.UUID, taskID string) bool {
 }
 
 // knowsRound reports whether this process holds local evidence that a run
-// belongs to a WeCom round of this session: a round bound to it, or a promise
-// owed to it. Both are written only by the inbound path — a round is opened by
-// a message this adapter ingested and named by the flush that answered it, and
-// a promise is left by the guard closing that round's own bubble — so either
-// one is positive proof of where the question was asked, needing no database.
+// belongs to a WeCom round of this session: a round bound to it, or an ending
+// owed to it. Both trace back to the inbound path — a round is opened by a
+// message this adapter ingested and named by the flush that answered it, and
+// every entry on owed comes from a round that was on that list — so either one
+// is positive proof of where the question was asked, needing no database.
+//
+// That second half only holds because owed is written for a round this store
+// was HOLDING and for nothing else (endEnding, the held flag). A ledger that
+// filed a debt for any run whose delivery failed would put runs asked in the
+// installer's browser on this list, and this function would then answer yes for
+// them — an authorization question settled by a bus event the caller does not
+// control. Read owed as "a round of ours is owed words", never as "the store
+// once tried to speak for this id".
 //
 // It is deliberately not the whole of the origin question: a run with nothing
 // on file here may still have come from WeCom, and that case is the row's to

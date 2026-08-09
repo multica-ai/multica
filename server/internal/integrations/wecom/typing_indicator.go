@@ -770,10 +770,15 @@ func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, batch engine.Ru
 // behaviour has one definition and a test can run it without waiting out the
 // five minutes.
 //
-// The promise is filed by the ledger and only if these words landed. A guard
-// whose frame and fallback both fail has promised the user nothing, so there is
-// nothing to keep: the run's real ending finds no promise, chases the binding
-// row, and tells the user what happened directly.
+// The promise is filed by the ledger, not here, and either way the run comes
+// out of this owed an ending. Words that landed put "还在处理，完成后我再单独
+// 回复你" on the screen and the promise is that sentence. Words that did not —
+// frame refused, fallback unsendable — still cost the round its bubble, which
+// the ledger consumed under the lock that found it, so the user is left
+// watching a spinner nothing can seal; I3 records that as owed too. The
+// difference is only in what the user has already been told, and the run's real
+// ending is said in the chat this round was speaking in either way, off the
+// note rather than the binding row.
 func (m *TypingIndicatorManager) fireGuard(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID) {
 	m.streams.sayEnding(sessionID, byBatch(batch), roundContinues, nil,
 		func(t roundTurn) (roundAddress, error) {
@@ -797,8 +802,8 @@ func (m *TypingIndicatorManager) fireGuard(ctx context.Context, sessionID pgtype
 // comes off the handle, captured at ingest, because by now the binding row may
 // point at a different chat.
 //
-// Both routes failing is what the returned error is for. Under I3 the ledger
-// then records nothing, so this run's ending is still owed and the next
+// Both routes failing is what the returned error is for. The ledger then
+// records nothing as SAID, so this run's ending is still owed and the next
 // publisher of it — a sweeper tick, WeCom's own redelivery — says it instead of
 // finding it filed as already said.
 func (m *TypingIndicatorManager) writeClosing(ctx context.Context, sessionID pgtype.UUID, h streamHandle, text, why string) error {

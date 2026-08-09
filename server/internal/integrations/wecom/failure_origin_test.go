@@ -426,3 +426,117 @@ func TestAnotherChannelsFailureNeverReachesTheTaskRow(t *testing.T) {
 		t.Fatalf("another channel's failed run wrote %d stream frames here, want none", len(frames))
 	}
 }
+
+// ---- and where the local evidence must not be manufactured ----
+//
+// The gate answers "yes, this run is ours" from memory before it asks the
+// database, and the memory it reads is the owed list. That shortcut is only
+// sound while owed holds runs of rounds this adapter actually ingested. The
+// note's ADDRESS is a session-level fact — one WeCom round leaves it and every
+// later round of that session sees it — so a ledger that filed a debt whenever
+// a delivery failed would let any run sharing the session write itself onto the
+// list the gate trusts.
+
+// TestAWebRunsUndeliveredAnswerDoesNotBuyItTheRoomsVoice is the fix.
+//
+// The installer asks in their browser, against a session the room also uses.
+// The answer to THAT question is pushed at the room already (no origin gate on
+// the answer path until #6591) and here it does not even land — the socket is
+// down. Nothing was owed, nothing was consumed, nothing was said. If that alone
+// puts the run on owed, its later task:failed walks straight through the gate
+// on "local evidence" and tells everyone in the room that a question they never
+// saw has gone wrong — with no database read, so no fix on the row side can
+// reach it.
+func TestAWebRunsUndeliveredAnswerDoesNotBuyItTheRoomsVoice(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+
+	// The room asked something earlier and read its answer. That is what puts
+	// the room's address on the session's note, where it outlives the round.
+	rig.askedInTheRoom(t, "task-1")
+	rig.ran(t, "REQ-1", 1, "task-1")
+	rig.answer(t, "42", "task-1")
+
+	// Now the installer asks the same session something in a browser. No
+	// bubble, no promise — and the socket is down when the answer goes out.
+	rig.askedInTheBrowser(t, "task-2")
+	rig.senders.clear(rig.instID, rig.conn.sender)
+	if err := rig.out.processEvent(context.Background(), events.Event{
+		ChatSessionID: bubbleSession,
+		TaskID:        taskUUID(t, "task-2"),
+		Payload:       protocol.ChatDonePayload{Content: "the salary band for that role is 42k"},
+	}); err == nil {
+		t.Fatalf("the answer reported itself delivered with no connection to send it on")
+	}
+	rig.senders.set(rig.instID, rig.conn.sender) // the socket comes back
+
+	// Errorf, not Fatalf: this is the mechanism, and the next three assertions
+	// are what it costs the room. A run that stops here has been told half of
+	// what went wrong.
+	if rig.streams.owesEnding(bubbleSessionID(t), taskUUID(t, "task-2")) {
+		t.Errorf("the ledger owes an ending to a run this adapter never ingested — owed is what " +
+			"knowsRound reads as proof of where a question was asked, so a browser run that " +
+			"failed to deliver has just written itself its own permission to speak in the room")
+	}
+
+	rig.failed(t, "task-2", false)
+
+	if got := pushedTexts(t, rig.conn); len(got) != 0 {
+		t.Fatalf("the room was told %q about a run nobody in it started — everyone in the chat "+
+			"just learned that a question they never saw had gone wrong", got)
+	}
+	if asked := rig.q.originAsked(); len(asked) != 1 || asked[0] != taskUUID(t, "task-2") {
+		t.Fatalf("the origin gate read the channel_ingested stamp for %v, want exactly [%s] — "+
+			"a run with no round and no promise of this adapter's has to be decided by the row, "+
+			"and this one skipped the check on evidence it manufactured for itself",
+			asked, taskUUID(t, "task-2"))
+	}
+	// Two frames: the room's own bubble, opened and sealed by its own answer.
+	if frames := rig.conn.streamFrames(t); len(frames) != 2 {
+		t.Fatalf("the room's stream frames are %v, want the 2 its own round wrote", frames)
+	}
+}
+
+// TestARoomRunsUndeliveredAnswerStaysOwedToItsAsker is the control, and the
+// direction that costs more to get wrong.
+//
+// Same failed delivery, same session, same empty-handed ledger write — except
+// this round IS the room's, and the attempt cost it the bubble the asker was
+// watching. I3 leaves the run owed an ending, so the failure that follows keeps
+// it, and it keeps it while every database read the gate could make is failing.
+func TestARoomRunsUndeliveredAnswerStaysOwedToItsAsker(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.askedInTheRoom(t, "task-1")
+	rig.ran(t, "REQ-1", 1, "task-1")
+
+	// The socket drops between the answer being computed and it going out. The
+	// bubble is consumed by the attempt either way.
+	rig.senders.clear(rig.instID, rig.conn.sender)
+	if err := rig.out.processEvent(context.Background(), events.Event{
+		ChatSessionID: bubbleSession,
+		TaskID:        taskUUID(t, "task-1"),
+		Payload:       protocol.ChatDonePayload{Content: "42"},
+	}); err == nil {
+		t.Fatalf("the answer reported itself delivered with no connection to send it on")
+	}
+	rig.senders.set(rig.instID, rig.conn.sender)
+
+	if !rig.streams.owesEnding(bubbleSessionID(t), taskUUID(t, "task-1")) {
+		t.Fatalf("the room's own round is owed nothing after an answer that never landed — its " +
+			"bubble is gone and the asker is watching a spinner only a later ending can seal")
+	}
+
+	// And the database has stopped answering, so the gate has nothing but this.
+	rig.q.taskErr = errors.New("connection refused")
+	rig.q.originErr = errors.New("connection refused")
+
+	rig.failed(t, "task-1", false)
+
+	got := pushedTexts(t, rig.conn)
+	if len(got) != 1 || got[0] != streamCopyFailed {
+		t.Fatalf("the asker read %q, want exactly [%q] — their question's bubble was taken by an "+
+			"answer that never arrived, and this notice is the only thing left to tell them",
+			got, streamCopyFailed)
+	}
+}
