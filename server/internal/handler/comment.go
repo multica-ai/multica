@@ -1082,6 +1082,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		if status == 0 {
 			status = http.StatusUnprocessableEntity
 		}
+		h.recordCommentGateBlocker(r.Context(), r, issue, authorType, gateResult.Message) // CEREBRO-PATCH(comment-gate-blocker-line): FIR-4727 surface the block in the run modal.
 		writeError(w, status, gateResult.Message)
 		return
 	}

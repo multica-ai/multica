@@ -1844,6 +1844,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `create-issue-permission-source-map` | `server/internal/service/builtin_skills/multica-working-on-issues/references/working-on-issues-source-map.md` | Link skill guidance to enforcement sources. |
 | `issue-update-platform-action` | `server/internal/handler/issue.go` | FIR-4076 keeps the upstream update handler unchanged except for one pre-mutation call into the Cerebro-owned Task Mandate + Permissions gate. |
 | `comment-create-platform-action` | `server/internal/handler/comment.go` | FIR-4076 keeps the upstream comment handler unchanged except for one pre-mutation call into the same Cerebro-owned gate. |
+| `comment-gate-blocker-line` | `server/internal/handler/comment.go` | FIR-4727 — one call on the gate-reject branch into the fork-owned `recordCommentGateBlocker` (in `comment_workflow_gate_cerebro.go`, cerebro zone), which appends a `blocker` `task_message` so a before.message.send block shows as a line in the agent's run modal instead of only a 422. Reuses the existing run-timeline table the modal already renders; no new table, no new UI. |
 
 Approved by FIR-3266 and implementation plan artifact `019f60d7-a728-7663-82d3-7ad6198f15bf`.
 

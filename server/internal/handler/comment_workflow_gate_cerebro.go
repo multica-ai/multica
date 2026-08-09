@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // evaluateCommentWorkflowGate collects the request facts consumed by
@@ -99,4 +103,63 @@ func (h *Handler) evaluateCommentWorkflowGate(
 	}
 
 	return h.CommentTargetGuard.EvaluateComment(ctx, input)
+}
+
+// recordCommentGateBlocker drops one `blocker` line into the agent's run
+// timeline when a before.message.send gate rejects its comment, so a human
+// watching the run modal sees the block instead of only an opaque 422. The run
+// modal already renders `blocker` task_message rows, so this reuses that path —
+// no new table, no new UI. Best-effort: a failure here never affects the 422
+// the agent receives. No-op for member authors (no run) or when no task header
+// is present (e.g. a manual CLI comment outside a task).
+func (h *Handler) recordCommentGateBlocker(ctx context.Context, r *http.Request, issue db.Issue, authorType, message string) {
+	if h.CerebroQueries == nil {
+		return
+	}
+	taskIDHeader := r.Header.Get("X-Task-ID")
+	line, ok := commentGateBlockerLine(authorType, taskIDHeader, message)
+	if !ok {
+		return
+	}
+	taskUUID, err := util.ParseUUID(taskIDHeader)
+	if err != nil {
+		return
+	}
+	message = line
+	seq, err := h.CerebroQueries.NextTaskMessageSeq(ctx, taskUUID)
+	if err != nil {
+		slog.Warn("comment gate blocker: next seq failed", append(logger.RequestAttrs(r), "error", err, "task_id", taskIDHeader)...)
+		return
+	}
+	if err := h.CerebroQueries.InsertBlockerTaskMessage(ctx, cerebrodb.InsertBlockerTaskMessageParams{
+		TaskID:  taskUUID,
+		Seq:     seq,
+		Content: pgtype.Text{String: message, Valid: true},
+	}); err != nil {
+		slog.Warn("comment gate blocker: insert failed", append(logger.RequestAttrs(r), "error", err, "task_id", taskIDHeader)...)
+		return
+	}
+	h.publishTask(protocol.EventTaskMessage, uuidToString(issue.WorkspaceID), "system", "", taskIDHeader, protocol.TaskMessagePayload{
+		TaskID:    taskIDHeader,
+		IssueID:   uuidToString(issue.ID),
+		Seq:       int(seq),
+		Type:      "blocker",
+		Content:   message,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	})
+}
+
+// commentGateBlockerLine decides whether a gate rejection earns a run-modal
+// blocker line and returns the text to show. Only agent authors running inside
+// a task (X-Task-ID present) have a run modal to surface it in; a member's
+// blocked comment or a taskless CLI call gets nothing. An empty gate message
+// falls back to a generic line so the timeline entry is never blank.
+func commentGateBlockerLine(authorType, taskIDHeader, message string) (string, bool) {
+	if authorType != "agent" || taskIDHeader == "" {
+		return "", false
+	}
+	if strings.TrimSpace(message) == "" {
+		return "Comment blocked by a before.message.send hook.", true
+	}
+	return message, true
 }
