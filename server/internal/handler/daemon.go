@@ -3765,6 +3765,7 @@ type TaskMessageRequest struct {
 	Seq     int            `json:"seq"`
 	Type    string         `json:"type"`
 	Tool    string         `json:"tool,omitempty"`
+	CallID  string         `json:"call_id,omitempty"`
 	Content string         `json:"content,omitempty"`
 	Input   map[string]any `json:"input,omitempty"`
 	Output  string         `json:"output,omitempty"`
@@ -3821,6 +3822,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			Seq:     int32(msg.Seq),
 			Type:    msg.Type,
 			Tool:    pgtype.Text{String: msg.Tool, Valid: msg.Tool != ""},
+			CallID:  pgtype.Text{String: msg.CallID, Valid: msg.CallID != ""},
 			Content: pgtype.Text{String: msg.Content, Valid: msg.Content != ""},
 			Input:   inputJSON,
 			Output:  pgtype.Text{String: msg.Output, Valid: msg.Output != ""},
@@ -3850,6 +3852,11 @@ func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if _, err := h.TaskService.AcknowledgeTaskCancellation(r.Context(), task.ID); err != nil {
+		slog.Error("failed to persist task cancellation acknowledgement", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to acknowledge task cancellation")
+		return
+	}
 	h.TaskService.FinalizeDeferredCancelledChat(r.Context(), task.ID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -3869,6 +3876,7 @@ func taskMessageToPayload(m db.TaskMessage, taskID, issueID string) protocol.Tas
 		Seq:       int(m.Seq),
 		Type:      m.Type,
 		Tool:      m.Tool.String,
+		CallID:    m.CallID.String,
 		Content:   m.Content.String,
 		Input:     input,
 		Output:    m.Output.String,

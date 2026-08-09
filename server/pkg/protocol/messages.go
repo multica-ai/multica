@@ -151,6 +151,7 @@ type TaskMessagePayload struct {
 	Seq       int            `json:"seq"`
 	Type      string         `json:"type"`              // "text", "tool_use", "tool_result", "error"
 	Tool      string         `json:"tool,omitempty"`    // tool name for tool_use/tool_result
+	CallID    string         `json:"call_id,omitempty"` // provider-local id pairing a tool_use with its tool_result
 	Content   string         `json:"content,omitempty"` // text content
 	Input     map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
 	Output    string         `json:"output,omitempty"`  // tool output (tool_result only)

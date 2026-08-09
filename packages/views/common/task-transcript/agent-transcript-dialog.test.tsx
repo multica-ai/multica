@@ -256,7 +256,7 @@ const items: TimelineItem[] = [
 
 function renderDialog(
   dialogItems: TimelineItem[] = items,
-  options: { task?: AgentTask; isLive?: boolean } = {},
+  options: { task?: AgentTask; isLive?: boolean; variant?: "transcript" | "cockpit" } = {},
 ) {
   return renderWithI18n(
     <AgentTranscriptDialog
@@ -266,6 +266,7 @@ function renderDialog(
       items={dialogItems}
       agentName="Codex"
       isLive={options.isLive}
+      variant={options.variant}
     />,
   );
 }
@@ -310,6 +311,36 @@ describe("AgentTranscriptDialog", () => {
     // the runtime loaded. The non-antigravity live state still waits.
     await screen.findByRole("button", { name: "Run details" });
     expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
+  });
+
+  it("labels failed and terminally unconfirmed file activity honestly", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Edit",
+        call_id: "failed-edit",
+        input: { file_path: "src/failed.ts", old_string: "old", new_string: "new" },
+      },
+      {
+        seq: 2,
+        type: "tool_result",
+        tool: "Edit",
+        call_id: "failed-edit",
+        output: "failed: file changed concurrently",
+      },
+      {
+        seq: 3,
+        type: "tool_use",
+        tool: "Write",
+        call_id: "missing-result",
+        input: { file_path: "src/unconfirmed.ts", content: "export {};" },
+      },
+    ], { variant: "cockpit", isLive: false });
+
+    expect(screen.getByText("File activity (2)")).toBeInTheDocument();
+    expect(screen.getByTitle("src/failed.ts — failed")).toHaveTextContent("failed");
+    expect(screen.getByTitle("src/unconfirmed.ts — unconfirmed")).toHaveTextContent("unconfirmed");
   });
 
   it("preserves selected filters across dialog remounts unconditionally", () => {

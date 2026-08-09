@@ -2772,10 +2772,10 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 		mu.Lock()
 		var gotToolUse, gotToolResult bool
 		for _, msg := range reported {
-			if msg.Seq == 1 && msg.Type == "tool_use" && msg.Tool == "exec_command" {
+			if msg.Seq == 1 && msg.Type == "tool_use" && msg.Tool == "exec_command" && msg.CallID == "cmd-1" {
 				gotToolUse = true
 			}
-			if msg.Seq == 2 && msg.Type == "tool_result" && msg.Tool == "exec_command" && msg.Output == "clean" {
+			if msg.Seq == 2 && msg.Type == "tool_result" && msg.Tool == "exec_command" && msg.CallID == "cmd-1" && msg.Output == "clean" {
 				gotToolResult = true
 			}
 		}

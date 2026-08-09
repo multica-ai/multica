@@ -293,6 +293,12 @@ export interface AgentTask {
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
+  /**
+   * Set after the daemon has observed cancellation, exited the local runner,
+   * and flushed the task transcript. A cancelled task without this field has
+   * accepted the stop request but may still have a live local process.
+   */
+  cancel_acknowledged_at?: string;
   result: unknown;
   error: string | null;
   // Empty string when the task is not in a failed state (the backend uses

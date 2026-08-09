@@ -665,6 +665,35 @@ describe("ApiClient", () => {
     ]);
   });
 
+  it("preserves a valid cancellation acknowledgement and drops only a malformed one", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              id: "task-1",
+              status: "cancelled",
+              cancel_acknowledged_at: "2026-08-09T01:30:00Z",
+            },
+            {
+              id: "task-2",
+              status: "cancelled",
+              cancel_acknowledged_at: 42,
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const tasks = await new ApiClient("https://api.example.test").listTasksByIssue("issue-1");
+
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]?.cancel_acknowledged_at).toBe("2026-08-09T01:30:00Z");
+    expect(tasks[1]?.cancel_acknowledged_at).toBeUndefined();
+  });
+
   it("keeps task runs when optional comment coverage is malformed", async () => {
     vi.stubGlobal(
       "fetch",

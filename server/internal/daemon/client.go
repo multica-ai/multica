@@ -341,9 +341,16 @@ func (c *Client) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID, reas
 // cancellation and has finished flushing the transcript (runner.run only
 // returns after executeAndDrain's drain wait), so the server can settle its
 // deferred chat finalization now instead of waiting out the sweeper grace
-// period (#5219). Idempotent server-side.
+// period (#5219). Idempotent server-side, so retry transient control-plane
+// failures without risking a duplicate timestamp or chat finalization.
 func (c *Client) AckTaskCancelled(ctx context.Context, taskID string) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/cancel-ack", taskID), map[string]any{}, nil)
+	return c.postJSONWithRetry(
+		ctx,
+		fmt.Sprintf("/api/daemon/tasks/%s/cancel-ack", taskID),
+		map[string]any{},
+		nil,
+		cancellationAckRetrySchedule,
+	)
 }
 
 func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, step, total int) error {
@@ -359,6 +366,7 @@ type TaskMessageData struct {
 	Seq     int            `json:"seq"`
 	Type    string         `json:"type"`
 	Tool    string         `json:"tool,omitempty"`
+	CallID  string         `json:"call_id,omitempty"`
 	Content string         `json:"content,omitempty"`
 	Input   map[string]any `json:"input,omitempty"`
 	Output  string         `json:"output,omitempty"`
@@ -835,6 +843,18 @@ var defaultTerminalRetrySchedule = []time.Duration{
 	16 * time.Second,
 	32 * time.Second,
 	64 * time.Second,
+}
+
+// cancellationAckRetrySchedule stays inside the frontend's 20-second stop
+// acknowledgement window when the server responds promptly, while still
+// riding out a short restart or transient 5xx after the local process exits.
+// The endpoint is idempotent, so replaying a request whose response was lost
+// is safe.
+var cancellationAckRetrySchedule = []time.Duration{
+	250 * time.Millisecond,
+	1 * time.Second,
+	2 * time.Second,
+	4 * time.Second,
 }
 
 // skillBundleResolveRetrySchedule rides out brief transport blips on a single

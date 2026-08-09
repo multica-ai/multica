@@ -266,6 +266,7 @@ export interface TaskMessagePayload {
   seq: number;
   type: "text" | "thinking" | "tool_use" | "tool_result" | "error";
   tool?: string;
+  call_id?: string;
   content?: string;
   input?: Record<string, unknown>;
   output?: string;

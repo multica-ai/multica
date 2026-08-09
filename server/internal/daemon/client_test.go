@@ -270,6 +270,31 @@ func TestPostJSONWithRetry_TransientThenSuccess(t *testing.T) {
 	}
 }
 
+func TestAckTaskCancelled_RetriesOnTransient5xxThenSucceeds(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/tasks/task-1/cancel-ack" {
+			t.Fatalf("path = %q, want cancel-ack endpoint", r.URL.Path)
+		}
+		if calls.Add(1) < 3 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	if err := c.AckTaskCancelled(context.Background(), "task-1"); err != nil {
+		t.Fatalf("AckTaskCancelled: %v", err)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("expected 3 attempts (2 transient + 1 success), got %d", got)
+	}
+}
+
 // TestFailTask_RetriesOnTransient5xxThenSucceeds pins the callback half of
 // MUL-5305 Must-fix 1: FailTask's terminal transaction is now the sole
 // persistence point for the withheld session and continuity-gap flag, so if the

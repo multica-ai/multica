@@ -58,6 +58,20 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   };
 }
 
+function renderActiveTaskRow(task: AgentTask) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  return renderWithI18n(
+    <QueryClientProvider client={queryClient}>
+      <ActiveTaskRow task={task} issueId="issue-1" />
+    </QueryClientProvider>,
+  );
+}
+
 beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -71,14 +85,11 @@ afterEach(() => {
 
 describe("ActiveTaskRow", () => {
   it("renders running status as elapsed time only", () => {
-    renderWithI18n(
-      <ActiveTaskRow
-        task={makeTask({
-          trigger_comment_id: "comment-3",
-          coalesced_comment_ids: ["comment-1", "comment-2"],
-        })}
-        issueId="issue-1"
-      />,
+    renderActiveTaskRow(
+      makeTask({
+        trigger_comment_id: "comment-3",
+        coalesced_comment_ids: ["comment-1", "comment-2"],
+      }),
     );
 
     expect(screen.getByText("5m 04s")).toBeInTheDocument();
@@ -90,7 +101,7 @@ describe("ActiveTaskRow", () => {
   });
 
   it("does not make transcript actions depend on hover-only rendering", () => {
-    renderWithI18n(<ActiveTaskRow task={makeTask()} issueId="issue-1" />);
+    renderActiveTaskRow(makeTask());
 
     const transcriptButton = screen.getByRole("button", { name: "View transcript" });
     const status = screen.getByText("5m 04s");
@@ -246,12 +257,7 @@ describe("per-run token usage", () => {
   // running task carries usage in production. Asserting a token figure here
   // would only prove that a hand-written fixture renders.
   it("shows a running row's timer, and no token figure even if usage exists", () => {
-    renderWithI18n(
-      <ActiveTaskRow
-        task={makeTask({ usage: [usageSlice()] })}
-        issueId="issue-1"
-      />,
-    );
+    renderActiveTaskRow(makeTask({ usage: [usageSlice()] }));
 
     expect(screen.getByText("5m 04s")).toBeInTheDocument();
     expect(screen.queryByText("892K")).not.toBeInTheDocument();
@@ -296,6 +302,14 @@ describe("execution log header geometry", () => {
     status: "completed",
     completed_at: "2026-06-08T08:04:00Z",
     usage: [usageSlice()],
+  });
+
+  it("shows the Agent terminal launcher while a run is active", () => {
+    renderSection([makeTask({ status: "running" })]);
+
+    expect(
+      screen.getByRole("button", { name: "Open Agent Terminal" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps the section label on one line", () => {
