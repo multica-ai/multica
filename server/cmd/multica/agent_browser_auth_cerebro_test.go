@@ -109,7 +109,7 @@ func TestVerifyInternalAgentBrowserPrintsOnlySanitizedResult(t *testing.T) {
 	client := cli.NewAPIClient(server.URL, "workspace-id", "task-token")
 	var out bytes.Buffer
 	screenshotPath := filepath.Join(t.TempDir(), "registry.png")
-	if err := verifyInternalAgentBrowser(context.Background(), client, &out, "registry", screenshotPath); err != nil {
+	if err := verifyInternalAgentBrowser(context.Background(), client, &out, "registry", "", screenshotPath); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Contains(out.Bytes(), []byte(`"app":"registry"`)) {
@@ -169,7 +169,7 @@ func TestVerifyInternalAgentBrowserPollsAsyncJob(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.png")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := verifyInternalAgentBrowser(ctx, client, io.Discard, "registry", path); err != nil {
+	if err := verifyInternalAgentBrowser(ctx, client, io.Discard, "registry", "", path); err != nil {
 		t.Fatal(err)
 	}
 	if polls != 2 {
@@ -188,7 +188,7 @@ func TestVerifyInternalAgentBrowserRejectsInvalidScreenshot(t *testing.T) {
 
 	client := cli.NewAPIClient(server.URL, "workspace-id", "task-token")
 	screenshotPath := filepath.Join(t.TempDir(), "registry.png")
-	err := verifyInternalAgentBrowser(context.Background(), client, io.Discard, "registry", screenshotPath)
+	err := verifyInternalAgentBrowser(context.Background(), client, io.Discard, "registry", "", screenshotPath)
 	if err == nil || err.Error() != "internal browser verification returned an invalid screenshot" {
 		t.Fatalf("error = %v", err)
 	}
@@ -212,5 +212,45 @@ func TestInternalBrowserVerifyTimeoutOutlastsVerifier(t *testing.T) {
 	if internalBrowserVerifyTimeout <= internalbrowserqa.MaxVerificationDuration {
 		t.Fatalf("CLI timeout %s must exceed verifier worst case %s",
 			internalBrowserVerifyTimeout, internalbrowserqa.MaxVerificationDuration)
+	}
+}
+
+// FIR-4796 — --page reaches the server, and its absence leaves no key on the
+// wire so this CLI still works against a server build that predates the flag.
+func TestVerifyInternalAgentBrowserSendsPageOnlyWhenRequested(t *testing.T) {
+	var body []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, _ = io.ReadAll(req.Body)
+		_ = json.NewEncoder(w).Encode(internalBrowserVerifyResponse{
+			App: "finance", ScreenshotPNG: []byte("\x89PNG\r\n\x1a\ncontrols"),
+		})
+	}))
+	defer server.Close()
+
+	client := cli.NewAPIClient(server.URL, "workspace-id", "task-token")
+	screenshotPath := filepath.Join(t.TempDir(), "finance.png")
+
+	if err := verifyInternalAgentBrowser(context.Background(), client, io.Discard, "finance", "", screenshotPath); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(body, []byte(`"page"`)) {
+		t.Fatalf("unset page still reached the wire: %s", body)
+	}
+
+	if err := verifyInternalAgentBrowser(context.Background(), client, io.Discard, "finance", "/controls", screenshotPath); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte(`"page":"/controls"`)) {
+		t.Fatalf("requested page did not reach the server: %s", body)
+	}
+}
+
+func TestInternalVerifyCommandExposesPageFlag(t *testing.T) {
+	flag := agentBrowserInternalVerifyCmd.Flags().Lookup("page")
+	if flag == nil {
+		t.Fatal("internal-verify has no --page flag")
+	}
+	if flag.DefValue != "" {
+		t.Fatalf("--page default = %q, want empty so the command is unchanged without it", flag.DefValue)
 	}
 }

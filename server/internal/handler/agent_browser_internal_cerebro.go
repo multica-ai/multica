@@ -18,11 +18,14 @@ import (
 )
 
 type InternalBrowserQARunner interface {
-	Verify(context.Context, string, internalbrowserqa.Credential) (internalbrowserqa.Result, error)
+	Verify(context.Context, string, string, internalbrowserqa.Credential) (internalbrowserqa.Result, error)
 }
 
 type internalBrowserVerifyRequest struct {
-	App   string `json:"app"`
+	App string `json:"app"`
+	// Page is the in-app route to end on. Omitted when unset so an older server
+	// build, whose decoder rejects unknown fields, still accepts the request.
+	Page  string `json:"page,omitempty"`
 	Async bool   `json:"async,omitempty"`
 }
 
@@ -68,6 +71,11 @@ func (h *Handler) VerifyInternalAgentBrowser(w http.ResponseWriter, r *http.Requ
 	target, err := internalbrowserqa.TargetFor(req.App)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "internal browser target is not allowed")
+		return
+	}
+	page, err := internalbrowserqa.ValidatePage(req.Page)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "internal browser page must be a path inside the app")
 		return
 	}
 	wsID, agentID, ownerID, ok := h.authorizeInternalAgentBrowser(w, r, target.Vault)
@@ -118,7 +126,7 @@ func (h *Handler) VerifyInternalAgentBrowser(w http.ResponseWriter, r *http.Requ
 	// into jobs explicitly so deployed desktop binaries do not break when the
 	// server is upgraded first.
 	if !req.Async {
-		result, verifyErr := h.InternalBrowserQA.Verify(r.Context(), target.Name, credential)
+		result, verifyErr := h.InternalBrowserQA.Verify(r.Context(), target.Name, page, credential)
 		if verifyErr != nil {
 			h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "deny", "browser verification failed")
 			writeInternalBrowserVerificationError(w, result, verifyErr)
@@ -136,14 +144,14 @@ func (h *Handler) VerifyInternalAgentBrowser(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "browser verification could not be started")
 		return
 	}
-	go h.runInternalBrowserJob(jobID, wsID, agentID, target, credential)
+	go h.runInternalBrowserJob(jobID, wsID, agentID, target, page, credential)
 	writeJSON(w, http.StatusAccepted, map[string]string{"job_id": jobID, "state": "pending"})
 }
 
-func (h *Handler) runInternalBrowserJob(jobID string, wsID, agentID pgtype.UUID, target internalbrowserqa.Target, credential internalbrowserqa.Credential) {
+func (h *Handler) runInternalBrowserJob(jobID string, wsID, agentID pgtype.UUID, target internalbrowserqa.Target, page string, credential internalbrowserqa.Credential) {
 	ctx, cancel := context.WithTimeout(context.Background(), internalbrowserqa.MaxVerificationDuration)
 	defer cancel()
-	result, err := h.InternalBrowserQA.Verify(ctx, target.Name, credential)
+	result, err := h.InternalBrowserQA.Verify(ctx, target.Name, page, credential)
 	if err != nil {
 		h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "deny", "browser verification failed")
 	} else {

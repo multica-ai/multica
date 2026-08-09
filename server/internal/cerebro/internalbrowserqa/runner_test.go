@@ -210,7 +210,7 @@ func TestVerifyReportsUnresolvableHostAsDNSWithoutOpeningBrowser(t *testing.T) {
 	runner := NewRunner(commander)
 	runner.resolveHost = func(context.Context, string) error { return errors.New("no such host") }
 
-	result, err := runner.Verify(context.Background(), "customer-service", Credential{})
+	result, err := runner.Verify(context.Background(), "customer-service", "", Credential{})
 	if err == nil || err.Error() != "internal browser stage dns failed" {
 		t.Fatalf("error = %v, want internal browser stage dns failed", err)
 	}
@@ -238,7 +238,7 @@ func TestVerifyDistinguishesDNSTimeoutFromMissingName(t *testing.T) {
 		return ctx.Err()
 	}
 
-	result, err := runner.Verify(context.Background(), "customer-service", Credential{})
+	result, err := runner.Verify(context.Background(), "customer-service", "", Credential{})
 	if err == nil || err.Error() != "internal browser stage dns dns-timeout failed" {
 		t.Fatalf("error = %v, want a dns-timeout stage error", err)
 	}
@@ -265,7 +265,7 @@ func TestVerifyClassifiesFailureCauseOnEveryStage(t *testing.T) {
 				commander.finalURL = "about:blank"
 			}
 			runner := testRunner(commander)
-			_, err := runner.Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
+			_, err := runner.Verify(context.Background(), "multica", "", Credential{SessionToken: "signed-session"})
 			if err == nil || err.Error() != test.want {
 				t.Fatalf("error = %v, want %q", err, test.want)
 			}
@@ -280,7 +280,7 @@ func TestVerifyClassifiesFailureCauseOnEveryStage(t *testing.T) {
 // that exists must still hand one back.
 func TestVerifyCapturesScreenshotOnRecoverableStageFailure(t *testing.T) {
 	commander := &stageFailingCommander{stage: "navigation", kind: commandFailureNotFound}
-	result, err := testRunner(commander).Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
+	result, err := testRunner(commander).Verify(context.Background(), "multica", "", Credential{SessionToken: "signed-session"})
 	if err == nil {
 		t.Fatal("Verify succeeded, want failure")
 	}
@@ -296,7 +296,7 @@ func TestVerifyCapturesScreenshotOnRecoverableStageFailure(t *testing.T) {
 // the runner must not burn a stage timeout trying to photograph one.
 func TestVerifySkipsScreenshotWhenNoPageCanExist(t *testing.T) {
 	commander := &stageFailingCommander{stage: "open", kind: commandFailureBrowserLaunch}
-	result, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{})
+	result, err := testRunner(commander).Verify(context.Background(), "customer-service", "", Credential{})
 	if err == nil {
 		t.Fatal("Verify succeeded, want failure")
 	}
@@ -310,7 +310,7 @@ func TestVerifySkipsScreenshotWhenNoPageCanExist(t *testing.T) {
 
 func TestVerifyReportsMissingMarkerAsNotFoundWithDetail(t *testing.T) {
 	commander := &markerlessCommander{}
-	result, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{})
+	result, err := testRunner(commander).Verify(context.Background(), "customer-service", "", Credential{})
 	if err == nil || err.Error() != "internal browser stage markers not-found failed" {
 		t.Fatalf("error = %v", err)
 	}
@@ -327,7 +327,7 @@ func TestVerifyReportsMissingMarkerAsNotFoundWithDetail(t *testing.T) {
 func TestFailureResultCarriesNoCredential(t *testing.T) {
 	const password = "password-must-never-leak"
 	commander := &stageFailingCommander{stage: "reload", kind: commandFailureTimeout}
-	result, err := testRunner(commander).Verify(context.Background(), "registry", Credential{
+	result, err := testRunner(commander).Verify(context.Background(), "registry", "", Credential{
 		Username: "registry-test@example.com", Password: password,
 	})
 	if err == nil {
@@ -413,7 +413,7 @@ func TestRunnerPassesAccessHeadersToRegistryVersionCheck(t *testing.T) {
 		return "abcdef0123456789abcdef0123456789abcdef01", nil
 	}
 
-	_, err := runner.Verify(context.Background(), "registry", Credential{
+	_, err := runner.Verify(context.Background(), "registry", "", Credential{
 		Username: "registry-test@example.com", Password: "password",
 		AccessClientID: accessID, AccessClientSecret: accessSecret,
 	})
@@ -481,7 +481,7 @@ func (c *financeCommander) Run(ctx context.Context, stdin string, args ...string
 
 func TestRunnerNavigatesFinanceDirectlyToCfoBeforeSnapshot(t *testing.T) {
 	commander := &financeCommander{}
-	if _, err := testRunner(commander).Verify(context.Background(), "finance", Credential{
+	if _, err := testRunner(commander).Verify(context.Background(), "finance", "", Credential{
 		Username: "finance@example.com",
 		Password: "secret",
 	}); err != nil {
@@ -530,7 +530,7 @@ func TestRunnerReturnsSafeMulticaVersionCommit(t *testing.T) {
 		requestedURL = versionURL
 		return "abcdef0123456789abcdef0123456789abcdef01", nil
 	}
-	result, err := runner.Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
+	result, err := runner.Verify(context.Background(), "multica", "", Credential{SessionToken: "signed-session"})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -547,7 +547,7 @@ func TestRunnerFailsClosedWhenMulticaVersionIsUnavailable(t *testing.T) {
 	runner.fetchVersion = func(context.Context, string, map[string]string) (string, error) {
 		return "", errors.New("must not escape")
 	}
-	result, err := runner.Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
+	result, err := runner.Verify(context.Background(), "multica", "", Credential{SessionToken: "signed-session"})
 	if err == nil || err.Error() != "internal browser stage version failed" {
 		t.Fatalf("error = %v, want version stage failure", err)
 	}
@@ -564,7 +564,7 @@ func TestRunnerFailsClosedWhenMulticaVersionIsUnknown(t *testing.T) {
 	runner.fetchVersion = func(context.Context, string, map[string]string) (string, error) {
 		return "unknown", nil
 	}
-	result, err := runner.Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
+	result, err := runner.Verify(context.Background(), "multica", "", Credential{SessionToken: "signed-session"})
 	if err == nil || err.Error() != "internal browser stage version failed" {
 		t.Fatalf("error = %v, want version stage failure", err)
 	}
@@ -605,7 +605,7 @@ func (c *wrongPathCommander) Run(ctx context.Context, stdin string, args ...stri
 
 func TestRunnerFailsClosedWhenMulticaNavigationMissesIssues(t *testing.T) {
 	commander := &wrongPathCommander{}
-	result, err := testRunner(commander).Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
+	result, err := testRunner(commander).Verify(context.Background(), "multica", "", Credential{SessionToken: "signed-session"})
 	if err == nil || err.Error() != "internal browser stage url not-found failed" {
 		t.Fatalf("error = %v, want url not-found stage failure", err)
 	}
@@ -619,7 +619,7 @@ func TestRunnerFailsClosedWhenMulticaNavigationMissesIssues(t *testing.T) {
 
 func TestRunnerNavigatesMulticaToIssuesBeforeSnapshot(t *testing.T) {
 	commander := &recordingCommander{}
-	if _, err := testRunner(commander).Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"}); err != nil {
+	if _, err := testRunner(commander).Verify(context.Background(), "multica", "", Credential{SessionToken: "signed-session"}); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 
@@ -646,7 +646,7 @@ func TestRunnerSendsCredentialsOnlyThroughBatchStdin(t *testing.T) {
 	commander := &recordingCommander{}
 	runner := testRunner(commander)
 
-	result, err := runner.Verify(context.Background(), "registry", Credential{
+	result, err := runner.Verify(context.Background(), "registry", "", Credential{
 		Username: username, Password: password,
 		AccessClientID: accessID, AccessClientSecret: accessSecret,
 	})
@@ -683,7 +683,7 @@ func TestRunnerSendsCredentialsOnlyThroughBatchStdin(t *testing.T) {
 
 func TestRunnerCapturesScreenshotAfterAuthenticatedMarkers(t *testing.T) {
 	commander := &recordingCommander{}
-	result, err := testRunner(commander).Verify(context.Background(), "registry", Credential{
+	result, err := testRunner(commander).Verify(context.Background(), "registry", "", Credential{
 		Username:           "registry-test@example.com",
 		Password:           "password-must-never-leak",
 		AccessClientID:     "access-id-must-never-leak",
@@ -715,7 +715,7 @@ func TestRunnerCapturesScreenshotAfterAuthenticatedMarkers(t *testing.T) {
 
 func TestRunnerRejectsCredentialForNoLoginTarget(t *testing.T) {
 	runner := testRunner(&recordingCommander{})
-	_, err := runner.Verify(context.Background(), "customer-service", Credential{Username: "unexpected", Password: "unexpected"})
+	_, err := runner.Verify(context.Background(), "customer-service", "", Credential{Username: "unexpected", Password: "unexpected"})
 	if err == nil {
 		t.Fatal("credential was accepted for a no-login target")
 	}
@@ -726,7 +726,7 @@ func TestRunnerSendsSessionCookieOnlyThroughBatchStdin(t *testing.T) {
 	commander := &recordingCommander{}
 	runner := testRunner(commander)
 
-	result, err := runner.Verify(context.Background(), "multica", Credential{SessionToken: sessionToken})
+	result, err := runner.Verify(context.Background(), "multica", "", Credential{SessionToken: sessionToken})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -770,7 +770,7 @@ func TestRunnerSendsSessionCookieOnlyThroughBatchStdin(t *testing.T) {
 
 func TestRunnerWaitsForClientRenderAfterReload(t *testing.T) {
 	commander := &recordingCommander{}
-	if _, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{}); err != nil {
+	if _, err := testRunner(commander).Verify(context.Background(), "customer-service", "", Credential{}); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 	var reloadIndex, waitIndex, snapshotIndex = -1, -1, -1
@@ -791,14 +791,14 @@ func TestRunnerWaitsForClientRenderAfterReload(t *testing.T) {
 }
 
 func TestRunnerReturnsOnlySafeFailureStage(t *testing.T) {
-	_, err := testRunner(failingCommander{}).Verify(context.Background(), "customer-service", Credential{})
+	_, err := testRunner(failingCommander{}).Verify(context.Background(), "customer-service", "", Credential{})
 	if err == nil || err.Error() != "internal browser stage open failed" {
 		t.Fatalf("error = %q", err)
 	}
 }
 
 func TestRunnerReturnsSafeOpenFailureClass(t *testing.T) {
-	_, err := testRunner(classifiedFailingCommander{kind: commandFailureDNS}).Verify(context.Background(), "customer-service", Credential{})
+	_, err := testRunner(classifiedFailingCommander{kind: commandFailureDNS}).Verify(context.Background(), "customer-service", "", Credential{})
 	if err == nil || err.Error() != "internal browser stage open dns failed" {
 		t.Fatalf("error = %q", err)
 	}
@@ -811,7 +811,7 @@ func TestRunnerObservesStageWithOnlySafeDiagnosticFields(t *testing.T) {
 		got = observation
 	}
 
-	_, err := runner.Verify(context.Background(), "customer-service", Credential{})
+	_, err := runner.Verify(context.Background(), "customer-service", "", Credential{})
 	if err == nil {
 		t.Fatal("Verify succeeded, want failure")
 	}
@@ -835,7 +835,7 @@ func TestRunnerSerializesConcurrentVerifications(t *testing.T) {
 		go func() {
 			defer group.Done()
 			<-start
-			_, err := runner.Verify(context.Background(), "customer-service", Credential{})
+			_, err := runner.Verify(context.Background(), "customer-service", "", Credential{})
 			errors <- err
 		}()
 	}
@@ -910,7 +910,7 @@ func TestRunnerBoundsStagesAndCleanup(t *testing.T) {
 		cleanupTimeout: 5 * time.Millisecond,
 	}
 	started := time.Now()
-	_, err := runner.Verify(context.Background(), "customer-service", Credential{})
+	_, err := runner.Verify(context.Background(), "customer-service", "", Credential{})
 	if err == nil || err.Error() != "internal browser stage open timeout failed" {
 		t.Fatalf("error = %v", err)
 	}
@@ -964,7 +964,7 @@ func (c *coldStartCommander) Run(ctx context.Context, stdin string, args ...stri
 
 func TestVerifyRetriesOpenOnceWhenTheAppIsSlowToWake(t *testing.T) {
 	commander := &coldStartCommander{stageFailingCommander: stageFailingCommander{stage: "no-such-stage"}}
-	result, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{})
+	result, err := testRunner(commander).Verify(context.Background(), "customer-service", "", Credential{})
 	if err != nil {
 		t.Fatalf("Verify failed after a cold start: %v", err)
 	}
@@ -1002,7 +1002,7 @@ func TestVerifyContinuesWhenOpenTimesOutAfterReachingExpectedHost(t *testing.T) 
 		stageFailingCommander: stageFailingCommander{stage: "no-such-stage"},
 		stage:                 openStage, targetURL: "http://customer-service.internal:3456/desk",
 	}
-	result, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{})
+	result, err := testRunner(commander).Verify(context.Background(), "customer-service", "", Credential{})
 	if err != nil {
 		t.Fatalf("Verify failed after reaching the expected host: %v", err)
 	}
@@ -1019,7 +1019,7 @@ func TestVerifyContinuesWhenReloadTimesOutAfterReachingExpectedHost(t *testing.T
 		stageFailingCommander: stageFailingCommander{stage: "no-such-stage"},
 		stage:                 "reload", targetURL: "http://customer-service.internal:3456/desk",
 	}
-	if _, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{}); err != nil {
+	if _, err := testRunner(commander).Verify(context.Background(), "customer-service", "", Credential{}); err != nil {
 		t.Fatalf("Verify failed after reload reached the expected host: %v", err)
 	}
 	if commander.attempts.Load() != 1 {
@@ -1047,7 +1047,7 @@ func TestVerifyDoesNotRecoverNavigationTimeoutOnAnUnexpectedHost(t *testing.T) {
 	commander := &redirectedTimeoutCommander{
 		stageFailingCommander: stageFailingCommander{stage: "no-such-stage"},
 	}
-	if _, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{}); err == nil {
+	if _, err := testRunner(commander).Verify(context.Background(), "customer-service", "", Credential{}); err == nil {
 		t.Fatal("Verify succeeded after a redirect to an unexpected host")
 	}
 	if commander.opens.Load() != 2 {
@@ -1061,7 +1061,7 @@ func TestVerifyDoesNotRetryOpenOnNonTimeoutFailure(t *testing.T) {
 	commander := &countingOpenFailureCommander{
 		stageFailingCommander: stageFailingCommander{stage: "no-such-stage"}, kind: commandFailureConnection,
 	}
-	if _, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{}); err == nil {
+	if _, err := testRunner(commander).Verify(context.Background(), "customer-service", "", Credential{}); err == nil {
 		t.Fatal("Verify succeeded, want failure")
 	}
 	if commander.opens.Load() != 1 {
@@ -1195,7 +1195,7 @@ func TestVerifyUsesAccessOnlyDataCatalogCredentialWithoutFormLogin(t *testing.T)
 	commander := &dataCatalogAccessCommander{}
 	credential := Credential{AccessClientID: "reader.access", AccessClientSecret: "reader-secret"}
 
-	if _, err := testRunner(commander).Verify(context.Background(), "data-catalog-reader", credential); err != nil {
+	if _, err := testRunner(commander).Verify(context.Background(), "data-catalog-reader", "", credential); err != nil {
 		t.Fatalf("Verify failed: %v", err)
 	}
 
@@ -1262,7 +1262,7 @@ func (c *dialogCommander) Run(ctx context.Context, stdin string, args ...string)
 
 func TestVerifyDismissesTheFirstLoginDialogBeforeNavigating(t *testing.T) {
 	commander := &dialogCommander{stageFailingCommander: stageFailingCommander{stage: "no-such-stage"}}
-	if _, err := testRunner(commander).Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"}); err != nil {
+	if _, err := testRunner(commander).Verify(context.Background(), "multica", "", Credential{SessionToken: "signed-session"}); err != nil {
 		t.Fatalf("Verify failed with the survey dialog up: %v", err)
 	}
 	if !commander.skipped.Load() {
@@ -1276,7 +1276,7 @@ func TestVerifyDismissesTheFirstLoginDialogBeforeNavigating(t *testing.T) {
 // No dialog is the normal case: a missing Skip button must not fail the run.
 func TestVerifySucceedsWhenThereIsNoDialogToDismiss(t *testing.T) {
 	commander := &stageFailingCommander{stage: "no-such-stage"}
-	if _, err := testRunner(commander).Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"}); err != nil {
+	if _, err := testRunner(commander).Verify(context.Background(), "multica", "", Credential{SessionToken: "signed-session"}); err != nil {
 		t.Fatalf("Verify failed without a dialog: %v", err)
 	}
 }
@@ -1390,7 +1390,7 @@ func TestVerifyDrivesTheCodeLoginAndKeepsSecretsOffTheCommandLine(t *testing.T) 
 		Username: "agent-testing@firtal.com", LoginCode: "the-staging-code",
 		AccessClientID: "id.access", AccessClientSecret: "the-token-secret",
 	}
-	if _, err := testRunner(commander).Verify(context.Background(), "cerebro", credential); err != nil {
+	if _, err := testRunner(commander).Verify(context.Background(), "cerebro", "", credential); err != nil {
 		t.Fatalf("Verify failed for the code login: %v", err)
 	}
 	for _, want := range []string{"agent-testing@firtal.com", "the-staging-code", "input[data-input-otp]", "Continue"} {
@@ -1403,5 +1403,169 @@ func TestVerifyDrivesTheCodeLoginAndKeepsSecretsOffTheCommandLine(t *testing.T) 
 	}
 	if !slices.Contains(commander.navigationURLs, "https://cerebro.firtal.com/") {
 		t.Fatal("cerebro verification did not return through the workspace root after login")
+	}
+}
+
+// FIR-4796 — a caller may end the run on any page of an app that is already
+// allowlisted, without widening the host allowlist.
+
+// pageCommander answers a Finance run and moves its reported URL as the browser
+// navigates, so a test can tell the app's own /cfo check apart from the page the
+// caller asked for. Every command it is asked to run is recorded, so a rejected
+// page can be proven to have reached no browser at all.
+type pageCommander struct {
+	calls    []string
+	urls     []string
+	urlReads int
+}
+
+func (c *pageCommander) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
+	c.calls = append(c.calls, strings.Join(args, " "))
+	switch {
+	case len(args) > 0 && args[len(args)-1] == "url":
+		reached := c.urls[min(c.urlReads, len(c.urls)-1)]
+		c.urlReads++
+		return []byte(reached + "\n"), nil
+	case len(args) > 0 && args[len(args)-1] == "snapshot":
+		return []byte("Monthly overview\nControllership review\nVersus budget\n"), nil
+	case len(args) > 0 && args[len(args)-1] == "errors":
+		return []byte("[]\n"), nil
+	}
+	return nil, nil
+}
+
+func (c *pageCommander) CaptureScreenshot(_ context.Context, _ ...string) ([]byte, error) {
+	c.calls = append(c.calls, "capture-screenshot")
+	return append(append([]byte(nil), pngSignature...), "finance-controls"...), nil
+}
+
+func financeCredential() Credential {
+	return Credential{Username: "qa@example.com", Password: "must-never-appear"}
+}
+
+func openedURLs(calls []string) []string {
+	var opened []string
+	for _, call := range calls {
+		if index := strings.Index(call, "open http"); index >= 0 {
+			opened = append(opened, call[index+len("open "):])
+		}
+	}
+	return opened
+}
+
+func TestVerifyOpensRequestedPageAfterTheAppsOwnChecks(t *testing.T) {
+	commander := &pageCommander{urls: []string{
+		"http://firtal-agents-private.internal:3000/cfo",
+		"http://firtal-agents-private.internal:3000/controls",
+	}}
+
+	result, err := testRunner(commander).Verify(context.Background(), "finance", "/controls", financeCredential())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	pageIndex := slices.IndexFunc(commander.calls, func(call string) bool {
+		return strings.HasSuffix(call, "open http://firtal-agents-private.internal:3000/controls")
+	})
+	snapshotIndex := slices.IndexFunc(commander.calls, func(call string) bool {
+		return strings.HasSuffix(call, "snapshot")
+	})
+	screenshotIndex := slices.Index(commander.calls, "capture-screenshot")
+	if pageIndex < 0 {
+		t.Fatalf("requested page was never opened: %v", commander.calls)
+	}
+	// The login and marker checks must still decide the verdict, so the page can
+	// only be opened once they have passed.
+	if snapshotIndex < 0 || pageIndex < snapshotIndex {
+		t.Fatalf("page opened before the app's own marker check: %v", commander.calls)
+	}
+	if screenshotIndex < pageIndex {
+		t.Fatalf("screenshot captured before the requested page: %v", commander.calls)
+	}
+	if result.FinalURL != "http://firtal-agents-private.internal:3000/controls" {
+		t.Fatalf("final URL = %q", result.FinalURL)
+	}
+	if !slices.Equal(result.Markers, []string{"Monthly overview", "Controllership review", "Versus budget"}) {
+		t.Fatalf("the app's own marker check changed: %v", result.Markers)
+	}
+}
+
+// An address that leaves the app must be refused outright — never opened and
+// then judged after the fact.
+func TestVerifyRejectsAPageOutsideTheApp(t *testing.T) {
+	for _, page := range []string{
+		"https://evil.example.com/controls",
+		"//evil.example.com/controls",
+		"http://firtal-agents-private.internal:3000/controls",
+		"https://finance.firtal.com/controls",
+		"controls",
+		`/\evil.example.com`,
+		"javascript:alert(1)",
+	} {
+		commander := &pageCommander{urls: []string{"http://firtal-agents-private.internal:3000/cfo"}}
+		if _, err := testRunner(commander).Verify(context.Background(), "finance", page, financeCredential()); err == nil {
+			t.Fatalf("page %q was accepted", page)
+		}
+		if len(commander.calls) != 0 {
+			t.Fatalf("page %q reached the browser: %v", page, commander.calls)
+		}
+	}
+}
+
+func TestVerifyWithoutAPageNavigatesExactlyAsBefore(t *testing.T) {
+	commander := &pageCommander{urls: []string{"http://firtal-agents-private.internal:3000/cfo"}}
+
+	result, err := testRunner(commander).Verify(context.Background(), "finance", "", financeCredential())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	want := []string{
+		"http://firtal-agents-private.internal:3000/auth/login?manual=true",
+		"http://firtal-agents-private.internal:3000/cfo",
+	}
+	if opened := openedURLs(commander.calls); !slices.Equal(opened, want) {
+		t.Fatalf("opened = %v, want %v", opened, want)
+	}
+	if result.FinalURL != "http://firtal-agents-private.internal:3000/cfo" {
+		t.Fatalf("final URL = %q", result.FinalURL)
+	}
+}
+
+// A lost session sends the app back to its login screen. Screenshotting that as
+// if it were the requested page is exactly the false pass this check prevents.
+func TestVerifyFailsWhenTheAppRedirectsAwayFromTheRequestedPage(t *testing.T) {
+	commander := &pageCommander{urls: []string{
+		"http://firtal-agents-private.internal:3000/cfo",
+		"http://firtal-agents-private.internal:3000/auth/login",
+	}}
+
+	result, err := testRunner(commander).Verify(context.Background(), "finance", "/controls", financeCredential())
+	if err == nil {
+		t.Fatal("a redirect away from the requested page was reported as a pass")
+	}
+	if result.FailureStage != "url" || result.FailureCause != string(commandFailureNotFound) {
+		t.Fatalf("failure = %s/%s, want url/not-found", result.FailureStage, result.FailureCause)
+	}
+	if SafeError(err) == "internal browser verification failed" {
+		t.Fatalf("failure lost its diagnostics: %v", err)
+	}
+}
+
+func TestValidatePage(t *testing.T) {
+	for _, page := range []string{"", "/controls", "/controls?month=2026-07", "/a/b#c", "  /controls  "} {
+		if _, err := ValidatePage(page); err != nil {
+			t.Fatalf("ValidatePage(%q) = %v, want accepted", page, err)
+		}
+	}
+	for _, page := range []string{
+		"https://evil.example.com/x", "//evil.example.com/x", "http://finance.internal:3000/x",
+		"controls", `/\evil.example.com`, "javascript:alert(1)", "/" + strings.Repeat("a", maxPagePathLength),
+	} {
+		if _, err := ValidatePage(page); err == nil {
+			t.Fatalf("ValidatePage(%q) was accepted", page)
+		}
+	}
+	if cleaned, _ := ValidatePage("  /controls  "); cleaned != "/controls" {
+		t.Fatalf("cleaned = %q, want /controls", cleaned)
 	}
 }

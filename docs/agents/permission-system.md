@@ -519,6 +519,17 @@ names the exact Agent Vault keys to reveal. Atlas uses this to keep separate
 Admin and Reader service-token pairs in `Shared/browser-login/data-catalog`,
 while its unknown check receives no credential.
 
+`--page` is the one caller-controlled input on this path (FIR-4796). It widens
+which route of an already-granted app the run ends on, never which host it may
+reach: `internalbrowserqa.ValidatePage` accepts only an absolute same-origin
+path and rejects a full URL, a scheme-relative `//host/path`, or an embedded
+backslash, and the browser's address is rebuilt from the allowlisted target's
+own scheme and host. It is enforced three times — the API handler (400), the
+`RemoteRunner` before it sends, and the private verifier container next to its
+own target check — because the verifier is the process with private-network
+reach and cannot trust its caller. The grant chain, the vault keys a target may
+reveal, and the set of allowed hosts are all unchanged by it.
+
 Every row here actively allows or denies an agent action right now, with default
 configuration. Verified against the code.
 

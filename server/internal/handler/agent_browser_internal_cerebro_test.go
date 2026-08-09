@@ -2,7 +2,10 @@ package handler
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -70,5 +73,23 @@ func TestLoadInternalBrowserVaultCredentialKeepsCerebroLoginAndAccessKeys(t *tes
 	}
 	if credential.AccessClientID != "cerebro.access" || credential.AccessClientSecret != "cerebro-secret" {
 		t.Fatal("cerebro access credential was not loaded")
+	}
+}
+
+// FIR-4796 — the page is the first caller-controlled input on this gated path,
+// so an address outside the app is refused at the API boundary too.
+func TestVerifyInternalAgentBrowserRejectsAPageOutsideTheApp(t *testing.T) {
+	for _, page := range []string{"https://evil.example.com/controls", "//evil.example.com/controls", "controls"} {
+		handler := &Handler{}
+		request := httptest.NewRequest(http.MethodPost, "/api/cerebro/agent-browser/internal-verify",
+			strings.NewReader(`{"app":"finance","page":"`+page+`"}`))
+		request.Header.Set("X-Actor-Source", "task_token")
+		recorder := httptest.NewRecorder()
+
+		handler.VerifyInternalAgentBrowser(recorder, request)
+
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("page %q: status = %d, want 400", page, recorder.Code)
+		}
 	}
 }

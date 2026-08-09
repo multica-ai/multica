@@ -107,6 +107,12 @@ The sanitized result includes `version_commit`, the current UI markers, final
 URL, browser errors, and the path to the screenshot. Compare `version_commit`
 with the release merge commit before calling the production rollout complete.
 
+Add `--page <path>` to end the run on another route of the same app — for
+example `--app finance --page /controls`. The app's own login and marker checks
+run first and still decide the verdict; the page is opened afterwards and is
+what the screenshot shows. Only a path inside that app is accepted: a full URL
+or a `//host/path` form is rejected, never followed.
+
 ## 4. Teardown
 
 Stop only the processes owned by this worktree:

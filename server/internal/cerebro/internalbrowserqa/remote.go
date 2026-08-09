@@ -14,7 +14,10 @@ import (
 )
 
 type remoteVerifyRequest struct {
-	App        string     `json:"app"`
+	App string `json:"app"`
+	// Page is omitted when unset so a verifier container that predates this
+	// field still accepts the request: its decoder rejects unknown fields.
+	Page       string     `json:"page,omitempty"`
 	Credential Credential `json:"credential"`
 }
 
@@ -46,11 +49,15 @@ func NewRemoteRunner(endpoint, token string, client *http.Client) (*RemoteRunner
 	return &RemoteRunner{endpoint: strings.TrimRight(parsed.String(), "/") + "/verify", token: token, client: client}, nil
 }
 
-func (r *RemoteRunner) Verify(ctx context.Context, app string, credential Credential) (Result, error) {
+func (r *RemoteRunner) Verify(ctx context.Context, app, page string, credential Credential) (Result, error) {
 	if _, err := TargetFor(app); err != nil {
 		return Result{}, err
 	}
-	body, err := json.Marshal(remoteVerifyRequest{App: app, Credential: credential})
+	page, err := ValidatePage(page)
+	if err != nil {
+		return Result{}, err
+	}
+	body, err := json.Marshal(remoteVerifyRequest{App: app, Page: page, Credential: credential})
 	if err != nil {
 		return Result{}, fmt.Errorf("encode browser verifier request")
 	}
@@ -132,7 +139,13 @@ func (h *RunnerHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"target is not allowed"}`, http.StatusBadRequest)
 		return
 	}
-	result, err := h.runner.Verify(r.Context(), request.App, request.Credential)
+	// This process is the one with private-network reach, so it re-validates the
+	// page instead of trusting the caller that sent it.
+	if _, err := ValidatePage(request.Page); err != nil {
+		http.Error(w, `{"error":"page is not allowed"}`, http.StatusBadRequest)
+		return
+	}
+	result, err := h.runner.Verify(r.Context(), request.App, request.Page, request.Credential)
 	if err != nil {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		_ = json.NewEncoder(w).Encode(FailureBody(result, err))

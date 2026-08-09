@@ -49,7 +49,10 @@ type agentBrowserProvisionOptions struct {
 }
 
 type internalBrowserVerifyRequest struct {
-	App   string `json:"app"`
+	App string `json:"app"`
+	// Page is omitted when unset so this CLI keeps working against a server
+	// build that predates the flag: the server rejects unknown fields.
+	Page  string `json:"page,omitempty"`
 	Async bool   `json:"async,omitempty"`
 }
 
@@ -163,11 +166,11 @@ var agentBrowserProvisionAuthCmd = &cobra.Command{
 	},
 }
 
-func verifyInternalAgentBrowser(ctx context.Context, client *cli.APIClient, out io.Writer, app, screenshotPath string) error {
+func verifyInternalAgentBrowser(ctx context.Context, client *cli.APIClient, out io.Writer, app, page, screenshotPath string) error {
 	var response internalBrowserVerifyResponse
 	status, err := client.PostJSONWithDiagnostic(ctx,
 		"/api/cerebro/agent-browser/internal-verify",
-		internalBrowserVerifyRequest{App: app, Async: true}, &response, http.StatusUnprocessableEntity)
+		internalBrowserVerifyRequest{App: app, Page: page, Async: true}, &response, http.StatusUnprocessableEntity)
 	if err != nil {
 		return err
 	}
@@ -287,6 +290,7 @@ var agentBrowserInternalVerifyCmd = &cobra.Command{
 		if app == "" {
 			return fmt.Errorf("--app is required")
 		}
+		page, _ := cmd.Flags().GetString("page")
 		screenshotPath, _ := cmd.Flags().GetString("screenshot")
 		if screenshotPath == "" {
 			screenshotPath = fmt.Sprintf("%s-internal-verify.png", app)
@@ -298,7 +302,7 @@ var agentBrowserInternalVerifyCmd = &cobra.Command{
 		configureInternalBrowserVerifyClient(client)
 		ctx, cancel := context.WithTimeout(cmd.Context(), internalBrowserVerifyTimeout)
 		defer cancel()
-		return verifyInternalAgentBrowser(ctx, client, os.Stdout, app, screenshotPath)
+		return verifyInternalAgentBrowser(ctx, client, os.Stdout, app, page, screenshotPath)
 	},
 }
 
@@ -310,6 +314,7 @@ func init() {
 	agentBrowserProvisionAuthCmd.Flags().String("password-key", "", "Credential key containing the login password")
 	agentBrowserCmd.AddCommand(agentBrowserProvisionAuthCmd)
 	agentBrowserInternalVerifyCmd.Flags().String("app", "", "Allowlisted app: multica, multica-permissions, cerebro, cerebro-permission-profiles, registry, finance, pricing, customer-service, warehouse, data-catalog, data-catalog-reader, data-catalog-reader-permissions, or data-catalog-unknown")
+	agentBrowserInternalVerifyCmd.Flags().String("page", "", "In-app path to end on after login, e.g. /controls (default: the app's own verification page)")
 	agentBrowserInternalVerifyCmd.Flags().String("screenshot", "", "PNG output path (default: <app>-internal-verify.png)")
 	agentBrowserCmd.AddCommand(agentBrowserInternalVerifyCmd)
 }

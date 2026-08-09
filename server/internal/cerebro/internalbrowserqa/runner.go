@@ -245,6 +245,48 @@ func TargetFor(name string) (Target, error) {
 	return target, nil
 }
 
+// maxPagePathLength caps a caller-supplied page so an absurd string never
+// reaches the browser's argument vector.
+const maxPagePathLength = 512
+
+// ValidatePage accepts only an absolute path inside the app TargetFor already
+// allowed. Anything that could point the browser at another host — a full URL,
+// a scheme-relative "//host/path", or a backslash a URL parser may fold into an
+// authority — is rejected rather than followed, so a caller can choose the page
+// without widening the host allowlist.
+func ValidatePage(page string) (string, error) {
+	trimmed := strings.TrimSpace(page)
+	if trimmed == "" {
+		return "", nil
+	}
+	if len(trimmed) > maxPagePathLength ||
+		!strings.HasPrefix(trimmed, "/") ||
+		strings.HasPrefix(trimmed, "//") ||
+		strings.Contains(trimmed, `\`) {
+		return "", fmt.Errorf("internal browser page must be a path inside the app")
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Scheme != "" || parsed.Host != "" || parsed.Opaque != "" {
+		return "", fmt.Errorf("internal browser page must be a path inside the app")
+	}
+	return trimmed, nil
+}
+
+// landedOnPage proves the browser is on the requested route. Without it an app
+// that bounced the request to its own login screen would still be screenshotted
+// as if it were the page the caller asked for.
+func landedOnPage(finalURL, page string) bool {
+	reached, err := url.Parse(finalURL)
+	if err != nil {
+		return false
+	}
+	wanted, err := url.Parse(page)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSuffix(reached.Path, "/") == strings.TrimSuffix(wanted.Path, "/")
+}
+
 type Commander interface {
 	Run(ctx context.Context, stdin string, args ...string) ([]byte, error)
 	CaptureScreenshot(ctx context.Context, args ...string) ([]byte, error)
@@ -416,9 +458,10 @@ type Result struct {
 	VersionCommit string   `json:"version_commit,omitempty"`
 
 	// Failure diagnostics. Empty on success. FailureDetail is sourced only from
-	// this package's static target allowlist — never from browser output — so it
-	// can name the attempted address or the missing marker without leaking page
-	// content or a credential.
+	// this package's static target allowlist and the caller's own already-
+	// validated page path — never from browser output — so it can name the
+	// attempted address or the missing marker without leaking page content or a
+	// credential.
 	FailureStage  string `json:"failure_stage,omitempty"`
 	FailureCause  string `json:"failure_cause,omitempty"`
 	FailureDetail string `json:"failure_detail,omitempty"`
@@ -478,9 +521,10 @@ const (
 // can spend after the open stage. A target may chain a direct route open, a
 // link click, a row click, and a tab click with their render waits after the
 // shared login sequence; Multica additionally verifies its deployed commit
-// through /version. The count stays at the historical maximum so the ceiling
+// through /version, and a caller-chosen page adds one more open, render, and
+// URL read on top. The count stays at the historical maximum so the ceiling
 // never shrinks under a target that composes several navigation steps.
-const countedStages = 14
+const countedStages = 17
 
 // MaxVerificationDuration is the longest a single Verify can legitimately take:
 // the DNS preflight, every open attempt including the cold-start retry, and each
@@ -811,8 +855,15 @@ func SafeError(err error) string {
 	return "internal browser verification failed"
 }
 
-func (r *Runner) Verify(ctx context.Context, app string, credential Credential) (Result, error) {
+// Verify runs the target's fixed login-and-markers check. An optional page is a
+// same-origin path opened only after that check has passed, so the caller sees
+// any page of the app while every existing assertion stays exactly as it was.
+func (r *Runner) Verify(ctx context.Context, app, page string, credential Credential) (Result, error) {
 	target, err := TargetFor(app)
+	if err != nil {
+		return Result{}, err
+	}
+	page, err = ValidatePage(page)
 	if err != nil {
 		return Result{}, err
 	}
@@ -1008,6 +1059,28 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	versionCommit, err := r.readVersion(ctx, target, credential)
 	if err != nil {
 		return r.failure(target, baseArgs, "version endpoint: "+target.VersionPath, err)
+	}
+	// The caller's page is opened last, on the session the checks above already
+	// proved is logged in. Its own address is rebuilt from the allowlisted
+	// target's scheme and host, so a path is the only thing the caller controls.
+	if page != "" {
+		parsedTarget, _ := url.Parse(target.URL)
+		pageURL := parsedTarget.Scheme + "://" + parsedTarget.Host + page
+		if _, err := r.runStage(ctx, target, "navigation", "", append(baseArgs, "open", pageURL)...); err != nil {
+			return r.failure(target, baseArgs, pageURL, err)
+		}
+		if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
+			return r.failure(target, baseArgs, pageURL, err)
+		}
+		pageURLOutput, err := r.runStage(ctx, target, "url", "", append(baseArgs, "get", "url")...)
+		if err != nil {
+			return r.failure(target, baseArgs, pageURL, err)
+		}
+		finalURLText = strings.TrimSpace(string(pageURLOutput))
+		if !landedOnPage(finalURLText, page) {
+			return r.failure(target, baseArgs, "unexpected final path",
+				stageError{stage: "url", kind: commandFailureNotFound})
+		}
 	}
 	rawErrors, err := r.runStage(ctx, target, "errors", "", append(baseArgs, "errors")...)
 	if err != nil {

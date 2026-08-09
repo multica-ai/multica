@@ -3,6 +3,7 @@ package internalbrowserqa
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,7 +32,7 @@ func TestRemoteRunnerMovesBrowserExecutionAcrossServerBoundaryWithoutLeakingCred
 	if err != nil {
 		t.Fatalf("NewRemoteRunner: %v", err)
 	}
-	result, err := runner.Verify(context.Background(), "registry", Credential{Username: username, Password: password})
+	result, err := runner.Verify(context.Background(), "registry", "", Credential{Username: username, Password: password})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestRemoteRunnerPreservesOnlySafeRunnerStageErrors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewRemoteRunner: %v", err)
 			}
-			_, err = runner.Verify(context.Background(), "registry", Credential{Username: "user", Password: "secret"})
+			_, err = runner.Verify(context.Background(), "registry", "", Credential{Username: "user", Password: "secret"})
 			if err == nil || err.Error() != tt.want {
 				t.Fatalf("Verify error = %v, want %q", err, tt.want)
 			}
@@ -114,5 +115,73 @@ func TestRunnerHTTPHandlerKeepsBrowserTargetOnPrivateInternalAllowlist(t *testin
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+// FIR-4796 — the page travels to the private verifier, but only as a key that
+// exists when a caller actually asked for one.
+
+func TestRemoteRunnerSendsPageOnlyWhenTheCallerAskedForOne(t *testing.T) {
+	var body []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		_ = json.NewEncoder(w).Encode(Result{App: "registry", ScreenshotPNG: append([]byte(nil), pngSignature...)})
+	}))
+	defer server.Close()
+
+	runner, err := NewRemoteRunner(server.URL, "runner-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewRemoteRunner: %v", err)
+	}
+
+	// A verifier container that predates this field rejects unknown fields, so an
+	// unset page must leave no key on the wire at all.
+	if _, err := runner.Verify(context.Background(), "registry", "", Credential{}); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if strings.Contains(string(body), `"page"`) {
+		t.Fatalf("unset page still reached the wire: %s", body)
+	}
+
+	if _, err := runner.Verify(context.Background(), "registry", "/authentication/api-keys", Credential{}); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !strings.Contains(string(body), `"page":"/authentication/api-keys"`) {
+		t.Fatalf("requested page did not reach the verifier: %s", body)
+	}
+}
+
+func TestRemoteRunnerRejectsAPageOutsideTheAppBeforeSending(t *testing.T) {
+	sent := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { sent = true }))
+	defer server.Close()
+
+	runner, err := NewRemoteRunner(server.URL, "runner-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewRemoteRunner: %v", err)
+	}
+	if _, err := runner.Verify(context.Background(), "registry", "https://evil.example.com/x", Credential{}); err == nil {
+		t.Fatal("an address outside the app was accepted")
+	}
+	if sent {
+		t.Fatal("an address outside the app was forwarded to the verifier")
+	}
+}
+
+// The verifier is the process with private-network reach, so it refuses an
+// out-of-app address on its own rather than trusting the server that sent it.
+func TestRunnerHTTPHandlerRejectsAPageOutsideTheApp(t *testing.T) {
+	runner := NewRunner(&recordingCommander{})
+	runner.resolveHost = func(context.Context, string) error { return nil }
+	handler := NewRunnerHTTPHandler("runner-token", runner)
+
+	request := httptest.NewRequest(http.MethodPost, "/verify",
+		strings.NewReader(`{"app":"registry","page":"//evil.example.com/x","credential":{}}`))
+	request.Header.Set("Authorization", "Bearer runner-token")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", recorder.Code)
 	}
 }
