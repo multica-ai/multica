@@ -19,6 +19,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/pooltestdb"
+	"github.com/multica-ai/multica/server/internal/runtimepool"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -44,6 +46,748 @@ func TestLogClaimEndpointSlowIncludesPayloadFields(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("slow claim log missing %q in %s", want, got)
 		}
+	}
+}
+
+type runtimeCapabilityWakeRecorder struct {
+	requests []runtimepool.AssignRequest
+}
+
+func (r *runtimeCapabilityWakeRecorder) AssignWaiting(_ context.Context, request runtimepool.AssignRequest) (runtimepool.AssignResult, error) {
+	r.requests = append(r.requests, request)
+	return runtimepool.AssignResult{}, nil
+}
+
+func (*runtimeCapabilityWakeRecorder) SweepWaiting(context.Context, int) ([]runtimepool.AssignResult, error) {
+	return nil, nil
+}
+
+// runtimeProfileEditBeforeLockStarter simulates a profile edit landing after
+// DaemonRegister has decoded the failed-profile payload but before the
+// registration transaction reads the profile under its KEY SHARE lock. The
+// stored runtime must be derived from the locked row, not an earlier snapshot.
+type runtimeProfileEditBeforeLockStarter struct {
+	inner       txStarter
+	t           *testing.T
+	profileID   string
+	displayName string
+	commandName string
+	edited      bool
+}
+
+func (s *runtimeProfileEditBeforeLockStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.inner.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &runtimeProfileEditBeforeLockTx{Tx: tx, starter: s}, nil
+}
+
+type runtimeProfileEditBeforeLockTx struct {
+	pgx.Tx
+	starter *runtimeProfileEditBeforeLockStarter
+}
+
+func (tx *runtimeProfileEditBeforeLockTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if !tx.starter.edited && strings.Contains(sql, "FROM runtime_profile") && strings.Contains(sql, "FOR KEY SHARE") {
+		if _, err := tx.Tx.Exec(ctx, `
+			UPDATE runtime_profile SET display_name = $1, command_name = $2
+			WHERE id = $3
+		`, tx.starter.displayName, tx.starter.commandName, tx.starter.profileID); err != nil {
+			tx.starter.t.Fatalf("edit runtime profile before registration lock: %v", err)
+		}
+		tx.starter.edited = true
+	}
+	return tx.Tx.QueryRow(ctx, sql, args...)
+}
+
+// runtimeConflictBeforeUpsertStarter inserts the natural-key row after the
+// registration attempt's initial lookup but immediately before its first
+// upsert. The attempt must roll that path back and retry under the Runtime
+// lock instead of committing an update it never validated.
+type runtimeConflictBeforeUpsertStarter struct {
+	inner       txStarter
+	t           *testing.T
+	workspaceID string
+	daemonID    string
+	provider    string
+	ownerID     string
+	injected    bool
+	beginCalls  int
+}
+
+func (s *runtimeConflictBeforeUpsertStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.inner.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.beginCalls++
+	return &runtimeConflictBeforeUpsertTx{Tx: tx, starter: s}, nil
+}
+
+type runtimeConflictBeforeUpsertTx struct {
+	pgx.Tx
+	starter *runtimeConflictBeforeUpsertStarter
+}
+
+func (tx *runtimeConflictBeforeUpsertTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if !tx.starter.injected && strings.Contains(sql, "INSERT INTO agent_runtime") && strings.Contains(sql, "ON CONFLICT (workspace_id, daemon_id, provider)") {
+		if _, err := tx.Tx.Exec(ctx, `
+			INSERT INTO agent_runtime (
+				workspace_id, daemon_id, name, runtime_mode, provider, status,
+				device_info, metadata, owner_id, visibility, capabilities
+			) VALUES ($1, $2, 'Concurrent Runtime', 'local', $3, 'online', '', '{}'::jsonb, $4, 'private', ARRAY['competitor/v1'])
+		`, tx.starter.workspaceID, tx.starter.daemonID, tx.starter.provider, tx.starter.ownerID); err != nil {
+			tx.starter.t.Fatalf("insert conflicting runtime before upsert: %v", err)
+		}
+		tx.starter.injected = true
+	}
+	return tx.Tx.QueryRow(ctx, sql, args...)
+}
+
+type runtimeCapabilityFixture struct {
+	t           *testing.T
+	ctx         context.Context
+	tx          pgx.Tx
+	handler     *Handler
+	wake        *runtimeCapabilityWakeRecorder
+	workspaceID string
+	ownerID     string
+	seed        int64
+	issueNumber int
+}
+
+func newRuntimeCapabilityFixture(t *testing.T) *runtimeCapabilityFixture {
+	t.Helper()
+	pool := pooltestdb.Open(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin runtime capability fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := tx.Rollback(context.Background()); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			t.Errorf("rollback runtime capability fixture: %v", err)
+		}
+	})
+
+	queries := db.New(tx)
+	handlerCopy := *testHandler
+	handlerCopy.Queries = queries
+	handlerCopy.DB = tx
+	handlerCopy.TxStarter = tx
+	wake := &runtimeCapabilityWakeRecorder{}
+	taskService := service.NewTaskService(queries, tx, nil, nil)
+	taskService.RuntimePool = wake
+	handlerCopy.TaskService = taskService
+
+	fixture := &runtimeCapabilityFixture{
+		t:       t,
+		ctx:     ctx,
+		tx:      tx,
+		handler: &handlerCopy,
+		wake:    wake,
+		seed:    time.Now().UnixNano(),
+	}
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Runtime Capability Owner', $1)
+		RETURNING id
+	`, fmt.Sprintf("runtime-capability-owner-%d@example.test", fixture.seed)).Scan(&fixture.ownerID); err != nil {
+		t.Fatalf("create runtime capability owner: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ('Runtime Capability', $1, '', 'RCP')
+		RETURNING id
+	`, fmt.Sprintf("runtime-capability-%d", fixture.seed)).Scan(&fixture.workspaceID); err != nil {
+		t.Fatalf("create runtime capability workspace: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
+	`, fixture.workspaceID, fixture.ownerID); err != nil {
+		t.Fatalf("create runtime capability member: %v", err)
+	}
+	return fixture
+}
+
+func (f *runtimeCapabilityFixture) createMember(role string) string {
+	f.t.Helper()
+	var userID string
+	if err := f.tx.QueryRow(f.ctx, `
+		INSERT INTO "user" (name, email) VALUES ('Runtime Capability Member', $1) RETURNING id
+	`, fmt.Sprintf("runtime-capability-member-%d-%s@example.test", f.seed, uuid.NewString())).Scan(&userID); err != nil {
+		f.t.Fatalf("create runtime capability user: %v", err)
+	}
+	if _, err := f.tx.Exec(f.ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
+	`, f.workspaceID, userID, role); err != nil {
+		f.t.Fatalf("create runtime capability member: %v", err)
+	}
+	return userID
+}
+
+func (f *runtimeCapabilityFixture) createRuntime(provider, daemonID, ownerID, visibility string, capabilities []string, profileID string) string {
+	f.t.Helper()
+	var runtimeID string
+	if err := f.tx.QueryRow(f.ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, visibility, profile_id, capabilities, last_seen_at
+		) VALUES ($1, $2, $3, 'local', $4, 'online', '', '{}'::jsonb, $5, $6,
+			NULLIF($7, '')::uuid, $8::text[], '2000-01-01T00:00:00Z')
+		RETURNING id
+	`, f.workspaceID, daemonID, "Runtime "+provider, provider, ownerID, visibility, profileID, capabilities).Scan(&runtimeID); err != nil {
+		f.t.Fatalf("create runtime %q: %v", provider, err)
+	}
+	return runtimeID
+}
+
+func (f *runtimeCapabilityFixture) createPoolTask(runtimeID, requesterID, requiredCapability, status, affinity string) string {
+	f.t.Helper()
+	f.issueNumber++
+	requirements, err := json.Marshal(map[string]any{
+		"schema_version":   "multica.runtime-requirements/v1",
+		"capabilities_all": []string{requiredCapability},
+	})
+	if err != nil {
+		f.t.Fatalf("marshal task requirements: %v", err)
+	}
+	var agentID string
+	if err := f.tx.QueryRow(f.ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config, runtime_id,
+			visibility, permission_mode, max_concurrent_tasks, owner_id, instructions,
+			custom_env, custom_args, runtime_binding_mode, runtime_requirements
+		) VALUES ($1, $2, '', 'pool', '{}'::jsonb, NULL, 'private', 'private', 1, $3,
+			'', '{}'::jsonb, '[]'::jsonb, 'pool', $4::jsonb)
+		RETURNING id
+	`, f.workspaceID, "Runtime Capability Agent "+uuid.NewString(), f.ownerID, requirements).Scan(&agentID); err != nil {
+		f.t.Fatalf("create Pool agent: %v", err)
+	}
+	var issueID string
+	if err := f.tx.QueryRow(f.ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number)
+		VALUES ($1, $2, 'backlog', 'none', 'member', $3, 0, $4)
+		RETURNING id
+	`, f.workspaceID, "Runtime Capability Issue "+uuid.NewString(), f.ownerID, f.issueNumber).Scan(&issueID); err != nil {
+		f.t.Fatalf("create Pool issue: %v", err)
+	}
+	var affinityRuntime any
+	if affinity == runtimepool.SessionAffinityPinned {
+		affinityRuntime = runtimeID
+	}
+	var taskID string
+	if err := f.tx.QueryRow(f.ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, issue_id, runtime_id, status, runtime_binding_mode,
+			runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+			session_affinity_state, session_affinity_runtime_id
+		) VALUES ($1, $2, $3, $4, 'pool', $5::jsonb, $6, $7, $8, $9)
+		RETURNING id
+	`, agentID, issueID, runtimeID, status, requirements, f.workspaceID, requesterID, affinity, affinityRuntime).Scan(&taskID); err != nil {
+		f.t.Fatalf("create Pool task: %v", err)
+	}
+	return taskID
+}
+
+func (f *runtimeCapabilityFixture) registerRuntime(actorID, daemonID, provider string, capabilitiesPresent bool, capabilities []string, failedProfiles []map[string]any) *httptest.ResponseRecorder {
+	f.t.Helper()
+	runtimeRegistration := map[string]any{
+		"name":    "Registered " + provider,
+		"type":    provider,
+		"version": "9.9.9",
+		"status":  "online",
+	}
+	if capabilitiesPresent {
+		runtimeRegistration["capabilities"] = capabilities
+	}
+	body := map[string]any{
+		"workspace_id":    f.workspaceID,
+		"daemon_id":       daemonID,
+		"device_name":     "runtime-capability-test",
+		"cli_version":     "9.9.9",
+		"runtimes":        []map[string]any{runtimeRegistration},
+		"failed_profiles": failedProfiles,
+	}
+	var request *http.Request
+	if actorID == "" {
+		request = newDaemonTokenRequest(http.MethodPost, "/api/daemon/register", body, f.workspaceID, daemonID)
+	} else {
+		request = newRequestAs(actorID, http.MethodPost, "/api/daemon/register", body)
+	}
+	recorder := httptest.NewRecorder()
+	f.handler.DaemonRegister(recorder, request)
+	return recorder
+}
+
+func TestRuntimeRegistrationCapabilitiesPresence(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	tests := []struct {
+		name                string
+		provider            string
+		capabilitiesPresent bool
+		capabilities        []string
+		want                string
+	}{
+		{name: "legacy platform omission derives extension capability", provider: "platform-agent-cli", want: "multica.extension.execute/v1"},
+		{name: "explicit platform empty remains empty", provider: "platform-agent-cli", capabilitiesPresent: true, capabilities: []string{}, want: ""},
+		{name: "other provider omission remains empty", provider: "codex", want: ""},
+		{name: "platform prefix omission remains empty", provider: "platform-agent-cli-compatible", want: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			daemonID := "runtime-capability-presence-" + uuid.NewString()
+			response := fixture.registerRuntime("", daemonID, test.provider, test.capabilitiesPresent, test.capabilities, nil)
+			if response.Code != http.StatusOK {
+				t.Fatalf("DaemonRegister status = %d: %s", response.Code, response.Body.String())
+			}
+			var capabilities []string
+			if err := fixture.tx.QueryRow(fixture.ctx, `
+				SELECT capabilities FROM agent_runtime
+				WHERE workspace_id = $1 AND daemon_id = $2 AND provider = $3 AND profile_id IS NULL
+			`, fixture.workspaceID, daemonID, test.provider).Scan(&capabilities); err != nil {
+				t.Fatalf("load registered capabilities: %v", err)
+			}
+			if got := strings.Join(capabilities, ","); got != test.want {
+				t.Fatalf("stored capabilities = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestCapabilityDowngradeRequeuesQueued(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	daemonID := "runtime-capability-downgrade-" + uuid.NewString()
+	runtimeID := fixture.createRuntime("codex", daemonID, fixture.ownerID, "private", []string{"a/v1", "b/v1"}, "")
+	noneTask := fixture.createPoolTask(runtimeID, fixture.ownerID, "b/v1", "queued", runtimepool.SessionAffinityNone)
+	pinnedTask := fixture.createPoolTask(runtimeID, fixture.ownerID, "b/v1", "queued", runtimepool.SessionAffinityPinned)
+	compatibleTask := fixture.createPoolTask(runtimeID, fixture.ownerID, "a/v1", "queued", runtimepool.SessionAffinityNone)
+
+	response := fixture.registerRuntime("", daemonID, "codex", true, []string{"a/v1"}, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister status = %d: %s", response.Code, response.Body.String())
+	}
+
+	tests := []struct {
+		name                string
+		taskID              string
+		wantStatus          string
+		wantRuntimeID       string
+		wantAffinityRuntime string
+		wantReason          string
+	}{
+		{name: "none", taskID: noneTask, wantStatus: "waiting_runtime", wantReason: "no_eligible_runtime"},
+		{name: "pinned", taskID: pinnedTask, wantStatus: "waiting_runtime", wantAffinityRuntime: runtimeID, wantReason: "session_runtime_capability_mismatch"},
+		{name: "compatible", taskID: compatibleTask, wantStatus: "queued", wantRuntimeID: runtimeID},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var status, runtime, affinityRuntime, reason string
+			if err := fixture.tx.QueryRow(fixture.ctx, `
+				SELECT status, COALESCE(runtime_id::text, ''),
+				       COALESCE(session_affinity_runtime_id::text, ''), COALESCE(wait_reason, '')
+				FROM agent_task_queue WHERE id = $1
+			`, test.taskID).Scan(&status, &runtime, &affinityRuntime, &reason); err != nil {
+				t.Fatalf("load task routing state: %v", err)
+			}
+			if status != test.wantStatus || runtime != test.wantRuntimeID || affinityRuntime != test.wantAffinityRuntime || reason != test.wantReason {
+				t.Fatalf("task state = status %q runtime %q affinity %q reason %q", status, runtime, affinityRuntime, reason)
+			}
+		})
+	}
+	var capabilities []string
+	if err := fixture.tx.QueryRow(fixture.ctx, `SELECT capabilities FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&capabilities); err != nil {
+		t.Fatalf("load downgraded capabilities: %v", err)
+	}
+	if got := strings.Join(capabilities, ","); got != "a/v1" {
+		t.Fatalf("stored capabilities = %q, want a/v1", got)
+	}
+}
+
+func TestCapabilityDowngradeRejectsInFlight(t *testing.T) {
+	for _, status := range []string{"dispatched", "running", "waiting_local_directory"} {
+		t.Run(status, func(t *testing.T) {
+			fixture := newRuntimeCapabilityFixture(t)
+			daemonID := "runtime-capability-inflight-" + uuid.NewString()
+			runtimeID := fixture.createRuntime("codex", daemonID, fixture.ownerID, "private", []string{"a/v1", "b/v1"}, "")
+			taskID := fixture.createPoolTask(runtimeID, fixture.ownerID, "b/v1", status, runtimepool.SessionAffinityNone)
+			var beforeLastSeen time.Time
+			if err := fixture.tx.QueryRow(fixture.ctx, `SELECT last_seen_at FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&beforeLastSeen); err != nil {
+				t.Fatalf("load initial heartbeat: %v", err)
+			}
+
+			response := fixture.registerRuntime("", daemonID, "codex", true, []string{"a/v1"}, nil)
+			if response.Code != http.StatusConflict {
+				t.Fatalf("DaemonRegister status = %d, want 409: %s", response.Code, response.Body.String())
+			}
+			var conflict struct {
+				Code string `json:"code"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&conflict); err != nil {
+				t.Fatalf("decode conflict: %v", err)
+			}
+			if conflict.Code != "RUNTIME_CAPABILITY_IN_USE" {
+				t.Fatalf("conflict code = %q, want RUNTIME_CAPABILITY_IN_USE", conflict.Code)
+			}
+
+			var capabilities []string
+			var afterLastSeen time.Time
+			var storedStatus, taskStatus string
+			if err := fixture.tx.QueryRow(fixture.ctx, `
+				SELECT capabilities, last_seen_at, status FROM agent_runtime WHERE id = $1
+			`, runtimeID).Scan(&capabilities, &afterLastSeen, &storedStatus); err != nil {
+				t.Fatalf("load rejected runtime mutation: %v", err)
+			}
+			if err := fixture.tx.QueryRow(fixture.ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&taskStatus); err != nil {
+				t.Fatalf("load in-flight task: %v", err)
+			}
+			if got := strings.Join(capabilities, ","); got != "a/v1,b/v1" {
+				t.Fatalf("stored capabilities = %q, want unchanged", got)
+			}
+			if !afterLastSeen.Equal(beforeLastSeen) || storedStatus != "online" || taskStatus != status {
+				t.Fatalf("rejected mutation changed state: last_seen %s -> %s runtime=%q task=%q", beforeLastSeen, afterLastSeen, storedStatus, taskStatus)
+			}
+		})
+	}
+}
+
+func TestCapabilityAdditionWake(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	daemonID := "runtime-capability-addition-" + uuid.NewString()
+	runtimeID := fixture.createRuntime("codex", daemonID, fixture.ownerID, "private", []string{"a/v1"}, "")
+
+	response := fixture.registerRuntime("", daemonID, "codex", true, []string{"b/v1", "a/v1"}, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister status = %d: %s", response.Code, response.Body.String())
+	}
+	var capabilities []string
+	if err := fixture.tx.QueryRow(fixture.ctx, `SELECT capabilities FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&capabilities); err != nil {
+		t.Fatalf("load added capabilities: %v", err)
+	}
+	if got := strings.Join(capabilities, ","); got != "a/v1,b/v1" {
+		t.Fatalf("stored capabilities = %q, want a/v1,b/v1", got)
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace wakes = %d, want 1", len(fixture.wake.requests))
+	}
+	request := fixture.wake.requests[0]
+	if uuidToString(request.WorkspaceID) != fixture.workspaceID || request.FocusTaskID.Valid || request.Limit != runtimepool.AssignmentBatchLimit {
+		t.Fatalf("wake request = %+v", request)
+	}
+}
+
+func TestRuntimeOwnerChangeRequeuesNewlyUnauthorizedQueued(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	oldOwnerID := fixture.createMember("member")
+	newOwnerID := fixture.createMember("member")
+	daemonID := "runtime-owner-tightening-" + uuid.NewString()
+	runtimeID := fixture.createRuntime("codex", daemonID, oldOwnerID, "private", []string{"a/v1"}, "")
+	noneTask := fixture.createPoolTask(runtimeID, oldOwnerID, "a/v1", "queued", runtimepool.SessionAffinityNone)
+	pinnedTask := fixture.createPoolTask(runtimeID, oldOwnerID, "a/v1", "queued", runtimepool.SessionAffinityPinned)
+
+	response := fixture.registerRuntime(newOwnerID, daemonID, "codex", true, []string{"a/v1"}, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister status = %d: %s", response.Code, response.Body.String())
+	}
+	var storedOwner string
+	if err := fixture.tx.QueryRow(fixture.ctx, `SELECT owner_id FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&storedOwner); err != nil {
+		t.Fatalf("load changed runtime owner: %v", err)
+	}
+	if storedOwner != newOwnerID {
+		t.Fatalf("runtime owner = %q, want %q", storedOwner, newOwnerID)
+	}
+
+	tests := []struct {
+		name                string
+		taskID              string
+		wantAffinityRuntime string
+		wantReason          string
+	}{
+		{name: "none", taskID: noneTask, wantReason: "no_eligible_runtime"},
+		{name: "pinned", taskID: pinnedTask, wantAffinityRuntime: runtimeID, wantReason: "session_runtime_unauthorized"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var status, assignedRuntime, affinityRuntime, reason string
+			if err := fixture.tx.QueryRow(fixture.ctx, `
+				SELECT status, COALESCE(runtime_id::text, ''),
+				       COALESCE(session_affinity_runtime_id::text, ''), COALESCE(wait_reason, '')
+				FROM agent_task_queue WHERE id = $1
+			`, test.taskID).Scan(&status, &assignedRuntime, &affinityRuntime, &reason); err != nil {
+				t.Fatalf("load owner-mutated task: %v", err)
+			}
+			if status != runtimepool.StatusWaitingRuntime || assignedRuntime != "" || affinityRuntime != test.wantAffinityRuntime || reason != test.wantReason {
+				t.Fatalf("task state = status %q runtime %q affinity %q reason %q", status, assignedRuntime, affinityRuntime, reason)
+			}
+		})
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace wakes = %d, want 1", len(fixture.wake.requests))
+	}
+}
+
+func TestRuntimeOwnerChangeRejectsNewlyUnauthorizedInFlight(t *testing.T) {
+	for _, status := range []string{"dispatched", "running", "waiting_local_directory"} {
+		t.Run(status, func(t *testing.T) {
+			fixture := newRuntimeCapabilityFixture(t)
+			oldOwnerID := fixture.createMember("member")
+			newOwnerID := fixture.createMember("member")
+			daemonID := "runtime-owner-inflight-" + uuid.NewString()
+			runtimeID := fixture.createRuntime("codex", daemonID, oldOwnerID, "private", []string{"a/v1"}, "")
+			taskID := fixture.createPoolTask(runtimeID, oldOwnerID, "a/v1", status, runtimepool.SessionAffinityNone)
+			var beforeLastSeen time.Time
+			if err := fixture.tx.QueryRow(fixture.ctx, `SELECT last_seen_at FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&beforeLastSeen); err != nil {
+				t.Fatalf("load initial heartbeat: %v", err)
+			}
+
+			response := fixture.registerRuntime(newOwnerID, daemonID, "codex", true, []string{"a/v1"}, nil)
+			if response.Code != http.StatusConflict {
+				t.Fatalf("DaemonRegister status = %d, want 409: %s", response.Code, response.Body.String())
+			}
+			var conflict struct {
+				Code string `json:"code"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&conflict); err != nil {
+				t.Fatalf("decode conflict: %v", err)
+			}
+			if conflict.Code != "RUNTIME_ACCESS_IN_USE" {
+				t.Fatalf("conflict code = %q, want RUNTIME_ACCESS_IN_USE", conflict.Code)
+			}
+
+			var storedOwner, taskStatus, assignedRuntime string
+			var afterLastSeen time.Time
+			if err := fixture.tx.QueryRow(fixture.ctx, `
+				SELECT owner_id, last_seen_at FROM agent_runtime WHERE id = $1
+			`, runtimeID).Scan(&storedOwner, &afterLastSeen); err != nil {
+				t.Fatalf("load rejected owner mutation: %v", err)
+			}
+			if err := fixture.tx.QueryRow(fixture.ctx, `
+				SELECT status, COALESCE(runtime_id::text, '') FROM agent_task_queue WHERE id = $1
+			`, taskID).Scan(&taskStatus, &assignedRuntime); err != nil {
+				t.Fatalf("load in-flight task: %v", err)
+			}
+			if storedOwner != oldOwnerID || !afterLastSeen.Equal(beforeLastSeen) || taskStatus != status || assignedRuntime != runtimeID {
+				t.Fatalf("rejected owner mutation changed state: owner=%q last_seen=%s task=%q runtime=%q", storedOwner, afterLastSeen, taskStatus, assignedRuntime)
+			}
+			if len(fixture.wake.requests) != 0 {
+				t.Fatalf("Workspace wakes = %d, want 0 after rollback", len(fixture.wake.requests))
+			}
+		})
+	}
+}
+
+func TestFailedProfileRegistrationPreservesStoredCapabilities(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	var profileID string
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		INSERT INTO runtime_profile (workspace_id, display_name, protocol_family, command_name, created_by)
+		VALUES ($1, 'Capability Profile', 'codex', 'company-codex', $2)
+		RETURNING id
+	`, fixture.workspaceID, fixture.ownerID).Scan(&profileID); err != nil {
+		t.Fatalf("create runtime profile: %v", err)
+	}
+	daemonID := "runtime-capability-profile-" + uuid.NewString()
+	runtimeID := fixture.createRuntime("codex", daemonID, fixture.ownerID, "private", []string{"custom.profile.execute/v1"}, profileID)
+	body := map[string]any{
+		"workspace_id": fixture.workspaceID,
+		"daemon_id":    daemonID,
+		"device_name":  "runtime-capability-test",
+		"runtimes":     []map[string]any{},
+		"failed_profiles": []map[string]any{{
+			"profile_id":   profileID,
+			"command_name": "company-codex",
+			"reason":       "probe failed",
+		}},
+	}
+	response := httptest.NewRecorder()
+	fixture.handler.DaemonRegister(response, newDaemonTokenRequest(http.MethodPost, "/api/daemon/register", body, fixture.workspaceID, daemonID))
+	if response.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister status = %d: %s", response.Code, response.Body.String())
+	}
+	var capabilities []string
+	var status string
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		SELECT capabilities, status FROM agent_runtime WHERE id = $1
+	`, runtimeID).Scan(&capabilities, &status); err != nil {
+		t.Fatalf("load failed-profile runtime: %v", err)
+	}
+	if got := strings.Join(capabilities, ","); got != "custom.profile.execute/v1" || status != "offline" {
+		t.Fatalf("failed-profile state = capabilities %q status %q", got, status)
+	}
+}
+
+func TestFailedProfileOwnerChangeRejectsNewlyUnauthorizedInFlight(t *testing.T) {
+	for _, status := range []string{"dispatched", "running", "waiting_local_directory"} {
+		t.Run(status, func(t *testing.T) {
+			fixture := newRuntimeCapabilityFixture(t)
+			oldOwnerID := fixture.createMember("member")
+			newOwnerID := fixture.createMember("member")
+			var profileID string
+			if err := fixture.tx.QueryRow(fixture.ctx, `
+				INSERT INTO runtime_profile (workspace_id, display_name, protocol_family, command_name, created_by)
+				VALUES ($1, 'Failed Profile Conflict', 'codex', 'failed-profile-codex', $2)
+				RETURNING id
+			`, fixture.workspaceID, fixture.ownerID).Scan(&profileID); err != nil {
+				t.Fatalf("create runtime profile: %v", err)
+			}
+			daemonID := "failed-profile-access-inflight-" + uuid.NewString()
+			runtimeID := fixture.createRuntime("codex", daemonID, oldOwnerID, "private", []string{"custom.profile.execute/v1"}, profileID)
+			taskID := fixture.createPoolTask(runtimeID, oldOwnerID, "custom.profile.execute/v1", status, runtimepool.SessionAffinityNone)
+			var beforeLastSeen time.Time
+			if err := fixture.tx.QueryRow(fixture.ctx, `SELECT last_seen_at FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&beforeLastSeen); err != nil {
+				t.Fatalf("load initial heartbeat: %v", err)
+			}
+
+			body := map[string]any{
+				"workspace_id": fixture.workspaceID,
+				"daemon_id":    daemonID,
+				"device_name":  "failed-profile-conflict-test",
+				"runtimes":     []map[string]any{},
+				"failed_profiles": []map[string]any{{
+					"profile_id":   profileID,
+					"command_name": "failed-profile-codex",
+					"reason":       "probe failed",
+				}},
+			}
+			response := httptest.NewRecorder()
+			fixture.handler.DaemonRegister(response, newRequestAs(newOwnerID, http.MethodPost, "/api/daemon/register", body))
+			if response.Code != http.StatusConflict {
+				t.Fatalf("DaemonRegister status = %d, want 409: %s", response.Code, response.Body.String())
+			}
+			var conflict struct {
+				Code string `json:"code"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&conflict); err != nil {
+				t.Fatalf("decode conflict: %v", err)
+			}
+			if conflict.Code != "RUNTIME_ACCESS_IN_USE" {
+				t.Fatalf("conflict code = %q, want RUNTIME_ACCESS_IN_USE", conflict.Code)
+			}
+
+			var storedOwner, storedStatus, taskStatus, assignedRuntime string
+			var storedCapabilities []string
+			var afterLastSeen time.Time
+			if err := fixture.tx.QueryRow(fixture.ctx, `
+				SELECT owner_id, status, last_seen_at, capabilities
+				FROM agent_runtime WHERE id = $1
+			`, runtimeID).Scan(&storedOwner, &storedStatus, &afterLastSeen, &storedCapabilities); err != nil {
+				t.Fatalf("load rejected failed-profile mutation: %v", err)
+			}
+			if err := fixture.tx.QueryRow(fixture.ctx, `
+				SELECT status, COALESCE(runtime_id::text, '')
+				FROM agent_task_queue WHERE id = $1
+			`, taskID).Scan(&taskStatus, &assignedRuntime); err != nil {
+				t.Fatalf("load in-flight task: %v", err)
+			}
+			if storedOwner != oldOwnerID || storedStatus != "online" || !afterLastSeen.Equal(beforeLastSeen) || strings.Join(storedCapabilities, ",") != "custom.profile.execute/v1" {
+				t.Fatalf("rejected Runtime mutation changed state: owner=%q status=%q last_seen=%s capabilities=%v", storedOwner, storedStatus, afterLastSeen, storedCapabilities)
+			}
+			if taskStatus != status || assignedRuntime != runtimeID {
+				t.Fatalf("rejected Task mutation changed state: status=%q runtime=%q", taskStatus, assignedRuntime)
+			}
+			if len(fixture.wake.requests) != 0 {
+				t.Fatalf("Workspace wakes = %d, want 0 after rollback", len(fixture.wake.requests))
+			}
+		})
+	}
+}
+
+func TestFailedProfileRegistrationUsesLockedProfileMetadata(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	var profileID string
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		INSERT INTO runtime_profile (workspace_id, display_name, protocol_family, command_name, created_by)
+		VALUES ($1, 'Profile Before Edit', 'codex', 'command-before-edit', $2)
+		RETURNING id
+	`, fixture.workspaceID, fixture.ownerID).Scan(&profileID); err != nil {
+		t.Fatalf("create runtime profile: %v", err)
+	}
+
+	editStarter := &runtimeProfileEditBeforeLockStarter{
+		inner:       fixture.tx,
+		t:           t,
+		profileID:   profileID,
+		displayName: "Profile After Edit",
+		commandName: "command-after-edit",
+	}
+	fixture.handler.TxStarter = editStarter
+	daemonID := "runtime-profile-locked-metadata-" + uuid.NewString()
+	body := map[string]any{
+		"workspace_id": fixture.workspaceID,
+		"daemon_id":    daemonID,
+		"device_name":  "edited-profile-device",
+		"runtimes":     []map[string]any{},
+		"failed_profiles": []map[string]any{{
+			"profile_id": profileID,
+			"reason":     "probe failed",
+		}},
+	}
+	response := httptest.NewRecorder()
+	fixture.handler.DaemonRegister(response, newDaemonTokenRequest(http.MethodPost, "/api/daemon/register", body, fixture.workspaceID, daemonID))
+	if response.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister status = %d: %s", response.Code, response.Body.String())
+	}
+	if !editStarter.edited {
+		t.Fatal("profile edit hook did not run before registration lock")
+	}
+
+	var name string
+	var metadata []byte
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		SELECT name, metadata FROM agent_runtime
+		WHERE workspace_id = $1 AND daemon_id = $2 AND profile_id = $3
+	`, fixture.workspaceID, daemonID, profileID).Scan(&name, &metadata); err != nil {
+		t.Fatalf("load failed-profile runtime: %v", err)
+	}
+	if name != "Profile After Edit (edited-profile-device)" {
+		t.Fatalf("runtime name = %q, want locked profile display name", name)
+	}
+	var storedMetadata map[string]any
+	if err := json.Unmarshal(metadata, &storedMetadata); err != nil {
+		t.Fatalf("unmarshal runtime metadata: %v", err)
+	}
+	if storedMetadata["command_name"] != "command-after-edit" {
+		t.Fatalf("command_name = %#v, want locked profile command", storedMetadata["command_name"])
+	}
+}
+
+func TestRuntimeRegistrationRetriesFreshNaturalKeyConflict(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	daemonID := "runtime-fresh-conflict-" + uuid.NewString()
+	conflictStarter := &runtimeConflictBeforeUpsertStarter{
+		inner:       fixture.tx,
+		t:           t,
+		workspaceID: fixture.workspaceID,
+		daemonID:    daemonID,
+		provider:    "codex",
+		ownerID:     fixture.ownerID,
+	}
+	fixture.handler.TxStarter = conflictStarter
+
+	response := fixture.registerRuntime("", daemonID, "codex", true, []string{"a/v1"}, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister status = %d: %s", response.Code, response.Body.String())
+	}
+	if !conflictStarter.injected || conflictStarter.beginCalls != 2 {
+		t.Fatalf("conflict retry = injected %v begin calls %d, want true/2", conflictStarter.injected, conflictStarter.beginCalls)
+	}
+	var count int
+	var capabilities []string
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		SELECT capabilities, count(*) OVER ()
+		FROM agent_runtime
+		WHERE workspace_id = $1 AND daemon_id = $2 AND provider = 'codex' AND profile_id IS NULL
+		LIMIT 1
+	`, fixture.workspaceID, daemonID).Scan(&capabilities, &count); err != nil {
+		t.Fatalf("load retried runtime registration: %v", err)
+	}
+	if count != 1 || strings.Join(capabilities, ",") != "a/v1" {
+		t.Fatalf("registered rows = %d capabilities %v, want one [a/v1]", count, capabilities)
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace wakes = %d, want one post-commit wake", len(fixture.wake.requests))
 	}
 }
 

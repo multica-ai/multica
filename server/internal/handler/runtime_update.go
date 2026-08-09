@@ -1,16 +1,468 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/runtimeaccess"
+	"github.com/multica-ai/multica/server/internal/runtimepool"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+var (
+	errRuntimeCapabilityInUse     = errors.New("runtime capability is in use")
+	errRuntimeAccessInUse         = errors.New("runtime access is in use")
+	errRuntimeMutationForbidden   = errors.New("runtime mutation forbidden")
+	errRuntimeRegistrationChanged = errors.New("runtime registration changed concurrently")
+)
+
+type runtimeRegistrationMutation struct {
+	WorkspaceID          pgtype.UUID
+	DaemonID             pgtype.Text
+	Name                 string
+	RuntimeMode          string
+	Provider             string
+	Status               string
+	DeviceInfo           string
+	Metadata             []byte
+	OwnerID              pgtype.UUID
+	ProfileID            pgtype.UUID
+	Capabilities         *[]string
+	PreserveCapabilities bool
+	ResolveProfileFields func(db.RuntimeProfile) runtimeProfileRegistrationFields
+}
+
+type runtimeProfileRegistrationFields struct {
+	Name     string
+	Metadata []byte
+}
+
+type runtimeRegistrationMutationResult struct {
+	Runtime  db.AgentRuntime
+	Inserted bool
+}
+
+func normalizeRegisteredCapabilityPresence(advertised *[]string) (*[]string, error) {
+	if advertised == nil {
+		return nil, nil
+	}
+	normalized, err := runtimepool.NormalizeAdvertisedCapabilities(*advertised)
+	if err != nil {
+		return nil, err
+	}
+	return &normalized, nil
+}
+
+func effectiveRegisteredCapabilities(provider string, advertised *[]string) ([]string, error) {
+	if advertised != nil {
+		return runtimepool.NormalizeAdvertisedCapabilities(*advertised)
+	}
+	if provider == "platform-agent-cli" {
+		return []string{runtimepool.CapabilityExtensionExecuteV1}, nil
+	}
+	return []string{}, nil
+}
+
+func (h *Handler) registerRuntimeMutation(ctx context.Context, mutation runtimeRegistrationMutation) (runtimeRegistrationMutationResult, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		result, retry, err := h.registerRuntimeMutationAttempt(ctx, mutation)
+		if err != nil {
+			return runtimeRegistrationMutationResult{}, err
+		}
+		if !retry {
+			return result, nil
+		}
+	}
+	return runtimeRegistrationMutationResult{}, errRuntimeRegistrationChanged
+}
+
+func (h *Handler) registerRuntimeMutationAttempt(ctx context.Context, mutation runtimeRegistrationMutation) (runtimeRegistrationMutationResult, bool, error) {
+	var result runtimeRegistrationMutationResult
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return result, false, fmt.Errorf("begin runtime registration: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	provider := mutation.Provider
+	if mutation.ProfileID.Valid {
+		profile, err := qtx.LockRuntimeProfileForRegistration(ctx, db.LockRuntimeProfileForRegistrationParams{
+			ID:          mutation.ProfileID,
+			WorkspaceID: mutation.WorkspaceID,
+		})
+		if err != nil {
+			return result, false, fmt.Errorf("lock runtime profile: %w", err)
+		}
+		if !profile.Enabled {
+			return result, false, errRuntimeProfileDisabled
+		}
+		provider = profile.ProtocolFamily
+		if mutation.ResolveProfileFields != nil {
+			resolved := mutation.ResolveProfileFields(profile)
+			mutation.Name = resolved.Name
+			mutation.Metadata = resolved.Metadata
+		}
+	}
+
+	var existingID pgtype.UUID
+	if mutation.ProfileID.Valid {
+		existingID, err = qtx.FindAgentRuntimeIDForProfileRegistration(ctx, db.FindAgentRuntimeIDForProfileRegistrationParams{
+			WorkspaceID: mutation.WorkspaceID,
+			DaemonID:    mutation.DaemonID,
+			ProfileID:   mutation.ProfileID,
+		})
+	} else {
+		existingID, err = qtx.FindAgentRuntimeIDForBuiltinRegistration(ctx, db.FindAgentRuntimeIDForBuiltinRegistrationParams{
+			WorkspaceID: mutation.WorkspaceID,
+			DaemonID:    mutation.DaemonID,
+			Provider:    provider,
+		})
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return result, false, fmt.Errorf("find registered runtime: %w", err)
+	}
+
+	var current db.AgentRuntime
+	if err == nil {
+		current, err = qtx.LockRuntimeForCapabilityRegistration(ctx, existingID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return result, true, nil
+		}
+		if err != nil {
+			return result, false, fmt.Errorf("lock registered runtime: %w", err)
+		}
+	}
+
+	capabilities := []string{}
+	if mutation.PreserveCapabilities {
+		if current.ID.Valid {
+			capabilities = append(capabilities, current.Capabilities...)
+		}
+	} else {
+		capabilities, err = effectiveRegisteredCapabilities(provider, mutation.Capabilities)
+		if err != nil {
+			return result, false, err
+		}
+	}
+
+	desired := current
+	desired.WorkspaceID = mutation.WorkspaceID
+	desired.DaemonID = mutation.DaemonID
+	desired.Provider = provider
+	desired.Status = mutation.Status
+	desired.Capabilities = capabilities
+	if mutation.OwnerID.Valid || !current.ID.Valid {
+		desired.OwnerID = mutation.OwnerID
+	}
+	if !current.ID.Valid {
+		desired.Visibility = "private"
+	}
+
+	shouldWake := !current.ID.Valid && len(capabilities) > 0
+	if current.ID.Valid {
+		requeued, mutationWake, err := applyRuntimeRoutingMutation(ctx, qtx, current, desired)
+		if err != nil {
+			return result, false, err
+		}
+		shouldWake = mutationWake || len(requeued) > 0
+	}
+
+	if mutation.ProfileID.Valid {
+		row, err := qtx.UpsertAgentRuntimeWithProfile(ctx, db.UpsertAgentRuntimeWithProfileParams{
+			WorkspaceID:  mutation.WorkspaceID,
+			DaemonID:     mutation.DaemonID,
+			Name:         mutation.Name,
+			RuntimeMode:  mutation.RuntimeMode,
+			Provider:     provider,
+			Status:       mutation.Status,
+			DeviceInfo:   mutation.DeviceInfo,
+			Metadata:     mutation.Metadata,
+			OwnerID:      desired.OwnerID,
+			ProfileID:    mutation.ProfileID,
+			Capabilities: capabilities,
+		})
+		if err != nil {
+			return result, false, fmt.Errorf("upsert profile runtime: %w", err)
+		}
+		if !current.ID.Valid && !row.Inserted {
+			return result, true, nil
+		}
+		result.Inserted = row.Inserted
+		result.Runtime = db.AgentRuntime{
+			ID: row.ID, WorkspaceID: row.WorkspaceID, DaemonID: row.DaemonID,
+			Name: row.Name, CustomName: row.CustomName, RuntimeMode: row.RuntimeMode,
+			Provider: row.Provider, Status: row.Status, DeviceInfo: row.DeviceInfo,
+			Metadata: row.Metadata, LastSeenAt: row.LastSeenAt, CreatedAt: row.CreatedAt,
+			UpdatedAt: row.UpdatedAt, OwnerID: row.OwnerID, LegacyDaemonID: row.LegacyDaemonID,
+			Visibility: row.Visibility, ProfileID: row.ProfileID, Capabilities: row.Capabilities,
+		}
+	} else {
+		row, err := qtx.UpsertAgentRuntime(ctx, db.UpsertAgentRuntimeParams{
+			WorkspaceID:  mutation.WorkspaceID,
+			DaemonID:     mutation.DaemonID,
+			Name:         mutation.Name,
+			RuntimeMode:  mutation.RuntimeMode,
+			Provider:     provider,
+			Status:       mutation.Status,
+			DeviceInfo:   mutation.DeviceInfo,
+			Metadata:     mutation.Metadata,
+			OwnerID:      desired.OwnerID,
+			Capabilities: capabilities,
+		})
+		if err != nil {
+			return result, false, fmt.Errorf("upsert runtime: %w", err)
+		}
+		if !current.ID.Valid && !row.Inserted {
+			return result, true, nil
+		}
+		result.Inserted = row.Inserted
+		result.Runtime = db.AgentRuntime{
+			ID: row.ID, WorkspaceID: row.WorkspaceID, DaemonID: row.DaemonID,
+			Name: row.Name, CustomName: row.CustomName, RuntimeMode: row.RuntimeMode,
+			Provider: row.Provider, Status: row.Status, DeviceInfo: row.DeviceInfo,
+			Metadata: row.Metadata, LastSeenAt: row.LastSeenAt, CreatedAt: row.CreatedAt,
+			UpdatedAt: row.UpdatedAt, OwnerID: row.OwnerID, LegacyDaemonID: row.LegacyDaemonID,
+			Visibility: row.Visibility, ProfileID: row.ProfileID, Capabilities: row.Capabilities,
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return result, false, fmt.Errorf("commit runtime registration: %w", err)
+	}
+	if shouldWake {
+		h.wakeRuntimePoolWorkspaceBestEffort(ctx, result.Runtime.WorkspaceID)
+	}
+	return result, false, nil
+}
+
+type invalidRuntimeDependent struct {
+	task              db.AgentTaskQueue
+	capabilityInvalid bool
+	accessInvalid     bool
+}
+
+func applyRuntimeRoutingMutation(ctx context.Context, qtx *db.Queries, current, desired db.AgentRuntime) ([]db.AgentTaskQueue, bool, error) {
+	capabilitiesChanged := !slices.Equal(current.Capabilities, desired.Capabilities)
+	accessChanged := current.OwnerID != desired.OwnerID || current.Visibility != desired.Visibility
+	shouldWake := (!runtimepool.ContainsAllCapabilities(current.Capabilities, desired.Capabilities)) ||
+		(current.Visibility != "public" && desired.Visibility == "public") ||
+		current.OwnerID != desired.OwnerID ||
+		(current.Status != "online" && desired.Status == "online")
+	if !capabilitiesChanged && !accessChanged {
+		return nil, shouldWake, nil
+	}
+
+	dependentIDs, err := qtx.ListPoolCapabilityDependentIDs(ctx, current.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("list runtime Pool dependents: %w", err)
+	}
+	agentIDs := make([]pgtype.UUID, 0, len(dependentIDs))
+	taskIDs := make([]pgtype.UUID, 0, len(dependentIDs))
+	seenAgents := make(map[pgtype.UUID]struct{}, len(dependentIDs))
+	for _, dependent := range dependentIDs {
+		taskIDs = append(taskIDs, dependent.TaskID)
+		if _, ok := seenAgents[dependent.AgentID]; !ok {
+			seenAgents[dependent.AgentID] = struct{}{}
+			agentIDs = append(agentIDs, dependent.AgentID)
+		}
+	}
+	sort.Slice(agentIDs, func(i, j int) bool {
+		return bytes.Compare(agentIDs[i].Bytes[:], agentIDs[j].Bytes[:]) < 0
+	})
+	sort.Slice(taskIDs, func(i, j int) bool {
+		return bytes.Compare(taskIDs[i].Bytes[:], taskIDs[j].Bytes[:]) < 0
+	})
+	lockedAgents, err := qtx.LockPoolCapabilityDependentAgents(ctx, agentIDs)
+	if err != nil {
+		return nil, false, fmt.Errorf("lock runtime dependent Agents: %w", err)
+	}
+	if len(lockedAgents) != len(agentIDs) {
+		return nil, false, errors.New("runtime dependent Agent set changed")
+	}
+	lockedTasks, err := qtx.LockPoolCapabilityDependents(ctx, taskIDs)
+	if err != nil {
+		return nil, false, fmt.Errorf("lock runtime dependent Tasks: %w", err)
+	}
+	if len(lockedTasks) != len(taskIDs) {
+		return nil, false, errors.New("runtime dependent Task set changed")
+	}
+
+	invalid := make([]invalidRuntimeDependent, 0, len(lockedTasks))
+	for _, task := range lockedTasks {
+		if !runtimePoolTaskNonterminal(task.Status) {
+			continue
+		}
+		capabilityInvalid := false
+		if capabilitiesChanged {
+			requirements, parseErr := runtimepool.ParseRequirements(task.RuntimeRequirements)
+			currentCapable := parseErr == nil && runtimepool.ContainsAllCapabilities(current.Capabilities, requirements.CapabilitiesAll)
+			desiredCapable := parseErr == nil && runtimepool.ContainsAllCapabilities(desired.Capabilities, requirements.CapabilitiesAll)
+			capabilityInvalid = currentCapable && !desiredCapable
+		}
+
+		accessInvalid := false
+		if accessChanged {
+			member, memberErr := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+				UserID:      task.RuntimeRequesterUserID,
+				WorkspaceID: task.PlacementWorkspaceID,
+			})
+			if memberErr != nil && !errors.Is(memberErr, pgx.ErrNoRows) {
+				return nil, false, fmt.Errorf("load runtime requester membership: %w", memberErr)
+			}
+			currentAllowed := memberErr == nil && runtimeaccess.CanUse(member, current)
+			desiredAllowed := memberErr == nil && runtimeaccess.CanUse(member, desired)
+			accessInvalid = currentAllowed && !desiredAllowed
+		}
+		if capabilityInvalid || accessInvalid {
+			invalid = append(invalid, invalidRuntimeDependent{
+				task:              task,
+				capabilityInvalid: capabilityInvalid,
+				accessInvalid:     accessInvalid,
+			})
+		}
+	}
+
+	var capabilityInUse, accessInUse bool
+	for _, dependent := range invalid {
+		if !runtimePoolTaskInFlight(dependent.task.Status) {
+			continue
+		}
+		capabilityInUse = capabilityInUse || dependent.capabilityInvalid
+		accessInUse = accessInUse || dependent.accessInvalid
+	}
+	if capabilityInUse {
+		return nil, false, errRuntimeCapabilityInUse
+	}
+	if accessInUse {
+		return nil, false, errRuntimeAccessInUse
+	}
+
+	requeued := make([]db.AgentTaskQueue, 0, len(invalid))
+	for _, dependent := range invalid {
+		reason := "no_eligible_runtime"
+		if dependent.task.SessionAffinityState == runtimepool.SessionAffinityPinned {
+			if dependent.capabilityInvalid {
+				reason = "session_runtime_capability_mismatch"
+			} else {
+				reason = "session_runtime_unauthorized"
+			}
+		}
+		params := db.RequeuePoolTaskAfterCapabilityDowngradeParams{
+			TaskID: dependent.task.ID,
+			Reason: pgtype.Text{String: reason, Valid: true},
+		}
+		switch dependent.task.Status {
+		case "queued":
+			updated, err := qtx.RequeuePoolTaskAfterCapabilityDowngrade(ctx, params)
+			if err != nil {
+				return nil, false, fmt.Errorf("requeue invalid Runtime Pool Task: %w", err)
+			}
+			requeued = append(requeued, updated)
+		case runtimepool.StatusWaitingRuntime, "deferred":
+			if dependent.task.SessionAffinityState != runtimepool.SessionAffinityPinned {
+				continue
+			}
+			if _, err := qtx.UpdatePinnedPoolTaskWaitReason(ctx, db.UpdatePinnedPoolTaskWaitReasonParams{
+				TaskID: dependent.task.ID,
+				Reason: pgtype.Text{String: reason, Valid: true},
+			}); err != nil {
+				return nil, false, fmt.Errorf("update pinned Runtime Pool wait reason: %w", err)
+			}
+		}
+	}
+	return requeued, shouldWake, nil
+}
+
+func runtimePoolTaskNonterminal(status string) bool {
+	switch status {
+	case runtimepool.StatusWaitingRuntime, "queued", "deferred", "dispatched", "running", "waiting_local_directory":
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimePoolTaskInFlight(status string) bool {
+	return status == "dispatched" || status == "running" || status == "waiting_local_directory"
+}
+
+func (h *Handler) updateRuntimeVisibilitySafely(ctx context.Context, runtimeID pgtype.UUID, visibility string, actorUserID pgtype.UUID) (db.AgentRuntime, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.AgentRuntime{}, fmt.Errorf("begin Runtime visibility update: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	current, err := qtx.LockRuntimeForCapabilityRegistration(ctx, runtimeID)
+	if err != nil {
+		return db.AgentRuntime{}, err
+	}
+	member, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      actorUserID,
+		WorkspaceID: current.WorkspaceID,
+	})
+	if err != nil || !canEditRuntime(member, current) {
+		return db.AgentRuntime{}, errRuntimeMutationForbidden
+	}
+	desired := current
+	desired.Visibility = visibility
+	requeued, shouldWake, err := applyRuntimeRoutingMutation(ctx, qtx, current, desired)
+	if err != nil {
+		return db.AgentRuntime{}, err
+	}
+	updated, err := qtx.UpdateAgentRuntimeVisibility(ctx, db.UpdateAgentRuntimeVisibilityParams{
+		ID:         runtimeID,
+		Visibility: visibility,
+	})
+	if err != nil {
+		return db.AgentRuntime{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.AgentRuntime{}, err
+	}
+	if shouldWake || len(requeued) > 0 {
+		h.wakeRuntimePoolWorkspaceBestEffort(ctx, updated.WorkspaceID)
+	}
+	return updated, nil
+}
+
+func (h *Handler) wakeRuntimePoolWorkspaceBestEffort(ctx context.Context, workspaceID pgtype.UUID) {
+	if h.TaskService == nil {
+		return
+	}
+	if err := h.TaskService.WakePoolWorkspace(ctx, workspaceID); err != nil {
+		slog.Warn("runtime Pool wake failed after committed Runtime mutation",
+			"workspace_id", uuidToString(workspaceID), "error", err)
+	}
+}
+
+func writeRuntimeMutationConflict(w http.ResponseWriter, err error) bool {
+	var code, message string
+	switch {
+	case errors.Is(err, errRuntimeCapabilityInUse):
+		code = "RUNTIME_CAPABILITY_IN_USE"
+		message = "runtime capability is still required by in-flight tasks"
+	case errors.Is(err, errRuntimeAccessInUse):
+		code = "RUNTIME_ACCESS_IN_USE"
+		message = "runtime access is still required by in-flight tasks"
+	default:
+		return false
+	}
+	writeJSON(w, http.StatusConflict, map[string]any{"error": message, "code": code})
+	return true
+}
 
 // ---------------------------------------------------------------------------
 // CLI update request store

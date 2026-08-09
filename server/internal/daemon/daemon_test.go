@@ -1225,6 +1225,56 @@ func TestIsWorkspaceNotFoundError(t *testing.T) {
 	}
 }
 
+func TestRuntimeRegistrationCapabilitiesAreExplicit(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{"company-codex": "/opt/bin/company-codex"})
+	fx := newProfileRegisterFixture(t, []RuntimeProfile{{
+		ID:             "profile-codex",
+		WorkspaceID:    "ws-1",
+		DisplayName:    "Company Codex",
+		ProtocolFamily: "codex",
+		CommandName:    "company-codex",
+		Visibility:     "workspace",
+		Enabled:        true,
+	}}, http.StatusOK)
+	fx.daemon.cfg.Agents = map[string]AgentEntry{
+		"codex":              {Path: "/usr/bin/true", Command: "codex"},
+		"platform-agent-cli": {Path: "/usr/bin/true", Command: "platform-agent-cli"},
+	}
+
+	if _, _, _, err := fx.daemon.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("registerRuntimesForWorkspaceLocked: %v", err)
+	}
+	if len(fx.sentRuntimes) != 3 {
+		t.Fatalf("sent runtimes = %#v, want two built-ins and one profile", fx.sentRuntimes)
+	}
+
+	for _, registration := range fx.sentRuntimes {
+		provider, _ := registration["type"].(string)
+		capabilities, present := registration["capabilities"].([]any)
+		if !present {
+			t.Fatalf("provider %q omitted capabilities: %#v", provider, registration)
+		}
+		if provider == "platform-agent-cli" {
+			if len(capabilities) != 1 || capabilities[0] != "multica.extension.execute/v1" {
+				t.Fatalf("platform capabilities = %#v, want [multica.extension.execute/v1]", capabilities)
+			}
+			continue
+		}
+		if len(capabilities) != 0 {
+			t.Fatalf("provider %q capabilities = %#v, want explicit empty", provider, capabilities)
+		}
+	}
+
+	prefixRegistration := typedRuntimeRegistrations([]map[string]string{{
+		"name": "Platform Compatible",
+		"type": "platform-agent-cli-compatible",
+	}})
+	if len(prefixRegistration) != 1 || prefixRegistration[0].Capabilities == nil || len(*prefixRegistration[0].Capabilities) != 0 {
+		t.Fatalf("provider prefix capabilities = %#v, want explicit empty", prefixRegistration)
+	}
+}
+
 func TestIsTaskNotFoundError(t *testing.T) {
 	t.Parallel()
 

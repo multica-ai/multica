@@ -42,10 +42,11 @@ type AgentRuntimeResponse struct {
 	Visibility string `json:"visibility"`
 	// ProfileID is set when this runtime is an instance of a custom
 	// runtime_profile (MUL-3284); null for built-in runtimes.
-	ProfileID  *string `json:"profile_id"`
-	LastSeenAt *string `json:"last_seen_at"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	ProfileID    *string  `json:"profile_id"`
+	Capabilities []string `json:"capabilities"`
+	LastSeenAt   *string  `json:"last_seen_at"`
+	CreatedAt    string   `json:"created_at"`
+	UpdatedAt    string   `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -72,6 +73,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		OwnerID:      uuidToPtr(rt.OwnerID),
 		Visibility:   rt.Visibility,
 		ProfileID:    uuidToPtr(rt.ProfileID),
+		Capabilities: append([]string{}, rt.Capabilities...),
 		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),
@@ -568,11 +570,15 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	changed := false
 
 	if needVisibility {
-		updated, err := h.Queries.UpdateAgentRuntimeVisibility(r.Context(), db.UpdateAgentRuntimeVisibilityParams{
-			ID:         runtimeUUID,
-			Visibility: newVisibility,
-		})
+		updated, err := h.updateRuntimeVisibilitySafely(r.Context(), runtimeUUID, newVisibility, member.UserID)
 		if err != nil {
+			if writeRuntimeMutationConflict(w, err) {
+				return
+			}
+			if errors.Is(err, errRuntimeMutationForbidden) {
+				writeError(w, http.StatusForbidden, "you can only edit your own runtimes")
+				return
+			}
 			slog.Error("UpdateAgentRuntimeVisibility failed", "error", err, "runtime_id", runtimeID)
 			writeError(w, http.StatusInternalServerError, "failed to update runtime")
 			return

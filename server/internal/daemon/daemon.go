@@ -25,8 +25,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/runtimepool"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
@@ -2173,6 +2175,25 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 	return out
 }
 
+func typedRuntimeRegistrations(entries []map[string]string) []protocol.RuntimeRegistration {
+	registrations := make([]protocol.RuntimeRegistration, 0, len(entries))
+	for _, entry := range entries {
+		capabilities := []string{}
+		if entry["type"] == "platform-agent-cli" {
+			capabilities = []string{runtimepool.CapabilityExtensionExecuteV1}
+		}
+		registrations = append(registrations, protocol.RuntimeRegistration{
+			Name:         entry["name"],
+			Type:         entry["type"],
+			Version:      entry["version"],
+			Status:       entry["status"],
+			ProfileID:    entry["profile_id"],
+			Capabilities: &capabilities,
+		})
+	}
+	return registrations
+}
+
 // registerRuntimesForWorkspace registers this host's runtimes for one
 // workspace, probing the built-in agent CLIs itself. This is the entry point
 // for every standalone registration — a runtime_gone re-register, a profile
@@ -2284,7 +2305,7 @@ func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, wo
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
-		"runtimes":          runtimes,
+		"runtimes":          typedRuntimeRegistrations(runtimes),
 		"failed_profiles":   failedProfiles,
 	}
 
@@ -2329,7 +2350,7 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
-		"runtimes":          runtimes,
+		"runtimes":          typedRuntimeRegistrations(runtimes),
 		// Deliberately empty: this call carries no profiles, so it must not
 		// report profile failures either.
 		"failed_profiles": []map[string]string{},

@@ -2,9 +2,32 @@ package handler
 
 import (
 	"context"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
+
+func TestCapabilityAdditionCommitsWhenSchedulerUnavailable(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	daemonID := "runtime-capability-no-scheduler-" + uuid.NewString()
+	runtimeID := fixture.createRuntime("codex", daemonID, fixture.ownerID, "private", []string{"a/v1"}, "")
+	fixture.handler.TaskService.RuntimePool = nil
+
+	response := fixture.registerRuntime("", daemonID, "codex", true, []string{"a/v1", "b/v1"}, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister status = %d: %s", response.Code, response.Body.String())
+	}
+	var capabilities []string
+	if err := fixture.tx.QueryRow(fixture.ctx, `SELECT capabilities FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&capabilities); err != nil {
+		t.Fatalf("load committed capabilities: %v", err)
+	}
+	if got := strings.Join(capabilities, ","); got != "a/v1,b/v1" {
+		t.Fatalf("stored capabilities = %q, want a/v1,b/v1", got)
+	}
+}
 
 func TestInMemoryUpdateStore_HasPending(t *testing.T) {
 	ctx := context.Background()

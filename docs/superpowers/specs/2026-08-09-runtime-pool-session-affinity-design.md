@@ -162,13 +162,13 @@ capabilities TEXT[] NOT NULL DEFAULT '{}'
 
 Capability 变更是调度状态变更，不是无副作用的元数据覆盖：
 
-1. 注册事务先锁 Runtime，对新旧 capability 做差集。只有增加能力时直接提交，并在 commit 后唤醒该 Workspace 的等待任务。
+1. 内建 Runtime 注册与 visibility 变更事务先锁 Runtime，再对新旧 capability/access 做差集。唯一允许的 Runtime 前置锁例外是 custom/failed-profile 注册：必须按 **Profile KEY SHARE → Runtime → Agent → Task**，以与 profile delete 的 **Profile UPDATE → Runtime** 顺序一致；锁住 Runtime 后才能读取 dependent IDs，并继续按 Agent/Task UUID 顺序锁定。只有增加能力时直接提交，并在 commit 后唤醒该 Workspace 的等待任务。
 2. 删除能力时，事务内重读依赖该 Runtime 且 Requirements 将不再满足的非终态 Pool Task。`queued` 任务原子退回 `waiting_runtime`、清空 `runtime_id`；`none` 任务可重新选择，`pinned` 任务保持原 affinity 并显示 `session_runtime_capability_mismatch`。
 3. 若依赖者已是 `dispatched | running | waiting_local_directory`，本次 downgrade 以 `RUNTIME_CAPABILITY_IN_USE` 拒绝，旧 capability 不得部分覆盖。Daemon 必须先排空、取消或完成这些任务再注册降级；被拒绝的注册不得作为成功 heartbeat 延长 Online 状态。
 4. fresh claim 和 stale-dispatch 重投前都再次校验 Task Requirements 是当前 Runtime capabilities 的子集；不满足时 fail closed，不向 Daemon 下发。该防线不取代注册事务的重排/拒绝规则。
 5. Runtime visibility/owner 变更和 Workspace Member 加入、角色恢复等扩大授权的变更，在 commit 后触发同一 Workspace allocator。
 6. 授权缩减使用唯一化结果，禁止各入口自选“取消或拒绝”：
-   - Runtime visibility 收紧或 owner 切换：`queued` Pool Task 原子退回 `waiting_runtime` 并清 Runtime，`none` 写 `no_eligible_runtime`，`pinned` 写 `session_runtime_unauthorized`；若存在因新权限而失效的 `dispatched | running | waiting_local_directory`，整个 Runtime mutation 返回 `409 RUNTIME_ACCESS_IN_USE` 且不部分更新。
+   - Runtime visibility 收紧或 owner 切换：`queued` Pool Task 原子退回 `waiting_runtime` 并清 Runtime，`none` 写 `no_eligible_runtime`，`pinned` 写 `session_runtime_unauthorized`；若存在因新权限而失效的 `dispatched | running | waiting_local_directory`，整个 Runtime mutation 返回 `409 RUNTIME_ACCESS_IN_USE` 且不部分更新。Daemon 注册的正常 runtimes 与 `failed_profiles` 循环都必须立即透传 capability/access in-use 409；只有其他 failed-profile 记录错误继续 best-effort 日志。
    - Workspace Member 删除、停用或角色降级：这是安全撤权，必须在原 revoke 事务按 **Member → Runtime → 受影响的 Pool ChatSession → Agent → Task** 重排锁序并取消该 requester 已不再授权的全部 Pool 非终态 Task（包括 in-flight）；没有 Chat Task 时才跳过 ChatSession。`unresolved` 按 5.2 同时转 `none`；若撤权取消的是当前已解析 Chat head，则在同一 ChatSession 锁内按 7.2 只推进一个仍获授权的下一队头。不用 409 阻止成员撤权。
    - 上述 requeue 在 commit 后对每条发 `task:waiting_runtime`，cancel 发现有 terminal/cancel 事件；只有 requeue 任务触发 allocator，所有路径在事务内重读 Member/Runtime 并在 claim 前再复验。
 

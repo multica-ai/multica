@@ -31,7 +31,8 @@ type Runtime struct {
 	// back to the profile so the daemon can resolve the profile's
 	// command_name to the executable to launch. Built-in (provider-detected)
 	// runtimes leave this empty.
-	ProfileID string `json:"profile_id,omitempty"`
+	ProfileID    string   `json:"profile_id,omitempty"`
+	Capabilities []string `json:"capabilities"`
 }
 
 // RepoData holds repository information from the workspace.

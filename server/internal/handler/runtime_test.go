@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/runtimepool"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -80,6 +81,130 @@ func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
 				t.Fatalf("%s: expected 400 for malformed runtimeId, got %d: %s", tt.name, w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestRuntimeAccessTighteningRequeuesQueued(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	plainMemberID := fixture.createMember("member")
+	runtimeID := fixture.createRuntime("codex", "runtime-access-tightening", fixture.ownerID, "public", []string{"a/v1"}, "")
+	noneTask := fixture.createPoolTask(runtimeID, plainMemberID, "a/v1", "queued", runtimepool.SessionAffinityNone)
+	pinnedTask := fixture.createPoolTask(runtimeID, plainMemberID, "a/v1", "queued", runtimepool.SessionAffinityPinned)
+	ownerTask := fixture.createPoolTask(runtimeID, fixture.ownerID, "a/v1", "queued", runtimepool.SessionAffinityNone)
+
+	response := httptest.NewRecorder()
+	request := newRequestAs(fixture.ownerID, http.MethodPatch, "/api/runtimes/"+runtimeID, map[string]any{
+		"visibility": "private",
+	})
+	request = withURLParam(request, "runtimeId", runtimeID)
+	fixture.handler.UpdateAgentRuntime(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("UpdateAgentRuntime status = %d: %s", response.Code, response.Body.String())
+	}
+
+	tests := []struct {
+		name                string
+		taskID              string
+		wantStatus          string
+		wantRuntimeID       string
+		wantAffinityRuntime string
+		wantReason          string
+	}{
+		{name: "none", taskID: noneTask, wantStatus: runtimepool.StatusWaitingRuntime, wantReason: "no_eligible_runtime"},
+		{name: "pinned", taskID: pinnedTask, wantStatus: runtimepool.StatusWaitingRuntime, wantAffinityRuntime: runtimeID, wantReason: "session_runtime_unauthorized"},
+		{name: "still authorized owner", taskID: ownerTask, wantStatus: "queued", wantRuntimeID: runtimeID},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var status, assignedRuntime, affinityRuntime, reason string
+			if err := fixture.tx.QueryRow(fixture.ctx, `
+				SELECT status, COALESCE(runtime_id::text, ''),
+				       COALESCE(session_affinity_runtime_id::text, ''), COALESCE(wait_reason, '')
+				FROM agent_task_queue WHERE id = $1
+			`, test.taskID).Scan(&status, &assignedRuntime, &affinityRuntime, &reason); err != nil {
+				t.Fatalf("load access-mutated task: %v", err)
+			}
+			if status != test.wantStatus || assignedRuntime != test.wantRuntimeID || affinityRuntime != test.wantAffinityRuntime || reason != test.wantReason {
+				t.Fatalf("task state = status %q runtime %q affinity %q reason %q", status, assignedRuntime, affinityRuntime, reason)
+			}
+		})
+	}
+	var visibility string
+	if err := fixture.tx.QueryRow(fixture.ctx, `SELECT visibility FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&visibility); err != nil {
+		t.Fatalf("load tightened runtime visibility: %v", err)
+	}
+	if visibility != "private" {
+		t.Fatalf("runtime visibility = %q, want private", visibility)
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace wakes = %d, want 1", len(fixture.wake.requests))
+	}
+}
+
+func TestRuntimeAccessTighteningRejectsInFlight(t *testing.T) {
+	for _, status := range []string{"dispatched", "running", "waiting_local_directory"} {
+		t.Run(status, func(t *testing.T) {
+			fixture := newRuntimeCapabilityFixture(t)
+			plainMemberID := fixture.createMember("member")
+			runtimeID := fixture.createRuntime("codex", "runtime-access-inflight-"+status, fixture.ownerID, "public", []string{"a/v1"}, "")
+			taskID := fixture.createPoolTask(runtimeID, plainMemberID, "a/v1", status, runtimepool.SessionAffinityNone)
+
+			response := httptest.NewRecorder()
+			request := newRequestAs(fixture.ownerID, http.MethodPatch, "/api/runtimes/"+runtimeID, map[string]any{
+				"visibility": "private",
+			})
+			request = withURLParam(request, "runtimeId", runtimeID)
+			fixture.handler.UpdateAgentRuntime(response, request)
+			if response.Code != http.StatusConflict {
+				t.Fatalf("UpdateAgentRuntime status = %d, want 409: %s", response.Code, response.Body.String())
+			}
+			var conflict struct {
+				Code string `json:"code"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&conflict); err != nil {
+				t.Fatalf("decode conflict: %v", err)
+			}
+			if conflict.Code != "RUNTIME_ACCESS_IN_USE" {
+				t.Fatalf("conflict code = %q, want RUNTIME_ACCESS_IN_USE", conflict.Code)
+			}
+			var visibility, taskStatus, assignedRuntime string
+			if err := fixture.tx.QueryRow(fixture.ctx, `SELECT visibility FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&visibility); err != nil {
+				t.Fatalf("load rejected runtime mutation: %v", err)
+			}
+			if err := fixture.tx.QueryRow(fixture.ctx, `
+				SELECT status, COALESCE(runtime_id::text, '') FROM agent_task_queue WHERE id = $1
+			`, taskID).Scan(&taskStatus, &assignedRuntime); err != nil {
+				t.Fatalf("load in-flight task: %v", err)
+			}
+			if visibility != "public" || taskStatus != status || assignedRuntime != runtimeID {
+				t.Fatalf("rejected access mutation changed state: visibility=%q task=%q runtime=%q", visibility, taskStatus, assignedRuntime)
+			}
+			if len(fixture.wake.requests) != 0 {
+				t.Fatalf("Workspace wakes = %d, want 0 after rollback", len(fixture.wake.requests))
+			}
+		})
+	}
+}
+
+func TestRuntimeAccessExpansionWakesOnce(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	runtimeID := fixture.createRuntime("codex", "runtime-access-expansion", fixture.ownerID, "private", []string{"a/v1"}, "")
+
+	response := httptest.NewRecorder()
+	request := newRequestAs(fixture.ownerID, http.MethodPatch, "/api/runtimes/"+runtimeID, map[string]any{
+		"visibility": "public",
+	})
+	request = withURLParam(request, "runtimeId", runtimeID)
+	fixture.handler.UpdateAgentRuntime(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("UpdateAgentRuntime status = %d: %s", response.Code, response.Body.String())
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace wakes = %d, want 1", len(fixture.wake.requests))
+	}
+	requestWake := fixture.wake.requests[0]
+	if uuidToString(requestWake.WorkspaceID) != fixture.workspaceID || requestWake.FocusTaskID.Valid || requestWake.Limit != runtimepool.AssignmentBatchLimit {
+		t.Fatalf("wake request = %+v", requestWake)
 	}
 }
 

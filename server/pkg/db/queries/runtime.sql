@@ -33,6 +33,65 @@ SELECT * FROM agent_runtime
 WHERE id = $1
 FOR UPDATE;
 
+-- name: LockRuntimeForCapabilityRegistration :one
+-- Runtime capability/access mutations must hold this lock before discovering
+-- Pool dependents. The later Agent and Task locks are acquired from the
+-- post-lock ID snapshot in deterministic UUID order.
+SELECT * FROM agent_runtime
+WHERE id = @runtime_id
+FOR UPDATE;
+
+-- name: FindAgentRuntimeIDForBuiltinRegistration :one
+SELECT id FROM agent_runtime
+WHERE workspace_id = @workspace_id
+  AND daemon_id = @daemon_id
+  AND provider = @provider
+  AND profile_id IS NULL;
+
+-- name: FindAgentRuntimeIDForProfileRegistration :one
+SELECT id FROM agent_runtime
+WHERE workspace_id = @workspace_id
+  AND daemon_id = @daemon_id
+  AND profile_id = @profile_id;
+
+-- name: ListPoolCapabilityDependentIDs :many
+-- Deliberately does not lock. The caller already holds the Runtime lock, then
+-- derives and locks distinct Agents before locking these exact Tasks.
+SELECT id AS task_id, agent_id FROM agent_task_queue
+WHERE runtime_binding_mode = 'pool'
+  AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+  AND (runtime_id = @runtime_id OR session_affinity_runtime_id = @runtime_id)
+ORDER BY id;
+
+-- name: LockPoolCapabilityDependentAgents :many
+SELECT * FROM agent
+WHERE id = ANY(@agent_ids::uuid[])
+ORDER BY id
+FOR UPDATE;
+
+-- name: LockPoolCapabilityDependents :many
+SELECT * FROM agent_task_queue
+WHERE id = ANY(@task_ids::uuid[])
+ORDER BY id
+FOR UPDATE;
+
+-- name: RequeuePoolTaskAfterCapabilityDowngrade :one
+UPDATE agent_task_queue
+SET status = 'waiting_runtime', runtime_id = NULL, wait_reason = @reason
+WHERE id = @task_id
+  AND status = 'queued'
+  AND runtime_binding_mode = 'pool'
+RETURNING *;
+
+-- name: UpdatePinnedPoolTaskWaitReason :one
+UPDATE agent_task_queue
+SET wait_reason = @reason
+WHERE id = @task_id
+  AND status IN ('waiting_runtime', 'deferred')
+  AND runtime_binding_mode = 'pool'
+  AND session_affinity_state = 'pinned'
+RETURNING *;
+
 -- name: GetAgentRuntimeForWorkspace :one
 SELECT * FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2;
@@ -51,8 +110,9 @@ INSERT INTO agent_runtime (
     device_info,
     metadata,
     owner_id,
+    capabilities,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, @capabilities::text[], now())
 -- Built-in runtimes carry no profile_id. The arbiter is the partial unique
 -- index from migration 121 (WHERE profile_id IS NULL); the predicate must be
 -- spelled out so Postgres selects that partial index, not the custom-runtime
@@ -65,6 +125,7 @@ DO UPDATE SET
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
+    capabilities = EXCLUDED.capabilities,
     last_seen_at = now(),
     updated_at = now()
 RETURNING *, (xmax = 0) AS inserted;
@@ -88,8 +149,9 @@ INSERT INTO agent_runtime (
     metadata,
     owner_id,
     profile_id,
+    capabilities,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, @capabilities::text[], now())
 ON CONFLICT (workspace_id, daemon_id, profile_id) WHERE profile_id IS NOT NULL
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -99,6 +161,7 @@ DO UPDATE SET
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
+    capabilities = EXCLUDED.capabilities,
     last_seen_at = now(),
     updated_at = now()
 RETURNING *, (xmax = 0) AS inserted;

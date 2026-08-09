@@ -317,6 +317,47 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQ
 	return items, nil
 }
 
+const findAgentRuntimeIDForBuiltinRegistration = `-- name: FindAgentRuntimeIDForBuiltinRegistration :one
+SELECT id FROM agent_runtime
+WHERE workspace_id = $1
+  AND daemon_id = $2
+  AND provider = $3
+  AND profile_id IS NULL
+`
+
+type FindAgentRuntimeIDForBuiltinRegistrationParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	DaemonID    pgtype.Text `json:"daemon_id"`
+	Provider    string      `json:"provider"`
+}
+
+func (q *Queries) FindAgentRuntimeIDForBuiltinRegistration(ctx context.Context, arg FindAgentRuntimeIDForBuiltinRegistrationParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, findAgentRuntimeIDForBuiltinRegistration, arg.WorkspaceID, arg.DaemonID, arg.Provider)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const findAgentRuntimeIDForProfileRegistration = `-- name: FindAgentRuntimeIDForProfileRegistration :one
+SELECT id FROM agent_runtime
+WHERE workspace_id = $1
+  AND daemon_id = $2
+  AND profile_id = $3
+`
+
+type FindAgentRuntimeIDForProfileRegistrationParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	DaemonID    pgtype.Text `json:"daemon_id"`
+	ProfileID   pgtype.UUID `json:"profile_id"`
+}
+
+func (q *Queries) FindAgentRuntimeIDForProfileRegistration(ctx context.Context, arg FindAgentRuntimeIDForProfileRegistrationParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, findAgentRuntimeIDForProfileRegistration, arg.WorkspaceID, arg.DaemonID, arg.ProfileID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const findLegacyRuntimesByDaemonID = `-- name: FindLegacyRuntimesByDaemonID :many
 SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, capabilities FROM agent_runtime
 WHERE workspace_id = $1
@@ -682,6 +723,41 @@ func (q *Queries) ListDaemonCustomNames(ctx context.Context, arg ListDaemonCusto
 	return items, nil
 }
 
+const listPoolCapabilityDependentIDs = `-- name: ListPoolCapabilityDependentIDs :many
+SELECT id AS task_id, agent_id FROM agent_task_queue
+WHERE runtime_binding_mode = 'pool'
+  AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+  AND (runtime_id = $1 OR session_affinity_runtime_id = $1)
+ORDER BY id
+`
+
+type ListPoolCapabilityDependentIDsRow struct {
+	TaskID  pgtype.UUID `json:"task_id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+}
+
+// Deliberately does not lock. The caller already holds the Runtime lock, then
+// derives and locks distinct Agents before locking these exact Tasks.
+func (q *Queries) ListPoolCapabilityDependentIDs(ctx context.Context, runtimeID pgtype.UUID) ([]ListPoolCapabilityDependentIDsRow, error) {
+	rows, err := q.db.Query(ctx, listPoolCapabilityDependentIDs, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPoolCapabilityDependentIDsRow{}
+	for rows.Next() {
+		var i ListPoolCapabilityDependentIDsRow
+		if err := rows.Scan(&i.TaskID, &i.AgentID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockAgentRuntime = `-- name: LockAgentRuntime :one
 SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, capabilities FROM agent_runtime
 WHERE id = $1
@@ -703,6 +779,185 @@ FOR UPDATE
 // races under read-committed isolation.
 func (q *Queries) LockAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
 	row := q.db.QueryRow(ctx, lockAgentRuntime, id)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+		&i.CustomName,
+		&i.Capabilities,
+	)
+	return i, err
+}
+
+const lockPoolCapabilityDependentAgents = `-- name: LockPoolCapabilityDependentAgents :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, runtime_binding_mode, runtime_requirements FROM agent
+WHERE id = ANY($1::uuid[])
+ORDER BY id
+FOR UPDATE
+`
+
+func (q *Queries) LockPoolCapabilityDependentAgents(ctx context.Context, agentIds []pgtype.UUID) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, lockPoolCapabilityDependentAgents, agentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.RuntimeBindingMode,
+			&i.RuntimeRequirements,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockPoolCapabilityDependents = `-- name: LockPoolCapabilityDependents :many
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session FROM agent_task_queue
+WHERE id = ANY($1::uuid[])
+ORDER BY id
+FOR UPDATE
+`
+
+func (q *Queries) LockPoolCapabilityDependents(ctx context.Context, taskIds []pgtype.UUID) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, lockPoolCapabilityDependents, taskIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.RuntimeBindingMode,
+			&i.RuntimeRequirements,
+			&i.PlacementWorkspaceID,
+			&i.RuntimeRequesterUserID,
+			&i.SessionAffinityState,
+			&i.SessionAffinityRuntimeID,
+			&i.ExplicitFreshSession,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockRuntimeForCapabilityRegistration = `-- name: LockRuntimeForCapabilityRegistration :one
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, capabilities FROM agent_runtime
+WHERE id = $1
+FOR UPDATE
+`
+
+// Runtime capability/access mutations must hold this lock before discovering
+// Pool dependents. The later Agent and Task locks are acquired from the
+// post-lock ID snapshot in deterministic UUID order.
+func (q *Queries) LockRuntimeForCapabilityRegistration(ctx context.Context, runtimeID pgtype.UUID) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, lockRuntimeForCapabilityRegistration, runtimeID)
 	var i AgentRuntime
 	err := row.Scan(
 		&i.ID,
@@ -882,6 +1137,86 @@ type RecordRuntimeLegacyDaemonIDParams struct {
 func (q *Queries) RecordRuntimeLegacyDaemonID(ctx context.Context, arg RecordRuntimeLegacyDaemonIDParams) error {
 	_, err := q.db.Exec(ctx, recordRuntimeLegacyDaemonID, arg.ID, arg.LegacyDaemonID)
 	return err
+}
+
+const requeuePoolTaskAfterCapabilityDowngrade = `-- name: RequeuePoolTaskAfterCapabilityDowngrade :one
+UPDATE agent_task_queue
+SET status = 'waiting_runtime', runtime_id = NULL, wait_reason = $1
+WHERE id = $2
+  AND status = 'queued'
+  AND runtime_binding_mode = 'pool'
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session
+`
+
+type RequeuePoolTaskAfterCapabilityDowngradeParams struct {
+	Reason pgtype.Text `json:"reason"`
+	TaskID pgtype.UUID `json:"task_id"`
+}
+
+func (q *Queries) RequeuePoolTaskAfterCapabilityDowngrade(ctx context.Context, arg RequeuePoolTaskAfterCapabilityDowngradeParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, requeuePoolTaskAfterCapabilityDowngrade, arg.Reason, arg.TaskID)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
 }
 
 const selectStaleOnlineRuntimes = `-- name: SelectStaleOnlineRuntimes :many
@@ -1229,6 +1564,87 @@ func (q *Queries) UpdateAgentRuntimeVisibility(ctx context.Context, arg UpdateAg
 	return i, err
 }
 
+const updatePinnedPoolTaskWaitReason = `-- name: UpdatePinnedPoolTaskWaitReason :one
+UPDATE agent_task_queue
+SET wait_reason = $1
+WHERE id = $2
+  AND status IN ('waiting_runtime', 'deferred')
+  AND runtime_binding_mode = 'pool'
+  AND session_affinity_state = 'pinned'
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session
+`
+
+type UpdatePinnedPoolTaskWaitReasonParams struct {
+	Reason pgtype.Text `json:"reason"`
+	TaskID pgtype.UUID `json:"task_id"`
+}
+
+func (q *Queries) UpdatePinnedPoolTaskWaitReason(ctx context.Context, arg UpdatePinnedPoolTaskWaitReasonParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, updatePinnedPoolTaskWaitReason, arg.Reason, arg.TaskID)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
 const upsertAgentRuntime = `-- name: UpsertAgentRuntime :one
 INSERT INTO agent_runtime (
     workspace_id,
@@ -1240,8 +1656,9 @@ INSERT INTO agent_runtime (
     device_info,
     metadata,
     owner_id,
+    capabilities,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text[], now())
 ON CONFLICT (workspace_id, daemon_id, provider) WHERE profile_id IS NULL
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -1250,21 +1667,23 @@ DO UPDATE SET
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
+    capabilities = EXCLUDED.capabilities,
     last_seen_at = now(),
     updated_at = now()
 RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, capabilities, (xmax = 0) AS inserted
 `
 
 type UpsertAgentRuntimeParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	DaemonID    pgtype.Text `json:"daemon_id"`
-	Name        string      `json:"name"`
-	RuntimeMode string      `json:"runtime_mode"`
-	Provider    string      `json:"provider"`
-	Status      string      `json:"status"`
-	DeviceInfo  string      `json:"device_info"`
-	Metadata    []byte      `json:"metadata"`
-	OwnerID     pgtype.UUID `json:"owner_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	DaemonID     pgtype.Text `json:"daemon_id"`
+	Name         string      `json:"name"`
+	RuntimeMode  string      `json:"runtime_mode"`
+	Provider     string      `json:"provider"`
+	Status       string      `json:"status"`
+	DeviceInfo   string      `json:"device_info"`
+	Metadata     []byte      `json:"metadata"`
+	OwnerID      pgtype.UUID `json:"owner_id"`
+	Capabilities []string    `json:"capabilities"`
 }
 
 type UpsertAgentRuntimeRow struct {
@@ -1307,6 +1726,7 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		arg.DeviceInfo,
 		arg.Metadata,
 		arg.OwnerID,
+		arg.Capabilities,
 	)
 	var i UpsertAgentRuntimeRow
 	err := row.Scan(
@@ -1345,8 +1765,9 @@ INSERT INTO agent_runtime (
     metadata,
     owner_id,
     profile_id,
+    capabilities,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::text[], now())
 ON CONFLICT (workspace_id, daemon_id, profile_id) WHERE profile_id IS NOT NULL
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -1356,22 +1777,24 @@ DO UPDATE SET
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
+    capabilities = EXCLUDED.capabilities,
     last_seen_at = now(),
     updated_at = now()
 RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, capabilities, (xmax = 0) AS inserted
 `
 
 type UpsertAgentRuntimeWithProfileParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	DaemonID    pgtype.Text `json:"daemon_id"`
-	Name        string      `json:"name"`
-	RuntimeMode string      `json:"runtime_mode"`
-	Provider    string      `json:"provider"`
-	Status      string      `json:"status"`
-	DeviceInfo  string      `json:"device_info"`
-	Metadata    []byte      `json:"metadata"`
-	OwnerID     pgtype.UUID `json:"owner_id"`
-	ProfileID   pgtype.UUID `json:"profile_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	DaemonID     pgtype.Text `json:"daemon_id"`
+	Name         string      `json:"name"`
+	RuntimeMode  string      `json:"runtime_mode"`
+	Provider     string      `json:"provider"`
+	Status       string      `json:"status"`
+	DeviceInfo   string      `json:"device_info"`
+	Metadata     []byte      `json:"metadata"`
+	OwnerID      pgtype.UUID `json:"owner_id"`
+	ProfileID    pgtype.UUID `json:"profile_id"`
+	Capabilities []string    `json:"capabilities"`
 }
 
 type UpsertAgentRuntimeWithProfileRow struct {
@@ -1415,6 +1838,7 @@ func (q *Queries) UpsertAgentRuntimeWithProfile(ctx context.Context, arg UpsertA
 		arg.Metadata,
 		arg.OwnerID,
 		arg.ProfileID,
+		arg.Capabilities,
 	)
 	var i UpsertAgentRuntimeWithProfileRow
 	err := row.Scan(
