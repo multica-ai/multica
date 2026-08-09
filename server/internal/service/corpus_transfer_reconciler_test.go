@@ -54,6 +54,18 @@ func TestCorpusTransferReconcilerPersistsRetryAndTombstonePasses(t *testing.T) {
 			t.Fatal("completion was not fenced by a cleanup lease token")
 		}
 	})
+
+	t.Run("last successful pass removes a deleted workspace ledger", func(t *testing.T) {
+		queries := &fakeCorpusCleanupQueries{
+			claims:       []db.CorpusTransfer{cleanupTransferRow(int32(len(corpusTransferCleanupRedelete)))},
+			deleteOrphan: true,
+		}
+		reconciler := &CorpusTransferReconciler{Queries: queries, Storage: &fakeCorpusCleanupDeleter{}}
+		reconciler.RunOnce(context.Background())
+		if queries.deleteOrphanCalls != 1 || queries.completeCalls != 0 {
+			t.Fatalf("delete-orphan/complete = %d/%d, want 1/0", queries.deleteOrphanCalls, queries.completeCalls)
+		}
+	})
 }
 
 func TestCorpusTransferReconcilerExpiresAbandonedUploadedTransfer(t *testing.T) {
@@ -220,10 +232,15 @@ func TestCorpusTransferCleanupClaimsAreLeaseFenced(t *testing.T) {
 	}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("stale completion error = %v, want no rows", err)
 	}
-	if _, err := queries.CompleteCorpusTransferCleanup(context.Background(), db.CompleteCorpusTransferCleanupParams{
+	if _, err := queries.DeleteOrphanedCorpusTransferAfterCleanup(context.Background(), db.DeleteOrphanedCorpusTransferAfterCleanupParams{
+		WorkspaceID: parseTestUUID(t, workspaceID), ID: parseTestUUID(t, transferID), CleanupLeaseToken: wrongLease,
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("stale orphan deletion error = %v, want no rows", err)
+	}
+	if _, err := queries.DeleteOrphanedCorpusTransferAfterCleanup(context.Background(), db.DeleteOrphanedCorpusTransferAfterCleanupParams{
 		WorkspaceID: parseTestUUID(t, workspaceID), ID: parseTestUUID(t, transferID), CleanupLeaseToken: lease,
 	}); err != nil {
-		t.Fatalf("lease owner completion: %v", err)
+		t.Fatalf("lease owner orphan deletion: %v", err)
 	}
 }
 
@@ -246,15 +263,17 @@ func cleanupTransferRow(pass int32) db.CorpusTransfer {
 }
 
 type fakeCorpusCleanupQueries struct {
-	mu            sync.Mutex
-	claims        []db.CorpusTransfer
-	retryCalls    int
-	scheduleCalls int
-	completeCalls int
-	onClaim       func()
-	lastRetry     db.RetryCorpusTransferCleanupParams
-	lastSchedule  db.ScheduleCorpusTransferCleanupPassParams
-	lastComplete  db.CompleteCorpusTransferCleanupParams
+	mu                sync.Mutex
+	claims            []db.CorpusTransfer
+	retryCalls        int
+	scheduleCalls     int
+	completeCalls     int
+	deleteOrphanCalls int
+	deleteOrphan      bool
+	onClaim           func()
+	lastRetry         db.RetryCorpusTransferCleanupParams
+	lastSchedule      db.ScheduleCorpusTransferCleanupPassParams
+	lastComplete      db.CompleteCorpusTransferCleanupParams
 }
 
 func (f *fakeCorpusCleanupQueries) ClaimNextCorpusTransferForCleanup(_ context.Context, arg db.ClaimNextCorpusTransferForCleanupParams) (db.CorpusTransfer, error) {
@@ -288,6 +307,14 @@ func (f *fakeCorpusCleanupQueries) CompleteCorpusTransferCleanup(_ context.Conte
 	f.completeCalls++
 	f.lastComplete = arg
 	return db.CorpusTransfer{}, nil
+}
+
+func (f *fakeCorpusCleanupQueries) DeleteOrphanedCorpusTransferAfterCleanup(_ context.Context, _ db.DeleteOrphanedCorpusTransferAfterCleanupParams) (db.CorpusTransfer, error) {
+	f.deleteOrphanCalls++
+	if f.deleteOrphan {
+		return db.CorpusTransfer{}, nil
+	}
+	return db.CorpusTransfer{}, pgx.ErrNoRows
 }
 
 type fakeCorpusCleanupDeleter struct {

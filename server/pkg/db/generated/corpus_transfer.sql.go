@@ -220,10 +220,14 @@ SET cleanup_pending = false,
     cleanup_next_attempt_at = NULL,
     cleanup_last_error = NULL,
     updated_at = now()
-WHERE workspace_id = $1
-  AND id = $2
-  AND cleanup_pending
-  AND cleanup_lease_token = $3
+WHERE corpus_transfer.workspace_id = $1
+  AND corpus_transfer.id = $2
+  AND corpus_transfer.cleanup_pending
+  AND corpus_transfer.cleanup_lease_token = $3
+  AND EXISTS (
+      SELECT 1 FROM workspace
+      WHERE workspace.id = corpus_transfer.workspace_id
+  )
 RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
 `
 
@@ -443,6 +447,63 @@ func (q *Queries) CreateOrGetCorpusTransfer(ctx context.Context, arg CreateOrGet
 		arg.ExpectedSha256,
 		arg.ExpiresAt,
 	)
+	var i CorpusTransfer
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ActorID,
+		&i.IdempotencyKey,
+		&i.ObjectKey,
+		&i.Manifest,
+		&i.ManifestSha256,
+		&i.ExpectedSizeBytes,
+		&i.ExpectedSha256,
+		&i.State,
+		&i.VerificationToken,
+		&i.VerificationLeaseExpiresAt,
+		&i.VerifiedSizeBytes,
+		&i.VerifiedSha256,
+		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
+		&i.ExpiresAt,
+		&i.UploadStartedAt,
+		&i.UploadedAt,
+		&i.VerificationStartedAt,
+		&i.ConfirmedAt,
+		&i.FailedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteOrphanedCorpusTransferAfterCleanup = `-- name: DeleteOrphanedCorpusTransferAfterCleanup :one
+DELETE FROM corpus_transfer
+WHERE corpus_transfer.workspace_id = $1
+  AND corpus_transfer.id = $2
+  AND corpus_transfer.cleanup_pending
+  AND corpus_transfer.cleanup_lease_token = $3
+  AND NOT EXISTS (
+      SELECT 1 FROM workspace
+      WHERE workspace.id = corpus_transfer.workspace_id
+  )
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+`
+
+type DeleteOrphanedCorpusTransferAfterCleanupParams struct {
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	ID                pgtype.UUID `json:"id"`
+	CleanupLeaseToken pgtype.UUID `json:"cleanup_lease_token"`
+}
+
+func (q *Queries) DeleteOrphanedCorpusTransferAfterCleanup(ctx context.Context, arg DeleteOrphanedCorpusTransferAfterCleanupParams) (CorpusTransfer, error) {
+	row := q.db.QueryRow(ctx, deleteOrphanedCorpusTransferAfterCleanup, arg.WorkspaceID, arg.ID, arg.CleanupLeaseToken)
 	var i CorpusTransfer
 	err := row.Scan(
 		&i.ID,
