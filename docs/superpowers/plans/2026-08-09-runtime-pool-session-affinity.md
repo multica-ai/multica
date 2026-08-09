@@ -58,13 +58,15 @@ Dependencies are strict: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7; tasks 8-12 consume the
 - Modify: `server/internal/migrations/migrations_lint_test.go`
 - Modify: `server/internal/migrations/platform_extension_release_migration_test.go`
 - Create: `server/internal/migrations/runtime_pool_contract_migration_test.go`
+- Modify: `server/cmd/migrate/main.go`
+- Modify: `server/cmd/migrate/migrate_invalid_index_test.go`
 - Modify by sqlc generation: every actual diff under `server/pkg/db/generated/` (never hand-edit generated files)
 
 **Interfaces:**
 - Consumes: existing Agent, `agent_runtime`, `agent_task_queue`, `platform_extension_release`, and migration 261 terminal timestamp contract.
-- Produces: `runtimepool.ParseRequirements(json.RawMessage) (Requirements, error)`, `runtimepool.CanonicalRequirements(Requirements) (json.RawMessage, error)`, binding/affinity/capability constants, all Pool columns, and `agent_comment_followup_obligation` keyed by `(agent_id, comment_id)`.
+- Produces: `runtimepool.ParseRequirements(json.RawMessage) (Requirements, error)`, `runtimepool.CanonicalRequirements(Requirements) (json.RawMessage, error)`, `pooltestdb.Open`, `pooltestdb.OpenWithSearchPath`, binding/affinity/capability constants, all Pool columns, and `agent_comment_followup_obligation` keyed by `(agent_id, comment_id)`.
 
-- [ ] **Step 1: Write the RED contracts.** Add table-driven parser cases for unknown/trailing fields, wrong schema, empty/duplicate/unsorted/invalid capabilities, 32/33 items, 128/129 bytes, and canonical JSON 4096/+1 bytes. Add migration tests for this truth table:
+- [ ] **Step 1: Write the RED contracts.** Add table-driven parser cases for unknown/trailing fields, duplicate object keys (including escaped-equivalent keys), wrong schema, empty/duplicate/unsorted/invalid capabilities, 32/33 items, 128/129 bytes, and canonical JSON 4096/+1 bytes. Add migration tests for this truth table:
 
 ```text
 fixed nonterminal: runtime_id required; affinity=none; placement/requester NULL; never waiting_runtime
@@ -125,6 +127,8 @@ func TestRuntimePoolContractMigrationPreflightsTerminalTimestamps(t *testing.T) 
 
 Add `TestRuntimePoolContractTruthTable` in the same file. Use `pooltestdb.Open(t)`, insert one fixture row per truth-table branch in an isolated transaction, and assert valid rows commit while invalid rows return SQLSTATE `23514`. Numbered RED/GREEN loops are: (1) fixed lifecycle, (2) Pool lifecycle, (3) all four affinity pairs, (4) unresolved Chat-only, (5) removed cancellation, (6) explicit fresh (`pool+none` succeeds; `fixed+none` fails), and (7) reservation/fixed/pool Release shapes. Run each loop with `-run '^TestRuntimePoolContractTruthTable/<case>$'` before proceeding.
 
+Add `TestRuntimePoolObligationConcurrentIndexHooks` in `migrate_invalid_index_test.go`. For migrations 268, 270, and 271, create the named INVALID index fixture, run the registered pre-migration hook, and prove the invalid relation is removed while a valid relation is preserved. This RED must fail because the three hooks are initially absent.
+
 - [ ] **Step 2: Run RED.**
 
 ```bash
@@ -132,7 +136,7 @@ cd /Users/zxx/Documents/技术学习/multica
 export DATABASE_URL='postgres://multica:multica@localhost:5432/multica?sslmode=disable'
 make migrate-up
 cd /Users/zxx/Documents/技术学习/multica/server
-/Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go test ./internal/runtimepool ./internal/pooltestdb ./internal/migrations -run 'Requirements|RuntimePoolContract|PlatformExtensionRelease|PoolTestDatabase' -count=1
+/Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go test ./internal/runtimepool ./internal/pooltestdb ./internal/migrations ./cmd/migrate -run 'Requirements|RuntimePoolContract|PlatformExtensionRelease|PoolTestDatabase|RuntimePoolObligationConcurrentIndexHooks' -count=1
 ```
 
 Expected: FAIL with `undefined: ParseRequirements` and missing `runtime_binding_mode`/`placement_workspace_id` migration assertions.
@@ -189,6 +193,7 @@ func validateRequirements(value Requirements) error {
 }
 
 func ParseRequirements(raw json.RawMessage) (Requirements, error) {
+    if err := rejectDuplicateObjectKeys(raw); err != nil { return Requirements{}, err }
     dec := json.NewDecoder(bytes.NewReader(raw))
     dec.DisallowUnknownFields()
     var value Requirements
@@ -203,6 +208,8 @@ func CanonicalRequirements(value Requirements) (json.RawMessage, error) {
     return json.Marshal(value)
 }
 ```
+
+`rejectDuplicateObjectKeys` must scan decoded JSON tokens recursively, compare decoded object-key strings, and reject a repeated key before typed decoding. It must therefore reject both literal duplicates and escaped-equivalent spellings such as `"capabilities_all"` plus `"\u0063apabilities_all"`; raw substring matching is forbidden.
 
 Create the one shared fail-fast integration DB helper below and use it from every new Pool DB test. It deliberately has no skip path and checks reachability before returning:
 
@@ -235,6 +242,8 @@ func Open(t *testing.T) *pgxpool.Pool {
     return pool
 }
 ```
+
+`OpenWithSearchPath(t, schemas...)` uses the same required `DATABASE_URL`, parses it with `pgxpool.ParseConfig`, sets a sanitized `search_path` RuntimeParam, and then calls the same fail-fast open/ping path. Its subprocess tests prove both missing and unreachable URLs fail rather than skip; a live test proves the requested private schema is current. Pool migration tests must use these helpers instead of the legacy `cmd/migrate` helper that calls `t.Skip`.
 
 `postgres_test.go` deletes `DATABASE_URL`, asserts `Open` fails through a subprocess test helper, and uses the configured URL to assert a one-second `SELECT 1` succeeds. This helper is the only permitted DB bootstrap for new tests in Tasks 1-14.
 
@@ -352,6 +361,8 @@ CREATE INDEX CONCURRENTLY idx_agent_comment_followup_obligation_fifo
 
 Each matching down file also contains one statement: 271/270 use `DROP INDEX CONCURRENTLY`, 269 drops only the PK constraint, and 268 uses `DROP INDEX CONCURRENTLY IF EXISTS`. Migration 267 down first raises `runtime pool rows exist; rollback refused` if any Agent, Task, or Release is Pool, then drops the obligation table, both new Release checks, the remaining named checks, and columns in reverse order. It restores the migration-251 `agent_task_queue_active_requires_runtime` predicate, restores `platform_extension_release_check`, restores `agent_task_queue_status_check` without `waiting_runtime`, and restores `agent_runtime_mode_check` for `local|cloud`; it does not rerun the terminal preflight and drops `agent_task_queue_terminal_completed_at_check` last. `runtime_pool_contract_migration_test.go` asserts 267 has no index/inline-key syntax and 268-271 each have exactly one top-level statement with the required `CONCURRENTLY`/`USING INDEX` contract.
 
+Register `cleanupInvalidConcurrentIndexHook` for migrations 268, 270, and 271 using their exact index names. The SQL remains fail-closed without `IF NOT EXISTS`; the hook only removes a verified INVALID index so an interrupted concurrent build can retry automatically.
+
 ```sql
 ALTER TABLE agent_task_queue ADD CONSTRAINT agent_task_queue_active_requires_runtime
   CHECK (runtime_id IS NOT NULL OR completed_at IS NOT NULL) NOT VALID;
@@ -367,8 +378,8 @@ export DATABASE_URL='postgres://multica:multica@localhost:5432/multica?sslmode=d
 make migrate-up
 cd /Users/zxx/Documents/技术学习/multica/server
 /Users/zxx/Documents/技术学习/.tools/sqlc-v1.31.1/bin/sqlc generate
-/Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go test ./internal/runtimepool ./internal/pooltestdb ./internal/migrations ./pkg/db/generated -count=1
-/Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go vet ./internal/runtimepool ./internal/pooltestdb ./internal/migrations ./pkg/db/generated
+/Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go test ./internal/runtimepool ./internal/pooltestdb ./internal/migrations ./pkg/db/generated ./cmd/migrate -count=1
+/Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go vet ./internal/runtimepool ./internal/pooltestdb ./internal/migrations ./pkg/db/generated ./cmd/migrate
 ```
 
 Expected: sqlc reports `v1.31.1`; all tests and vet PASS.
@@ -377,7 +388,7 @@ Expected: sqlc reports `v1.31.1`; all tests and vet PASS.
 
 ```bash
 cd /Users/zxx/Documents/技术学习/multica
-git add server/migrations/267_runtime_pool_contract.up.sql server/migrations/267_runtime_pool_contract.down.sql server/migrations/268_comment_followup_id_unique.up.sql server/migrations/268_comment_followup_id_unique.down.sql server/migrations/269_comment_followup_primary_key.up.sql server/migrations/269_comment_followup_primary_key.down.sql server/migrations/270_comment_followup_agent_comment_unique.up.sql server/migrations/270_comment_followup_agent_comment_unique.down.sql server/migrations/271_comment_followup_fifo_index.up.sql server/migrations/271_comment_followup_fifo_index.down.sql server/internal/runtimepool/requirements.go server/internal/runtimepool/requirements_test.go server/internal/pooltestdb/postgres.go server/internal/pooltestdb/postgres_test.go server/internal/migrations/migrations_lint_test.go server/internal/migrations/platform_extension_release_migration_test.go server/internal/migrations/runtime_pool_contract_migration_test.go server/pkg/db/generated
+git add server/migrations/267_runtime_pool_contract.up.sql server/migrations/267_runtime_pool_contract.down.sql server/migrations/268_comment_followup_id_unique.up.sql server/migrations/268_comment_followup_id_unique.down.sql server/migrations/269_comment_followup_primary_key.up.sql server/migrations/269_comment_followup_primary_key.down.sql server/migrations/270_comment_followup_agent_comment_unique.up.sql server/migrations/270_comment_followup_agent_comment_unique.down.sql server/migrations/271_comment_followup_fifo_index.up.sql server/migrations/271_comment_followup_fifo_index.down.sql server/internal/runtimepool/requirements.go server/internal/runtimepool/requirements_test.go server/internal/pooltestdb/postgres.go server/internal/pooltestdb/postgres_test.go server/internal/migrations/migrations_lint_test.go server/internal/migrations/platform_extension_release_migration_test.go server/internal/migrations/runtime_pool_contract_migration_test.go server/cmd/migrate/main.go server/cmd/migrate/migrate_invalid_index_test.go server/pkg/db/generated
 git commit -m "feat(server): persist runtime pool contracts"
 ```
 
