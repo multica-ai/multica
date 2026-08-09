@@ -6046,10 +6046,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// (Hermes HERMES_HOME is applied after custom_env below so the per-task
 	// overlay can win over a user-set HERMES_HOME; see
 	// layerCustomEnvAndHermesHome.)
-	// Point Cursor at per-task project state when managed MCP is present.
-	// The workdir .cursor/mcp.json carries the managed server list, while
-	// CURSOR_DATA_DIR isolates the matching project approvals from the user's
-	// persistent ~/.cursor/projects state.
+	// Point Cursor at per-task project state. The workdir .cursor/mcp.json
+	// carries a managed server list when configured, while CURSOR_DATA_DIR keeps
+	// repository-scoped assets, terminal captures, codebase identity, and MCP
+	// approvals out of the user's persistent ~/.cursor/projects state.
 	if env.CursorDataDir != "" {
 		agentEnv["CURSOR_DATA_DIR"] = env.CursorDataDir
 	}
@@ -6079,6 +6079,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	configureClaudeTaskMemoryEnvironment(provider, agentEnv, os.Getenv)
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
@@ -7514,10 +7515,40 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "REASONIX_STATE_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "REASONIX_STATE_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, claudeDisableAutoMemoryEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false
+}
+
+const (
+	// multicaClaudeMemoryEnv is a daemon-level escape hatch for operators who
+	// intentionally want Claude's repository-wide auto memory despite the
+	// cross-issue context risk.
+	multicaClaudeMemoryEnv = "MULTICA_CLAUDE_MEMORY"
+	// claudeDisableAutoMemoryEnv is documented by Claude Code and prevents both
+	// loading and generating ~/.claude/projects/<repo>/memory content.
+	claudeDisableAutoMemoryEnv = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
+)
+
+// configureClaudeTaskMemoryEnvironment disables Claude Code auto memory for
+// daemon-managed tasks. Multica already resumes the exact provider session for
+// follow-ups on the same issue, so repository-wide hidden memory is unnecessary
+// and can retain deleted issue content. Explicit daemon opt-in mirrors
+// MULTICA_CODEX_MEMORY.
+func configureClaudeTaskMemoryEnvironment(provider string, agentEnv map[string]string, getenv func(string) string) {
+	if provider != "claude" {
+		return
+	}
+	raw := ""
+	if getenv != nil {
+		raw = strings.TrimSpace(getenv(multicaClaudeMemoryEnv))
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return
+	}
+	agentEnv[claudeDisableAutoMemoryEnv] = "1"
 }
 
 // layerCustomEnvAndHermesHome applies the agent's custom_env onto the child env

@@ -31,18 +31,46 @@ type cursorMcpConfigFile struct {
 	McpServers map[string]json.RawMessage `json:"mcpServers"`
 }
 
-// prepareCursorMcpConfig writes the Cursor-native MCP sidecars for agents that
-// have an explicit managed mcp_config saved. A nil/null mcp_config means "let
-// Cursor behave normally", so no .cursor/mcp.json or CURSOR_DATA_DIR is created.
+// prepareCursorMcpConfig always creates a task-local CURSOR_DATA_DIR so Cursor
+// cannot reuse repository-scoped assets, terminal captures, codebase identity,
+// or other project state from an unrelated issue that used the same checkout.
+// When an explicit managed mcp_config is present it also writes the matching
+// project config, approvals, and optional auth sidecar. A nil/null mcp_config
+// leaves the user's MCP configuration untouched while retaining task-state
+// isolation.
 func prepareCursorMcpConfig(envRoot, workDir string, mcpConfig json.RawMessage, mcpAuthSource string, manifest *sidecarManifest) (string, error) {
-	if !hasManagedCursorMcpConfig(mcpConfig) {
-		return "", nil
-	}
 	if envRoot == "" {
-		return "", fmt.Errorf("env root is required for managed cursor mcp_config")
+		return "", fmt.Errorf("env root is required for cursor task state")
 	}
 
 	projectRoot := cursorProjectRoot(workDir)
+	cursorDataDir := filepath.Join(envRoot, "cursor-data")
+	projectDataDir := filepath.Join(cursorDataDir, "projects", cursorSlugifyPath(projectRoot))
+	if err := os.MkdirAll(projectDataDir, 0o700); err != nil {
+		return "", fmt.Errorf("create cursor project data dir: %w", err)
+	}
+	trustData, err := json.MarshalIndent(map[string]string{
+		"trustedAt":     "1970-01-01T00:00:00Z",
+		"workspacePath": projectRoot,
+		"trustMethod":   "multica-managed",
+	}, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal cursor workspace trust: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDataDir, cursorWorkspaceTrustedFile), trustData, 0o600); err != nil {
+		return "", fmt.Errorf("write cursor workspace trust: %w", err)
+	}
+
+	if !hasManagedCursorMcpConfig(mcpConfig) {
+		if err := removeCursorMcpAuthFile(projectDataDir); err != nil {
+			return "", err
+		}
+		if err := os.Remove(filepath.Join(projectDataDir, "mcp-approvals.json")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("remove prior cursor mcp approvals: %w", err)
+		}
+		return cursorDataDir, nil
+	}
+
 	servers, err := parseCursorManagedMcpServers(mcpConfig)
 	if err != nil {
 		return "", err
@@ -63,11 +91,6 @@ func prepareCursorMcpConfig(envRoot, workDir string, mcpConfig json.RawMessage, 
 		return "", fmt.Errorf("write .cursor/mcp.json: %w", err)
 	}
 
-	cursorDataDir := filepath.Join(envRoot, "cursor-data")
-	projectDataDir := filepath.Join(cursorDataDir, "projects", cursorSlugifyPath(projectRoot))
-	if err := os.MkdirAll(projectDataDir, 0o700); err != nil {
-		return "", fmt.Errorf("create cursor project data dir: %w", err)
-	}
 	if err := removeCursorMcpAuthFile(projectDataDir); err != nil {
 		return "", err
 	}
@@ -81,17 +104,6 @@ func prepareCursorMcpConfig(envRoot, workDir string, mcpConfig json.RawMessage, 
 	}
 	if err := os.WriteFile(filepath.Join(projectDataDir, "mcp-approvals.json"), approvalData, 0o600); err != nil {
 		return "", fmt.Errorf("write cursor mcp approvals: %w", err)
-	}
-	trustData, err := json.MarshalIndent(map[string]string{
-		"trustedAt":     "1970-01-01T00:00:00Z",
-		"workspacePath": projectRoot,
-		"trustMethod":   "multica-managed",
-	}, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("marshal cursor workspace trust: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDataDir, cursorWorkspaceTrustedFile), trustData, 0o600); err != nil {
-		return "", fmt.Errorf("write cursor workspace trust: %w", err)
 	}
 	if strings.TrimSpace(mcpAuthSource) != "" {
 		if err := seedCursorMcpAuthFile(projectDataDir, mcpAuthSource); err != nil {

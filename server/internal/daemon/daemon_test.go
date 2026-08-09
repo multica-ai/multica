@@ -159,6 +159,7 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "CURSOR_DATA_DIR", want: true},
 		{key: "cursor_data_dir", want: true},
 		{key: "CURSOR_MCP_AUTH_SOURCE", want: true},
+		{key: "CLAUDE_CODE_DISABLE_AUTO_MEMORY", want: true},
 		{key: "OPENCLAW_CONFIG_PATH", want: true},
 		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
 		{key: "ANTHROPIC_API_KEY", want: false},
@@ -178,6 +179,55 @@ func TestIsBlockedEnvKey(t *testing.T) {
 			t.Parallel()
 			if got := isBlockedEnvKey(tt.key); got != tt.want {
 				t.Fatalf("isBlockedEnvKey(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigureClaudeTaskMemoryEnvironment(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		provider  string
+		optIn     string
+		initial   map[string]string
+		wantValue string
+		wantSet   bool
+	}{
+		{
+			name:      "Claude auto memory disabled by default",
+			provider:  "claude",
+			wantValue: "1",
+			wantSet:   true,
+		},
+		{
+			name:     "explicit opt-in preserves native memory",
+			provider: "claude",
+			optIn:    "true",
+		},
+		{
+			name:     "other providers unchanged",
+			provider: "cursor",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			agentEnv := map[string]string{}
+			for k, v := range tt.initial {
+				agentEnv[k] = v
+			}
+			configureClaudeTaskMemoryEnvironment(tt.provider, agentEnv, func(key string) string {
+				if key == multicaClaudeMemoryEnv {
+					return tt.optIn
+				}
+				return ""
+			})
+			got, ok := agentEnv[claudeDisableAutoMemoryEnv]
+			if ok != tt.wantSet || got != tt.wantValue {
+				t.Fatalf("%s = %q, set=%v; want %q, set=%v", claudeDisableAutoMemoryEnv, got, ok, tt.wantValue, tt.wantSet)
 			}
 		})
 	}
