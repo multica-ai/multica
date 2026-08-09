@@ -495,7 +495,7 @@ type Daemon struct {
 
 	activeCodexStoresMu   sync.Mutex
 	activeCodexStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
-	activeCodexStores     map[string]int  // per-issue Codex session store path -> live-task refcount; guards the store from GC mid-task (MUL-4424)
+	activeCodexStores     map[string]int  // per-conversation Codex session store path -> live-task refcount; guards the store from GC mid-task (MUL-4424)
 	deletingCodexStores   map[string]bool // store paths a GC delete has reserved; markActive waits these out so a task never mounts a store mid-removal
 
 	// localPathLocks serialises agent tasks whose project resource is a
@@ -5837,7 +5837,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
 	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
 	if provider == "codex" {
-		if store := execenv.CodexSessionStorePath(d.cfg.Profile, task.AgentID, task.IssueID); store != "" {
+		if store := execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx); store != "" {
 			d.markActiveCodexStore(store)
 			defer d.unmarkActiveCodexStore(store)
 		}

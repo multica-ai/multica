@@ -53,6 +53,80 @@ func TestPrepareCodexKeepsRealHomeAndScopesOnlyCodexHome(t *testing.T) {
 	}
 }
 
+func TestPrepareCodexLocalDirectoryChatKeepsRolloutAcrossTaskIDs(t *testing.T) {
+	// Given: a direct chat runs against the same local directory in two tasks.
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+	workspacesRoot := t.TempDir()
+	localWorkDir := t.TempDir()
+	task := TaskContextForEnv{
+		AgentID:       "agent-chat-resume",
+		ChatSessionID: "chat-session-resume",
+	}
+
+	first, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-chat-resume",
+		TaskID:         "11111111-1111-1111-1111-111111111111",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		LocalWorkDir:   localWorkDir,
+		Task:           task,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("first Prepare failed: %v", err)
+	}
+	sessionID := "019fe3de-56a2-7792-8913-ee53664dfa0e"
+	seedRolloutAt(t, filepath.Join(first.CodexHome, "sessions", "2026", "08", "09", "rollout-2026-08-09T09-13-47-"+sessionID+".jsonl"), 32)
+	if err := first.Cleanup(true); err != nil {
+		t.Fatalf("cleanup first task: %v", err)
+	}
+
+	// When: the follow-up task prepares a fresh task-scoped CODEX_HOME.
+	second, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-chat-resume",
+		TaskID:         "22222222-2222-2222-2222-222222222222",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		LocalWorkDir:   localWorkDir,
+		Task:           task,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("second Prepare failed: %v", err)
+	}
+	defer second.Cleanup(true)
+
+	// Then: the prior rollout is visible, so the daemon can resume the chat.
+	if !CodexResumeRolloutPresent(second.CodexHome, sessionID) {
+		t.Fatal("follow-up direct chat cannot see the prior rollout; context would be dropped")
+	}
+}
+
+func TestCodexSessionStoreKeyUsesChatSessionIDWhenIssueAbsent(t *testing.T) {
+	// Given: two direct chats belong to the same agent and have no issue ID.
+	const agentID = "agent-chat-key"
+	const chatA = "chat-session-a"
+	const chatB = "chat-session-b"
+	taskA := TaskContextForEnv{AgentID: agentID, ChatSessionID: chatA}
+
+	// When: their persistent Codex session-store keys are built.
+	keyA := codexSessionStoreKey("", taskA)
+	keyAAgain := codexSessionStoreKey("", taskA)
+	keyB := codexSessionStoreKey("", TaskContextForEnv{AgentID: agentID, ChatSessionID: chatB})
+
+	// Then: the key is stable for one chat and isolated from another chat.
+	if keyA == "" {
+		t.Fatal("direct chat must have a persistent Codex session-store key")
+	}
+	if keyA != keyAAgain {
+		t.Fatalf("same chat produced unstable keys: %q and %q", keyA, keyAAgain)
+	}
+	if keyA == keyB {
+		t.Fatalf("different chats share one Codex session-store key: %q", keyA)
+	}
+}
+
 // TestReuseCodexToleratesLegacyTaskHome covers an env root prepared by an older
 // daemon: its leftover `home/` directory (including the credential symlinks it
 // seeded) must neither break reuse nor be adopted as a HOME again.
