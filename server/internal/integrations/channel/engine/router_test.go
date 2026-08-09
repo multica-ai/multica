@@ -80,11 +80,19 @@ type fakeBinder struct {
 	lastEnsure   EnsureSessionParams
 	lastAppend   AppendParams
 	lastBind     BindMediaParams
+	pendingFresh int
+	pendingErr   error
 }
 
 func (f *fakeBinder) EnsureSession(_ context.Context, p EnsureSessionParams) (pgtype.UUID, error) {
 	f.lastEnsure = p
 	return f.ensureID, f.ensureErr
+}
+func (f *fakeBinder) MarkPendingFresh(_ context.Context, _ pgtype.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pendingFresh++
+	return f.pendingErr
 }
 func (f *fakeBinder) AppendMessage(_ context.Context, p AppendParams) (AppendResult, error) {
 	f.mu.Lock()
@@ -119,6 +127,11 @@ func (f *fakeBinder) appendedParams() AppendParams {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lastAppend
+}
+func (f *fakeBinder) pendingFreshCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pendingFresh
 }
 
 type fakeAuditor struct {
@@ -922,6 +935,53 @@ func TestRouter_IssueCommand_InfrastructureFailureRemainsError(t *testing.T) {
 	}
 }
 
+func TestRouter_BareIssueReturnsUsageWithoutCreatingOrResolvingMedia(t *testing.T) {
+	h := newHarness(t)
+	h.binder.parseIssue = true
+	msg := p2pMessage(t)
+	msg.Text = "/issue"
+	msg.CommandText = "/issue"
+	msg.Type = channel.MsgTypeImage
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("bare issue must be a product outcome, got error: %v", err)
+	}
+	if h.issues.called {
+		t.Fatal("bare issue unexpectedly called IssueService.Create")
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("bare issue unexpectedly enqueued a chat task, calls=%d", h.tasks.calls())
+	}
+	if h.media.calls() != 0 {
+		t.Fatalf("bare issue unexpectedly resolved media, calls=%d", h.media.calls())
+	}
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeIssueUsage && calls[0].IssueUsageHadMedia
+	}) {
+		t.Fatalf("issue usage result was not delivered: %+v", h.replier.calls())
+	}
+}
+
+func TestRouter_BareIssueWithoutMediaDoesNotRequestMediaResend(t *testing.T) {
+	h := newHarness(t)
+	h.binder.parseIssue = true
+	h.media.noMedia = true
+	msg := p2pMessage(t)
+	msg.Text = "/issue"
+	msg.CommandText = "/issue"
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("bare issue must be a product outcome, got error: %v", err)
+	}
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeIssueUsage && !calls[0].IssueUsageHadMedia
+	}) {
+		t.Fatalf("plain issue usage result was not delivered: %+v", h.replier.calls())
+	}
+}
+
 func TestRouter_IssueCommand_MediaTargetsCreatedIssue(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -1287,7 +1347,7 @@ func TestRouter_AdapterFreshBodyIsNotParsedAgain(t *testing.T) {
 	}
 }
 
-func TestRouter_BareFreshSkipsEmptyTurnAndForcesNextRealMessage(t *testing.T) {
+func TestRouter_BareFreshPersistsIntentAndRepliesWithoutEmptyTurn(t *testing.T) {
 	h := newHarness(t)
 	h.media.noMedia = true
 
@@ -1308,24 +1368,14 @@ func TestRouter_BareFreshSkipsEmptyTurnAndForcesNextRealMessage(t *testing.T) {
 	if h.dedup.marks() != 1 {
 		t.Fatalf("bare fresh dedup marks = %d, want 1", h.dedup.marks())
 	}
-
-	next := p2pMessage(t)
-	next.MessageID = "om-2"
-	next.Text = "start the new topic"
-	if err := h.router.Handle(context.Background(), next); err != nil {
-		t.Fatalf("next Handle: %v", err)
+	if h.binder.pendingFreshCalls() != 1 {
+		t.Fatalf("pending fresh writes = %d, want 1", h.binder.pendingFreshCalls())
 	}
-	if !h.tasks.freshArg() {
-		t.Fatal("the next real message must consume the pending ForceFresh intent")
-	}
-
-	again := p2pMessage(t)
-	again.MessageID = "om-3"
-	if err := h.router.Handle(context.Background(), again); err != nil {
-		t.Fatalf("again Handle: %v", err)
-	}
-	if h.tasks.freshArg() {
-		t.Fatal("the pending ForceFresh intent must be consumed exactly once")
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeFreshPending
+	}) {
+		t.Fatalf("fresh-pending result was not delivered: %+v", h.replier.calls())
 	}
 }
 
@@ -1346,38 +1396,23 @@ func TestRouter_AdapterBareFreshUsesOriginalCommandText(t *testing.T) {
 	if h.tasks.wasCalled() {
 		t.Fatal("adapter-enriched bare fresh must not schedule an empty agent run")
 	}
+	if h.binder.pendingFreshCalls() != 1 {
+		t.Fatalf("pending fresh writes = %d, want 1", h.binder.pendingFreshCalls())
+	}
 }
 
-func TestRouter_BareFreshSurvivesFailedEnqueue(t *testing.T) {
+func TestRouter_BareFreshPersistenceFailureDoesNotAcknowledge(t *testing.T) {
 	h := newHarness(t)
 	h.media.noMedia = true
+	h.binder.pendingErr = errors.New("database unavailable")
 
 	reset := p2pMessage(t)
 	reset.Text = "/new"
-	if err := h.router.Handle(context.Background(), reset); err != nil {
-		t.Fatalf("bare fresh Handle: %v", err)
+	if err := h.router.Handle(context.Background(), reset); err == nil {
+		t.Fatal("bare fresh must fail when its durable intent cannot be stored")
 	}
-
-	h.tasks.err = service.ErrChatTaskAgentNoRuntime
-	failed := p2pMessage(t)
-	failed.MessageID = "om-2"
-	failed.Text = "first attempt while offline"
-	if err := h.router.Handle(context.Background(), failed); err != nil {
-		t.Fatalf("failed enqueue Handle: %v", err)
-	}
-	if !h.tasks.freshArg() {
-		t.Fatal("failed enqueue must still receive the pending ForceFresh intent")
-	}
-
-	h.tasks.err = nil
-	next := p2pMessage(t)
-	next.MessageID = "om-3"
-	next.Text = "retry after runtime is available"
-	if err := h.router.Handle(context.Background(), next); err != nil {
-		t.Fatalf("retry Handle: %v", err)
-	}
-	if !h.tasks.freshArg() {
-		t.Fatal("pending ForceFresh intent must survive until a run queues")
+	if len(h.replier.calls()) != 0 {
+		t.Fatalf("failed persistence emitted a success reply: %+v", h.replier.calls())
 	}
 }
 

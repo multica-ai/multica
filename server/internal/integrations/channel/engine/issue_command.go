@@ -16,8 +16,7 @@ const issueCommandPrefix = "/issue"
 //   - `/issue <title>`            → Title = "<title>", Description = ""
 //   - `/issue <title>\n<rest...>` → Title = "<title>", Description = "<rest>"
 //   - `/issue` (alone, no title)  → Title = "", Description = ""
-//     (the caller falls back to the previous user message; the parser does not
-//     do that lookup itself because it has no DB access)
+//     (the Router returns a usage result; it never infers a title from history)
 //
 // Only the first non-empty line is considered: a body that begins with blank
 // lines and then `/issue ...` still qualifies. A body whose first non-empty
@@ -148,20 +147,4 @@ func matchingLineBounds(body, expected string) []textLineBounds {
 		offset = next
 	}
 	return bounds
-}
-
-// titleFromPreviousMessage derives a title from a prior chat message, used for
-// the bare `/issue` fallback. The previous message may itself be an `/issue …`
-// invocation (two commands in a row), in which case stripping the prefix yields
-// the real intent; otherwise the first non-empty line is the title.
-func titleFromPreviousMessage(body string) string {
-	if cmd, ok := ParseIssueCommand(body); ok {
-		return cmd.Title
-	}
-	for _, line := range strings.Split(body, "\n") {
-		if t := strings.TrimSpace(line); t != "" {
-			return t
-		}
-	}
-	return ""
 }

@@ -73,6 +73,7 @@ func NewResolverSet(
 // production value.
 type engineSessionBinder interface {
 	EnsureSession(ctx context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error)
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error
 	AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error)
 }
 
@@ -214,6 +215,10 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 	})
 }
 
+func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
+	return r.session.MarkPendingFresh(ctx, sessionID)
+}
+
 func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
 	// The adapter's own command source wins, and Text is only the fallback.
 	// Overwriting it with Text — which this used to do — threw away the
@@ -232,6 +237,7 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 		CommandText:    commandText,
 		MessageID:      p.Message.MessageID,
 		ClaimToken:     p.ClaimToken,
+		ForceFresh:     p.Message.ForceFresh,
 	})
 }
 

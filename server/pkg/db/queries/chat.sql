@@ -1246,17 +1246,6 @@ SELECT EXISTS (
 UPDATE chat_session SET last_read_at = now()
 WHERE id = $1;
 
--- name: GetMostRecentUserChatMessage :one
--- Returns the most recent role='user' message in a session. Used by the
--- Lark `/issue` command parser: when the user types `/issue` with no
--- title, the spec falls back to "use the previous user message as the
--- title". Bot replies (role='assistant') are excluded — only human
--- input qualifies as a fallback title source.
-SELECT * FROM chat_message
-WHERE chat_session_id = $1 AND role = 'user'
-ORDER BY created_at DESC
-LIMIT 1;
-
 -- name: ChatSessionHasUserMessage :one
 -- Reports whether a session has any human (role='user') message yet. Used to
 -- scope the is_agent_intro self-introduction prompt to the very first,

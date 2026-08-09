@@ -1654,6 +1654,16 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	if currentSession.Status != "active" {
 		return db.AgentTaskQueue{}, ErrChatSessionArchived
 	}
+	// Lock the channel binding only after the chat_session lock above. The
+	// append path touches chat_session before binding as well, so this order
+	// avoids an ABBA edge while keeping pending fresh in the enqueue transaction.
+	pendingFresh, err := qtx.LockChannelChatSessionPendingFresh(ctx, chatSession.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return db.AgentTaskQueue{}, fmt.Errorf("lock channel pending fresh: %w", err)
+	}
+	if err == nil && pendingFresh {
+		forceFreshSession = true
+	}
 	mediaPendingUntil, err := qtx.GetChannelMediaPendingUntil(ctx, chatSession.ID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -1704,6 +1714,11 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		task = corrected
 	case !errors.Is(err, pgx.ErrNoRows):
 		return db.AgentTaskQueue{}, fmt.Errorf("defer chat task for sealed pending media: %w", err)
+	}
+	if pendingFresh {
+		if err := qtx.ClearChannelChatSessionPendingFresh(ctx, chatSession.ID); err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("clear channel pending fresh: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("commit chat task enqueue: %w", err)

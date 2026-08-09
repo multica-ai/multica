@@ -975,38 +975,6 @@ func (q *Queries) GetLatestAssistantChatMessageForSession(ctx context.Context, c
 	return i, err
 }
 
-const getMostRecentUserChatMessage = `-- name: GetMostRecentUserChatMessage :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions FROM chat_message
-WHERE chat_session_id = $1 AND role = 'user'
-ORDER BY created_at DESC
-LIMIT 1
-`
-
-// Returns the most recent role='user' message in a session. Used by the
-// Lark `/issue` command parser: when the user types `/issue` with no
-// title, the spec falls back to "use the previous user message as the
-// title". Bot replies (role='assistant') are excluded — only human
-// input qualifies as a fallback title source.
-func (q *Queries) GetMostRecentUserChatMessage(ctx context.Context, chatSessionID pgtype.UUID) (ChatMessage, error) {
-	row := q.db.QueryRow(ctx, getMostRecentUserChatMessage, chatSessionID)
-	var i ChatMessage
-	err := row.Scan(
-		&i.ID,
-		&i.ChatSessionID,
-		&i.Role,
-		&i.Content,
-		&i.TaskID,
-		&i.CreatedAt,
-		&i.FailureReason,
-		&i.ElapsedMs,
-		&i.MessageKind,
-		&i.ChannelMediaPendingUntil,
-		&i.ChannelIngested,
-		&i.QuickActions,
-	)
-	return i, err
-}
-
 const getOldestActiveChatSessionForCreatorAgent = `-- name: GetOldestActiveChatSessionForCreatorAgent :one
 SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id FROM chat_session
 WHERE workspace_id = $1

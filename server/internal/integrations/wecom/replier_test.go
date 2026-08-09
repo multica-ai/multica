@@ -158,6 +158,27 @@ func TestPost_AddressesRoomChatID(t *testing.T) {
 	}
 }
 
+func TestReply_CommandOutcomes_PostGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		outcome engine.Outcome
+		want    string
+	}{
+		{engine.OutcomeFreshPending, freshPendingText},
+		{engine.OutcomeIssueUsage, issueUsageText},
+	} {
+		t.Run(string(tc.outcome), func(t *testing.T) {
+			r, inst, conn := newReplierWithConn(t)
+			msg := channel.InboundMessage{Source: channel.Source{ChatID: "USER_A", ChatType: channel.ChatTypeP2P, SenderID: "USER_A"}}
+			r.Reply(context.Background(), inst, msg, engine.Result{Outcome: tc.outcome})
+			body := conn.sendBody(t, 0)
+			markdown, _ := body["markdown"].(map[string]any)
+			if got, _ := markdown["content"].(string); got != tc.want {
+				t.Fatalf("reply text = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSendBindingPrompt_GroupNeverLeaksToken drives the REAL sendBindingPrompt
 // group branch — the single line the whole #1 fix rests on. It asserts the
 // token-bearing frame goes only to the sender at chat_type=1, the group gets a

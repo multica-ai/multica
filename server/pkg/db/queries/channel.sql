@@ -524,6 +524,28 @@ SET last_message_id = sqlc.narg('last_message_id'),
     last_thread_id  = sqlc.narg('last_thread_id')
 WHERE chat_session_id = $1;
 
+-- name: MarkChannelChatSessionPendingFresh :one
+-- Persists a channel `/new` intent until the next chat task is successfully
+-- created. RETURNING makes a missing binding an error instead of silently
+-- acknowledging a fresh start that was never stored.
+UPDATE channel_chat_session_binding
+SET pending_fresh = TRUE
+WHERE chat_session_id = $1
+RETURNING pending_fresh;
+
+-- name: LockChannelChatSessionPendingFresh :one
+-- EnqueueChatTask reads this under the same row lock and transaction that
+-- creates the task. A concurrent `/new` therefore lands either before this
+-- task and is consumed by it, or after this task and remains for the next one.
+SELECT pending_fresh FROM channel_chat_session_binding
+WHERE chat_session_id = $1
+FOR UPDATE;
+
+-- name: ClearChannelChatSessionPendingFresh :exec
+UPDATE channel_chat_session_binding
+SET pending_fresh = FALSE
+WHERE chat_session_id = $1;
+
 -- name: DeleteChannelChatSessionBindingBySession :exec
 -- Application-layer integrity (replaces the old chat_session-FK ON DELETE
 -- CASCADE): drop the binding when its chat_session is deleted.

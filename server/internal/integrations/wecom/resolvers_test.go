@@ -34,6 +34,7 @@ func (f *fakeSessionBinder) EnsureSession(_ context.Context, in engine.EnsureSes
 	f.ensureIn = in
 	return f.sessID, nil
 }
+func (f *fakeSessionBinder) MarkPendingFresh(context.Context, pgtype.UUID) error { return nil }
 func (f *fakeSessionBinder) AppendUserMessage(_ context.Context, in engine.AppendInput) (engine.AppendResult, error) {
 	f.appendIn = in
 	return engine.AppendResult{}, nil
@@ -67,13 +68,13 @@ func TestSessionBinder_AppendUsesTextAsCommand(t *testing.T) {
 	b := &sessionBinder{session: fb}
 	_, err := b.AppendMessage(context.Background(), engine.AppendParams{
 		SessionID: mustTestUUID(t),
-		Message:   channel.InboundMessage{Text: "/issue do a thing", MessageID: "m9"},
+		Message:   channel.InboundMessage{Text: "/issue do a thing", MessageID: "m9", ForceFresh: true},
 	})
 	if err != nil {
 		t.Fatalf("AppendMessage: %v", err)
 	}
-	if fb.appendIn.Body != "/issue do a thing" || fb.appendIn.CommandText != "/issue do a thing" {
-		t.Errorf("append body/command = %q/%q, want both to equal the text (no adapter command source to prefer)", fb.appendIn.Body, fb.appendIn.CommandText)
+	if fb.appendIn.Body != "/issue do a thing" || fb.appendIn.CommandText != "/issue do a thing" || !fb.appendIn.ForceFresh {
+		t.Errorf("append body/command/forceFresh = %q/%q/%t, want text fallback preserved with fresh intent", fb.appendIn.Body, fb.appendIn.CommandText, fb.appendIn.ForceFresh)
 	}
 }
 
