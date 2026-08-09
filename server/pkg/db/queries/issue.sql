@@ -215,8 +215,8 @@ LIMIT 1;
 -- but a future loader bypass or a new caller skipping the loader would be
 -- silently catastrophic without this guard. See incident #1661.
 --
--- issue_vcs_pull_request (migration 213) has no FK to issue, so the link rows
--- are not cascaded away. Sweep them here so they go atomically with the issue.
+-- issue_vcs_pull_request and external_pull_request have no FK to issue, so
+-- their link rows are not cascaded away. Sweep them atomically with the issue.
 -- The mirrored PR rows themselves belong to the connection, not the issue, so
 -- they persist (matching the GitHub link behaviour).
 --
@@ -230,6 +230,12 @@ WITH target AS (
 ),
 cleared_vcs_pr_links AS (
     DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)
+),
+deleted_external_pull_requests AS (
+    -- workspace_id keeps the unique index (workspace_id, issue_id, provider,
+    -- html_url) usable for this sweep; the target CTE already guarantees the
+    -- rows belong to this workspace.
+    DELETE FROM external_pull_request WHERE issue_id IN (SELECT target.id FROM target) AND workspace_id = $2
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 

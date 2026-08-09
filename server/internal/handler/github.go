@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -134,6 +135,12 @@ type GitHubPullRequestResponse struct {
 	Additions    int32 `json:"additions"`
 	Deletions    int32 `json:"deletions"`
 	ChangedFiles int32 `json:"changed_files"`
+	// Code platform snapshot fields populated by the daemon's authenticated a1
+	// CLI. GitHub and token-based providers omit these additive fields.
+	ReadyToMerge           *bool   `json:"ready_to_merge,omitempty"`
+	CommentCount           int32   `json:"comment_count,omitempty"`
+	UnresolvedCommentCount int32   `json:"unresolved_comment_count,omitempty"`
+	SyncError              *string `json:"sync_error,omitempty"`
 }
 
 type GitHubConnectResponse struct {
@@ -275,6 +282,36 @@ func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow, snapshotEnab
 		resp.SnapshotFetchedAt = timestampToPtr(p.SnapshotFetchedAt)
 	}
 	return resp
+}
+
+func externalPullRequestToResponse(p db.ExternalPullRequest) GitHubPullRequestResponse {
+	parts := strings.Split(p.RepositoryPath, "/")
+	repoName := parts[len(parts)-1]
+	repoOwner := strings.Join(parts[:len(parts)-1], "/")
+	// Link-only record: no live status is fetched, so the card degrades to
+	// the "external, status unknown" display via SnapshotAvailable=false.
+	snapshotAvailable := false
+	return GitHubPullRequestResponse{
+		ID:                     uuidToString(p.ID),
+		Provider:               p.Provider,
+		WorkspaceID:            uuidToString(p.WorkspaceID),
+		RepoOwner:              repoOwner,
+		RepoName:               repoName,
+		Number:                 p.ReviewNumber,
+		Title:                  p.Title,
+		HtmlURL:                p.HtmlUrl,
+		PRCreatedAt:            timestampToString(p.CreatedAt),
+		PRUpdatedAt:            timestampToString(p.UpdatedAt),
+		SnapshotAvailable:      &snapshotAvailable,
+		FailedCheckNames:       []string{},
+	}
+}
+
+func boolToPtr(v pgtype.Bool) *bool {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Bool
 }
 
 func currentGitHubSnapshotAvailable(
@@ -964,6 +1001,29 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	externalRows, err := h.Queries.ListExternalPullRequestsByIssue(r.Context(), db.ListExternalPullRequestsByIssueParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     issue.ID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list external pull requests")
+		return
+	}
+	// Backfill scan (loads up to thousands of comments) is throttled to one
+	// run per issue per cooldown.
+	if h.shouldRunCodeDiscovery(issue) {
+		if err := h.discoverCodePullRequestsForIssue(r.Context(), issue); err != nil {
+			slog.Warn("code: failed to discover pull requests from issue content",
+				"error", err,
+				"issue_id", uuidToString(issue.ID),
+			)
+		} else if fresh, ferr := h.Queries.ListExternalPullRequestsByIssue(r.Context(), db.ListExternalPullRequestsByIssueParams{
+			WorkspaceID: issue.WorkspaceID,
+			IssueID:     issue.ID,
+		}); ferr == nil {
+			externalRows = fresh
+		}
+	}
 	rows, err := h.Queries.ListPullRequestsByIssue(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
@@ -996,10 +1056,196 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	for _, row := range vcsRows {
 		out = append(out, vcsPullRequestRowToResponse(row))
 	}
+	for _, row := range externalRows {
+		out = append(out, externalPullRequestToResponse(row))
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].PRCreatedAt > out[j].PRCreatedAt
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
+}
+
+type codeReviewReference struct {
+	RepositoryPath string
+	ReviewNumber   int32
+	URL            string
+}
+
+func parseCodeReviewURL(raw string) (codeReviewReference, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Hostname(), "code.alibaba-inc.com") || u.User != nil {
+		return codeReviewReference{}, errors.New("expected an https://code.alibaba-inc.com/.../codereview/<id> URL")
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 4 || parts[len(parts)-2] != "codereview" {
+		return codeReviewReference{}, errors.New("expected an https://code.alibaba-inc.com/.../codereview/<id> URL")
+	}
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return codeReviewReference{}, errors.New("invalid Code repository path")
+		}
+	}
+	number, err := strconv.ParseInt(parts[len(parts)-1], 10, 32)
+	if err != nil || number <= 0 {
+		return codeReviewReference{}, errors.New("Code review id must be a positive integer")
+	}
+	return codeReviewReference{
+		RepositoryPath: strings.Join(parts[:len(parts)-2], "/"),
+		ReviewNumber:   int32(number),
+		URL:            "https://code.alibaba-inc.com/" + strings.Join(parts, "/"),
+	}, nil
+}
+
+var codeReviewURLRe = regexp.MustCompile(`(?i)https://code\.alibaba-inc\.com/[^\s<>"']+`)
+
+func extractCodeReviewReferences(texts ...string) []codeReviewReference {
+	seen := make(map[string]struct{})
+	refs := make([]codeReviewReference, 0)
+	for _, text := range texts {
+		for _, candidate := range codeReviewURLRe.FindAllString(text, -1) {
+			candidate = strings.TrimRight(candidate, ".,;:!?)]}")
+			ref, err := parseCodeReviewURL(candidate)
+			if err != nil {
+				continue
+			}
+			if _, ok := seen[ref.URL]; ok {
+				continue
+			}
+			seen[ref.URL] = struct{}{}
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
+
+func actorUUID(actorID string) pgtype.UUID {
+	if actorID == "" {
+		return pgtype.UUID{}
+	}
+	parsed, err := parseStrictUUID(actorID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return parsed
+}
+
+func (h *Handler) linkCodePullRequestsFromText(ctx context.Context, issue db.Issue, actorType, actorID string, texts ...string) ([]db.ExternalPullRequest, error) {
+	refs := extractCodeReviewReferences(texts...)
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	existingRows, err := h.Queries.ListExternalPullRequestsByIssue(ctx, db.ListExternalPullRequestsByIssueParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     issue.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	existing := make(map[string]struct{}, len(existingRows))
+	for _, row := range existingRows {
+		existing[row.HtmlUrl] = struct{}{}
+	}
+	linked := make([]db.ExternalPullRequest, 0, len(refs))
+	for _, ref := range refs {
+		if _, ok := existing[ref.URL]; ok {
+			continue
+		}
+		row, err := h.Queries.CreateExternalPullRequest(ctx, db.CreateExternalPullRequestParams{
+			WorkspaceID:    issue.WorkspaceID,
+			IssueID:        issue.ID,
+			Provider:       "code",
+			RepositoryPath: ref.RepositoryPath,
+			ReviewNumber:   ref.ReviewNumber,
+			Title:          fmt.Sprintf("%s MR !%d", ref.RepositoryPath, ref.ReviewNumber),
+			HtmlUrl:        ref.URL,
+			CreatedByType:  actorType,
+			CreatedByID:    actorUUID(actorID),
+		})
+		if err != nil {
+			return linked, err
+		}
+		existing[ref.URL] = struct{}{}
+		linked = append(linked, row)
+	}
+	return linked, nil
+}
+
+func (h *Handler) autoLinkCodePullRequestsFromText(ctx context.Context, issue db.Issue, actorType, actorID string, texts ...string) error {
+	linked, err := h.linkCodePullRequestsFromText(ctx, issue, actorType, actorID, texts...)
+	// Publish realtime events for whatever was linked before surfacing a
+	// partial failure — otherwise rows created before the error would sit in
+	// the DB without any notification.
+	for _, row := range linked {
+		h.publish(protocol.EventPullRequestLinked, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
+			"pull_request":     externalPullRequestToResponse(row),
+			"linked_issue_ids": []string{uuidToString(issue.ID)},
+		})
+	}
+	return err
+}
+
+// codeDiscoveryCooldown bounds how often the expensive comment backfill scan
+// may run for one issue.
+const codeDiscoveryCooldown = 15 * time.Minute
+
+// codeDiscoveryGate throttles the Code-link backfill scan in
+// ListPullRequestsForIssue to at most one run per issue per cooldown. Fresh
+// links normally arrive through the comment/metadata write paths; the scan
+// exists for historical content. It is held by the Handler as a pointer so
+// the shallow Handler copy in beginIssueTableSnapshot never copies the lock.
+type codeDiscoveryGate struct {
+	mu sync.Mutex
+	at map[string]time.Time
+}
+
+func newCodeDiscoveryGate() *codeDiscoveryGate {
+	return &codeDiscoveryGate{at: make(map[string]time.Time)}
+}
+
+func (g *codeDiscoveryGate) allow(issueKey string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if last, ok := g.at[issueKey]; ok && time.Since(last) < codeDiscoveryCooldown {
+		return false
+	}
+	g.at[issueKey] = time.Now()
+	if len(g.at) > 4096 {
+		for k, t := range g.at {
+			if time.Since(t) > codeDiscoveryCooldown {
+				delete(g.at, k)
+			}
+		}
+	}
+	return true
+}
+
+func (h *Handler) shouldRunCodeDiscovery(issue db.Issue) bool {
+	return h.codeDiscovery.allow(uuidToString(issue.ID))
+}
+
+func (h *Handler) discoverCodePullRequestsForIssue(ctx context.Context, issue db.Issue) error {
+	texts := []string{issue.Title}
+	if issue.Description.Valid {
+		texts = append(texts, issue.Description.String)
+	}
+	for _, value := range parseIssueMetadata(issue.Metadata) {
+		if text, ok := value.(string); ok {
+			texts = append(texts, text)
+		}
+	}
+	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Limit:       2000,
+	})
+	if err != nil {
+		return err
+	}
+	for _, comment := range comments {
+		texts = append(texts, comment.Content)
+	}
+	_, err = h.linkCodePullRequestsFromText(ctx, issue, "system", "", texts...)
+	return err
 }
 
 // broadcastPRSnapshotApplied is the ghsnapshot pipeline's onApplied callback:

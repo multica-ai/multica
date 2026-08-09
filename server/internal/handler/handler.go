@@ -180,6 +180,12 @@ type Handler struct {
 	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
 	// correct delivery scope for a single-node deployment.
 	DaemonPendingWork DaemonPendingWorkNotifier
+	// codeDiscovery throttles the expensive Code-link backfill scan in
+	// ListPullRequestsForIssue to at most one run per issue per cooldown;
+	// fresh links arrive through the comment/metadata write paths instead.
+	// Pointer-typed so the shallow Handler copy in beginIssueTableSnapshot
+	// does not copy a lock.
+	codeDiscovery *codeDiscoveryGate
 	// ModelCatalogCache serves the last known good model list for a runtime so
 	// the picker can render without waiting for a daemon round trip
 	// (stale-while-revalidate, MUL-5444). Nil-safe: every call site treats a nil
@@ -354,6 +360,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		DaemonHub:                    daemonHub,
 		DaemonProfileRefresh:         daemonProfileRefresh,
 		DaemonWorkspaceRefresh:       daemonWorkspaceRefresh,
+		codeDiscovery:                newCodeDiscoveryGate(),
 		Bus:                          bus,
 		TaskService:                  taskSvc,
 		IssueService:                 service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),

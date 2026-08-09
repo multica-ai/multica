@@ -11,6 +11,68 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createExternalPullRequest = `-- name: CreateExternalPullRequest :one
+
+INSERT INTO external_pull_request (
+    workspace_id, issue_id, provider, repository_path, review_number,
+    title, html_url, created_by_type, created_by_id
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9
+)
+ON CONFLICT (workspace_id, issue_id, provider, html_url) DO UPDATE SET
+    repository_path = EXCLUDED.repository_path,
+    review_number = EXCLUDED.review_number,
+    title = EXCLUDED.title,
+    updated_at = now()
+RETURNING id, workspace_id, issue_id, provider, repository_path, review_number, title, html_url, created_by_type, created_by_id, created_at, updated_at
+`
+
+type CreateExternalPullRequestParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	IssueID        pgtype.UUID `json:"issue_id"`
+	Provider       string      `json:"provider"`
+	RepositoryPath string      `json:"repository_path"`
+	ReviewNumber   int32       `json:"review_number"`
+	Title          string      `json:"title"`
+	HtmlUrl        string      `json:"html_url"`
+	CreatedByType  string      `json:"created_by_type"`
+	CreatedByID    pgtype.UUID `json:"created_by_id"`
+}
+
+// =====================
+// External pull requests
+// =====================
+func (q *Queries) CreateExternalPullRequest(ctx context.Context, arg CreateExternalPullRequestParams) (ExternalPullRequest, error) {
+	row := q.db.QueryRow(ctx, createExternalPullRequest,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.Provider,
+		arg.RepositoryPath,
+		arg.ReviewNumber,
+		arg.Title,
+		arg.HtmlUrl,
+		arg.CreatedByType,
+		arg.CreatedByID,
+	)
+	var i ExternalPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.Provider,
+		&i.RepositoryPath,
+		&i.ReviewNumber,
+		&i.Title,
+		&i.HtmlUrl,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createGitHubInstallation = `-- name: CreateGitHubInstallation :one
 INSERT INTO github_installation (
     workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id
@@ -336,6 +398,50 @@ func (q *Queries) LinkIssueToPullRequest(ctx context.Context, arg LinkIssueToPul
 		arg.PreserveCloseIntent,
 	)
 	return err
+}
+
+const listExternalPullRequestsByIssue = `-- name: ListExternalPullRequestsByIssue :many
+SELECT id, workspace_id, issue_id, provider, repository_path, review_number, title, html_url, created_by_type, created_by_id, created_at, updated_at FROM external_pull_request
+WHERE workspace_id = $1 AND issue_id = $2
+ORDER BY created_at DESC
+`
+
+type ListExternalPullRequestsByIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+func (q *Queries) ListExternalPullRequestsByIssue(ctx context.Context, arg ListExternalPullRequestsByIssueParams) ([]ExternalPullRequest, error) {
+	rows, err := q.db.Query(ctx, listExternalPullRequestsByIssue, arg.WorkspaceID, arg.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExternalPullRequest{}
+	for rows.Next() {
+		var i ExternalPullRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.Provider,
+			&i.RepositoryPath,
+			&i.ReviewNumber,
+			&i.Title,
+			&i.HtmlUrl,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listGitHubInstallationsByInstallationID = `-- name: ListGitHubInstallationsByInstallationID :many

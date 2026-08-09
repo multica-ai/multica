@@ -280,3 +280,27 @@ ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
 -- name: UnlinkIssueFromPullRequest :exec
 DELETE FROM issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2;
+
+-- =====================
+-- External pull requests
+-- =====================
+
+-- name: CreateExternalPullRequest :one
+INSERT INTO external_pull_request (
+    workspace_id, issue_id, provider, repository_path, review_number,
+    title, html_url, created_by_type, created_by_id
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, sqlc.narg('created_by_id')
+)
+ON CONFLICT (workspace_id, issue_id, provider, html_url) DO UPDATE SET
+    repository_path = EXCLUDED.repository_path,
+    review_number = EXCLUDED.review_number,
+    title = EXCLUDED.title,
+    updated_at = now()
+RETURNING *;
+
+-- name: ListExternalPullRequestsByIssue :many
+SELECT * FROM external_pull_request
+WHERE workspace_id = $1 AND issue_id = $2
+ORDER BY created_at DESC;

@@ -186,6 +186,19 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := uuidToString(updated.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	// Only string metadata values can carry Code URLs; scanning the raw
+	// serialized JSON would feed escaped content (e.g. \u002f) to the regex
+	// and miss the link.
+	var metaText string
+	if err := json.Unmarshal(req.Value, &metaText); err == nil {
+		if err := h.autoLinkCodePullRequestsFromText(r.Context(), updated, actorType, actorID, metaText); err != nil {
+			slog.Warn("code: failed to auto-link pull request from issue metadata", append(logger.RequestAttrs(r),
+				"error", err,
+				"issue_id", issueID,
+				"key", key,
+			)...)
+		}
+	}
 	metadata := parseIssueMetadata(updated.Metadata)
 	h.publish(protocol.EventIssueMetadataChanged, workspaceID, actorType, actorID, map[string]any{
 		"issue_id": uuidToString(updated.ID),
