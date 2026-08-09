@@ -53,11 +53,31 @@ const mediaDialTimeout = 10 * time.Second
 // and that a media URL has no business resolving to. IsLoopback / IsPrivate /
 // IsLinkLocal* / IsMulticast / IsUnspecified handle the rest.
 //
-// 100.64.0.0/10 is the one that matters most here: RFC 6598 shared address
-// space, which no standard-library predicate reports as private, and which
-// is exactly what Tailscale hands out. A tailnet peer is a machine inside the
-// trust boundary reachable by IP with no credential.
+// The list is the IANA IPv4 and IPv6 Special-Purpose Address Registries minus
+// what those predicates already catch, minus the handful of special-purpose
+// blocks that are ordinary globally-routed unicast (the AS112 delegations
+// 192.31.196.0/24, 192.175.48.0/24 and 2620:4f:8000::/48, and AMT's
+// 192.52.193.0/24) — those are "special" in who runs them, not in where they
+// point, and refusing them would buy nothing.
+//
+// Two groups, and they fail differently.
+//
+// The first is space that is not the public internet: a media URL resolving
+// there is either a mistake or an attempt, and either way there is no object
+// at the end of it. 100.64.0.0/10 is the one that matters most — RFC 6598
+// shared address space, which no standard-library predicate reports as
+// private, and which is exactly what Tailscale hands out. A tailnet peer is a
+// machine inside the trust boundary reachable by IP with no credential.
+//
+// The second is TRANSLATION space, and it is the more dangerous of the two:
+// these addresses are not destinations, they are IPv4 destinations wearing an
+// IPv6 costume. 64:ff9b:1::a9fe:a9fe is 169.254.169.254 the moment a NAT64
+// translator sees it; 2002:a9fe:a9fe:: is the same address through a 6to4
+// relay; a Teredo address carries its IPv4 endpoint in the same way. Every
+// one of them reaches straight past a guard that only knows how to recognise
+// an IPv4 address when it is written as one.
 var reservedMediaPrefixes = []netip.Prefix{
+	// ---- IPv4: not the public internet ----
 	netip.MustParsePrefix("0.0.0.0/8"),       // "this network"
 	netip.MustParsePrefix("100.64.0.0/10"),   // RFC 6598 CGNAT — Tailscale lives here
 	netip.MustParsePrefix("192.0.0.0/24"),    // IETF protocol assignments
@@ -66,9 +86,32 @@ var reservedMediaPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("198.51.100.0/24"), // TEST-NET-2
 	netip.MustParsePrefix("203.0.113.0/24"),  // TEST-NET-3
 	netip.MustParsePrefix("240.0.0.0/4"),     // reserved, includes 255.255.255.255
-	netip.MustParsePrefix("64:ff9b::/96"),    // NAT64 — reaches IPv4 space through a translator
-	netip.MustParsePrefix("100::/64"),        // discard-only
-	netip.MustParsePrefix("2001:db8::/32"),   // documentation
+	netip.MustParsePrefix("192.88.99.0/24"),  // deprecated 6to4 relay anycast — the v4 end of 2002::/16
+
+	// ---- IPv6: not the public internet ----
+	netip.MustParsePrefix("100::/64"),       // discard-only
+	netip.MustParsePrefix("100:0:0:1::/64"), // dummy prefix, also discard-only
+	// The whole IETF protocol-assignments block, not its dozen sub-entries.
+	// It holds Teredo (2001::/32), benchmarking (2001:2::/48 — the twin of
+	// 198.18.0.0/15 above), AMT, AS112-v6, ORCHID/ORCHIDv2, DET, and the PCP
+	// / TURN / DNS-SD anycast addresses. None of it is somewhere a COS object
+	// lives, and one prefix is easier to keep true than eight. Same call the
+	// v4 side already makes with 192.0.0.0/24. Documentation space is
+	// 2001:db8::/32, which is outside this /23 and listed separately.
+	netip.MustParsePrefix("2001::/23"),
+	netip.MustParsePrefix("2001:db8::/32"), // documentation
+	netip.MustParsePrefix("3fff::/20"),     // documentation, RFC 9637
+	netip.MustParsePrefix("5f00::/16"),     // SRv6 SIDs, RFC 9602 — routing labels, not hosts
+	// Site-local. RFC 3879 deprecated it and IANA delisted it, which is why
+	// no predicate and no registry row covers it — but the networks that
+	// were numbered out of it before 2004 still route it internally, and it
+	// is one line.
+	netip.MustParsePrefix("fec0::/10"),
+
+	// ---- IPv6: translation space, i.e. IPv4 addresses in disguise ----
+	netip.MustParsePrefix("64:ff9b::/96"),   // NAT64, well-known prefix
+	netip.MustParsePrefix("64:ff9b:1::/48"), // NAT64, local-use prefix (RFC 8215)
+	netip.MustParsePrefix("2002::/16"),      // 6to4 — the last 112 bits open with an IPv4 address
 }
 
 // addrPolicy answers whether one resolved address may be dialed. Production
