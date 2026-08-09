@@ -302,9 +302,9 @@ RETURNING id
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
 INSERT INTO agent_task_queue (
-	agent_id, runtime_id, issue_id, status, priority, autopilot_run_id
+	agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, completed_at
 )
-VALUES ($1, $2, $3, 'completed', 0, $4)
+VALUES ($1, $2, $3, 'completed', 0, $4, now())
 RETURNING id
 `, agentID, runtimeID, issueID, autopilotRunID).Scan(&taskID); err != nil {
 		t.Fatalf("create workspace task: %v", err)
@@ -526,8 +526,8 @@ RETURNING id
 	}
 	var taskID string
 	if err := conn.QueryRow(ctx, `
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status)
-VALUES ($1, $2, $3, 'completed')
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, completed_at)
+VALUES ($1, $2, $3, 'completed', now())
 RETURNING id
 `, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
 		t.Fatalf("create ordinary delete task: %v", err)

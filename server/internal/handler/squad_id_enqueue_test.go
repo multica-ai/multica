@@ -107,8 +107,8 @@ func TestCreateRetryTask_InheritsSquadID(t *testing.T) {
 
 	var parentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, attempt, max_attempts, is_leader_task, squad_id)
-		VALUES ($1, $2, $3, 'failed', 1, 3, TRUE, $4)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, attempt, max_attempts, is_leader_task, squad_id, completed_at)
+		VALUES ($1, $2, $3, 'failed', 1, 3, TRUE, $4, now())
 		RETURNING id
 	`, fx.LeaderID, runtimeID, issueID, fx.SquadID).Scan(&parentID); err != nil {
 		t.Fatalf("seed parent task: %v", err)

@@ -62,6 +62,18 @@ SET replayed_from_delivery_id = NULL
 WHERE webhook_delivery.workspace_id = $1
   AND replayed_from_delivery_id IS NOT NULL;
 
+-- name: DeleteWorkspaceCommentFollowupObligations :exec
+DELETE FROM agent_comment_followup_obligation obligation
+WHERE obligation.issue_id IN (
+        SELECT id FROM issue WHERE issue.workspace_id = $1
+    )
+   OR obligation.agent_id IN (
+        SELECT id FROM agent WHERE agent.workspace_id = $1
+    )
+   OR obligation.comment_id IN (
+        SELECT id FROM comment WHERE comment.workspace_id = $1
+    );
+
 -- name: DeleteWorkspaceLeafData :exec
 WITH
 ws_agents AS MATERIALIZED (
@@ -327,6 +339,16 @@ deleted_channel_installations AS (
 DELETE FROM lark_installation WHERE lark_installation.workspace_id = $1;
 
 -- name: DeleteWorkspaceComments :exec
+WITH deleted_comment_followup_obligations AS (
+    -- Preserve cleanup for a malformed cross-workspace obligation whose only
+    -- target-workspace ownership path is its Comment. A conforming writer
+    -- locks that Comment before inserting, so the DELETE below is also the
+    -- concurrency barrier for the post-statement obligation sweep.
+    DELETE FROM agent_comment_followup_obligation obligation
+    WHERE obligation.comment_id IN (
+        SELECT id FROM comment WHERE comment.workspace_id = $1
+    )
+)
 DELETE FROM comment WHERE comment.workspace_id = $1;
 
 -- name: DeleteWorkspaceIssueRoots :exec

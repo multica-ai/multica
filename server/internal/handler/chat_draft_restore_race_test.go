@@ -92,9 +92,9 @@ func seedDraftRestoreRaceFixture(t *testing.T, slug string) draftRestoreRaceFixt
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (
 			agent_id, chat_session_id, status, priority, context, runtime_id,
-			started_at, chat_finalize_deferred_at
+			started_at, chat_finalize_deferred_at, completed_at
 		)
-		VALUES ($1, $2, 'cancelled', 0, '{}'::jsonb, $3, now(), now())
+		VALUES ($1, $2, 'cancelled', 0, '{}'::jsonb, $3, now(), now(), now())
 		RETURNING id
 	`, agentID, sessionID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("create deferred chat task: %v", err)

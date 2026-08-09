@@ -3593,7 +3593,7 @@ func TestRootMentionOwnerRoutesMemberReplyButNotAgentReply(t *testing.T) {
 	// Helper: cancel all tasks for an agent on this issue.
 	cancelTasks := func(agentID string) {
 		_, err := testPool.Exec(ctx,
-			`UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1 AND agent_id = $2`,
+			`UPDATE agent_task_queue SET status = 'cancelled', completed_at = now() WHERE issue_id = $1 AND agent_id = $2`,
 			issueID, agentID,
 		)
 		if err != nil {
@@ -3733,7 +3733,7 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 
 	// Cancel reviewer's task so it's free to be re-triggered if the bug returns.
 	if _, err := testPool.Exec(ctx,
-		`UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1 AND agent_id = $2`,
+		`UPDATE agent_task_queue SET status = 'cancelled', completed_at = now() WHERE issue_id = $1 AND agent_id = $2`,
 		issueID, reviewerAgent,
 	); err != nil {
 		t.Fatalf("cancel reviewer task: %v", err)
@@ -3829,7 +3829,7 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 	if got := countQueued(mentionedAgent); got != 1 {
 		t.Fatalf("expected root mention to queue mentioned agent once, got %d", got)
 	}
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1`, issueID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'cancelled', completed_at = now() WHERE issue_id = $1`, issueID); err != nil {
 		t.Fatalf("cancel root mention task: %v", err)
 	}
 

@@ -255,8 +255,8 @@ func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader
 			t.Fatalf("load runtime: %v", err)
 		}
 		if _, err := testPool.Exec(ctx, `
-			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, squad_id)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, squad_id, completed_at)
+			VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $4 IN ('completed', 'failed', 'cancelled') THEN now() END)
 		`, fx.LeaderID, runtimeID, issueID, status, isLeader, fx.SquadID); err != nil {
 			t.Fatalf("insert task: %v", err)
 		}
@@ -369,7 +369,7 @@ func TestCreateComment_SquadPlainReplyToMemberParentKeepsRootMentionOwner(t *tes
 	// 2. Mark OtherAgent's parent task done so queued-task counts below only
 	//    reflect what the plain reply does.
 	if _, err := testPool.Exec(ctx, `
-		UPDATE agent_task_queue SET status = 'completed'
+		UPDATE agent_task_queue SET status = 'completed', completed_at = now()
 		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
 	`, issueID, fx.OtherID); err != nil {
 		t.Fatalf("complete OtherAgent parent task: %v", err)
@@ -624,7 +624,7 @@ func TestCreateComment_SquadLeaderThreadParentTaskDoesNotSelfTriggerAssignedFall
 	parent := postAgentComment(leaderTaskID, map[string]any{
 		"content": "coordinating this issue",
 	})
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, leaderTaskID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, leaderTaskID); err != nil {
 		t.Fatalf("complete leader task: %v", err)
 	}
 
@@ -690,8 +690,8 @@ func TestCreateRetryTask_InheritsIsLeaderTask(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var parentID string
 			if err := testPool.QueryRow(ctx, `
-				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, attempt, max_attempts, is_leader_task)
-				VALUES ($1, $2, $3, 'failed', 1, 3, $4)
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, attempt, max_attempts, is_leader_task, completed_at)
+				VALUES ($1, $2, $3, 'failed', 1, 3, $4, now())
 				RETURNING id
 			`, fx.LeaderID, runtimeID, issueID, tc.isLeader).Scan(&parentID); err != nil {
 				t.Fatalf("seed parent task: %v", err)

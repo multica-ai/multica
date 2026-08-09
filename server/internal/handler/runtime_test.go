@@ -259,8 +259,8 @@ func TestGetRuntimeUsage_BucketsByUsageTime(t *testing.T) {
 	insertTaskWithUsage := func(enqueueAt, usageAt time.Time, inputTokens int64) string {
 		var taskID string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
-			VALUES ($1, $2, $3, 'completed', $4)
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at, completed_at)
+		VALUES ($1, $2, $3, 'completed', $4, now())
 			RETURNING id
 		`, agentID, issueID, runtimeID, enqueueAt).Scan(&taskID); err != nil {
 			t.Fatalf("insert task: %v", err)
@@ -373,8 +373,8 @@ func TestListRuntimeUsageByAgent_MergesMixedCaseProvider(t *testing.T) {
 	insert := func(provider string, input int64) {
 		var taskID string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
-			VALUES ($1, $2, $3, 'completed', $4)
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at, completed_at)
+		VALUES ($1, $2, $3, 'completed', $4, now())
 			RETURNING id
 		`, agentID, issueID, runtimeID, now).Scan(&taskID); err != nil {
 			t.Fatalf("insert task: %v", err)

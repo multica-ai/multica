@@ -559,8 +559,8 @@ func TestRollupTaskUsageHourlyIdempotentAndWatermark(t *testing.T) {
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
-		VALUES ($1, $2, $3, 'completed', now() - interval '20 minutes') RETURNING id
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at, completed_at)
+		VALUES ($1, $2, $3, 'completed', now() - interval '20 minutes', now()) RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
@@ -672,8 +672,8 @@ func TestRollupTaskUsageHourlyReassignBetweenRuntimes(t *testing.T) {
 	usageAt := time.Date(2021, 3, 14, 1, 0, 0, 0, time.UTC)
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
-		VALUES ($1, $2, $3, 'completed', $4) RETURNING id
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at, completed_at)
+		VALUES ($1, $2, $3, 'completed', $4, now()) RETURNING id
 	`, agentID, issueID, oldRuntimeID, usageAt).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
@@ -796,8 +796,8 @@ func TestRollupTaskUsageHourlyWorkspaceMismatch(t *testing.T) {
 	usageAt := time.Date(2021, 9, 9, 1, 0, 0, 0, time.UTC)
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
-		VALUES ($1, $2, $3, 'completed', $4) RETURNING id
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at, completed_at)
+		VALUES ($1, $2, $3, 'completed', $4, now()) RETURNING id
 	`, foreignAgentID, issueID, foreignRuntimeID, usageAt).Scan(&taskID); err != nil {
 		t.Fatalf("insert atq: %v", err)
 	}
@@ -879,8 +879,8 @@ func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
-		VALUES ($1, $2, $3, 'completed', now()) RETURNING id
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at, completed_at)
+		VALUES ($1, $2, $3, 'completed', now(), now()) RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
@@ -984,8 +984,8 @@ func TestDashboardRollupClearsOnIssueDelete(t *testing.T) {
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
-		VALUES ($1, $2, $3, 'completed', now()) RETURNING id
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at, completed_at)
+		VALUES ($1, $2, $3, 'completed', now(), now()) RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
@@ -1061,8 +1061,8 @@ func TestDashboardRollupReattributesOnLinkTaskToIssue(t *testing.T) {
 	// Quick-create task: issue_id is NULL at creation time.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, context, created_at)
-		VALUES ($1, NULL, $2, 'completed', '{}'::jsonb, now()) RETURNING id
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, context, created_at, completed_at)
+		VALUES ($1, NULL, $2, 'completed', '{}'::jsonb, now(), now()) RETURNING id
 	`, agentID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("insert quick-create task: %v", err)
 	}
@@ -1341,8 +1341,8 @@ func TestDashboardUsageDailyCrossMidnightFullPipeline(t *testing.T) {
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
-		VALUES ($1, $2, $3, 'completed', now()) RETURNING id
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at, completed_at)
+		VALUES ($1, $2, $3, 'completed', now(), now()) RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
@@ -1452,8 +1452,8 @@ func TestRollupTaskUsageHourlyConvergesOnTaskUsageDelete(t *testing.T) {
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
-		VALUES ($1, $2, $3, 'completed', now() - interval '30 minutes') RETURNING id
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at, completed_at)
+		VALUES ($1, $2, $3, 'completed', now() - interval '30 minutes', now()) RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}

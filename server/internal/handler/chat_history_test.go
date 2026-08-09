@@ -50,8 +50,8 @@ func newChatHistoryTask(t *testing.T, chatSession bool) string {
 	}
 	var taskID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, chat_session_id)
-		VALUES ($1, $2, 'completed', 0, $3)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, chat_session_id, completed_at)
+		VALUES ($1, $2, 'completed', 0, $3, now())
 		RETURNING id
 	`, agentID, runtimeID, sessionArg).Scan(&taskID); err != nil {
 		t.Fatalf("insert chat history task: %v", err)

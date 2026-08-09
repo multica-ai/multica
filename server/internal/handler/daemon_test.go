@@ -1108,7 +1108,7 @@ func TestClaimTaskByRuntime_ChatIntroGateClearsAfterUserReplies(t *testing.T) {
 
 	// The intro run finishes. Chat tasks serialize on chat_session_id, so the
 	// next turn only becomes claimable once this one leaves an in-flight state.
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, introTaskID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, introTaskID); err != nil {
 		t.Fatalf("complete intro task: %v", err)
 	}
 
@@ -2652,8 +2652,8 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, legacyIssueID) })
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
-		VALUES ($1, $2, 'completed', $3)
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id, completed_at)
+		VALUES ($1, $2, 'completed', $3, now())
 		RETURNING id
 	`, legacyAgentID, legacyIssueID, legacyRuntimeID).Scan(&legacyTaskID); err != nil {
 		t.Fatalf("seed legacy task: %v", err)
@@ -4331,9 +4331,9 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 		if err := testPool.QueryRow(ctx, `
 			INSERT INTO agent_task_queue (
 				agent_id, runtime_id, issue_id, status, priority,
-				failure_reason, error, session_id, work_dir
+				failure_reason, error, session_id, work_dir, completed_at
 			)
-			VALUES ($1, $2, $3, 'failed', 0, $4, $5, $6, $7)
+			VALUES ($1, $2, $3, 'failed', 0, $4, $5, $6, $7, now())
 			RETURNING id
 		`, agentID, sourceRuntimeID, issueID, failureReason, errorText, session, workdir).Scan(&sourceID); err != nil {
 			t.Fatalf("setup: insert source task: %v", err)

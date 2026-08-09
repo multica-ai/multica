@@ -65,8 +65,8 @@ func TestCreateComment_WorkerAgentCommentWakesSquadLeader_MUL4015(t *testing.T) 
 		t.Fatalf("load leader runtime: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, originator_user_id, accountable_user_id)
-		VALUES ($1, $2, $3, 'completed', TRUE, $4, $4)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, originator_user_id, accountable_user_id, completed_at)
+		VALUES ($1, $2, $3, 'completed', TRUE, $4, $4, now())
 	`, fx.LeaderID, leaderRuntimeID, issueID, testUserID); err != nil {
 		t.Fatalf("seed leader task: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestCreateComment_WorkerAgentCommentWakesPrivateSquadLeader_MUL4015(t *test
 		t.Fatalf("advance worker task to running: %v", err)
 	}
 	// Complete the leader task so it stops showing as pending.
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, leaderTaskID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, leaderTaskID); err != nil {
 		t.Fatalf("complete leader task: %v", err)
 	}
 

@@ -618,12 +618,12 @@ func TestCreateRetryTask_PreservesCommentPlanAndResetsReceipt(t *testing.T) {
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority,
 			trigger_comment_id, coalesced_comment_ids, delivered_comment_ids,
-			attempt, max_attempts, failure_reason
+			attempt, max_attempts, failure_reason, completed_at
 		)
 		VALUES (
 			$1, $2, $3, 'failed', 0,
 			$4, ARRAY[$5::uuid, $6::uuid], ARRAY[$4::uuid, $5::uuid, $6::uuid],
-			1, 3, 'timeout'
+			1, 3, 'timeout', now()
 		)
 		RETURNING id
 	`, agentID, runtimeID, issueID, commentIDs[2], commentIDs[0], commentIDs[1]).Scan(&parentID); err != nil {

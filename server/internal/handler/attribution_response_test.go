@@ -134,8 +134,8 @@ func TestListTasksByIssueHydratesAttribution(t *testing.T) {
 	// lives in the global user table — so hydration has a name to fill.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, originator_source, originator_user_id, accountable_user_id)
-		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'completed', 0, $2, 'direct_human', $3, $3)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, originator_source, originator_user_id, accountable_user_id, completed_at)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'completed', 0, $2, 'direct_human', $3, $3, now())
 		RETURNING id
 	`, agentID, issueID, testUserID).Scan(&taskID); err != nil {
 		t.Fatalf("create attributed task: %v", err)

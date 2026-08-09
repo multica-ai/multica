@@ -39,8 +39,8 @@ func TestListTasksByIssueHydratesUsage(t *testing.T) {
 	newTask := func(status string) string {
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id)
-			VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), $2, 0, $3)
+			INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, completed_at)
+			VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), $2, 0, $3, CASE WHEN $2 IN ('completed', 'failed', 'cancelled') THEN now() END)
 			RETURNING id
 		`, agentID, status, issueID).Scan(&id); err != nil {
 			t.Fatalf("create task: %v", err)

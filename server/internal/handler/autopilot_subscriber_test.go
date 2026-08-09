@@ -661,9 +661,9 @@ func TestDeleteAutopilotArchivesAndPreservesHistory(t *testing.T) {
 	}
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, status, priority, autopilot_run_id
+			agent_id, runtime_id, status, priority, autopilot_run_id, completed_at
 		)
-		VALUES ($1, $2, 'completed', 0, $3)
+		VALUES ($1, $2, 'completed', 0, $3, now())
 		RETURNING id
 	`, agentID, runtimeID, runID).Scan(&taskID); err != nil {
 		t.Fatalf("create linked task: %v", err)

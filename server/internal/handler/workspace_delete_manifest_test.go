@@ -13,6 +13,8 @@ const (
 	workspaceDeleteDetach workspaceDeleteAction = "detach"
 	workspaceDeleteKeep   workspaceDeleteAction = "keep"
 	workspaceDeleteSettle workspaceDeleteAction = "settle"
+
+	followupObligationTable = "agent_comment_followup_obligation"
 )
 
 // workspaceDeletionManifest is the schema coverage contract for workspace
@@ -22,6 +24,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"activity_log":                    workspaceDelete,
 	"agent":                           workspaceDelete,
 	"agent_builder_draft":             workspaceDelete,
+	followupObligationTable:           workspaceDelete,
 	"agent_invocation_target":         workspaceDelete,
 	"agent_runtime":                   workspaceDelete,
 	"agent_skill":                     workspaceDelete,

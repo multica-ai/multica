@@ -233,6 +233,7 @@ Pool queued Task 已经选定 Runtime 后，新评论的 originator 可能无权
 - 唯一键为 `(agent_id, comment_id)`；义务行存在即表示 pending，被某 Task 原子覆盖或评论/目标失效后才删除，不使用仅存内存的回调标记。
 - 处理器每次从持久化 Comment 重新计算调用权限、originator、Connected Apps 和 overlay；不从被拒绝合并的 Task 继承旧身份。
 - 只有以下某个事务性结果成功时才删除义务：合并到可使用的 pre-claim Task，或在空闲 `(issue, agent)` slot 创建了独立 Task。遇到异 HEAD、无权 Runtime、active Task 或唯一键竞态时保持 pending。
+- 任何首次创建或更新 obligation 的请求路径，必须在 upsert 前以 `FOR UPDATE` 锁定当前 Comment，重读并验证 Comment、Issue 和 Agent 同属一个 Workspace，再按 **Comment → Obligation** 写入。禁止无 Comment 锁的 initial upsert；Workspace 删除依赖 Comment 行锁作为并发 barrier，锁后提交的 obligation 必须被同一删除事务的后续扫描看见。
 - Comment 编辑在同一事务 upsert 新 `comment_updated_at/head_sha`；Comment 删除、Agent/Issue 删除或目标明确不再触发时同事务删除义务。
 - 任意 active Task 进入终态（completed、failed、cancelled，包括 Runtime 删除、rerun 取消和 sweeper）都在 commit 后唤醒相同 `(issue, agent)` 的义务；有界周期扫描恢复丢失通知。终态与新义务并发时依靠唯一键、行锁和创建 Task/删除 obligation 同事务收敛，不存在“取消后无 reconcile 就丢评论”窗口。
 

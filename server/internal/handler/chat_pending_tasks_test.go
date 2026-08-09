@@ -57,8 +57,8 @@ func insertPendingChatTask(t *testing.T, agentID, sessionID, status string) stri
 	t.Helper()
 	var taskID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, chat_session_id)
-		VALUES ($1, $2, $3, 0, $4)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, chat_session_id, completed_at)
+		VALUES ($1, $2, $3, 0, $4, CASE WHEN $3 IN ('completed', 'failed', 'cancelled') THEN now() END)
 		RETURNING id
 	`, agentID, handlerTestRuntimeID(t), status, sessionID).Scan(&taskID); err != nil {
 		t.Fatalf("insert pending chat task: %v", err)
@@ -304,7 +304,7 @@ func TestGetPendingChatTask_ReturnsActiveHeadAndFIFOQueue(t *testing.T) {
 
 	if _, err := testPool.Exec(
 		context.Background(),
-		`UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`,
+		`UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`,
 		activeID,
 	); err != nil {
 		t.Fatalf("complete active task: %v", err)

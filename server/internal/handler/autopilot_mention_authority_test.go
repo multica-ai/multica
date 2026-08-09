@@ -372,8 +372,8 @@ func seedCompletedTaskOnIssueBefore(t *testing.T, agentID, issueID, runtimeID st
 	t.Helper()
 	var taskID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
-		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 hour') RETURNING id
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at, completed_at)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 hour', now()) RETURNING id
 	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
 		t.Fatalf("seed completed task: %v", err)
 	}

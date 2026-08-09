@@ -194,7 +194,7 @@ func TestPreviewCommentTriggers_PlainReplyToMemberRootMentionRoutesToMentionedAg
 		t.Fatalf("root mention queued Kim tasks before completion = %d, want 1", got)
 	}
 	if _, err := testPool.Exec(ctx, `
-		UPDATE agent_task_queue SET status = 'completed'
+		UPDATE agent_task_queue SET status = 'completed', completed_at = now()
 		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
 	`, issueID, kimID); err != nil {
 		t.Fatalf("complete Kim root task: %v", err)
@@ -254,7 +254,7 @@ func TestPreviewCommentTriggers_PlainReplyToMultiAgentRootRoutesFirstMentionedOw
 		t.Fatalf("root mention queued assignee tasks = %d, want 0", got)
 	}
 	if _, err := testPool.Exec(ctx, `
-		UPDATE agent_task_queue SET status = 'completed'
+		UPDATE agent_task_queue SET status = 'completed', completed_at = now()
 		WHERE issue_id = $1 AND agent_id IN ($2, $3) AND status = 'queued'
 	`, issueID, agentAID, agentBID); err != nil {
 		t.Fatalf("complete root owner tasks: %v", err)
@@ -322,7 +322,7 @@ func TestPreviewCommentTriggers_SquadAssigneePlainReplyKeepsRootMentionOwner(t *
 		t.Fatalf("root mention queued Kim tasks = %d, want 1", got)
 	}
 	if _, err := testPool.Exec(ctx, `
-		UPDATE agent_task_queue SET status = 'completed'
+		UPDATE agent_task_queue SET status = 'completed', completed_at = now()
 		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
 	`, issueID, kimID); err != nil {
 		t.Fatalf("complete Kim root task: %v", err)
