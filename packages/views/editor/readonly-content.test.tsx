@@ -234,6 +234,60 @@ describe("ReadonlyContent image strip", () => {
   });
 });
 
+// CEREBRO-PATCH(image-size-attributes): FIR-4699 Phase 7 — read-only parity for
+// inline images. A resized/aligned image renders as a figure (width + align +
+// caption) even while the attachment-chip flag is ON; a plain ![alt](url) still
+// renders as the tray chip so comments/chat/DMs/channels are unchanged.
+describe("ReadonlyContent inline image parity (FIR-4699 Phase 7)", () => {
+  it("renders a width+align image with a caption as a figure, not a chip", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={[
+          '<img src="https://cdn/a.png" alt="A photo" data-width-pct="50" data-align="center">',
+          "<figcaption>My caption</figcaption>",
+        ].join("\n")}
+      />,
+    );
+
+    // Inline placement escapes the chip gate and renders the real figure.
+    const figure = container.querySelector<HTMLElement>(
+      '.image-figure[data-align="center"]',
+    );
+    expect(figure).not.toBeNull();
+    // Width rides an inline percentage of the text column.
+    expect(figure!.style.width).toBe("50%");
+    // The image renders full-size inside the figure (chip thumbnails do not).
+    expect(figure!.querySelector("img.image-content")).not.toBeNull();
+    // The caption is a sibling block, styled via .image-caption.
+    const caption = container.querySelector("figcaption.image-caption");
+    expect(caption?.textContent).toBe("My caption");
+    // Not routed through the horizontal tray strip.
+    expect(container.querySelector(".rte-image-strip")).toBeNull();
+  });
+
+  it("clamps an out-of-range data-width-pct to 100% (untrusted Markdown)", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={'<img src="https://cdn/a.png" alt="A" data-width-pct="99999">'}
+      />,
+    );
+    const figure = container.querySelector<HTMLElement>(".image-figure");
+    expect(figure).not.toBeNull();
+    // Not 99999% — the column stays intact.
+    expect(figure!.style.width).toBe("100%");
+  });
+
+  it("keeps a plain ![alt](url) rendering as a chip (flag on, unchanged)", () => {
+    const { container } = render(
+      <ReadonlyContent content={"![A photo](https://cdn/a.png)"} />,
+    );
+    // No figure — the tray chip path still owns plain images.
+    expect(container.querySelector(".image-figure")).toBeNull();
+    // The chip renders the thumbnail as an <img>.
+    expect(container.querySelector("img")).not.toBeNull();
+  });
+});
+
 describe("ReadonlyContent issue mention chip", () => {
   // Default desktop behavior follows regular browser links: plain click
   // navigates in the current view, modifier-click opens a new tab. JEH-1112:

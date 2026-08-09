@@ -90,7 +90,8 @@ const sanitizeSchema = {
   // CEREBRO-PATCH(todo-list-editor): allow readonly checkbox markup from GFM task lists.
   // Allow <mark> (text highlight) — emitted by highlightToHtml from `==text==`.
   // It carries no attributes, so only the tag name needs whitelisting.
-  tagNames: [...(defaultSchema.tagNames ?? []), "input", "mark"],
+  // CEREBRO-PATCH(image-size-attributes): FIR-4699 — keep the inline-image figure caption through sanitize.
+  tagNames: [...(defaultSchema.tagNames ?? []), "input", "mark", "figure", "figcaption"],
   protocols: {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href ?? []), "mention", "slash"],
@@ -127,6 +128,9 @@ const sanitizeSchema = {
     img: [
       ...(defaultSchema.attributes?.img ?? []),
       "alt",
+      // CEREBRO-PATCH(image-size-attributes): FIR-4699 — keep inline width/align through sanitize.
+      "dataWidthPct",
+      "dataAlign",
     ],
     // CEREBRO-PATCH(stacked-data-tables): keep the data-table class + per-cell data-label through sanitize (FIR-1727).
     table: [...(defaultSchema.attributes?.table ?? []), ["className", "data-table"]],
@@ -437,13 +441,21 @@ function FileCardDiv({
 // strip instead of centered stacked blocks. Detects the shape off the hast node
 // so a paragraph mixing text and an inline image is left as a normal <p>.
 function isImageOnlyParagraph(node?: {
-  children?: Array<{ type?: string; tagName?: string; value?: unknown }>;
+  children?: Array<{
+    type?: string;
+    tagName?: string;
+    value?: unknown;
+    properties?: Record<string, unknown>;
+  }>;
 }): boolean {
   const children = node?.children;
   if (!Array.isArray(children) || children.length === 0) return false;
   let hasImage = false;
   for (const child of children) {
     if (child.type === "element" && child.tagName === "img") {
+      // CEREBRO-PATCH(image-size-attributes): FIR-4699 — an inline-placed image is a figure, not a tray strip.
+      if (child.properties?.dataWidthPct != null || child.properties?.dataAlign != null)
+        return false;
       hasImage = true;
       continue;
     }
@@ -512,17 +524,23 @@ const components: Partial<Components> = {
   },
 
   // Images — centered with toolbar + lightbox (matches Tiptap ImageView NodeView)
-  img: function ReadonlyImage({ src, alt }) {
+  img: function ReadonlyImage({ src, alt, node }) {
     const { t } = useT("editor");
     const [lightbox, setLightbox] = useState(false);
     const imgSrc = typeof src === "string" ? src : "";
     const imgAlt = alt ?? "";
+    // CEREBRO-PATCH(image-size-attributes): FIR-4699 — inline placement (width/align) renders as a figure and escapes the tray-chip gate.
+    const pctRaw = parseInt(String(node?.properties?.dataWidthPct ?? ""), 10);
+    // Clamp to 1–100: the attribute is untrusted Markdown, so `data-width-pct="99999"` must not blow the column out.
+    const widthPct = Number.isFinite(pctRaw) ? Math.min(100, Math.max(1, pctRaw)) : null;
+    const align = (node?.properties?.dataAlign as string | undefined) || null;
+    const inlinePlaced = widthPct != null || align != null;
     // CEREBRO-PATCH(readonly-image-gallery): FIR-2710 — open the surface gallery when present, else the legacy lightbox.
     const gallery = useGalleryImage({ src: imgSrc, alt: imgAlt, downloadHref: imgSrc });
     const handleView = () => (gallery.enabled ? gallery.open() : setLightbox(true));
     // CEREBRO-PATCH(readonly-attachment-chip): FIR-2034 — posted image as the compact thumbnail card + existing lightbox, matching the composer.
     const chipsEnabled = useFlagValue("cerebro_attachment_chips");
-    if (chipsEnabled)
+    if (chipsEnabled && !inlinePlaced)
       return (
         <span className="image-node" ref={gallery.ref}>
           <AttachmentChip filename={imgAlt || "image"} thumbnailSrc={imgSrc} onActivate={handleView} activateLabel={t(($) => $.image.view)} className="my-1" />
@@ -544,7 +562,13 @@ const components: Partial<Components> = {
     return (
       // CEREBRO-PATCH(readonly-image-gallery): FIR-2710 — register this image with the surface gallery via ref.
       <span className="image-node" ref={gallery.ref}>
-        <span className="image-figure" onClick={handleView}>
+        {/* CEREBRO-PATCH(image-size-attributes): FIR-4699 — carry inline width/align onto the figure so the editor CSS sizes/aligns it. */}
+        <span
+          className="image-figure"
+          onClick={handleView}
+          data-align={align ?? undefined}
+          style={widthPct != null ? { width: `${widthPct}%` } : undefined}
+        >
           <img src={imgSrc} alt={imgAlt} className="image-content" draggable={false} />
           <span
             className="image-toolbar"
@@ -571,6 +595,12 @@ const components: Partial<Components> = {
 
   // FileCard — intercept <div data-type="fileCard"> from preprocessMarkdown
   div: FileCardDiv,
+
+  // CEREBRO-PATCH(image-size-attributes): FIR-4699 — the inline-image caption is a
+  // sibling block; tag it so cerebro-overrides.css styles it in --muted-foreground.
+  figcaption: ({ children }) => (
+    <figcaption className="image-caption">{children}</figcaption>
+  ),
 
   // Tables — wrap in tableWrapper div for border/radius/scroll (matches Tiptap)
   // CEREBRO-PATCH(stacked-data-tables): forward the data-table class so CSS can render data tables as stacked cards on mobile (FIR-1727).
