@@ -33,8 +33,8 @@ func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 	// which the schedule wants the next (final) retry deferred.
 	var parentID pgtype.UUID
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts, failure_reason, session_id, work_dir)
-		VALUES ($1, $2, $3, 'failed', 0, 2, 2, 'agent_error.provider_network', 'src-session', '/tmp/src-workdir')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts, failure_reason, session_id, work_dir, completed_at)
+		VALUES ($1, $2, $3, 'failed', 0, 2, 2, 'agent_error.provider_network', 'src-session', '/tmp/src-workdir', now())
 		RETURNING id
 	`, agentID, runtimeID, issueID).Scan(&parentID); err != nil {
 		t.Fatalf("insert parent task: %v", err)

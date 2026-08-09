@@ -52,8 +52,8 @@ func TestRerunIssuePinsForceFreshSessionForRollbackSafety(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var sourceID pgtype.UUID
 			if err := pool.QueryRow(ctx, `
-				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, failure_reason, session_id, work_dir)
-				VALUES ($1, $2, $3, $4, 0, $5, 'src-session', '/tmp/src-workdir')
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, failure_reason, session_id, work_dir, completed_at)
+				VALUES ($1, $2, $3, $4, 0, $5, 'src-session', '/tmp/src-workdir', now())
 				RETURNING id
 			`, agentID, runtimeID, issueID, tc.status, tc.failureReason).Scan(&sourceID); err != nil {
 				t.Fatalf("insert source task: %v", err)
