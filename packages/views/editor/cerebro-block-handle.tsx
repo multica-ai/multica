@@ -81,6 +81,12 @@ export function CerebroBlockHandle({
   const [target, setTarget] = useState<Target | null>(null);
   const createIssue = useCreateIssue();
 
+  // CEREBRO-PATCH(image-block-menu): an image (and its caption) is not a text
+  // block — "Turn into" would replace the node and Indent/Outdent are list-only,
+  // so those items are hidden for these node types in the menu below (FIR-4699).
+  const nodeName = target?.node.type.name;
+  const isImageBlock = nodeName === "image" || nodeName === "imageCaption";
+
   // Place the cursor inside the targeted block before running a command — but
   // leave a multi-block text selection alone, so the menu applies to all of it.
   function focusTarget() {
@@ -230,46 +236,51 @@ export function CerebroBlockHandle({
             <GripVertical className="size-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-52">
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <Type className="mr-2 size-4" /> Turn into
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                <DropdownMenuItem onClick={() => turnInto("paragraph")}>
-                  <Type className="mr-2 size-4" /> Text
+            {/* CEREBRO-PATCH(image-block-menu): text-structure ops are hidden for an image/caption block (FIR-4699). */}
+            {!isImageBlock && (
+              <>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Type className="mr-2 size-4" /> Turn into
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onClick={() => turnInto("paragraph")}>
+                      <Type className="mr-2 size-4" /> Text
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => turnInto("heading1")}>
+                      <Heading1 className="mr-2 size-4" /> Heading 1
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => turnInto("heading2")}>
+                      <Heading2 className="mr-2 size-4" /> Heading 2
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => turnInto("heading3")}>
+                      <Heading3 className="mr-2 size-4" /> Heading 3
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => turnInto("bulletList")}>
+                      <List className="mr-2 size-4" /> Bulleted list
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => turnInto("orderedList")}>
+                      <ListOrdered className="mr-2 size-4" /> Numbered list
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => turnInto("taskList")}>
+                      <ListChecks className="mr-2 size-4" /> Task list
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => turnInto("blockquote")}>
+                      <TextQuote className="mr-2 size-4" /> Quote
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => turnInto("codeBlock")}>
+                      <Code className="mr-2 size-4" /> Code
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuItem onClick={indent}>
+                  <IndentIncrease className="mr-2 size-4" /> Indent
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => turnInto("heading1")}>
-                  <Heading1 className="mr-2 size-4" /> Heading 1
+                <DropdownMenuItem onClick={outdent}>
+                  <IndentDecrease className="mr-2 size-4" /> Outdent
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => turnInto("heading2")}>
-                  <Heading2 className="mr-2 size-4" /> Heading 2
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => turnInto("heading3")}>
-                  <Heading3 className="mr-2 size-4" /> Heading 3
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => turnInto("bulletList")}>
-                  <List className="mr-2 size-4" /> Bulleted list
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => turnInto("orderedList")}>
-                  <ListOrdered className="mr-2 size-4" /> Numbered list
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => turnInto("taskList")}>
-                  <ListChecks className="mr-2 size-4" /> Task list
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => turnInto("blockquote")}>
-                  <TextQuote className="mr-2 size-4" /> Quote
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => turnInto("codeBlock")}>
-                  <Code className="mr-2 size-4" /> Code
-                </DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-            <DropdownMenuItem onClick={indent}>
-              <IndentIncrease className="mr-2 size-4" /> Indent
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={outdent}>
-              <IndentDecrease className="mr-2 size-4" /> Outdent
-            </DropdownMenuItem>
+              </>
+            )}
             <DropdownMenuItem onClick={duplicate}>
               <Copy className="mr-2 size-4" /> Duplicate
             </DropdownMenuItem>
