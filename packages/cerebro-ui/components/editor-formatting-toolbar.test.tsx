@@ -175,7 +175,8 @@ describe("EditorFormattingToolbar", () => {
       expect(bold).toHaveAttribute("data-pressed");
       expect(bold).toHaveClass("data-pressed:bg-[var(--toolbar-active)]");
       expect(bold).toHaveClass("data-pressed:border-[var(--toolbar-active-border)]");
-      expect(screen.getByRole("separator")).toBeVisible();
+      // One divider per group boundary now, not the single hardcoded one.
+    expect(screen.getAllByRole("separator")[0]).toBeVisible();
 
       fireEvent.focus(bold);
       expect(await screen.findByText("⌘B")).toBeVisible();
@@ -687,5 +688,71 @@ describe("EditorFormattingToolbar on a phone", () => {
 
     fireEvent.click(item);
     expect(screen.queryByRole("menuitem", { name: /Strikethrough/ })).toBeNull();
+  });
+});
+
+// FIR-4028 design review — the row's shape and placement, not its actions.
+// Every assertion here is a line the review named as diverging from the
+// approved design; each one failed before the fix.
+describe("EditorFormattingToolbar — the row as a field", () => {
+  function toolbarEl() {
+    return screen.getByRole("toolbar", { name: "Formatting toolbar" });
+  }
+
+  it("stays put while the note scrolls", () => {
+    // The row mounts inside the writing pane's scroll container, so without
+    // this it leaves the screen the moment the note is longer than the pane —
+    // which is the whole thing the issue asked for.
+    render(<EditorFormattingToolbar editor={fakeEditor() as never} />);
+    expect(toolbarEl().className).toContain("sticky");
+    expect(toolbarEl().className).toContain("top-0");
+  });
+
+  it("is a standalone field, not a full-bleed bar", () => {
+    render(<EditorFormattingToolbar editor={fakeEditor() as never} />);
+    const { className } = toolbarEl();
+    expect(className).toContain("rounded-");
+    expect(className).toContain("bg-card");
+    // A bottom rule and a near-white wash are what made it read as another
+    // edge of the pane instead of a control surface for the text.
+    expect(className).not.toContain("border-b");
+    expect(className).not.toContain("bg-muted/20");
+  });
+
+  it("is 36px tall, not 44", () => {
+    render(<EditorFormattingToolbar editor={fakeEditor() as never} />);
+    expect(toolbarEl().className).toContain("min-h-9");
+    expect(toolbarEl().className).not.toContain("min-h-11");
+  });
+
+  it("separates the groups, wherever the user has dragged Bold", () => {
+    // The separator used to be hardcoded after `bold`, so reordering moved the
+    // group divider somewhere meaningless.
+    preferences.current = {
+      cerebro_editor_toolbar_order: {
+        order: [
+          "heading",
+          "italic",
+          "strike",
+          "highlight",
+          "code",
+          "bold",
+          "link",
+          "lists",
+          "blockquote",
+          "comment",
+        ],
+        hidden: [],
+      },
+    };
+    const { container } = render(
+      <EditorFormattingToolbar editor={fakeEditor() as never} />,
+    );
+    const separators = container.querySelectorAll('[data-slot="separator"]');
+    // heading | marks | link | lists+quote | comment → four boundaries.
+    expect(separators).toHaveLength(4);
+    preferences.current = {
+      cerebro_editor_toolbar_order: ["italic", "bold"],
+    };
   });
 });

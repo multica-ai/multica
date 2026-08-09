@@ -284,6 +284,24 @@ function ListsControl({ editor }: { editor: Editor }) {
  * the overflow menu when the pane gets narrow — the row never scrolls an action
  * past its own edge, which is the rule the whole design rests on.
  */
+/**
+ * Which group each action belongs to. A separator is drawn wherever two
+ * neighbours in the rendered row fall in different groups, so the dividers
+ * follow the user's own order instead of being pinned to one action.
+ */
+const ACTION_GROUP: Record<EditorToolbarActionId, number> = {
+  heading: 0,
+  bold: 1,
+  italic: 1,
+  strike: 1,
+  highlight: 1,
+  code: 1,
+  link: 2,
+  lists: 3,
+  blockquote: 3,
+  comment: 4,
+};
+
 const PRIMARY_SLOTS = new Set<EditorToolbarActionId>([
   "heading",
   "bold",
@@ -880,13 +898,20 @@ export function EditorFormattingToolbar({
           : undefined
       }
       className={cn(
-        "@container relative flex min-h-11 items-center gap-0.5 border-b bg-muted/20 px-2 py-1.5",
-        dock.isPhone && "border-t bg-background",
+        // The row is a field over the text, not another edge of the pane: its
+        // own border all round, and sticky so it survives scrolling the note —
+        // it mounts inside the writing pane's scroll container.
+        "@container sticky top-0 z-20 m-2 flex min-h-9 items-center gap-0.5 rounded-lg border bg-card px-1.5 py-1",
+        // Docked to the keyboard the row spans the full width, so the field
+        // shape would only cut it off from the edges it is meant to sit on —
+        // and it keeps the 44px touch height a thumb needs.
+        dock.isPhone &&
+          "m-0 min-h-11 rounded-none border-x-0 border-b-0 bg-background",
         className,
       )}
     >
       <TooltipProvider>
-        {slots.map((action) => {
+        {slots.map((action, index) => {
           const control =
             action === "lists" ? (
               <ListsControl editor={editor} />
@@ -912,9 +937,10 @@ export function EditorFormattingToolbar({
               )}
             >
               {control}
-              {action === "bold" && (
-                <Separator orientation="vertical" className="h-5" />
-              )}
+              {slots[index + 1] !== undefined &&
+                ACTION_GROUP[slots[index + 1]!] !== ACTION_GROUP[action] && (
+                  <Separator orientation="vertical" className="h-5" />
+                )}
             </div>
           );
         })}
