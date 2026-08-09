@@ -120,9 +120,9 @@ func (f *fakeOutboundQueries) failStampNotSet(taskID string) {
 	msg := "fakeOutboundQueries: the origin gate read the channel_ingested stamp for task " +
 		taskID + ", but this rig never set channelIngested. Say where the question was asked: " +
 		"channelIngested: askedOverWecom() for one typed in the room, askedInTheWebUI() for one " +
-		"typed in Multica. There is no default — the answer path delivers only when the stamp is " +
-		"set and the failure path delivers unless it is, so either zero value would let one of " +
-		"those two pass a test that never stated what it meant."
+		"typed in Multica. There is no default — the failure-notice path delivers unless the " +
+		"stamp is set, and the answer-path gate #6591 adds delivers only when it is, so either " +
+		"zero value would let one of those two pass a test that never stated what it meant."
 	if f.t == nil {
 		panic(msg)
 	}

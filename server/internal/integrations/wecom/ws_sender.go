@@ -214,8 +214,19 @@ type ackResult struct {
 //
 // Both halves exist because a bubble is written to more than once per turn.
 // The ack frame carries nothing but the req_id — no stream id, no sequence —
-// so a verdict is only identifiable by its position: acks come back over one
-// TCP connection in the order the frames went out. Without the count, an
+// so a verdict is only identifiable by its position.
+//
+// ASSUMPTION, unmeasured: acks come back over the one TCP connection in the
+// order the frames went out. WeCom documents no ordering guarantee for them,
+// and we have not instrumented a run to check. It is the weakest premise under
+// this file — if the server ever answers out of order, matching by position
+// misattributes verdicts and the counting below makes it worse, not better.
+// What would settle it: tag a sequence onto the frames of one turn in a trace
+// build and record the order the acks arrive in over a few thousand turns,
+// including a reconnect. Until then, cancelAck is deliberately the only way a
+// count moves without a verdict.
+//
+// Without the count, an
 // opening frame whose ack is still on the wire when the answer goes out hands
 // ITS verdict to the closing frame, and a closing frame the server actually
 // refused reads as delivered — which loses the answer entirely, since the
@@ -234,11 +245,17 @@ type streamAcks struct {
 	at     time.Time
 }
 
-// streamAcksMax bounds the per-turn bookkeeping on a long-lived connection.
-// Entries are retired by age and this is only the backstop, so it is set well
-// past any number of turns one bot can have inside the stream window — a sweep
-// that had to drop live entries would put their closing frames out of step, and
-// 2048 of these costs under a hundred kilobytes.
+// streamAcksMax bounds the per-turn bookkeeping on a long-lived connection,
+// and reaching it is the ONLY thing that ever retires an entry: nothing runs
+// on a timer, and a turn ending does not remove its own row — pruneStreamsLocked
+// is called from beginStreamFrameLocked and returns immediately below the cap.
+// Age decides which entries a sweep may take once it runs, not when one runs.
+//
+// So the map holds every req_id this connection has streamed on until the cap
+// trips. It is set well past any number of turns one bot can have inside the
+// stream window, because a sweep that had to drop live entries would put their
+// closing frames out of step, and 2048 of these costs under a hundred
+// kilobytes.
 const streamAcksMax = 2048
 
 // replyWaiter is one caller parked on one req_id.

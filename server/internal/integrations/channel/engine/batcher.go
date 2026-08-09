@@ -23,9 +23,20 @@ const DefaultChatRunBatchWindow = 3 * time.Second
 // and the affordance count then differ, which is visible to the user in both
 // directions. See wecom/stream_store.go for what the id is used for.
 //
-// Ids are minted by the caller and are monotonic per process, so a larger id
-// is a later batch. Zero means "no batch" — a platform with no debouncer, or a
-// message that scheduled no run at all.
+// Ids are unique per process and never zero. Minting starts at 1 and
+// Router.scheduleRun mints one line above the branch that checks for a
+// debouncer, so a notifier is never handed a zero: with batching disabled each
+// message still gets a fresh id of its own, and OnIngested only fires for a
+// message that scheduled a run.
+//
+// They are NOT a clock. The counter is atomic, but it is read outside the
+// batcher's lock, so a message holding 6 can reach the batcher ahead of one
+// holding 5 — "larger id" does not order two batches minted concurrently.
+// Nothing depends on it: the only comparison in the tree is wecom's
+// queuedBehind, which chooses between two strings for an answer that came back
+// empty. What an id does guarantee is identity — two messages carry the same
+// one if and only if the same flush will answer both — and that is what a
+// per-run affordance actually needs.
 type RunBatchID uint64
 
 // stoppableTimer is the slice of *time.Timer the batcher depends on, pinned to

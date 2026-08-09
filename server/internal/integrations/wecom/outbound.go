@@ -196,9 +196,17 @@ func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t r
 		if err := o.finishStream(ctx, t.Handle, text); err == nil {
 			return t.Handle.address(), nil
 		}
-		// The frame was refused. Say it as a new message instead — and never
-		// re-send the stream frame itself, whose req_id will have expired long
-		// before another connection could carry it.
+		// The frame was refused. Say it as a new message instead, and do not
+		// re-send the stream frame: 846608 and 846605 both mean this stream
+		// will never take another one, and a transport error leaves it unknown
+		// whether the first frame landed — a second could print the answer
+		// twice in the same bubble. The plain message is the one route whose
+		// outcome this process can actually observe.
+		//
+		// Not because the handle has gone stale. A callback's req_id belongs to
+		// the turn rather than to the socket it arrived on, and a stream opened
+		// before a reconnect is still writable after it — measured against a
+		// live tenant, see senders_registry.go.
 		content = text
 	}
 	if !hasVisibleChar(content) {

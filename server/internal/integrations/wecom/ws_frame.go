@@ -661,16 +661,25 @@ const streamContentLimit = 20480
 // opens its streams with the same literal.
 const streamThinkingPlaceholder = "<think></think>"
 
-// aibot errcodes worth branching on. Neither of the two stream codes is in the
-// published error tables; both come from Tencent's OpenClaw plugin, which
-// handles them in production.
+// aibot errcodes worth branching on.
+//
+// ASSUMPTION, unconfirmed by the vendor: neither stream code appears in
+// WeCom's published error tables. Both are read off Tencent's OpenClaw plugin
+// source, with no version pinned and no statement from WeCom that the numbers
+// are stable. What would settle it: the codes appearing in the published
+// tables, or a support answer naming them. A wrong guess degrades rather than
+// breaks — an errcode this file does not recognise falls through to the
+// plain-message fallback, which is where a refused frame ends up anyway.
 const (
 	// errcodeStreamExpired — the stream ran past its window and the server
-	// will not take another frame for it. The two sources disagree on how long
-	// that window is: the long-connection doc says 10 minutes, while the
-	// plugin's own comment puts it at 6. streamMaxAge takes the shorter number
-	// (stream_store.go) — being early costs a fallback message, being late
-	// costs the answer.
+	// will not take another frame for it.
+	//
+	// ASSUMPTION on the window, unmeasured: the long-connection doc says 10
+	// minutes and the plugin's own comment says 6, and we have not tested
+	// which holds. streamMaxAge takes the shorter number (stream_store.go) —
+	// being early costs a fallback message, being late costs the answer. What
+	// would settle it: hold one stream open against a live tenant and frame it
+	// every thirty seconds until the server refuses.
 	errcodeStreamExpired = 846608
 
 	// errcodeStreamBadReqID — this req_id may not carry a stream. An event
@@ -812,10 +821,18 @@ func truncateStreamContent(s string) string {
 	return s[:cut] + ellipsis
 }
 
-// hasVisibleChar reports whether s contains anything the WeCom client will
-// render. Whitespace and control runes do not count — that is the whole point:
-// a closing frame the server considers empty is discarded, and the bubble it
-// was meant to seal spins for good.
+// hasVisibleChar reports whether s contains a rune that is neither whitespace
+// nor a control character. That is the test a closing frame has to pass: one
+// the server considers empty is discarded, and the bubble it was meant to seal
+// spins for good.
+//
+// Not the same as "the client will render something", and deliberately not.
+// Format runes — U+200B zero width space, U+FEFF, a soft hyphen — are neither
+// space nor control, so a body made only of those passes here and still shows
+// as nothing. Widening the test would mean carrying a Unicode category table
+// for input this adapter does not accept: every ending routes through the
+// stream copy constants at the top of typing_indicator.go, all of which are
+// ordinary Chinese text.
 func hasVisibleChar(s string) bool {
 	for _, r := range s {
 		if !unicode.IsSpace(r) && !unicode.IsControl(r) {
