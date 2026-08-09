@@ -708,6 +708,144 @@ WHERE id = (
 )
 RETURNING *;
 
+-- name: GetGlobalEligibleAgentHeadSnapshot :one
+-- Correctness snapshot for Runtime-targeted claim. Eligibility and ordering
+-- intentionally match ClaimAgentTask. Runtime is not a predicate here: the
+-- Agent's one global head is selected first and the target Runtime is checked
+-- only by ClaimAgentTaskForRuntime's outer CAS.
+SELECT q.* FROM agent_task_queue AS q
+WHERE q.agent_id = sqlc.arg(agent_id)::uuid
+  AND q.status = 'queued'
+  AND q.session_affinity_state <> 'unresolved'
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS active
+      WHERE active.agent_id = q.agent_id
+        AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+        AND (
+          (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+          OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+          OR (
+            q.issue_id IS NULL
+            AND q.chat_session_id IS NULL
+            AND q.autopilot_run_id IS NULL
+            AND active.issue_id IS NULL
+            AND active.chat_session_id IS NULL
+            AND active.autopilot_run_id IS NULL
+          )
+        )
+  )
+ORDER BY q.priority DESC, q.created_at ASC, q.id ASC
+LIMIT 1;
+
+-- name: ClaimAgentTaskForRuntime :one
+-- Lock/CAS the exact global eligible Agent head. There is deliberately no
+-- Runtime predicate in global_head: a poll for the wrong Runtime returns no
+-- row instead of skipping the head and dispatching a lower task.
+WITH global_head AS (
+  SELECT q.id
+  FROM agent_task_queue AS q
+  WHERE q.agent_id = sqlc.arg(agent_id)::uuid
+    AND q.status = 'queued'
+    AND q.session_affinity_state <> 'unresolved'
+    AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue AS active
+        WHERE active.agent_id = q.agent_id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+          AND (
+            (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+            OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+            OR (
+              q.issue_id IS NULL
+              AND q.chat_session_id IS NULL
+              AND q.autopilot_run_id IS NULL
+              AND active.issue_id IS NULL
+              AND active.chat_session_id IS NULL
+              AND active.autopilot_run_id IS NULL
+            )
+          )
+    )
+  ORDER BY q.priority DESC, q.created_at ASC, q.id ASC
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED
+)
+UPDATE agent_task_queue AS q
+SET status = 'dispatched',
+    dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => sqlc.arg(prepare_lease_secs)::double precision)
+FROM global_head AS head
+WHERE q.id = head.id
+  AND q.id = sqlc.arg(expected_task_id)::uuid
+  AND q.agent_id = sqlc.arg(agent_id)::uuid
+  AND q.runtime_id = sqlc.arg(runtime_id)::uuid
+  AND q.status = 'queued'
+  AND q.chat_session_id IS NOT DISTINCT FROM sqlc.narg(expected_chat_session_id)::uuid
+  AND q.runtime_binding_mode = sqlc.arg(expected_runtime_binding_mode)::text
+  AND q.placement_workspace_id IS NOT DISTINCT FROM sqlc.narg(expected_placement_workspace_id)::uuid
+  AND q.runtime_requester_user_id IS NOT DISTINCT FROM sqlc.narg(expected_runtime_requester_user_id)::uuid
+  AND q.runtime_requirements = sqlc.arg(expected_runtime_requirements)::jsonb
+  AND q.session_affinity_state = sqlc.arg(expected_session_affinity_state)::text
+  AND q.session_affinity_runtime_id IS NOT DISTINCT FROM sqlc.narg(expected_session_affinity_runtime_id)::uuid
+  AND q.explicit_fresh_session = sqlc.arg(expected_explicit_fresh_session)::boolean
+RETURNING q.*;
+
+-- name: RequeuePoolTaskAfterClaimRevalidation :one
+-- A fresh Pool claim whose locked placement snapshot became invalid returns to
+-- the allocator. The complete routing CAS prevents a diagnosis for an old
+-- snapshot (or another Runtime) from mutating a newer placement.
+UPDATE agent_task_queue AS q
+SET status = 'waiting_runtime',
+    runtime_id = NULL,
+    wait_reason = sqlc.arg(wait_reason)::text,
+    dispatched_at = NULL,
+    prepare_lease_expires_at = NULL
+WHERE q.id = sqlc.arg(expected_task_id)::uuid
+  AND q.agent_id = sqlc.arg(agent_id)::uuid
+  AND q.runtime_id = sqlc.arg(runtime_id)::uuid
+  AND q.status = 'queued'
+  AND q.chat_session_id IS NOT DISTINCT FROM sqlc.narg(expected_chat_session_id)::uuid
+  AND q.runtime_binding_mode = 'pool'
+  AND q.runtime_binding_mode = sqlc.arg(expected_runtime_binding_mode)::text
+  AND q.placement_workspace_id IS NOT DISTINCT FROM sqlc.narg(expected_placement_workspace_id)::uuid
+  AND q.runtime_requester_user_id IS NOT DISTINCT FROM sqlc.narg(expected_runtime_requester_user_id)::uuid
+  AND q.runtime_requirements = sqlc.arg(expected_runtime_requirements)::jsonb
+  AND q.session_affinity_state = sqlc.arg(expected_session_affinity_state)::text
+  AND q.session_affinity_runtime_id IS NOT DISTINCT FROM sqlc.narg(expected_session_affinity_runtime_id)::uuid
+  AND q.explicit_fresh_session = sqlc.arg(expected_explicit_fresh_session)::boolean
+RETURNING q.*;
+
+-- name: LockPoolRuntimeForClaim :one
+SELECT * FROM agent_runtime
+WHERE id = sqlc.arg(runtime_id)::uuid
+FOR UPDATE;
+
+-- name: LockPoolChatSessionForClaim :one
+SELECT * FROM chat_session
+WHERE id = sqlc.arg(chat_session_id)::uuid
+FOR UPDATE;
+
+-- name: IsPoolChatClaimHead :one
+-- Task 11 will replace this conservative claim-time guard with the shared
+-- canonical selector. Until then a Pool Chat task is claimable/reclaimable
+-- only when no other resolved nonterminal row exists in the session.
+SELECT EXISTS (
+  SELECT 1 FROM agent_task_queue AS task
+  WHERE task.id = sqlc.arg(task_id)::uuid
+    AND task.chat_session_id = sqlc.arg(chat_session_id)::uuid
+    AND task.runtime_binding_mode = 'pool'
+    AND task.status = sqlc.arg(expected_status)::text
+    AND task.session_affinity_state IN ('none', 'pinned')
+    AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS other
+      WHERE other.chat_session_id = task.chat_session_id
+        AND other.id <> task.id
+        AND other.status IN (
+          'waiting_runtime', 'queued', 'deferred', 'dispatched', 'running',
+          'waiting_local_directory'
+        )
+        AND other.session_affinity_state <> 'unresolved'
+    )
+) AS is_head;
+
 -- name: SetTaskDeliveredCommentIDs :one
 -- Replace (rather than append to) the delivery receipt for this claim. A stale
 -- dispatched task may be reclaimed by a daemon with different capabilities,
@@ -796,6 +934,130 @@ WHERE id IN (
     FOR UPDATE SKIP LOCKED
 )
 RETURNING *;
+
+-- name: GetGlobalEligibleStaleAgentHeadSnapshot :one
+-- Stale delivery is ordered globally per Agent before any Runtime CAS. A
+-- daemon polling the wrong Runtime must not skip this head and redeliver a
+-- lower stale task for the same Agent.
+SELECT q.* FROM agent_task_queue AS q
+WHERE q.agent_id = sqlc.arg(agent_id)::uuid
+  AND q.status = 'dispatched'
+  AND q.started_at IS NULL
+  AND q.session_affinity_state <> 'unresolved'
+  AND q.dispatched_at < now() - make_interval(secs => sqlc.arg(claim_recovery_secs)::double precision)
+  AND (q.prepare_lease_expires_at IS NULL OR q.prepare_lease_expires_at < now())
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS active
+      WHERE active.agent_id = q.agent_id
+        AND active.id <> q.id
+        AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+        AND (
+          (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+          OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+          OR (
+            q.issue_id IS NULL
+            AND q.chat_session_id IS NULL
+            AND q.autopilot_run_id IS NULL
+            AND active.issue_id IS NULL
+            AND active.chat_session_id IS NULL
+            AND active.autopilot_run_id IS NULL
+          )
+        )
+  )
+ORDER BY q.priority DESC, q.dispatched_at ASC, q.id ASC
+LIMIT 1;
+
+-- name: CountOtherAgentCapacityForStaleReclaim :one
+-- The stale row already bears capacity. Excluding it lets max=1 redeliver its
+-- own lost response while still refusing when another active Task consumes
+-- the Agent's slot.
+SELECT count(*)::bigint
+FROM agent_task_queue
+WHERE agent_id = sqlc.arg(agent_id)::uuid
+  AND id <> sqlc.arg(excluded_task_id)::uuid
+  AND status IN ('dispatched', 'running', 'waiting_local_directory');
+
+-- name: ReclaimStaleDispatchedTaskForAgentRuntime :one
+WITH global_stale_head AS (
+  SELECT q.id
+  FROM agent_task_queue AS q
+  WHERE q.agent_id = sqlc.arg(agent_id)::uuid
+    AND q.status = 'dispatched'
+    AND q.started_at IS NULL
+    AND q.session_affinity_state <> 'unresolved'
+    AND q.dispatched_at < now() - make_interval(secs => sqlc.arg(claim_recovery_secs)::double precision)
+    AND (q.prepare_lease_expires_at IS NULL OR q.prepare_lease_expires_at < now())
+    AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue AS active
+        WHERE active.agent_id = q.agent_id
+          AND active.id <> q.id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+          AND (
+            (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+            OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+            OR (
+              q.issue_id IS NULL
+              AND q.chat_session_id IS NULL
+              AND q.autopilot_run_id IS NULL
+              AND active.issue_id IS NULL
+              AND active.chat_session_id IS NULL
+              AND active.autopilot_run_id IS NULL
+            )
+          )
+    )
+  ORDER BY q.priority DESC, q.dispatched_at ASC, q.id ASC
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED
+)
+UPDATE agent_task_queue AS q
+SET dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => sqlc.arg(prepare_lease_secs)::double precision)
+FROM global_stale_head AS head
+WHERE q.id = head.id
+  AND q.id = sqlc.arg(expected_task_id)::uuid
+  AND q.agent_id = sqlc.arg(agent_id)::uuid
+  AND q.runtime_id = sqlc.arg(runtime_id)::uuid
+  AND q.status = 'dispatched'
+  AND q.started_at IS NULL
+  AND q.dispatched_at IS NOT DISTINCT FROM sqlc.narg(expected_dispatched_at)::timestamptz
+  AND q.dispatched_at < now() - make_interval(secs => sqlc.arg(claim_recovery_secs)::double precision)
+  AND (q.prepare_lease_expires_at IS NULL OR q.prepare_lease_expires_at < now())
+  AND q.chat_session_id IS NOT DISTINCT FROM sqlc.narg(expected_chat_session_id)::uuid
+  AND q.runtime_binding_mode = sqlc.arg(expected_runtime_binding_mode)::text
+  AND q.placement_workspace_id IS NOT DISTINCT FROM sqlc.narg(expected_placement_workspace_id)::uuid
+  AND q.runtime_requester_user_id IS NOT DISTINCT FROM sqlc.narg(expected_runtime_requester_user_id)::uuid
+  AND q.runtime_requirements = sqlc.arg(expected_runtime_requirements)::jsonb
+  AND q.session_affinity_state = sqlc.arg(expected_session_affinity_state)::text
+  AND q.session_affinity_runtime_id IS NOT DISTINCT FROM sqlc.narg(expected_session_affinity_runtime_id)::uuid
+  AND q.explicit_fresh_session = sqlc.arg(expected_explicit_fresh_session)::boolean
+RETURNING q.*;
+
+-- name: CancelInvalidStalePoolTaskForClaimRevalidation :one
+-- An invalid stale Pool delivery is terminally cancelled under the same locks;
+-- it is never rewritten to waiting_runtime and never re-delivered. Service
+-- code performs the established cancellation lifecycle after commit.
+UPDATE agent_task_queue AS q
+SET status = 'cancelled',
+    completed_at = now(),
+    prepare_lease_expires_at = NULL
+WHERE q.id = sqlc.arg(expected_task_id)::uuid
+  AND q.agent_id = sqlc.arg(agent_id)::uuid
+  AND q.runtime_id = sqlc.arg(runtime_id)::uuid
+  AND q.status = 'dispatched'
+  AND q.started_at IS NULL
+  AND q.dispatched_at IS NOT DISTINCT FROM sqlc.narg(expected_dispatched_at)::timestamptz
+  AND q.dispatched_at < now() - make_interval(secs => sqlc.arg(claim_recovery_secs)::double precision)
+  AND (q.prepare_lease_expires_at IS NULL OR q.prepare_lease_expires_at < now())
+  AND q.chat_session_id IS NOT DISTINCT FROM sqlc.narg(expected_chat_session_id)::uuid
+  AND q.runtime_binding_mode = 'pool'
+  AND q.runtime_binding_mode = sqlc.arg(expected_runtime_binding_mode)::text
+  AND q.placement_workspace_id IS NOT DISTINCT FROM sqlc.narg(expected_placement_workspace_id)::uuid
+  AND q.runtime_requester_user_id IS NOT DISTINCT FROM sqlc.narg(expected_runtime_requester_user_id)::uuid
+  AND q.runtime_requirements = sqlc.arg(expected_runtime_requirements)::jsonb
+  AND q.session_affinity_state = sqlc.arg(expected_session_affinity_state)::text
+  AND q.session_affinity_runtime_id IS NOT DISTINCT FROM sqlc.narg(expected_session_affinity_runtime_id)::uuid
+  AND q.explicit_fresh_session = sqlc.arg(expected_explicit_fresh_session)::boolean
+RETURNING q.*;
 
 -- name: ExtendAgentTaskPrepareLease :one
 -- Keeps a dispatched task protected while the daemon resolves/cache/materializes
@@ -1551,7 +1813,91 @@ ORDER BY priority DESC, created_at ASC;
 -- idx_agent_task_queue_claim_candidates so the warm path is cheap.
 SELECT * FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
-ORDER BY priority DESC, created_at ASC;
+ORDER BY priority DESC, created_at ASC, id ASC;
+
+-- name: ListFreshClaimAttemptsByRuntime :many
+-- The raw preview above remains the EmptyClaim existence check. This query
+-- resolves one actual global eligible head per candidate Agent in one round
+-- trip, then applies the Runtime filter outside each Agent-global selector.
+WITH candidate_agents AS (
+  SELECT DISTINCT candidate.agent_id
+  FROM agent_task_queue AS candidate
+  WHERE candidate.runtime_id = sqlc.arg(runtime_id)::uuid
+    AND candidate.status = 'queued'
+), global_heads AS (
+  SELECT head.*
+  FROM candidate_agents AS candidate
+  CROSS JOIN LATERAL (
+    SELECT q.id, q.agent_id, q.runtime_id, q.priority, q.created_at
+    FROM agent_task_queue AS q
+    WHERE q.agent_id = candidate.agent_id
+      AND q.status = 'queued'
+      AND q.session_affinity_state <> 'unresolved'
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue AS active
+        WHERE active.agent_id = q.agent_id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+          AND (
+            (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+            OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+            OR (
+              q.issue_id IS NULL AND q.chat_session_id IS NULL AND q.autopilot_run_id IS NULL
+              AND active.issue_id IS NULL AND active.chat_session_id IS NULL AND active.autopilot_run_id IS NULL
+            )
+          )
+      )
+    ORDER BY q.priority DESC, q.created_at ASC, q.id ASC
+    LIMIT 1
+  ) AS head
+)
+SELECT agent_id, runtime_id FROM global_heads
+WHERE runtime_id = sqlc.arg(runtime_id)::uuid
+ORDER BY priority DESC, created_at ASC, id ASC;
+
+-- name: ListStaleClaimCandidatesByRuntime :many
+-- Preview only: Runtime filtering discovers Agent attempts. The transactional
+-- reclaim helper reselects the Agent's global stale head without this filter.
+WITH candidate_agents AS (
+  SELECT DISTINCT candidate.agent_id
+  FROM agent_task_queue AS candidate
+  WHERE candidate.runtime_id = sqlc.arg(runtime_id)::uuid
+    AND candidate.status = 'dispatched'
+    AND candidate.started_at IS NULL
+    AND candidate.dispatched_at < now() - make_interval(secs => sqlc.arg(claim_recovery_secs)::double precision)
+    AND (candidate.prepare_lease_expires_at IS NULL OR candidate.prepare_lease_expires_at < now())
+), global_heads AS (
+  SELECT head.*
+  FROM candidate_agents AS candidate
+  CROSS JOIN LATERAL (
+    SELECT q.*
+    FROM agent_task_queue AS q
+    WHERE q.agent_id = candidate.agent_id
+      AND q.status = 'dispatched'
+      AND q.started_at IS NULL
+      AND q.session_affinity_state <> 'unresolved'
+      AND q.dispatched_at < now() - make_interval(secs => sqlc.arg(claim_recovery_secs)::double precision)
+      AND (q.prepare_lease_expires_at IS NULL OR q.prepare_lease_expires_at < now())
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue AS active
+        WHERE active.agent_id = q.agent_id
+          AND active.id <> q.id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+          AND (
+            (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+            OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+            OR (
+              q.issue_id IS NULL AND q.chat_session_id IS NULL AND q.autopilot_run_id IS NULL
+              AND active.issue_id IS NULL AND active.chat_session_id IS NULL AND active.autopilot_run_id IS NULL
+            )
+          )
+      )
+    ORDER BY q.priority DESC, q.dispatched_at ASC, q.id ASC
+    LIMIT 1
+  ) AS head
+)
+SELECT agent_id, runtime_id FROM global_heads
+WHERE runtime_id = sqlc.arg(runtime_id)::uuid
+ORDER BY priority DESC, dispatched_at ASC, id ASC;
 
 -- name: PromoteDueDeferredTasksForRuntime :many
 UPDATE agent_task_queue
@@ -1574,7 +1920,91 @@ RETURNING *;
 -- candidate set is small, so this is cheap in practice.
 SELECT * FROM agent_task_queue
 WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND status = 'queued'
-ORDER BY priority DESC, created_at ASC;
+ORDER BY priority DESC, created_at ASC, id ASC;
+
+-- name: ListFreshClaimAttemptsByRuntimes :many
+-- Machine-level form of ListFreshClaimAttemptsByRuntime. It returns at most
+-- one actual global eligible head per Agent, already ordered by the real head
+-- rather than by a blocked raw Runtime candidate.
+WITH candidate_agents AS (
+  SELECT DISTINCT candidate.agent_id
+  FROM agent_task_queue AS candidate
+  WHERE candidate.runtime_id = ANY(sqlc.arg(runtime_ids)::uuid[])
+    AND candidate.status = 'queued'
+), global_heads AS (
+  SELECT head.*
+  FROM candidate_agents AS candidate
+  CROSS JOIN LATERAL (
+    SELECT q.id, q.agent_id, q.runtime_id, q.priority, q.created_at
+    FROM agent_task_queue AS q
+    WHERE q.agent_id = candidate.agent_id
+      AND q.status = 'queued'
+      AND q.session_affinity_state <> 'unresolved'
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue AS active
+        WHERE active.agent_id = q.agent_id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+          AND (
+            (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+            OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+            OR (
+              q.issue_id IS NULL AND q.chat_session_id IS NULL AND q.autopilot_run_id IS NULL
+              AND active.issue_id IS NULL AND active.chat_session_id IS NULL AND active.autopilot_run_id IS NULL
+            )
+          )
+      )
+    ORDER BY q.priority DESC, q.created_at ASC, q.id ASC
+    LIMIT 1
+  ) AS head
+)
+SELECT agent_id, runtime_id FROM global_heads
+WHERE runtime_id = ANY(sqlc.arg(runtime_ids)::uuid[])
+ORDER BY priority DESC, created_at ASC, id ASC;
+
+-- name: ListStaleClaimCandidatesByRuntimes :many
+-- Batch preview only. Ordering is deterministic before the service dedupes by
+-- Agent across both stale and fresh attempts.
+WITH candidate_agents AS (
+  SELECT DISTINCT candidate.agent_id
+  FROM agent_task_queue AS candidate
+  WHERE candidate.runtime_id = ANY(sqlc.arg(runtime_ids)::uuid[])
+    AND candidate.status = 'dispatched'
+    AND candidate.started_at IS NULL
+    AND candidate.dispatched_at < now() - make_interval(secs => sqlc.arg(claim_recovery_secs)::double precision)
+    AND (candidate.prepare_lease_expires_at IS NULL OR candidate.prepare_lease_expires_at < now())
+), global_heads AS (
+  SELECT head.*
+  FROM candidate_agents AS candidate
+  CROSS JOIN LATERAL (
+    SELECT q.*
+    FROM agent_task_queue AS q
+    WHERE q.agent_id = candidate.agent_id
+      AND q.status = 'dispatched'
+      AND q.started_at IS NULL
+      AND q.session_affinity_state <> 'unresolved'
+      AND q.dispatched_at < now() - make_interval(secs => sqlc.arg(claim_recovery_secs)::double precision)
+      AND (q.prepare_lease_expires_at IS NULL OR q.prepare_lease_expires_at < now())
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue AS active
+        WHERE active.agent_id = q.agent_id
+          AND active.id <> q.id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+          AND (
+            (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+            OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+            OR (
+              q.issue_id IS NULL AND q.chat_session_id IS NULL AND q.autopilot_run_id IS NULL
+              AND active.issue_id IS NULL AND active.chat_session_id IS NULL AND active.autopilot_run_id IS NULL
+            )
+          )
+      )
+    ORDER BY q.priority DESC, q.dispatched_at ASC, q.id ASC
+    LIMIT 1
+  ) AS head
+)
+SELECT agent_id, runtime_id FROM global_heads
+WHERE runtime_id = ANY(sqlc.arg(runtime_ids)::uuid[])
+ORDER BY priority DESC, dispatched_at ASC, id ASC;
 
 -- name: PromoteDueDeferredTasksForRuntimes :many
 -- Batch variant of PromoteDueDeferredTasksForRuntime (MUL-4257): promotes all

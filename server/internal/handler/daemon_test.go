@@ -1350,6 +1350,64 @@ func TestClaimTaskByRuntime_DoesNotReclaimDifferentRuntimeTask(t *testing.T) {
 	}
 }
 
+func TestRuntimeTargetedClaimHandlerDoesNotDispatchOtherRuntimeHead(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Fatal("database is required for Runtime-targeted handler tests")
+	}
+	ctx := context.Background()
+	runtimeA := createClaimReclaimRuntime(t, ctx, "Runtime-targeted handler A")
+	runtimeB := createClaimReclaimRuntime(t, ctx, "Runtime-targeted handler B")
+	agentID, issueB := createClaimReclaimAgentAndIssue(t, ctx, runtimeB, "Runtime-targeted handler Agent")
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET max_concurrent_tasks = 5 WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("raise Agent capacity: %v", err)
+	}
+	var issueA string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'Runtime-targeted lower A', 'in_progress', 'none', $2, 'member',
+			(SELECT COALESCE(MAX(number), 950000) + 1 FROM issue WHERE workspace_id = $1), 1)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueA); err != nil {
+		t.Fatalf("create Runtime-A Issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueA) })
+	var lowerA, headB string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 1)
+		RETURNING id
+	`, agentID, runtimeA, issueA).Scan(&lowerA); err != nil {
+		t.Fatalf("create lower Runtime-A Task: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 10)
+		RETURNING id
+	`, agentID, runtimeB, issueB).Scan(&headB); err != nil {
+		t.Fatalf("create Runtime-B head Task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id IN ($1,$2)`, lowerA, headB) })
+
+	claimed, body := claimTaskByRuntimeForTest(t, runtimeA)
+	if claimed != nil {
+		t.Fatalf("Runtime A unexpectedly claimed %s: %s", claimed.ID, body)
+	}
+	var statusA, statusB string
+	if err := testPool.QueryRow(ctx, `
+		SELECT max(status) FILTER (WHERE id = $1), max(status) FILTER (WHERE id = $2)
+		FROM agent_task_queue WHERE id IN ($1,$2)
+	`, lowerA, headB).Scan(&statusA, &statusB); err != nil {
+		t.Fatalf("read preserved Task statuses: %v", err)
+	}
+	if statusA != "queued" || statusB != "queued" {
+		t.Fatalf("wrong Runtime poll mutated Tasks: A=%s B=%s", statusA, statusB)
+	}
+	claimed, body = claimTaskByRuntimeForTest(t, runtimeB)
+	if claimed == nil || claimed.ID != headB {
+		t.Fatalf("Runtime B claim = %+v, want head %s: %s", claimed, headB, body)
+	}
+}
+
 func TestClaimTaskByRuntime_SkillBundleRefsAndResolve(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

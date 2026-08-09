@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/runtimeaccess"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/runtimepool"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -2922,6 +2924,414 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 	return claimed, nil
 }
 
+type runtimeClaimKind uint8
+
+const (
+	freshRuntimeClaim runtimeClaimKind = iota
+	staleRuntimeReclaim
+	runtimeClaimHeartbeatWindow = 150 * time.Second
+)
+
+// claimTaskForAgentRuntime and reclaimStaleTaskForAgentRuntime are the shared
+// singular/batch correctness boundary. Candidate queries only discover an
+// Agent attempt; this transaction reselects that Agent's global eligible head
+// and applies the requested Runtime as the final outer CAS.
+func (s *TaskService) claimTaskForAgentRuntime(ctx context.Context, agentID, runtimeID pgtype.UUID) (*db.AgentTaskQueue, error) {
+	return s.claimOrReclaimTaskForAgentRuntime(ctx, agentID, runtimeID, freshRuntimeClaim)
+}
+
+func (s *TaskService) reclaimStaleTaskForAgentRuntime(ctx context.Context, agentID, runtimeID pgtype.UUID) (*db.AgentTaskQueue, error) {
+	return s.claimOrReclaimTaskForAgentRuntime(ctx, agentID, runtimeID, staleRuntimeReclaim)
+}
+
+func (s *TaskService) claimOrReclaimTaskForAgentRuntime(
+	ctx context.Context,
+	agentID, runtimeID pgtype.UUID,
+	kind runtimeClaimKind,
+) (*db.AgentTaskQueue, error) {
+	var claimed, requeued, cancelled *db.AgentTaskQueue
+	var previousRuntimeID pgtype.UUID
+
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		before, err := currentGlobalEligibleRuntimeHead(ctx, qtx, agentID, kind)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read global eligible Agent head: %w", err)
+		}
+		// This comparison must precede every Pool lock and diagnosis. A poll for
+		// Runtime A must never mutate the global head actually assigned to B.
+		if before.RuntimeID != runtimeID {
+			return nil
+		}
+		previousRuntimeID = before.RuntimeID
+
+		if before.RuntimeBindingMode == runtimepool.BindingPool {
+			var member db.Member
+			memberFound := true
+			member, err = qtx.LockPoolPlacementMember(ctx, db.LockPoolPlacementMemberParams{
+				WorkspaceID:     before.PlacementWorkspaceID,
+				RequesterUserID: before.RuntimeRequesterUserID,
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				memberFound = false
+			} else if err != nil {
+				return fmt.Errorf("lock Pool claim Member: %w", err)
+			}
+
+			runtime, err := qtx.LockPoolRuntimeForClaim(ctx, runtimeID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("lock Pool claim Runtime: %w", err)
+			}
+
+			var chatSession db.ChatSession
+			chatFound := true
+			if before.ChatSessionID.Valid {
+				chatSession, err = qtx.LockPoolChatSessionForClaim(ctx, before.ChatSessionID)
+				if errors.Is(err, pgx.ErrNoRows) {
+					chatFound = false
+				} else if err != nil {
+					return fmt.Errorf("lock Pool claim Chat Session: %w", err)
+				}
+			}
+
+			agent, err := qtx.GetAgentForClaimUpdate(ctx, agentID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("lock Pool claim Agent: %w", err)
+			}
+
+			current, err := currentGlobalEligibleRuntimeHead(ctx, qtx, agentID, kind)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("re-read global eligible Agent head: %w", err)
+			}
+			if !sameRuntimeClaimRoutingSnapshot(before, current) || current.RuntimeID != runtimeID {
+				return nil
+			}
+
+			// Chat head is a prerequisite for every mutation, including invalid
+			// requeue/cancel. In a malformed double-resolved session we fail
+			// closed instead of moving whichever row happened to win Agent order.
+			if current.ChatSessionID.Valid {
+				isHead, headErr := qtx.IsPoolChatClaimHead(ctx, db.IsPoolChatClaimHeadParams{
+					TaskID:         current.ID,
+					ChatSessionID:  current.ChatSessionID,
+					ExpectedStatus: current.Status,
+				})
+				if headErr != nil {
+					return fmt.Errorf("validate Pool Chat claim head: %w", headErr)
+				}
+				if !isHead {
+					return nil
+				}
+			}
+
+			reason := validatePoolRuntimeClaimSnapshot(member, memberFound, runtime, agent, chatSession, chatFound, current)
+			if reason != "" {
+				if kind == staleRuntimeReclaim {
+					row, cancelErr := qtx.CancelInvalidStalePoolTaskForClaimRevalidation(ctx, staleCancelParams(current, runtimeID))
+					if errors.Is(cancelErr, pgx.ErrNoRows) {
+						return nil
+					}
+					if cancelErr != nil {
+						return fmt.Errorf("cancel invalid stale Pool Task: %w", cancelErr)
+					}
+					if row.ChatSessionID.Valid {
+						if pointerErr := qtx.AdvanceCancelledChatSessionPointer(ctx, row.ID); pointerErr != nil {
+							return fmt.Errorf("advance invalid stale Chat pointer: %w", pointerErr)
+						}
+					}
+					cancelledTask := row
+					cancelled = &cancelledTask
+					return nil
+				}
+
+				row, requeueErr := qtx.RequeuePoolTaskAfterClaimRevalidation(ctx, freshRequeueParams(current, runtimeID, reason))
+				if errors.Is(requeueErr, pgx.ErrNoRows) {
+					return nil
+				}
+				if requeueErr != nil {
+					return fmt.Errorf("requeue invalid fresh Pool Task: %w", requeueErr)
+				}
+				requeuedTask := row
+				requeued = &requeuedTask
+				return nil
+			}
+
+			capacity, err := countRuntimeClaimCapacity(ctx, qtx, agentID, current.ID, kind)
+			if err != nil {
+				return fmt.Errorf("count Runtime-targeted claim capacity: %w", err)
+			}
+			if capacity >= int64(agent.MaxConcurrentTasks) {
+				return nil
+			}
+			before = current
+		} else {
+			// Fixed keeps its established Agent -> Task lock order and skips all
+			// Pool authorization/placement locks.
+			agent, err := qtx.GetAgentForClaimUpdate(ctx, agentID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("lock fixed claim Agent: %w", err)
+			}
+			current, err := currentGlobalEligibleRuntimeHead(ctx, qtx, agentID, kind)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("re-read fixed global eligible Agent head: %w", err)
+			}
+			if !sameRuntimeClaimRoutingSnapshot(before, current) || current.RuntimeID != runtimeID {
+				return nil
+			}
+			capacity, err := countRuntimeClaimCapacity(ctx, qtx, agentID, current.ID, kind)
+			if err != nil {
+				return fmt.Errorf("count fixed Runtime-targeted claim capacity: %w", err)
+			}
+			if capacity >= int64(agent.MaxConcurrentTasks) {
+				return nil
+			}
+			before = current
+		}
+
+		row, err := claimCurrentGlobalRuntimeHead(ctx, qtx, kind, before, runtimeID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("claim global Agent head for Runtime: %w", err)
+		}
+		if kind == freshRuntimeClaim && row.ChatSessionID.Valid && row.ChatInputTaskID.Valid && row.ChatInputTaskID == row.ID {
+			if err := qtx.ReanchorClaimedDirectChatInput(ctx, db.ReanchorClaimedDirectChatInputParams{
+				DispatchedAt: row.DispatchedAt,
+				TaskID:       row.ID,
+			}); err != nil {
+				return fmt.Errorf("reanchor claimed direct Chat input: %w", err)
+			}
+		}
+		claimedTask := row
+		claimed = &claimedTask
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if requeued != nil {
+		if s.RuntimePool != nil {
+			if _, assignErr := s.AssignPoolWorkspace(ctx, requeued.PlacementWorkspaceID, requeued.ID); assignErr != nil {
+				slog.Warn("reassign invalid fresh Pool Task after claim revalidation",
+					"task_id", util.UUIDToString(requeued.ID), "error", assignErr)
+			}
+		} else {
+			// A TaskService without a scheduler is valid in focused tests and
+			// degraded deployments. The committed waiting transition remains
+			// observable and the periodic allocator can recover it later.
+			s.broadcastTaskEvent(ctx, protocol.EventTaskWaitingRuntime, *requeued)
+		}
+		// The old Runtime may now have another global Agent head available.
+		s.notifyRuntimeMayHaveWork(previousRuntimeID, "")
+	}
+	if cancelled != nil {
+		slog.Info("invalid stale Pool Task cancelled during claim revalidation",
+			"task_id", util.UUIDToString(cancelled.ID),
+			"runtime_id", util.UUIDToString(previousRuntimeID),
+		)
+		s.captureTaskCancelled(ctx, *cancelled)
+		if cancelled.ChatSessionID.Valid {
+			s.finalizeCancelledChatMessage(ctx, *cancelled, CancelTaskOptions{ClientSupportsDraftRestore: true})
+		}
+		s.ReconcileAgentStatus(ctx, cancelled.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, *cancelled)
+		s.NotifyTaskFinished(*cancelled)
+	}
+	if claimed == nil {
+		return nil, nil
+	}
+	if kind == freshRuntimeClaim {
+		slog.Info("task claimed for Runtime",
+			"task_id", util.UUIDToString(claimed.ID),
+			"runtime_id", util.UUIDToString(runtimeID),
+			"agent_id", util.UUIDToString(agentID),
+		)
+		s.captureTaskDispatched(ctx, *claimed)
+		s.ReconcileAgentStatus(ctx, agentID)
+		s.broadcastTaskDispatch(ctx, *claimed)
+	}
+	return claimed, nil
+}
+
+func currentGlobalEligibleRuntimeHead(ctx context.Context, qtx *db.Queries, agentID pgtype.UUID, kind runtimeClaimKind) (db.AgentTaskQueue, error) {
+	if kind == staleRuntimeReclaim {
+		return qtx.GetGlobalEligibleStaleAgentHeadSnapshot(ctx, db.GetGlobalEligibleStaleAgentHeadSnapshotParams{
+			AgentID:           agentID,
+			ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
+		})
+	}
+	return qtx.GetGlobalEligibleAgentHeadSnapshot(ctx, agentID)
+}
+
+func countRuntimeClaimCapacity(ctx context.Context, qtx *db.Queries, agentID, taskID pgtype.UUID, kind runtimeClaimKind) (int64, error) {
+	if kind == staleRuntimeReclaim {
+		return qtx.CountOtherAgentCapacityForStaleReclaim(ctx, db.CountOtherAgentCapacityForStaleReclaimParams{
+			AgentID:        agentID,
+			ExcludedTaskID: taskID,
+		})
+	}
+	return qtx.CountRunningTasks(ctx, agentID)
+}
+
+func claimCurrentGlobalRuntimeHead(
+	ctx context.Context,
+	qtx *db.Queries,
+	kind runtimeClaimKind,
+	head db.AgentTaskQueue,
+	runtimeID pgtype.UUID,
+) (db.AgentTaskQueue, error) {
+	if kind == staleRuntimeReclaim {
+		return qtx.ReclaimStaleDispatchedTaskForAgentRuntime(ctx, staleReclaimParams(head, runtimeID))
+	}
+	return qtx.ClaimAgentTaskForRuntime(ctx, db.ClaimAgentTaskForRuntimeParams{
+		PrepareLeaseSecs:                 prepareLeaseDuration.Seconds(),
+		ExpectedTaskID:                   head.ID,
+		AgentID:                          head.AgentID,
+		RuntimeID:                        runtimeID,
+		ExpectedChatSessionID:            head.ChatSessionID,
+		ExpectedRuntimeBindingMode:       head.RuntimeBindingMode,
+		ExpectedPlacementWorkspaceID:     head.PlacementWorkspaceID,
+		ExpectedRuntimeRequesterUserID:   head.RuntimeRequesterUserID,
+		ExpectedRuntimeRequirements:      head.RuntimeRequirements,
+		ExpectedSessionAffinityState:     head.SessionAffinityState,
+		ExpectedSessionAffinityRuntimeID: head.SessionAffinityRuntimeID,
+		ExpectedExplicitFreshSession:     head.ExplicitFreshSession,
+	})
+}
+
+func staleReclaimParams(head db.AgentTaskQueue, runtimeID pgtype.UUID) db.ReclaimStaleDispatchedTaskForAgentRuntimeParams {
+	return db.ReclaimStaleDispatchedTaskForAgentRuntimeParams{
+		PrepareLeaseSecs:                 prepareLeaseDuration.Seconds(),
+		ExpectedTaskID:                   head.ID,
+		AgentID:                          head.AgentID,
+		RuntimeID:                        runtimeID,
+		ExpectedDispatchedAt:             head.DispatchedAt,
+		ClaimRecoverySecs:                claimResponseRecoveryWindow.Seconds(),
+		ExpectedChatSessionID:            head.ChatSessionID,
+		ExpectedRuntimeBindingMode:       head.RuntimeBindingMode,
+		ExpectedPlacementWorkspaceID:     head.PlacementWorkspaceID,
+		ExpectedRuntimeRequesterUserID:   head.RuntimeRequesterUserID,
+		ExpectedRuntimeRequirements:      head.RuntimeRequirements,
+		ExpectedSessionAffinityState:     head.SessionAffinityState,
+		ExpectedSessionAffinityRuntimeID: head.SessionAffinityRuntimeID,
+		ExpectedExplicitFreshSession:     head.ExplicitFreshSession,
+	}
+}
+
+func staleCancelParams(head db.AgentTaskQueue, runtimeID pgtype.UUID) db.CancelInvalidStalePoolTaskForClaimRevalidationParams {
+	return db.CancelInvalidStalePoolTaskForClaimRevalidationParams{
+		ExpectedTaskID:                   head.ID,
+		AgentID:                          head.AgentID,
+		RuntimeID:                        runtimeID,
+		ExpectedDispatchedAt:             head.DispatchedAt,
+		ClaimRecoverySecs:                claimResponseRecoveryWindow.Seconds(),
+		ExpectedChatSessionID:            head.ChatSessionID,
+		ExpectedRuntimeBindingMode:       head.RuntimeBindingMode,
+		ExpectedPlacementWorkspaceID:     head.PlacementWorkspaceID,
+		ExpectedRuntimeRequesterUserID:   head.RuntimeRequesterUserID,
+		ExpectedRuntimeRequirements:      head.RuntimeRequirements,
+		ExpectedSessionAffinityState:     head.SessionAffinityState,
+		ExpectedSessionAffinityRuntimeID: head.SessionAffinityRuntimeID,
+		ExpectedExplicitFreshSession:     head.ExplicitFreshSession,
+	}
+}
+
+func freshRequeueParams(head db.AgentTaskQueue, runtimeID pgtype.UUID, reason string) db.RequeuePoolTaskAfterClaimRevalidationParams {
+	return db.RequeuePoolTaskAfterClaimRevalidationParams{
+		WaitReason:                       reason,
+		ExpectedTaskID:                   head.ID,
+		AgentID:                          head.AgentID,
+		RuntimeID:                        runtimeID,
+		ExpectedChatSessionID:            head.ChatSessionID,
+		ExpectedRuntimeBindingMode:       head.RuntimeBindingMode,
+		ExpectedPlacementWorkspaceID:     head.PlacementWorkspaceID,
+		ExpectedRuntimeRequesterUserID:   head.RuntimeRequesterUserID,
+		ExpectedRuntimeRequirements:      head.RuntimeRequirements,
+		ExpectedSessionAffinityState:     head.SessionAffinityState,
+		ExpectedSessionAffinityRuntimeID: head.SessionAffinityRuntimeID,
+		ExpectedExplicitFreshSession:     head.ExplicitFreshSession,
+	}
+}
+
+func sameRuntimeClaimRoutingSnapshot(a, b db.AgentTaskQueue) bool {
+	return a.ID == b.ID &&
+		a.AgentID == b.AgentID &&
+		a.Status == b.Status &&
+		a.RuntimeID == b.RuntimeID &&
+		a.DispatchedAt == b.DispatchedAt &&
+		a.ChatSessionID == b.ChatSessionID &&
+		a.RuntimeBindingMode == b.RuntimeBindingMode &&
+		a.PlacementWorkspaceID == b.PlacementWorkspaceID &&
+		a.RuntimeRequesterUserID == b.RuntimeRequesterUserID &&
+		bytes.Equal(a.RuntimeRequirements, b.RuntimeRequirements) &&
+		a.SessionAffinityState == b.SessionAffinityState &&
+		a.SessionAffinityRuntimeID == b.SessionAffinityRuntimeID &&
+		a.ExplicitFreshSession == b.ExplicitFreshSession
+}
+
+func validatePoolRuntimeClaimSnapshot(
+	member db.Member,
+	memberFound bool,
+	runtime db.AgentRuntime,
+	agent db.Agent,
+	chat db.ChatSession,
+	chatFound bool,
+	task db.AgentTaskQueue,
+) string {
+	pinned := task.SessionAffinityState == runtimepool.SessionAffinityPinned
+	reason := func(pinnedReason string) string {
+		if pinned {
+			return pinnedReason
+		}
+		return "no_eligible_runtime"
+	}
+	if !memberFound ||
+		member.WorkspaceID != task.PlacementWorkspaceID ||
+		member.UserID != task.RuntimeRequesterUserID ||
+		runtime.WorkspaceID != task.PlacementWorkspaceID ||
+		agent.WorkspaceID != task.PlacementWorkspaceID ||
+		agent.ArchivedAt.Valid ||
+		!runtimeaccess.CanUse(member, runtime) {
+		return reason("session_runtime_unauthorized")
+	}
+	if task.ChatSessionID.Valid && (!chatFound || chat.WorkspaceID != task.PlacementWorkspaceID || chat.AgentID != task.AgentID) {
+		return reason("session_runtime_unauthorized")
+	}
+	if runtime.Status != "online" || !runtime.LastSeenAt.Valid || runtime.LastSeenAt.Time.Before(time.Now().Add(-runtimeClaimHeartbeatWindow)) {
+		return reason("session_runtime_offline")
+	}
+	requirements, err := runtimepool.ParseRequirements(task.RuntimeRequirements)
+	if err != nil || !runtimepool.ContainsAllCapabilities(runtime.Capabilities, requirements.CapabilitiesAll) {
+		return reason("session_runtime_capability_mismatch")
+	}
+	if pinned && (!task.SessionAffinityRuntimeID.Valid || task.RuntimeID != task.SessionAffinityRuntimeID) {
+		// The assigned Runtime and affinity snapshot disagree; neither Runtime
+		// has been proven offline. Return to placement with a neutral reason so
+		// the allocator can restore the pinned binding without a false diagnosis.
+		return "no_eligible_runtime"
+	}
+	return ""
+}
+
 // ClaimTaskForRuntime claims the next runnable task for a runtime while
 // still respecting each agent's max_concurrent_tasks limit.
 //
@@ -2961,26 +3371,32 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		return nil, err
 	}
 
-	// Check this before EmptyClaim: a lost claim response moves the task out of
-	// `queued`, so the empty-queued cache cannot represent recoverability.
-	stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
+	// Check stale attempts before EmptyClaim: a lost claim response moves the
+	// task out of queued, so the empty-queued cache cannot represent it.
+	staleCandidates, err := s.Queries.ListStaleClaimCandidatesByRuntime(ctx, db.ListStaleClaimCandidatesByRuntimeParams{
 		RuntimeID:         runtimeID,
 		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
-		PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
 	})
-	if err == nil {
-		outcome = "reclaimed_dispatched"
-		claimedFlag = true
-		slog.Info("stale dispatched task reclaimed",
-			"task_id", util.UUIDToString(stale.ID),
-			"runtime_id", runtimeKey,
-			"agent_id", util.UUIDToString(stale.AgentID),
-		)
-		return &stale, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil {
 		outcome = "error_reclaim_dispatched"
-		return nil, fmt.Errorf("reclaim stale dispatched task: %w", err)
+		return nil, fmt.Errorf("list stale dispatched claim candidates: %w", err)
+	}
+	for _, attempt := range staleCandidates {
+		stale, reclaimErr := s.reclaimStaleTaskForAgentRuntime(ctx, attempt.AgentID, attempt.RuntimeID)
+		if reclaimErr != nil {
+			outcome = "error_reclaim_dispatched"
+			return nil, reclaimErr
+		}
+		if stale != nil {
+			outcome = "reclaimed_dispatched"
+			claimedFlag = true
+			slog.Info("stale dispatched task reclaimed",
+				"task_id", util.UUIDToString(stale.ID),
+				"runtime_id", runtimeKey,
+				"agent_id", util.UUIDToString(stale.AgentID),
+			)
+			return stale, nil
+		}
 	}
 
 	if s.EmptyClaim.IsEmpty(ctx, runtimeKey) {
@@ -3012,23 +3428,23 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	}
 
 	loopStart := time.Now()
-	triedAgents := map[string]struct{}{}
+	attempts, err := s.Queries.ListFreshClaimAttemptsByRuntime(ctx, runtimeID)
+	if err != nil {
+		loopMs = time.Since(loopStart).Milliseconds()
+		outcome = "error_resolve_attempts"
+		return nil, fmt.Errorf("list fresh Runtime claim attempts: %w", err)
+	}
 	var claimed *db.AgentTaskQueue
-	for _, candidate := range tasks {
-		agentKey := util.UUIDToString(candidate.AgentID)
-		if _, seen := triedAgents[agentKey]; seen {
-			continue
-		}
-		triedAgents[agentKey] = struct{}{}
+	for _, attempt := range attempts {
 		tried++
 
-		task, err := s.ClaimTask(ctx, candidate.AgentID)
+		task, err := s.claimTaskForAgentRuntime(ctx, attempt.AgentID, attempt.RuntimeID)
 		if err != nil {
 			loopMs = time.Since(loopStart).Milliseconds()
 			outcome = "error_claim"
 			return nil, err
 		}
-		if task != nil && task.RuntimeID == runtimeID {
+		if task != nil {
 			claimed = task
 			break
 		}
@@ -3112,16 +3528,17 @@ func (s *TaskService) RequeueTaskAfterClaimFailure(ctx context.Context, task db.
 //
 // It preserves the exact per-runtime semantics, just set-ified:
 //  1. promote due deferred tasks across the set (one UPDATE);
-//  2. reclaim up to maxTasks stale-dispatched tasks across the set (one UPDATE)
-//     — done before the empty-cache check because a lost claim response moves
-//     the task out of `queued`, which the empty-queued cache cannot represent;
+//  2. resolve each agent's global stale head, then reclaim it through the
+//     Runtime-targeted transactional helper — done before the empty-cache check
+//     because a lost claim response moves the task out of `queued`, which the
+//     empty-queued cache cannot represent;
 //  3. short-circuit runtimes whose empty-claim verdict is cached, sampling the
 //     invalidation version for the rest BEFORE the candidate SELECT;
 //  4. list queued candidates across the non-empty set (one SELECT);
 //  5. mark still-empty runtimes so their next idle poll skips Postgres;
-//  6. claim per distinct agent via ClaimTask (unchanged — preserves the
-//     per-(issue, agent) serialization, the agent concurrency cap, and every
-//     dispatch side effect) until maxTasks is reached.
+//  6. resolve each agent's global fresh head and claim it through the same
+//     Runtime-targeted helper (preserving serialization, capacity, and dispatch
+//     side effects) until maxTasks is reached.
 //
 // The returned slice contains both reclaimed and freshly-claimed tasks, each
 // already carrying its runtime_id so the daemon routes it to the matching
@@ -3135,10 +3552,8 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	// unambiguous even if a daemon ever sends a duplicate.
 	seen := make(map[string]struct{}, len(runtimeIDs))
 	uniqueIDs := make([]pgtype.UUID, 0, len(runtimeIDs))
-	runtimeInSet := make(map[string]struct{}, len(runtimeIDs))
 	for _, rid := range runtimeIDs {
 		key := util.UUIDToString(rid)
-		runtimeInSet[key] = struct{}{}
 		if _, dup := seen[key]; dup {
 			continue
 		}
@@ -3147,6 +3562,10 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	}
 
 	claimed := make([]db.AgentTaskQueue, 0, maxTasks)
+	// One Agent attempt per machine poll across both stale and fresh paths.
+	// This is deliberately not keyed by Runtime: capacity and serialization
+	// remain global to the Agent.
+	triedAgents := make(map[string]struct{})
 
 	// 1. Promote due deferred tasks across the whole set (promote-first, like
 	// the singular path). Replay the per-row side effects the singular service
@@ -3171,22 +3590,39 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		s.NotifyTaskEnqueued(ctx, task)
 	}
 
-	// 2. Reclaim lost-response dispatched tasks across the set, up to maxTasks.
-	reclaimed, err := s.Queries.ReclaimStaleDispatchedTasksForRuntimes(ctx, db.ReclaimStaleDispatchedTasksForRuntimesParams{
+	// 2. Discover stale attempts across the set, then reclaim each Agent's one
+	// global eligible stale head through the same Runtime-targeted transaction
+	// used by the singular path.
+	staleCandidates, err := s.Queries.ListStaleClaimCandidatesByRuntimes(ctx, db.ListStaleClaimCandidatesByRuntimesParams{
 		RuntimeIds:        uniqueIDs,
 		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
-		PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
-		MaxTasks:          int32(maxTasks),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("reclaim stale dispatched tasks: %w", err)
+		return nil, fmt.Errorf("list stale dispatched claim candidates: %w", err)
 	}
-	for i := range reclaimed {
-		claimed = append(claimed, reclaimed[i])
+	for i := range staleCandidates {
+		if len(claimed) >= maxTasks {
+			break
+		}
+		agentKey := util.UUIDToString(staleCandidates[i].AgentID)
+		triedAgents[agentKey] = struct{}{}
+		reclaimed, reclaimErr := s.reclaimStaleTaskForAgentRuntime(ctx, staleCandidates[i].AgentID, staleCandidates[i].RuntimeID)
+		if reclaimErr != nil {
+			if len(claimed) > 0 {
+				slog.Error("batch claim: stale reclaim failed after partial success; returning committed tasks",
+					"error", reclaimErr, "claimed", len(claimed))
+				return claimed, nil
+			}
+			return nil, fmt.Errorf("reclaim stale dispatched task: %w", reclaimErr)
+		}
+		if reclaimed == nil {
+			continue
+		}
+		claimed = append(claimed, *reclaimed)
 		slog.Info("stale dispatched task reclaimed (batch)",
-			"task_id", util.UUIDToString(reclaimed[i].ID),
-			"runtime_id", util.UUIDToString(reclaimed[i].RuntimeID),
-			"agent_id", util.UUIDToString(reclaimed[i].AgentID),
+			"task_id", util.UUIDToString(reclaimed.ID),
+			"runtime_id", util.UUIDToString(reclaimed.RuntimeID),
+			"agent_id", util.UUIDToString(reclaimed.AgentID),
 		)
 	}
 	if len(claimed) >= maxTasks {
@@ -3242,21 +3678,29 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		}
 	}
 
-	// 6. Claim per distinct agent (unchanged path → same per-(issue, agent)
-	// serialization, capacity cap, and dispatch side effects) until maxTasks is
-	// reached.
-	triedAgents := make(map[string]struct{}, len(candidates))
-	for i := range candidates {
+	// 6. Resolve the distinct agents' actual global heads, then claim through the
+	// Runtime-targeted path with the same serialization, capacity cap, and
+	// dispatch side effects until maxTasks is reached.
+	freshAttempts, err := s.Queries.ListFreshClaimAttemptsByRuntimes(ctx, nonEmpty)
+	if err != nil {
+		if len(claimed) > 0 {
+			slog.Error("batch claim: resolve fresh attempts failed after partial success; returning committed tasks",
+				"error", err, "claimed", len(claimed))
+			return claimed, nil
+		}
+		return nil, fmt.Errorf("list fresh Runtime claim attempts: %w", err)
+	}
+	for i := range freshAttempts {
 		if len(claimed) >= maxTasks {
 			break
 		}
-		agentKey := util.UUIDToString(candidates[i].AgentID)
+		agentKey := util.UUIDToString(freshAttempts[i].AgentID)
 		if _, tried := triedAgents[agentKey]; tried {
 			continue
 		}
 		triedAgents[agentKey] = struct{}{}
 
-		task, err := s.ClaimTask(ctx, candidates[i].AgentID)
+		task, err := s.claimTaskForAgentRuntime(ctx, freshAttempts[i].AgentID, freshAttempts[i].RuntimeID)
 		if err != nil {
 			// Each ClaimTask commits in its own transaction, so earlier
 			// iterations (and step-2 reclaims) are already dispatched
@@ -3271,15 +3715,6 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 			return nil, fmt.Errorf("claim task: %w", err)
 		}
 		if task == nil {
-			continue
-		}
-		// ClaimAgentTask selects by agent only; guard that the claimed task
-		// belongs to a runtime this daemon hosts. An agent with a
-		// higher-priority queued task on ANOTHER daemon's runtime could
-		// otherwise be dispatched here and dropped — matching the singular
-		// path's runtime_id guard. Such a stray dispatch is recovered by the
-		// reclaim path on the owning daemon's next poll.
-		if _, ok := runtimeInSet[util.UUIDToString(task.RuntimeID)]; !ok {
 			continue
 		}
 		claimed = append(claimed, *task)

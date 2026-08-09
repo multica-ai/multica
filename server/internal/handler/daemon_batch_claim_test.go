@@ -87,6 +87,68 @@ func TestClaimTasksByRuntime_RoutesAcrossRuntimesAndMintsTokens(t *testing.T) {
 	}
 }
 
+func TestRuntimeTargetedBatchClaimDoesNotDispatchHeadOutsideRuntimeSet(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Fatal("database is required for Runtime-targeted batch handler tests")
+	}
+	ctx := context.Background()
+	runtimeA := createClaimReclaimRuntime(t, ctx, "Runtime-targeted batch A")
+	runtimeB := createClaimReclaimRuntime(t, ctx, "Runtime-targeted batch B")
+	agentID, issueB := createClaimReclaimAgentAndIssue(t, ctx, runtimeB, "Runtime-targeted batch Agent")
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET max_concurrent_tasks = 5 WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("raise Agent capacity: %v", err)
+	}
+	var issueA string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'Runtime-targeted batch lower A', 'in_progress', 'none', $2, 'member',
+			(SELECT COALESCE(MAX(number), 960000) + 1 FROM issue WHERE workspace_id = $1), 1)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueA); err != nil {
+		t.Fatalf("create Runtime-A Issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueA) })
+	lowerA := seedQueuedIssueTask(t, ctx, agentID, runtimeA, issueA)
+	headB := seedQueuedIssueTask(t, ctx, agentID, runtimeB, issueB)
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET priority = CASE id WHEN $1 THEN 1 ELSE 10 END WHERE id IN ($1,$2)`, lowerA, headB); err != nil {
+		t.Fatalf("order Runtime-targeted Tasks: %v", err)
+	}
+
+	w := postBatchClaim(t, testWorkspaceID, []string{runtimeA}, 2)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Runtime-A batch status = %d: %s", w.Code, w.Body.String())
+	}
+	var response batchClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode Runtime-A batch: %v", err)
+	}
+	if len(response.Tasks) != 0 {
+		t.Fatalf("Runtime-A-only batch claimed other Runtime head: %+v", response.Tasks)
+	}
+	var statusA, statusB string
+	if err := testPool.QueryRow(ctx, `
+		SELECT max(status) FILTER (WHERE id = $1), max(status) FILTER (WHERE id = $2)
+		FROM agent_task_queue WHERE id IN ($1,$2)
+	`, lowerA, headB).Scan(&statusA, &statusB); err != nil {
+		t.Fatalf("read preserved batch Task statuses: %v", err)
+	}
+	if statusA != "queued" || statusB != "queued" {
+		t.Fatalf("wrong Runtime batch mutated Tasks: A=%s B=%s", statusA, statusB)
+	}
+
+	w = postBatchClaim(t, testWorkspaceID, []string{runtimeA, runtimeB}, 2)
+	if w.Code != http.StatusOK {
+		t.Fatalf("two-Runtime batch status = %d: %s", w.Code, w.Body.String())
+	}
+	response = batchClaimResponse{}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode two-Runtime batch: %v", err)
+	}
+	if len(response.Tasks) != 1 || response.Tasks[0].ID != headB || response.Tasks[0].RuntimeID != runtimeB {
+		t.Fatalf("two-Runtime batch = %+v, want only Runtime-B global head %s", response.Tasks, headB)
+	}
+}
+
 // TestClaimTasksByRuntime_SkipsCrossWorkspaceRuntime is the security-critical
 // case: a daemon token scoped to workspace A must not claim a task routed to a
 // runtime in workspace B, even when B's runtime_id is included in the request.

@@ -1076,6 +1076,130 @@ func (q *Queries) CancelDeferredEscalationsForTask(ctx context.Context, escalati
 	return items, nil
 }
 
+const cancelInvalidStalePoolTaskForClaimRevalidation = `-- name: CancelInvalidStalePoolTaskForClaimRevalidation :one
+UPDATE agent_task_queue AS q
+SET status = 'cancelled',
+    completed_at = now(),
+    prepare_lease_expires_at = NULL
+WHERE q.id = $1::uuid
+  AND q.agent_id = $2::uuid
+  AND q.runtime_id = $3::uuid
+  AND q.status = 'dispatched'
+  AND q.started_at IS NULL
+  AND q.dispatched_at IS NOT DISTINCT FROM $4::timestamptz
+  AND q.dispatched_at < now() - make_interval(secs => $5::double precision)
+  AND (q.prepare_lease_expires_at IS NULL OR q.prepare_lease_expires_at < now())
+  AND q.chat_session_id IS NOT DISTINCT FROM $6::uuid
+  AND q.runtime_binding_mode = 'pool'
+  AND q.runtime_binding_mode = $7::text
+  AND q.placement_workspace_id IS NOT DISTINCT FROM $8::uuid
+  AND q.runtime_requester_user_id IS NOT DISTINCT FROM $9::uuid
+  AND q.runtime_requirements = $10::jsonb
+  AND q.session_affinity_state = $11::text
+  AND q.session_affinity_runtime_id IS NOT DISTINCT FROM $12::uuid
+  AND q.explicit_fresh_session = $13::boolean
+RETURNING q.id, q.agent_id, q.issue_id, q.status, q.priority, q.dispatched_at, q.started_at, q.completed_at, q.result, q.error, q.created_at, q.context, q.runtime_id, q.session_id, q.work_dir, q.trigger_comment_id, q.chat_session_id, q.autopilot_run_id, q.attempt, q.max_attempts, q.parent_task_id, q.failure_reason, q.trigger_summary, q.force_fresh_session, q.is_leader_task, q.wait_reason, q.initiator_user_id, q.handoff_note, q.prepare_lease_expires_at, q.squad_id, q.runtime_mcp_overlay, q.escalation_for_task_id, q.fire_at, q.originator_user_id, q.runtime_connected_apps, q.coalesced_comment_ids, q.delivered_comment_ids, q.chat_input_task_id, q.chat_finalize_deferred_at, q.originator_source, q.delegated_from_task_id, q.retry_of_task_id, q.rerun_of_task_id, q.rule_version_id, q.trigger_evidence_kind, q.trigger_evidence_ref_id, q.accountable_user_id, q.session_rollout_missing, q.retired_session_id, q.quick_actions_disabled, q.regenerate_quick_actions_for, q.runtime_binding_mode, q.runtime_requirements, q.placement_workspace_id, q.runtime_requester_user_id, q.session_affinity_state, q.session_affinity_runtime_id, q.explicit_fresh_session
+`
+
+type CancelInvalidStalePoolTaskForClaimRevalidationParams struct {
+	ExpectedTaskID                   pgtype.UUID        `json:"expected_task_id"`
+	AgentID                          pgtype.UUID        `json:"agent_id"`
+	RuntimeID                        pgtype.UUID        `json:"runtime_id"`
+	ExpectedDispatchedAt             pgtype.Timestamptz `json:"expected_dispatched_at"`
+	ClaimRecoverySecs                float64            `json:"claim_recovery_secs"`
+	ExpectedChatSessionID            pgtype.UUID        `json:"expected_chat_session_id"`
+	ExpectedRuntimeBindingMode       string             `json:"expected_runtime_binding_mode"`
+	ExpectedPlacementWorkspaceID     pgtype.UUID        `json:"expected_placement_workspace_id"`
+	ExpectedRuntimeRequesterUserID   pgtype.UUID        `json:"expected_runtime_requester_user_id"`
+	ExpectedRuntimeRequirements      []byte             `json:"expected_runtime_requirements"`
+	ExpectedSessionAffinityState     string             `json:"expected_session_affinity_state"`
+	ExpectedSessionAffinityRuntimeID pgtype.UUID        `json:"expected_session_affinity_runtime_id"`
+	ExpectedExplicitFreshSession     bool               `json:"expected_explicit_fresh_session"`
+}
+
+// An invalid stale Pool delivery is terminally cancelled under the same locks;
+// it is never rewritten to waiting_runtime and never re-delivered. Service
+// code performs the established cancellation lifecycle after commit.
+func (q *Queries) CancelInvalidStalePoolTaskForClaimRevalidation(ctx context.Context, arg CancelInvalidStalePoolTaskForClaimRevalidationParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, cancelInvalidStalePoolTaskForClaimRevalidation,
+		arg.ExpectedTaskID,
+		arg.AgentID,
+		arg.RuntimeID,
+		arg.ExpectedDispatchedAt,
+		arg.ClaimRecoverySecs,
+		arg.ExpectedChatSessionID,
+		arg.ExpectedRuntimeBindingMode,
+		arg.ExpectedPlacementWorkspaceID,
+		arg.ExpectedRuntimeRequesterUserID,
+		arg.ExpectedRuntimeRequirements,
+		arg.ExpectedSessionAffinityState,
+		arg.ExpectedSessionAffinityRuntimeID,
+		arg.ExpectedExplicitFreshSession,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
 const cancelQueuedAgentTask = `-- name: CancelQueuedAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
@@ -1315,6 +1439,152 @@ type ClaimAgentTaskParams struct {
 // whose completion lookup would race over "most recent issue by this agent".
 func (q *Queries) ClaimAgentTask(ctx context.Context, arg ClaimAgentTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, claimAgentTask, arg.AgentID, arg.PrepareLeaseSecs)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
+const claimAgentTaskForRuntime = `-- name: ClaimAgentTaskForRuntime :one
+WITH global_head AS (
+  SELECT q.id
+  FROM agent_task_queue AS q
+  WHERE q.agent_id = $3::uuid
+    AND q.status = 'queued'
+    AND q.session_affinity_state <> 'unresolved'
+    AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue AS active
+        WHERE active.agent_id = q.agent_id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+          AND (
+            (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+            OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+            OR (
+              q.issue_id IS NULL
+              AND q.chat_session_id IS NULL
+              AND q.autopilot_run_id IS NULL
+              AND active.issue_id IS NULL
+              AND active.chat_session_id IS NULL
+              AND active.autopilot_run_id IS NULL
+            )
+          )
+    )
+  ORDER BY q.priority DESC, q.created_at ASC, q.id ASC
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED
+)
+UPDATE agent_task_queue AS q
+SET status = 'dispatched',
+    dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => $1::double precision)
+FROM global_head AS head
+WHERE q.id = head.id
+  AND q.id = $2::uuid
+  AND q.agent_id = $3::uuid
+  AND q.runtime_id = $4::uuid
+  AND q.status = 'queued'
+  AND q.chat_session_id IS NOT DISTINCT FROM $5::uuid
+  AND q.runtime_binding_mode = $6::text
+  AND q.placement_workspace_id IS NOT DISTINCT FROM $7::uuid
+  AND q.runtime_requester_user_id IS NOT DISTINCT FROM $8::uuid
+  AND q.runtime_requirements = $9::jsonb
+  AND q.session_affinity_state = $10::text
+  AND q.session_affinity_runtime_id IS NOT DISTINCT FROM $11::uuid
+  AND q.explicit_fresh_session = $12::boolean
+RETURNING q.id, q.agent_id, q.issue_id, q.status, q.priority, q.dispatched_at, q.started_at, q.completed_at, q.result, q.error, q.created_at, q.context, q.runtime_id, q.session_id, q.work_dir, q.trigger_comment_id, q.chat_session_id, q.autopilot_run_id, q.attempt, q.max_attempts, q.parent_task_id, q.failure_reason, q.trigger_summary, q.force_fresh_session, q.is_leader_task, q.wait_reason, q.initiator_user_id, q.handoff_note, q.prepare_lease_expires_at, q.squad_id, q.runtime_mcp_overlay, q.escalation_for_task_id, q.fire_at, q.originator_user_id, q.runtime_connected_apps, q.coalesced_comment_ids, q.delivered_comment_ids, q.chat_input_task_id, q.chat_finalize_deferred_at, q.originator_source, q.delegated_from_task_id, q.retry_of_task_id, q.rerun_of_task_id, q.rule_version_id, q.trigger_evidence_kind, q.trigger_evidence_ref_id, q.accountable_user_id, q.session_rollout_missing, q.retired_session_id, q.quick_actions_disabled, q.regenerate_quick_actions_for, q.runtime_binding_mode, q.runtime_requirements, q.placement_workspace_id, q.runtime_requester_user_id, q.session_affinity_state, q.session_affinity_runtime_id, q.explicit_fresh_session
+`
+
+type ClaimAgentTaskForRuntimeParams struct {
+	PrepareLeaseSecs                 float64     `json:"prepare_lease_secs"`
+	ExpectedTaskID                   pgtype.UUID `json:"expected_task_id"`
+	AgentID                          pgtype.UUID `json:"agent_id"`
+	RuntimeID                        pgtype.UUID `json:"runtime_id"`
+	ExpectedChatSessionID            pgtype.UUID `json:"expected_chat_session_id"`
+	ExpectedRuntimeBindingMode       string      `json:"expected_runtime_binding_mode"`
+	ExpectedPlacementWorkspaceID     pgtype.UUID `json:"expected_placement_workspace_id"`
+	ExpectedRuntimeRequesterUserID   pgtype.UUID `json:"expected_runtime_requester_user_id"`
+	ExpectedRuntimeRequirements      []byte      `json:"expected_runtime_requirements"`
+	ExpectedSessionAffinityState     string      `json:"expected_session_affinity_state"`
+	ExpectedSessionAffinityRuntimeID pgtype.UUID `json:"expected_session_affinity_runtime_id"`
+	ExpectedExplicitFreshSession     bool        `json:"expected_explicit_fresh_session"`
+}
+
+// Lock/CAS the exact global eligible Agent head. There is deliberately no
+// Runtime predicate in global_head: a poll for the wrong Runtime returns no
+// row instead of skipping the head and dispatching a lower task.
+func (q *Queries) ClaimAgentTaskForRuntime(ctx context.Context, arg ClaimAgentTaskForRuntimeParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, claimAgentTaskForRuntime,
+		arg.PrepareLeaseSecs,
+		arg.ExpectedTaskID,
+		arg.AgentID,
+		arg.RuntimeID,
+		arg.ExpectedChatSessionID,
+		arg.ExpectedRuntimeBindingMode,
+		arg.ExpectedPlacementWorkspaceID,
+		arg.ExpectedRuntimeRequesterUserID,
+		arg.ExpectedRuntimeRequirements,
+		arg.ExpectedSessionAffinityState,
+		arg.ExpectedSessionAffinityRuntimeID,
+		arg.ExpectedExplicitFreshSession,
+	)
 	var i AgentTaskQueue
 	err := row.Scan(
 		&i.ID,
@@ -1744,6 +2014,29 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 		&i.ExplicitFreshSession,
 	)
 	return i, err
+}
+
+const countOtherAgentCapacityForStaleReclaim = `-- name: CountOtherAgentCapacityForStaleReclaim :one
+SELECT count(*)::bigint
+FROM agent_task_queue
+WHERE agent_id = $1::uuid
+  AND id <> $2::uuid
+  AND status IN ('dispatched', 'running', 'waiting_local_directory')
+`
+
+type CountOtherAgentCapacityForStaleReclaimParams struct {
+	AgentID        pgtype.UUID `json:"agent_id"`
+	ExcludedTaskID pgtype.UUID `json:"excluded_task_id"`
+}
+
+// The stale row already bears capacity. Excluding it lets max=1 redeliver its
+// own lost response while still refusing when another active Task consumes
+// the Agent's slot.
+func (q *Queries) CountOtherAgentCapacityForStaleReclaim(ctx context.Context, arg CountOtherAgentCapacityForStaleReclaimParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOtherAgentCapacityForStaleReclaim, arg.AgentID, arg.ExcludedTaskID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const countRunningTasks = `-- name: CountRunningTasks :one
@@ -3628,6 +3921,206 @@ func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskI
 	return i, err
 }
 
+const getGlobalEligibleAgentHeadSnapshot = `-- name: GetGlobalEligibleAgentHeadSnapshot :one
+SELECT q.id, q.agent_id, q.issue_id, q.status, q.priority, q.dispatched_at, q.started_at, q.completed_at, q.result, q.error, q.created_at, q.context, q.runtime_id, q.session_id, q.work_dir, q.trigger_comment_id, q.chat_session_id, q.autopilot_run_id, q.attempt, q.max_attempts, q.parent_task_id, q.failure_reason, q.trigger_summary, q.force_fresh_session, q.is_leader_task, q.wait_reason, q.initiator_user_id, q.handoff_note, q.prepare_lease_expires_at, q.squad_id, q.runtime_mcp_overlay, q.escalation_for_task_id, q.fire_at, q.originator_user_id, q.runtime_connected_apps, q.coalesced_comment_ids, q.delivered_comment_ids, q.chat_input_task_id, q.chat_finalize_deferred_at, q.originator_source, q.delegated_from_task_id, q.retry_of_task_id, q.rerun_of_task_id, q.rule_version_id, q.trigger_evidence_kind, q.trigger_evidence_ref_id, q.accountable_user_id, q.session_rollout_missing, q.retired_session_id, q.quick_actions_disabled, q.regenerate_quick_actions_for, q.runtime_binding_mode, q.runtime_requirements, q.placement_workspace_id, q.runtime_requester_user_id, q.session_affinity_state, q.session_affinity_runtime_id, q.explicit_fresh_session FROM agent_task_queue AS q
+WHERE q.agent_id = $1::uuid
+  AND q.status = 'queued'
+  AND q.session_affinity_state <> 'unresolved'
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS active
+      WHERE active.agent_id = q.agent_id
+        AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+        AND (
+          (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+          OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+          OR (
+            q.issue_id IS NULL
+            AND q.chat_session_id IS NULL
+            AND q.autopilot_run_id IS NULL
+            AND active.issue_id IS NULL
+            AND active.chat_session_id IS NULL
+            AND active.autopilot_run_id IS NULL
+          )
+        )
+  )
+ORDER BY q.priority DESC, q.created_at ASC, q.id ASC
+LIMIT 1
+`
+
+// Correctness snapshot for Runtime-targeted claim. Eligibility and ordering
+// intentionally match ClaimAgentTask. Runtime is not a predicate here: the
+// Agent's one global head is selected first and the target Runtime is checked
+// only by ClaimAgentTaskForRuntime's outer CAS.
+func (q *Queries) GetGlobalEligibleAgentHeadSnapshot(ctx context.Context, agentID pgtype.UUID) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, getGlobalEligibleAgentHeadSnapshot, agentID)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
+const getGlobalEligibleStaleAgentHeadSnapshot = `-- name: GetGlobalEligibleStaleAgentHeadSnapshot :one
+SELECT q.id, q.agent_id, q.issue_id, q.status, q.priority, q.dispatched_at, q.started_at, q.completed_at, q.result, q.error, q.created_at, q.context, q.runtime_id, q.session_id, q.work_dir, q.trigger_comment_id, q.chat_session_id, q.autopilot_run_id, q.attempt, q.max_attempts, q.parent_task_id, q.failure_reason, q.trigger_summary, q.force_fresh_session, q.is_leader_task, q.wait_reason, q.initiator_user_id, q.handoff_note, q.prepare_lease_expires_at, q.squad_id, q.runtime_mcp_overlay, q.escalation_for_task_id, q.fire_at, q.originator_user_id, q.runtime_connected_apps, q.coalesced_comment_ids, q.delivered_comment_ids, q.chat_input_task_id, q.chat_finalize_deferred_at, q.originator_source, q.delegated_from_task_id, q.retry_of_task_id, q.rerun_of_task_id, q.rule_version_id, q.trigger_evidence_kind, q.trigger_evidence_ref_id, q.accountable_user_id, q.session_rollout_missing, q.retired_session_id, q.quick_actions_disabled, q.regenerate_quick_actions_for, q.runtime_binding_mode, q.runtime_requirements, q.placement_workspace_id, q.runtime_requester_user_id, q.session_affinity_state, q.session_affinity_runtime_id, q.explicit_fresh_session FROM agent_task_queue AS q
+WHERE q.agent_id = $1::uuid
+  AND q.status = 'dispatched'
+  AND q.started_at IS NULL
+  AND q.session_affinity_state <> 'unresolved'
+  AND q.dispatched_at < now() - make_interval(secs => $2::double precision)
+  AND (q.prepare_lease_expires_at IS NULL OR q.prepare_lease_expires_at < now())
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS active
+      WHERE active.agent_id = q.agent_id
+        AND active.id <> q.id
+        AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+        AND (
+          (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+          OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+          OR (
+            q.issue_id IS NULL
+            AND q.chat_session_id IS NULL
+            AND q.autopilot_run_id IS NULL
+            AND active.issue_id IS NULL
+            AND active.chat_session_id IS NULL
+            AND active.autopilot_run_id IS NULL
+          )
+        )
+  )
+ORDER BY q.priority DESC, q.dispatched_at ASC, q.id ASC
+LIMIT 1
+`
+
+type GetGlobalEligibleStaleAgentHeadSnapshotParams struct {
+	AgentID           pgtype.UUID `json:"agent_id"`
+	ClaimRecoverySecs float64     `json:"claim_recovery_secs"`
+}
+
+// Stale delivery is ordered globally per Agent before any Runtime CAS. A
+// daemon polling the wrong Runtime must not skip this head and redeliver a
+// lower stale task for the same Agent.
+func (q *Queries) GetGlobalEligibleStaleAgentHeadSnapshot(ctx context.Context, arg GetGlobalEligibleStaleAgentHeadSnapshotParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, getGlobalEligibleStaleAgentHeadSnapshot, arg.AgentID, arg.ClaimRecoverySecs)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
 const getLastTaskSession = `-- name: GetLastTaskSession :one
 WITH retired_sessions AS (
     SELECT DISTINCT r.retired_session_id AS session_id
@@ -4144,6 +4637,43 @@ func (q *Queries) HasPendingTaskForIssueAndAgentExcludingTriggerComment(ctx cont
 	var has_pending bool
 	err := row.Scan(&has_pending)
 	return has_pending, err
+}
+
+const isPoolChatClaimHead = `-- name: IsPoolChatClaimHead :one
+SELECT EXISTS (
+  SELECT 1 FROM agent_task_queue AS task
+  WHERE task.id = $1::uuid
+    AND task.chat_session_id = $2::uuid
+    AND task.runtime_binding_mode = 'pool'
+    AND task.status = $3::text
+    AND task.session_affinity_state IN ('none', 'pinned')
+    AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS other
+      WHERE other.chat_session_id = task.chat_session_id
+        AND other.id <> task.id
+        AND other.status IN (
+          'waiting_runtime', 'queued', 'deferred', 'dispatched', 'running',
+          'waiting_local_directory'
+        )
+        AND other.session_affinity_state <> 'unresolved'
+    )
+) AS is_head
+`
+
+type IsPoolChatClaimHeadParams struct {
+	TaskID         pgtype.UUID `json:"task_id"`
+	ChatSessionID  pgtype.UUID `json:"chat_session_id"`
+	ExpectedStatus string      `json:"expected_status"`
+}
+
+// Task 11 will replace this conservative claim-time guard with the shared
+// canonical selector. Until then a Pool Chat task is claimable/reclaimable
+// only when no other resolved nonterminal row exists in the session.
+func (q *Queries) IsPoolChatClaimHead(ctx context.Context, arg IsPoolChatClaimHeadParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isPoolChatClaimHead, arg.TaskID, arg.ChatSessionID, arg.ExpectedStatus)
+	var is_head bool
+	err := row.Scan(&is_head)
+	return is_head, err
 }
 
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
@@ -4746,6 +5276,136 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 	return items, nil
 }
 
+const listFreshClaimAttemptsByRuntime = `-- name: ListFreshClaimAttemptsByRuntime :many
+WITH candidate_agents AS (
+  SELECT DISTINCT candidate.agent_id
+  FROM agent_task_queue AS candidate
+  WHERE candidate.runtime_id = $1::uuid
+    AND candidate.status = 'queued'
+), global_heads AS (
+  SELECT head.id, head.agent_id, head.runtime_id, head.priority, head.created_at
+  FROM candidate_agents AS candidate
+  CROSS JOIN LATERAL (
+    SELECT q.id, q.agent_id, q.runtime_id, q.priority, q.created_at
+    FROM agent_task_queue AS q
+    WHERE q.agent_id = candidate.agent_id
+      AND q.status = 'queued'
+      AND q.session_affinity_state <> 'unresolved'
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue AS active
+        WHERE active.agent_id = q.agent_id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+          AND (
+            (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+            OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+            OR (
+              q.issue_id IS NULL AND q.chat_session_id IS NULL AND q.autopilot_run_id IS NULL
+              AND active.issue_id IS NULL AND active.chat_session_id IS NULL AND active.autopilot_run_id IS NULL
+            )
+          )
+      )
+    ORDER BY q.priority DESC, q.created_at ASC, q.id ASC
+    LIMIT 1
+  ) AS head
+)
+SELECT agent_id, runtime_id FROM global_heads
+WHERE runtime_id = $1::uuid
+ORDER BY priority DESC, created_at ASC, id ASC
+`
+
+type ListFreshClaimAttemptsByRuntimeRow struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+// The raw preview above remains the EmptyClaim existence check. This query
+// resolves one actual global eligible head per candidate Agent in one round
+// trip, then applies the Runtime filter outside each Agent-global selector.
+func (q *Queries) ListFreshClaimAttemptsByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]ListFreshClaimAttemptsByRuntimeRow, error) {
+	rows, err := q.db.Query(ctx, listFreshClaimAttemptsByRuntime, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFreshClaimAttemptsByRuntimeRow{}
+	for rows.Next() {
+		var i ListFreshClaimAttemptsByRuntimeRow
+		if err := rows.Scan(&i.AgentID, &i.RuntimeID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFreshClaimAttemptsByRuntimes = `-- name: ListFreshClaimAttemptsByRuntimes :many
+WITH candidate_agents AS (
+  SELECT DISTINCT candidate.agent_id
+  FROM agent_task_queue AS candidate
+  WHERE candidate.runtime_id = ANY($1::uuid[])
+    AND candidate.status = 'queued'
+), global_heads AS (
+  SELECT head.id, head.agent_id, head.runtime_id, head.priority, head.created_at
+  FROM candidate_agents AS candidate
+  CROSS JOIN LATERAL (
+    SELECT q.id, q.agent_id, q.runtime_id, q.priority, q.created_at
+    FROM agent_task_queue AS q
+    WHERE q.agent_id = candidate.agent_id
+      AND q.status = 'queued'
+      AND q.session_affinity_state <> 'unresolved'
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue AS active
+        WHERE active.agent_id = q.agent_id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+          AND (
+            (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+            OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+            OR (
+              q.issue_id IS NULL AND q.chat_session_id IS NULL AND q.autopilot_run_id IS NULL
+              AND active.issue_id IS NULL AND active.chat_session_id IS NULL AND active.autopilot_run_id IS NULL
+            )
+          )
+      )
+    ORDER BY q.priority DESC, q.created_at ASC, q.id ASC
+    LIMIT 1
+  ) AS head
+)
+SELECT agent_id, runtime_id FROM global_heads
+WHERE runtime_id = ANY($1::uuid[])
+ORDER BY priority DESC, created_at ASC, id ASC
+`
+
+type ListFreshClaimAttemptsByRuntimesRow struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+// Machine-level form of ListFreshClaimAttemptsByRuntime. It returns at most
+// one actual global eligible head per Agent, already ordered by the real head
+// rather than by a blocked raw Runtime candidate.
+func (q *Queries) ListFreshClaimAttemptsByRuntimes(ctx context.Context, runtimeIds []pgtype.UUID) ([]ListFreshClaimAttemptsByRuntimesRow, error) {
+	rows, err := q.db.Query(ctx, listFreshClaimAttemptsByRuntimes, runtimeIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFreshClaimAttemptsByRuntimesRow{}
+	for rows.Next() {
+		var i ListFreshClaimAttemptsByRuntimesRow
+		if err := rows.Scan(&i.AgentID, &i.RuntimeID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingTasksByRuntime = `-- name: ListPendingTasksByRuntime :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session FROM agent_task_queue
 WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
@@ -4922,7 +5582,7 @@ func (q *Queries) ListPoolTasksByIDs(ctx context.Context, taskIds []pgtype.UUID)
 const listQueuedClaimCandidatesByRuntime = `-- name: ListQueuedClaimCandidatesByRuntime :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
-ORDER BY priority DESC, created_at ASC
+ORDER BY priority DESC, created_at ASC, id ASC
 `
 
 // Returns rows the runtime can attempt to claim. Status is restricted to
@@ -5015,7 +5675,7 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtim
 const listQueuedClaimCandidatesByRuntimes = `-- name: ListQueuedClaimCandidatesByRuntimes :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session FROM agent_task_queue
 WHERE runtime_id = ANY($1::uuid[]) AND status = 'queued'
-ORDER BY priority DESC, created_at ASC
+ORDER BY priority DESC, created_at ASC, id ASC
 `
 
 // Batch variant of ListQueuedClaimCandidatesByRuntime (MUL-4257): returns
@@ -5133,6 +5793,158 @@ func (q *Queries) ListRuntimePoolSweepWorkspaces(ctx context.Context, arg ListRu
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStaleClaimCandidatesByRuntime = `-- name: ListStaleClaimCandidatesByRuntime :many
+WITH candidate_agents AS (
+  SELECT DISTINCT candidate.agent_id
+  FROM agent_task_queue AS candidate
+  WHERE candidate.runtime_id = $1::uuid
+    AND candidate.status = 'dispatched'
+    AND candidate.started_at IS NULL
+    AND candidate.dispatched_at < now() - make_interval(secs => $2::double precision)
+    AND (candidate.prepare_lease_expires_at IS NULL OR candidate.prepare_lease_expires_at < now())
+), global_heads AS (
+  SELECT head.id, head.agent_id, head.issue_id, head.status, head.priority, head.dispatched_at, head.started_at, head.completed_at, head.result, head.error, head.created_at, head.context, head.runtime_id, head.session_id, head.work_dir, head.trigger_comment_id, head.chat_session_id, head.autopilot_run_id, head.attempt, head.max_attempts, head.parent_task_id, head.failure_reason, head.trigger_summary, head.force_fresh_session, head.is_leader_task, head.wait_reason, head.initiator_user_id, head.handoff_note, head.prepare_lease_expires_at, head.squad_id, head.runtime_mcp_overlay, head.escalation_for_task_id, head.fire_at, head.originator_user_id, head.runtime_connected_apps, head.coalesced_comment_ids, head.delivered_comment_ids, head.chat_input_task_id, head.chat_finalize_deferred_at, head.originator_source, head.delegated_from_task_id, head.retry_of_task_id, head.rerun_of_task_id, head.rule_version_id, head.trigger_evidence_kind, head.trigger_evidence_ref_id, head.accountable_user_id, head.session_rollout_missing, head.retired_session_id, head.quick_actions_disabled, head.regenerate_quick_actions_for, head.runtime_binding_mode, head.runtime_requirements, head.placement_workspace_id, head.runtime_requester_user_id, head.session_affinity_state, head.session_affinity_runtime_id, head.explicit_fresh_session
+  FROM candidate_agents AS candidate
+  CROSS JOIN LATERAL (
+    SELECT q.id, q.agent_id, q.issue_id, q.status, q.priority, q.dispatched_at, q.started_at, q.completed_at, q.result, q.error, q.created_at, q.context, q.runtime_id, q.session_id, q.work_dir, q.trigger_comment_id, q.chat_session_id, q.autopilot_run_id, q.attempt, q.max_attempts, q.parent_task_id, q.failure_reason, q.trigger_summary, q.force_fresh_session, q.is_leader_task, q.wait_reason, q.initiator_user_id, q.handoff_note, q.prepare_lease_expires_at, q.squad_id, q.runtime_mcp_overlay, q.escalation_for_task_id, q.fire_at, q.originator_user_id, q.runtime_connected_apps, q.coalesced_comment_ids, q.delivered_comment_ids, q.chat_input_task_id, q.chat_finalize_deferred_at, q.originator_source, q.delegated_from_task_id, q.retry_of_task_id, q.rerun_of_task_id, q.rule_version_id, q.trigger_evidence_kind, q.trigger_evidence_ref_id, q.accountable_user_id, q.session_rollout_missing, q.retired_session_id, q.quick_actions_disabled, q.regenerate_quick_actions_for, q.runtime_binding_mode, q.runtime_requirements, q.placement_workspace_id, q.runtime_requester_user_id, q.session_affinity_state, q.session_affinity_runtime_id, q.explicit_fresh_session
+    FROM agent_task_queue AS q
+    WHERE q.agent_id = candidate.agent_id
+      AND q.status = 'dispatched'
+      AND q.started_at IS NULL
+      AND q.session_affinity_state <> 'unresolved'
+      AND q.dispatched_at < now() - make_interval(secs => $2::double precision)
+      AND (q.prepare_lease_expires_at IS NULL OR q.prepare_lease_expires_at < now())
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue AS active
+        WHERE active.agent_id = q.agent_id
+          AND active.id <> q.id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+          AND (
+            (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+            OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+            OR (
+              q.issue_id IS NULL AND q.chat_session_id IS NULL AND q.autopilot_run_id IS NULL
+              AND active.issue_id IS NULL AND active.chat_session_id IS NULL AND active.autopilot_run_id IS NULL
+            )
+          )
+      )
+    ORDER BY q.priority DESC, q.dispatched_at ASC, q.id ASC
+    LIMIT 1
+  ) AS head
+)
+SELECT agent_id, runtime_id FROM global_heads
+WHERE runtime_id = $1::uuid
+ORDER BY priority DESC, dispatched_at ASC, id ASC
+`
+
+type ListStaleClaimCandidatesByRuntimeParams struct {
+	RuntimeID         pgtype.UUID `json:"runtime_id"`
+	ClaimRecoverySecs float64     `json:"claim_recovery_secs"`
+}
+
+type ListStaleClaimCandidatesByRuntimeRow struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+// Preview only: Runtime filtering discovers Agent attempts. The transactional
+// reclaim helper reselects the Agent's global stale head without this filter.
+func (q *Queries) ListStaleClaimCandidatesByRuntime(ctx context.Context, arg ListStaleClaimCandidatesByRuntimeParams) ([]ListStaleClaimCandidatesByRuntimeRow, error) {
+	rows, err := q.db.Query(ctx, listStaleClaimCandidatesByRuntime, arg.RuntimeID, arg.ClaimRecoverySecs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStaleClaimCandidatesByRuntimeRow{}
+	for rows.Next() {
+		var i ListStaleClaimCandidatesByRuntimeRow
+		if err := rows.Scan(&i.AgentID, &i.RuntimeID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStaleClaimCandidatesByRuntimes = `-- name: ListStaleClaimCandidatesByRuntimes :many
+WITH candidate_agents AS (
+  SELECT DISTINCT candidate.agent_id
+  FROM agent_task_queue AS candidate
+  WHERE candidate.runtime_id = ANY($1::uuid[])
+    AND candidate.status = 'dispatched'
+    AND candidate.started_at IS NULL
+    AND candidate.dispatched_at < now() - make_interval(secs => $2::double precision)
+    AND (candidate.prepare_lease_expires_at IS NULL OR candidate.prepare_lease_expires_at < now())
+), global_heads AS (
+  SELECT head.id, head.agent_id, head.issue_id, head.status, head.priority, head.dispatched_at, head.started_at, head.completed_at, head.result, head.error, head.created_at, head.context, head.runtime_id, head.session_id, head.work_dir, head.trigger_comment_id, head.chat_session_id, head.autopilot_run_id, head.attempt, head.max_attempts, head.parent_task_id, head.failure_reason, head.trigger_summary, head.force_fresh_session, head.is_leader_task, head.wait_reason, head.initiator_user_id, head.handoff_note, head.prepare_lease_expires_at, head.squad_id, head.runtime_mcp_overlay, head.escalation_for_task_id, head.fire_at, head.originator_user_id, head.runtime_connected_apps, head.coalesced_comment_ids, head.delivered_comment_ids, head.chat_input_task_id, head.chat_finalize_deferred_at, head.originator_source, head.delegated_from_task_id, head.retry_of_task_id, head.rerun_of_task_id, head.rule_version_id, head.trigger_evidence_kind, head.trigger_evidence_ref_id, head.accountable_user_id, head.session_rollout_missing, head.retired_session_id, head.quick_actions_disabled, head.regenerate_quick_actions_for, head.runtime_binding_mode, head.runtime_requirements, head.placement_workspace_id, head.runtime_requester_user_id, head.session_affinity_state, head.session_affinity_runtime_id, head.explicit_fresh_session
+  FROM candidate_agents AS candidate
+  CROSS JOIN LATERAL (
+    SELECT q.id, q.agent_id, q.issue_id, q.status, q.priority, q.dispatched_at, q.started_at, q.completed_at, q.result, q.error, q.created_at, q.context, q.runtime_id, q.session_id, q.work_dir, q.trigger_comment_id, q.chat_session_id, q.autopilot_run_id, q.attempt, q.max_attempts, q.parent_task_id, q.failure_reason, q.trigger_summary, q.force_fresh_session, q.is_leader_task, q.wait_reason, q.initiator_user_id, q.handoff_note, q.prepare_lease_expires_at, q.squad_id, q.runtime_mcp_overlay, q.escalation_for_task_id, q.fire_at, q.originator_user_id, q.runtime_connected_apps, q.coalesced_comment_ids, q.delivered_comment_ids, q.chat_input_task_id, q.chat_finalize_deferred_at, q.originator_source, q.delegated_from_task_id, q.retry_of_task_id, q.rerun_of_task_id, q.rule_version_id, q.trigger_evidence_kind, q.trigger_evidence_ref_id, q.accountable_user_id, q.session_rollout_missing, q.retired_session_id, q.quick_actions_disabled, q.regenerate_quick_actions_for, q.runtime_binding_mode, q.runtime_requirements, q.placement_workspace_id, q.runtime_requester_user_id, q.session_affinity_state, q.session_affinity_runtime_id, q.explicit_fresh_session
+    FROM agent_task_queue AS q
+    WHERE q.agent_id = candidate.agent_id
+      AND q.status = 'dispatched'
+      AND q.started_at IS NULL
+      AND q.session_affinity_state <> 'unresolved'
+      AND q.dispatched_at < now() - make_interval(secs => $2::double precision)
+      AND (q.prepare_lease_expires_at IS NULL OR q.prepare_lease_expires_at < now())
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue AS active
+        WHERE active.agent_id = q.agent_id
+          AND active.id <> q.id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+          AND (
+            (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+            OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+            OR (
+              q.issue_id IS NULL AND q.chat_session_id IS NULL AND q.autopilot_run_id IS NULL
+              AND active.issue_id IS NULL AND active.chat_session_id IS NULL AND active.autopilot_run_id IS NULL
+            )
+          )
+      )
+    ORDER BY q.priority DESC, q.dispatched_at ASC, q.id ASC
+    LIMIT 1
+  ) AS head
+)
+SELECT agent_id, runtime_id FROM global_heads
+WHERE runtime_id = ANY($1::uuid[])
+ORDER BY priority DESC, dispatched_at ASC, id ASC
+`
+
+type ListStaleClaimCandidatesByRuntimesParams struct {
+	RuntimeIds        []pgtype.UUID `json:"runtime_ids"`
+	ClaimRecoverySecs float64       `json:"claim_recovery_secs"`
+}
+
+type ListStaleClaimCandidatesByRuntimesRow struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+// Batch preview only. Ordering is deterministic before the service dedupes by
+// Agent across both stale and fresh attempts.
+func (q *Queries) ListStaleClaimCandidatesByRuntimes(ctx context.Context, arg ListStaleClaimCandidatesByRuntimesParams) ([]ListStaleClaimCandidatesByRuntimesRow, error) {
+	rows, err := q.db.Query(ctx, listStaleClaimCandidatesByRuntimes, arg.RuntimeIds, arg.ClaimRecoverySecs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStaleClaimCandidatesByRuntimesRow{}
+	for rows.Next() {
+		var i ListStaleClaimCandidatesByRuntimesRow
+		if err := rows.Scan(&i.AgentID, &i.RuntimeID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -5786,6 +6598,36 @@ func (q *Queries) LockPoolAgentForPlacement(ctx context.Context, agentID pgtype.
 	return i, err
 }
 
+const lockPoolChatSessionForClaim = `-- name: LockPoolChatSessionForClaim :one
+SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id FROM chat_session
+WHERE id = $1::uuid
+FOR UPDATE
+`
+
+func (q *Queries) LockPoolChatSessionForClaim(ctx context.Context, chatSessionID pgtype.UUID) (ChatSession, error) {
+	row := q.db.QueryRow(ctx, lockPoolChatSessionForClaim, chatSessionID)
+	var i ChatSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.CreatorID,
+		&i.Title,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnreadSince,
+		&i.RuntimeID,
+		&i.LastReadAt,
+		&i.IsAgentIntro,
+		&i.PinnedAt,
+		&i.ProjectID,
+	)
+	return i, err
+}
+
 const lockPoolPlacementMember = `-- name: LockPoolPlacementMember :one
 SELECT id, workspace_id, user_id, role, created_at FROM member
 WHERE workspace_id = $1::uuid
@@ -5807,6 +6649,38 @@ func (q *Queries) LockPoolPlacementMember(ctx context.Context, arg LockPoolPlace
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const lockPoolRuntimeForClaim = `-- name: LockPoolRuntimeForClaim :one
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, capabilities FROM agent_runtime
+WHERE id = $1::uuid
+FOR UPDATE
+`
+
+func (q *Queries) LockPoolRuntimeForClaim(ctx context.Context, runtimeID pgtype.UUID) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, lockPoolRuntimeForClaim, runtimeID)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+		&i.CustomName,
+		&i.Capabilities,
 	)
 	return i, err
 }
@@ -6542,6 +7416,160 @@ func (q *Queries) RebindAgentBuilderRuntime(ctx context.Context, arg RebindAgent
 	return i, err
 }
 
+const reclaimStaleDispatchedTaskForAgentRuntime = `-- name: ReclaimStaleDispatchedTaskForAgentRuntime :one
+WITH global_stale_head AS (
+  SELECT q.id
+  FROM agent_task_queue AS q
+  WHERE q.agent_id = $3::uuid
+    AND q.status = 'dispatched'
+    AND q.started_at IS NULL
+    AND q.session_affinity_state <> 'unresolved'
+    AND q.dispatched_at < now() - make_interval(secs => $6::double precision)
+    AND (q.prepare_lease_expires_at IS NULL OR q.prepare_lease_expires_at < now())
+    AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue AS active
+        WHERE active.agent_id = q.agent_id
+          AND active.id <> q.id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+          AND (
+            (q.issue_id IS NOT NULL AND active.issue_id = q.issue_id)
+            OR (q.chat_session_id IS NOT NULL AND active.chat_session_id = q.chat_session_id)
+            OR (
+              q.issue_id IS NULL
+              AND q.chat_session_id IS NULL
+              AND q.autopilot_run_id IS NULL
+              AND active.issue_id IS NULL
+              AND active.chat_session_id IS NULL
+              AND active.autopilot_run_id IS NULL
+            )
+          )
+    )
+  ORDER BY q.priority DESC, q.dispatched_at ASC, q.id ASC
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED
+)
+UPDATE agent_task_queue AS q
+SET dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => $1::double precision)
+FROM global_stale_head AS head
+WHERE q.id = head.id
+  AND q.id = $2::uuid
+  AND q.agent_id = $3::uuid
+  AND q.runtime_id = $4::uuid
+  AND q.status = 'dispatched'
+  AND q.started_at IS NULL
+  AND q.dispatched_at IS NOT DISTINCT FROM $5::timestamptz
+  AND q.dispatched_at < now() - make_interval(secs => $6::double precision)
+  AND (q.prepare_lease_expires_at IS NULL OR q.prepare_lease_expires_at < now())
+  AND q.chat_session_id IS NOT DISTINCT FROM $7::uuid
+  AND q.runtime_binding_mode = $8::text
+  AND q.placement_workspace_id IS NOT DISTINCT FROM $9::uuid
+  AND q.runtime_requester_user_id IS NOT DISTINCT FROM $10::uuid
+  AND q.runtime_requirements = $11::jsonb
+  AND q.session_affinity_state = $12::text
+  AND q.session_affinity_runtime_id IS NOT DISTINCT FROM $13::uuid
+  AND q.explicit_fresh_session = $14::boolean
+RETURNING q.id, q.agent_id, q.issue_id, q.status, q.priority, q.dispatched_at, q.started_at, q.completed_at, q.result, q.error, q.created_at, q.context, q.runtime_id, q.session_id, q.work_dir, q.trigger_comment_id, q.chat_session_id, q.autopilot_run_id, q.attempt, q.max_attempts, q.parent_task_id, q.failure_reason, q.trigger_summary, q.force_fresh_session, q.is_leader_task, q.wait_reason, q.initiator_user_id, q.handoff_note, q.prepare_lease_expires_at, q.squad_id, q.runtime_mcp_overlay, q.escalation_for_task_id, q.fire_at, q.originator_user_id, q.runtime_connected_apps, q.coalesced_comment_ids, q.delivered_comment_ids, q.chat_input_task_id, q.chat_finalize_deferred_at, q.originator_source, q.delegated_from_task_id, q.retry_of_task_id, q.rerun_of_task_id, q.rule_version_id, q.trigger_evidence_kind, q.trigger_evidence_ref_id, q.accountable_user_id, q.session_rollout_missing, q.retired_session_id, q.quick_actions_disabled, q.regenerate_quick_actions_for, q.runtime_binding_mode, q.runtime_requirements, q.placement_workspace_id, q.runtime_requester_user_id, q.session_affinity_state, q.session_affinity_runtime_id, q.explicit_fresh_session
+`
+
+type ReclaimStaleDispatchedTaskForAgentRuntimeParams struct {
+	PrepareLeaseSecs                 float64            `json:"prepare_lease_secs"`
+	ExpectedTaskID                   pgtype.UUID        `json:"expected_task_id"`
+	AgentID                          pgtype.UUID        `json:"agent_id"`
+	RuntimeID                        pgtype.UUID        `json:"runtime_id"`
+	ExpectedDispatchedAt             pgtype.Timestamptz `json:"expected_dispatched_at"`
+	ClaimRecoverySecs                float64            `json:"claim_recovery_secs"`
+	ExpectedChatSessionID            pgtype.UUID        `json:"expected_chat_session_id"`
+	ExpectedRuntimeBindingMode       string             `json:"expected_runtime_binding_mode"`
+	ExpectedPlacementWorkspaceID     pgtype.UUID        `json:"expected_placement_workspace_id"`
+	ExpectedRuntimeRequesterUserID   pgtype.UUID        `json:"expected_runtime_requester_user_id"`
+	ExpectedRuntimeRequirements      []byte             `json:"expected_runtime_requirements"`
+	ExpectedSessionAffinityState     string             `json:"expected_session_affinity_state"`
+	ExpectedSessionAffinityRuntimeID pgtype.UUID        `json:"expected_session_affinity_runtime_id"`
+	ExpectedExplicitFreshSession     bool               `json:"expected_explicit_fresh_session"`
+}
+
+func (q *Queries) ReclaimStaleDispatchedTaskForAgentRuntime(ctx context.Context, arg ReclaimStaleDispatchedTaskForAgentRuntimeParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, reclaimStaleDispatchedTaskForAgentRuntime,
+		arg.PrepareLeaseSecs,
+		arg.ExpectedTaskID,
+		arg.AgentID,
+		arg.RuntimeID,
+		arg.ExpectedDispatchedAt,
+		arg.ClaimRecoverySecs,
+		arg.ExpectedChatSessionID,
+		arg.ExpectedRuntimeBindingMode,
+		arg.ExpectedPlacementWorkspaceID,
+		arg.ExpectedRuntimeRequesterUserID,
+		arg.ExpectedRuntimeRequirements,
+		arg.ExpectedSessionAffinityState,
+		arg.ExpectedSessionAffinityRuntimeID,
+		arg.ExpectedExplicitFreshSession,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
 const reclaimStaleDispatchedTaskForRuntime = `-- name: ReclaimStaleDispatchedTaskForRuntime :one
 UPDATE agent_task_queue
 SET dispatched_at = now(),
@@ -7004,6 +8032,126 @@ type RequeueAgentTaskAfterClaimFailureParams struct {
 // rolling back a newer reclaim.
 func (q *Queries) RequeueAgentTaskAfterClaimFailure(ctx context.Context, arg RequeueAgentTaskAfterClaimFailureParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, requeueAgentTaskAfterClaimFailure, arg.TaskID, arg.RuntimeID, arg.DispatchedAt)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
+const requeuePoolTaskAfterClaimRevalidation = `-- name: RequeuePoolTaskAfterClaimRevalidation :one
+UPDATE agent_task_queue AS q
+SET status = 'waiting_runtime',
+    runtime_id = NULL,
+    wait_reason = $1::text,
+    dispatched_at = NULL,
+    prepare_lease_expires_at = NULL
+WHERE q.id = $2::uuid
+  AND q.agent_id = $3::uuid
+  AND q.runtime_id = $4::uuid
+  AND q.status = 'queued'
+  AND q.chat_session_id IS NOT DISTINCT FROM $5::uuid
+  AND q.runtime_binding_mode = 'pool'
+  AND q.runtime_binding_mode = $6::text
+  AND q.placement_workspace_id IS NOT DISTINCT FROM $7::uuid
+  AND q.runtime_requester_user_id IS NOT DISTINCT FROM $8::uuid
+  AND q.runtime_requirements = $9::jsonb
+  AND q.session_affinity_state = $10::text
+  AND q.session_affinity_runtime_id IS NOT DISTINCT FROM $11::uuid
+  AND q.explicit_fresh_session = $12::boolean
+RETURNING q.id, q.agent_id, q.issue_id, q.status, q.priority, q.dispatched_at, q.started_at, q.completed_at, q.result, q.error, q.created_at, q.context, q.runtime_id, q.session_id, q.work_dir, q.trigger_comment_id, q.chat_session_id, q.autopilot_run_id, q.attempt, q.max_attempts, q.parent_task_id, q.failure_reason, q.trigger_summary, q.force_fresh_session, q.is_leader_task, q.wait_reason, q.initiator_user_id, q.handoff_note, q.prepare_lease_expires_at, q.squad_id, q.runtime_mcp_overlay, q.escalation_for_task_id, q.fire_at, q.originator_user_id, q.runtime_connected_apps, q.coalesced_comment_ids, q.delivered_comment_ids, q.chat_input_task_id, q.chat_finalize_deferred_at, q.originator_source, q.delegated_from_task_id, q.retry_of_task_id, q.rerun_of_task_id, q.rule_version_id, q.trigger_evidence_kind, q.trigger_evidence_ref_id, q.accountable_user_id, q.session_rollout_missing, q.retired_session_id, q.quick_actions_disabled, q.regenerate_quick_actions_for, q.runtime_binding_mode, q.runtime_requirements, q.placement_workspace_id, q.runtime_requester_user_id, q.session_affinity_state, q.session_affinity_runtime_id, q.explicit_fresh_session
+`
+
+type RequeuePoolTaskAfterClaimRevalidationParams struct {
+	WaitReason                       string      `json:"wait_reason"`
+	ExpectedTaskID                   pgtype.UUID `json:"expected_task_id"`
+	AgentID                          pgtype.UUID `json:"agent_id"`
+	RuntimeID                        pgtype.UUID `json:"runtime_id"`
+	ExpectedChatSessionID            pgtype.UUID `json:"expected_chat_session_id"`
+	ExpectedRuntimeBindingMode       string      `json:"expected_runtime_binding_mode"`
+	ExpectedPlacementWorkspaceID     pgtype.UUID `json:"expected_placement_workspace_id"`
+	ExpectedRuntimeRequesterUserID   pgtype.UUID `json:"expected_runtime_requester_user_id"`
+	ExpectedRuntimeRequirements      []byte      `json:"expected_runtime_requirements"`
+	ExpectedSessionAffinityState     string      `json:"expected_session_affinity_state"`
+	ExpectedSessionAffinityRuntimeID pgtype.UUID `json:"expected_session_affinity_runtime_id"`
+	ExpectedExplicitFreshSession     bool        `json:"expected_explicit_fresh_session"`
+}
+
+// A fresh Pool claim whose locked placement snapshot became invalid returns to
+// the allocator. The complete routing CAS prevents a diagnosis for an old
+// snapshot (or another Runtime) from mutating a newer placement.
+func (q *Queries) RequeuePoolTaskAfterClaimRevalidation(ctx context.Context, arg RequeuePoolTaskAfterClaimRevalidationParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, requeuePoolTaskAfterClaimRevalidation,
+		arg.WaitReason,
+		arg.ExpectedTaskID,
+		arg.AgentID,
+		arg.RuntimeID,
+		arg.ExpectedChatSessionID,
+		arg.ExpectedRuntimeBindingMode,
+		arg.ExpectedPlacementWorkspaceID,
+		arg.ExpectedRuntimeRequesterUserID,
+		arg.ExpectedRuntimeRequirements,
+		arg.ExpectedSessionAffinityState,
+		arg.ExpectedSessionAffinityRuntimeID,
+		arg.ExpectedExplicitFreshSession,
+	)
 	var i AgentTaskQueue
 	err := row.Scan(
 		&i.ID,
