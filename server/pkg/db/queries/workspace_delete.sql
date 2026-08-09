@@ -89,6 +89,15 @@ ws_tasks AS MATERIALIZED (
        OR issue_id IN (SELECT id FROM ws_issues)
        OR runtime_id IN (SELECT id FROM ws_runtimes)
 ),
+ws_terminal_sessions AS MATERIALIZED (
+    SELECT id
+    FROM agent_terminal_session
+    WHERE workspace_id = $1
+       OR task_id IN (SELECT id FROM ws_tasks)
+       OR agent_id IN (SELECT id FROM ws_agents)
+       OR runtime_id IN (SELECT id FROM ws_runtimes)
+       OR issue_id IN (SELECT id FROM ws_issues)
+),
 ws_sessions AS MATERIALIZED (
     SELECT id FROM chat_session WHERE workspace_id = $1
 ),
@@ -109,6 +118,18 @@ ws_channel_installations AS MATERIALIZED (
 ),
 ws_lark_installations AS MATERIALIZED (
     SELECT id FROM lark_installation WHERE workspace_id = $1
+),
+deleted_terminal_control_events AS (
+    DELETE FROM agent_terminal_control_event
+    WHERE terminal_session_id IN (SELECT id FROM ws_terminal_sessions)
+),
+deleted_terminal_control_leases AS (
+    DELETE FROM agent_terminal_control_lease
+    WHERE session_id IN (SELECT id FROM ws_terminal_sessions)
+),
+deleted_terminal_sessions AS (
+    DELETE FROM agent_terminal_session
+    WHERE id IN (SELECT id FROM ws_terminal_sessions)
 ),
 deleted_task_usage AS (
     DELETE FROM task_usage
