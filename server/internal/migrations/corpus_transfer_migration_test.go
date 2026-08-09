@@ -10,8 +10,8 @@ import (
 func TestCorpusTransferMigrationsPreserveLedgerContract(t *testing.T) {
 	dir := realMigrationsDir(t)
 	tableFiles := []string{
-		"257_corpus_transfer.up.sql",
-		"261_corpus_transfer_ack.up.sql",
+		"265_corpus_transfer.up.sql",
+		"269_corpus_transfer_ack.up.sql",
 	}
 	for _, name := range tableFiles {
 		body := readMigrationForTest(t, dir, name)
@@ -21,7 +21,7 @@ func TestCorpusTransferMigrationsPreserveLedgerContract(t *testing.T) {
 		}
 	}
 
-	transfer := readMigrationForTest(t, dir, "257_corpus_transfer.up.sql")
+	transfer := readMigrationForTest(t, dir, "265_corpus_transfer.up.sql")
 	for _, state := range []string{"created", "uploading", "uploaded", "verifying", "confirmed", "acked", "failed", "expired", "purged"} {
 		if !strings.Contains(transfer, "'"+state+"'") {
 			t.Errorf("transfer state check is missing %q", state)
@@ -45,11 +45,11 @@ func TestCorpusTransferMigrationsPreserveLedgerContract(t *testing.T) {
 	}
 
 	for name, prefix := range map[string]string{
-		"258_corpus_transfer_primary_index.up.sql":     "CREATE UNIQUE INDEX CONCURRENTLY",
-		"260_corpus_transfer_idempotency_index.up.sql": "CREATE UNIQUE INDEX CONCURRENTLY",
-		"262_corpus_transfer_ack_primary_index.up.sql": "CREATE UNIQUE INDEX CONCURRENTLY",
-		"264_corpus_transfer_cleanup_due_index.up.sql": "CREATE INDEX CONCURRENTLY",
-		"265_corpus_transfer_expiry_due_index.up.sql":  "CREATE INDEX CONCURRENTLY",
+		"266_corpus_transfer_primary_index.up.sql":     "CREATE UNIQUE INDEX CONCURRENTLY",
+		"268_corpus_transfer_idempotency_index.up.sql": "CREATE UNIQUE INDEX CONCURRENTLY",
+		"270_corpus_transfer_ack_primary_index.up.sql": "CREATE UNIQUE INDEX CONCURRENTLY",
+		"272_corpus_transfer_cleanup_due_index.up.sql": "CREATE INDEX CONCURRENTLY",
+		"273_corpus_transfer_expiry_due_index.up.sql":  "CREATE INDEX CONCURRENTLY",
 	} {
 		body := readMigrationForTest(t, dir, name)
 		if !strings.Contains(strings.ToUpper(body), prefix) {
@@ -61,10 +61,10 @@ func TestCorpusTransferMigrationsPreserveLedgerContract(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"258_corpus_transfer_primary_index.down.sql",
-		"262_corpus_transfer_ack_primary_index.down.sql",
-		"264_corpus_transfer_cleanup_due_index.down.sql",
-		"265_corpus_transfer_expiry_due_index.down.sql",
+		"266_corpus_transfer_primary_index.down.sql",
+		"270_corpus_transfer_ack_primary_index.down.sql",
+		"272_corpus_transfer_cleanup_due_index.down.sql",
+		"273_corpus_transfer_expiry_due_index.down.sql",
 	} {
 		body := strings.ToUpper(readMigrationForTest(t, dir, name))
 		if !strings.Contains(body, "DROP INDEX CONCURRENTLY IF EXISTS") {
