@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
   Agent,
+  TerminalSessionMetadata,
   AgentTemplate,
   AgentTemplateSummary,
   AgentBuilderRuntimeSwitch,
@@ -1233,6 +1234,34 @@ export const AgentTaskSchema = z.object({
 }).loose();
 
 export const AgentTaskListSchema = z.array(AgentTaskSchema);
+
+export const TerminalSessionMetadataSchema: z.ZodType<TerminalSessionMetadata> = z.object({
+  available: z.boolean().default(false),
+  protocol_version: z.number().int().default(1),
+  session_id: z.string().optional(),
+  task_id: z.string().default(""),
+  issue_id: z.string().optional(),
+  agent_id: z.string().optional(),
+  workspace_id: z.string().optional(),
+  runtime_id: z.string().optional(),
+  daemon_id: z.string().optional(),
+  provider: z.string().optional(),
+  mode: z.literal("pty").optional(),
+  status: z.enum(["starting", "running", "reconnecting", "exited", "failed"]).optional(),
+  structured_observation: z.enum(["available", "stale", "unavailable"]).optional(),
+  generation: z.number().int().positive().optional(),
+  cols: z.number().int().min(20).max(400).optional(),
+  rows: z.number().int().min(5).max(200).optional(),
+  output_seq: z.number().nonnegative().optional(),
+  provider_session_id: z.string().optional(),
+  exit_code: z.number().int().nullable().optional(),
+  exit_reason: z.string().optional(),
+  capability: z.literal("terminal-pty-v1").optional(),
+  replay_available: z.boolean().optional(),
+  oldest_seq: z.number().nonnegative().optional(),
+  observer_count: z.number().int().nonnegative().optional(),
+  controller_active: z.boolean().optional(),
+}).loose();
 
 // Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
 // chat recovery. Its optional message payload must be well-formed before the

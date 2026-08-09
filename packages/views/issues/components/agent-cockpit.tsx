@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   CornerDownRight,
   Loader2,
@@ -10,7 +11,7 @@ import {
   SquareTerminal,
 } from "lucide-react";
 import { toast } from "sonner";
-import { dispatchReasonCode } from "@multica/core/api";
+import { api, dispatchReasonCode } from "@multica/core/api";
 import {
   useCancelIssueTask,
   useCreateComment,
@@ -32,6 +33,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { TranscriptButton } from "../../common/task-transcript";
 import { useT } from "../../i18n";
+import { AgentTerminal } from "./agent-terminal";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 
 function isActiveTask(task: AgentTask): boolean {
@@ -100,6 +102,17 @@ export function AgentCockpitSession({
   onOpenChange: (open: boolean) => void;
   allowTerminalContinuation?: boolean;
 }) {
+  const { t } = useT("agents");
+  const { data: terminal } = useQuery({
+    queryKey: ["task-terminal", task.id],
+    queryFn: () => api.getTaskTerminal(task.id),
+    enabled: open,
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" || query.state.data?.status === "reconnecting"
+        ? 3_000
+        : false,
+  });
+
   return (
     <TranscriptButton
       task={task}
@@ -109,12 +122,27 @@ export function AgentCockpitSession({
       renderButton={false}
       open={open}
       onOpenChange={onOpenChange}
+      terminalSlot={
+        terminal?.available ? <AgentTerminal taskId={task.id} metadata={terminal} /> : undefined
+      }
+      headerSlot={
+        terminal && !terminal.available && terminal.session_id ? (
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.cockpit.terminal_replay_unavailable)}
+          </p>
+        ) : undefined
+      }
       headerActions={({ agentName }) => (
         <AgentCockpitActions
           task={task}
           issueId={issueId}
           agentName={agentName}
           allowTerminalContinuation={allowTerminalContinuation}
+          terminalRun={
+            terminal?.available === true ||
+            terminal?.mode === "pty" ||
+            Boolean(terminal?.session_id)
+          }
           onSessionClose={() => onOpenChange(false)}
         />
       )}
@@ -127,12 +155,14 @@ function AgentCockpitActions({
   issueId,
   agentName,
   allowTerminalContinuation,
+  terminalRun,
   onSessionClose,
 }: {
   task: AgentTask;
   issueId: string;
   agentName: string;
   allowTerminalContinuation: boolean;
+  terminalRun: boolean;
   onSessionClose: () => void;
 }) {
   const { t } = useT("agents");
@@ -234,7 +264,7 @@ function AgentCockpitActions({
 
   return (
     <>
-      {(active || allowTerminalContinuation) && (
+      {!terminalRun && (active || allowTerminalContinuation) && (
         <Popover open={redirectOpen} onOpenChange={setRedirectOpen}>
           <PopoverTrigger
             render={

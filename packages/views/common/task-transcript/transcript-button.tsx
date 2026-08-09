@@ -46,6 +46,7 @@ interface TranscriptButtonProps {
    */
   headerSlot?: React.ReactNode;
   headerActions?: React.ReactNode | ((context: { agentName: string }) => React.ReactNode);
+  terminalSlot?: React.ReactNode;
 }
 
 /**
@@ -75,6 +76,7 @@ export function TranscriptButton({
   onOpenChange: controlledOnOpenChange,
   headerSlot,
   headerActions,
+  terminalSlot,
 }: TranscriptButtonProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -230,6 +232,7 @@ export function TranscriptButton({
             variant={variant}
             headerSlot={headerSlot}
             headerActions={headerActions}
+            terminalSlot={terminalSlot}
           />
         ) : (
           <AgentTranscriptDialog
@@ -242,6 +245,7 @@ export function TranscriptButton({
             variant={variant}
             headerSlot={headerSlot}
             headerActions={headerActions}
+            terminalSlot={terminalSlot}
           />
         ))}
     </>
@@ -256,6 +260,7 @@ interface LiveTranscriptDialogProps {
   variant: "transcript" | "cockpit";
   headerSlot?: React.ReactNode;
   headerActions?: React.ReactNode | ((context: { agentName: string }) => React.ReactNode);
+  terminalSlot?: React.ReactNode;
 }
 
 const LIVE_TRANSCRIPT_RECONCILE_MS = 5_000;
@@ -279,6 +284,7 @@ function LiveTranscriptDialog({
   variant,
   headerSlot,
   headerActions,
+  terminalSlot,
 }: LiveTranscriptDialogProps) {
   const queryClient = useQueryClient();
   const { data } = useQuery({
@@ -336,6 +342,7 @@ function LiveTranscriptDialog({
       variant={variant}
       headerSlot={headerSlot}
       headerActions={headerActions}
+      terminalSlot={terminalSlot}
     />
   );
 }

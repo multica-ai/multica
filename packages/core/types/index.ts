@@ -8,6 +8,8 @@ export type {
   AgentInvocationTarget,
   AgentInvocationTargetInput,
   AgentTask,
+  TerminalSessionMetadata,
+  TerminalWebSocketConfig,
   TaskUsage,
   TaskAttribution,
   AttributionUser,

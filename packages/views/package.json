@@ -86,6 +86,8 @@
     "@tiptap/react": "3.27.1",
     "@tiptap/starter-kit": "3.27.1",
     "@tiptap/suggestion": "3.27.1",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "cmdk": "^1.1.1",
     "hast-util-to-html": "^9.0.5",
     "katex": "catalog:",

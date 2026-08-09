@@ -34,6 +34,8 @@ import type {
   AgentEnvResponse,
   UpdateAgentEnvRequest,
   AgentTask,
+  TerminalSessionMetadata,
+  TerminalWebSocketConfig,
   AgentActivityBucket,
   AgentRunCount,
   WorkspaceWorkingAgent,
@@ -195,6 +197,7 @@ import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
   AgentTaskListSchema,
+  TerminalSessionMetadataSchema,
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
@@ -1997,6 +2000,30 @@ export class ApiClient {
 
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
     return this.fetch(`/api/tasks/${taskId}/messages`);
+  }
+
+  async getTaskTerminal(taskId: string): Promise<TerminalSessionMetadata> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/terminal`);
+    return parseWithFallback<TerminalSessionMetadata>(
+      raw,
+      TerminalSessionMetadataSchema,
+      { available: false, protocol_version: 1, task_id: taskId },
+      { endpoint: "GET /api/tasks/:id/terminal" },
+    );
+  }
+
+  getTaskTerminalWebSocketConfig(taskId: string): TerminalWebSocketConfig {
+    const browserOrigin = typeof window === "undefined" ? "http://localhost" : window.location.origin;
+    const base = this.baseUrl || browserOrigin;
+    const url = new URL(`/api/tasks/${encodeURIComponent(taskId)}/terminal/ws`, base);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    const workspaceSlug = getCurrentSlug();
+    if (workspaceSlug) url.searchParams.set("workspace_slug", workspaceSlug);
+    const identity = this.options.identity;
+    if (identity?.platform) url.searchParams.set("client_platform", identity.platform);
+    if (identity?.version) url.searchParams.set("client_version", identity.version);
+    if (identity?.os) url.searchParams.set("client_os", identity.os);
+    return { url: url.toString(), token: this.token };
   }
 
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {

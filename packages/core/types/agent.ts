@@ -268,6 +268,39 @@ export interface TaskAttribution {
   rerun_of_task_id?: string;
 }
 
+export interface TerminalSessionMetadata {
+  available: boolean;
+  protocol_version: number;
+  session_id?: string;
+  task_id: string;
+  issue_id?: string;
+  agent_id?: string;
+  workspace_id?: string;
+  runtime_id?: string;
+  daemon_id?: string;
+  provider?: string;
+  mode?: "pty";
+  status?: "starting" | "running" | "reconnecting" | "exited" | "failed";
+  structured_observation?: "available" | "stale" | "unavailable";
+  generation?: number;
+  cols?: number;
+  rows?: number;
+  output_seq?: number;
+  provider_session_id?: string;
+  exit_code?: number | null;
+  exit_reason?: string;
+  capability?: "terminal-pty-v1";
+  replay_available?: boolean;
+  oldest_seq?: number;
+  observer_count?: number;
+  controller_active?: boolean;
+}
+
+export interface TerminalWebSocketConfig {
+  url: string;
+  token: string | null;
+}
+
 export interface AgentTask {
   id: string;
   agent_id: string;

@@ -4,7 +4,7 @@ import { createContext, cloneElement, useContext, type ReactElement, type ReactN
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentTask } from "@multica/core/types";
+import type { AgentTask, TerminalSessionMetadata } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
 const mockState = vi.hoisted(() => ({
@@ -15,9 +15,17 @@ const mockState = vi.hoisted(() => ({
   success: vi.fn(),
   warning: vi.fn(),
   error: vi.fn(),
+  terminalMetadata: {
+    available: false,
+    protocol_version: 1,
+    task_id: "task-1",
+  } as TerminalSessionMetadata,
 }));
 
 vi.mock("@multica/core/api", () => ({
+  api: {
+    getTaskTerminal: vi.fn(() => Promise.resolve(mockState.terminalMetadata)),
+  },
   dispatchReasonCode: () => undefined,
 }));
 
@@ -46,16 +54,23 @@ vi.mock("../../common/task-transcript", () => ({
   TranscriptButton: ({
     variant,
     headerActions,
+    terminalSlot,
   }: {
     variant?: string;
     headerActions?: ReactNode | ((context: { agentName: string }) => ReactNode);
+    terminalSlot?: ReactNode;
   }) => (
     <div data-testid="transcript" data-variant={variant}>
+      {terminalSlot}
       {typeof headerActions === "function"
         ? headerActions({ agentName: "Quantization Engineer" })
         : headerActions}
     </div>
   ),
+}));
+
+vi.mock("./agent-terminal", () => ({
+  AgentTerminal: () => <div>PTY terminal active</div>,
 }));
 
 const PopoverContext = createContext<{
@@ -154,9 +169,26 @@ beforeEach(() => {
   mockState.createComment.mockResolvedValue({
     trigger_outcomes: [{ target_type: "agent", target_id: "agent-1", status: "queued" }],
   });
+  mockState.terminalMetadata = {
+    available: false,
+    protocol_version: 1,
+    task_id: "task-1",
+  };
 });
 
 describe("AgentCockpit", () => {
+  it("hides Redirect/Continue when PTY is active while keeping Stop Agent", async () => {
+    mockState.terminalMetadata = {
+      available: true,
+      protocol_version: 1,
+      task_id: "task-1",
+    };
+    renderSession();
+
+    expect(await screen.findByText("PTY terminal active")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Redirect" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop Agent" })).toBeInTheDocument();
+  });
   it("renders a visible Issue-page terminal launcher", () => {
     const onOpen = vi.fn();
     renderWithI18n(<AgentCockpitLauncher runningCount={2} onOpen={onOpen} />);
@@ -199,7 +231,7 @@ describe("AgentCockpit", () => {
     expect(mockState.success).toHaveBeenCalledWith("New instruction queued");
   });
 
-  it("continues a terminal run without cancelling it again", async () => {
+  it("continues a legacy structured run without cancelling it again", async () => {
     renderSession(makeTask({ status: "cancelled", completed_at: "2026-08-08T08:10:00Z" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
@@ -219,6 +251,22 @@ describe("AgentCockpit", () => {
     await waitFor(() =>
       expect(mockState.rerunIssue).toHaveBeenCalledWith("task-1"),
     );
+  });
+
+  it("offers Restart but never Continue for a historical PTY run", async () => {
+    mockState.terminalMetadata = {
+      available: false,
+      protocol_version: 1,
+      task_id: "task-1",
+      session_id: "terminal-session-1",
+      mode: "pty",
+    };
+    renderSession(makeTask({ status: "cancelled", completed_at: "2026-08-08T08:10:00Z" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Restart" })).toBeInTheDocument();
   });
 
   it("does not offer Continue from an older run whose session is not selected", () => {

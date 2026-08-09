@@ -103,6 +103,8 @@ interface AgentTranscriptDialogProps {
    * The dialog stays generic — slot content is the caller's concern.
    */
   headerSlot?: React.ReactNode;
+  /** Live terminal surface. Its presence upgrades cockpit mode to three tabs. */
+  terminalSlot?: React.ReactNode;
 }
 
 // ─── Color mapping for timeline segments ────────────────────────────────────
@@ -240,6 +242,7 @@ export function AgentTranscriptDialog({
   variant = "transcript",
   headerActions,
   headerSlot,
+  terminalSlot,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
@@ -248,6 +251,10 @@ export function AgentTranscriptDialog({
   const [copiedWorkdir, setCopiedWorkdir] = useState(false);
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
+  const hasTerminal = Boolean(terminalSlot);
+  const [cockpitTab, setCockpitTab] = useState<"terminal" | "transcript" | "files">(
+    hasTerminal ? "terminal" : "transcript",
+  );
   // Row-level expand overrides. A row the user toggled follows the toggle; any
   // other row follows the density preference (see traceEventDefaultExpanded).
   // Switching density or task resets the overrides wholesale.
@@ -347,6 +354,10 @@ export function AgentTranscriptDialog({
   useEffect(() => {
     setRowOverrides(new Map());
   }, [task.id, density]);
+
+  useEffect(() => {
+    setCockpitTab(hasTerminal ? "terminal" : "transcript");
+  }, [task.id, hasTerminal]);
 
   // Derive filter options from each item:
   //   tool_use / tool_result → filter value = tool, display = "tool:Bash"
@@ -829,7 +840,40 @@ export function AgentTranscriptDialog({
           </div>
         </div>
 
-        {variant === "cockpit" && <CockpitFileChanges items={items} isLive={isLive} />}
+        {variant === "cockpit" && terminalSlot && (
+          <div className="flex shrink-0 items-center gap-1 border-b px-4 py-1.5" role="tablist">
+            {(["terminal", "transcript", "files"] as const).map((tab) => (
+              <Button
+                key={tab}
+                type="button"
+                role="tab"
+                size="sm"
+                variant={cockpitTab === tab ? "secondary" : "ghost"}
+                aria-selected={cockpitTab === tab}
+                onClick={() => setCockpitTab(tab)}
+              >
+                {t(($) => $.cockpit[`tab_${tab}`])}
+              </Button>
+            ))}
+          </div>
+        )}
+
+        {variant === "cockpit" && terminalSlot && cockpitTab === "terminal" && (
+          <div className="min-h-0 flex-1">{terminalSlot}</div>
+        )}
+
+        {variant === "cockpit" && terminalSlot && cockpitTab === "files" && (
+          <div className="min-h-0 flex-1 overflow-auto">
+            <CockpitFileChanges items={items} isLive={isLive} />
+          </div>
+        )}
+
+        {variant === "cockpit" && !terminalSlot && (
+          <CockpitFileChanges items={items} isLive={isLive} />
+        )}
+
+        {(!terminalSlot || cockpitTab === "transcript") && (
+          <>
 
         {/* ── List toolbar: read-before-you-read summary (left) + controls
             (right). Duration + event count fill the left, so the row balances
@@ -1054,6 +1098,8 @@ export function AgentTranscriptDialog({
             />
           )}
         </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -256,7 +256,12 @@ const items: TimelineItem[] = [
 
 function renderDialog(
   dialogItems: TimelineItem[] = items,
-  options: { task?: AgentTask; isLive?: boolean; variant?: "transcript" | "cockpit" } = {},
+  options: {
+    task?: AgentTask;
+    isLive?: boolean;
+    variant?: "transcript" | "cockpit";
+    terminalSlot?: ReactNode;
+  } = {},
 ) {
   return renderWithI18n(
     <AgentTranscriptDialog
@@ -267,6 +272,7 @@ function renderDialog(
       agentName="Codex"
       isLive={options.isLive}
       variant={options.variant}
+      terminalSlot={options.terminalSlot}
     />,
   );
 }
@@ -289,6 +295,21 @@ afterEach(() => {
 });
 
 describe("AgentTranscriptDialog", () => {
+  it("switches a PTY cockpit without unmounting the task session", () => {
+    renderDialog(items, {
+      variant: "cockpit",
+      terminalSlot: <div>Live Codex TUI</div>,
+    });
+
+    expect(screen.getByText("Live Codex TUI")).toBeInTheDocument();
+    expect(screen.queryByText("Agent summary")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Transcript" }));
+    expect(screen.getByText("Agent summary")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    expect(screen.getByText("File activity (0)")).toBeInTheDocument();
+  });
   it("explains unavailable live events for an empty Antigravity transcript", async () => {
     vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("antigravity")]);
 
