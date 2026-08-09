@@ -220,7 +220,7 @@ func TestTheRetryLookupIsNotPaidForOnEveryAnswer(t *testing.T) {
 //
 // Cancellation publishes task:cancelled and nothing else: no chat:done, no
 // task:failed. Subscribing only to failure leaves the bubble spinning for the
-// full five minutes, after which the guard tells the user "还在处理，完成后我再
+// full nine minutes, after which the guard tells the user "还在处理，完成后我再
 // 单独回复你" — a promise of a separate reply, about a run they cancelled
 // themselves, that will never come.
 func TestACancelledRunClosesItsBubble(t *testing.T) {
@@ -305,7 +305,7 @@ func TestCancellingAfterTheGuardKeepsThePromise(t *testing.T) {
 	rig := newBubbleRig(t)
 	rig.ran(t, "REQ-G1", 1, "task-1")
 
-	// The guard closes the bubble at five minutes; the run carries on.
+	// The guard closes the bubble at nine minutes; the run carries on.
 	rig.guardClosed(t, 1)
 
 	rig.cancelled(t, "task-1")
@@ -344,7 +344,7 @@ func TestACancelledRunThisProcessNeverSawStaysSilent(t *testing.T) {
 // ---- the guard, now that a round always knows its run ----
 
 // TestAGuardClosedRoundsFailureIsStillReported. The guard consumes the handle
-// at five minutes, so a run that fails after that finds no bubble. The note it
+// at nine minutes, so a run that fails after that finds no bubble. The note it
 // left is what turns the promise into a delivered message, and it is matched
 // by the run's own id — a promise left by a DIFFERENT round must not be spent
 // on this one.
@@ -473,7 +473,7 @@ func TestAnAnsweredGuardClosedRoundIsNoLongerOwedAReply(t *testing.T) {
 	rig.ran(t, "REQ-A1", 1, "task-1")
 	rig.guardClosed(t, 1)
 
-	rig.answer(t, "the answer that took five minutes", "task-1")
+	rig.answer(t, "the answer that took nine minutes", "task-1")
 	// The sweeper repeat sayTheRunFailed's own comment anticipates.
 	rig.failed(t, "task-1", false)
 
@@ -482,7 +482,7 @@ func TestAnAnsweredGuardClosedRoundIsNoLongerOwedAReply(t *testing.T) {
 		t.Fatalf("a guard-closed round that answered produced %d plain messages, want 1 — "+
 			"its promise was never settled, so the run's failure notice contradicted the answer above it", len(pushes))
 	}
-	if md, _ := pushes[0]["markdown"].(map[string]any); md == nil || md["content"] != "the answer that took five minutes" {
+	if md, _ := pushes[0]["markdown"].(map[string]any); md == nil || md["content"] != "the answer that took nine minutes" {
 		t.Fatalf("the promised separate reply did not carry the answer: %v", pushes[0])
 	}
 }
@@ -681,7 +681,7 @@ func TestOpenIsIgnoredWithoutABatch(t *testing.T) {
 // window is the run's LAST event: cancellation publishes no chat:done and no
 // task:failed, so if the round is not retired here nothing will ever retire
 // it, and the opening frame landing a moment later paints a spinner with no
-// closer. The guard replaces it five minutes on with "还在处理，完成后我再单独
+// closer. The guard replaces it nine minutes on with "还在处理，完成后我再单独
 // 回复你" — a promise of a separate reply, about a run the user themselves
 // stopped.
 //

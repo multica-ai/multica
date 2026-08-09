@@ -236,7 +236,7 @@ func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t r
 // window, a frame the server refused. It returns where it spoke, so a round
 // whose note never held an address learns one.
 //
-// For a round the guard closed at five minutes this message IS the separate
+// For a round the guard closed at nine minutes this message IS the separate
 // reply it promised, which is why the ledger settles on the strength of it:
 // left owed, the promise would be claimed by the next repeat of this run's
 // failure and tell the user "这次没跑通" underneath the answer they just read.

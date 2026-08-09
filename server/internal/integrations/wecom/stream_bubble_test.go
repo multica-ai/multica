@@ -318,7 +318,7 @@ func (r *bubbleRig) cancelled(t *testing.T, taskName string) {
 	})
 }
 
-// guardClosed is the five-minute guard firing on one round: it writes "还在处理，
+// guardClosed is the nine-minute guard firing on one round: it writes "还在处理，
 // 完成后我再单独回复你" into the bubble and leaves the promise behind. It runs
 // the manager's own guard body, so a test gets the real thing — including the
 // part where the promise is filed only because those words landed — without
@@ -665,5 +665,67 @@ func TestAGuardClosedRunDoesNotSealTheNextQuestionsBubble(t *testing.T) {
 	last := frames[len(frames)-1]
 	if last["content"] != "the second run's answer" || last["finish"] != true {
 		t.Fatalf("the second question's own answer did not seal its bubble: %v", last)
+	}
+}
+
+// ---- the protocol window these two constants stand for ----
+
+// TestALongRunStillAnswersInItsBubbleInsideTheMeasuredWindow is what pins
+// streamMaxAge to what was measured rather than to what was guessed.
+//
+// Eight minutes is the interesting number: inside the ten the server actually
+// allows, outside the six this adapter used to assume. Every other test here
+// either disables the guard and drives the clock in relative steps, or moves
+// time by streamMaxAge itself — so all of them follow the constant wherever it
+// goes and none of them notices it being wrong. Set the window back to six and
+// this run's answer stops landing in the bubble the asker has been watching for
+// eight minutes and arrives underneath it as a separate message instead, with
+// the spinner above it never sealed.
+func TestALongRunStillAnswersInItsBubbleInsideTheMeasuredWindow(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ran(t, "REQ-LONG", 1, "task-1")
+
+	// A run that takes eight minutes. Long, and well within what WeCom took on
+	// 2026-08-09: it accepted a frame at 600.0s and refused one at 630.0s.
+	rig.now = rig.now.Add(8 * time.Minute)
+	rig.answer(t, "the answer to a long question", "task-1")
+
+	if pushes := rig.conn.pushes(t); len(pushes) != 0 {
+		t.Fatalf("an eight-minute run's answer went out as %d plain message(s) — the window is "+
+			"set shorter than the server's, so the handle was thrown away while it was still "+
+			"usable and the asker's bubble is spinning above the answer", len(pushes))
+	}
+	frames := rig.conn.streamFrames(t)
+	if len(frames) != 2 {
+		t.Fatalf("got %d stream frames, want 2 (open + seal)", len(frames))
+	}
+	if frames[1]["id"] != frames[0]["id"] || frames[1]["finish"] != true ||
+		frames[1]["content"] != "the answer to a long question" {
+		t.Fatalf("the answer did not seal the bubble its question opened: %v", frames[1])
+	}
+}
+
+// TestTheGuardClosesTheBubbleWhileTheServerStillAcceptsFrames pins the other
+// constant, as the relationship that gives it its meaning.
+//
+// The guard's whole job is to replace a spinner with a sentence before the
+// server stops accepting frames. Its closing frame is written at
+// streamGuardAfter and has to be accepted, so it needs real headroom under the
+// measured ceiling — not merely a value below streamMaxAge. Without this, a
+// guard moved up to the window's edge still passes every test in this file and
+// fails only in production, where its promise of a separate reply is refused
+// and the user is left watching the spinner it was supposed to end.
+func TestTheGuardClosesTheBubbleWhileTheServerStillAcceptsFrames(t *testing.T) {
+	t.Parallel()
+	const headroom = time.Minute
+	if streamGuardAfter >= streamMaxAge {
+		t.Fatalf("the guard fires at %v and the window closes at %v — the guard's own frame is "+
+			"refused, so the bubble it exists to end spins for good", streamGuardAfter, streamMaxAge)
+	}
+	if got := streamMaxAge - streamGuardAfter; got < headroom {
+		t.Fatalf("the guard fires %v before the window closes, want at least %v — one slow frame "+
+			"and the promise of a separate reply is refused, leaving the asker the spinner the "+
+			"guard was there to replace", got, headroom)
 	}
 }

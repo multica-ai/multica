@@ -663,28 +663,32 @@ const streamThinkingPlaceholder = "<think></think>"
 
 // aibot errcodes worth branching on.
 //
-// ASSUMPTION, unconfirmed by the vendor: neither stream code appears in
-// WeCom's published error tables. Both are read off Tencent's OpenClaw plugin
-// source, with no version pinned and no statement from WeCom that the numbers
-// are stable. What would settle it: the codes appearing in the published
-// tables, or a support answer naming them. A wrong guess degrades rather than
-// breaks — an errcode this file does not recognise falls through to the
-// plain-message fallback, which is where a refused frame ends up anyway.
+// A wrong guess about either degrades rather than breaks — an errcode this file
+// does not recognise falls through to the plain-message fallback, which is
+// where a refused frame ends up anyway.
 const (
 	// errcodeStreamExpired — the stream ran past its window and the server
 	// will not take another frame for it.
 	//
-	// ASSUMPTION on the window, unmeasured: the long-connection doc says 10
-	// minutes and the plugin's own comment says 6, and we have not tested
-	// which holds. streamMaxAge takes the shorter number (stream_store.go) —
-	// being early costs a fallback message, being late costs the answer. What
-	// would settle it: hold one stream open against a live tenant and frame it
-	// every thirty seconds until the server refuses.
+	// Measured on 2026-08-09 against the live tenant, not inferred: a stream
+	// framed every thirty seconds was refused with exactly this code, and the
+	// server's own errmsg named the reason — "stream message update expired
+	// (>10 minutes), cannot update". The published global errcode table
+	// defines it the same way. The window it implies is streamMaxAge; see
+	// stream_store.go for the numbers and what else the probe settled.
 	errcodeStreamExpired = 846608
 
-	// errcodeStreamBadReqID — this req_id may not carry a stream. An event
-	// callback's req_id looks usable and is not; only a message callback's
-	// works, so the event path has to use aibot_send_msg.
+	// errcodeStreamBadReqID — this req_id may not carry a stream.
+	//
+	// ASSUMPTION, unconfirmed by the vendor and unmeasured: this number is
+	// read off Tencent's OpenClaw plugin source, with no version pinned, and
+	// it does not appear in WeCom's published error tables the way 846608
+	// does. What would settle it: the code appearing in the published tables,
+	// a support answer naming it, or a probe that opens a stream on an event
+	// callback's req_id and reads back what the server says.
+	//
+	// An event callback's req_id looks usable and is not; only a message
+	// callback's works, so the event path has to use aibot_send_msg.
 	errcodeStreamBadReqID = 846605
 )
 

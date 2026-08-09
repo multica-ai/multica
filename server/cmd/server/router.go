@@ -739,7 +739,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// task:failed that carries none.
 					Tasks: queries,
 					// A run that fails after its bubble is gone — the guard
-					// closed it at five minutes, or the process restarted
+					// closed it at nine minutes, or the process restarted
 					// mid-run — still owes the user the news, and the binding
 					// row is where the chat is found when no handle is left.
 					Bindings: queries,

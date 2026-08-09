@@ -186,7 +186,7 @@ type TypingIndicatorWiring struct {
 	Tasks bool
 	// Bindings finds the chat behind a session when no round is on file.
 	// Without it a run that fails after its bubble is gone (guard closed it at
-	// five minutes, or the process restarted mid-run) tells the user nothing,
+	// nine minutes, or the process restarted mid-run) tells the user nothing,
 	// and the guard's "I'll reply separately" is never answered.
 	Bindings bool
 }
@@ -356,13 +356,13 @@ func (m *TypingIndicatorManager) Register(bus *events.Bus) {
 // timeout come down that path). So the session is normally on the event, and
 // sessionFor's read of it off the task row is a fallback for a payload neither
 // publisher produces today. It is kept because a bubble left spinning is a
-// failure nobody reports: five minutes on, the guard replaces it with "still
+// failure nobody reports: nine minutes on, the guard replaces it with "still
 // working, I'll reply separately" — a promise about a run that has been dead
 // the whole time.
 //
 // The bubble is not the whole of it. A handle is consumed by whichever ending
-// gets there first, and the guard is allowed to be that one at the five-minute
-// mark while the run carries on — so every run longer than five minutes that
+// gets there first, and the guard is allowed to be that one at the nine-minute
+// mark while the run carries on — so every run longer than nine minutes that
 // then failed finds no handle here. This notice is the only "that run did not
 // go through" WeCom ever produces: the replier speaks for needs_binding,
 // offline, archived and issue_created and for nothing else. So the handle is
@@ -514,7 +514,7 @@ func (m *TypingIndicatorManager) refuseUnknownOrigin(ctx context.Context, sessio
 // handleTaskCancelled seals the bubble of a run the user stopped.
 //
 // Cancellation is a terminal state that publishes no chat:done and no
-// task:failed, so without this the bubble spins for the full five minutes and
+// task:failed, so without this the bubble spins for the full nine minutes and
 // the guard then promises a separate reply — about a run the user cancelled
 // themselves, that will never come. A session with several rounds open gets one
 // closing frame per cancelled run, each on its own bubble, because the round is
@@ -766,7 +766,7 @@ func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, batch engine.Ru
 
 // fireGuard is what the timer does, kept apart from the timer so the guard's
 // behaviour has one definition and a test can run it without waiting out the
-// five minutes.
+// nine minutes.
 //
 // The promise is filed by the ledger, not here, and either way the run comes
 // out of this owed an ending. Words that landed put "还在处理，完成后我再单独

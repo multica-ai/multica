@@ -37,7 +37,7 @@ func TestAPromiseIsNotKeptUntilTheWordsAreAccepted(t *testing.T) {
 	rig := newBubbleRig(t)
 	rig.ran(t, "REQ-1", 1, "task-1")
 
-	// Five minutes pass with the run still going: the guard takes the bubble
+	// Nine minutes pass with the run still going: the guard takes the bubble
 	// and leaves the promise behind.
 	rig.guardClosed(t, 1)
 
@@ -87,7 +87,7 @@ func (r *bubbleRig) answerErr(t *testing.T, content, taskName string) error {
 // already closed on a promise.
 type terminalPath struct {
 	name string
-	// afterTheGuard runs the five-minute guard on this round first, so the
+	// afterTheGuard runs the nine-minute guard on this round first, so the
 	// ending arrives to a promise rather than a bubble.
 	afterTheGuard bool
 	// fire publishes the ending for the round bound to task-1, the way its

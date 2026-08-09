@@ -16,7 +16,7 @@ import (
 // What closes the WeCom streaming bubble is a bus subscription holding four
 // dependencies, and every one of those five things is invisible when it is
 // missing: the events keep being published, nothing panics, nothing logs, and
-// the user watches a spinner until the five-minute guard replaces it with a
+// the user watches a spinner until the nine-minute guard replaces it with a
 // promise about a run that is already over. Nothing in the wecom package fails
 // either, because every unit test builds its own manager and hands it its own
 // dependencies.
@@ -115,7 +115,7 @@ func TestWecomBubbleClosersAreWiredOnTheRealBootPath(t *testing.T) {
 		{
 			field: "Bindings",
 			wired: wiring.Bindings,
-			consequence: "a run that fails after its bubble is gone — the guard closed it at five minutes, " +
+			consequence: "a run that fails after its bubble is gone — the guard closed it at nine minutes, " +
 				"or the process restarted mid-run — has no chat to speak in, so the user is told nothing and " +
 				"the guard's \"I'll reply separately\" is never answered",
 		},

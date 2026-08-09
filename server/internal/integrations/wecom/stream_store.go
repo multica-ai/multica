@@ -90,24 +90,43 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// streamMaxAge is how long a handle is worth keeping. The long-connection doc
-// gives a stream 10 minutes before the server ends it; the one production
-// implementation we can read — Tencent's own OpenClaw plugin — treats errcode
-// 846608 as a 6-minute ceiling. The two do not agree, so we take the shorter
-// number: being early costs a fallback message, being late costs the answer.
+// streamMaxAge is how long a handle is worth keeping: ten minutes, measured
+// against the live tenant on 2026-08-09 rather than read off anyone's source.
+// One stream was held open with our backend stopped and framed every thirty
+// seconds until the server refused. It took the frame at 600.0s and refused
+// the one at 630.0s with errcode 846608, errmsg "stream message update expired
+// (>10 minutes), cannot update". So the true ceiling is somewhere in (600s,
+// 630s] and this constant sits on its lower bound.
+//
+// The budget belongs to the STREAM, not to the req_id that carried it. The
+// same probe sealed a first stream with finish=true at two minutes and opened
+// a second on the same req_id with a fresh stream id: the second was still
+// being accepted at eight minutes old, well past the first one's own
+// ten-minute mark, and died at its own. That is what would make rotating onto
+// a fresh stream a real way to outlive the window, and it is not visible on
+// the wire — it is why it is written down here.
+//
+// The six minutes this used to say came from a different mechanism, not from a
+// source that disagreed with the ten. Tencent's OpenClaw plugin carries six for
+// the webhook callback flow, where the developer's server is polled for at most
+// six minutes from the user's message; we hold a long connection, which the
+// long-connection doc gives ten minutes from the opening frame. The plugin also
+// describes its six as an idle timeout, which the measurement rules out
+// separately: the clock ran while frames were landing every thirty seconds.
 //
 // The window applies to a queued round's bubble the same as a running one's:
 // the clock starts at the opening frame, and waiting in line does not stop it.
-const streamMaxAge = 6 * time.Minute
+const streamMaxAge = 10 * time.Minute
 
 // streamGuardAfter is when we close a bubble ourselves rather than let it run
 // into streamMaxAge. A minute of headroom covers a slow frame and leaves the
 // user with a sentence instead of a spinner the server will no longer let us
-// replace.
-const streamGuardAfter = 5 * time.Minute
+// replace. It stays clear of the measured ceiling's lower bound, not just of
+// streamMaxAge.
+const streamGuardAfter = 9 * time.Minute
 
 // roundMemory is how long a session keeps the note the last handle left
-// behind. It has to outlast the bubble by a lot: the guard closes at five
+// behind. It has to outlast the bubble by a lot: the guard closes at nine
 // minutes and the run it made a promise about carries on for as long as the
 // agent needs, so the window between the promise and the failure it accounts
 // for is the length of a long run, not the length of a stream. An hour covers
@@ -363,7 +382,7 @@ type pendingEnding struct {
 // was speaking, whether anything is still owed to it, and which runs are done.
 //
 // owed is the heart of it. A handle is taken by whichever ending gets there
-// first, and the five-minute guard is allowed to be that one — it writes
+// first, and the nine-minute guard is allowed to be that one — it writes
 // "still working, I'll reply separately" while the run carries on. The failure
 // that arrives afterwards finds no handle, and without this note it would
 // return without a word: a promise, and then nothing.
