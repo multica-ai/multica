@@ -3210,6 +3210,13 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		if !h.canInvokeAgent(ctx, agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
 			return http.StatusForbidden, "cannot assign to private agent"
 		}
+		ready, reason, err := service.AgentReadiness(ctx, h.Queries, agent)
+		if err != nil {
+			return http.StatusInternalServerError, "failed to check agent readiness"
+		}
+		if !ready {
+			return http.StatusBadRequest, reason
+		}
 		return 0, ""
 	case "squad":
 		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
@@ -3268,7 +3275,11 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 		return db.Agent{}, false, false
 	}
 	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil {
+		return db.Agent{}, false, false
+	}
+	ready, _, err := service.AgentReadiness(ctx, h.Queries, agent)
+	if err != nil || !ready {
 		return db.Agent{}, false, false
 	}
 	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.effectiveInvoker(), uuidToString(issue.WorkspaceID)) {
@@ -3281,6 +3292,25 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 		return db.Agent{}, false, false
 	}
 	return agent, hasPending, true
+}
+
+// isAgentAssigneeReady checks if an issue is assigned to an active agent
+// with a valid runtime.
+func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool {
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
+		return false
+	}
+
+	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
+	if err != nil {
+		return false
+	}
+
+	ready, _, err := service.AgentReadiness(ctx, h.Queries, agent)
+	if err != nil {
+		return false
+	}
+	return ready
 }
 
 // isAgentRunningOnIssue reports whether the calling agent's current task
@@ -3318,21 +3348,6 @@ func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue
 		return false
 	}
 	return uuidToString(task.IssueID) == uuidToString(issue.ID)
-}
-
-// isAgentAssigneeReady checks if an issue is assigned to an active agent
-// with a valid runtime.
-func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool {
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
-		return false
-	}
-
-	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-		return false
-	}
-
-	return true
 }
 
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {

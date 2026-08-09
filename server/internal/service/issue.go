@@ -625,10 +625,14 @@ func isAgentAssigneeReadyWithQueries(ctx context.Context, q *db.Queries, issue d
 		return false
 	}
 	agent, err := q.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil {
 		return false
 	}
-	return true
+	ready, _, err := AgentReadiness(ctx, q, agent)
+	if err != nil {
+		return false
+	}
+	return ready
 }
 
 func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
