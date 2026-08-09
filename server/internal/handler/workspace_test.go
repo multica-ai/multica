@@ -202,6 +202,35 @@ VALUES ($1, $2, 'owner')
 `, wsID, testUserID); err != nil {
 		t.Fatalf("create owner member: %v", err)
 	}
+	var corpusTransferID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO corpus_transfer (
+	id, workspace_id, actor_id, idempotency_key, object_key, manifest,
+	manifest_sha256, expected_size_bytes, expected_sha256, state,
+	verified_size_bytes, verified_sha256, confirmed_at, expires_at
+)
+VALUES (
+	gen_random_uuid(), $1, $2, 'workspace-delete-transfer',
+	'workspaces/delete-test/corpus-transfers/delete-test/archive.zip',
+	'{}'::jsonb, repeat('0', 64), 1, repeat('0', 64), 'acked',
+	1, repeat('0', 64), now(), now() + interval '1 hour'
+)
+RETURNING id
+`, wsID, testUserID).Scan(&corpusTransferID); err != nil {
+		t.Fatalf("create corpus transfer: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO corpus_transfer_ack (
+	workspace_id, transfer_id, sink_id, confirmed_sha256, acknowledged_by
+)
+VALUES ($1, $2, 'workspace-delete-sink', repeat('0', 64), $3)
+`, wsID, corpusTransferID, testUserID); err != nil {
+		t.Fatalf("create corpus transfer ACK: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM corpus_transfer_ack WHERE workspace_id = $1`, wsID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM corpus_transfer WHERE workspace_id = $1`, wsID)
+	})
 	if _, err := testPool.Exec(ctx, `
 INSERT INTO github_pending_check_suite (
 	workspace_id, installation_id, repo_owner, repo_name, pr_number,
@@ -425,6 +454,8 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
 	}
 
 	for _, table := range []string{
+		"corpus_transfer_ack",
+		"corpus_transfer",
 		"task_usage_hourly_dirty",
 		"task_usage_hourly",
 		"runtime_profile",

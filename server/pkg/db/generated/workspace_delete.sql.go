@@ -230,6 +230,12 @@ deleted_hourly_dirty AS (
 deleted_hourly AS (
     DELETE FROM task_usage_hourly WHERE workspace_id = $1
 ),
+deleted_corpus_transfer_acks AS (
+    DELETE FROM corpus_transfer_ack WHERE workspace_id = $1
+),
+deleted_corpus_transfers AS (
+    DELETE FROM corpus_transfer WHERE workspace_id = $1
+),
 deleted_attachments AS (
     DELETE FROM attachment WHERE workspace_id = $1
 ),
