@@ -1126,7 +1126,7 @@ Pass the THREAD ROOT comment id (the top-level comment that started the thread),
 	// rename_session — set a session's display name.
 	srv.RegisterTool(mcp.Tool{
 		Name:        "rename_session",
-		Description: "Set a session's name (the thread's display name), and optionally its workflow phase badge. The session id is the THREAD ROOT comment id. When running an Issue workflow, name the plan session \"Plan\" with phase \"plan\", then each build/review session \"Build 1\"/\"Review 1\" with phase \"build\"/\"review\", so the session header shows which phase the run is in.",
+		Description: "Set a session's human-readable name (the thread's display name), and optionally its workflow phase badge. The session id is the THREAD ROOT comment id. The name must describe the thread's concrete purpose; use the phase badge separately for workflow state. For example, name a plan session \"Plan descriptive thread naming\" with phase \"plan\", and a build session \"Build contextual naming guidance\" with phase \"build\". Do not use a generic display name such as \"Session 1\", \"Plan\", \"Build 1\", or \"Review 1\".",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"issue_id", "root_comment_id", "name"},

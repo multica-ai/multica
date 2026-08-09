@@ -110,6 +110,7 @@ func buildAgentOnlyBrief(provider string, ctx TaskContextForEnv) string {
 	}
 
 	b.WriteString(userProfilePromptSection(ctx.UserProfilePrompt))
+	b.WriteString(cerebroSessionNamingRule(ctx)) // CEREBRO-PATCH(runtime-config-session-naming): FIR-4801 keeps the required issue-thread rule when workspace_brief_mode is off
 
 	// The agent's resolved tools are its own capability, not workspace prose —
 	// an off-brief support agent still needs to know its connections. The

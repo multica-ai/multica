@@ -606,6 +606,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	}
 	b.WriteString(cerebroNamesVerbatimRule()) // CEREBRO-PATCH(runtime-config-names-verbatim): FIR-3986 — never translate a product name; emitted for every task, not only issue ones
 	if hasIssueContext {                      // CEREBRO-PATCH(runtime-config-wakeup-dedup): FIR-1585 — never-busy-wait + wakeup rule, emitted ONCE (was duplicated by TECH-3121 + TECH-3038)
+		b.WriteString(cerebroSessionNamingRule(ctx)) // CEREBRO-PATCH(runtime-config-session-naming): FIR-4801 name newly received and agent-created top-level threads
 		b.WriteString(cerebroNoBusyWaitRule())
 		b.WriteString(cerebroWakeupMandatoryRule())
 		b.WriteString(cerebroClaudeMdScopeRule()) // CEREBRO-PATCH(runtime-config-claudemd-scope): FIR-1585 — repo CLAUDE.md/AGENTS.md is repo-only; keep workspace/agent/process content out
