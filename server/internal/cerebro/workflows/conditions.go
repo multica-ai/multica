@@ -13,10 +13,9 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// Condition is a single conjunctive filter applied after the trigger fires.
-// The conditions column in cerebro_workflow stores an array of these — all
-// must evaluate true for the action to execute. An empty array means
-// "always".
+// Condition is a single filter applied after the trigger fires. Workflow hooks
+// combine their ordered conditions using HookPolicy.ConditionMode; other
+// workflow consumers remain conjunctive. An empty array means "always".
 //
 //	{ "field": "issue.priority", "op": "in", "values": ["urgent","high"] }
 //	{ "field": "issue.project_id", "op": "eq", "value": "<uuid>" }
@@ -31,7 +30,7 @@ type Condition struct {
 // OpEvalPassed is a deferred (DB-backed) hook condition operator: it is true iff
 // the referenced eval's latest run for the event's issue passed. It is NOT
 // handled by the pure match() below (which fails closed on it via default);
-// splitHookConditions routes it to the DB-backed resolveHookConditions instead.
+// the hook policy evaluator routes it to the DB-backed resolver instead.
 const OpEvalPassed = "eval_passed"
 
 // OpEvalFailed is the gate-shaped sibling of OpEvalPassed (FIR-3659): it is
@@ -42,6 +41,16 @@ const OpEvalPassed = "eval_passed"
 // can run the eval fresh (issue-target evals are token-free), the verdict is
 // re-computed at evaluation time so the latest issue state decides.
 const OpEvalFailed = "eval_failed"
+
+func isHookConditionOperator(op string) bool {
+	switch op {
+	case "eq", "ne", "in", "not_in", "is_null", "is_not_null", "starts_with",
+		"exists", "not_exists", "gte", "lt", OpEvalPassed, OpEvalFailed:
+		return true
+	default:
+		return false
+	}
+}
 
 func parseConditions(raw []byte) ([]Condition, error) {
 	if len(raw) == 0 {

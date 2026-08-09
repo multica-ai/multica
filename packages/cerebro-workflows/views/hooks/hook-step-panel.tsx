@@ -9,7 +9,7 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import type { HookBinding, HookCondition, HookEventType, WorkflowHook } from "../../core/hook-types";
 import { HOOK_EVENT_OPTIONS } from "../../core/hook-types";
 import { fieldsForEvents, validateHookStep } from "../../core/hook-validation";
-import { ACTION_CONFIGURATION, fieldDefinition } from "../../core/hook-ux";
+import { ACTION_CONFIGURATION, HOOK_ACTION_OPTIONS, fieldDefinition } from "../../core/hook-ux";
 import type { HookStepKey } from "./hook-chain";
 import { HookTargetPicker, type HookDirectory } from "./hook-target-picker";
 
@@ -23,7 +23,6 @@ const operatorOptions = [
   { value: "exists", label: "exists" }, { value: "not_exists", label: "does not exist" },
   { value: "starts_with", label: "starts with" }, { value: "gte", label: "is at least" }, { value: "lt", label: "is below" },
 ];
-
 function ChoiceSelect({ label, value, options, onChange, placeholder = "Select an option" }: { label: string; value: string; options: ReadonlyArray<{ value: string; label: string }>; onChange: (value: string) => void; placeholder?: string }) {
   return <Select value={value || null} onValueChange={(next) => next && onChange(next)}>
     <SelectTrigger aria-label={label} className="w-full overflow-hidden"><SelectValue><span className="truncate">{options.find((option) => option.value === value)?.label ?? placeholder}</span></SelectValue></SelectTrigger>
@@ -38,6 +37,7 @@ export function HookStepPanel({ step, hook, onChange, directory = {} }: { step: 
   const updateCondition = (index: number, patch: Partial<HookCondition>) => onChange({ ...hook, conditions: hook.conditions.map((condition, current) => current === index ? { ...condition, ...patch } : condition) });
   const updateAction = (index: number, type: string) => {
     const option = ACTION_OPTIONS.find((candidate) => candidate.value === type) ?? ACTION_OPTIONS[0];
+    if (!option) return;
     onChange({ ...hook, actions: hook.actions.map((action, current) => current === index ? { type: option.value, label: option.label, config: {} } : action) });
   };
   const updateActionConfig = (index: number, key: string, value: string | number | boolean) => onChange({ ...hook, actions: hook.actions.map((action, current) => current === index ? { ...action, config: { ...action.config, [key]: value } } : action) });
@@ -64,7 +64,10 @@ export function HookStepPanel({ step, hook, onChange, directory = {} }: { step: 
 
   const filterSection = <div aria-label="Only when" className="grid gap-2">
     <div><h3 className="text-sm font-semibold">Only when <span className="font-normal text-muted-foreground">(optional)</span></h3><p className="text-xs text-muted-foreground">Extra conditions on the event's data. Leave empty to run every time.</p></div>
-    {hook.conditions.length > 1 && <p className="text-sm font-medium">All of the following must match</p>}
+    {hook.conditions.length > 1 && <fieldset className="grid gap-1"><legend className="text-sm font-medium">Conditions that must match</legend><RadioGroup className="flex flex-wrap gap-2" value={hook.condition_mode} onValueChange={(value) => onChange({ ...hook, condition_mode: value as WorkflowHook["condition_mode"] })}>
+      <label className={`flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm ${hook.condition_mode === "all" ? "border-primary bg-primary/10" : ""}`}><RadioGroupItem value="all" />All conditions</label>
+      <label className={`flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm ${hook.condition_mode === "any" ? "border-primary bg-primary/10" : ""}`}><RadioGroupItem value="any" />Any condition</label>
+    </RadioGroup></fieldset>}
     {hook.conditions.map((condition, index) => { const definition = fieldDefinition(condition.field); const rowError = conditionError(condition, fields); return <div key={index} aria-label={`Condition group ${index + 1}`} className="grid gap-2 rounded-xl border-l-4 border-l-primary/40 pl-2"><div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)_auto] sm:items-end">
       <label className="grid gap-1 text-sm">Field<ChoiceSelect label={`Filter field ${index + 1}`} value={condition.field} placeholder="Select field" options={fields.map((field) => ({ value: field, label: fieldDefinition(field).label }))} onChange={(value) => updateCondition(index, { field: value, value: "" })} /></label>
       <label className="grid gap-1 text-sm">Operator<ChoiceSelect label={`Filter operator ${index + 1}`} value={condition.operator} options={operatorOptions} onChange={(value) => updateCondition(index, { operator: value })} /></label>
@@ -100,6 +103,8 @@ export function HookStepPanel({ step, hook, onChange, directory = {} }: { step: 
   </section>;
 }
 
+export const ACTION_OPTIONS = HOOK_ACTION_OPTIONS;
+
 function ActionConfiguration({ action, directory, update }: { action: WorkflowHook["actions"][number]; directory: HookDirectory; update: (key: string, value: string | number | boolean) => void }) {
   const definition = ACTION_CONFIGURATION[action.type];
   if (!definition) return <p role="alert" className="text-sm text-destructive">This action is not configurable in the editor.</p>;
@@ -110,7 +115,7 @@ function ActionField({ field, value, directory, update }: { field: (typeof ACTIO
   const label = `${field.label}${field.required ? "" : " (optional)"}`;
   if (field.input === "target") return <label className="grid gap-1 text-sm">{label}<HookTargetPicker label={field.key === "target" ? "Handoff target" : field.key === "plan_ref" ? "Handoff plan reference" : field.label} value={String(value ?? "")} options={directory[field.target ?? "agent"] ?? []} onSearch={field.target === "issue" ? directory.searchIssues : undefined} onChange={update} />{field.help && <span className="text-xs text-muted-foreground">{field.help}</span>}</label>;
   if (field.input === "textarea") return <label className="grid gap-1 text-sm">{label}<Textarea aria-label={field.key === "rubric" ? "Judge rubric" : field.key === "summary" ? "Handoff summary" : field.key === "done" ? "Handoff done" : field.key === "remaining" ? "Handoff remaining" : field.label} value={String(value ?? "")} onChange={(event) => update(event.target.value)} /></label>;
-  if (field.input === "checkbox") return <label className="flex items-center gap-2 text-sm"><Checkbox aria-label={field.label} checked={value !== false} onCheckedChange={(checked) => update(checked === true)} />{field.label}</label>;
+  if (field.input === "checkbox") return <label className="flex items-center gap-2 text-sm"><Checkbox aria-label={field.label} checked={typeof value === "boolean" ? value : ("default" in field ? field.default : true) !== false} onCheckedChange={(checked) => update(checked === true)} />{field.label}{field.help && <span className="text-xs text-muted-foreground">{field.help}</span>}</label>;
   if (field.input === "select") return <label className="grid gap-1 text-sm">{label}<ChoiceSelect label={field.label} value={String(value ?? "")} options={field.options ?? []} onChange={update} /></label>;
   const displayedValue = field.input === "number" ? Number(value ?? (field.key === "max_depth" ? 2 : 1)) : field.input === "datetime-local" ? toLocalDateTime(String(value ?? "")) : String(value ?? "");
   return <label className="grid gap-1 text-sm">{label}<Input aria-label={field.key === "plan_ref" ? "Handoff plan reference" : field.label} type={field.input} min={field.key === "max_depth" ? 1 : undefined} max={field.key === "max_depth" ? 4 : undefined} value={displayedValue} onChange={(event) => update(field.input === "number" ? Number(event.target.value) : field.input === "datetime-local" && event.target.value ? new Date(event.target.value).toISOString() : event.target.value)} />{field.help && <span className="text-xs text-muted-foreground">{field.help}</span>}</label>;
@@ -145,12 +150,3 @@ function decisionLabel(decision: WorkflowHook["decision"]) { return ({ allow: "G
 function decisionDescription(decision: WorkflowHook["decision"]) { return ({ allow: "Let the action continue. Use the actions below to add guidance, reminders, or logging without stopping the agent.", block: "Stop the action and tell the agent what must change.", modify: "Change only fields declared mutable by the event.", require: "Let it continue only after the agent satisfies a stated outcome." })[decision]; }
 function failModeLabel(mode: WorkflowHook["fail_mode"]) { return ({ open: "Continue", closed: "Stop", warn: "Continue and log" })[mode]; }
 function failModeDescription(mode: WorkflowHook["fail_mode"]) { return ({ open: "Let the action continue.", closed: "Stop the action to be safe.", warn: "Let the action continue and record that the check could not run." })[mode]; }
-
-export const ACTION_OPTIONS = [
-  { value: "member.notify", label: "Notify member" }, { value: "agent.dispatch", label: "Start agent" }, { value: "squad.dispatch", label: "Start squad" },
-  { value: "skill.run", label: "Run skill" }, { value: "judge.gate", label: "Judge gate" }, { value: "eval.run", label: "Run eval" }, { value: "eval.gate", label: "Eval gate" },
-  { value: "wakeup.create", label: "Create wakeup" }, { value: "wakeup.cancel", label: "Cancel wakeup" }, { value: "session.handoff", label: "Start Handoff" },
-  { value: "task.retry", label: "Repeat current step" }, { value: "task.cancel", label: "Cancel task" }, { value: "artifact.create_or_update", label: "Create or update artifact" },
-  { value: "workflow.activate", label: "Start workflow" }, { value: "workflow.pause", label: "Pause workflow" }, { value: "workflow.resume", label: "Resume workflow" }, { value: "workflow.stop", label: "Stop workflow" },
-  { value: "approval.require", label: "Require approval" }, { value: "audit.record", label: "Record audit event" }, { value: "metric.increment", label: "Increment metric" },
-] as const;

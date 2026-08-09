@@ -1,10 +1,70 @@
 package workflows
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 )
+
+func TestHookActionManifestOwnsEveryVisibleRuntimeAction(t *testing.T) {
+	registry := NewActionRegistry()
+	registerVersionOneHookActions(registry, &fakeTypedActionExecutor{})
+	if len(hookActionManifest.Actions) != 23 {
+		t.Fatalf("manifest action count = %d, want 23", len(hookActionManifest.Actions))
+	}
+	seen := map[string]bool{}
+	for _, action := range hookActionManifest.Actions {
+		if action.Type == "" || action.Label == "" || action.Description == "" {
+			t.Fatalf("incomplete manifest action: %#v", action)
+		}
+		if seen[action.Type] {
+			t.Fatalf("duplicate manifest action %q", action.Type)
+		}
+		seen[action.Type] = true
+		if !registry.Has(action.Type) {
+			t.Errorf("%s has no registered planner", action.Type)
+		}
+		if !hookActionExecutorSupports(action.Type) {
+			t.Errorf("%s has no runtime executor", action.Type)
+		}
+	}
+}
+
+func TestHookActionCatalogIsGeneratedFromServerManifest(t *testing.T) {
+	want := generateHookActionTypeScript()
+	path := filepath.Join("..", "..", "..", "..", "packages", "cerebro-workflows", "core", "hook-action-catalog.generated.ts")
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s has drifted; run go generate ./internal/cerebro/workflows", path)
+	}
+}
+
+func TestHookActionManifestRequiredConfigurationIsEnforced(t *testing.T) {
+	for _, action := range hookActionManifest.Actions {
+		required := false
+		for _, field := range action.Fields {
+			if field.Required {
+				required = true
+				break
+			}
+		}
+		err := validateTypedHookAction(HookAction{Type: action.Type, Config: map[string]any{}})
+		// An action whose knobs all have a safe default is configured the
+		// moment it is picked, so an empty config is the intended shape.
+		if required && err == nil {
+			t.Errorf("%s accepted empty required configuration", action.Type)
+		}
+		if !required && err != nil {
+			t.Errorf("%s rejected its own defaults: %v", action.Type, err)
+		}
+	}
+}
 
 func TestTypedActionRegistryContainsLegacyAndVersionOneActions(t *testing.T) {
 	registry := NewActionRegistry()

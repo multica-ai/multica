@@ -9,12 +9,44 @@ import (
 )
 
 func registerWorkflowHookTools(srv *mcp.Server, client *cli.APIClient) {
-	hookSchema := map[string]any{"type": "object", "description": "Complete Workflow hook policy document"}
+	hookSchema := map[string]any{
+		"type":        "object",
+		"description": "Complete Workflow hook policy document",
+		"properties": map[string]any{
+			"condition_mode": map[string]any{
+				"type":        "string",
+				"enum":        []string{"all", "any"},
+				"default":     "all",
+				"description": "Whether all conditions or any condition must match.",
+			},
+			"revision": map[string]any{
+				"type":        "integer",
+				"minimum":     1,
+				"description": "Current immutable Draft revision for a revision-safe update.",
+			},
+		},
+	}
+	testSchema := map[string]any{
+		"type":        "object",
+		"description": "Exact saved Draft revision and one retained compatible event. Test is planning-only and has no side effects.",
+		"properties": map[string]any{
+			"event_id": map[string]any{
+				"type":        "string",
+				"description": "Retained event UUID returned in compatible_events by get_workflow_hook.",
+			},
+			"revision": map[string]any{
+				"type":        "integer",
+				"minimum":     1,
+				"description": "Exact saved Draft revision to test.",
+			},
+		},
+		"required": []string{"event_id", "revision"},
+	}
 	registerHookGet(srv, client, "list_workflow_hooks", "List visible Workflow hooks.", "", false)
 	registerHookGet(srv, client, "get_workflow_hook", "Get one Workflow hook.", "", true)
 	registerHookMutation(srv, client, "create_workflow_hook", "Create a Workflow hook in Dry run.", httpPost, "", hookSchema, false)
 	registerHookMutation(srv, client, "update_workflow_hook", "Update a Workflow hook as a new Dry run version.", httpPut, "", hookSchema, true)
-	registerHookMutation(srv, client, "test_workflow_hook", "Test a Workflow hook without side effects and refresh its baseline.", httpPost, "/test", hookSchema, true)
+	registerHookMutation(srv, client, "test_workflow_hook", "Test an exact saved Workflow Hook Draft revision against a retained event. Planning-only; no side effects.", httpPost, "/test", testSchema, true)
 	registerHookMutation(srv, client, "publish_workflow_hook", "Publish a tested Workflow hook. Human-only permission is enforced by the server.", httpPost, "/publish", nil, true)
 	registerHookGet(srv, client, "get_effective_workflow_hooks", "Get the effective bindings for one Workflow hook.", "/effective", true)
 	registerHookGet(srv, client, "list_workflow_hook_runs", "List audit runs for one Workflow hook.", "/runs", true)

@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"os"
 	"time"
@@ -21,16 +22,19 @@ var workflowHookTestCmd = &cobra.Command{Use: "test <hook-id>", Short: "Test a W
 var workflowHookPublishCmd = &cobra.Command{Use: "publish <hook-id>", Short: "Publish a tested Workflow hook", Args: exactArgs(1), RunE: runWorkflowHookPublish}
 var workflowHookEffectiveCmd = &cobra.Command{Use: "effective <hook-id>", Short: "Show effective Workflow hook bindings", Args: exactArgs(1), RunE: runWorkflowHookEffective}
 var workflowHookRunsCmd = &cobra.Command{Use: "runs <hook-id>", Short: "List Workflow hook runs", Args: exactArgs(1), RunE: runWorkflowHookRuns}
+var workflowHookEventsCmd = &cobra.Command{Use: "events <hook-id>", Short: "List compatible retained events", Args: exactArgs(1), RunE: runWorkflowHookEvents}
 
 func init() {
-	for _, cmd := range []*cobra.Command{workflowHookListCmd, workflowHookGetCmd, workflowHookCreateCmd, workflowHookUpdateCmd, workflowHookTestCmd, workflowHookPublishCmd, workflowHookEffectiveCmd, workflowHookRunsCmd} {
+	for _, cmd := range []*cobra.Command{workflowHookListCmd, workflowHookGetCmd, workflowHookCreateCmd, workflowHookUpdateCmd, workflowHookTestCmd, workflowHookPublishCmd, workflowHookEffectiveCmd, workflowHookRunsCmd, workflowHookEventsCmd} {
 		cmd.Flags().String("output", "json", "Output format: json")
 	}
 	for _, cmd := range []*cobra.Command{workflowHookCreateCmd, workflowHookUpdateCmd, workflowHookTestCmd} {
 		cmd.Flags().String("file", "", "Read the JSON document from a file")
 		cmd.Flags().Bool("stdin", false, "Read the JSON document from stdin")
 	}
-	workflowHookCmd.AddCommand(workflowHookListCmd, workflowHookGetCmd, workflowHookCreateCmd, workflowHookUpdateCmd, workflowHookTestCmd, workflowHookPublishCmd, workflowHookEffectiveCmd, workflowHookRunsCmd)
+	workflowHookTestCmd.Flags().String("event", "", "Retained event ID")
+	workflowHookTestCmd.Flags().Int("revision", 0, "Exact saved Draft revision")
+	workflowHookCmd.AddCommand(workflowHookListCmd, workflowHookGetCmd, workflowHookCreateCmd, workflowHookUpdateCmd, workflowHookTestCmd, workflowHookPublishCmd, workflowHookEffectiveCmd, workflowHookRunsCmd, workflowHookEventsCmd)
 	workflowCmd.AddCommand(workflowHookCmd)
 }
 
@@ -57,6 +61,10 @@ func runWorkflowHookEffective(cmd *cobra.Command, args []string) error {
 
 func runWorkflowHookRuns(cmd *cobra.Command, args []string) error {
 	return workflowHookGetPath(cmd, "/api/cerebro/workflow-hooks/"+url.PathEscape(args[0])+"/runs")
+}
+
+func runWorkflowHookEvents(cmd *cobra.Command, args []string) error {
+	return workflowHookGetPath(cmd, "/api/cerebro/workflow-hooks/"+url.PathEscape(args[0])+"/events")
 }
 
 func workflowHookGetPath(cmd *cobra.Command, path string) error {
@@ -111,6 +119,13 @@ func runWorkflowHookTest(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+	} else {
+		eventID, _ := cmd.Flags().GetString("event")
+		revision, _ := cmd.Flags().GetInt("revision")
+		if eventID == "" || revision < 1 {
+			return fmt.Errorf("--event and --revision are required")
+		}
+		body = map[string]any{"event_id": eventID, "revision": revision}
 	}
 	return workflowHookPost(cmd, "/api/cerebro/workflow-hooks/"+url.PathEscape(args[0])+"/test", body)
 }

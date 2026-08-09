@@ -9,6 +9,9 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? process.env.FRONTEND_ORIGIN ?? "http://localhost:3000",
     headless: true,
+    // A failing CI run should carry every request, response and DOM snapshot —
+    // without it, a red e2e job only tells you which assertion failed.
+    trace: "retain-on-failure",
   },
   projects: [
     {

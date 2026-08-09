@@ -1186,7 +1186,7 @@ var catalog = []Capability{
 			"POST /api/cerebro/workflow-hooks/",
 			"PUT /api/cerebro/workflow-hooks/{id}",
 			"POST /api/cerebro/workflow-hooks/{id}/test",
-			"POST /api/cerebro/workflow-hooks/{id}/disable",
+			"DELETE /api/cerebro/workflow-hooks/{id}/draft",
 			"DELETE /api/cerebro/workflow-hooks/{id}",
 		},
 		ToolBindings: []string{"create_workflow_hook", "test_workflow_hook", "update_workflow_hook"},
@@ -1197,7 +1197,7 @@ var catalog = []Capability{
 		Category:      CategoryWorkflows,
 		Description:   "Publish a tested Workflow hook so that it can enforce decisions. Human-only.",
 		DescriptionZh: "发布已测试的工作流钩子，使其能够强制执行决策。仅限人员。",
-		Ops:           []string{"POST /api/cerebro/workflow-hooks/{id}/publish"},
+		Ops:           []string{"POST /api/cerebro/workflow-hooks/{id}/publish", "POST /api/cerebro/workflow-hooks/{id}/disable"},
 		ToolBindings:  []string{"publish_workflow_hook"},
 	},
 	{

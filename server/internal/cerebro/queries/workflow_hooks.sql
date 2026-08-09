@@ -10,17 +10,17 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: CreateCerebroWorkflowHookPolicy :one
 INSERT INTO cerebro_workflow_hook_policy (
     family_id, workspace_id, name, description, policy_version, mode, fail_mode,
-    event_types, conditions, created_by_id, created_by_type
-) VALUES ($1, $2, $3, $4, $5, 'dry_run', $6, $7, $8, $9, $10)
+    condition_mode, event_types, conditions, created_by_id, created_by_type
+) VALUES ($1, $2, $3, $4, $5, 'dry_run', $6, COALESCE(NULLIF($7, ''), 'all'), $8, $9, $10, $11)
 RETURNING *;
 
 -- name: CreateCerebroWorkflowHookPolicyVersion :one
 INSERT INTO cerebro_workflow_hook_policy (
     family_id, workspace_id, name, description, policy_version, mode, fail_mode,
-    event_types, conditions, created_by_id, created_by_type
+    condition_mode, event_types, conditions, created_by_id, created_by_type
 )
 SELECT p.family_id, p.workspace_id, $3, $4, p.policy_version + 1, 'dry_run', $5,
-       $6, $7, $8, $9
+       COALESCE(NULLIF($6, ''), 'all'), $7, $8, $9, $10
 FROM cerebro_workflow_hook_policy p
 WHERE p.id = $1 AND p.workspace_id = $2
 RETURNING *;

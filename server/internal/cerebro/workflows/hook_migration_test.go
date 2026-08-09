@@ -31,6 +31,96 @@ func TestHookMigrationDefinesCompletePersistenceModel(t *testing.T) {
 	}
 }
 
+func TestHookMigrationsAddConditionModeWithAllDefault(t *testing.T) {
+	entries, err := os.ReadDir("../../../migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var combined strings.Builder
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".up.sql") {
+			continue
+		}
+		raw, err := os.ReadFile("../../../migrations/" + entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		combined.Write(raw)
+	}
+	migrations := combined.String()
+	for _, contract := range []string{
+		"ADD COLUMN IF NOT EXISTS condition_mode TEXT NOT NULL DEFAULT 'all'",
+		"CHECK (condition_mode IN ('all', 'any'))",
+	} {
+		if !strings.Contains(migrations, contract) {
+			t.Fatalf("Hook migrations are missing %q", contract)
+		}
+	}
+}
+
+func TestHookLifecycleMigrationSeparatesLiveAndDraftIdentity(t *testing.T) {
+	raw, err := os.ReadFile("../../../migrations/9164_cerebro_workflow_hook_lifecycle.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	migration := string(raw)
+	for _, contract := range []string{
+		"CREATE TABLE IF NOT EXISTS cerebro_workflow_hook_family",
+		"active_policy_id UUID",
+		"current_draft_revision_id UUID",
+		"CREATE TABLE IF NOT EXISTS cerebro_workflow_hook_draft_series",
+		"CREATE UNIQUE INDEX IF NOT EXISTS hook_one_active_draft_series_per_family",
+		"WHERE status = 'active'",
+		"CREATE TABLE IF NOT EXISTS cerebro_workflow_hook_draft_revision",
+		"UNIQUE (workspace_id, draft_series_id, revision)",
+		"WHERE mode <> 'dry_run'",
+		"REFERENCES cerebro_workflow_hook_policy (workspace_id, family_id, id)",
+		"REFERENCES cerebro_workflow_hook_draft_revision (workspace_id, family_id, id)",
+	} {
+		if !strings.Contains(migration, contract) {
+			t.Fatalf("Hook lifecycle migration is missing %q", contract)
+		}
+	}
+}
+
+func TestHookEventJournalMigrationProtectsSevenDayReplayAndExactRevisionEvidence(t *testing.T) {
+	raw, err := os.ReadFile("../../../migrations/9165_cerebro_workflow_hook_event_journal.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, fragment := range []string{
+		"CREATE TABLE IF NOT EXISTS cerebro_workflow_hook_event_journal",
+		"schema_version INTEGER NOT NULL DEFAULT 1",
+		"event_hash TEXT NOT NULL",
+		"expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '7 days')",
+		"UNIQUE (workspace_id, event_hash)",
+		"CREATE TABLE IF NOT EXISTS cerebro_workflow_hook_test_evidence",
+		"draft_revision_id UUID NOT NULL",
+		"event_journal_id UUID NOT NULL",
+		"UNIQUE (workspace_id, draft_revision_id)",
+		"ADD COLUMN IF NOT EXISTS draft_revision_id UUID",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Fatalf("hook event journal migration missing %q", fragment)
+		}
+	}
+}
+
+func TestGeneratedHookQueriesPersistConditionMode(t *testing.T) {
+	raw, err := os.ReadFile("../queries/workflow_hooks.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := string(raw)
+	if strings.Count(query, "condition_mode") < 2 {
+		t.Fatalf("workflow hook create queries must persist condition_mode")
+	}
+	if strings.Count(query, "COALESCE(NULLIF(") < 2 {
+		t.Fatalf("workflow hook create queries must normalize an empty condition_mode to all")
+	}
+}
+
 func TestHookFailModeCleanupRetiresOpenPolicies(t *testing.T) {
 	raw, err := os.ReadFile("../../../migrations/9154_cerebro_workflow_hook_fail_mode_cleanup.up.sql")
 	if err != nil {

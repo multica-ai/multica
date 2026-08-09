@@ -1,7 +1,19 @@
 export type HookMode = "off" | "dry_run" | "enforce" | "managed";
 export type HookFailMode = "open" | "closed" | "warn";
+export type HookConditionMode = "all" | "any";
 export type HookDecision = "allow" | "block" | "modify" | "require";
 export type HookScopeKind = "workspace" | "project" | "workflow" | "agent" | "model" | "issue" | "session";
+export type HookLifecycleState = "draft" | "live" | "live_with_draft" | "off" | "off_with_draft" | "managed";
+
+export interface HookLifecycle {
+  state: HookLifecycleState;
+  live_policy_id?: string;
+  live_version?: number;
+  draft_id?: string;
+  draft_series_id?: string;
+  draft_revision?: number;
+  live_unchanged_by_draft: boolean;
+}
 
 export type HookEventType =
   | "before.session.start"
@@ -44,6 +56,9 @@ export interface HookActionDraft {
 
 export interface WorkflowHook {
   id?: string;
+  family_id?: string;
+  draft_series_id?: string;
+  revision?: number;
   version: number;
   name: string;
   description: string;
@@ -51,6 +66,7 @@ export interface WorkflowHook {
   fail_mode: HookFailMode;
   events: HookEventType[];
   bindings: HookBinding[];
+  condition_mode: HookConditionMode;
   conditions: HookCondition[];
   decision: HookDecision;
   requirement: string;
@@ -58,6 +74,17 @@ export interface WorkflowHook {
   baseline_run_count: number;
   can_publish?: boolean;
   last_run_at?: string;
+  lifecycle: HookLifecycle;
+  compatible_events?: HookJournalEvent[];
+}
+
+export interface HookJournalEvent {
+  id: string;
+  event_id: string;
+  event_type: HookEventType;
+  schema_version: number;
+  occurred_at: string;
+  expires_at: string;
 }
 
 export interface HookRun {
@@ -109,11 +136,14 @@ export function createHookDraft(): WorkflowHook {
     fail_mode: "warn",
     events: [],
     bindings: [],
+    condition_mode: "all",
     conditions: [],
     decision: "allow",
     requirement: "",
     actions: [],
     baseline_run_count: 0,
     can_publish: false,
+    lifecycle: { state: "draft", live_unchanged_by_draft: false },
+    compatible_events: [],
   };
 }

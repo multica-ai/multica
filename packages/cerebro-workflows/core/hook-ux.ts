@@ -1,10 +1,12 @@
-import { createHookDraft, HOOK_EVENT_OPTIONS, type HookEventType, type WorkflowHook } from "./hook-types";
+import { createHookDraft, HOOK_EVENT_OPTIONS, type WorkflowHook } from "./hook-types";
 import type { HookStepKey } from "./hook-validation";
+import { HOOK_ACTION_CATALOG } from "./hook-action-catalog.generated";
 
 export interface HookFieldDefinition {
   label: string;
   input: "text" | "number" | "boolean" | "select";
   options?: ReadonlyArray<{ value: string; label: string }>;
+  sensitive?: boolean;
 }
 
 export interface ActionFieldDefinition {
@@ -13,6 +15,7 @@ export interface ActionFieldDefinition {
   input: "text" | "textarea" | "number" | "datetime-local" | "checkbox" | "target" | "select";
   required?: boolean;
   target?: "agent" | "member" | "issue" | "workflow" | "skill" | "squad" | "artifact" | "eval";
+  summary: "target" | "safe" | "redacted" | "omit";
   help?: string;
   options?: ReadonlyArray<{ value: string; label: string }>;
 }
@@ -23,6 +26,9 @@ export interface ActionDefinition {
   fields: readonly ActionFieldDefinition[];
 }
 
+export interface HookSummaryTarget { value: string; label: string }
+export type HookSummaryDirectory = Partial<Record<"agent" | "member" | "model" | "issue" | "project" | "workflow" | "session" | "squad" | "skill" | "artifact" | "eval", readonly HookSummaryTarget[]>>;
+
 const statusOptions = ["Backlog", "Todo", "In progress", "In review", "Done", "Blocked", "Cancelled"].map((label) => ({ value: label.toLowerCase().replaceAll(" ", "_"), label }));
 
 const FIELD_DEFINITIONS: Record<string, HookFieldDefinition> = {
@@ -32,7 +38,7 @@ const FIELD_DEFINITIONS: Record<string, HookFieldDefinition> = {
   attempt: { label: "Attempt number", input: "number" },
   hook_depth: { label: "Hook depth", input: "number" },
   continuation: { label: "Continuation registered", input: "boolean" },
-  "message.body": { label: "Message text", input: "text" },
+  "message.body": { label: "Message text", input: "text", sensitive: true },
   "tool.name": { label: "Tool name", input: "text" },
   "workflow.step": { label: "Workflow step", input: "text" },
   model: { label: "Model", input: "text" },
@@ -45,102 +51,27 @@ export function fieldDefinition(field: string): HookFieldDefinition {
   };
 }
 
-export const ACTION_CONFIGURATION: Record<string, ActionDefinition> = {
-  "member.notify": { label: "Notify member", description: "Send a clear notification to a named member.", fields: [
-    { key: "member_id", label: "Member", input: "target", target: "member", required: true },
-    { key: "title", label: "Title", input: "text", required: true },
-    { key: "message", label: "Message", input: "textarea", required: true },
-  ] },
-  "agent.dispatch": { label: "Start agent", description: "Start a named agent with this hook context.", fields: [{ key: "agent_id", label: "Agent", input: "target", target: "agent", required: true }] },
-  "squad.dispatch": { label: "Start squad", description: "Start a squad through its lead agent.", fields: [
-    { key: "squad_id", label: "Squad", input: "target", target: "squad", required: true },
-    { key: "agent_id", label: "Lead agent", input: "target", target: "agent", required: true },
-  ] },
-  "skill.run": { label: "Run skill", description: "Run a named skill, optionally with a specific agent.", fields: [
-    { key: "skill_name", label: "Skill", input: "target", target: "skill", required: true },
-    { key: "agent_id", label: "Agent", input: "target", target: "agent" },
-  ] },
-  "judge.gate": { label: "Judge gate", description: "Ask a judge agent to decide against a written rubric.", fields: [
-    { key: "agent_id", label: "Judge agent", input: "target", target: "agent", required: true },
-    { key: "rubric", label: "Rubric", input: "textarea", required: true },
-  ] },
-  "eval.run": { label: "Run eval", description: "Run a cerebro eval when this event fires.", fields: [
-    { key: "eval_id", label: "Eval", input: "target", target: "eval", required: true },
-  ] },
-  "eval.gate": { label: "Eval gate", description: "Block this hook unless the eval's latest run passed.", fields: [
-    { key: "eval_id", label: "Eval", input: "target", target: "eval", required: true },
-  ] },
-  "wakeup.create": { label: "Create wakeup", description: "Schedule a single future wakeup.", fields: [
-    { key: "fire_at", label: "Wake up at", input: "datetime-local", required: true },
-    { key: "agent_id", label: "Agent", input: "target", target: "agent" },
-    { key: "issue_id", label: "Issue", input: "target", target: "issue" },
-    { key: "prompt", label: "Prompt", input: "textarea", required: true },
-  ] },
-  "wakeup.cancel": { label: "Cancel wakeup", description: "Cancel one existing wakeup by its runtime value.", fields: [{ key: "wakeup_id", label: "Wakeup ID", input: "text", required: true }] },
-  "session.handoff": { label: "Start Handoff", description: "Pass the work and its state to another agent session.", fields: [
-    { key: "target", label: "Target agent", input: "target", target: "agent", required: true },
-    { key: "plan_ref", label: "Plan reference", input: "target", target: "artifact", help: "Optional when the hook does not follow a saved plan." },
-    { key: "start_new", label: "Start new session now", input: "checkbox" },
-    { key: "summary", label: "Summary", input: "textarea", required: true },
-    { key: "done", label: "Done", input: "textarea", required: true },
-    { key: "remaining", label: "Remaining", input: "textarea", required: true },
-    { key: "max_depth", label: "Maximum Handoff depth", input: "number", required: true },
-  ] },
-  "task.retry": { label: "Repeat current step", description: "Retry the task that produced the event.", fields: [{ key: "task_id", label: "Task ID", input: "text", required: true }] },
-  "task.cancel": { label: "Cancel task", description: "Cancel the task that produced the event.", fields: [{ key: "task_id", label: "Task ID", input: "text", required: true }] },
-  "artifact.create_or_update": { label: "Create or update artifact", description: "Write a reusable document from the hook outcome.", fields: [
-    { key: "artifact_id", label: "Existing artifact", input: "target", target: "artifact" },
-    { key: "title", label: "Title", input: "text", required: true },
-    { key: "kind", label: "Type", input: "select", required: true, options: ["report", "plan", "decision", "diagram", "note"].map((value) => ({ value, label: value.charAt(0).toUpperCase() + value.slice(1) })) },
-    { key: "body", label: "Content", input: "textarea", required: true },
-  ] },
-  "workflow.activate": { label: "Start workflow", description: "Start a named workflow.", fields: [{ key: "workflow_id", label: "Workflow", input: "target", target: "workflow", required: true }] },
-  "workflow.pause": { label: "Pause workflow", description: "Pause a named workflow.", fields: [{ key: "workflow_id", label: "Workflow", input: "target", target: "workflow", required: true }] },
-  "workflow.resume": { label: "Resume workflow", description: "Resume a named workflow.", fields: [{ key: "workflow_id", label: "Workflow", input: "target", target: "workflow", required: true }] },
-  "workflow.stop": { label: "Stop workflow", description: "Stop a named workflow.", fields: [{ key: "workflow_id", label: "Workflow", input: "target", target: "workflow", required: true }] },
-  "approval.require": { label: "Require approval", description: "Pause until a person approves the described capability.", fields: [
-    { key: "capability", label: "Capability", input: "text", required: true },
-    { key: "resource", label: "Resource", input: "text", required: true },
-    { key: "reason", label: "Reason", input: "textarea", required: true },
-  ] },
-  "issue.comment": { label: "Comment on issue", description: "Post a comment on the event's issue. Supports {{placeholders}} like {{task.failure_reason}}.", fields: [
-    { key: "body", label: "Comment", input: "textarea", required: true },
-    { key: "issue_id", label: "Issue", input: "target", target: "issue", help: "Optional; defaults to the issue that produced the event." },
-  ] },
-  "issue.status": { label: "Set issue status", description: "Change the event's issue to a named status.", fields: [
-    { key: "status", label: "Status", input: "select", required: true, options: statusOptions },
-    { key: "issue_id", label: "Issue", input: "target", target: "issue", help: "Optional; defaults to the issue that produced the event." },
-  ] },
-  "audit.record": { label: "Record audit event", description: "Add a named event to the audit trail.", fields: [
-    { key: "event", label: "Event name", input: "text", required: true },
-    { key: "message", label: "Details", input: "textarea" },
-  ] },
-  "metric.increment": { label: "Increment metric", description: "Increase a named operational metric.", fields: [
-    { key: "name", label: "Metric name", input: "text", required: true },
-    { key: "amount", label: "Amount", input: "number", required: true },
-  ] },
-};
-
-const eventPhrase = (event?: HookEventType) => {
-  if (event === "before.task.complete") return "before a task completes";
-  if (event === "on.task.failure") return "when a task fails";
-  if (event === "on.wakeup.fire_failure") return "when a wakeup fails";
-  const label = HOOK_EVENT_OPTIONS.find((option) => option.value === event)?.label ?? "the selected event occurs";
-  return label.replace(/^Before /, "before ").replace(/^After /, "after ").replace(/^When /, "when ").replace(/^the selected/, "when the selected");
-};
+export const ACTION_CONFIGURATION = Object.fromEntries(HOOK_ACTION_CATALOG.map(({ type, label, description, fields }) => [type, { label, description, fields }])) as unknown as Record<string, ActionDefinition>;
+export const HOOK_ACTION_OPTIONS = HOOK_ACTION_CATALOG.map(({ type, label }) => ({ value: type, label }));
 
 export function triggerSummary(hook: WorkflowHook): string {
   const firstEvent = hook.events.at(0);
   return !firstEvent ? "Choose a trigger" : hook.events.length === 1 ? HOOK_EVENT_OPTIONS.find((option) => option.value === firstEvent)?.label ?? firstEvent : `${hook.events.length} triggers`;
 }
 
-export function scopeSummary(hook: WorkflowHook): string {
-  const firstBinding = hook.bindings.at(0);
-  return !firstBinding ? "Choose what this applies to" : hook.bindings.length === 1 ? `1 ${firstBinding.kind === "session" ? "chat or session" : firstBinding.kind}` : `${hook.bindings.length} scopes`;
+function resolvedTarget(directory: HookSummaryDirectory, kind: keyof HookSummaryDirectory, value: string): string {
+  return directory[kind]?.find((option) => option.value === value)?.label ?? "Unknown target";
+}
+
+export function scopeSummary(hook: WorkflowHook, directory: HookSummaryDirectory = {}): string {
+  if (hook.bindings.length === 0) return "Choose what this applies to";
+  return hook.bindings.map((binding) => binding.kind === "workspace" ? "This workspace" : resolvedTarget(directory, binding.kind, binding.value)).join(" or ");
 }
 
 export function filterSummary(hook: WorkflowHook): string {
-  return hook.conditions.length === 0 ? "Every time" : hook.conditions.length === 1 ? "1 filter" : `${hook.conditions.length} filters`;
+  if (hook.conditions.length === 0) return "Every time";
+  const mode = hook.condition_mode === "any" ? "Any" : "All";
+  return `${mode}: ${hook.conditions.map(conditionSummary).join("; ")}`;
 }
 
 export function decisionSummary(hook: WorkflowHook): string {
@@ -151,23 +82,61 @@ export function failModeSummary(hook: WorkflowHook): string {
   return ({ open: "Continue", closed: "Stop", warn: "Continue and log" })[hook.fail_mode];
 }
 
-export function stepSummary(hook: WorkflowHook, step: HookStepKey): string {
-  const firstAction = hook.actions.at(0);
-  if (step === "when") return `${triggerSummary(hook)} · ${scopeSummary(hook)} · ${filterSummary(hook)}`;
+export function stepSummary(hook: WorkflowHook, step: HookStepKey, directory: HookSummaryDirectory = {}): string {
+  if (step === "when") return `${triggerSummary(hook)} · ${scopeSummary(hook, directory)} · ${filterSummary(hook)}`;
   if (step === "guide") return decisionSummary(hook);
-  return !firstAction ? "Choose an action" : hook.actions.length === 1 ? ACTION_CONFIGURATION[firstAction.type]?.label ?? firstAction.label : `${hook.actions.length} actions`;
+  return hook.actions.length === 0 ? "Choose an action" : hook.actions.map((action) => actionSummary(action, directory)).join("; ");
 }
 
-export function describeHook(hook: WorkflowHook): string {
-  const trigger = eventPhrase(hook.events[0]);
-  const scope = hook.bindings.length === 0 ? "the selected work" : hook.bindings.some((binding) => binding.kind === "workspace") ? "this workspace" : hook.bindings.map((binding) => binding.kind === "session" ? "chat or session" : binding.kind).join(" or ");
-  const condition = hook.conditions.length === 0 ? "every time" : `when ${hook.conditions.length === 1 ? "its condition matches" : `${hook.conditions.length} conditions match`}`;
-  const decision = ({ allow: "let it continue with guidance", block: "stop it", modify: "modify it", require: "require the stated outcome" })[hook.decision];
-  const actions = hook.actions.length === 0 ? "take no follow-up action" : hook.actions.map((action) => {
-    const label = (ACTION_CONFIGURATION[action.type]?.label ?? action.label).toLowerCase();
-    return label === "notify member" ? "notify a member" : label;
-  }).join(" and ");
-  return `This hook runs ${trigger} for ${scope}, ${condition}, will ${decision}, and will ${actions}.`;
+export function describeHook(hook: WorkflowHook, directory: HookSummaryDirectory = {}): string {
+  const conditions = hook.conditions.length === 0
+    ? "if no conditions"
+    : `if ${hook.condition_mode === "any" ? "any" : "all"} ${hook.conditions.map(conditionSummary).join("; ")}`;
+  const actions = hook.actions.length === 0 ? "No follow-up action" : hook.actions.map((action) => actionSummary(action, directory)).join("; ");
+  return `When ${triggerSummary(hook)} for ${scopeSummary(hook, directory)}, ${conditions}, ${decisionSummary(hook)}, then ${actions}.`;
+}
+
+const conditionOperators: Record<string, string> = {
+  eq: "is",
+  not_in: "is not one of",
+  exists: "exists",
+  not_exists: "does not exist",
+  starts_with: "starts with",
+  gte: "is at least",
+  lt: "is below",
+};
+
+function conditionSummary(condition: WorkflowHook["conditions"][number]): string {
+  const definition = fieldDefinition(condition.field);
+  const operator = conditionOperators[condition.operator] ?? condition.operator;
+  if (condition.operator === "exists" || condition.operator === "not_exists") return `${definition.label} ${operator}`;
+  const knownField = Object.hasOwn(FIELD_DEFINITIONS, condition.field);
+  const sensitive = definition.sensitive || !knownField || /(?:^|\.)(?:body|content|id|message|prompt|reason|rubric|secret|token)(?:$|\.)/i.test(condition.field);
+  const value = sensitive ? "<redacted>" : humanConditionValue(condition.value, definition);
+  return `${definition.label} ${operator} ${value}`;
+}
+
+function humanConditionValue(value: string, definition: HookFieldDefinition): string {
+  if (definition.input === "boolean") return value === "true" ? "Yes" : value === "false" ? "No" : value;
+  if (definition.options) {
+    return value.split(",").map((item) => definition.options?.find((option) => option.value === item.trim())?.label ?? item.trim()).join(", ");
+  }
+  return value;
+}
+
+function actionSummary(action: WorkflowHook["actions"][number], directory: HookSummaryDirectory): string {
+  const definition = ACTION_CONFIGURATION[action.type];
+  if (!definition) return action.label || "Unknown action";
+  const details = definition.fields.flatMap((field) => {
+    const value = action.config[field.key];
+    if (value === undefined || value === null || value === "" || field.summary === "omit") return [];
+    if (field.summary === "redacted") return [`${field.label}: <redacted>`];
+    if (field.summary === "target") return [`${field.label}: ${resolvedTarget(directory, field.target ?? "agent", String(value))}`];
+    const optionLabel = field.options?.find((option) => option.value === String(value))?.label;
+    const displayed = field.input === "checkbox" ? value === true ? "Yes" : "No" : optionLabel ?? String(value);
+    return [`${field.label}: ${displayed}`];
+  });
+  return details.length > 0 ? `${definition.label} — ${details.join("; ")}` : definition.label;
 }
 
 function templateHook(patch: Partial<WorkflowHook>): WorkflowHook {

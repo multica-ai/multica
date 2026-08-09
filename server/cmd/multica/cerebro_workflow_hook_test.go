@@ -38,6 +38,30 @@ func TestWorkflowHookPublishUsesCanonicalAPI(t *testing.T) {
 	}
 }
 
+func TestWorkflowHookEventsAndExactRevisionTestUseCanonicalAPI(t *testing.T) {
+	method, path, _ := withWorkflowHookServer(t, func() {
+		if err := runWorkflowHookEvents(workflowHookEventsCmd, []string{"hook-1"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if method != http.MethodGet || path != "/api/cerebro/workflow-hooks/hook-1/events" {
+		t.Fatalf("events request = %s %s", method, path)
+	}
+
+	resetWorkflowFlags(t, workflowHookTestCmd, "event", "revision", "file", "stdin", "output")
+	_ = workflowHookTestCmd.Flags().Set("event", "event-1")
+	_ = workflowHookTestCmd.Flags().Set("revision", "3")
+	method, path, body := withWorkflowHookServer(t, func() {
+		if err := runWorkflowHookTest(workflowHookTestCmd, []string{"hook-1"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if method != http.MethodPost || path != "/api/cerebro/workflow-hooks/hook-1/test" ||
+		body["event_id"] != "event-1" || body["revision"] != float64(3) {
+		t.Fatalf("test request = %s %s %#v", method, path, body)
+	}
+}
+
 func withWorkflowHookServer(t *testing.T, run func()) (method, path string, body map[string]any) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

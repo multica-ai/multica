@@ -200,6 +200,18 @@ WHERE id=$1 AND workspace_id=$2 RETURNING id`, issueID, workspaceID, status).Sca
 	}
 }
 
+func hookActionExecutorSupports(actionType string) bool {
+	switch actionType {
+	case "member.notify", "agent.dispatch", "squad.dispatch", "skill.run", "judge.gate", "eval.gate", "eval.run",
+		"wakeup.create", "wakeup.cancel", "session.handoff", "task.cancel", "task.retry",
+		"artifact.create_or_update", "workflow.activate", "workflow.resume", "workflow.pause", "workflow.stop",
+		"approval.require", "issue.comment", "issue.check_related", "issue.status", "audit.record", "metric.increment":
+		return true
+	default:
+		return false
+	}
+}
+
 func (e *PostgresHookActionExecutor) runSkill(ctx context.Context, workspaceID, actorID pgtype.UUID, policy HookPolicy, event HookEvent, config map[string]any) (map[string]any, error) {
 	skillName := strings.TrimSpace(hookConfigString(config, "skill_name", ""))
 	if skillName == "" {

@@ -62,7 +62,8 @@ describe("HookEditor", () => {
     expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
   });
 
-  it("states the real all-conditions-must-match behavior without an OR control", () => {
+  it("lets the user choose whether all or any condition must match", async () => {
+    const user = userEvent.setup();
     render(<HookEditor initialHook={{
       ...createHookDraft(),
       events: ["before.task.complete"],
@@ -72,8 +73,11 @@ describe("HookEditor", () => {
       ],
     }} onSave={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Configure When" }));
-    expect(screen.getByText("All of the following must match")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Filter conjunction 2")).not.toBeInTheDocument();
+    const all = screen.getByRole("radio", { name: "All conditions" });
+    const any = screen.getByRole("radio", { name: "Any condition" });
+    expect(all).toBeChecked();
+    await user.click(any);
+    expect(any).toBeChecked();
   });
 
   it("uses the same scope control for agent, issue, and session", () => {
@@ -121,12 +125,23 @@ describe("HookEditor", () => {
     expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
   });
 
-  it("runs Test through the persisted hook API callback before showing history", () => {
+  it("opens the retained event picker and tests the exact saved revision without saving again", async () => {
+    const user = userEvent.setup();
     const onTest = vi.fn();
-    render(<HookEditor initialHook={{ ...createHookDraft(), id: "hook-1" }} onSave={vi.fn()} onTest={onTest} />);
-    fireEvent.click(screen.getByRole("button", { name: "Test" }));
-    expect(onTest).toHaveBeenCalledWith(expect.objectContaining({ id: "hook-1" }));
+    const onSave = vi.fn();
+    render(<HookEditor initialHook={{
+      ...createHookDraft(), id: "hook-1", revision: 2,
+      compatible_events: [{
+        id: "event-journal-1", event_id: "observed-1", event_type: "before.task.complete",
+        schema_version: 1, occurred_at: "2026-07-30T10:00:00Z", expires_at: "2026-08-06T10:00:00Z",
+      }],
+    }} onSave={onSave} onTest={onTest} />);
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    expect(onTest).not.toHaveBeenCalled();
     expect(screen.getByRole("region", { name: "Test and history" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Run test with selected event" }));
+    expect(onTest).toHaveBeenCalledWith(expect.objectContaining({ id: "hook-1", revision: 2 }), "event-journal-1");
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   it("configures Start Handoff as a typed action without commands", () => {
@@ -164,7 +179,44 @@ describe("HookEditor", () => {
   it("shows a live plain-language explanation and editable description", () => {
     render(<HookEditor initialHook={{ ...createHookDraft(), events: ["before.task.complete"] }} onSave={vi.fn()} />);
     expect(screen.getByLabelText("Hook description")).toBeInTheDocument();
-    expect(screen.getByLabelText("What this hook does")).toHaveTextContent("before a task completes");
+    expect(screen.getByLabelText("What this hook does")).toHaveTextContent("Before task completes");
+  });
+
+  it("uses resolved labels and redaction in the editor and Publish summary", async () => {
+    const user = userEvent.setup();
+    const hook = {
+      ...createHookDraft(),
+      name: "Notify owner",
+      events: ["before.task.complete" as const],
+      bindings: [{ kind: "issue" as const, value: "private-issue-id" }],
+      conditions: [{ field: "issue.status", operator: "eq", value: "in_review" }],
+      actions: [{ type: "member.notify", label: "Notify member", config: { member_id: "private-member-id", title: "Private title", message: "Private message" } }],
+      baseline_run_count: 1,
+    };
+    render(<HookEditor
+      initialHook={hook}
+      onSave={vi.fn()}
+      canPublish
+      directory={{
+        issue: [{ value: "private-issue-id", label: "Returns launch" }],
+        member: [{ value: "private-member-id", label: "Jesper" }],
+      }}
+    />);
+
+    const summary = screen.getByLabelText("What this hook does");
+    expect(summary).toHaveTextContent("Returns launch");
+    expect(summary).toHaveTextContent("Jesper");
+    expect(summary).toHaveTextContent("<redacted>");
+    expect(summary).not.toHaveTextContent("private-issue-id");
+    expect(summary).not.toHaveTextContent("Private title");
+
+    await user.click(screen.getByRole("button", { name: "Publish" }));
+    const publish = screen.getByRole("dialog", { name: "Publish hook" });
+    expect(publish).toHaveTextContent("Returns launch");
+    expect(publish).toHaveTextContent("Jesper");
+    expect(publish).toHaveTextContent("<redacted>");
+    expect(publish).not.toHaveTextContent("private-member-id");
+    expect(publish).not.toHaveTextContent("Private message");
   });
 
   it("labels an enforced version honestly", () => {
@@ -180,43 +232,138 @@ describe("HookEditor", () => {
     expect(screen.getByText("Trigger 2:")).toBeInTheDocument();
   });
 
-  it("saves current edits before publishing and asks for confirmation", async () => {
+  it("requires dirty Draft changes to be saved before Test or Publish", async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn().mockResolvedValue({ id: "hook-1" });
-    const onPublish = vi.fn();
     const valid = {
       ...createHookDraft(), id: "hook-1", name: "Guard completion", events: ["before.task.complete" as const],
+      family_id: "family-1",
       bindings: [{ kind: "workspace" as const, value: "" }],
       conditions: [{ field: "issue.status", operator: "eq", value: "todo" }],
       decision: "block" as const, requirement: "Continue the issue",
       actions: [{ type: "audit.record", label: "Record audit event", config: { event: "completion_blocked" } }],
       baseline_run_count: 4,
+      version: 5,
+      revision: 2,
+      lifecycle: {
+        state: "live_with_draft" as const,
+        live_policy_id: "live-v4",
+        live_version: 4,
+        draft_id: "hook-1",
+        draft_series_id: "draft-series-1",
+        draft_revision: 2,
+        live_unchanged_by_draft: true,
+      },
     };
-    render(<HookEditor initialHook={valid} onSave={onSave} onPublish={onPublish} canPublish />);
+    render(<HookEditor initialHook={valid} onSave={vi.fn()} onPublish={vi.fn()} onTest={vi.fn()} canPublish />);
     await user.clear(screen.getByLabelText("Hook name"));
     await user.type(screen.getByLabelText("Hook name"), "Changed name");
+    expect(screen.getByRole("button", { name: "Test" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByLabelText("Draft save requirement")).toHaveTextContent("Save draft before testing or publishing.");
+  });
+
+  it("publishes the already tested saved Draft revision without saving again", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    const onPublish = vi.fn();
+    const valid = {
+      ...createHookDraft(), id: "hook-1", name: "Guard completion", events: ["before.task.complete" as const],
+      family_id: "family-1", bindings: [{ kind: "workspace" as const, value: "" }],
+      conditions: [{ field: "issue.status", operator: "eq", value: "todo" }],
+      decision: "block" as const, requirement: "Continue the issue",
+      actions: [{ type: "audit.record", label: "Record audit event", config: { event: "completion_blocked" } }],
+      baseline_run_count: 1, can_publish: true, version: 5, revision: 2,
+      lifecycle: {
+        state: "live_with_draft" as const, live_policy_id: "live-v4", live_version: 4,
+        draft_id: "hook-1", draft_series_id: "draft-series-1", draft_revision: 2,
+        live_unchanged_by_draft: true,
+      },
+    };
+    render(<HookEditor initialHook={valid} onSave={onSave} onPublish={onPublish} canPublish />);
     await user.click(screen.getByRole("button", { name: "Publish" }));
     expect(screen.getByRole("dialog", { name: "Publish hook" })).toBeInTheDocument();
+    expect(screen.getByText("Publishing replaces Live v4 with Draft v5. Live v4 stays active until this finishes.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Confirm publish" }));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: "Changed name" }));
+    expect(onSave).not.toHaveBeenCalled();
     expect(onPublish).toHaveBeenCalled();
   });
 
-  it("warns before saving an enforced hook as a dry-run draft", async () => {
+  it("saves Draft changes without replacing the Live policy", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
-    render(<HookEditor initialHook={{ ...createHookDraft(), id: "hook-1", mode: "enforce" }} onSave={onSave} />);
+    render(<HookEditor initialHook={{
+      ...createHookDraft(),
+      id: "live-v4",
+      family_id: "family-1",
+      mode: "enforce",
+      version: 4,
+      lifecycle: {
+        state: "live",
+        live_policy_id: "live-v4",
+        live_version: 4,
+        live_unchanged_by_draft: false,
+      },
+    }} onSave={onSave} />);
 
     await user.click(screen.getByRole("button", { name: "Save draft" }));
-    expect(onSave).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "Save as draft?" })).toHaveTextContent("This hook is live. Saving a draft switches it to Dry run until you publish again.");
-
-    await user.click(screen.getByRole("button", { name: "Keep enforced" }));
-    expect(onSave).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Save draft" }));
-    await user.click(screen.getByRole("button", { name: "Save as draft" }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ mode: "dry_run" }));
+    expect(screen.queryByRole("dialog", { name: "Save as draft?" })).not.toBeInTheDocument();
+    expect(screen.getByText("Live v4 stays active until you publish this Draft.")).toBeInTheDocument();
+  });
+
+  it("offers Discard draft only when a separate Draft exists", async () => {
+    const user = userEvent.setup();
+    const onDiscard = vi.fn();
+    render(<HookEditor initialHook={{
+      ...createHookDraft(),
+      id: "draft-r3",
+      family_id: "family-1",
+      revision: 3,
+      version: 5,
+      lifecycle: {
+        state: "live_with_draft",
+        live_policy_id: "live-v4",
+        live_version: 4,
+        draft_id: "draft-r3",
+        draft_revision: 3,
+        live_unchanged_by_draft: true,
+      },
+    }} onSave={vi.fn()} onDiscard={onDiscard} />);
+
+    await user.click(screen.getByRole("button", { name: "More hook actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Discard draft" }));
+    expect(screen.getByRole("dialog", { name: "Discard draft?" })).toHaveTextContent("Live v4 remains active.");
+    await user.click(screen.getByRole("button", { name: "Confirm discard" }));
+    expect(onDiscard).toHaveBeenCalledWith(expect.objectContaining({ id: "draft-r3" }));
+  });
+
+  it("confirms Disable and names the version that stops running", async () => {
+    const user = userEvent.setup();
+    const onDisable = vi.fn();
+    render(<HookEditor initialHook={{
+      ...createHookDraft(),
+      id: "draft-r3",
+      family_id: "family-1",
+      revision: 3,
+      version: 5,
+      lifecycle: {
+        state: "live_with_draft",
+        live_policy_id: "live-v4",
+        live_version: 4,
+        draft_id: "draft-r3",
+        draft_revision: 3,
+        live_unchanged_by_draft: true,
+      },
+    }} onSave={vi.fn()} onDisable={onDisable} />);
+
+    await user.click(screen.getByRole("button", { name: "More hook actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Disable hook" }));
+    expect(onDisable).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Disable hook?" });
+    expect(dialog).toHaveTextContent("Live v4 stops running on matching events.");
+    expect(dialog).toHaveTextContent("Draft v5 is kept and can still be published later.");
+    await user.click(screen.getByRole("button", { name: "Confirm disable" }));
+    expect(onDisable).toHaveBeenCalledWith(expect.objectContaining({ id: "draft-r3" }));
   });
 
   it("offers lifecycle controls for an existing editable hook", async () => {

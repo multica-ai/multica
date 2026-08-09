@@ -26,6 +26,11 @@ const (
 	HookAfterWorkflowStep    HookEventType = "after.workflow.step_completed"
 )
 
+func isSupportedHookEventType(target HookEventType) bool {
+	_, supported := HookEventCatalog[target]
+	return supported
+}
+
 type HookEventDefinition struct {
 	Label     string `json:"label"`
 	Phase     string `json:"phase"`

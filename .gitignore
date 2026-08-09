@@ -48,6 +48,7 @@ server/multica
 # Test artifacts
 test-results/
 apps/web/test-results/
+e2e/screenshots/
 
 # context (agent workspace)
 .context

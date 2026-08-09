@@ -56,18 +56,22 @@ export function validateHookStep(hook: WorkflowHook, step: HookStepKey): HookVal
       return { valid: true };
     case "actions":
       if (hook.actions.length === 0) return { valid: false, message: "Add at least one action." };
-      if (!hook.actions.every(actionIsConfigured)) return { valid: false, message: "Complete every action." };
+      for (const action of hook.actions) {
+        const message = actionConfigurationError(action);
+        if (message) return { valid: false, message };
+      }
       return hook.fail_mode ? { valid: true } : { valid: false, message: "Choose what happens if the check cannot run." };
   }
 }
 
-function actionIsConfigured(action: WorkflowHook["actions"][number]): boolean {
+function actionConfigurationError(action: WorkflowHook["actions"][number]): string | undefined {
   const definition = ACTION_CONFIGURATION[action.type];
-  if (!definition) return false;
-  return definition.fields.filter((field) => field.required).every((field) => {
+  if (!definition) return "Choose a supported action.";
+  const missing = definition.fields.filter((field) => field.required).find((field) => {
     const value = action.config[field.key];
-    return typeof value === "boolean" ? true : String(value ?? "").trim().length > 0;
+    return typeof value !== "boolean" && String(value ?? "").trim().length === 0;
   });
+  return missing ? `Choose ${missing.label} for ${definition.label}.` : undefined;
 }
 
 export function validateHook(hook: WorkflowHook): HookValidationResult {

@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
-import type { HookRun } from "../../core/hook-types";
+import type { HookJournalEvent, HookRun } from "../../core/hook-types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@multica/ui/components/ui/select";
 import type { HookDirectory } from "./hook-target-picker";
 
-export function HookTestHistory({ runs, onTest, directory = {} }: { runs: HookRun[]; onTest?: (event?: Record<string, unknown>) => void; directory?: HookDirectory }) {
-  const [selectedRunID, setSelectedRunID] = useState(runs[0]?.id ?? "");
-  useEffect(() => { if (!selectedRunID && runs[0]) setSelectedRunID(runs[0].id); }, [runs, selectedRunID]);
-  const selectedRun = runs.find((run) => run.id === selectedRunID) ?? runs[0];
+export function HookTestHistory({ events = [], runs, onTest, directory = {} }: { events?: HookJournalEvent[]; runs: HookRun[]; onTest?: (eventID: string) => void; directory?: HookDirectory }) {
+  const [selectedEventID, setSelectedEventID] = useState(events[0]?.id ?? "");
+  useEffect(() => { if (!selectedEventID && events[0]) setSelectedEventID(events[0].id); }, [events, selectedEventID]);
+  const selectedEvent = events.find((event) => event.id === selectedEventID) ?? events[0];
   return <section aria-label="Test and history" className="grid gap-4 p-6">
     <div><p className="text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground">Test</p><h2 className="text-lg font-semibold">Run against a real past event</h2><p className="text-sm text-muted-foreground">Nothing is changed while testing.</p></div>
-    {runs.length > 0 ? <label className="grid gap-1.5 text-sm font-medium">Past event<Select value={selectedRun?.id ?? null} onValueChange={(value) => value && setSelectedRunID(value)}><SelectTrigger aria-label="Past event"><SelectValue>{selectedRun ? runLabel(selectedRun) : "Choose an event"}</SelectValue></SelectTrigger><SelectContent>{runs.map((run) => <SelectItem key={run.id} value={run.id}>{runLabel(run)}</SelectItem>)}</SelectContent></Select></label> : <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No past events yet. Save the hook and let it observe an event in Dry run first.</p>}
-    <Button type="button" disabled={!selectedRun} onClick={() => onTest?.(selectedRun?.event)}>Run test with selected event</Button>
+    {events.length > 0 ? <label className="grid gap-1.5 text-sm font-medium">Past event<Select value={selectedEvent?.id ?? null} onValueChange={(value) => value && setSelectedEventID(value)}><SelectTrigger aria-label="Past event"><SelectValue>{selectedEvent ? eventLabel(selectedEvent) : "Choose an event"}</SelectValue></SelectTrigger><SelectContent>{events.map((event) => <SelectItem key={event.id} value={event.id}>{eventLabel(event)}</SelectItem>)}</SelectContent></Select></label> : <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No compatible events from the last 7 days yet. Save the Draft and let the workflow observe one first.</p>}
+    <Button type="button" disabled={!selectedEvent} onClick={() => selectedEvent && onTest?.(selectedEvent.id)}>Run test with selected event</Button>
     {runs.map((run) => <article key={run.id} className="rounded-lg border bg-muted/30 p-4">
       <div className="flex justify-between gap-3"><strong>{run.source}</strong><span className="text-xs text-muted-foreground">{run.latency_ms} ms</span></div>
       <p className="mt-2 text-xs text-muted-foreground">Policy version {run.policy_version}</p>
@@ -26,9 +26,9 @@ export function HookTestHistory({ runs, onTest, directory = {} }: { runs: HookRu
   </section>;
 }
 
-function runLabel(run: HookRun) {
-  const when = run.created_at ? new Date(run.created_at).toLocaleString() : "Unknown time";
-  return `${run.source.split(" · ")[0]} · ${when}`;
+function eventLabel(event: HookJournalEvent) {
+  const when = event.occurred_at ? new Date(event.occurred_at).toLocaleString() : "Unknown time";
+  return `${event.event_type} · ${when}`;
 }
 
 function scopeLabel(run: HookRun, directory: HookDirectory) {

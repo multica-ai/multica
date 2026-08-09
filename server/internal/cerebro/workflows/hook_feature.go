@@ -74,7 +74,7 @@ func NewPostgresHookEngineStore(repository HookRepository) *PostgresHookEngineSt
 }
 
 func (s *PostgresHookEngineStore) EffectivePolicies(ctx context.Context, event HookEvent) ([]HookPolicy, error) {
-	return s.repository.List(ctx, event.WorkspaceID)
+	return s.repository.ListEffective(ctx, event.WorkspaceID)
 }
 
 func (s *PostgresHookEngineStore) GetResult(_ context.Context, key string) (HookResult, bool) {
@@ -93,6 +93,9 @@ func (s *PostgresHookEngineStore) SaveResult(ctx context.Context, key string, ev
 	s.results[key] = result
 	s.mu.Unlock()
 
+	if _, err := s.repository.CaptureEvent(ctx, event.WorkspaceID, event); err != nil {
+		return err
+	}
 	recorded := make(map[string]bool)
 	for _, match := range result.Matches {
 		if recorded[match.PolicyID] {

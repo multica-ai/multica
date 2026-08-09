@@ -149,9 +149,9 @@ func (q *Queries) CreateCerebroWorkflowHookHandler(ctx context.Context, arg Crea
 const createCerebroWorkflowHookPolicy = `-- name: CreateCerebroWorkflowHookPolicy :one
 INSERT INTO cerebro_workflow_hook_policy (
     family_id, workspace_id, name, description, policy_version, mode, fail_mode,
-    event_types, conditions, created_by_id, created_by_type
-) VALUES ($1, $2, $3, $4, $5, 'dry_run', $6, $7, $8, $9, $10)
-RETURNING id, family_id, workspace_id, name, description, policy_version, mode, fail_mode, event_types, conditions, baseline_at, published_at, created_by_id, created_by_type, published_by_id, created_at, updated_at
+    condition_mode, event_types, conditions, created_by_id, created_by_type
+) VALUES ($1, $2, $3, $4, $5, 'dry_run', $6, COALESCE(NULLIF($7, ''), 'all'), $8, $9, $10, $11)
+RETURNING id, family_id, workspace_id, name, description, policy_version, mode, fail_mode, event_types, conditions, baseline_at, published_at, created_by_id, created_by_type, published_by_id, created_at, updated_at, condition_mode
 `
 
 type CreateCerebroWorkflowHookPolicyParams struct {
@@ -161,6 +161,7 @@ type CreateCerebroWorkflowHookPolicyParams struct {
 	Description   string      `json:"description"`
 	PolicyVersion int32       `json:"policy_version"`
 	FailMode      string      `json:"fail_mode"`
+	Column7       interface{} `json:"column_7"`
 	EventTypes    []byte      `json:"event_types"`
 	Conditions    []byte      `json:"conditions"`
 	CreatedByID   pgtype.UUID `json:"created_by_id"`
@@ -175,6 +176,7 @@ func (q *Queries) CreateCerebroWorkflowHookPolicy(ctx context.Context, arg Creat
 		arg.Description,
 		arg.PolicyVersion,
 		arg.FailMode,
+		arg.Column7,
 		arg.EventTypes,
 		arg.Conditions,
 		arg.CreatedByID,
@@ -199,6 +201,7 @@ func (q *Queries) CreateCerebroWorkflowHookPolicy(ctx context.Context, arg Creat
 		&i.PublishedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ConditionMode,
 	)
 	return i, err
 }
@@ -206,13 +209,13 @@ func (q *Queries) CreateCerebroWorkflowHookPolicy(ctx context.Context, arg Creat
 const createCerebroWorkflowHookPolicyVersion = `-- name: CreateCerebroWorkflowHookPolicyVersion :one
 INSERT INTO cerebro_workflow_hook_policy (
     family_id, workspace_id, name, description, policy_version, mode, fail_mode,
-    event_types, conditions, created_by_id, created_by_type
+    condition_mode, event_types, conditions, created_by_id, created_by_type
 )
 SELECT p.family_id, p.workspace_id, $3, $4, p.policy_version + 1, 'dry_run', $5,
-       $6, $7, $8, $9
+       COALESCE(NULLIF($6, ''), 'all'), $7, $8, $9, $10
 FROM cerebro_workflow_hook_policy p
 WHERE p.id = $1 AND p.workspace_id = $2
-RETURNING id, family_id, workspace_id, name, description, policy_version, mode, fail_mode, event_types, conditions, baseline_at, published_at, created_by_id, created_by_type, published_by_id, created_at, updated_at
+RETURNING id, family_id, workspace_id, name, description, policy_version, mode, fail_mode, event_types, conditions, baseline_at, published_at, created_by_id, created_by_type, published_by_id, created_at, updated_at, condition_mode
 `
 
 type CreateCerebroWorkflowHookPolicyVersionParams struct {
@@ -221,6 +224,7 @@ type CreateCerebroWorkflowHookPolicyVersionParams struct {
 	Name          string      `json:"name"`
 	Description   string      `json:"description"`
 	FailMode      string      `json:"fail_mode"`
+	Column6       interface{} `json:"column_6"`
 	EventTypes    []byte      `json:"event_types"`
 	Conditions    []byte      `json:"conditions"`
 	CreatedByID   pgtype.UUID `json:"created_by_id"`
@@ -234,6 +238,7 @@ func (q *Queries) CreateCerebroWorkflowHookPolicyVersion(ctx context.Context, ar
 		arg.Name,
 		arg.Description,
 		arg.FailMode,
+		arg.Column6,
 		arg.EventTypes,
 		arg.Conditions,
 		arg.CreatedByID,
@@ -258,6 +263,7 @@ func (q *Queries) CreateCerebroWorkflowHookPolicyVersion(ctx context.Context, ar
 		&i.PublishedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ConditionMode,
 	)
 	return i, err
 }
@@ -270,7 +276,7 @@ INSERT INTO cerebro_workflow_hook_run (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 ON CONFLICT (workspace_id, idempotency_key) DO UPDATE
 SET idempotency_key = EXCLUDED.idempotency_key
-RETURNING id, workspace_id, policy_id, policy_version, event_id, event_type, source_scope, input_event, matched_conditions, decision, would_decision, fail_mode, remediation, latency_ms, timed_out, idempotency_key, created_at
+RETURNING id, workspace_id, policy_id, policy_version, event_id, event_type, source_scope, input_event, matched_conditions, decision, would_decision, fail_mode, remediation, latency_ms, timed_out, idempotency_key, created_at, draft_revision_id
 `
 
 type CreateCerebroWorkflowHookRunParams struct {
@@ -328,6 +334,7 @@ func (q *Queries) CreateCerebroWorkflowHookRun(ctx context.Context, arg CreateCe
 		&i.TimedOut,
 		&i.IdempotencyKey,
 		&i.CreatedAt,
+		&i.DraftRevisionID,
 	)
 	return i, err
 }
@@ -348,7 +355,7 @@ func (q *Queries) DeleteCerebroWorkflowHookPolicy(ctx context.Context, arg Delet
 }
 
 const getCerebroWorkflowHookPolicy = `-- name: GetCerebroWorkflowHookPolicy :one
-SELECT id, family_id, workspace_id, name, description, policy_version, mode, fail_mode, event_types, conditions, baseline_at, published_at, created_by_id, created_by_type, published_by_id, created_at, updated_at FROM cerebro_workflow_hook_policy
+SELECT id, family_id, workspace_id, name, description, policy_version, mode, fail_mode, event_types, conditions, baseline_at, published_at, created_by_id, created_by_type, published_by_id, created_at, updated_at, condition_mode FROM cerebro_workflow_hook_policy
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -378,6 +385,7 @@ func (q *Queries) GetCerebroWorkflowHookPolicy(ctx context.Context, arg GetCereb
 		&i.PublishedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ConditionMode,
 	)
 	return i, err
 }
@@ -451,7 +459,7 @@ func (q *Queries) ListCerebroWorkflowHookHandlers(ctx context.Context, policyID 
 }
 
 const listCerebroWorkflowHookPolicies = `-- name: ListCerebroWorkflowHookPolicies :many
-SELECT id, family_id, workspace_id, name, description, policy_version, mode, fail_mode, event_types, conditions, baseline_at, published_at, created_by_id, created_by_type, published_by_id, created_at, updated_at FROM cerebro_workflow_hook_policy
+SELECT id, family_id, workspace_id, name, description, policy_version, mode, fail_mode, event_types, conditions, baseline_at, published_at, created_by_id, created_by_type, published_by_id, created_at, updated_at, condition_mode FROM cerebro_workflow_hook_policy
 WHERE workspace_id = $1
 ORDER BY updated_at DESC
 `
@@ -483,6 +491,7 @@ func (q *Queries) ListCerebroWorkflowHookPolicies(ctx context.Context, workspace
 			&i.PublishedByID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ConditionMode,
 		); err != nil {
 			return nil, err
 		}
@@ -495,7 +504,7 @@ func (q *Queries) ListCerebroWorkflowHookPolicies(ctx context.Context, workspace
 }
 
 const listCerebroWorkflowHookRuns = `-- name: ListCerebroWorkflowHookRuns :many
-SELECT id, workspace_id, policy_id, policy_version, event_id, event_type, source_scope, input_event, matched_conditions, decision, would_decision, fail_mode, remediation, latency_ms, timed_out, idempotency_key, created_at FROM cerebro_workflow_hook_run
+SELECT id, workspace_id, policy_id, policy_version, event_id, event_type, source_scope, input_event, matched_conditions, decision, would_decision, fail_mode, remediation, latency_ms, timed_out, idempotency_key, created_at, draft_revision_id FROM cerebro_workflow_hook_run
 WHERE workspace_id = $1 AND ($4::uuid IS NULL OR policy_id = $4)
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -540,6 +549,7 @@ func (q *Queries) ListCerebroWorkflowHookRuns(ctx context.Context, arg ListCereb
 			&i.TimedOut,
 			&i.IdempotencyKey,
 			&i.CreatedAt,
+			&i.DraftRevisionID,
 		); err != nil {
 			return nil, err
 		}
@@ -573,7 +583,7 @@ SET mode = 'enforce', published_at = now(), published_by_id = $3, updated_at = n
 WHERE p.id = $1 AND p.workspace_id = $2 AND p.mode = 'dry_run'
   AND p.baseline_at IS NOT NULL
   AND EXISTS (SELECT 1 FROM cerebro_workflow_hook_run r WHERE r.policy_id = p.id)
-RETURNING id, family_id, workspace_id, name, description, policy_version, mode, fail_mode, event_types, conditions, baseline_at, published_at, created_by_id, created_by_type, published_by_id, created_at, updated_at
+RETURNING id, family_id, workspace_id, name, description, policy_version, mode, fail_mode, event_types, conditions, baseline_at, published_at, created_by_id, created_by_type, published_by_id, created_at, updated_at, condition_mode
 `
 
 type PublishCerebroWorkflowHookPolicyParams struct {
@@ -603,6 +613,7 @@ func (q *Queries) PublishCerebroWorkflowHookPolicy(ctx context.Context, arg Publ
 		&i.PublishedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ConditionMode,
 	)
 	return i, err
 }

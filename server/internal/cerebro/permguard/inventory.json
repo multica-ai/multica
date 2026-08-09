@@ -26,6 +26,10 @@
     },
     {
       "id": "POST /api/cerebro/workflow-hooks/{id}/disable",
+      "gate": "tool_policy:hooks:enforce + human_only"
+    },
+    {
+      "id": "DELETE /api/cerebro/workflow-hooks/{id}/draft",
       "gate": "tool_policy:hooks:write"
     },
     {
@@ -3843,6 +3847,10 @@
     {
       "id": "workflow hook runs",
       "exempt": "read-only — wraps GET /api/cerebro/workflow-hooks/{id}/runs"
+    },
+    {
+      "id": "workflow hook events",
+      "exempt": "read-only — wraps GET /api/cerebro/workflow-hooks/{id}/events"
     },
     {
       "id": "workflow hook create",

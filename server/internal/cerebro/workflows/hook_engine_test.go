@@ -212,7 +212,7 @@ func TestHookEngineBlockWinsAndRequirementsAreCombined(t *testing.T) {
 	if result.Decision != HookBlock {
 		t.Fatalf("decision = %q, want block", result.Decision)
 	}
-	if !reflect.DeepEqual(result.Requirements, []string{"Create a wakeup", "Record a continuation"}) {
+	if !reflect.DeepEqual(result.Requirements, []string{"Create a wakeup", "Record a continuation", "Complete the required hook outcome."}) {
 		t.Fatalf("requirements = %#v", result.Requirements)
 	}
 	if !reflect.DeepEqual(result.MatchedConditions, []Condition{
@@ -377,10 +377,14 @@ func TestHookEngineStopsRemainingActionsAfterRequiredActionFails(t *testing.T) {
 }
 
 func newTestHookPolicy(id string, decision HookDecision, mode HookMode, binding HookBinding) HookPolicy {
+	requirement := ""
+	if decision == HookBlock || decision == HookRequire {
+		requirement = "Complete the required hook outcome."
+	}
 	return HookPolicy{
 		ID: id, Version: 1, Name: id, Mode: mode, FailMode: HookFailWarn,
 		Events:   []HookEventType{HookBeforeTaskComplete, HookBeforePromptAssemble, HookOnError},
 		Bindings: []HookBinding{binding},
-		Handlers: []HookHandler{{ID: "handler-1", Decision: decision}},
+		Handlers: []HookHandler{{ID: "handler-1", Decision: decision, Requirement: requirement}},
 	}
 }

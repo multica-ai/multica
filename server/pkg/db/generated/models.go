@@ -2284,6 +2284,55 @@ type CerebroWorkflowHookBinding struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroWorkflowHookDraftRevision struct {
+	ID                pgtype.UUID        `json:"id"`
+	DraftSeriesID     pgtype.UUID        `json:"draft_series_id"`
+	FamilyID          pgtype.UUID        `json:"family_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	CandidateVersion  int32              `json:"candidate_version"`
+	Revision          int32              `json:"revision"`
+	Configuration     []byte             `json:"configuration"`
+	ConfigurationHash string             `json:"configuration_hash"`
+	PublishedPolicyID pgtype.UUID        `json:"published_policy_id"`
+	CreatedByID       pgtype.UUID        `json:"created_by_id"`
+	CreatedByType     string             `json:"created_by_type"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroWorkflowHookDraftSeries struct {
+	ID          pgtype.UUID        `json:"id"`
+	FamilyID    pgtype.UUID        `json:"family_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
+	DiscardedAt pgtype.Timestamptz `json:"discarded_at"`
+}
+
+type CerebroWorkflowHookEventJournal struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	EventID       string             `json:"event_id"`
+	EventType     string             `json:"event_type"`
+	SchemaVersion int32              `json:"schema_version"`
+	EventHash     string             `json:"event_hash"`
+	ReplayEvent   []byte             `json:"replay_event"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroWorkflowHookFamily struct {
+	ID                     pgtype.UUID        `json:"id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	ActivePolicyID         pgtype.UUID        `json:"active_policy_id"`
+	CurrentDraftRevisionID pgtype.UUID        `json:"current_draft_revision_id"`
+	Disabled               bool               `json:"disabled"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroWorkflowHookHandler struct {
 	ID            pgtype.UUID        `json:"id"`
 	PolicyID      pgtype.UUID        `json:"policy_id"`
@@ -2313,6 +2362,7 @@ type CerebroWorkflowHookPolicy struct {
 	PublishedByID pgtype.UUID        `json:"published_by_id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ConditionMode string             `json:"condition_mode"`
 }
 
 type CerebroWorkflowHookRun struct {
@@ -2333,6 +2383,17 @@ type CerebroWorkflowHookRun struct {
 	TimedOut          bool               `json:"timed_out"`
 	IdempotencyKey    string             `json:"idempotency_key"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	DraftRevisionID   pgtype.UUID        `json:"draft_revision_id"`
+}
+
+type CerebroWorkflowHookTestEvidence struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	FamilyID        pgtype.UUID        `json:"family_id"`
+	DraftRevisionID pgtype.UUID        `json:"draft_revision_id"`
+	EventJournalID  pgtype.UUID        `json:"event_journal_id"`
+	HookRunID       pgtype.UUID        `json:"hook_run_id"`
+	QualifiedAt     pgtype.Timestamptz `json:"qualified_at"`
 }
 
 type CerebroWorkflowIdempotencyKey struct {

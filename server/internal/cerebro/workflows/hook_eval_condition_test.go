@@ -190,3 +190,72 @@ func TestHookEngineEvalPassedConditionGatesActions(t *testing.T) {
 		t.Fatalf("passing eval condition must run the action: matches=%d actions=%d", len(got.Matches), len(got.ActionResults))
 	}
 }
+
+func TestHookEngineAnyMatchesAcrossPureAndDeferredConditions(t *testing.T) {
+	ws, evalID, issue := uuid.New(), uuid.New(), uuid.New()
+	policy := newTestHookPolicy("any-mixed-policy", HookAllow, HookModeEnforce, HookBinding{Kind: HookScopeIssue, ID: issue.String()})
+	policy.ConditionMode = HookConditionAny
+	policy.Conditions = []Condition{
+		{Field: "issue.id", Op: "eq", Value: "does-not-match"},
+		evalPassedCondition(evalID),
+	}
+
+	result, err := NewHookEngine(true, NewMemoryHookStore([]HookPolicy{policy})).
+		WithConditionResolver(&fakeEvalResolver{passed: true}).
+		Evaluate(context.Background(), HookEvent{
+			EventID:     "any-mixed-event",
+			Type:        HookBeforeTaskComplete,
+			WorkspaceID: ws.String(),
+			IssueID:     issue.String(),
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Matches) != 1 {
+		t.Fatalf("matches = %d, want 1 when deferred condition satisfies any", len(result.Matches))
+	}
+	if len(result.MatchedConditions) != 1 || result.MatchedConditions[0].Op != OpEvalPassed {
+		t.Fatalf("matched conditions = %#v, want only the true deferred condition", result.MatchedConditions)
+	}
+}
+
+func TestHookConditionModeShortCircuitsInStoredOrder(t *testing.T) {
+	ws, evalID, issue := uuid.New(), uuid.New(), uuid.New()
+	event := HookEvent{WorkspaceID: ws.String(), IssueID: issue.String()}
+	falsePure := Condition{Field: "issue.id", Op: "eq", Value: "does-not-match"}
+	truePure := Condition{Field: "issue.id", Op: "eq", Value: issue.String()}
+	deferred := evalPassedCondition(evalID)
+
+	t.Run("any skips deferred after a pure match", func(t *testing.T) {
+		resolver := &fakeEvalResolver{passed: false}
+		matches, matched := evaluateHookPolicyConditions(context.Background(), resolver, HookPolicy{
+			ConditionMode: HookConditionAny,
+			Conditions:    []Condition{truePure, deferred},
+		}, event)
+		if !matches || len(matched) != 1 || resolver.calls != 0 {
+			t.Fatalf("matches=%v matched=%#v resolver calls=%d", matches, matched, resolver.calls)
+		}
+	})
+
+	t.Run("all skips deferred after a pure miss", func(t *testing.T) {
+		resolver := &fakeEvalResolver{passed: true}
+		matches, _ := evaluateHookPolicyConditions(context.Background(), resolver, HookPolicy{
+			ConditionMode: HookConditionAll,
+			Conditions:    []Condition{falsePure, deferred},
+		}, event)
+		if matches || resolver.calls != 0 {
+			t.Fatalf("matches=%v resolver calls=%d", matches, resolver.calls)
+		}
+	})
+
+	t.Run("any returns false when every condition misses", func(t *testing.T) {
+		resolver := &fakeEvalResolver{passed: false}
+		matches, matched := evaluateHookPolicyConditions(context.Background(), resolver, HookPolicy{
+			ConditionMode: HookConditionAny,
+			Conditions:    []Condition{falsePure, deferred},
+		}, event)
+		if matches || len(matched) != 0 || resolver.calls != 1 {
+			t.Fatalf("matches=%v matched=%#v resolver calls=%d", matches, matched, resolver.calls)
+		}
+	})
+}

@@ -385,7 +385,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "skill_update", Description: "Directly update a skill's name/description/content/config, bypassing review. CLI-runtime MCP tool over PUT /api/skills/{id}.", Status: ToolStatusExcluded},
 	{Name: "test_connection", Description: "Probe a URL for reachability and tool discovery without saving a connection. Requires the manage_connections capability.", Status: ToolStatusNewlyImplemented},
 	{Name: "toggle_workflow", Description: "Enable or disable a workflow. CLI-runtime MCP tool over POST /api/cerebro/workflows/{id}/toggle.", Status: ToolStatusExcluded},
-	{Name: "test_workflow_hook", Description: "Test a Workflow hook without side effects and refresh its baseline. CLI-runtime MCP tool over POST /api/cerebro/workflow-hooks/{id}/test.", Status: ToolStatusExcluded},
+	{Name: "test_workflow_hook", Description: "Test an exact saved Workflow Hook Draft revision against a retained event without side effects. CLI-runtime MCP tool over POST /api/cerebro/workflow-hooks/{id}/test.", Status: ToolStatusExcluded},
 	{Name: "update_connection", Description: "Update a workspace connection. Requires the manage_connections capability.", Status: ToolStatusNewlyImplemented},
 	{Name: "update_command", Description: "Replace a reusable workflow command. CLI-runtime MCP tool over PUT /api/cerebro/commands/{id}.", Status: ToolStatusNewlyImplemented},
 	{Name: "update_eval", Description: "Replace a versioned eval contract. CLI-runtime MCP tool over PUT /api/cerebro/evals/{id}.", Status: ToolStatusExcluded},

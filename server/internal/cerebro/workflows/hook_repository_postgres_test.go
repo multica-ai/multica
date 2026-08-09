@@ -15,15 +15,31 @@ func TestPostgresHookRepositoryListReturnsOnlyLatestPolicyVersionPerFamily(t *te
 	fixture := setupWorkflowIntegrationFixture(t, pool)
 	familyID := uuid.New()
 
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO cerebro_workflow_hook_family (id, workspace_id) VALUES ($1, $2)
+	`, familyID, fixture.workspaceID); err != nil {
+		t.Fatalf("insert family: %v", err)
+	}
+
+	var latestPolicyID uuid.UUID
 	for version, mode := range []string{"enforce", "dry_run"} {
-		if _, err := pool.Exec(ctx, `
+		if err := pool.QueryRow(ctx, `
 			INSERT INTO cerebro_workflow_hook_policy (
 				family_id, workspace_id, name, policy_version, mode,
 				fail_mode, created_by_id, created_by_type
 			) VALUES ($1, $2, $3, $4, $5, 'warn', $6, 'member')
-		`, familyID, fixture.workspaceID, "Versioned policy", version+1, mode, fixture.userID); err != nil {
+			RETURNING id
+		`, familyID, fixture.workspaceID, "Versioned policy", version+1, mode, fixture.userID).Scan(&latestPolicyID); err != nil {
 			t.Fatalf("insert policy version %d: %v", version+1, err)
 		}
+	}
+
+	// The family points at its Live version; the older version stays in the
+	// table as history and must not show up as a second policy.
+	if _, err := pool.Exec(ctx, `
+		UPDATE cerebro_workflow_hook_family SET active_policy_id=$2 WHERE id=$1
+	`, familyID, latestPolicyID); err != nil {
+		t.Fatalf("point family at its live version: %v", err)
 	}
 
 	policies, err := NewPostgresHookRepository(pool).List(ctx, uuidString(fixture.workspaceID))
@@ -148,10 +164,19 @@ func TestPostgresHookRepositoryRunsReturnsCompleteExplanation(t *testing.T) {
 		PolicyID: created.ID, PolicyVersion: created.Version,
 		Event:       HookEvent{EventID: "event-explanation", Type: HookBeforeTaskComplete, WorkspaceID: uuidString(fixture.workspaceID), IssueID: uuid.NewString()},
 		SourceScope: policy.Bindings[0], LatencyMS: 17,
-		Result: HookResult{Decision: HookAllow, WouldDecision: HookRequire, MatchedConditions: policy.Conditions, Requirements: []string{"Add delivery evidence"}},
+		FailMode: policy.FailMode,
+		Result: HookResult{
+			Decision: HookAllow, WouldDecision: HookRequire,
+			Matches:           []HookMatch{{PolicyID: created.ID, Version: created.Version}},
+			MatchedConditions: policy.Conditions, Requirements: []string{"Add delivery evidence"},
+		},
 	}
-	if err := repo.RecordRun(ctx, uuidString(fixture.workspaceID), run); err != nil {
-		t.Fatalf("record run: %v", err)
+	retained, err := repo.CaptureEvent(ctx, uuidString(fixture.workspaceID), run.Event)
+	if err != nil {
+		t.Fatalf("capture retained event: %v", err)
+	}
+	if _, err := repo.RecordTestEvidence(ctx, uuidString(fixture.workspaceID), retained.ID, run); err != nil {
+		t.Fatalf("record exact revision evidence: %v", err)
 	}
 	runs, err := repo.Runs(ctx, uuidString(fixture.workspaceID), created.ID)
 	if err != nil {

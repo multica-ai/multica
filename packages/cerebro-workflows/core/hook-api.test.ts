@@ -3,6 +3,21 @@ import { createHookDraft } from "./hook-types";
 import { parseHookListResponse, parseHookResponse, parseHookRunsResponse, toHookTransport } from "./hook-api";
 
 describe("workflow hook API compatibility", () => {
+  it("defaults legacy policies to all conditions and round-trips any", () => {
+    const legacy = parseHookResponse({
+      id: "legacy", version: 1, name: "Legacy", mode: "dry_run", fail_mode: "warn",
+      events: [], bindings: [], conditions: [], handlers: [],
+    });
+    expect(legacy.condition_mode).toBe("all");
+
+    const any = parseHookResponse({
+      id: "any", version: 1, name: "Any", mode: "dry_run", fail_mode: "warn", condition_mode: "any",
+      events: [], bindings: [], conditions: [], handlers: [],
+    });
+    expect(any.condition_mode).toBe("any");
+    expect(toHookTransport(any).condition_mode).toBe("any");
+  });
+
   it("serializes list filters as trimmed values instead of one comma string", () => {
     const transport = toHookTransport({
       ...createHookDraft(),
@@ -24,6 +39,46 @@ describe("workflow hook API compatibility", () => {
     expect(parsed).toEqual(expect.objectContaining({ id: "draft-1", events: [], bindings: [], conditions: [], actions: [] }));
   });
 
+  it("preserves stable family identity and separate Live and Draft lifecycle", () => {
+    const parsed = parseHookResponse({
+      id: "draft-r3",
+      family_id: "family-1",
+      draft_series_id: "draft-series-1",
+      revision: 3,
+      version: 5,
+      name: "Draft changes",
+      mode: "dry_run",
+      fail_mode: "warn",
+      events: [],
+      bindings: [],
+      conditions: [],
+      handlers: [],
+      lifecycle: {
+        state: "live_with_draft",
+        live_policy_id: "live-v4",
+        live_version: 4,
+        draft_id: "draft-r3",
+        draft_series_id: "draft-series-1",
+        draft_revision: 3,
+        live_unchanged_by_draft: true,
+      },
+    });
+
+    expect(parsed).toEqual(expect.objectContaining({
+      id: "draft-r3",
+      family_id: "family-1",
+      draft_series_id: "draft-series-1",
+      revision: 3,
+      lifecycle: expect.objectContaining({
+        state: "live_with_draft",
+        live_policy_id: "live-v4",
+        live_version: 4,
+        live_unchanged_by_draft: true,
+      }),
+    }));
+    expect(toHookTransport(parsed).revision).toBe(3);
+  });
+
   it("retires the legacy silent failure mode at the API boundary", () => {
     const parsed = parseHookResponse({
       id: "draft-1", version: 1, name: "Legacy hook", description: "", mode: "dry_run", fail_mode: "open",
@@ -34,9 +89,28 @@ describe("workflow hook API compatibility", () => {
     expect(toHookTransport(parsed).fail_mode).toBe("warn");
   });
 
-  it("falls back safely when an installed client receives malformed data", () => {
-    expect(parseHookListResponse({ hooks: null })).toEqual([]);
-    expect(parseHookResponse({ id: 42 })).toEqual(createHookDraft());
+  it("blocks a malformed detail response instead of creating an editable blank Draft", () => {
+    expect(() => parseHookResponse({ id: 42 })).toThrow("Hook response is malformed");
+  });
+
+  it("keeps valid list records and reports each malformed record", () => {
+    const result = parseHookListResponse({
+      hooks: [
+        {
+          id: "valid-hook", version: 1, name: "Valid", mode: "dry_run", fail_mode: "warn",
+          events: [], bindings: [], conditions: [], handlers: [],
+        },
+        { id: "broken-hook", version: "one" },
+      ],
+      partial_errors: [{ record_id: "server-broken", code: "hook_record_malformed", request_id: "request-1" }],
+    });
+
+    expect(result.hooks).toHaveLength(1);
+    expect(result.hooks[0]?.id).toBe("valid-hook");
+    expect(result.partial_errors).toEqual([
+      { record_id: "server-broken", code: "hook_record_malformed", request_id: "request-1" },
+      { record_id: "broken-hook", code: "hook_record_malformed" },
+    ]);
   });
 
   it("maps the shared backend policy contract to the editor contract", () => {

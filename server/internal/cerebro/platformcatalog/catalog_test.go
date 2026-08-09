@@ -79,6 +79,7 @@ func TestWorkflowHookCapabilityContracts(t *testing.T) {
 	want := map[string]struct {
 		enforcement platformaccess.Enforcement
 		tools       []string
+		ops         []string
 	}{
 		"hooks:read": {
 			enforcement: platformaccess.EnforcementAuthenticatedRead,
@@ -87,10 +88,18 @@ func TestWorkflowHookCapabilityContracts(t *testing.T) {
 		"hooks:write": {
 			enforcement: platformaccess.EnforcementActorOptIn,
 			tools:       []string{"create_workflow_hook", "test_workflow_hook", "update_workflow_hook"},
+			ops: []string{
+				"POST /api/cerebro/workflow-hooks/",
+				"PUT /api/cerebro/workflow-hooks/{id}",
+				"POST /api/cerebro/workflow-hooks/{id}/test",
+				"DELETE /api/cerebro/workflow-hooks/{id}/draft",
+				"DELETE /api/cerebro/workflow-hooks/{id}",
+			},
 		},
 		"hooks:enforce": {
 			enforcement: platformaccess.EnforcementHumanOptIn,
 			tools:       []string{"publish_workflow_hook"},
+			ops:         []string{"POST /api/cerebro/workflow-hooks/{id}/publish", "POST /api/cerebro/workflow-hooks/{id}/disable"},
 		},
 		"hooks:manage_managed": {
 			enforcement: platformaccess.EnforcementOwnerOnly,
@@ -108,6 +117,9 @@ func TestWorkflowHookCapabilityContracts(t *testing.T) {
 		}
 		if strings.Join(capability.ToolBindings, ",") != strings.Join(expected.tools, ",") {
 			t.Errorf("%s tool bindings = %v, want %v", key, capability.ToolBindings, expected.tools)
+		}
+		if strings.Join(capability.Ops, ",") != strings.Join(expected.ops, ",") {
+			t.Errorf("%s operations = %v, want %v", key, capability.Ops, expected.ops)
 		}
 	}
 

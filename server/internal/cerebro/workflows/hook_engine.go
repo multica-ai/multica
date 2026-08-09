@@ -87,15 +87,15 @@ policyLoop:
 		if policy.Mode == HookModeOff || !eventListed(policy.Events, event.Type) || !policyMatches(policy, event) {
 			continue
 		}
-		pure, deferred := splitHookConditions(policy.Conditions)
-		if !evaluate(pure, hookConditionContext(event)) || !resolveHookConditions(ctx, e.resolver, policy, deferred, event) {
+		conditionsMatch, matchedConditions := evaluateHookPolicyConditions(ctx, e.resolver, policy, event)
+		if !conditionsMatch {
 			continue
 		}
 		binding, ok := mostSpecificBinding(policy.Bindings, event)
 		if !ok {
 			continue
 		}
-		result.MatchedConditions = append(result.MatchedConditions, policy.Conditions...)
+		result.MatchedConditions = append(result.MatchedConditions, matchedConditions...)
 		for _, handler := range policy.Handlers {
 			match := HookMatch{
 				PolicyID: policy.ID, Version: policy.Version, HandlerID: handler.ID,

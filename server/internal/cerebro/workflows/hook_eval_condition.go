@@ -43,6 +43,37 @@ func splitHookConditions(conds []Condition) (pure, deferred []Condition) {
 	return pure, deferred
 }
 
+func evaluateHookPolicyConditions(ctx context.Context, resolver HookConditionResolver, policy HookPolicy, event HookEvent) (bool, []Condition) {
+	if len(policy.Conditions) == 0 {
+		return true, nil
+	}
+	mode := policy.ConditionMode
+	if mode == "" {
+		mode = HookConditionAll
+	}
+	matched := make([]Condition, 0, len(policy.Conditions))
+	conditionContext := hookConditionContext(event)
+	for _, condition := range policy.Conditions {
+		// A managed policy compares one event field against another
+		// ($event.wakeup.max_active), so the value has to be resolved against
+		// the event before it is compared — same as evaluate() does.
+		holds := match(resolveConditionValues(condition, conditionContext), conditionContext)
+		if isDeferredHookOp(condition.Op) {
+			holds = resolveEvalCondition(ctx, resolver, policy, condition, event, condition.Op == OpEvalFailed)
+		}
+		if holds {
+			matched = append(matched, condition)
+		}
+		if mode == HookConditionAny && holds {
+			return true, matched
+		}
+		if mode != HookConditionAny && !holds {
+			return false, nil
+		}
+	}
+	return mode != HookConditionAny, matched
+}
+
 // resolveHookConditions evaluates the deferred conditions against the resolver.
 // Every deferred condition must hold (conjunctive, like evaluate()).
 //

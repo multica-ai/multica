@@ -1,6 +1,9 @@
 package workflows
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type HookEventType string
 
@@ -22,12 +25,40 @@ const (
 	HookModeManaged HookMode = "managed"
 )
 
+type HookConditionMode string
+
+const (
+	HookConditionAll HookConditionMode = "all"
+	HookConditionAny HookConditionMode = "any"
+)
+
 type HookFailMode string
 
 const (
 	HookFailClosed HookFailMode = "closed"
 	HookFailWarn   HookFailMode = "warn"
 )
+
+type HookLifecycleState string
+
+const (
+	HookLifecycleDraft         HookLifecycleState = "draft"
+	HookLifecycleLive          HookLifecycleState = "live"
+	HookLifecycleLiveWithDraft HookLifecycleState = "live_with_draft"
+	HookLifecycleOff           HookLifecycleState = "off"
+	HookLifecycleOffWithDraft  HookLifecycleState = "off_with_draft"
+	HookLifecycleManaged       HookLifecycleState = "managed"
+)
+
+type HookLifecycle struct {
+	State                HookLifecycleState `json:"state"`
+	LivePolicyID         string             `json:"live_policy_id,omitempty"`
+	LiveVersion          int                `json:"live_version,omitempty"`
+	DraftID              string             `json:"draft_id,omitempty"`
+	DraftSeriesID        string             `json:"draft_series_id,omitempty"`
+	DraftRevision        int                `json:"draft_revision,omitempty"`
+	LiveUnchangedByDraft bool               `json:"live_unchanged_by_draft"`
+}
 
 type HookScopeKind string
 
@@ -81,23 +112,42 @@ type HookActionResult struct {
 }
 
 type HookPolicy struct {
-	ID            string          `json:"id"`
-	Version       int             `json:"version"`
-	Name          string          `json:"name"`
-	Description   string          `json:"description,omitempty"`
-	Mode          HookMode        `json:"mode"`
-	FailMode      HookFailMode    `json:"fail_mode"`
-	Events        []HookEventType `json:"events"`
-	Bindings      []HookBinding   `json:"bindings"`
-	Conditions    []Condition     `json:"conditions,omitempty"`
-	Handlers      []HookHandler   `json:"handlers"`
-	CreatedByID   string          `json:"created_by_id,omitempty"`
-	CreatedByType string          `json:"created_by_type,omitempty"`
-	UpdatedAt     time.Time       `json:"updated_at,omitempty"`
-	LastRunAt     *time.Time      `json:"last_run_at,omitempty"`
-	ObservedRuns  int             `json:"observed_run_count"`
-	BaselineAt    *time.Time      `json:"baseline_at,omitempty"`
-	CanPublish    bool            `json:"can_publish"`
+	ID               string             `json:"id"`
+	FamilyID         string             `json:"family_id"`
+	DraftSeriesID    string             `json:"draft_series_id,omitempty"`
+	Revision         int                `json:"revision,omitempty"`
+	Version          int                `json:"version"`
+	Name             string             `json:"name"`
+	Description      string             `json:"description,omitempty"`
+	Mode             HookMode           `json:"mode"`
+	FailMode         HookFailMode       `json:"fail_mode"`
+	Events           []HookEventType    `json:"events"`
+	Bindings         []HookBinding      `json:"bindings"`
+	ConditionMode    HookConditionMode  `json:"condition_mode"`
+	Conditions       []Condition        `json:"conditions,omitempty"`
+	Handlers         []HookHandler      `json:"handlers"`
+	CreatedByID      string             `json:"created_by_id,omitempty"`
+	CreatedByType    string             `json:"created_by_type,omitempty"`
+	UpdatedAt        time.Time          `json:"updated_at,omitempty"`
+	LastRunAt        *time.Time         `json:"last_run_at,omitempty"`
+	ObservedRuns     int                `json:"observed_run_count"`
+	BaselineAt       *time.Time         `json:"baseline_at,omitempty"`
+	CanPublish       bool               `json:"can_publish"`
+	Lifecycle        HookLifecycle      `json:"lifecycle"`
+	CompatibleEvents []HookJournalEvent `json:"compatible_events,omitempty"`
+}
+
+func (p *HookPolicy) UnmarshalJSON(data []byte) error {
+	type hookPolicyAlias HookPolicy
+	decoded := hookPolicyAlias{ConditionMode: HookConditionAll}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if decoded.ConditionMode == "" {
+		decoded.ConditionMode = HookConditionAll
+	}
+	*p = HookPolicy(decoded)
+	return nil
 }
 
 type HookActor struct {

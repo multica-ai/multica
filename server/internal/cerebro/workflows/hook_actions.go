@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 var ErrActionNotConfigured = errors.New("workflow action is not configured")
@@ -56,84 +57,37 @@ type TypedActionExecutor interface {
 	ExecuteHookAction(context.Context, HookPolicy, HookEvent, HookAction) (map[string]any, error)
 }
 
-var versionOneHookActionTypes = []string{
-	"member.notify", "agent.dispatch", "squad.dispatch", "wakeup.create", "wakeup.cancel",
-	"session.handoff", "task.retry", "task.cancel", "artifact.create_or_update",
-	"workflow.activate", "workflow.pause", "workflow.resume", "workflow.stop",
-	"approval.require", "audit.record", "metric.increment",
-	"skill.run", "judge.gate", "eval.gate", "eval.run",
-	"issue.comment", "issue.status", "issue.check_related",
-}
+var versionOneHookActionTypes = manifestHookActionTypes()
 
 var issueStatusActionValues = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
 
 func validateTypedHookAction(action HookAction) error {
-	known := false
-	for _, actionType := range versionOneHookActionTypes {
-		if action.Type == actionType {
-			known = true
-			break
-		}
-	}
-	if !known {
+	definition, configured := hookActionManifestByType[action.Type]
+	if !configured {
 		// Preserve forward compatibility for actions registered by another
-		// workflow module. This validator only owns the typed actions above.
+		// workflow module. Structural Draft validation owns rejecting unknown
+		// action types at the HTTP boundary.
 		return nil
 	}
-	requireString := func(key string) error {
-		if strings.TrimSpace(hookConfigString(action.Config, key, "")) == "" {
-			return fmt.Errorf("%s %s is required", action.Type, key)
+	for _, field := range definition.Fields {
+		if !field.Required {
+			continue
 		}
-		return nil
+		value, exists := action.Config[field.Key]
+		missing := !exists || value == nil
+		if text, ok := value.(string); ok && strings.TrimSpace(text) == "" {
+			missing = true
+		}
+		if missing {
+			return fmt.Errorf("%s %s is required", action.Type, field.Key)
+		}
 	}
 	switch action.Type {
-	case "member.notify":
-		for _, key := range []string{"member_id", "title", "message"} {
-			if err := requireString(key); err != nil {
-				return err
-			}
-		}
-		return nil
 	case "wakeup.create":
-		if err := requireString("fire_at"); err != nil {
-			return err
-		}
-		return requireString("prompt")
-	case "wakeup.cancel":
-		return requireString("wakeup_id")
-	case "task.retry", "task.cancel":
-		return requireString("task_id")
-	case "artifact.create_or_update":
-		for _, key := range []string{"title", "kind", "body"} {
-			if err := requireString(key); err != nil {
-				return err
-			}
+		if _, err := time.Parse(time.RFC3339, hookConfigString(action.Config, "fire_at", "")); err != nil {
+			return fmt.Errorf("wakeup.create requires fire_at: %w", err)
 		}
 		return nil
-	case "approval.require":
-		for _, key := range []string{"capability", "resource", "reason"} {
-			if err := requireString(key); err != nil {
-				return err
-			}
-		}
-		return nil
-	case "audit.record":
-		return requireString("event")
-	case "metric.increment":
-		if err := requireString("name"); err != nil {
-			return err
-		}
-		if _, ok := action.Config["amount"]; !ok {
-			return fmt.Errorf("%s amount is required", action.Type)
-		}
-		return nil
-	case "skill.run":
-		return requireString("skill_name")
-	case "judge.gate":
-		if err := requireString("agent_id"); err != nil {
-			return err
-		}
-		return requireString("rubric")
 	case "eval.gate":
 		if _, err := hookConfigUUID(action.Config, "eval_id"); err != nil {
 			return fmt.Errorf("eval.gate requires eval_id: %w", err)
@@ -144,12 +98,7 @@ func validateTypedHookAction(action HookAction) error {
 			return fmt.Errorf("eval.run requires eval_id: %w", err)
 		}
 		return nil
-	case "issue.comment":
-		return requireString("body")
 	case "issue.status":
-		if err := requireString("status"); err != nil {
-			return err
-		}
 		status := hookConfigString(action.Config, "status", "")
 		for _, allowed := range issueStatusActionValues {
 			if status == allowed {
@@ -157,25 +106,21 @@ func validateTypedHookAction(action HookAction) error {
 			}
 		}
 		return fmt.Errorf("issue.status status %q is not a valid issue status", status)
-	case "issue.check_related":
-		// Every knob has a safe default (link and comment on, never block), so
-		// a policy can enable the check with an empty config.
-		return nil
-	case "agent.dispatch":
-		return requireString("agent_id")
-	case "squad.dispatch":
-		if err := requireString("squad_id"); err != nil {
-			return err
-		}
-		return requireString("agent_id")
 	case "session.handoff":
 		_, err := validateHandoffAction(HookEvent{}, action.Config)
 		return err
-	case "workflow.activate", "workflow.pause", "workflow.resume", "workflow.stop":
-		return requireString("workflow_id")
 	default:
 		return nil
 	}
+}
+
+func isVersionOneHookActionType(target string) bool {
+	for _, actionType := range versionOneHookActionTypes {
+		if target == actionType {
+			return true
+		}
+	}
+	return false
 }
 
 func validateTypedHookActions(policy HookPolicy) error {
@@ -190,28 +135,7 @@ func validateTypedHookActions(policy HookPolicy) error {
 }
 
 func hookActionCapability(actionType string) string {
-	switch actionType {
-	case "member.notify", "issue.comment", "issue.check_related":
-		return "add_comment"
-	case "issue.status":
-		return "update_issue"
-	case "agent.dispatch", "squad.dispatch", "skill.run", "judge.gate", "eval.gate", "eval.run":
-		return "trigger_other_agent"
-	case "wakeup.create", "wakeup.cancel":
-		return "schedule_agent_wakeup"
-	case "session.handoff":
-		return "manage_sessions"
-	case "task.retry", "task.cancel":
-		return "manage_work_sessions"
-	case "artifact.create_or_update":
-		return "manage_artifacts"
-	case "workflow.activate", "workflow.pause", "workflow.resume", "workflow.stop":
-		return "manage_workflows"
-	case "approval.require":
-		return "decide_approval"
-	default:
-		return ""
-	}
+	return hookActionManifestByType[actionType].Capability
 }
 
 func registerVersionOneHookActions(registry *ActionRegistry, executor TypedActionExecutor) {

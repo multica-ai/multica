@@ -1,7 +1,7 @@
 import { Check, Circle, Play, ShieldAlert, Zap } from "lucide-react";
 import type { WorkflowHook } from "../../core/hook-types";
 import { validateHookStep, type HookStepKey } from "../../core/hook-validation";
-import { stepSummary } from "../../core/hook-ux";
+import { stepSummary, type HookSummaryDirectory } from "../../core/hook-ux";
 
 export type { HookStepKey };
 
@@ -11,7 +11,7 @@ export const HOOK_STEPS: ReadonlyArray<{ key: HookStepKey; label: string; icon: 
   { key: "actions", label: "Actions", icon: Play },
 ];
 
-export function HookChain({ selected, hook, onSelect }: { selected: HookStepKey; hook: WorkflowHook; onSelect: (step: HookStepKey) => void }) {
+export function HookChain({ selected, hook, directory = {}, onSelect }: { selected: HookStepKey; hook: WorkflowHook; directory?: HookSummaryDirectory; onSelect: (step: HookStepKey) => void }) {
   return (
     <ol aria-label="Hook chain" className="flex flex-col px-6 py-5">
       {HOOK_STEPS.map((step, index) => {
@@ -29,7 +29,7 @@ export function HookChain({ selected, hook, onSelect }: { selected: HookStepKey;
               <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"><Icon className="size-4" /></span>
               <span className="min-w-0 flex-1">
                 <span className="block text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground">{index + 1} · {step.label}</span>
-                <span className="mt-0.5 block text-sm font-semibold">{stepSummary(hook, step.key)}</span>
+                <span className="mt-0.5 block text-sm font-semibold">{stepSummary(hook, step.key, directory)}</span>
               </span>
               <span title={status.message} className={`flex size-4 shrink-0 items-center justify-center rounded-full ${status.valid ? "bg-success text-success-foreground" : "border border-muted-foreground/40 text-muted-foreground"}`}>{status.valid ? <Check className="size-2.5" /> : <Circle className="size-2" />}</span>
             </button>
