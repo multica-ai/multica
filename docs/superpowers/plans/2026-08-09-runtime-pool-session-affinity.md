@@ -299,12 +299,12 @@ ALTER TABLE agent_task_queue ADD CONSTRAINT agent_task_queue_unresolved_check CH
   session_affinity_state<>'unresolved' OR
   (runtime_binding_mode='pool' AND chat_session_id IS NOT NULL AND
    status IN ('waiting_runtime','deferred') AND runtime_id IS NULL AND
-   wait_reason='chat_predecessor_pending')
+   wait_reason IS NOT NULL AND wait_reason='chat_predecessor_pending')
 );
 ALTER TABLE agent_task_queue ADD CONSTRAINT agent_task_queue_removed_check CHECK (
   session_affinity_state<>'removed' OR
   (runtime_binding_mode='pool' AND status='cancelled' AND completed_at IS NOT NULL AND
-   runtime_id IS NULL AND wait_reason='session_runtime_removed')
+   runtime_id IS NULL AND wait_reason IS NOT NULL AND wait_reason='session_runtime_removed')
 );
 ALTER TABLE agent_task_queue DROP CONSTRAINT agent_task_queue_active_requires_runtime;
 ALTER TABLE agent_task_queue ADD CONSTRAINT agent_task_queue_routing_lifecycle_check CHECK (
@@ -396,10 +396,14 @@ git commit -m "feat(server): persist runtime pool contracts"
 - Create: `server/migrations/279_runtime_pool_rollback_guard.up.sql`, `server/migrations/279_runtime_pool_rollback_guard.down.sql`
 - Create: `server/internal/migrations/runtime_pool_indexes_test.go`
 - Modify: `server/internal/migrations/migrations_lint_test.go`
+- Modify: `server/cmd/migrate/main.go`
+- Modify: `server/cmd/migrate/migrate_invalid_index_test.go`
+- Modify: `server/internal/service/task.go`
+- Modify: `server/internal/service/duplicate_pending_task_test.go`
 
 **Interfaces:**
 - Consumes: Task 1 statuses and `placement_workspace_id`.
-- Produces: issue unique v3, Chat non-unique v4, workspace waiting order, capacity-bearing lookup, per-Workspace Pool deferred due lookup, and down-first rollback refusal while Pool rows exist.
+- Produces: issue unique v3, Chat non-unique v4, workspace waiting order, capacity-bearing lookup, per-Workspace Pool deferred due lookup, invalid concurrent-index recovery hooks, v3 duplicate-error compatibility, and down-first rollback refusal while Pool rows exist.
 
 - [ ] **Step 1: Write RED index assertions.** Assert exact names/predicates and that each `CONCURRENTLY` migration contains one statement:
 
@@ -432,7 +436,9 @@ func TestRuntimePoolIndexDeferredIsWorkspaceBounded(t *testing.T) {
 }
 ```
 
-In the same file add DB-backed `TestRuntimePoolIndexesAgainstDatabase`: use `pooltestdb.Open(t)`, insert two Issue waiting rows to prove the v3 unique index rejects the second, insert two Chat waiting rows to prove v4 remains non-unique, use `EXPLAIN (FORMAT JSON)` with `enable_seqscan=off` to assert the workspace waiting/deferred indexes are eligible, and run the 279 down body with a Pool Agent to assert the stable rollback refusal. Static text assertions alone do not satisfy this task.
+In the same file add DB-backed `TestRuntimePoolIndexesAgainstDatabase`: use `pooltestdb.Open(t)`, insert two Issue waiting rows to prove the v3 unique index rejects the second and names v3, insert two Chat waiting rows and assert `pg_index.indisunique = false`, assert every new index is `indisvalid`, recursively inspect `EXPLAIN (FORMAT JSON)` with `enable_seqscan=off` to prove the exact waiting, due-deferred, capacity, and six-status Chat queries use an eligible new index beneath any `Limit`/`Sort`/`LockRows`, and run the 279 down body under a savepoint for fixed-only, Pool Agent, Pool Task, and Pool Release cases. Static text assertions alone do not satisfy this task.
+
+Add `TestRuntimePoolConcurrentIndexHooks` in `migrate_invalid_index_test.go`: create an INVALID index fixture for each of migrations 272, 274, 276, 277, and 278, invoke the registered pre-migration hook, and assert only the named INVALID index is removed while a valid index is preserved. Extend `duplicate_pending_task_test.go` so `isDuplicatePendingTaskErr` recognizes v1, v2, and v3 but rejects unrelated `23505` errors.
 
 - [ ] **Step 2: Run RED.**
 
@@ -441,7 +447,7 @@ cd /Users/zxx/Documents/技术学习/multica
 export DATABASE_URL='postgres://multica:multica@localhost:5432/multica?sslmode=disable'
 make migrate-up
 cd /Users/zxx/Documents/技术学习/multica/server
-/Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go test ./internal/migrations -run 'RuntimePoolIndex|RollbackGuard' -count=1
+/Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go test ./internal/migrations ./cmd/migrate ./internal/service -run 'RuntimePoolIndex|RollbackGuard|RuntimePoolConcurrentIndexHooks|DuplicatePendingTask' -count=1
 ```
 
 Expected: FAIL listing absent v3/v4/workspace/capacity/deferred indexes.
@@ -462,6 +468,8 @@ THEN RAISE EXCEPTION 'runtime pool rows exist; rollback refused'; END IF;
 END $$;
 ```
 
+Register `cleanupInvalidConcurrentIndexHook` for 272, 274, 276, 277, and 278 before any later migration drops an old index. The 273/275 down migrations recreate the exact prior index without `IF NOT EXISTS`, so rollback fails closed instead of silently accepting an INVALID object. Add v3 to `isDuplicatePendingTaskErr` before migration 272 is enabled. Production rollout is explicitly two-phase: first deploy the v3-compatible binary everywhere with schema migration execution held, drain all older binaries, then apply 272-279 and enable Pool writers. Never apply 272 while a v2-only binary can still serve requests.
+
 - [ ] **Step 4: Run GREEN and query-plan checks.**
 
 ```bash
@@ -471,7 +479,8 @@ make migrate-up
 cd /Users/zxx/Documents/技术学习/multica/server
 /Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go test ./internal/migrations -run 'RuntimePoolIndex|RollbackGuard' -count=1
 /Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go test ./internal/migrations -count=1
-/Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go vet ./internal/migrations
+/Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go test ./cmd/migrate ./internal/service -run 'RuntimePoolConcurrentIndexHooks|DuplicatePendingTask' -count=1
+/Users/zxx/Documents/技术学习/.tools/go1.26.1/bin/go vet ./internal/migrations ./cmd/migrate ./internal/service
 ```
 
 Expected: tests prove uniqueness/non-uniqueness, workspace-bounded waiting/deferred planner eligibility, and 279 down refusal before index removal; all PASS.
@@ -480,7 +489,7 @@ Expected: tests prove uniqueness/non-uniqueness, workspace-bounded waiting/defer
 
 ```bash
 cd /Users/zxx/Documents/技术学习/multica
-git add server/migrations/272_pending_issue_agent_pool_v3.up.sql server/migrations/272_pending_issue_agent_pool_v3.down.sql server/migrations/273_drop_pending_issue_agent_v2.up.sql server/migrations/273_drop_pending_issue_agent_v2.down.sql server/migrations/274_chat_pending_pool_v4.up.sql server/migrations/274_chat_pending_pool_v4.down.sql server/migrations/275_drop_chat_pending_v3.up.sql server/migrations/275_drop_chat_pending_v3.down.sql server/migrations/276_waiting_runtime_workspace_index.up.sql server/migrations/276_waiting_runtime_workspace_index.down.sql server/migrations/277_runtime_pool_occupancy_index.up.sql server/migrations/277_runtime_pool_occupancy_index.down.sql server/migrations/278_runtime_pool_deferred_due_index.up.sql server/migrations/278_runtime_pool_deferred_due_index.down.sql server/migrations/279_runtime_pool_rollback_guard.up.sql server/migrations/279_runtime_pool_rollback_guard.down.sql server/internal/migrations/runtime_pool_indexes_test.go server/internal/migrations/migrations_lint_test.go
+git add server/migrations/272_pending_issue_agent_pool_v3.up.sql server/migrations/272_pending_issue_agent_pool_v3.down.sql server/migrations/273_drop_pending_issue_agent_v2.up.sql server/migrations/273_drop_pending_issue_agent_v2.down.sql server/migrations/274_chat_pending_pool_v4.up.sql server/migrations/274_chat_pending_pool_v4.down.sql server/migrations/275_drop_chat_pending_v3.up.sql server/migrations/275_drop_chat_pending_v3.down.sql server/migrations/276_waiting_runtime_workspace_index.up.sql server/migrations/276_waiting_runtime_workspace_index.down.sql server/migrations/277_runtime_pool_occupancy_index.up.sql server/migrations/277_runtime_pool_occupancy_index.down.sql server/migrations/278_runtime_pool_deferred_due_index.up.sql server/migrations/278_runtime_pool_deferred_due_index.down.sql server/migrations/279_runtime_pool_rollback_guard.up.sql server/migrations/279_runtime_pool_rollback_guard.down.sql server/internal/migrations/runtime_pool_indexes_test.go server/internal/migrations/migrations_lint_test.go server/cmd/migrate/main.go server/cmd/migrate/migrate_invalid_index_test.go server/internal/service/task.go server/internal/service/duplicate_pending_task_test.go
 git commit -m "feat(server): index runtime pool scheduling"
 ```
 
