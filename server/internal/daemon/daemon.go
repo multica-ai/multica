@@ -5832,12 +5832,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		hermesEnv["HERMES_HOME"] = res.SourceHome
 	}
-	// Guard this task's per-issue Codex session store from the GC for the whole
+	// Guard this task's scoped Codex session store from the GC for the whole
 	// task, starting before Prepare/Reuse mounts it — so a prune that samples the
 	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
-	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
+	// of a long-idle conversation (MUL-4424). No-op for non-Codex tasks / no
+	// stable key.
+	sessionStoreScope := execenv.ResolveCodexSessionStoreScope(task.SessionStoreScope, task.IssueID)
 	if provider == "codex" {
-		if store := execenv.CodexSessionStorePath(d.cfg.Profile, task.AgentID, task.IssueID); store != "" {
+		if store := execenv.CodexSessionStorePath(d.cfg.Profile, task.AgentID, sessionStoreScope); store != "" {
 			d.markActiveCodexStore(store)
 			defer d.unmarkActiveCodexStore(store)
 		}
@@ -5847,6 +5849,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
 			Profile:               d.cfg.Profile,
+			SessionStoreScope:     sessionStoreScope,
 			WorkDir:               task.PriorWorkDir,
 			Provider:              provider,
 			CodexVersion:          codexVersion,
@@ -5870,6 +5873,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		prepParams := execenv.PrepareParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
 			Profile:               d.cfg.Profile,
+			SessionStoreScope:     sessionStoreScope,
 			WorkspaceID:           task.WorkspaceID,
 			TaskID:                task.ID,
 			AgentName:             agentName,
