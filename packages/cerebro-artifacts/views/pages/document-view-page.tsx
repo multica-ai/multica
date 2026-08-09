@@ -44,6 +44,9 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ContentEditor } from "@multica/views/editor";
+import { EditorImageTray } from "@multica/cerebro-composer";
+import { api } from "@multica/core/api";
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { ArtifactContent } from "../components/artifact-content";
 import { KindIcon, KIND_LABELS } from "../components/kind-icon";
 import { DocumentToolsSidebar } from "../components/document-tools-sidebar";
@@ -233,6 +236,15 @@ function MarkdownDocumentEditor({
     [flush, onBodyChange],
   );
 
+  // FIR-4699 Phase 4 — Documents can accept an image at all. Behind the flag the
+  // inline editor becomes the same EditorImageTray Notes already uses (drag/drop,
+  // paste, attach button, numbered tray); off leaves the bare ContentEditor
+  // untouched. EditorImageTray shares ContentEditor's props, so only onUploadFile
+  // is added.
+  const imagesEnabled = useFeatureFlag("cerebro_editor_images");
+  const { uploadWithToast } = useFileUpload(api);
+  const Editor = imagesEnabled ? EditorImageTray : ContentEditor;
+
   return (
     <section className="overflow-hidden rounded-md border border-border bg-card shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
@@ -259,7 +271,7 @@ function MarkdownDocumentEditor({
         />
       )}
       <div className="min-h-[65vh] bg-background px-4 py-4 md:px-6 md:py-5">
-        <ContentEditor
+        <Editor
           key={`${artifact.id}:${remountToken}`}
           defaultValue={value}
           onUpdate={handleUpdate}
@@ -268,6 +280,7 @@ function MarkdownDocumentEditor({
           showBubbleMenu={!toolbarEnabled}
           debounceMs={800}
           placeholder="Just start writing…"
+          {...(imagesEnabled ? { onUploadFile: uploadWithToast } : {})}
           // FIR-1621 — Documents are full-page surfaces, so the editor fills the
           // card. Override the global .rich-text-editor 70ch readability cap
           // (FIR-2114), which otherwise leaves a wide gap on the right here.

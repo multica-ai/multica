@@ -88,6 +88,10 @@ export type CerebroFlagKey =
   // trail, and the Documents editor shows a "Version history" action to view /
   // restore earlier versions. Off by default until QA'd on staging.
   | "cerebro_document_versions"
+  // FIR-4699: images in Notes and Documents — drop, paste or pick a file; it
+  // lands as a numbered tray thumbnail or inline in the text, resizable and
+  // aligned. Off = today exactly: tray on Notes, nothing on Documents, no resize.
+  | "cerebro_editor_images"
   // FIR-2697 part 2: folder suggestions with accept. When on, an agent can
   // PROPOSE an existing folder for a document/note instead of moving it
   // outright; the artifact only moves once a human accepts the proposal, shown
@@ -536,6 +540,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_note_versions: true,
   // FIR-2697: document version history — off until QA'd on staging.
   cerebro_document_versions: false,
+  // FIR-4699: images in Notes and Documents — off until QA signs off.
+  cerebro_editor_images: false,
   // FIR-2697 part 2: folder suggestions with accept — off until QA'd on staging.
   cerebro_folder_suggestions: false,
   // FIR-2697 part 3: automatic Agent Runs folder structure — off until QA'd.

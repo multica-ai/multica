@@ -15,13 +15,6 @@ const currentMember = vi.hoisted(() => ({
   userId: "user-1" as string | null,
   role: "member" as string | null,
 }));
-const featureFlags = vi.hoisted(() => ({ editorToolbar: false }));
-
-vi.mock("@multica/cerebro-feature-flags", () => ({
-  useFeatureFlag: (key: string) =>
-    key === "cerebro_editor_toolbar" ? featureFlags.editorToolbar : false,
-}));
-
 vi.mock("@multica/cerebro-artifacts/core", () => ({
   artifactDetailOptions: (_wsId: string, id: string) => ({
     queryKey: ["artifacts", "ws-1", "detail", id],
@@ -142,6 +135,53 @@ vi.mock("@multica/cerebro-ui", () => ({
   ),
 }));
 
+const featureFlags = vi.hoisted(() => ({
+  map: {} as Record<string, boolean>,
+}));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: (key: string) => featureFlags.map[key] ?? false,
+}));
+
+// FIR-4699 Phase 4: with the images flag on, Documents mounts the same
+// EditorImageTray Notes already uses, wired for upload — drag/drop/paste/tray.
+vi.mock("@multica/cerebro-composer", () => ({
+  EditorImageTray: React.forwardRef(
+    (
+      props: {
+        defaultValue?: string;
+        onUpdate?: (markdown: string) => void;
+        onEditorReady?: (editor: unknown) => void;
+        onUploadFile?: (file: File) => unknown;
+      },
+      ref: React.ForwardedRef<{ getMarkdown: () => string }>,
+    ) => {
+      const [value, setValue] = React.useState(props.defaultValue ?? "");
+      React.useEffect(() => {
+        props.onEditorReady?.({ state: { selection: { empty: true } } });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, []);
+      React.useImperativeHandle(ref, () => ({ getMarkdown: () => value }));
+      return (
+        <>
+          <span
+            data-testid="document-image-tray"
+            data-has-upload={String(typeof props.onUploadFile === "function")}
+          />
+          <textarea
+            aria-label="Markdown editor"
+            value={value}
+            onChange={(event) => {
+              setValue(event.target.value);
+              props.onUpdate?.(event.target.value);
+            }}
+          />
+        </>
+      );
+    },
+  ),
+}));
+
 import { DocumentViewPage } from "./document-view-page";
 
 function artifact(overrides: Partial<Artifact> = {}): Artifact {
@@ -187,7 +227,7 @@ describe("DocumentViewPage markdown body", () => {
     navigationPush.mockClear();
     currentMember.userId = "user-1";
     currentMember.role = "member";
-    featureFlags.editorToolbar = false;
+    featureFlags.map = {};
   });
 
   it("keeps selection formatting available when the editor toolbar flag is off", async () => {
@@ -197,8 +237,26 @@ describe("DocumentViewPage markdown body", () => {
     expect(screen.queryByRole("toolbar", { name: "Formatting toolbar" })).not.toBeInTheDocument();
   });
 
+  // FIR-4699 Phase 4 — Documents can accept an image at all. With the flag on,
+  // the inline editor is the tray (drag/drop/paste), wired to an upload handler;
+  // today it is a bare ContentEditor with no upload, so the tray never mounts.
+  it("mounts the image tray with an upload handler on Documents when cerebro_editor_images is on", () => {
+    featureFlags.map["cerebro_editor_images"] = true;
+    renderPage(artifact());
+
+    const tray = screen.getByTestId("document-image-tray");
+    expect(tray).toHaveAttribute("data-has-upload", "true");
+  });
+
+  it("keeps the bare editor with no image tray when cerebro_editor_images is off", () => {
+    renderPage(artifact());
+
+    expect(screen.queryByTestId("document-image-tray")).toBeNull();
+    expect(screen.getByLabelText("Markdown editor")).toBeInTheDocument();
+  });
+
   it("renders owned markdown documents as an inline editor and autosaves body changes", async () => {
-    featureFlags.editorToolbar = true;
+    featureFlags.map["cerebro_editor_toolbar"] = true;
     renderPage(artifact());
 
     expect(screen.getByLabelText("Markdown editor")).toHaveValue(
