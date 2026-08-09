@@ -20,7 +20,7 @@ WHERE id = $4
   AND workspace_id = $5
   AND runtime_id IS NULL
   AND squad_id IS NULL
-RETURNING id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at
+RETURNING id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at, runtime_binding_mode, runtime_requirements
 `
 
 type CompletePlatformExtensionReleaseParams struct {
@@ -55,6 +55,8 @@ func (q *Queries) CompletePlatformExtensionRelease(ctx context.Context, arg Comp
 		&i.Resources,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
 	)
 	return i, err
 }
@@ -78,7 +80,7 @@ INSERT INTO platform_extension_release (
     $7
 )
 ON CONFLICT (workspace_id, extension_key, version) DO NOTHING
-RETURNING id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at
+RETURNING id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at, runtime_binding_mode, runtime_requirements
 `
 
 type CreatePlatformExtensionReleaseReservationParams struct {
@@ -117,6 +119,8 @@ func (q *Queries) CreatePlatformExtensionReleaseReservation(ctx context.Context,
 		&i.Resources,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
 	)
 	return i, err
 }
@@ -134,7 +138,7 @@ func (q *Queries) DeletePlatformExtensionReleasesByWorkspace(ctx context.Context
 }
 
 const getPlatformExtensionReleaseByIdentity = `-- name: GetPlatformExtensionReleaseByIdentity :one
-SELECT id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at FROM platform_extension_release
+SELECT id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at, runtime_binding_mode, runtime_requirements FROM platform_extension_release
 WHERE workspace_id = $1
   AND extension_key = $2
   AND version = $3
@@ -162,12 +166,14 @@ func (q *Queries) GetPlatformExtensionReleaseByIdentity(ctx context.Context, arg
 		&i.Resources,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
 	)
 	return i, err
 }
 
 const getPlatformExtensionReleaseInWorkspace = `-- name: GetPlatformExtensionReleaseInWorkspace :one
-SELECT id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at FROM platform_extension_release
+SELECT id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at, runtime_binding_mode, runtime_requirements FROM platform_extension_release
 WHERE id = $1
   AND workspace_id = $2
 `
@@ -193,12 +199,14 @@ func (q *Queries) GetPlatformExtensionReleaseInWorkspace(ctx context.Context, ar
 		&i.Resources,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
 	)
 	return i, err
 }
 
 const listPlatformExtensionReleasesInWorkspace = `-- name: ListPlatformExtensionReleasesInWorkspace :many
-SELECT id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at FROM platform_extension_release
+SELECT id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at, runtime_binding_mode, runtime_requirements FROM platform_extension_release
 WHERE workspace_id = $1
 ORDER BY created_at DESC, id DESC
 `
@@ -225,6 +233,8 @@ func (q *Queries) ListPlatformExtensionReleasesInWorkspace(ctx context.Context, 
 			&i.Resources,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.RuntimeBindingMode,
+			&i.RuntimeRequirements,
 		); err != nil {
 			return nil, err
 		}
@@ -237,7 +247,7 @@ func (q *Queries) ListPlatformExtensionReleasesInWorkspace(ctx context.Context, 
 }
 
 const listPlatformExtensionRuntimeCandidates = `-- name: ListPlatformExtensionRuntimeCandidates :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, capabilities
 FROM agent_runtime
 WHERE workspace_id = $1
   AND provider = 'platform-agent-cli'
@@ -274,6 +284,7 @@ func (q *Queries) ListPlatformExtensionRuntimeCandidates(ctx context.Context, wo
 			&i.Visibility,
 			&i.ProfileID,
 			&i.CustomName,
+			&i.Capabilities,
 		); err != nil {
 			return nil, err
 		}
@@ -293,7 +304,7 @@ WITH active_agent_counts AS (
       AND runtime_id IS NOT NULL
     GROUP BY runtime_id
 )
-SELECT rt.id, rt.workspace_id, rt.daemon_id, rt.name, rt.runtime_mode, rt.provider, rt.status, rt.device_info, rt.metadata, rt.last_seen_at, rt.created_at, rt.updated_at, rt.owner_id, rt.legacy_daemon_id, rt.visibility, rt.profile_id, rt.custom_name
+SELECT rt.id, rt.workspace_id, rt.daemon_id, rt.name, rt.runtime_mode, rt.provider, rt.status, rt.device_info, rt.metadata, rt.last_seen_at, rt.created_at, rt.updated_at, rt.owner_id, rt.legacy_daemon_id, rt.visibility, rt.profile_id, rt.custom_name, rt.capabilities
 FROM agent_runtime rt
 LEFT JOIN active_agent_counts counts ON counts.runtime_id = rt.id
 WHERE rt.workspace_id = $1
@@ -357,6 +368,7 @@ func (q *Queries) LockIdlePlatformExtensionRuntime(ctx context.Context, arg Lock
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.Capabilities,
 	)
 	return i, err
 }

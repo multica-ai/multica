@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -13,6 +14,7 @@ import (
 )
 
 const maxLegacyMigrationPrefix = 148
+const concurrentIndexMigrationFloor = 267
 
 var legacyDuplicateMigrationStems = map[string][]string{
 	"020": {"020_issue_number", "020_task_session"},
@@ -107,6 +109,43 @@ func TestNewMigrationPrefixesStartAfterLegacyRange(t *testing.T) {
 	}
 }
 
+func TestRuntimePoolEraIndexMigrationsStayConcurrentAndSingleStatement(t *testing.T) {
+	for _, file := range migrationFilesForLint(t, "*.sql") {
+		base := filepath.Base(file)
+		match := migrationPrefixPattern.FindStringSubmatch(base)
+		if match == nil {
+			continue
+		}
+		prefix, err := strconv.Atoi(match[1])
+		if err != nil {
+			t.Fatalf("parse migration prefix for %s: %v", base, err)
+		}
+		if prefix < concurrentIndexMigrationFloor {
+			continue
+		}
+
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		statements := sqlStatementsForLint(string(raw))
+		for _, statement := range statements {
+			upper := strings.ToUpper(statement)
+			if !strings.HasPrefix(upper, "CREATE INDEX ") &&
+				!strings.HasPrefix(upper, "CREATE UNIQUE INDEX ") &&
+				!strings.HasPrefix(upper, "DROP INDEX ") {
+				continue
+			}
+			if !strings.Contains(upper, " INDEX CONCURRENTLY ") {
+				t.Errorf("%s builds or drops a physical index without CONCURRENTLY", base)
+			}
+			if len(statements) != 1 {
+				t.Errorf("%s contains a physical index operation plus %d total statements; keep the index operation alone", base, len(statements))
+			}
+		}
+	}
+}
+
 func migrationStemsByPrefix(t *testing.T) map[string][]string {
 	t.Helper()
 
@@ -180,4 +219,23 @@ func isKnownLegacyPrefix(prefix string) bool {
 	default:
 		return false
 	}
+}
+
+func sqlStatementsForLint(raw string) []string {
+	lines := strings.Split(raw, "\n")
+	withoutComments := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if index := strings.Index(line, "--"); index >= 0 {
+			line = line[:index]
+		}
+		withoutComments = append(withoutComments, line)
+	}
+	parts := strings.Split(strings.Join(withoutComments, "\n"), ";")
+	statements := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if statement := strings.TrimSpace(part); statement != "" {
+			statements = append(statements, statement)
+		}
+	}
+	return statements
 }

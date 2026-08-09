@@ -62,3 +62,20 @@ func TestPlatformExtensionReleaseMigrationsPreserveReleaseAndConcurrentIndexCont
 		t.Errorf("release identity index rollback = %q", got)
 	}
 }
+
+func TestRuntimePoolContractMigrationPreflightsTerminalTimestamps(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(realMigrationsDir(t), "267_runtime_pool_contract.up.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	preflight := strings.Index(sql, "runtime_pool_terminal_timestamp_preflight")
+	addCheck := strings.Index(sql, "ADD CONSTRAINT agent_task_queue_terminal_completed_at_check")
+	validate := strings.Index(sql, "VALIDATE CONSTRAINT agent_task_queue_terminal_completed_at_check")
+	if preflight < 0 || addCheck <= preflight || validate <= addCheck {
+		t.Fatalf("preflight/add/validate order is invalid: %d/%d/%d", preflight, addCheck, validate)
+	}
+	if !strings.Contains(sql[addCheck:validate], "NOT VALID") {
+		t.Fatal("terminal timestamp CHECK must be added NOT VALID before validation")
+	}
+}

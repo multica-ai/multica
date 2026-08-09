@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY idx_agent_comment_followup_obligation_fifo;

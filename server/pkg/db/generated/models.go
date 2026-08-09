@@ -52,6 +52,8 @@ type Agent struct {
 	SystemKey             pgtype.Text `json:"system_key"`
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 	ServiceTier           pgtype.Text `json:"service_tier"`
+	RuntimeBindingMode    string      `json:"runtime_binding_mode"`
+	RuntimeRequirements   []byte      `json:"runtime_requirements"`
 }
 
 type AgentBuilderDraft struct {
@@ -59,6 +61,17 @@ type AgentBuilderDraft struct {
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	Draft         []byte             `json:"draft"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AgentCommentFollowupObligation struct {
+	ID               pgtype.UUID        `json:"id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	CommentID        pgtype.UUID        `json:"comment_id"`
+	CommentUpdatedAt pgtype.Timestamptz `json:"comment_updated_at"`
+	HeadSha          string             `json:"head_sha"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 // Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).
@@ -89,6 +102,7 @@ type AgentRuntime struct {
 	Visibility     string             `json:"visibility"`
 	ProfileID      pgtype.UUID        `json:"profile_id"`
 	CustomName     pgtype.Text        `json:"custom_name"`
+	Capabilities   []string           `json:"capabilities"`
 }
 
 type AgentSkill struct {
@@ -161,6 +175,13 @@ type AgentTaskQueue struct {
 	RetiredSessionID          pgtype.Text `json:"retired_session_id"`
 	QuickActionsDisabled      bool        `json:"quick_actions_disabled"`
 	RegenerateQuickActionsFor pgtype.UUID `json:"regenerate_quick_actions_for"`
+	RuntimeBindingMode        string      `json:"runtime_binding_mode"`
+	RuntimeRequirements       []byte      `json:"runtime_requirements"`
+	PlacementWorkspaceID      pgtype.UUID `json:"placement_workspace_id"`
+	RuntimeRequesterUserID    pgtype.UUID `json:"runtime_requester_user_id"`
+	SessionAffinityState      string      `json:"session_affinity_state"`
+	SessionAffinityRuntimeID  pgtype.UUID `json:"session_affinity_runtime_id"`
+	ExplicitFreshSession      bool        `json:"explicit_fresh_session"`
 }
 
 type AgentToLabel struct {
@@ -847,18 +868,20 @@ type PinnedItem struct {
 }
 
 type PlatformExtensionRelease struct {
-	ID           pgtype.UUID        `json:"id"`
-	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
-	ExtensionKey string             `json:"extension_key"`
-	Name         string             `json:"name"`
-	Version      string             `json:"version"`
-	Digest       string             `json:"digest"`
-	Manifest     []byte             `json:"manifest"`
-	RuntimeID    pgtype.UUID        `json:"runtime_id"`
-	SquadID      pgtype.UUID        `json:"squad_id"`
-	Resources    []byte             `json:"resources"`
-	CreatedBy    pgtype.UUID        `json:"created_by"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ExtensionKey        string             `json:"extension_key"`
+	Name                string             `json:"name"`
+	Version             string             `json:"version"`
+	Digest              string             `json:"digest"`
+	Manifest            []byte             `json:"manifest"`
+	RuntimeID           pgtype.UUID        `json:"runtime_id"`
+	SquadID             pgtype.UUID        `json:"squad_id"`
+	Resources           []byte             `json:"resources"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	RuntimeBindingMode  string             `json:"runtime_binding_mode"`
+	RuntimeRequirements []byte             `json:"runtime_requirements"`
 }
 
 type Project struct {

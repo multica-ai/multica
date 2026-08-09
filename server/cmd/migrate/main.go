@@ -59,11 +59,20 @@ type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 // way, so it carries the same hazard — an INVALID v2 leftover recorded as
 // success would let migration 262 drop the still-valid v1, leaving all four
 // dashboard rollups on a full table scan.
+//
+// Runtime-pool migrations 268, 270, and 271 deliberately omit IF NOT EXISTS
+// so a valid name collision fails closed. They still need the same narrow
+// recovery for the INVALID relation PostgreSQL leaves when a concurrent build
+// is interrupted: remove only the invalid leftover, then let the migration
+// retry the original statement.
 var preMigrationHooks = map[string]preMigrationHook{
 	"103_drop_legacy_daily_rollups":                         runTaskUsageHourlyHook,
 	"198_agent_task_attribution_strict_constraint_validate": runAttributionStrictHook,
 	"257_agent_task_queue_channel_media_pending_unique_v2":  cleanupInvalidConcurrentIndexHook("idx_one_pending_task_per_issue_agent_v2"),
 	"261_agent_task_queue_terminal_completed_at_v2":         cleanupInvalidConcurrentIndexHook("idx_agent_task_queue_terminal_completed_at_v2"),
+	"268_comment_followup_id_unique":                        cleanupInvalidConcurrentIndexHook("idx_agent_comment_followup_obligation_id"),
+	"270_comment_followup_agent_comment_unique":             cleanupInvalidConcurrentIndexHook("idx_agent_comment_followup_obligation_agent_comment"),
+	"271_comment_followup_fifo_index":                       cleanupInvalidConcurrentIndexHook("idx_agent_comment_followup_obligation_fifo"),
 }
 
 // cleanupInvalidConcurrentIndexHook removes an INVALID index left by an

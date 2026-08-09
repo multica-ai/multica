@@ -10,7 +10,131 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/pooltestdb"
 )
+
+func TestRuntimePoolConcurrentIndexHooksRepairInvalidIndexes(t *testing.T) {
+	testCases := []struct {
+		version   string
+		indexName string
+		unique    bool
+		columns   string
+	}{
+		{
+			version:   "268_comment_followup_id_unique",
+			indexName: "idx_agent_comment_followup_obligation_id",
+			unique:    true,
+			columns:   "(id)",
+		},
+		{
+			version:   "270_comment_followup_agent_comment_unique",
+			indexName: "idx_agent_comment_followup_obligation_agent_comment",
+			unique:    true,
+			columns:   "(agent_id, comment_id)",
+		},
+		{
+			version:   "271_comment_followup_fifo_index",
+			indexName: "idx_agent_comment_followup_obligation_fifo",
+			columns:   "(updated_at ASC, id ASC)",
+		},
+	}
+
+	// Check all registrations before opening Postgres so a missing production
+	// hook is a deterministic failure rather than a database-dependent skip.
+	for _, tc := range testCases {
+		t.Run(tc.version+"/registered", func(t *testing.T) {
+			if preMigrationHooks[tc.version] == nil {
+				t.Fatalf("production hook is not registered for %s", tc.version)
+			}
+		})
+	}
+	if t.Failed() {
+		return
+	}
+
+	pool := pooltestdb.Open(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	for _, tc := range testCases {
+		t.Run(tc.version+"/invalid_cleanup", func(t *testing.T) {
+			suffix := fmt.Sprintf("%d_%d", time.Now().UnixNano(), rand.Uint32())
+			schema := "migrate_runtime_pool_idx_" + suffix
+			schemaIdent := pgx.Identifier{schema}.Sanitize()
+			if _, err := pool.Exec(ctx, "CREATE SCHEMA "+schemaIdent); err != nil {
+				t.Fatalf("create schema: %v", err)
+			}
+			t.Cleanup(func() {
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cleanupCancel()
+				if _, err := pool.Exec(cleanupCtx, "DROP SCHEMA IF EXISTS "+schemaIdent+" CASCADE"); err != nil {
+					t.Logf("drop schema %s: %v", schema, err)
+				}
+			})
+
+			tableName := pgx.Identifier{schema, "agent_comment_followup_obligation"}.Sanitize()
+			if _, err := pool.Exec(ctx, "CREATE TABLE "+tableName+` (
+				id BIGINT NOT NULL,
+				agent_id BIGINT NOT NULL,
+				comment_id BIGINT NOT NULL,
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`); err != nil {
+				t.Fatalf("create obligation table: %v", err)
+			}
+
+			scopedPool := pooltestdb.OpenWithSearchPath(t, schema, "public")
+			blocker, err := pool.Acquire(ctx)
+			if err != nil {
+				t.Fatalf("acquire blocker conn: %v", err)
+			}
+			blockerTx, err := blocker.Begin(ctx)
+			if err != nil {
+				blocker.Release()
+				t.Fatalf("begin blocker tx: %v", err)
+			}
+			if _, err := blockerTx.Exec(ctx, "INSERT INTO "+tableName+" (id, agent_id, comment_id) VALUES (1, 1, 1)"); err != nil {
+				_ = blockerTx.Rollback(ctx)
+				blocker.Release()
+				t.Fatalf("blocker insert: %v", err)
+			}
+
+			builder, err := scopedPool.Acquire(ctx)
+			if err != nil {
+				_ = blockerTx.Rollback(ctx)
+				blocker.Release()
+				t.Fatalf("acquire builder conn: %v", err)
+			}
+			if _, err := builder.Exec(ctx, "SET statement_timeout = '2s'"); err != nil {
+				builder.Release()
+				_ = blockerTx.Rollback(ctx)
+				blocker.Release()
+				t.Fatalf("set statement_timeout: %v", err)
+			}
+			unique := ""
+			if tc.unique {
+				unique = "UNIQUE "
+			}
+			createIndex := "CREATE " + unique + "INDEX CONCURRENTLY " +
+				pgx.Identifier{tc.indexName}.Sanitize() + " ON " + tableName + " " + tc.columns
+			_, buildErr := builder.Exec(ctx, createIndex)
+			if _, err := builder.Exec(ctx, "SET statement_timeout = DEFAULT"); err != nil {
+				t.Logf("reset statement_timeout: %v", err)
+			}
+			builder.Release()
+			_ = blockerTx.Rollback(ctx)
+			blocker.Release()
+			if buildErr == nil {
+				t.Fatal("interrupted concurrent index build unexpectedly succeeded")
+			}
+
+			assertIndexValidity(t, pool, schema, tc.indexName, false)
+			if err := preMigrationHooks[tc.version](ctx, scopedPool); err != nil {
+				t.Fatalf("cleanup invalid index before %s: %v", tc.version, err)
+			}
+			assertIndexAbsent(t, pool, schema, tc.indexName)
+		})
+	}
+}
 
 func TestRunMigrationsRepairsInvalidConcurrentIndexBeforeRetry(t *testing.T) {
 	pool := openTestPool(t)
@@ -277,5 +401,25 @@ func assertIndexValidity(t *testing.T, pool interface {
 	}
 	if valid != want {
 		t.Fatalf("index %s.%s validity = %v, want %v", schema, index, valid, want)
+	}
+}
+
+func assertIndexAbsent(t *testing.T, pool interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, schema, index string) {
+	t.Helper()
+	var exists bool
+	if err := pool.QueryRow(context.Background(), `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_class c
+			JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE n.nspname = $1 AND c.relname = $2
+		)
+	`, schema, index).Scan(&exists); err != nil {
+		t.Fatalf("check existence for %s.%s: %v", schema, index, err)
+	}
+	if exists {
+		t.Fatalf("index %s.%s still exists after invalid-index cleanup", schema, index)
 	}
 }
