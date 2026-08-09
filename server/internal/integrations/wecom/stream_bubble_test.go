@@ -143,6 +143,10 @@ type bubbleRig struct {
 	bus     *events.Bus
 	instID  pgtype.UUID
 	now     time.Time
+	// boundRuns is batch -> task id, mirroring what the debounced flush told
+	// the store. It is the test's own copy of the binding, so a helper can name
+	// the run behind a batch without reaching into the store.
+	boundRuns map[engine.RunBatchID]string
 	// logs is what the manager wrote while the test ran. Set only by the rigs
 	// whose subject is a decision NOT to send: a refusal is invisible in the
 	// frames, so the log line is the only thing that separates it from a
@@ -161,11 +165,12 @@ func newBubbleRig(t *testing.T) *bubbleRig {
 
 	streams := newStreamStore()
 	rig := &bubbleRig{
-		conn:    conn,
-		streams: streams,
-		senders: reg,
-		instID:  instID,
-		now:     time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC),
+		conn:      conn,
+		streams:   streams,
+		senders:   reg,
+		instID:    instID,
+		now:       time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC),
+		boundRuns: map[engine.RunBatchID]string{},
 	}
 	streams.now = func() time.Time { return rig.now }
 
@@ -252,6 +257,7 @@ func (r *bubbleRig) reconnect() *bubbleConn {
 func (r *bubbleRig) runStarted(t *testing.T, batch engine.RunBatchID, taskName string) {
 	t.Helper()
 	r.typing.OnRunStarted(context.Background(), bubbleSessionID(t), batch, mustParseTestUUID(t, taskName))
+	r.boundRuns[batch] = taskUUID(t, taskName)
 }
 
 // ran is the common case: a message arrives and the flush 3s later creates its
@@ -304,14 +310,28 @@ func (r *bubbleRig) cancelled(t *testing.T, taskName string) {
 	})
 }
 
-// guardClosed is the five-minute guard firing on one round: it takes the
-// bubble and leaves the promise behind, which is what armGuard's timer does,
-// without a test having to wait out the window. The run carries on.
+// guardClosed is the five-minute guard firing on one round: it writes "还在处理，
+// 完成后我再单独回复你" into the bubble and leaves the promise behind. It runs
+// the manager's own guard body, so a test gets the real thing — including the
+// part where the promise is filed only because those words landed — without
+// waiting out the window. The run carries on.
 func (r *bubbleRig) guardClosed(t *testing.T, batch engine.RunBatchID) {
 	t.Helper()
-	if _, ok := r.streams.takeBatch(bubbleSessionID(t), batch, roundContinues); !ok {
-		t.Fatalf("could not guard-close round %d", batch)
+	r.typing.fireGuard(context.Background(), bubbleSessionID(t), batch)
+	if !r.streams.owesEnding(bubbleSessionID(t), r.taskOfBatch(t, batch)) {
+		t.Fatalf("could not guard-close round %d: no promise was left behind", batch)
 	}
+}
+
+// taskOfBatch is the run the flush bound to a batch, read back out of the rig's
+// own bookkeeping so guardClosed can assert the promise it just made.
+func (r *bubbleRig) taskOfBatch(t *testing.T, batch engine.RunBatchID) string {
+	t.Helper()
+	id, ok := r.boundRuns[batch]
+	if !ok {
+		t.Fatalf("batch %d has no run bound to it", batch)
+	}
+	return id
 }
 
 // mustParseTestUUID turns a readable test name into a stable UUID, so a test
@@ -601,8 +621,8 @@ func TestTheGuardClosesABubbleTheWindowIsAboutToStrand(t *testing.T) {
 	}
 	// The round is NOT over: the guard promised a separate reply, filed under
 	// the run the flush named.
-	if _, verdict := rig.streams.claimEnding(bubbleSessionID(t), taskUUID(t, "task-1")); verdict != roundOwesAnEnding {
-		t.Fatalf("after a guard close the store says %v, want roundOwesAnEnding — the promised reply would never be sent", verdict)
+	if !rig.streams.owesEnding(bubbleSessionID(t), taskUUID(t, "task-1")) {
+		t.Fatal("after a guard close the store owes this run nothing — the promised reply would never be sent")
 	}
 }
 
@@ -612,13 +632,10 @@ func TestTheGuardClosesABubbleTheWindowIsAboutToStrand(t *testing.T) {
 func TestAGuardClosedRunDoesNotSealTheNextQuestionsBubble(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	sessionID := bubbleSessionID(t)
 
 	// The first round's run is known, and its bubble is guard-closed mid-run.
 	rig.ran(t, "REQ-J1", 1, "task-1")
-	if _, ok := rig.streams.takeBatch(sessionID, 1, roundContinues); !ok {
-		t.Fatal("could not match the first round to its run")
-	}
+	rig.guardClosed(t, 1)
 
 	// The next question opens a bubble of its own, and its own run.
 	rig.ran(t, "REQ-J2", 2, "task-2")

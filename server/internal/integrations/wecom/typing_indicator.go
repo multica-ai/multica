@@ -317,9 +317,16 @@ func (m *TypingIndicatorManager) OnRunStarted(_ context.Context, sessionID pgtyp
 // answering, so a session with several rounds open closes the right one
 // instead of whichever happens to be newest.
 func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID) {
-	m.closeBubble(ctx, sessionID,
-		func(s *streamStore) (streamHandle, bool) { return s.takeBatch(sessionID, batch, roundOver) },
-		streamCopyNotStarted, "settled")
+	if m.senders == nil || m.streams == nil || !sessionID.Valid {
+		return
+	}
+	m.streams.sayEnding(sessionID, byBatch(batch), roundOver, nil,
+		func(t roundTurn) (roundAddress, error) {
+			if !t.HasBubble {
+				return roundAddress{}, errNothingToSay
+			}
+			return t.Handle.address(), m.writeClosing(ctx, sessionID, t.Handle, streamCopyNotStarted, "settled")
+		})
 }
 
 // Register subscribes the manager to the two ways a run ends without an
@@ -393,14 +400,8 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 	if !m.failureBelongsOnWecom(ctx, sessionID, taskID) {
 		return
 	}
-	if m.closeBubble(ctx, sessionID,
-		func(*streamStore) (streamHandle, bool) {
-			return m.rounds().take(ctx, sessionID, taskID, roundOver)
-		},
-		streamCopyFailed, "task failed") {
-		return
-	}
-	m.sayTheRunFailed(ctx, sessionID, taskID)
+	m.rounds().sayEnding(ctx, sessionID, byTask(taskID), roundOver,
+		func(t roundTurn) (roundAddress, error) { return m.sayTheRunFailed(ctx, sessionID, t) })
 }
 
 // failureBelongsOnWecom asks the question outbound.go asks of an answer: did
@@ -499,19 +500,25 @@ func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 	defer cancel()
-	taskID := taskIDFromEvent(e)
-	if m.closeBubble(ctx, sessionID,
-		func(*streamStore) (streamHandle, bool) {
-			return m.rounds().take(ctx, sessionID, taskID, roundOver)
-		},
-		streamCopyCancelled, "task cancelled") {
-		return
-	}
-	// No bubble left. If the guard already closed one for this run it promised
-	// a separate reply, and that promise is now void — say so, in the chat the
-	// promise was made in. The task id goes with it: the promise to keep is
-	// the cancelled round's own, and a session can hold several.
-	m.settleOwedEnding(ctx, sessionID, taskID, streamCopyCancelled)
+	m.rounds().sayEnding(ctx, sessionID, byTask(taskIDFromEvent(e)), roundOver,
+		func(t roundTurn) (roundAddress, error) {
+			if m.senders == nil {
+				return roundAddress{}, errNothingToSay
+			}
+			if t.HasBubble {
+				return t.Handle.address(), m.writeClosing(ctx, sessionID, t.Handle, streamCopyCancelled, "task cancelled")
+			}
+			// No bubble left. If the guard already closed one for this run it
+			// promised a separate reply, and that promise is now void — say so,
+			// in the chat the promise was made in. Only for THIS round's own
+			// promise: a session can hold several, the copy differs per
+			// outcome, and announcing a cancel against another round's promise
+			// would tell its asker "已取消" about a run nobody stopped.
+			if !t.Promised || !t.Addr.known() {
+				return roundAddress{}, errNothingToSay
+			}
+			return t.Addr, m.sayAsPlainMessage(ctx, sessionID, t.Addr, streamCopyCancelled)
+		})
 }
 
 // rounds builds the matcher that turns a task id on an event into the round it
@@ -531,69 +538,45 @@ func retryPending(e events.Event) bool {
 	return pending
 }
 
-// sayTheRunFailed delivers the failure to a round whose bubble is already gone.
+// sayTheRunFailed delivers a failed run's ending wherever the round can still
+// be reached, in the order of how much each address is trusted.
 //
-// Two addresses, in the order of how much they are trusted. The note the handle
-// left behind is the chat the question came from, which is what the guard's
-// promise was made in and what the binding row may no longer point at. Failing
-// that — a restart mid-run, a turn whose opening frame the server refused —
-// the binding row is the only address there is.
+// The bubble first, while the round still has one. Then the note the handle
+// left behind, which is the chat the question came from and what the guard's
+// promise was made in — the binding row may no longer point at it. Failing both
+// — a restart mid-run, a turn whose opening frame the server refused — the
+// binding row is the only address there is.
 //
-// A round the store says is accounted for gets nothing. That is the whole of
-// the not-twice rule: the answer took the handle the same way the guard does,
-// and a task:failed arriving behind a delivered answer — an auto-retry's first
-// attempt, a sweeper that ran late — must not contradict it. Which is why the
-// claim is made in this run's name: a promise belonging to another round is
-// not this failure's to spend, and spending it would both misreport that round
-// and leave this one's repeat with a promise still to take.
-func (m *TypingIndicatorManager) sayTheRunFailed(ctx context.Context, sessionID pgtype.UUID, taskID string) {
+// A round the store says is accounted for never reaches here at all: the ledger
+// answers roundToldAlready and runs no delivery. That is the whole of the
+// not-twice rule, and it is per run, so a task:failed arriving behind this run's
+// own delivered answer stays quiet while a second run's failure is still told.
+func (m *TypingIndicatorManager) sayTheRunFailed(ctx context.Context, sessionID pgtype.UUID, t roundTurn) (roundAddress, error) {
 	if m.senders == nil {
-		return
+		return roundAddress{}, errNothingToSay
 	}
-	addr, verdict := m.rounds().claim(ctx, sessionID, taskID)
-	switch verdict {
-	case roundToldAlready:
-		return
-	case roundForgotten:
+	if t.HasBubble {
+		return t.Handle.address(), m.writeClosing(ctx, sessionID, t.Handle, streamCopyFailed, "task failed")
+	}
+	addr := t.Addr
+	if !addr.known() {
 		found, ok := m.addressFromBinding(ctx, sessionID)
 		if !ok {
-			return
+			return roundAddress{}, errNothingToSay
 		}
 		addr = found
-		// No handle was consumed and no note was claimed on this path, so
-		// filing one is the only thing that stops the next publisher of the
-		// same news from repeating it.
-		m.streams.remember(sessionID, addr, roundOver, taskID)
 	}
-	m.sayAsPlainMessage(ctx, sessionID, addr, streamCopyFailed)
+	return addr, m.sayAsPlainMessage(ctx, sessionID, addr, streamCopyFailed)
 }
 
-// settleOwedEnding keeps the guard's promise to ONE round and nothing more. It
-// speaks only for a round the guard closed early — the one case where words are
-// owed and no bubble is left to put them in — and stays silent when that round
-// has no outstanding promise, which is every round that already ended properly.
-//
-// taskID is which round. A session can hold a promise per guard-closed round,
-// and the copy differs per outcome, so claiming without a name would announce
-// this run's outcome against somebody else's promise and leave this run's own
-// asker with the silence the guard promised to break.
-func (m *TypingIndicatorManager) settleOwedEnding(ctx context.Context, sessionID pgtype.UUID, taskID, text string) {
-	if m.senders == nil {
-		return
-	}
-	addr, verdict := m.rounds().claim(ctx, sessionID, taskID)
-	if verdict != roundOwesAnEnding {
-		return
-	}
-	m.sayAsPlainMessage(ctx, sessionID, addr, text)
-}
-
-func (m *TypingIndicatorManager) sayAsPlainMessage(ctx context.Context, sessionID pgtype.UUID, addr roundAddress, text string) {
-	if err := m.senders.sendTextCtx(ctx, addr.InstallationID, addr.ChatID, addr.ChatType, text); err != nil {
+func (m *TypingIndicatorManager) sayAsPlainMessage(ctx context.Context, sessionID pgtype.UUID, addr roundAddress, text string) error {
+	err := m.senders.sendTextCtx(ctx, addr.InstallationID, addr.ChatID, addr.ChatType, text)
+	if err != nil {
 		m.log.WarnContext(ctx, "wecom typing: could not deliver a run's ending",
 			"chat_session_id", util.UUIDToString(sessionID),
 			"installation_id", util.UUIDToString(addr.InstallationID), "error", err)
 	}
+	return err
 }
 
 // addressFromBinding reads the chat a session belongs to off the binding row —
@@ -711,20 +694,33 @@ func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, batch engine.Ru
 	t := time.AfterFunc(m.guardAfter, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 		defer cancel()
-		m.closeBubble(ctx, sessionID,
-			func(s *streamStore) (streamHandle, bool) { return s.takeBatch(sessionID, batch, roundContinues) },
-			streamCopyStillWorking, "window expiring")
+		m.fireGuard(ctx, sessionID, batch)
 	})
 	m.streams.arm(sessionID, batch, t)
 }
 
-// closeBubble seals one bubble with text, if take finds one to seal, and
-// reports whether it did. take names WHICH bubble — the ended run's, by the
-// task id the flush bound; the settled or guarded run's, by batch — and consuming the
-// handle inside the store makes this idempotent: two closers racing produce one
-// closing frame. The ending each take carries is what the caller's words amount
-// to for the round; every closer ends it except the guard, whose copy promises
-// a separate reply while the run goes on.
+// fireGuard is what the timer does, kept apart from the timer so the guard's
+// behaviour has one definition and a test can run it without waiting out the
+// five minutes.
+//
+// The promise is filed by the ledger and only if these words landed. A guard
+// whose frame and fallback both fail has promised the user nothing, so there is
+// nothing to keep: the run's real ending finds no promise, chases the binding
+// row, and tells the user what happened directly.
+func (m *TypingIndicatorManager) fireGuard(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID) {
+	m.streams.sayEnding(sessionID, byBatch(batch), roundContinues, nil,
+		func(t roundTurn) (roundAddress, error) {
+			if !t.HasBubble {
+				return roundAddress{}, errNothingToSay
+			}
+			return t.Handle.address(), m.writeClosing(ctx, sessionID, t.Handle, streamCopyStillWorking, "window expiring")
+		})
+}
+
+// writeClosing seals one bubble with text and reports whether the words reached
+// a sender. Which bubble was decided by the ledger, which consumed the handle
+// under its own lock — that is what makes two closers racing produce one
+// closing frame.
 //
 // A closing frame that cannot go out falls back to a plain message, the same
 // way the answer does in outbound.go. The words matter more here than there:
@@ -733,26 +729,25 @@ func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, batch engine.Ru
 // user with a spinner and no explanation that would ever arrive. The addressing
 // comes off the handle, captured at ingest, because by now the binding row may
 // point at a different chat.
-func (m *TypingIndicatorManager) closeBubble(ctx context.Context, sessionID pgtype.UUID, take func(*streamStore) (streamHandle, bool), text, why string) bool {
-	if m.senders == nil || m.streams == nil || !sessionID.Valid {
-		return false
-	}
-	h, ok := take(m.streams)
-	if !ok {
-		return false
-	}
+//
+// Both routes failing is what the returned error is for. Under I3 the ledger
+// then records nothing, so this run's ending is still owed and the next
+// publisher of it — a sweeper tick, WeCom's own redelivery — says it instead of
+// finding it filed as already said.
+func (m *TypingIndicatorManager) writeClosing(ctx context.Context, sessionID pgtype.UUID, h streamHandle, text, why string) error {
 	err := m.senders.stream(ctx, h, text, true)
 	if err == nil {
-		return true
+		return nil
 	}
 	m.log.WarnContext(ctx, "wecom typing: closing frame failed, saying it as a new message",
 		"chat_session_id", util.UUIDToString(sessionID),
 		"reason", why, "unusable", streamUnusable(err), "error", err)
-	if sendErr := m.senders.sendTextCtx(ctx, h.InstallationID, h.ChatID, h.ChatType, text); sendErr != nil {
+	sendErr := m.senders.sendTextCtx(ctx, h.InstallationID, h.ChatID, h.ChatType, text)
+	if sendErr != nil {
 		m.log.WarnContext(ctx, "wecom typing: the fallback message was unsendable too",
 			"chat_session_id", util.UUIDToString(sessionID), "reason", why, "error", sendErr)
 	}
-	return true
+	return sendErr
 }
 
 // sessionIDFromEvent recovers the chat session from a task lifecycle event.

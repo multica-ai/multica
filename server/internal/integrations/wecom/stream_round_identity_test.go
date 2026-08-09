@@ -291,13 +291,10 @@ func TestCancellingEveryQueuedTurnClosesEachOwnBubble(t *testing.T) {
 func TestCancellingAfterTheGuardKeepsThePromise(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	sessionID := bubbleSessionID(t)
 	rig.ran(t, "REQ-G1", 1, "task-1")
 
 	// The guard closes the bubble at five minutes; the run carries on.
-	if _, ok := rig.streams.takeBatch(sessionID, 1, roundContinues); !ok {
-		t.Fatal("could not guard-close the round")
-	}
+	rig.guardClosed(t, 1)
 
 	rig.cancelled(t, "task-1")
 
@@ -342,17 +339,12 @@ func TestACancelledRunThisProcessNeverSawStaysSilent(t *testing.T) {
 func TestAGuardClosedRoundsFailureIsStillReported(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	sessionID := bubbleSessionID(t)
 	rig.ran(t, "REQ-P1", 1, "task-1")
 	rig.ran(t, "REQ-P2", 2, "task-2")
 
 	// Both bubbles run into the window and are guard-closed mid-run.
-	if _, ok := rig.streams.takeBatch(sessionID, 1, roundContinues); !ok {
-		t.Fatal("could not guard-close the first round")
-	}
-	if _, ok := rig.streams.takeBatch(sessionID, 2, roundContinues); !ok {
-		t.Fatal("could not guard-close the second round")
-	}
+	rig.guardClosed(t, 1)
+	rig.guardClosed(t, 2)
 
 	// The first round's run answers — the separate reply its guard promised.
 	rig.answer(t, "the first answer", "task-1")
@@ -648,7 +640,7 @@ func TestAStaleRoundIsSweptRatherThanKept(t *testing.T) {
 	if got := rig.streams.depth(); got != 1 {
 		t.Fatalf("store holds %d open bubbles, want 1 (only the new question's)", got)
 	}
-	if _, ok := rig.streams.takeTask(sessionID, taskUUID(t, "task-1"), roundOver); ok {
+	if rig.streams.knowsRound(sessionID, taskUUID(t, "task-1")) {
 		t.Fatal("a round from beyond the stream window was still on file")
 	}
 }
