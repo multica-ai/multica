@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
 // mediaFrame builds an aibot_msg_callback frame from a raw body map, going
@@ -45,17 +46,43 @@ func mediaFrame(t *testing.T, msgType string, extra map[string]any) frameEnvelop
 // handler saw plus what went back over the socket.
 func dispatchOne(t *testing.T, env frameEnvelope) (channel.InboundMessage, bool, *recordingConn) {
 	t.Helper()
+	return dispatchOneAs(t, env, "")
+}
+
+// dispatchOneAs is dispatchOne with the bot's configured display name — the
+// one thing stripLeadingMentions has to match a group's addressing against.
+func dispatchOneAs(t *testing.T, env frameEnvelope, botDisplayName string) (channel.InboundMessage, bool, *recordingConn) {
+	t.Helper()
 	var got channel.InboundMessage
 	called := false
 	c := testChannel(func(_ context.Context, m channel.InboundMessage) error {
 		called, got = true, m
 		return nil
 	})
+	c.botDisplayName = botDisplayName
 	conn := &recordingConn{}
 	if err := c.dispatchFrame(context.Background(), env, newWSSender(conn, slog.Default()), slog.Default()); err != nil {
 		t.Fatalf("dispatchFrame: %v", err)
 	}
 	return got, called, conn
+}
+
+// mixedFrame builds a 图文混排 callback from its runs, in composition order.
+func mixedFrame(t *testing.T, extra map[string]any, items ...map[string]any) frameEnvelope {
+	t.Helper()
+	full := map[string]any{"mixed": map[string]any{"msg_item": items}}
+	for k, v := range extra {
+		full[k] = v
+	}
+	return mediaFrame(t, "mixed", full)
+}
+
+func textRun(content string) map[string]any {
+	return map[string]any{"msgtype": "text", "text": map[string]any{"content": content}}
+}
+
+func imageRun(url string) map[string]any {
+	return map[string]any{"msgtype": "image", "image": map[string]any{"url": url, "aeskey": "k"}}
 }
 
 // TestDispatchFrame_MediaCallbacksReachTheHandler is the defect this file
@@ -239,5 +266,141 @@ func TestVoiceStaysOnTheReceiptPath(t *testing.T) {
 	}
 	if got.Text != "把报表发我\n[File]" {
 		t.Errorf("body = %q, want the transcript above the file placeholder", got.Text)
+	}
+}
+
+// TestDispatchFrame_TheCommandSourceHasNoPlaceholdersInIt is the ordering
+// defect. A person reporting a bug attaches the screenshot and then types
+// "/issue 登录坏了" — that order, because you pick the picture while you are
+// still deciding what to say. WeCom sends it as one 图文混排, ownText renders
+// it "[Image]\n/issue 登录坏了", and engine.ParseIssueCommand looks at the
+// first non-empty line and only the first: it sees "[Image]", declines, and no
+// issue is filed. Nothing is said about it either, in the chat or the log. The
+// same two things typed the other way round work. Nobody can be expected to
+// know that.
+//
+// So the command source is the runs the sender authored and nothing else,
+// while the stored body keeps the placeholders — the agent still has to be
+// able to see that a picture was attached and where.
+func TestDispatchFrame_TheCommandSourceHasNoPlaceholdersInIt(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		items       []map[string]any
+		wantBody    string
+		wantCommand string
+	}{
+		{
+			name:        "image before the command — the ordering that was broken",
+			items:       []map[string]any{imageRun("https://cos.example.com/a"), textRun("/issue 登录坏了")},
+			wantBody:    "[Image]\n/issue 登录坏了",
+			wantCommand: "/issue 登录坏了",
+		},
+		{
+			name:        "image after the command — the ordering that happened to work",
+			items:       []map[string]any{textRun("/issue 登录坏了"), imageRun("https://cos.example.com/a")},
+			wantBody:    "/issue 登录坏了\n[Image]",
+			wantCommand: "/issue 登录坏了",
+		},
+		{
+			name:        "image between two runs the sender typed",
+			items:       []map[string]any{imageRun("https://cos.example.com/a"), textRun("/issue 登录坏了"), imageRun("https://cos.example.com/b"), textRun("复现步骤见图")},
+			wantBody:    "[Image]\n/issue 登录坏了\n[Image]\n复现步骤见图",
+			wantCommand: "/issue 登录坏了\n复现步骤见图",
+		},
+		{
+			name:        "a spoken command counts, WeCom already transcribed it",
+			items:       []map[string]any{imageRun("https://cos.example.com/a"), map[string]any{"msgtype": "voice", "voice": map[string]any{"content": "/issue 登录坏了"}}},
+			wantBody:    "[Image]\n/issue 登录坏了",
+			wantCommand: "/issue 登录坏了",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, called, _ := dispatchOne(t, mixedFrame(t, nil, tc.items...))
+			if !called {
+				t.Fatal("the message never reached the handler")
+			}
+			if got.Text != tc.wantBody {
+				t.Errorf("stored body = %q, want %q — the placeholders belong in the body", got.Text, tc.wantBody)
+			}
+			if got.CommandText != tc.wantCommand {
+				t.Errorf("CommandText = %q, want %q — a placeholder in the command source is a line the sender never typed", got.CommandText, tc.wantCommand)
+			}
+			cmd, ok := engine.ParseIssueCommand(got.CommandText)
+			if !ok {
+				t.Fatalf("engine.ParseIssueCommand(%q) declined — the sender attached a screenshot, typed /issue, and got no issue and no explanation", got.CommandText)
+			}
+			if cmd.Title != "登录坏了" {
+				t.Errorf("issue title = %q, want 登录坏了", cmd.Title)
+			}
+			if !got.SkipAgentRun {
+				t.Error("SkipAgentRun = false on a pure /issue; the agent would answer the slash command back at the sender")
+			}
+		})
+	}
+}
+
+// TestDispatchFrame_GroupMentionedMixedCommand is the two defects together,
+// and it is the one that has to keep passing for both of them to stay fixed.
+//
+// A group is the only place the bot can be reached by @-mentioning it, so the
+// mention arrives glued to the front of the text run: "@Multica Bot /issue
+// 登录坏了". main strips that (stripLeadingMentions) and this PR removes the
+// placeholders, and the command source needs BOTH — drop the strip and the
+// parser sees "@Multica Bot", drop the placeholder removal and it sees
+// "[Image]". Either way the sender gets nothing.
+func TestDispatchFrame_GroupMentionedMixedCommand(t *testing.T) {
+	t.Parallel()
+	group := map[string]any{"chattype": "group", "chatid": "GROUP_1"}
+	env := mixedFrame(t, group,
+		imageRun("https://cos.example.com/a"),
+		textRun("@Multica Bot /issue 登录坏了"),
+	)
+	got, called, _ := dispatchOneAs(t, env, "Multica Bot")
+	if !called {
+		t.Fatal("the group message never reached the handler")
+	}
+	if got.Source.ChatType != channel.ChatTypeGroup {
+		t.Fatalf("chat type = %v, want group — the mention strip is gated on it", got.Source.ChatType)
+	}
+	// The transcript keeps what was said, including who was addressed.
+	if want := "[Image]\n@Multica Bot /issue 登录坏了"; got.Text != want {
+		t.Errorf("stored body = %q, want %q", got.Text, want)
+	}
+	if want := "/issue 登录坏了"; got.CommandText != want {
+		t.Errorf("CommandText = %q, want %q — the placeholder and the addressing both have to come off", got.CommandText, want)
+	}
+	cmd, ok := engine.ParseIssueCommand(got.CommandText)
+	if !ok {
+		t.Fatalf("engine.ParseIssueCommand(%q) declined — an @-mentioned /issue with a screenshot files nothing", got.CommandText)
+	}
+	if cmd.Title != "登录坏了" {
+		t.Errorf("issue title = %q, want 登录坏了", cmd.Title)
+	}
+	if !got.SkipAgentRun {
+		t.Error("SkipAgentRun = false; the group would get the slash command read back to it")
+	}
+}
+
+// A standalone photo has no words in it. Its whole body is a placeholder, so
+// the command source is empty rather than "[Image]" — the engine's own
+// fallback then reads the body, which is the behaviour every adapter has, and
+// "[Image]" is not a command in any of them.
+func TestDispatchFrame_AStandalonePhotoCarriesNoCommand(t *testing.T) {
+	t.Parallel()
+	env := mediaFrame(t, "image", map[string]any{
+		"image": map[string]any{"url": "https://cos.example.com/a", "aeskey": "k"},
+	})
+	got, called, _ := dispatchOne(t, env)
+	if !called {
+		t.Fatal("the photo never reached the handler")
+	}
+	if got.CommandText != "" {
+		t.Errorf("CommandText = %q, want empty — the sender typed nothing", got.CommandText)
+	}
+	if got.SkipAgentRun {
+		t.Error("SkipAgentRun = true on a bare photo; the agent would never see the picture it was sent")
 	}
 }

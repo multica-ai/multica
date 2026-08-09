@@ -416,3 +416,168 @@ func TestInboundImageMessageHoldsTheAgentRunUntilMediaLands(t *testing.T) {
 		t.Errorf("channel_media_pending_until = %v, already in the past — it buys the download no time at all", pendingUntil.Time)
 	}
 }
+
+// recordingIssues is an IssueCreator that answers yes and remembers what it
+// was asked to file. The issue row itself is synthetic: nothing downstream of
+// the create reads it here (an invalid IssueID skips the issue-media lock in
+// BindMediaRefs), and what these tests need to know is whether an issue was
+// filed at all and under what title.
+type recordingIssues struct {
+	mu     sync.Mutex
+	params []service.IssueCreateParams
+}
+
+func (r *recordingIssues) Create(_ context.Context, p service.IssueCreateParams, _ service.IssueCreateOpts) (service.IssueCreateResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.params = append(r.params, p)
+	return service.IssueCreateResult{Issue: db.Issue{Title: p.Title}}, nil
+}
+
+func (r *recordingIssues) PublishAttachmentsChanged(context.Context, db.Issue, pgtype.UUID) {}
+
+func (r *recordingIssues) filed() []service.IssueCreateParams {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]service.IssueCreateParams(nil), r.params...)
+}
+
+// wecomMixedCallback builds a 图文混排 callback whose FIRST run is the
+// screenshot and whose second is what the sender typed — the ordering that
+// filed nothing. It goes through the real frame decoder and the real
+// normalization, including the group mention strip, so nothing about the
+// command source is decided by the fixture.
+func wecomMixedCallback(t *testing.T, botID, botDisplayName, senderID, msgID, chatType, chatID, imageURL, typed string) channel.InboundMessage {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"msgid":    msgID,
+		"aibotid":  botID,
+		"chattype": chatType,
+		"chatid":   chatID,
+		"from":     map[string]any{"userid": senderID},
+		"msgtype":  "mixed",
+		"mixed": map[string]any{"msg_item": []map[string]any{
+			{"msgtype": "image", "image": map[string]any{"url": imageURL, "aeskey": testAESKey}},
+			{"msgtype": "text", "text": map[string]any{"content": typed}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal callback: %v", err)
+	}
+	var mc aibotMsgCallback
+	if err := json.Unmarshal(raw, &mc); err != nil {
+		t.Fatalf("decode callback: %v", err)
+	}
+	text, ok := mc.ownText()
+	if !ok {
+		t.Fatal("mixed callback is not routable; the fixture is wrong")
+	}
+	return channelMessageFromCallback(botID, botDisplayName, mc, text, "req-mixed-1")
+}
+
+// runMixedIssueThroughTheRouter drives one 图文混排 through the real Router,
+// the real ChatSession and a real Postgres, and reports what got filed and
+// what the durable message says.
+func runMixedIssueThroughTheRouter(t *testing.T, botDisplayName, chatType, chatID, typed string) (*recordingIssues, string) {
+	t.Helper()
+	pool := mediaBindTestDB(t)
+	fixture := seedMediaBindFixture(t, pool)
+	ctx := context.Background()
+	queries := db.New(pool)
+
+	srv := cosServer(t, []byte("\xff\xd8\xff\xe0 a screenshot"), `attachment; filename="shot.jpg"`)
+	defer srv.Close()
+
+	storage := &fakeMediaStorage{}
+	resolver := newTestResolver(storage, engine.NewDBMediaIntentLedger(queries), nil)
+	session := engine.NewChatSession(queries, pool, TypeWecom, engine.SessionTitles{
+		Group: "群聊", Direct: "单聊", Fallback: "会话",
+	})
+	issues := &recordingIssues{}
+	router := engine.NewRouter(issues, &bindTestTasks{}, queries, engine.RouterConfig{
+		MediaTimeout: 20 * time.Second,
+		Logger:       testLogger(),
+	})
+	router.Register(TypeWecom, NewResolverSet(NewStore(queries), session, nil, resolver))
+
+	if chatID == "" {
+		chatID = fixture.senderID
+	}
+	msgID := fmt.Sprintf("MSGID-MIXED-%d", time.Now().UnixNano())
+	msg := wecomMixedCallback(t, fixture.botID, botDisplayName, fixture.senderID, msgID, chatType, chatID, srv.URL, typed)
+	if err := router.Handle(ctx, msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	var body string
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		err := pool.QueryRow(ctx, `
+			SELECT cm.content
+			FROM chat_message cm
+			JOIN chat_session cs ON cs.id = cm.chat_session_id
+			WHERE cs.workspace_id = $1 AND cm.role = 'user'
+			ORDER BY cm.created_at DESC LIMIT 1`, fixture.workspaceID).Scan(&body)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no durable chat_message was ever written: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return issues, body
+}
+
+// TestIssueAfterAnImageIsStillFiled is the user-visible half of the ordering
+// defect, checked where the user would check it: was an issue created.
+//
+// The sender attaches the screenshot, types "/issue 登录坏了", and sends one
+// 图文混排. ownText renders it "[Image]\n/issue 登录坏了", the engine's parser
+// reads the first non-empty line and only the first, and on the shipped code
+// that line was "[Image]" — no issue, no error, no reply saying why. Typing
+// the same two things the other way round worked, which is the part that makes
+// it impossible to report.
+func TestIssueAfterAnImageIsStillFiled(t *testing.T) {
+	issues, body := runMixedIssueThroughTheRouter(t, "", "single", "", "/issue 登录坏了")
+
+	filed := issues.filed()
+	if len(filed) != 1 {
+		t.Fatalf("issues created = %d, want 1 — the sender attached a screenshot, typed /issue 登录坏了, and nothing was filed and nothing said why", len(filed))
+	}
+	if filed[0].Title != "登录坏了" {
+		t.Errorf("issue title = %q, want 登录坏了", filed[0].Title)
+	}
+	// The transcript still shows the attachment and where it sat. Cutting the
+	// placeholder out of the body is the other way to break this, and it costs
+	// the agent the one signal that a picture was sent.
+	if want := "[Image]\n/issue 登录坏了"; body != want {
+		t.Errorf("durable body = %q, want %q", body, want)
+	}
+}
+
+// TestGroupMentionedIssueAfterAnImageIsStillFiled is the conflict-resolution
+// test. It fails if EITHER half is lost.
+//
+// In a group the @-mention is how the bot is reached, so it arrives glued to
+// the front of the text run: "@Multica Bot /issue 登录坏了". main strips that
+// (stripLeadingMentions, #6603) and this PR keeps the placeholders out of the
+// command source, and the parser needs both to see "/issue" on the line it
+// reads. Take main's version of ws_frame.go wholesale and the strip goes and
+// the parser sees "@Multica Bot"; derive the command from the resolved body
+// and it sees "[Image]". Either way no issue is filed, and this is the
+// assertion that says so.
+func TestGroupMentionedIssueAfterAnImageIsStillFiled(t *testing.T) {
+	issues, body := runMixedIssueThroughTheRouter(t, "Multica Bot", "group", "GROUP-BIND-1", "@Multica Bot /issue 登录坏了")
+
+	filed := issues.filed()
+	if len(filed) != 1 {
+		t.Fatalf("issues created = %d, want 1 — an @-mentioned /issue with a screenshot in a group filed nothing", len(filed))
+	}
+	if filed[0].Title != "登录坏了" {
+		t.Errorf("issue title = %q, want 登录坏了 (a title carrying the bot's own name means the mention strip was lost)", filed[0].Title)
+	}
+	if want := "[Image]\n@Multica Bot /issue 登录坏了"; body != want {
+		t.Errorf("durable body = %q, want %q — the transcript keeps who was addressed", body, want)
+	}
+}
