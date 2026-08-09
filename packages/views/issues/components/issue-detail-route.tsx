@@ -2,10 +2,18 @@
 
 import { useEffect, useRef } from "react";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
+import { useIssueDetailSplitStore } from "@multica/core/issues/stores";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useIsCompact } from "@multica/ui/hooks/use-mobile";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@multica/ui/components/ui/resizable";
 import { useNavigation } from "../../navigation";
 import { IssueDetail, IssueDetailSkeleton, IssueNotFound } from "./issue-detail";
+import { IssueDetailListRail } from "./issue-detail-list-rail";
 
 interface IssueDetailRouteProps {
   /**
@@ -55,6 +63,8 @@ export function useCanonicalIssueUrl(routeId: string, identifier: string | undef
 export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
   const wsId = useWorkspaceId();
   const { canonicalId, issue, isResolving, notFound } = useCanonicalIssue(wsId, routeId);
+  const isCompact = useIsCompact();
+  const collapsed = useIssueDetailSplitStore((s) => s.collapsed);
 
   useCanonicalIssueUrl(routeId, issue?.identifier);
 
@@ -66,5 +76,42 @@ export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
   // unbounded request loop that never settles. See `CanonicalIssue.notFound`.
   if (notFound || !canonicalId) return <IssueNotFound showBackLink={!onDelete} />;
 
-  return <IssueDetail issueId={canonicalId} onDelete={onDelete} />;
+  const detail = <IssueDetail issueId={canonicalId} onDelete={onDelete} />;
+
+  // Below the desktop breakpoint keep the current full-width detail and skip
+  // the left rail entirely.
+  if (isCompact) return detail;
+
+  // Collapsed: a fixed narrow rail (icon + count) beside the full detail,
+  // matching the inbox/chat two-panel layout without a resize handle.
+  if (collapsed) {
+    return (
+      <div className="flex flex-1 min-h-0">
+        <div className="flex w-11 shrink-0 flex-col border-r">
+          <IssueDetailListRail activeIssueId={canonicalId} />
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col">{detail}</div>
+      </div>
+    );
+  }
+
+  return (
+    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
+      <ResizablePanel
+        id="list"
+        defaultSize={320}
+        minSize={240}
+        maxSize={480}
+        groupResizeBehavior="preserve-pixel-size"
+      >
+        <div className="flex h-full flex-col border-r">
+          <IssueDetailListRail activeIssueId={canonicalId} />
+        </div>
+      </ResizablePanel>
+      <ResizableHandle />
+      <ResizablePanel id="detail" minSize="40%">
+        <div className="flex min-h-0 h-full flex-col">{detail}</div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  );
 }

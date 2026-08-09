@@ -70,3 +70,7 @@ export {
   type SubIssueRowProperties,
   type SubIssueRowPropertyKey,
 } from "./sub-issue-display-store";
+export {
+  useIssueDetailSplitStore,
+  type IssueDetailSplitState,
+} from "./issue-detail-split-store";
