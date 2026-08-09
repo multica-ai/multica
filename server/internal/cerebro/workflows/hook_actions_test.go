@@ -12,8 +12,8 @@ import (
 func TestHookActionManifestOwnsEveryVisibleRuntimeAction(t *testing.T) {
 	registry := NewActionRegistry()
 	registerVersionOneHookActions(registry, &fakeTypedActionExecutor{})
-	if len(hookActionManifest.Actions) != 23 {
-		t.Fatalf("manifest action count = %d, want 23", len(hookActionManifest.Actions))
+	if len(hookActionManifest.Actions) != 24 {
+		t.Fatalf("manifest action count = %d, want 24", len(hookActionManifest.Actions))
 	}
 	seen := map[string]bool{}
 	for _, action := range hookActionManifest.Actions {
@@ -76,7 +76,7 @@ func TestTypedActionRegistryContainsLegacyAndVersionOneActions(t *testing.T) {
 		"session.handoff", "task.retry", "task.cancel", "artifact.create_or_update",
 		"workflow.activate", "workflow.pause", "workflow.resume", "workflow.stop",
 		"approval.require", "audit.record", "metric.increment",
-		"skill.run", "judge.gate",
+		"skill.run", "judge.gate", "quality.gate",
 	}
 	for _, name := range want {
 		if !registry.Has(name) {

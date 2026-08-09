@@ -106,6 +106,8 @@ WHERE a.id=$1 AND a.workspace_id=$7 RETURNING id`, agentID, optionalHookUUID(eve
 		return e.runSkill(ctx, workspaceID, actorID, policy, event, action.Config)
 	case "judge.gate":
 		return e.startJudgeGate(ctx, workspaceID, actorID, policy, event, action.Config)
+	case "quality.gate":
+		return e.qualityGate(ctx, event, action.Config)
 	case "eval.gate":
 		return e.startEvalGate(ctx, workspaceID, event, action.Config)
 	case "eval.run":
@@ -202,7 +204,7 @@ WHERE id=$1 AND workspace_id=$2 RETURNING id`, issueID, workspaceID, status).Sca
 
 func hookActionExecutorSupports(actionType string) bool {
 	switch actionType {
-	case "member.notify", "agent.dispatch", "squad.dispatch", "skill.run", "judge.gate", "eval.gate", "eval.run",
+	case "member.notify", "agent.dispatch", "squad.dispatch", "skill.run", "judge.gate", "quality.gate", "eval.gate", "eval.run",
 		"wakeup.create", "wakeup.cancel", "session.handoff", "task.cancel", "task.retry",
 		"artifact.create_or_update", "workflow.activate", "workflow.resume", "workflow.pause", "workflow.stop",
 		"approval.require", "issue.comment", "issue.check_related", "issue.status", "audit.record", "metric.increment":

@@ -146,54 +146,8 @@ func (j *Judger) Judge(parent context.Context, draft Draft, candidates []Candida
 	ctx, cancel := context.WithTimeout(parent, judgeTimeout)
 	defer cancel()
 
-	prompt := buildPrompt(draft, candidates)
-	body := map[string]any{
-		"model": cfg.Model,
-		"messages": []map[string]any{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": prompt},
-		},
-		"temperature": 0,
-		"max_tokens":  600,
-	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return nil
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.BaseURL+gatewayChatCompletionsPath, bytes.NewReader(raw))
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-trace-name", "cerebro-duplicate-check")
-	req.Header.Set("x-tags", "multica,duplicate-check")
-	// BigQuery cost-tracking labels (deploy-labels-check skill). Every gateway
-	// call must carry app + function + user so the api_call_logs table can
-	// split spend per feature and per caller. Sanitised to [a-z0-9_-]/63 by
-	// the registry, so we send the raw form and let the registry trim.
-	req.Header.Set("x-bq-label-app", "multica")
-	req.Header.Set("x-bq-label-function", "duplicate-check")
-	req.Header.Set("x-bq-label-user", sanitizeLabelValue(draft.UserLabel))
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
-	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil
-	}
-
-	var parsed openAIResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil || len(parsed.Choices) == 0 {
-		return nil
-	}
-	text := extractText(parsed.Choices[0].Message.Content)
-	if text == "" {
+	text, err := cfg.ChatText(ctx, client, systemPrompt, buildPrompt(draft, candidates), 600, "duplicate-check", draft.UserLabel)
+	if err != nil || text == "" {
 		return nil
 	}
 
@@ -214,6 +168,64 @@ func (j *Judger) Judge(parent context.Context, draft Draft, candidates []Candida
 		}
 	}
 	return filtered
+}
+
+// ChatText posts a system+user prompt to the gateway and returns the model's
+// text reply. It is the single gateway call path shared by the duplicate-check
+// judge and the comment-quality gate (commentquality), so the plumbing —
+// endpoint, auth, BigQuery cost labels, response shape — lives in one place.
+// The caller sets the timeout on ctx and picks maxTokens; functionSlug drives
+// the trace name, tags and x-bq-label-function (e.g. "duplicate-check").
+func (cfg GatewayConfig) ChatText(ctx context.Context, client *http.Client, systemPrompt, userPrompt string, maxTokens int, functionSlug, userLabel string) (string, error) {
+	if cfg.BaseURL == "" || cfg.APIKey == "" {
+		return "", fmt.Errorf("duplicatecheck: gateway not configured")
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	raw, err := json.Marshal(map[string]any{
+		"model": cfg.Model,
+		"messages": []map[string]any{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userPrompt},
+		},
+		"temperature": 0,
+		"max_tokens":  maxTokens,
+	})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.BaseURL+gatewayChatCompletionsPath, bytes.NewReader(raw))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-trace-name", "cerebro-"+functionSlug)
+	req.Header.Set("x-tags", "multica,"+functionSlug)
+	// BigQuery cost-tracking labels (deploy-labels-check skill): every gateway
+	// call carries app + function + user so api_call_logs can split spend.
+	req.Header.Set("x-bq-label-app", "multica")
+	req.Header.Set("x-bq-label-function", functionSlug)
+	req.Header.Set("x-bq-label-user", SanitizeLabelValue(userLabel))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("duplicatecheck: gateway status %d", resp.StatusCode)
+	}
+	var parsed openAIResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil || len(parsed.Choices) == 0 {
+		return "", fmt.Errorf("duplicatecheck: no choices in gateway response")
+	}
+	return extractText(parsed.Choices[0].Message.Content), nil
 }
 
 // systemPrompt frames the task. Kept tight so Haiku focuses on the
@@ -258,7 +270,7 @@ func buildPrompt(draft Draft, candidates []Candidate) string {
 // user field so an email like "jeh@firtal.com" lands as "jeh-firtal-com"
 // rather than being silently rejected. Empty values become "system" so
 // every gateway call carries the three required labels.
-func sanitizeLabelValue(s string) string {
+func SanitizeLabelValue(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "system"

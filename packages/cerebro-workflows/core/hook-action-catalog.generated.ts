@@ -118,6 +118,21 @@ export const HOOK_ACTION_CATALOG = [
     ]
   },
   {
+    "type": "quality.gate",
+    "label": "Quality gate",
+    "description": "Judge the proposed comment text against a rubric live (synchronous). Bad comments are rejected with a rewrite requirement; good ones pass. fail_mode only governs judge outages.",
+    "capability": "trigger_other_agent",
+    "fields": [
+      {
+        "key": "rubric",
+        "label": "Rubric",
+        "input": "textarea",
+        "required": true,
+        "summary": "redacted"
+      }
+    ]
+  },
+  {
     "type": "eval.run",
     "label": "Run eval",
     "description": "Run a Cerebro eval when this event fires.",

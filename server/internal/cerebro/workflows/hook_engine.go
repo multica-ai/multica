@@ -139,7 +139,22 @@ policyLoop:
 					}
 				}
 				result.ActionResults = append(result.ActionResults, actionResult)
+				// A gate action (quality.gate) that ran successfully can still
+				// REJECT the send: it reports a decision + requirement in its
+				// output. That verdict is honored unconditionally — unlike an
+				// action *failure* below, it does NOT depend on fail_mode, so a
+				// bad comment is blocked even under fail_mode: warn.
+				if actionResult.Status == HookActionSuccess {
+					if decision, requirement, ok := actionGateVerdict(actionResult.Result); ok {
+						result.Decision = strongerDecision(result.Decision, decision)
+						if requirement != "" {
+							result.Requirements = append(result.Requirements, requirement)
+						}
+					}
+				}
 				if actionResult.Status == HookActionFailed || actionResult.Status == HookActionDenied {
+					// fail_mode governs only action FAILURES (e.g. the judge
+					// gateway is unreachable): closed blocks, warn lets through.
 					switch policy.FailMode {
 					case HookFailClosed:
 						result.Decision = HookBlock
@@ -172,6 +187,21 @@ func timeoutResult(policies []HookPolicy) HookResult {
 		}
 	}
 	return HookResult{Evaluated: true, Decision: HookAllow, TimedOut: true}
+}
+
+
+// actionGateVerdict reads a decision an action reports on success. A quality
+// gate that judged the content bad returns {"decision":"require"|"block",
+// "requirement":"…"}; this raises the send decision independent of fail_mode.
+// Any other output (e.g. {"pass":true}) yields ok=false and changes nothing.
+func actionGateVerdict(out map[string]any) (HookDecision, string, bool) {
+	raw, _ := out["decision"].(string)
+	decision := HookDecision(raw)
+	if decision != HookBlock && decision != HookRequire {
+		return "", "", false
+	}
+	requirement, _ := out["requirement"].(string)
+	return decision, strings.TrimSpace(requirement), true
 }
 
 func strongerDecision(current, next HookDecision) HookDecision {
