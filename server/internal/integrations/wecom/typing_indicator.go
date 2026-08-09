@@ -518,12 +518,20 @@ func (m *TypingIndicatorManager) refuseUnknownOrigin(ctx context.Context, sessio
 // Cancellation is a terminal state that publishes no chat:done and no
 // task:failed, so without this the bubble spins for the full five minutes and
 // the guard then promises a separate reply — about a run the user cancelled
-// themselves, that will never come. Every cancel path lands here: CancelTask
-// for a running or queued task, CancelQueuedChatTasks for the follow-ups
-// behind it, and the agent-level and issue-level bulk cancels, which all
-// broadcast task:cancelled per row. A session with several rounds open
-// therefore gets one closing frame per cancelled run, each on its own bubble,
-// because the round is matched by the task id the flush bound to it.
+// themselves, that will never come. A session with several rounds open gets one
+// closing frame per cancelled run, each on its own bubble, because the round is
+// matched by the task id the flush bound to it.
+//
+// This handler is only ever as complete as its publishers. It sees a cancelled
+// run when service.TaskService broadcasts task:cancelled for the row —
+// CancelTask, CancelQueuedChatTasks for the follow-ups behind it, the
+// agent-level and issue-level bulk cancels, and BroadcastCancelledTasks for the
+// handlers that cancel inside a transaction. A cancel path that flips the row
+// and publishes nothing is invisible here, and the bubble it strands has no
+// other closer: the daemon's own completion arrives after the row is already
+// cancelled, where CompleteAgentTask's status = 'running' guard matches nothing
+// and the answer is discarded without a chat:done. Archiving an agent used to
+// be exactly that path (handler.ArchiveAgent).
 //
 // Unlike a failure this does NOT go looking in the binding row when no round
 // is on file. streamCopyFailed is the only "that run did not go through" WeCom
