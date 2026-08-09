@@ -3,6 +3,13 @@ package runtime
 // api_connection_on_behalf_of.go (FIR-2668): per-agent delegation on API-type
 // connections.
 //
+// There are TWO delivery paths for the same header, one per connection type:
+// this file covers type=api (stamped per server-side dispatch in
+// APIConnectionTool.Call), and internal/cerebro/mcprelay covers type=mcp_http
+// (stamped on the request the relay forwards — FIR-4779). Both read the same
+// AuthConfig.OnBehalfOf toggle and both take the identity from a server-held
+// source, never from the caller.
+//
 // A connection with auth_config.on_behalf_of.enabled dispatches every
 // server-side call with the calling agent stamped in the X-On-Behalf-Of header
 // ("agent:<uuid>" — the Firtal Data Registry delegation contract, FIR-2564

@@ -155,7 +155,7 @@ func addConnectionWriteFlags(cmd *cobra.Command) {
 	cmd.Flags().String("cf-access-secret", "", "Cloudflare Access service-token client secret")
 	cmd.Flags().StringArray("endpoint", nil, "type=api only: an endpoint agents may call, as METHOD[,METHOD]:/path[|summary] (e.g. GET,POST:/orders/{id}|Order lookup). Repeat per path; the flag replaces the whole endpoint list.")
 	cmd.Flags().String("default-access", "", "Baseline verdict for actors with no explicit rule: allow, ask, or deny (default deny)")
-	cmd.Flags().Bool("on-behalf-of", false, "Stamp the calling agent's identity onto every dispatch as X-On-Behalf-Of: agent:<uuid> (type=api connections only). The remote API then authorizes the call as that agent's own delegation grant instead of the shared connection key (FIR-2668).")
+	cmd.Flags().Bool("on-behalf-of", false, "Stamp the calling agent's identity onto every call as X-On-Behalf-Of: agent:<uuid>. type=api: on every server-side dispatch, so the remote API authorizes the call as that agent's own delegation grant instead of the shared connection key (FIR-2668). type=mcp_http: on every call the MCP relay forwards, so the MCP server can attribute writes to the calling agent (FIR-4779) — internal connections only, since those are the ones that ride the relay.")
 }
 
 // ---------------------------------------------------------------------------

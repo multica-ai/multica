@@ -442,6 +442,12 @@ func (s *Store) BuildMCPConfigRelayed(ctx context.Context, workspaceID pgtype.UU
 // it — which is exactly why a local runtime saw zero tools before this was
 // added (FIR-1563). Codex/OpenCode translators key off "url", so the field is
 // harmless there.
+//
+// on_behalf_of is deliberately NOT applied here (FIR-4779). Everything this
+// function writes lands in the runtime's --mcp-config on its own disk, so an
+// identity header set here would be a value the agent process can rewrite —
+// exactly what the delegation contract forbids. The relay stamps it instead
+// (mcprelay.delegatedAgentFor), where it rides a server-signed token.
 func mcpServerEntry(c Connection, rewriter MCPURLRewriter) map[string]any {
 	if rewriter != nil {
 		if relayURL, bearer, ok := rewriter.RelayEntry(c.WorkspaceID, c.Name, c.URL, c.Internal); ok {

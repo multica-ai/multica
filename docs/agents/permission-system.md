@@ -669,6 +669,40 @@ points above are authoritative for runtime-tool inventory and access.
 | 17a | **`open_loop_step` (task-scoped workflow step creation)** | Capability derived from the trusted task context in `runtime/firtal_gateway_loop.go` (`loopStepCapabilityFromTask`); exposed by the in-app gateway in `firtal_gateway_executor.go` and by the task-token `/api/agents/{id}/tools` + invoke path in `handler/agent_tools.go` / `runtime/tool_executor_invoker.go`; persisted by `loops.Store.OpenNextStep` | **Not a general tool grant and not configurable through the tool-policy table.** The tool exists only for the agent task that represents a steps-enabled workflow block. The server, not the model, pins the issue, workflow, phase, block, current step, `Steps.Max`, and phase `MaxSteps`; the input schema exposes none of them. Missing/malformed task context, a task belonging to another agent, or a block without bounded steps leaves the tool unavailable. Repeated calls from one task return the same successor, while the first request beyond either authored limit durably fails the phase. This narrow task capability is the only path that bypasses the ordinary runtime-tool grant list. |
 | 18 | **Who can manage Mode configuration** | `server/internal/cerebro/sessionmode/handler.go` (`requestContext`) on `PUT /api/cerebro/session-modes/{mode}/draft` and `POST .../{mode}/publish|restore` | FIR-3111. Any workspace member may read the active Mode profiles and version history. Only a workspace owner/admin authenticated as a human may edit, Publish or Restore; task-token actors are explicitly denied even when their originating member is an admin. This is a code-owned management gate, not a tool-policy permission. |
 
+### Agent identity forwarded to mcp_http connections (FIR-4779)
+
+`on_behalf_of` is no longer api-type only. An **mcp_http** connection with
+`auth_config.on_behalf_of.enabled` now receives the same
+`X-On-Behalf-Of: agent:<uuid>` header on every call the MCP relay forwards
+(`mcprelay.delegatedAgentFor`, stamped in `Relay.ServeHTTP`'s Director). This is
+the second delivery path for the FIR-2668 contract: api-type stamps per
+server-side dispatch, mcp_http stamps at the relay, because that is where an
+mcp_http call is executed server-side.
+
+**This grants nothing.** Unlike the api-type case — where the remote API
+authorizes the call as that agent's own delegation grants — the mcp_http header
+is *attribution*: the connection's own stored credential still decides what the
+call may do, and the downstream MCP server is expected to treat the value as
+display data, not as an authorization input. It exists so a downstream server can
+record WHICH agent wrote something instead of a shared key (the finance-mcp
+annotation case).
+
+Trust posture, all enforced in `relay.go`:
+
+- The value is read only from the HMAC-signed relay token minted at task claim
+  (`Signer.MintFor` → `payload.actor().AgentID`), never from the request.
+- Any inbound `X-On-Behalf-Of` is deleted before the server sets its own,
+  alongside the existing `Authorization` / `CF-Access-*` strips — a runtime
+  cannot name itself.
+- A workspace-scoped token (`Mint`, no actor — the agent-less runtime tool scan)
+  sends no header. So does a token whose actor field does not parse as a UUID.
+- The direct `--mcp-config` entry (`connections.mcpServerEntry`) deliberately does
+  NOT stamp it: that document lives on the runtime's own disk, so a header written
+  there would be a value the agent process can rewrite.
+
+Off by default per connection, so enabling or disabling it is a connection config
+change (`multica connection update <name> --on-behalf-of[=false]`), not a deploy.
+
 ### Identity-aware API connection discovery (FIR-3290)
 
 For an API connection with `auth_config.on_behalf_of.enabled`,

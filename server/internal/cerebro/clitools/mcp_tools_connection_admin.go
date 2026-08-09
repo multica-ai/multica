@@ -97,7 +97,7 @@ func registerCerebroConnectionAdminTools(srv *mcp.Server, client *cli.APIClient)
 				"cf_access_id":     map[string]any{"type": "string", "description": "Cloudflare Access service-token client ID"},
 				"cf_access_secret": map[string]any{"type": "string", "description": "Cloudflare Access service-token client secret"},
 				"default_access":   map[string]any{"type": "string", "description": "Baseline verdict for actors with no explicit rule: allow, ask, or deny (default deny)", "enum": []string{"allow", "ask", "deny"}},
-				"on_behalf_of":     map[string]any{"type": "boolean", "description": "type=api connections only: stamp the calling agent's identity onto every dispatch as X-On-Behalf-Of: agent:<uuid>, so the remote API authorizes the call as that agent's own delegation grant instead of the shared connection key (FIR-2668)"},
+				"on_behalf_of":     map[string]any{"type": "boolean", "description": "stamp the calling agent's identity onto every call as X-On-Behalf-Of: agent:<uuid>. type=api: on every server-side dispatch, so the remote API authorizes the call as that agent's own delegation grant instead of the shared connection key (FIR-2668). type=mcp_http: on every call the MCP relay forwards, so the MCP server can attribute writes to the calling agent (FIR-4779)"},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -158,7 +158,7 @@ func registerCerebroConnectionAdminTools(srv *mcp.Server, client *cli.APIClient)
 				"cf_access_id":     map[string]any{"type": "string", "description": "Cloudflare Access service-token client ID"},
 				"cf_access_secret": map[string]any{"type": "string", "description": "Cloudflare Access service-token client secret"},
 				"default_access":   map[string]any{"type": "string", "description": "allow, ask, or deny", "enum": []string{"allow", "ask", "deny"}},
-				"on_behalf_of":     map[string]any{"type": "boolean", "description": "type=api connections only: stamp the calling agent's identity onto every dispatch as X-On-Behalf-Of: agent:<uuid>, so the remote API authorizes the call as that agent's own delegation grant instead of the shared connection key (FIR-2668)"},
+				"on_behalf_of":     map[string]any{"type": "boolean", "description": "stamp the calling agent's identity onto every call as X-On-Behalf-Of: agent:<uuid>. type=api: on every server-side dispatch, so the remote API authorizes the call as that agent's own delegation grant instead of the shared connection key (FIR-2668). type=mcp_http: on every call the MCP relay forwards, so the MCP server can attribute writes to the calling agent (FIR-4779)"},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {

@@ -49,6 +49,13 @@ import (
 // blast radius of a leaked token to a single run.
 const tokenTTL = 12 * time.Hour
 
+// onBehalfOfHeader carries the calling agent to the upstream MCP server as
+// "agent:<uuid>" — the same delegation contract api-type connections already use
+// (internal/cerebro/runtime/api_connection_on_behalf_of.go, FIR-2668). FIR-4779
+// extends it to mcp_http connections, which reach their server through this
+// relay rather than through a server-side dispatch loop.
+const onBehalfOfHeader = "X-On-Behalf-Of"
+
 // connLoader is the slice of *connections.Store the relay needs. An interface
 // keeps the handler unit-testable without a database.
 type connLoader interface {
@@ -314,6 +321,7 @@ func (rl *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	real := realHeaders(conn.AuthConfig)
+	delegatedAgent := delegatedAgentFor(conn, payload)
 	proxy := &httputil.ReverseProxy{
 		// FlushInterval -1 streams each write immediately — required for the
 		// MCP SSE response channel to reach the client without buffering.
@@ -329,12 +337,39 @@ func (rl *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			req.Header.Del("Authorization")
 			req.Header.Del("CF-Access-Client-Id")
 			req.Header.Del("CF-Access-Client-Secret")
+			// The delegation header is server-owned: whatever the runtime sent is
+			// dropped unconditionally, so an agent can never name itself here.
+			req.Header.Del(onBehalfOfHeader)
 			for k, v := range real {
 				req.Header.Set(k, v)
+			}
+			if delegatedAgent != "" {
+				req.Header.Set(onBehalfOfHeader, "agent:"+delegatedAgent)
 			}
 		},
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+// delegatedAgentFor returns the agent uuid to stamp on the upstream request, or
+// "" when the call must not carry one (FIR-4779).
+//
+// Two conditions, both required:
+//   - the connection has on_behalf_of enabled (opt-in per connection, off by
+//     default, so turning it off is a config change and not a deploy), and
+//   - the relay token was minted WITH an actor. A workspace-scoped token (Mint,
+//     used by the agent-less runtime tool scan) carries none, so no header is
+//     sent and the downstream server falls back to its own default attribution.
+//
+// The value comes only from the HMAC-signed token minted at task claim, never
+// from the request — the caller cannot choose who it claims to be. A token field
+// that does not parse as a UUID yields "" (parseUUIDOrZero → invalid), so a
+// malformed actor degrades to no attribution rather than a forged one.
+func delegatedAgentFor(conn connections.Connection, payload tokenPayload) string {
+	if ob := conn.AuthConfig.OnBehalfOf; ob == nil || !ob.Enabled {
+		return ""
+	}
+	return uuidText(payload.actor().AgentID)
 }
 
 // realHeaders builds the upstream auth headers from a connection's stored
