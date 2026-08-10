@@ -69,15 +69,20 @@ const (
 // subscriber, neither of which has a caller's context to inherit.
 const streamCloseTimeout = 10 * time.Second
 
-// settleRetryAfter is how long the settled flush's ending waits before trying
-// again, and settleRetryAttempts is how many times. The delay doubles, so the
-// three attempts fall at 15s, 45s and 105s after the first refusal — long
-// enough for a Supervisor reconnect to have happened, short enough that all of
-// them are over well inside roundMemory. See settleRound for why this path is
-// the one that needs them.
+// endingRetryAfter is how long an ending this manager could not deliver waits
+// before trying again, and endingRetryAttempts is how many times. The delay
+// doubles, so the three attempts fall at 15s, 45s and 105s after the first —
+// long enough for a Supervisor reconnect to have happened, short enough that
+// all of them are over well inside roundMemory.
+//
+// Two things book them. A settled round's send that nothing accepted, which has
+// no other publisher at all (see settleRound). And any ending whose wait for
+// another delivery ran past its caller's budget (errEndingDeferred): the news is
+// then still this publisher's to deliver and it has no time left to do it in, so
+// it comes back with a budget of its own.
 const (
-	settleRetryAfter    = 15 * time.Second
-	settleRetryAttempts = 3
+	endingRetryAfter    = 15 * time.Second
+	endingRetryAttempts = 3
 )
 
 // taskLookup resolves a task id to the chat session it belongs to. Both
@@ -123,9 +128,9 @@ type TypingIndicatorManager struct {
 	// disables the guard (tests that drive the clock themselves).
 	guardAfter time.Duration
 
-	// settleRetryAfter is the first delay before a settled round's ending is
-	// tried again. Negative disables the retry.
-	settleRetryAfter time.Duration
+	// endingRetryAfter is the first delay before an ending that did not reach
+	// the user is tried again. Negative disables the retry.
+	endingRetryAfter time.Duration
 }
 
 // TypingIndicatorConfig wires the manager. Senders and Streams are the same
@@ -152,8 +157,8 @@ type TypingIndicatorConfig struct {
 	// GuardAfter overrides streamGuardAfter. Test-only.
 	GuardAfter time.Duration
 
-	// SettleRetryAfter overrides settleRetryAfter. Test-only.
-	SettleRetryAfter time.Duration
+	// EndingRetryAfter overrides endingRetryAfter. Test-only.
+	EndingRetryAfter time.Duration
 }
 
 var _ engine.TypingNotifier = (*TypingIndicatorManager)(nil)
@@ -168,9 +173,9 @@ func NewTypingIndicator(cfg TypingIndicatorConfig) *TypingIndicatorManager {
 	if guard == 0 {
 		guard = streamGuardAfter
 	}
-	retry := cfg.SettleRetryAfter
+	retry := cfg.EndingRetryAfter
 	if retry == 0 {
-		retry = settleRetryAfter
+		retry = endingRetryAfter
 	}
 	return &TypingIndicatorManager{
 		senders:          cfg.Senders,
@@ -179,7 +184,7 @@ func NewTypingIndicator(cfg TypingIndicatorConfig) *TypingIndicatorManager {
 		bindings:         cfg.Bindings,
 		log:              logger,
 		guardAfter:       guard,
-		settleRetryAfter: retry,
+		endingRetryAfter: retry,
 	}
 }
 
@@ -383,25 +388,46 @@ func (m *TypingIndicatorManager) settleRound(ctx context.Context, sessionID pgty
 	if err == nil || errors.Is(err, errNothingToSay) {
 		return
 	}
-	m.bookSettleRetry(sessionID, batch, attempt+1)
+	// Everything else leaves this round still owing the user words, and the two
+	// ways it can are the same instruction. A send nothing accepted left the
+	// debt on the note for whoever spends it next. A wait that outlasted this
+	// attempt's budget (errEndingDeferred) recorded nothing at all — the guard
+	// is the one publisher this round can be waiting behind, and its promise
+	// ends nothing, so this settle is still the only closer a run that never
+	// started will ever have.
+	if !m.bookEndingRetry(attempt+1, func(ctx context.Context) {
+		m.settleRound(ctx, sessionID, batch, attempt+1)
+	}) {
+		m.log.WarnContext(ctx, "wecom typing: giving up on a settled round's ending",
+			"chat_session_id", util.UUIDToString(sessionID), "batch", uint64(batch),
+			"attempts", attempt+1, "error", err)
+	}
 }
 
-// bookSettleRetry schedules the next attempt at a settled round's ending.
+// bookEndingRetry schedules another attempt at an ending that did not reach the
+// user, and reports whether it booked one.
 //
-// Bounded twice over: settleRetryAttempts caps how many there are, and the delay
+// Bounded twice over: endingRetryAttempts caps how many there are, and the delay
 // doubles, so the last one lands inside three minutes of the first. That is the
-// shape of what it is waiting out — a Supervisor reconnect takes seconds — and
-// it stays far inside roundMemory, past which the note holding the debt is gone
-// and there is nothing left to say it against.
-func (m *TypingIndicatorManager) bookSettleRetry(sessionID pgtype.UUID, batch engine.RunBatchID, attempt int) {
-	if m.settleRetryAfter <= 0 || attempt > settleRetryAttempts {
-		return
+// shape of what it is waiting out — a Supervisor reconnect takes seconds, and a
+// delivery it lost the wait to is bounded by streamCloseTimeout — and it stays
+// far inside roundMemory, past which the note holding the debt is gone and there
+// is nothing left to say it against.
+//
+// The attempt runs on a budget of its own rather than the caller's, because the
+// caller's is what ran out. It goes back through sayEnding like every other
+// publisher, so an ending anything else delivered in the meantime finds nothing
+// owed and says nothing.
+func (m *TypingIndicatorManager) bookEndingRetry(attempt int, again func(context.Context)) bool {
+	if m.endingRetryAfter <= 0 || attempt > endingRetryAttempts {
+		return false
 	}
-	time.AfterFunc(m.settleRetryAfter<<(attempt-1), func() {
+	time.AfterFunc(m.endingRetryAfter<<(attempt-1), func() {
 		ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 		defer cancel()
-		m.settleRound(ctx, sessionID, batch, attempt)
+		again(ctx)
 	})
+	return true
 }
 
 // Register subscribes the manager to the two ways a run ends without an
@@ -504,13 +530,41 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 	defer cancel()
-	m.rounds().sayEnding(ctx, sessionID, byTask(taskID), roundOver,
+	m.sayFailedRun(ctx, sessionID, taskID, bound, 0)
+}
+
+// sayFailedRun is handleTaskFailed past its gates: the ledger call and what to
+// do when the ledger hands the notice back undelivered.
+//
+// Kept apart from the handler because the retry has to re-enter HERE. The gates
+// above answered where this run was asked, and that answer cannot change; asking
+// them again would be two more reads per attempt on a bus event this deployment
+// publishes for every run in it.
+//
+// The deferral is the case worth naming. task:failed has two publishers, so a
+// notice can arrive while another delivery for the same run is on the wire, and
+// waiting it out is what keeps the two from both speaking. A wait that loses to
+// this attempt's budget reserved nothing and recorded nothing — so unless
+// something else says this run's ending, streamCopyFailed is still owed, and
+// this publisher is still the one holding it. It is also the reply the guard's
+// promise promised whenever the delivery ahead was the guard's.
+func (m *TypingIndicatorManager) sayFailedRun(ctx context.Context, sessionID pgtype.UUID, taskID string, bound roundAddress, attempt int) {
+	_, err := m.rounds().sayEnding(ctx, sessionID, byTask(taskID), roundOver,
 		func(t roundTurn) (roundAddress, error) {
 			if !t.HasBubble && !t.Addr.known() && bound.known() {
 				t.Addr = bound
 			}
 			return m.sayTheRunFailed(ctx, sessionID, t)
 		})
+	if !errors.Is(err, errEndingDeferred) {
+		return
+	}
+	if !m.bookEndingRetry(attempt+1, func(ctx context.Context) {
+		m.sayFailedRun(ctx, sessionID, taskID, bound, attempt+1)
+	}) {
+		m.log.WarnContext(ctx, "wecom typing: giving up on a failed run's notice after waiting out other deliveries",
+			"chat_session_id", util.UUIDToString(sessionID), "task_id", taskID, "attempts", attempt+1)
+	}
 }
 
 // failureBelongsOnWecom asks where this run's input came from: the channel, or
@@ -627,7 +681,20 @@ func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 	defer cancel()
-	m.rounds().sayEnding(ctx, sessionID, byTask(taskIDFromEvent(e)), roundOver,
+	m.sayCancelledRun(ctx, sessionID, taskIDFromEvent(e), 0)
+}
+
+// sayCancelledRun is handleTaskCancelled's ledger call, and what to do when the
+// ledger hands the cancellation back undelivered.
+//
+// This is the ending with the fewest publishers of all — one broadcast, no
+// sweeper repeat, no redelivery — so a wait that outlasts its budget is the
+// whole of it unless this comes back. What the asker is left with otherwise is
+// whatever the delivery ahead put on the screen: a spinner it consumed and could
+// not seal, or the guard's streamCopyStillWorking promise about a run the user
+// themselves stopped.
+func (m *TypingIndicatorManager) sayCancelledRun(ctx context.Context, sessionID pgtype.UUID, taskID string, attempt int) {
+	_, err := m.rounds().sayEnding(ctx, sessionID, byTask(taskID), roundOver,
 		func(t roundTurn) (roundAddress, error) {
 			if m.senders == nil {
 				return roundAddress{}, errNothingToSay
@@ -646,6 +713,15 @@ func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
 			}
 			return t.Addr, m.sayAsPlainMessage(ctx, sessionID, t.Addr, streamCopyCancelled)
 		})
+	if !errors.Is(err, errEndingDeferred) {
+		return
+	}
+	if !m.bookEndingRetry(attempt+1, func(ctx context.Context) {
+		m.sayCancelledRun(ctx, sessionID, taskID, attempt+1)
+	}) {
+		m.log.WarnContext(ctx, "wecom typing: giving up on a cancelled run's notice after waiting out other deliveries",
+			"chat_session_id", util.UUIDToString(sessionID), "task_id", taskID, "attempts", attempt+1)
+	}
 }
 
 // rounds builds the matcher that turns a task id on an event into the round it
@@ -848,6 +924,16 @@ func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, batch engine.Ru
 // difference is only in what the user has already been told, and the run's real
 // ending is said in the chat this round was speaking in either way, off the
 // note rather than the binding row.
+//
+// It is the one publisher that books no retry when the ledger hands its words
+// back deferred, and the reason is which delivery it can possibly be waiting on.
+// A round still open is taken outright, so there is no wait; a round already
+// taken is only reachable by batch through batchRunID, which nothing but a
+// task-less round is ever filed under, and the sole other publisher of one of
+// those is the settled flush. So the delivery ahead of the guard is a settle
+// saying why the run never started — the round's real ending, and one that books
+// its own retry if it fails. The promise this guard came to make is about a run
+// that has already finished having anything to promise.
 func (m *TypingIndicatorManager) fireGuard(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID) {
 	m.streams.sayEnding(ctx, sessionID, byBatch(batch), roundContinues, nil,
 		func(t roundTurn) (roundAddress, error) {

@@ -64,6 +64,10 @@ type Outbound struct {
 	senders *sendersRegistry
 	streams *streamStore
 	logger  *slog.Logger
+
+	// retryAfter is the first delay before an answer the ledger handed back
+	// undelivered is tried again. Negative disables the retry; test-only.
+	retryAfter time.Duration
 }
 
 // NewOutbound builds the WeCom outbound subscriber. senders is the same
@@ -78,7 +82,10 @@ func NewOutbound(q outboundQueries, senders *sendersRegistry, streams *streamSto
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Outbound{q: q, tasks: q, senders: senders, streams: streams, logger: logger}
+	return &Outbound{
+		q: q, tasks: q, senders: senders, streams: streams, logger: logger,
+		retryAfter: answerRetryAfter,
+	}
 }
 
 // Register subscribes to the chat-done event on the bus.
@@ -157,14 +164,84 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// the ledger records the ending only from what deliverAnswer reports. There
 	// is no path here that sends without recording, and none that records
 	// without sending — see the ending ledger's contract in stream_store.go.
-	_, err = o.rounds().sayEnding(ctx, sessionID, byTask(taskIDFromEvent(e)), roundOver,
+	return o.sayTheAnswer(ctx, sessionID, taskIDFromEvent(e), content, 0)
+}
+
+// answerRetryAfter is how long an answer the ledger handed back undelivered
+// waits before trying again, and answerRetryAttempts is how many times. Same
+// shape and the same numbers as the typing indicator's endingRetryAfter, and for
+// the same reason — what an attempt is waiting out is a delivery bounded by
+// streamCloseTimeout, and every attempt is over long inside roundMemory.
+const (
+	answerRetryAfter    = 15 * time.Second
+	answerRetryAttempts = 3
+)
+
+// sayTheAnswer puts one completion in the round that asked for it, and books
+// itself again when the ledger hands the answer back still undelivered.
+//
+// The retry is what this subscriber owes the answer it is carrying. Nothing else
+// holds it: chat:done fires once, the completion is not persisted anywhere this
+// process can go back to, and every other publisher of this round's ending has
+// only an apology to offer. So the one outcome that must not end here is
+// errEndingDeferred — the wait for a delivery already speaking for this run ran
+// past the budget the bus handed this subscriber, which says nothing whatever
+// about whether the user has an answer.
+//
+// It is not a rare shape. The budget is taken at the top of handleEvent, before
+// the binding lookup and both origin reads, while the guard takes a fresh
+// streamCloseTimeout of its own when it fires: an answer that spent part of its
+// budget on those round trips can meet a guard that has just started sending
+// with all of its. Ordinary database latency is enough. And the guard is the
+// worst publisher to be waiting behind, because its words land and end nothing —
+// it files streamCopyStillWorking and the answer IS the separate reply that copy
+// has just promised.
+//
+// Everything else is the end of the matter. A delivery that said nothing on
+// purpose (errNothingToSay) is a completion nobody was owed; a delivery that was
+// refused is reported to the caller's WARN and leaves the round owed its ending
+// on the note, exactly as it did before.
+func (o *Outbound) sayTheAnswer(ctx context.Context, sessionID pgtype.UUID, taskID, content string, attempt int) error {
+	_, err := o.rounds().sayEnding(ctx, sessionID, byTask(taskID), roundOver,
 		func(t roundTurn) (roundAddress, error) {
 			return o.deliverAnswer(ctx, sessionID, t, content)
 		})
-	if errors.Is(err, errNothingToSay) {
+	switch {
+	case errors.Is(err, errEndingDeferred):
+		if o.bookAnswerRetry(sessionID, taskID, content, attempt+1) {
+			return nil
+		}
+		// Out of attempts, or retries disabled. The answer is lost either way,
+		// and the caller's WARN is the only place that can say so.
+		return err
+	case errors.Is(err, errNothingToSay):
 		return nil
 	}
 	return err
+}
+
+// bookAnswerRetry schedules another attempt at an answer, carrying the
+// completion with it, and reports whether it booked one.
+//
+// Bounded twice over, the same way the typing indicator's retries are:
+// answerRetryAttempts caps how many there are and the delay doubles, so the last
+// lands inside three minutes of the first and well inside roundMemory. The
+// attempt takes a budget of its own because the caller's is what ran out, and it
+// goes back through sayEnding like any other publisher — an answer something
+// else delivered in the meantime finds the run on told and says nothing.
+func (o *Outbound) bookAnswerRetry(sessionID pgtype.UUID, taskID, content string, attempt int) bool {
+	if o.retryAfter <= 0 || attempt > answerRetryAttempts {
+		return false
+	}
+	time.AfterFunc(o.retryAfter<<(attempt-1), func() {
+		ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
+		defer cancel()
+		if err := o.sayTheAnswer(ctx, sessionID, taskID, content, attempt); err != nil {
+			o.logger.WarnContext(ctx, "wecom outbound: reply delivery failed",
+				"error", err, "chat_session_id", util.UUIDToString(sessionID))
+		}
+	})
+	return true
 }
 
 // deliverAnswer writes an agent's answer wherever this round can still be
@@ -178,7 +255,9 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 //
 // Nothing here re-asks where the question came from. processEvent has already
 // refused every run that is not this room's, which is what makes it safe for
-// this function to write without asking.
+// this function to write without asking. That holds for a booked retry too:
+// every attempt descends from the one processEvent that gated this event, so a
+// later attempt inherits that decision rather than paying for it again.
 func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t roundTurn, content string) (roundAddress, error) {
 	if t.HasBubble {
 		// A bubble on screen has to end in words. An empty completion is a

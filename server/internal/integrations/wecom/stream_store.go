@@ -163,10 +163,11 @@ const (
 	// waited out reported this run's ending accepted. Once it is weaker than
 	// that — a caller whose budget ran out while it waited never learns what
 	// became of the delivery it was waiting on, and comes back with this and
-	// errNothingToSay together. So it is an instruction to the caller in front
-	// of it, not a fact about the user's screen. Nothing is recorded on the
-	// strength of it: the ledger is written from what a delivery reports and
-	// from nothing else (I1), and no delivery ever runs to see this verdict.
+	// errEndingDeferred together. There the verdict is not a fact about the
+	// user's screen and it is not the end of the matter either: the error is
+	// what says so, and it says come back. Nothing is recorded on the strength
+	// of this verdict in any case: the ledger is written from what a delivery
+	// reports and from nothing else (I1), and no delivery ever runs to see it.
 	roundToldAlready
 )
 
@@ -246,9 +247,9 @@ func (h streamHandle) address() roundAddress {
 //
 // owed / told / speaking below are one piece of bookkeeping answering one
 // question: has this run's ending been said to the user, and if not, who still
-// owes it. Six review rounds have found six different ways to get that wrong,
-// and all six were the same mistake — the ledger recorded an outcome the user
-// never got:
+// owes it. Seven review rounds have found seven different ways to get that
+// wrong, and all seven were the same mistake — an outcome was treated as
+// settled that the user never got:
 //
 //	1. a promise spent by POSITION, so one round's words settled another
 //	   round's promise and the round the user cared about was never told;
@@ -266,7 +267,12 @@ func (h streamHandle) address() roundAddress {
 //	6. a publisher waiting out another delivery read only WHETHER it landed and
 //	   not WHAT it was, so the guard's "still working" — words that land and
 //	   end nothing — silenced the failure notice and the answer behind it, and
-//	   the promise it had just filed had no publisher left to keep it.
+//	   the promise it had just filed had no publisher left to keep it;
+//	7. the fix for 5 and 6 reported a wait that lost to its caller's own
+//	   deadline as "nothing to say", which callers are entitled to read as the
+//	   end of the matter — so the publisher that still had the answer confirmed
+//	   the chat:done handled and exited, and the guard's promise landing a
+//	   moment later was a promise with nothing behind it.
 //
 // Scenario tests were written for each and did not stop the next one, because
 // each fix was a rule the next caller had to remember. So the ledger states its
@@ -278,13 +284,16 @@ func (h streamHandle) address() roundAddress {
 //	    a publisher arriving while a delivery is on the wire is handed that
 //	    delivery to wait on rather than a verdict of "already said" — until the
 //	    holder reports, there is no such fact to give it. One exception, and it
-//	    records nothing: a waiter whose own budget runs out returns the verdict
-//	    it came in holding, paired with errNothingToSay, having reserved nothing
-//	    and said nothing. The verdict is not a claim about the screen there —
-//	    see roundToldAlready's own doc, which says so. And what it then reads
-//	    off the holder is the whole outcome, words and ending together: only a
-//	    delivery that ENDED the round answers the run's other publishers, and
-//	    one that landed a promise leaves them the round it just put back on owed.
+//	    records nothing and settles nothing: a waiter whose own budget runs out
+//	    returns the verdict it came in holding, paired with errEndingDeferred,
+//	    having reserved nothing and said nothing. The verdict is not a claim
+//	    about the screen there — see roundToldAlready's own doc — and the error
+//	    beside it is the store telling that caller to come back, because the
+//	    news it walked in with is still undelivered and still nobody else's.
+//	    And what a waiter that IS released reads off the holder is the whole
+//	    outcome, words and ending together: only a delivery that ENDED the round
+//	    answers the run's other publishers, and one that landed a promise leaves
+//	    them the round it just put back on owed.
 //	I2. A RUN'S ENDING IS MATCHED BY THE RUN'S OWN ID — never by position,
 //	    never by session. A promise another round is waiting on is not this
 //	    run's to spend, and a note another round left is not this run's reason
@@ -320,6 +329,28 @@ func (h streamHandle) address() roundAddress {
 // same as nothing having happened: a round this store was holding has had its
 // bubble consumed either way, so I3 still leaves that run owed an ending.
 var errNothingToSay = errors.New("wecom: nothing to say for this round")
+
+// errEndingDeferred is how a WAIT reports that it lost to its caller's own
+// deadline. The delivery it was parked on is still running, so what became of
+// those words is not yet a fact anyone holds; this caller reserved nothing, said
+// nothing, and recorded nothing, and the news it arrived with never went out.
+//
+// It is deliberately not errNothingToSay and never wraps it, because the two
+// mean opposite things to whoever receives them. "Nothing to say" is terminal —
+// no bubble, nothing owed, a run this process has no business speaking for — and
+// a caller may close the matter on it. This one means come back: the words are
+// still in the caller's hands and it is still the publisher they have.
+//
+// A caller that reads it as terminal reports the news handled while holding it,
+// and that is not merely a delayed delivery. The publisher ahead is often the
+// nine-minute guard, whose words land and end nothing: the promise it files a
+// moment later is then a promise with no publisher left to keep it, and the
+// asker is looking at streamCopyStillWorking for a reply that has already
+// happened. So every caller of sayEnding answers this one, and the answer is
+// another attempt on a budget of its own — see the bounded retries in
+// outbound.go and typing_indicator.go. The one caller that needs none is
+// fireGuard, and its own comment says why.
+var errEndingDeferred = errors.New("wecom: ran out of budget waiting for another delivery")
 
 // roundTurn is what the ledger hands a delivery for the length of one ending:
 // everything this store knows about where the round can still be reached.
@@ -456,9 +487,14 @@ type inflightKey struct {
 // it is the point on both paths. If the first delivery fails, the publisher
 // behind it is the retry that news still has, and answering it "already said"
 // would swallow the words the way defect 4 swallowed a promise — which is
-// exactly what the speaking list did before defect 5 was found. The wait costs
-// the caller no more than speaking would have: it is bounded by the same context
-// the send runs on, and what it waits for IS a send on that budget.
+// exactly what the speaking list did before defect 5 was found. The wait is
+// bounded by the same context the send runs on, and what it waits for IS a send
+// on that budget.
+//
+// What it can cost the caller is that whole budget, which is defect 7: a wait
+// the caller loses leaves it with the news and no time to send it in. That is
+// not silence and it is not an ending, so it goes back as errEndingDeferred and
+// the caller returns on a budget of its own.
 //
 // The outcome is published under s.mu, by the same call that files what the
 // delivery lost. So a waiter released with delivered=false cannot get back into
@@ -1072,8 +1108,10 @@ func (s *streamStore) takeAtLocked(key string, i int, ending roundEnding) (round
 //
 // ctx is the caller's own budget for speaking, and the only thing this function
 // spends it on is waiting out a delivery already under way for the same run —
-// see endingInFlight. A caller whose budget runs out while it waits says
-// nothing, which is what it would have done anyway with no time left to send in.
+// see endingInFlight. A caller whose budget runs out while it waits says nothing
+// this time round and gets errEndingDeferred back, which is this store telling
+// it to return with a budget of its own: the delivery ahead is still running, so
+// there is no outcome yet that could account for the news this caller came with.
 func (s *streamStore) sayEnding(
 	ctx context.Context,
 	sessionID pgtype.UUID,
@@ -1147,8 +1185,13 @@ func (s *streamStore) sayEnding(
 				continue
 			case <-ctx.Done():
 				// No budget left to speak with, so nothing is said and — this
-				// caller holding no reservation — nothing is recorded.
-				return turn.Verdict, errNothingToSay
+				// caller holding no reservation — nothing is recorded. What it
+				// still has is the news, and there is no fact yet that could
+				// excuse it: the delivery ahead has not reported, and it may be
+				// the guard's, which lands words and ends nothing. So this goes
+				// back as a deferral rather than as silence, and the caller
+				// comes again on a budget of its own.
+				return turn.Verdict, errEndingDeferred
 			}
 		}
 		if turn.Verdict == roundToldAlready {
@@ -1166,7 +1209,9 @@ type beginning struct {
 	// wait is the delivery already speaking for this run. A caller handed one
 	// has reserved nothing: it waits for that delivery's outcome, and goes quiet
 	// or comes back round as the publisher the run has left depending on what
-	// the outcome is — words that ENDED the round, or anything else.
+	// the outcome is — words that ENDED the round, or anything else. Losing that
+	// wait to its own deadline is a third outcome and neither of the first two:
+	// it leaves with errEndingDeferred, to return on a budget of its own.
 	wait *endingInFlight
 	// worthResolving says whether a second id is worth a database row: true only
 	// when this session holds something a clone could still be reached through —
@@ -1289,8 +1334,10 @@ func (s *streamStore) beginEndingLocked(key string, k roundKey, ending roundEndi
 		// The caller waits on that delivery instead: silent only if what landed
 		// was this run's own ending, and otherwise the publisher the news has
 		// left. The verdict alongside is what it falls back to with no budget
-		// left to wait, and roundToldAlready is what that case means — this
-		// caller has nothing left to speak with, whatever the delivery did.
+		// left to wait, and it says nothing about the screen there — what the
+		// caller acts on in that case is errEndingDeferred, which tells it to
+		// come back, because this delivery may yet turn out to have said
+		// nothing that accounts for the news the caller is carrying.
 		return roundTurn{Addr: note.addr, Verdict: roundToldAlready}, pendingEnding{},
 			beginning{wait: note.speaking[at].flight}
 	}

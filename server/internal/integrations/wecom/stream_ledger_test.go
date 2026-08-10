@@ -2,17 +2,20 @@ package wecom
 
 // stream_ledger_test.go — the ledger's invariants, held shut from the outside.
 //
-// Six review rounds have found six different ways to break the same promise,
-// and every one of them was a scenario nobody had written a test for. So the
-// table here is not a scenario: it enumerates every terminal path a round has
-// and asserts the properties the ledger claims for all of them at once.
+// Seven review rounds have found seven different ways to break the same
+// promise, and every one of them was a scenario nobody had written a test for.
+// So the table here is not a scenario: it enumerates every terminal path a
+// round has and asserts the properties the ledger claims for all of them at
+// once.
 //
-// The last two are the ones that shape cannot reach. Both need two deliveries
-// for one run overlapping, which no sequential walk of the paths produces, and
-// their tests are at the bottom of the file — one delivery held on the wire with
-// its words unanswered, and another deciding what to do about them. The fifth
-// raced two publishers of the SAME ending; the sixth raced the run's real ending
-// against the guard's promise, which lands words and ends nothing.
+// The last three are the ones that shape cannot reach. All three need two
+// deliveries for one run overlapping, which no sequential walk of the paths
+// produces, and their tests are further down the file — one delivery held on the
+// wire with its words unanswered, and another deciding what to do about them.
+// The fifth raced two publishers of the SAME ending; the sixth raced the run's
+// real ending against the guard's promise, which lands words and ends nothing;
+// the seventh is the other deadline ordering of that race, where the waiter's
+// own budget runs out first and it walks away still holding the news.
 
 import (
 	"context"
@@ -343,7 +346,7 @@ func said(t *testing.T, c *bubbleConn) []string {
 func TestASettledRoundThatCouldNotBeToldIsStillOwedItsWords(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	rig.typing.settleRetryAfter = -1
+	rig.typing.endingRetryAfter = -1
 	sessionID := bubbleSessionID(t)
 	rig.ask(t, "REQ-SETTLE", 1) // a bubble, and a flush that never named a run
 
@@ -383,7 +386,7 @@ func TestASettledRoundThatCouldNotBeToldIsStillOwedItsWords(t *testing.T) {
 func TestASettleNobodyHeardIsSaidAgainWithoutAnotherPublisher(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	rig.typing.settleRetryAfter = 20 * time.Millisecond
+	rig.typing.endingRetryAfter = 20 * time.Millisecond
 	sessionID := bubbleSessionID(t)
 	rig.ask(t, "REQ-SETTLE-RETRY", 1)
 
@@ -745,16 +748,24 @@ func (r *bubbleRig) holdTheGuardsPromiseOnTheWire(t *testing.T, batch engine.Run
 	}
 }
 
+// sameTexts reports whether the chat holds exactly these words in this order.
+func sameTexts(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // wantSaid asserts what the person in the chat ended up reading, in order.
 func wantSaid(t *testing.T, c *bubbleConn, want []string, why string) {
 	t.Helper()
 	got := said(t, c)
-	same := len(got) == len(want)
-	for i := range want {
-		if same && got[i] != want[i] {
-			same = false
-		}
-	}
+	same := sameTexts(got, want)
 	if !same {
 		t.Fatalf("the asker read %q, want %q — %s", got, want, why)
 	}
@@ -840,7 +851,7 @@ func TestTheGuardsPromiseDoesNotSilenceTheAnswer(t *testing.T) {
 func TestASettleWaitsOutTheGuardHoldingItsRound(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
-	rig.typing.settleRetryAfter = -1
+	rig.typing.endingRetryAfter = -1
 	sessionID := bubbleSessionID(t)
 	rig.ask(t, "REQ-SETTLE-RACE", 1) // a bubble, and a flush that never named a run
 	release := rig.holdTheGuardsPromiseOnTheWire(t, 1)
@@ -866,6 +877,165 @@ func TestASettleWaitsOutTheGuardHoldingItsRound(t *testing.T) {
 	wantSaid(t, rig.conn, []string{streamCopyStillWorking, streamCopyNotStarted},
 		"the guard promised a separate reply for a run that was never started, so the settle "+
 			"is the only publisher left that can say so")
+}
+
+// ---- a wait that outlasts the waiter's own budget ----
+
+// The three tests below are the other deadline ordering of the four races
+// above, and the defect the wait itself introduced.
+//
+// A waiter is bounded by its caller's context. When that context is the shorter
+// of the two, the waiter comes away never having learnt what became of the
+// delivery it was parked on — and it is still carrying the news it walked in
+// with. It is not an exotic ordering: the answer's ten seconds are taken before
+// the binding lookup and both origin reads, and the guard takes a fresh ten of
+// its own when it fires, so ordinary database latency puts the answer's deadline
+// first while the guard is only just into its send.
+//
+// The store used to report that as errNothingToSay, which every caller is
+// entitled to read as the end of the matter — and did. Each of these tests holds
+// the guard's promise on the wire, gives the publisher behind it a budget too
+// short to wait the guard out, and asserts that the news still reaches the
+// asker. The guard is the publisher that makes the loss concrete: its words land
+// and end nothing, so the promise it files a moment later is the promise these
+// deferred publishers are the reply to.
+
+// waitUntilSaid blocks until the chat holds exactly want, in order.
+//
+// The last of those words is put there by a retry on a timer of its own, so the
+// assertion has to be about where the conversation settles rather than about
+// what is on screen the instant a publisher returned. A path that never delivers
+// fails on the deadline, which is what these tests are for.
+func (r *bubbleRig) waitUntilSaid(t *testing.T, want []string, why string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		got := said(t, r.conn)
+		if sameTexts(got, want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the asker read %q, want %q — %s", got, want, why)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestAnAnswerWhoseWaitOutlastsItsBudgetIsNotConfirmedAsHandled is the
+// regression, and the costliest of the three: what is dropped is the answer.
+//
+// The guard's promise is on the wire and the completion arrives behind it with a
+// budget too short to see how that turns out. Nothing else holds this answer —
+// chat:done fires once and the content lives nowhere this process can go back to
+// — so a subscriber that returns nil here has reported the reply delivered while
+// still holding it, and the promise the guard files a moment later has nothing
+// behind it at all.
+func TestAnAnswerWhoseWaitOutlastsItsBudgetIsNotConfirmedAsHandled(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.out.retryAfter = 20 * time.Millisecond
+	rig.ran(t, "REQ-BUDGET-ANSWER", 1, "task-1")
+	taskID := taskUUID(t, "task-1")
+	release := rig.holdTheGuardsPromiseOnTheWire(t, 1)
+
+	budget, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := rig.out.processEvent(budget, events.Event{
+		ChatSessionID: bubbleSession,
+		TaskID:        taskID,
+		Payload:       protocol.ChatDonePayload{Content: "42"},
+	}); err != nil {
+		t.Fatalf("the answer reported %v while the guard's frame was still on the wire; the "+
+			"budget was meant to run out on the wait, not on anything else", err)
+	}
+
+	release()
+	rig.waitUntilSaid(t, []string{streamCopyStillWorking, "42"},
+		"the answer ran out of budget waiting behind the guard's promise, and that promise is "+
+			"what this answer was the reply to — a publisher that reads a spent wait as "+
+			"'nothing to say' confirms the chat:done handled and the answer is gone")
+}
+
+// TestASettleWhoseWaitOutlastsItsBudgetBooksItsRetry is the same ordering on the
+// path with no second publisher at all.
+//
+// A run that never became a run has no task and therefore no lifecycle event: a
+// settle that returns having said nothing is the end of it, and the asker keeps
+// "还在处理，完成后我再单独回复你" about a run that never started. The bounded
+// schedule this manager already books for a refused settle is the answer here
+// too — a spent wait is the same fact as a refused send, that the words did not
+// go out — and the point of the test is that the path reaches it.
+func TestASettleWhoseWaitOutlastsItsBudgetBooksItsRetry(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.typing.endingRetryAfter = 20 * time.Millisecond
+	sessionID := bubbleSessionID(t)
+	rig.ask(t, "REQ-BUDGET-SETTLE", 1) // a bubble, and a flush that never named a run
+	release := rig.holdTheGuardsPromiseOnTheWire(t, 1)
+
+	budget, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	rig.typing.OnSettled(budget, sessionID, 1)
+
+	release()
+	rig.waitUntilSaid(t, []string{streamCopyStillWorking, streamCopyNotStarted},
+		"the settle ran out of budget waiting behind the guard's promise and returned before "+
+			"booking anything — with no task there is no later event to rescue the round, so "+
+			"the asker keeps a promise about a run that never started")
+}
+
+// TestAFailureNoticeWhoseWaitOutlastsItsBudgetIsStillSaid is the third caller,
+// and the reason the sentinel is answered by all of them rather than by the two
+// the review traced.
+//
+// A failure notice that returns silently after a spent wait leaves the same
+// promise unanswered. It is driven through the body the subscriber runs rather
+// than through the bus, the way the guard's own tests drive fireGuard: the
+// subscriber mints its budget internally, and the budget is the subject here.
+func TestAFailureNoticeWhoseWaitOutlastsItsBudgetIsStillSaid(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.typing.endingRetryAfter = 20 * time.Millisecond
+	rig.ran(t, "REQ-BUDGET-FAILED", 1, "task-1")
+	sessionID := bubbleSessionID(t)
+	taskID := taskUUID(t, "task-1")
+	release := rig.holdTheGuardsPromiseOnTheWire(t, 1)
+
+	budget, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	rig.typing.sayFailedRun(budget, sessionID, taskID, roundAddress{}, 0)
+
+	release()
+	rig.waitUntilSaid(t, []string{streamCopyStillWorking, streamCopyFailed},
+		"the failure notice ran out of budget waiting behind the guard's promise — it is the "+
+			"separate reply that promise promised, and nothing else was going to say it")
+}
+
+// TestACancellationWhoseWaitOutlastsItsBudgetIsStillSaid is the fourth and last
+// caller, and the one with the fewest publishers of all.
+//
+// A cancellation is broadcast once. No sweeper repeats it, nothing redelivers
+// it, and the run publishes nothing after it — so a spent wait here is the whole
+// of the notice unless this publisher comes back, and the asker keeps the
+// guard's "还在处理，完成后我再单独回复你" about a run they stopped themselves.
+func TestACancellationWhoseWaitOutlastsItsBudgetIsStillSaid(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.typing.endingRetryAfter = 20 * time.Millisecond
+	rig.ran(t, "REQ-BUDGET-CANCELLED", 1, "task-1")
+	sessionID := bubbleSessionID(t)
+	taskID := taskUUID(t, "task-1")
+	release := rig.holdTheGuardsPromiseOnTheWire(t, 1)
+
+	budget, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	rig.typing.sayCancelledRun(budget, sessionID, taskID, 0)
+
+	release()
+	rig.waitUntilSaid(t, []string{streamCopyStillWorking, streamCopyCancelled},
+		"the cancellation ran out of budget waiting behind the guard's promise — it is the "+
+			"one publisher this ending has, and the promise it leaves standing is about a run "+
+			"the user stopped on purpose")
 }
 
 // ---- a delivery that never reported at all ----
