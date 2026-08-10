@@ -1411,3 +1411,57 @@ describe("ChatInput commit handoff", () => {
     expect(editorState.focused).toBe(0);
   });
 });
+
+// Send and Stop must retain composer focus so Android's keyboard stays open.
+describe("ChatInput send keeps composer focus", () => {
+  async function readySendButton() {
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "msg" } });
+    let sendButton!: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendButton = buttons[buttons.length - 1]!;
+      expect(sendButton).not.toBeDisabled();
+    });
+    return sendButton;
+  }
+
+  it("cancels the send button's pointer-down so focus never leaves the editor", async () => {
+    renderInput();
+    const sendButton = await readySendButton();
+
+    // fireEvent returns false when a handler called preventDefault().
+    expect(fireEvent.pointerDown(sendButton)).toBe(false);
+  });
+
+  it("still submits on tap — cancelling pointer-down suppresses focus, not activation", async () => {
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput();
+      return true;
+    });
+    renderInput({ onSend });
+    const sendButton = await readySendButton();
+
+    fireEvent.pointerDown(sendButton);
+    fireEvent.click(sendButton);
+
+    await waitFor(() => expect(onSend).toHaveBeenCalled());
+    expect(onSend.mock.calls[0]![0]).toBe("msg");
+  });
+
+  it("cancels the stop button's pointer-down too — the slot must not flip behaviour mid-run", () => {
+    renderInput({ isRunning: true, onStop: vi.fn() });
+
+    expect(fireEvent.pointerDown(screen.getByRole("button", { name: "Stop" }))).toBe(false);
+  });
+
+  it("still stops on tap", () => {
+    const onStop = vi.fn();
+    renderInput({ isRunning: true, onStop });
+
+    const stopButton = screen.getByRole("button", { name: "Stop" });
+    fireEvent.pointerDown(stopButton);
+    fireEvent.click(stopButton);
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+});
