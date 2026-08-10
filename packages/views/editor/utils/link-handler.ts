@@ -251,7 +251,9 @@ export function openLink(
   currentSlug?: string | null,
   appOrigin?: string | null,
 ): void {
-  const internalPath = toSameOriginPath(href, appOrigin);
+  const internalPath =
+    toInternalAppPath(href, appOrigin) ??
+    (href.startsWith("/") ? toSameOriginPath(href) : null);
   if (internalPath) {
     let path = internalPath;
     if (currentSlug && !isGlobalPath(path)) {
