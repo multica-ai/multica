@@ -279,7 +279,12 @@ type Handler struct {
 	// to their real userid or email, so an explicit binding is required —
 	// see wecom/binding.go). Nil disables the redeem endpoint (returns 503)
 	// and the OutboundReplier's binding-prompt path.
-	WecomBindingTokens *wecom.BindingTokenService
+	WecomBindingTokens WecomBindingRedeemer
+
+	// WecomCredentialProbe overrides the install-time control check. Nil in
+	// production, which gets the real handshake probe; tests inject a fake so
+	// the install path runs without a socket.
+	WecomCredentialProbe wecom.CredentialProbe
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in
@@ -436,6 +441,14 @@ func writeMeasuredJSON(w http.ResponseWriter, status int, v any) (int, error) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// writeErrorCode is writeError plus a stable machine-readable code, so a UI
+// can translate the failure instead of toasting the English sentence at a
+// user whose console is in another language. The sentence stays as the
+// fallback for anything that has not been given a translation yet.
+func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
 // Thin wrappers around util functions.

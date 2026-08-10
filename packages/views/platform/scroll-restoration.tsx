@@ -28,6 +28,20 @@ export interface ScrollRestorationAdapter {
    * when there is nothing to restore.
    */
   get(containerKey: string): { top: number; height: number } | undefined;
+  /**
+   * Generic restorable view-state entries — the memento's second kind of
+   * cargo, for state that must survive the view's unmount but is not a
+   * scroll offset (e.g. "this route's comment-highlight deep link already
+   * landed"). Unlike scroll, these are not captured by DOM scan: the view
+   * writes them through `setViewState` at the moment the state changes and
+   * reads them back at mount. Scoped per route + tab like scroll entries.
+   *
+   * Optional so scroll-only adapters stay valid; the hooks treat a missing
+   * implementation as "nothing stored / write ignored".
+   */
+  getViewState?(entryKey: string): string | undefined;
+  /** Write (string) or clear (undefined) an entry for the current route. */
+  setViewState?(entryKey: string, value: string | undefined): void;
 }
 
 const ScrollRestorationContext = createContext<ScrollRestorationAdapter | null>(
@@ -76,5 +90,33 @@ export function useRestoredScrollRef(
       el.scrollTop = saved.top;
     },
     [adapter, containerKey],
+  );
+}
+
+/**
+ * The saved view-state entry for a key on the current route, or undefined.
+ * Read at mount like the scroll offset — it reflects what this view recorded
+ * before it was last unmounted.
+ */
+export function useRestoredViewState(entryKey: string): string | undefined {
+  const adapter = useContext(ScrollRestorationContext);
+  return adapter?.getViewState?.(entryKey);
+}
+
+/**
+ * Imperative writer for view-state entries: call it when the restorable
+ * state changes (pass undefined to clear). No-op without a provider or on
+ * adapters that only track scroll.
+ */
+export function useViewStateWriter(): (
+  entryKey: string,
+  value: string | undefined,
+) => void {
+  const adapter = useContext(ScrollRestorationContext);
+  return useCallback(
+    (entryKey: string, value: string | undefined) => {
+      adapter?.setViewState?.(entryKey, value);
+    },
+    [adapter],
   );
 }

@@ -81,6 +81,8 @@ vi.mock("../../navigation", () => ({
     <a {...props}>{children}</a>
   ),
   useNavigation: () => navigation.value,
+  resolveClickIntent: () => "push",
+  useIntentNavigate: () => () => {},
 }));
 
 vi.mock("@multica/core/paths", async () => {

@@ -66,7 +66,7 @@ import {
 import { configStore } from "@multica/core/config";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { repairEmptyListItems } from "./utils/repair-list-items";
-import { useAppOrigin } from "../navigation";
+import { resolveClickIntent, useAppOrigin } from "../navigation";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { posFromAnchor, type TextAnchor } from "./text-anchor";
@@ -651,7 +651,30 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             if (!href || isMentionHref(href)) return false;
 
             event.preventDefault();
-            openLink(href, workspaceSlugRef.current, appOriginRef.current);
+            openLink(
+              href,
+              workspaceSlugRef.current,
+              appOriginRef.current,
+              resolveClickIntent(event),
+            );
+            return true;
+          },
+          // Middle click never produces a `click` event. Route it through the
+          // same path as a cmd-click (background tab) — on desktop the native
+          // window-open request dead-ends against the shell's deny handler.
+          auxclick(_view, event) {
+            if (event.button !== 1) return false;
+            const target = event.target as HTMLElement;
+            if (target.closest("[data-node-view-wrapper]")) return false;
+            const href = target.closest("a")?.getAttribute("href");
+            if (!href || isMentionHref(href)) return false;
+            event.preventDefault();
+            openLink(
+              href,
+              workspaceSlugRef.current,
+              appOriginRef.current,
+              "background-tab",
+            );
             return true;
           },
         },

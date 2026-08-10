@@ -1,5 +1,5 @@
 import { act, type ReactNode } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -236,13 +236,20 @@ vi.mock("@tanstack/react-query", () => ({
   }),
 }));
 
-vi.mock("../navigation", () => ({
-  useNavigation: () => ({
+// Mock the context module, not the barrel: resolveClickIntent and
+// useIntentNavigate stay the REAL implementations and read this adapter
+// (no openInNewTab — the web shape, so tab intents go through window.open).
+vi.mock("../navigation/context", () => {
+  const adapter = () => ({
     push: mockPush,
     pathname: mockPathname.current,
     getShareableUrl: mockGetShareableUrl,
-  }),
-}));
+  });
+  return {
+    useNavigation: adapter,
+    useOptionalNavigation: adapter,
+  };
+});
 
 vi.mock("@multica/ui/components/common/theme-provider", () => ({
   useTheme: () => ({ theme: mockTheme.current, setTheme: mockSetTheme }),
@@ -343,6 +350,65 @@ describe("SearchCommand", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/settings");
     expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("cmd-click on a result opens it in a new tab instead of navigating in place", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "settings");
+
+    const settingsItem = await screen.findByText("Settings");
+    fireEvent.click(settingsItem, { metaKey: true });
+
+    expect(open).toHaveBeenCalledWith(
+      "https://app.multica//ws-test/settings",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(useSearchStore.getState().open).toBe(false);
+    open.mockRestore();
+  });
+
+  it("cmd+Enter opens the highlighted result in a new tab", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "settings");
+    await screen.findByText("Settings");
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true });
+
+    expect(open).toHaveBeenCalledWith(
+      "https://app.multica//ws-test/settings",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(mockPush).not.toHaveBeenCalled();
+    open.mockRestore();
+  });
+
+  it("a plain selection after an abandoned cmd-click does not inherit the stale intent", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    // cmd-click somewhere that selects nothing…
+    fireEvent.click(input, { metaKey: true });
+    await user.type(input, "settings");
+
+    const settingsItem = await screen.findByText("Settings");
+    // …then a plain click must navigate in place, not open a tab.
+    await user.click(settingsItem);
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/settings");
+    expect(open).not.toHaveBeenCalled();
+    open.mockRestore();
   });
 
   it("lists workspace members and navigates to the member page on selection", async () => {

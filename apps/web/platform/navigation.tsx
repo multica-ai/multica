@@ -11,15 +11,32 @@ import { canGoBackInApp } from "./in-app-history";
 /**
  * Web half of the `multica:navigate` bridge — the event shared content
  * (comments, chat, issue descriptions) fires when a link resolves to an in-app
- * destination. Desktop's shell answers it by opening a tab; on the web the
- * equivalent is a router push in place. Without this the event has no listener
- * and such links do nothing at all.
+ * destination. A plain click ("push") is a router push in place. A modifier
+ * click normally never reaches here on web — real anchors leave it to the
+ * browser — but the editor must intercept every click (contenteditable
+ * anchors don't navigate natively), and for those `window.open` is the
+ * closest the web can get: JS cannot open a background tab, so both tab
+ * dispositions land as a foreground browser tab.
  */
 function useInternalLinkHandler(router: ReturnType<typeof useRouter>) {
   useEffect(() => {
     const handler = (e: Event) => {
-      const path = (e as CustomEvent<{ path?: string }>).detail?.path;
+      const detail = (
+        e as CustomEvent<{ path?: string; disposition?: string }>
+      ).detail;
+      const path = detail?.path;
       if (!path) return;
+      if (
+        detail?.disposition === "background-tab" ||
+        detail?.disposition === "foreground-tab"
+      ) {
+        window.open(
+          window.location.origin + path,
+          "_blank",
+          "noopener,noreferrer",
+        );
+        return;
+      }
       router.push(path);
     };
     window.addEventListener("multica:navigate", handler);

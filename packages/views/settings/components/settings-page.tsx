@@ -161,9 +161,12 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
         {/* This page builds its own chrome instead of a PageHeader, so it has
             to supply the nav trigger itself — below `xl` the nav is a sheet or
             auto-collapsed, and settings has no other way back to it. */}
-        <div className="flex items-center">
+        {/* The gap below this row belongs to the row, not to the heading: with
+            `items-center`, a bottom margin on the `h1` is part of the box being
+            centred, so it offsets the heading against the trigger beside it. */}
+        <div className="flex items-center md:mb-4">
           <CollapsedNavTrigger />
-          <h1 className="sr-only text-body font-semibold md:not-sr-only md:mb-4 md:px-2">{t(($) => $.page.title)}</h1>
+          <h1 className="sr-only text-body font-semibold md:not-sr-only md:px-2">{t(($) => $.page.title)}</h1>
         </div>
         <TabsList
           variant="line"

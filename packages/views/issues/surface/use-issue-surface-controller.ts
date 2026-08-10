@@ -2,11 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { hashKey, keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { QueryKey } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type {
   Issue,
-  IssueAssigneeGroup,
   IssueStatus,
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
@@ -19,17 +17,16 @@ import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { ALL_STATUSES } from "@multica/core/issues/config";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
-import type {
-  AssigneeGroupedIssuesFilter,
-  IssueSortParam,
-  MyIssuesFilter,
-} from "@multica/core/issues/queries";
+import type { IssueSortParam } from "@multica/core/issues/queries";
 import { issueTableFacetsOptions } from "@multica/core/issues/queries";
 import {
   buildIssueSurfaceQueryPlan,
   type IssueSurfaceQueryPlan,
 } from "@multica/core/issues/surface/query-plan";
-import type { IssueScope } from "@multica/core/issues/surface/scope";
+import {
+  assigneeTypesForActorKind,
+  type IssueScope,
+} from "@multica/core/issues/surface/scope";
 import type { IssueDateFilter, SortField } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions } from "@multica/core/properties";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
@@ -82,12 +79,6 @@ export interface IssueSurfaceController {
    *  number it cannot stand behind. */
   workingAgents: WorkingAgentSummary[] | undefined;
   filteredGanttIssues: Issue[];
-  assigneeGroups?: IssueAssigneeGroup[];
-  assigneeGroupQueryKey?: QueryKey;
-  assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
-  filter: MyIssuesFilter;
-  loadMoreScope?: string;
-  loadMoreFilter?: MyIssuesFilter;
   sort: IssueSortParam;
   ganttIssues: Issue[];
   visibleStatuses: IssueStatus[];
@@ -316,8 +307,6 @@ export function useIssueSurfaceController({
     groupingPropertyId && catalogSettled && !activeGroupingProperty
       ? "status"
       : grouping;
-  const usesAssigneeBoard =
-    effectiveViewMode === "board" && effectiveGrouping === "assignee";
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
   const usesTable = effectiveViewMode === "table";
   const activeSearch = usesTable ? tableSearch : search;
@@ -391,19 +380,23 @@ export function useIssueSurfaceController({
   const derivedTableQuerySpec = useMemo<IssueTableQuerySpec>(() => {
     let queryScope: IssueTableQuerySpec["scope"];
     switch (scope.type) {
-      case "workspace":
+      case "workspace": {
+        const assigneeTypes = assigneeTypesForActorKind(scope.actorKind);
         queryScope = {
           kind: "workspace",
-          ...(scope.actorKind === "members"
-            ? { assignee_types: ["member" as const] }
-            : scope.actorKind === "agents"
-              ? { assignee_types: ["agent" as const, "squad" as const] }
-              : {}),
+          ...(assigneeTypes ? { assignee_types: assigneeTypes } : {}),
         };
         break;
-      case "project":
-        queryScope = { kind: "project", project_id: scope.projectId };
+      }
+      case "project": {
+        const assigneeTypes = assigneeTypesForActorKind(scope.actorKind);
+        queryScope = {
+          kind: "project",
+          project_id: scope.projectId,
+          ...(assigneeTypes ? { assignee_types: assigneeTypes } : {}),
+        };
         break;
+      }
       case "my":
         queryScope = {
           kind: "my",
@@ -674,13 +667,11 @@ export function useIssueSurfaceController({
     wsId,
     queryPlan,
     projectId,
-    usesAssigneeBoard,
     usesGantt,
     usesTable,
     serverStatusBranches,
     serverGroupBranches,
     ganttShowCompleted,
-    sort,
     statusFilters,
     priorityFilters,
     assigneeFilters,

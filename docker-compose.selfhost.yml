@@ -146,6 +146,12 @@ services:
       # subscribe credentials at connection time, and to seal the secret when
       # an installation is created from the WeCom settings tab.
       MULTICA_WECOM_SECRET_KEY: ${MULTICA_WECOM_SECRET_KEY:-}
+      # 1 = log every inbound and outbound WeCom frame, including the first
+      # 120 runes of each message body, so a real-device session can be
+      # checked against the server afterwards. Off unless set; turn it on only
+      # for a debugging session and unset it when that session ends, because
+      # what it records is user message content.
+      MULTICA_WECOM_TRACE: ${MULTICA_WECOM_TRACE:-}
     restart: unless-stopped
 
   frontend:

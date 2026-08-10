@@ -29,14 +29,14 @@ import type {
   UpdateIssueRequest,
 } from "@multica/core/types";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
+import { useViewBaseline } from "../surface/view-baseline-context";
 import { filterIssues, type IssueFilters } from "../utils/filter";
 import { getMoveAnchors } from "../utils/drag-utils";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import { childrenByParentsOptions, issueKeys, type IssueSortParam, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { childrenByParentsOptions, issueKeys } from "@multica/core/issues/queries";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -609,9 +609,6 @@ function SwimLaneViewImpl({
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
   projectMap,
-  myIssuesScope,
-  myIssuesFilter,
-  sort,
   projectId,
   onCreateIssue,
   groupBranches,
@@ -636,10 +633,6 @@ function SwimLaneViewImpl({
   ) => void;
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
-  myIssuesScope?: string;
-  myIssuesFilter?: MyIssuesFilter;
-  /** Must match the sort the page queried with — embedded in the cache key. */
-  sort?: IssueSortParam;
   /** Pre-fills `project_id` on the create form for the in-cell "+" button. */
   projectId?: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
@@ -648,6 +641,7 @@ function SwimLaneViewImpl({
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
   const viewStoreApi = useViewStoreApi();
+  const viewBaseline = useViewBaseline();
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
@@ -686,14 +680,6 @@ function SwimLaneViewImpl({
   const { getActorName } = useActorName();
 
   const laneSourceIssues = unfilteredIssues ?? issues;
-
-  const myIssuesOpts = useMemo(
-    () =>
-      myIssuesScope
-        ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
-        : undefined,
-    [myIssuesScope, myIssuesFilter],
-  );
 
   // Re-impose canonical status order (ALL_STATUSES) on whatever the controller
   // marked visible, so columns — including `cancelled`, ordered last — render
@@ -1336,35 +1322,20 @@ function SwimLaneViewImpl({
   const laneComponents = useMemo(
     () => ({
       Footer: () =>
-        groupBranches?.enabled ? (
-          groupBranches.hasMoreGroups ? (
-            <div className="pt-4">
-              <InfiniteScrollSentinel
-                onVisible={groupBranches.loadMoreGroups}
-                loading={groupBranches.isLoadingMoreGroups}
-              />
-            </div>
-          ) : null
-        ) : (
+        groupBranches?.enabled && groupBranches.hasMoreGroups ? (
           <div className="pt-4">
-            <SwimLaneLoadMoreRow
-              sortedStatuses={sortedStatuses}
-              gridStyle={gridStyle}
-              myIssuesOpts={myIssuesOpts}
-              sort={sort}
+            <InfiniteScrollSentinel
+              onVisible={groupBranches.loadMoreGroups}
+              loading={groupBranches.isLoadingMoreGroups}
             />
           </div>
-        ),
+        ) : null,
     }),
     [
       groupBranches?.enabled,
       groupBranches?.hasMoreGroups,
       groupBranches?.isLoadingMoreGroups,
       groupBranches?.loadMoreGroups,
-      sortedStatuses,
-      gridStyle,
-      myIssuesOpts,
-      sort,
     ],
   );
 
@@ -1454,6 +1425,12 @@ function SwimLaneViewImpl({
                         />
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
+                            disabled={viewBaseline?.status.has(status) === true}
+                            title={
+                              viewBaseline?.status.has(status) === true
+                                ? t(($) => $.filters.in_view)
+                                : undefined
+                            }
                             onClick={() => viewStoreApi.getState().hideStatus(status)}
                           >
                             <EyeOff className="size-3.5" />
@@ -1832,44 +1809,6 @@ function SwimLaneHiddenColumnsPanel({
   );
 }
 
-function SwimLaneLoadMoreRow({
-  sortedStatuses,
-  gridStyle,
-  myIssuesOpts,
-  sort,
-}: {
-  sortedStatuses: IssueStatus[];
-  gridStyle: React.CSSProperties;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-  sort?: IssueSortParam;
-}) {
-  return (
-    <div style={gridStyle}>
-      {sortedStatuses.map((status) => (
-        <SwimLaneLoadMoreCell
-          key={status}
-          status={status}
-          myIssuesOpts={myIssuesOpts}
-          sort={sort}
-        />
-      ))}
-    </div>
-  );
-}
-
-function SwimLaneLoadMoreCell({
-  status,
-  myIssuesOpts,
-  sort,
-}: {
-  status: IssueStatus;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-  sort?: IssueSortParam;
-}) {
-  const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(status, myIssuesOpts, sort);
-  if (!hasMore) return <div />;
-  return <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />;
-}
 
 /**
  * Memoized: the surface controller re-renders on loading-flag flips (e.g. a

@@ -202,9 +202,14 @@ export interface SendChatMessageResponse {
 }
 
 export interface StartMikaOnboardingResponse {
-  /** True only for the request that created the opening task. */
+  /** True only for the request that wrote the opening. */
   started: boolean;
-  task_id?: string;
+  /**
+   * The opening message, already persisted and final. No agent runs to
+   * produce it, so there is no task to await — a `started` response means the
+   * member's first message from Mika is in the transcript right now.
+   */
+  message_id?: string;
   created_at?: string;
 }
 

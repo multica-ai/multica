@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // runtimeMarkerBegin and runtimeMarkerEnd delimit the Multica-managed brief
@@ -165,6 +167,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from {workDir}/skills/ via per-task openclaw-config.json that pins agents.defaults.workspace)
 // For Hermes:   writes {workDir}/AGENTS.md  (skills discovered natively from a per-task HERMES_HOME/skills seeded by the daemon; see hermes_home.go)
 // For Pi:       writes {workDir}/AGENTS.md  (skills discovered natively from .pi/skills/)
+// For Oh-My-Pi (omp): writes {workDir}/AGENTS.md  (omp is a pi fork; skills discovered from .omp/skills/)
 // For Cursor:   writes {workDir}/AGENTS.md  (skills discovered natively from .cursor/skills/)
 // For Kimi:        writes {workDir}/AGENTS.md  (Kimi Code CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
 // For Reasonix:    writes {workDir}/AGENTS.md  (Reasonix reads AGENTS.md and .reasonix/skills/ natively)
@@ -190,6 +193,14 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 // Cleanup in lockstep — both paths consult the same table so a new provider
 // added to one side cannot drift past the other.
 func runtimeConfigPath(workDir, provider string) string {
+	// Built-in runtime identities (e.g. "omp") inherit their config file
+	// from their protocol family — resolve the family from the descriptor
+	// and delegate to the family's switch case. This avoids hardcoding
+	// "AGENTS.md" for every descriptor; a compatible runtime on Claude,
+	// CodeBuddy, or Qwen would otherwise write the wrong file.
+	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
+		return runtimeConfigPath(workDir, desc.ProtocolFamily)
+	}
 	switch provider {
 	case "claude":
 		return filepath.Join(workDir, "CLAUDE.md")

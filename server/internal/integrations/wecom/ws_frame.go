@@ -14,8 +14,10 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"unicode"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
 // Frame commands the client sends.
@@ -81,8 +83,32 @@ type aibotMsgCallback struct {
 	Text    struct {
 		Content string `json:"content"`
 	} `json:"text"`
-	// Image / voice / file / video / mixed have their own fields; we do
-	// not surface them yet — MsgType=="text" is the only case we route.
+	// Voice carries the TRANSCRIPT, not audio. WeCom runs the speech
+	// recognition on its side and delivers only the result, so a voice note
+	// needs no download, no media key and no storage — it is a sentence that
+	// happened to be spoken. Not gated on chat type: whatever chat a voice
+	// note arrives from, the transcript is read the same way.
+	Voice struct {
+		Content string `json:"content"`
+	} `json:"voice"`
+	// Image / file / video / mixed have their own fields and carry a
+	// downloadable payload; they are not surfaced yet.
+}
+
+// bodyText is the message's text, whether it was typed or spoken. Recognition
+// comes back empty on background noise or a half-second press, and an empty
+// body would reach the agent as a turn with nothing in it — so an empty
+// transcript reports false and takes the receipt path instead.
+func (mc aibotMsgCallback) bodyText() (string, bool) {
+	switch strings.ToLower(mc.MsgType) {
+	case "text":
+		return mc.Text.Content, true
+	case "voice":
+		transcript := strings.TrimSpace(mc.Voice.Content)
+		return transcript, transcript != ""
+	default:
+		return "", false
+	}
 }
 
 // aibotEventCallback is the body of an aibot_event_callback frame. We only
@@ -125,9 +151,10 @@ type InboundMessage struct {
 	// SenderUserID is the userid of the person who typed the message.
 	SenderUserID string `json:"sender_user_id,omitempty"`
 
-	// Content is the human-readable text body when MsgType == "text";
-	// empty for media / events. The cross-platform envelope's Text field
-	// is populated from this.
+	// Content is the human-readable body of the message — what was typed
+	// for MsgType == "text", what WeCom's recognition returned for
+	// MsgType == "voice". Empty for the downloadable kinds and for events.
+	// The cross-platform envelope's Text field is populated from this.
 	Content string `json:"content,omitempty"`
 
 	// ReqID is the frame req_id the server sent this message with. We
@@ -148,7 +175,12 @@ type InboundMessage struct {
 // A user @-mentioning the bot in a group is not distinguishable from a raw
 // group message on the wire — WeCom only forwards to the bot when it was
 // addressed, so any received group message counts as addressed.
-func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string) channel.InboundMessage {
+//
+// botDisplayName is the bot's name in a chat, from the installation config. It
+// is used for one thing: recognising where the sender's @-mention ends. Empty
+// is fine and falls back to a whitespace heuristic; see stripLeadingMentions.
+func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallback, reqID string) channel.InboundMessage {
+	body, _ := mc.bodyText()
 	chatType := channel.ChatTypeP2P
 	if strings.EqualFold(mc.ChatType, "group") {
 		chatType = channel.ChatTypeGroup
@@ -160,6 +192,27 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		chatID = senderID
 	}
 
+	// The command source is the sender's own words. In a group the @-mention IS
+	// how you reach the bot, so it arrives glued to whatever was typed after it
+	// — "@Andrew /new" is a person asking for a fresh session, not prose that
+	// happens to contain a word — and the addressing comes off the front.
+	//
+	// Groups only. In a 1:1 nobody has to address the bot, so a leading "@" is
+	// the sender naming a colleague they are talking ABOUT: "@李雷 /issue 帮我
+	// 问问他" is a question, and stripping the name would turn it into a filed
+	// issue nobody asked for plus, via SkipAgentRun below, no answer at all.
+	// Passing the raw content through keeps p2p exactly where it was before
+	// CommandText was set here.
+	//
+	// Read off bodyText, not Text.Content: a spoken "/issue …" carries the
+	// words in voice.content, and sourcing the command from the typed field
+	// would leave it empty — the engine would then fall back to Text, file the
+	// issue and, with SkipAgentRun false, run the agent over it as well.
+	command := body
+	if chatType == channel.ChatTypeGroup {
+		command = stripLeadingMentions(body, botDisplayName)
+	}
+
 	wm := InboundMessage{
 		BotID:        botID,
 		MsgID:        mc.MsgID,
@@ -167,7 +220,7 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		ChatType:     mc.ChatType,
 		ChatID:       chatID,
 		SenderUserID: senderID,
-		Content:      mc.Text.Content,
+		Content:      body,
 		ReqID:        reqID,
 	}
 	raw, _ := json.Marshal(wm)
@@ -176,8 +229,17 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		EventID:        mc.MsgID,
 		MessageID:      mc.MsgID,
 		Type:           channelMsgType(mc.MsgType),
-		Text:           mc.Text.Content,
+		Text:           body,
 		AddressedToBot: true,
+		// The sender's own words, with a group's addressing removed. Command
+		// classification is shared (channel/message.go) and falls back to Text
+		// when this is empty — and in a group Text starts with the mention, so
+		// every slash command read as ordinary prose. Lark sets this from its
+		// command body (feishu_channel.go:139) and Slack from its cleaned text
+		// (slack/inbound.go:131); WeCom was the one adapter leaving it empty.
+		// In a p2p chat this is Text verbatim, which is what the fallback was
+		// already producing.
+		CommandText: command,
 		// A pure /issue command in WeCom should NOT trigger the
 		// agent — the engine already creates the issue and the
 		// OutboundReplier already sends "✅ 已创建 #N". Letting the agent
@@ -185,7 +247,13 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		// command" reply that just clutters the conversation. wecom is
 		// alone on this — Slack/Lark keep the historical "let the agent
 		// see /issue and respond too" behaviour.
-		SkipAgentRun: isIssueCommand(mc.Text.Content),
+		//
+		// Read off the same source the engine will parse, so a group /issue
+		// behaves like the p2p one instead of filing the issue and then also
+		// asking the agent about it. It has to be the same source: read off the
+		// raw text instead and a p2p "@李雷 /issue …" would file an issue and
+		// stay silent, which is the whole reason the strip above is gated.
+		SkipAgentRun: isIssueCommand(command),
 		Source: channel.Source{
 			ChannelType: TypeWecom,
 			ChatID:      chatID,
@@ -196,25 +264,72 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 	}
 }
 
-// isIssueCommand mirrors engine.ParseIssueCommand's front-of-body detection
-// without materializing the parsed struct — we only need the yes/no. A pure
-// /issue command starts at the first non-empty line, "/issue" as a whole
-// token, optionally followed by whitespace and the title.
-func isIssueCommand(body string) bool {
-	for _, raw := range strings.Split(body, "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" {
+// stripLeadingMentions removes the @-mentions a message opens with, which in a
+// group chat is how the sender addresses the bot. WeCom puts them in the text
+// and sends no mention list alongside it, so there is nothing to match against
+// but the shape: an "@" at the very front, up to the next space.
+//
+// Group messages only — the caller gates it on chatType. Nobody addresses the
+// bot in a 1:1, so the same "@" at the front there is a colleague's name in the
+// sender's own sentence, and removing it would rewrite what they said.
+//
+// Only the front. A name further into the sentence is the sender talking ABOUT
+// somebody — "@Andrew ask @李雷 about yesterday" is one instruction naming one
+// colleague — and stripping that would quietly rewrite what they said.
+//
+// This feeds command classification only. The stored message keeps the text
+// exactly as it arrived, so the transcript still shows who was addressed.
+//
+// Slack does the same thing with a regex over its mention token
+// (slack/inbound.go cleanText); Feishu is handed an already-clean command body
+// by the platform. WeCom was the one adapter passing the raw text through.
+func stripLeadingMentions(s, botName string) string {
+	for {
+		trimmed := strings.TrimLeftFunc(s, unicode.IsSpace)
+		if !strings.HasPrefix(trimmed, "@") {
+			return trimmed
+		}
+		// Our own name first, matched whole. A display name may contain
+		// spaces — "Multica Bot" is the obvious one — and cutting at the
+		// first space would leave "Bot /new 重新分析", which is not a command,
+		// so every slash command in that group would still be dropped.
+		//
+		// The name is not guessed. It comes from the installation config, set
+		// when the bot was connected, because the callback carries no
+		// structured mention list to read it from. Absent, the heuristic below
+		// is what runs — correct for a one-word name, and what every
+		// installation has until somebody fills the field in.
+		if botName != "" && strings.HasPrefix(trimmed[1:], botName) {
+			s = trimmed[1+len(botName):]
 			continue
 		}
-		if line == "/issue" {
-			return true
+		i := strings.IndexFunc(trimmed, unicode.IsSpace)
+		if i < 0 {
+			// The whole message is one mention and nothing else. There is no
+			// command and no words — leave it, so an empty body is decided by
+			// the caller rather than manufactured here.
+			return trimmed
 		}
-		if strings.HasPrefix(line, "/issue ") || strings.HasPrefix(line, "/issue\t") {
-			return true
-		}
-		return false
+		s = trimmed[i:]
 	}
-	return false
+}
+
+// isIssueCommand asks the engine's own parser instead of mirroring it. The
+// mirror had drifted: it trimmed with strings.TrimSpace, which strips every
+// Unicode space including U+3000 — the ideographic space a Chinese IME emits
+// in full-width mode — while engine.ParseIssueCommand trims only " \t".
+//
+// So a p2p line opening with U+3000 read as a command here and as prose there:
+// SkipAgentRun was set so no agent ran, and the parser declined so no issue was
+// filed. The sender got nothing back and no error anywhere said why. Group
+// messages reach this helper after their leading mentions are normalized, and
+// must use the same parser too.
+//
+// A mirror of a parser is a parser. Delegating costs one allocation on a path
+// that already does I/O, and removes the whole class.
+func isIssueCommand(body string) bool {
+	_, ok := engine.ParseIssueCommand(body)
+	return ok
 }
 
 // channelMsgType maps the raw aibot msg_type onto the normalized enum.
@@ -231,11 +346,12 @@ func channelMsgType(wecomType string) channel.MsgType {
 	case "video":
 		return channel.MsgTypeVideo
 	default:
-		// Includes "mixed" (text + media): dispatchFrame only routes msgtype
-		// == "text", so anything else is answered with the text-only receipt
-		// and never reaches this normalization. Kept as Unknown rather than
-		// mapping "mixed" → Text, which was dead and implied mixed messages
-		// were routed as text when they are not.
+		// Includes "mixed" (text + media): dispatchFrame routes the kinds
+		// bodyText answers for — "text", and "voice" with a non-empty
+		// transcript — so anything else is answered with the text-only
+		// receipt and never reaches this normalization. Kept as Unknown
+		// rather than mapping "mixed" → Text, which was dead and implied
+		// mixed messages were routed as text when they are not.
 		return channel.MsgTypeUnknown
 	}
 }

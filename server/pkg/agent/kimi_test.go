@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -148,6 +149,272 @@ func TestKimiBackendSetModelFailureFailsTask(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+func fakeKimiACPThinkingScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  if [ -n "$KIMI_REQUESTS_FILE" ]; then
+    printf '%s\n' "$line" >> "$KIMI_REQUESTS_FILE"
+  fi
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_thinking"}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_thinking"}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/set_config_option"'*)
+      if [ "$KIMI_SET_CONFIG_ERROR" = "unsupported" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"Invalid params","data":{"value":"Unsupported thinking level"}}}\n' "$id"
+        continue
+      fi
+      requested=$(printf '%s' "$line" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
+      if [ "$KIMI_SET_CONFIG_RESULT" = "mismatch" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"thinking","currentValue":"low"}]}}\n' "$id"
+      elif [ "$KIMI_SET_CONFIG_RESULT" = "missing" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[]}}\n' "$id"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"thinking","currentValue":"%s"}]}}\n' "$id" "$requested"
+      fi
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_thinking","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"pong"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func runKimiThinkingTest(t *testing.T, fakePath string, env map[string]string, opts ExecOptions) Result {
+	t.Helper()
+	backend, err := New("kimi", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            env,
+	})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+	if opts.Timeout == 0 {
+		opts.Timeout = 5 * time.Second
+	}
+	session, err := backend.Execute(context.Background(), "reply with pong", opts)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		return result
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+		return Result{}
+	}
+}
+
+func TestKimiBackendSetsThinkingLevelBeforePrompt(t *testing.T) {
+	t.Parallel()
+	recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+	result := runKimiThinkingTest(t, fakePath, map[string]string{
+		"KIMI_REQUESTS_FILE": recordPath,
+	}, ExecOptions{Model: "kimi-code/k3", ThinkingLevel: "high"})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+
+	raw, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read recorded requests: %v", err)
+	}
+	var methods []string
+	var thinkingParams map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			t.Fatalf("decode recorded request: %v", err)
+		}
+		method, _ := frame["method"].(string)
+		methods = append(methods, method)
+		if method == "session/set_config_option" {
+			thinkingParams, _ = frame["params"].(map[string]any)
+		}
+	}
+	wantOrder := []string{"initialize", "session/new", "session/set_model", "session/set_config_option", "session/prompt"}
+	if !reflect.DeepEqual(methods, wantOrder) {
+		t.Fatalf("ACP method order = %v, want %v", methods, wantOrder)
+	}
+	if thinkingParams["sessionId"] != "ses_thinking" ||
+		thinkingParams["configId"] != "thinking" ||
+		thinkingParams["value"] != "high" {
+		t.Errorf("set_config_option params = %+v", thinkingParams)
+	}
+}
+
+func TestKimiBackendThinkingFailureWarnsAndContinues(t *testing.T) {
+	t.Parallel()
+	recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+	result := runKimiThinkingTest(t, fakePath, map[string]string{
+		"KIMI_REQUESTS_FILE":    recordPath,
+		"KIMI_SET_CONFIG_ERROR": "unsupported",
+	}, ExecOptions{Model: "kimi-code/k3", ThinkingLevel: "max"})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	raw, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read recorded requests: %v", err)
+	}
+	if !strings.Contains(string(raw), `"method":"session/prompt"`) {
+		t.Fatal("prompt was not sent after thinking configuration failed")
+	}
+}
+
+func TestKimiBackendThinkingConfirmationFailureWarnsAndContinues(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		result string
+	}{
+		{name: "mismatch", result: "mismatch"},
+		{name: "missing", result: "missing"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+			fakePath := filepath.Join(t.TempDir(), "kimi")
+			writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+			result := runKimiThinkingTest(t, fakePath, map[string]string{
+				"KIMI_REQUESTS_FILE":     recordPath,
+				"KIMI_SET_CONFIG_RESULT": tt.result,
+			}, ExecOptions{Model: "kimi-code/k3", ThinkingLevel: "max"})
+			if result.Status != "completed" {
+				t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+			}
+			if result.ResumeRejected {
+				t.Fatal("confirmation failure must not be classified as a rejected resume")
+			}
+			raw, err := os.ReadFile(recordPath)
+			if err != nil {
+				t.Fatalf("read recorded requests: %v", err)
+			}
+			if !strings.Contains(string(raw), `"method":"session/prompt"`) {
+				t.Fatal("prompt was not sent after thinking confirmation failed")
+			}
+		})
+	}
+}
+
+func TestKimiBackendOmitsThinkingConfigWhenUnset(t *testing.T) {
+	t.Parallel()
+	recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+	result := runKimiThinkingTest(t, fakePath, map[string]string{
+		"KIMI_REQUESTS_FILE": recordPath,
+	}, ExecOptions{Model: "kimi-code/k3"})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	raw, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read recorded requests: %v", err)
+	}
+	if strings.Contains(string(raw), `"method":"session/set_config_option"`) {
+		t.Fatal("thinking config was sent for an empty override")
+	}
+}
+
+// recordedKimiMethods returns the ACP method names the fake binary saw, in
+// order, from the file $KIMI_REQUESTS_FILE points at.
+func recordedKimiMethods(t *testing.T, recordPath string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read recorded requests: %v", err)
+	}
+	var methods []string
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			t.Fatalf("decode recorded request: %v", err)
+		}
+		method, _ := frame["method"].(string)
+		methods = append(methods, method)
+	}
+	return methods
+}
+
+// TestKimiBackendSetsThinkingLevelOnResumedSession covers the half of the
+// contract the fresh-session tests miss: a resumed session already carries
+// whatever thinking level its previous turn left behind, so the configured
+// level has to be re-applied — still before session/prompt, and without a
+// session/set_model call to piggyback on.
+func TestKimiBackendSetsThinkingLevelOnResumedSession(t *testing.T) {
+	t.Parallel()
+	recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+	result := runKimiThinkingTest(t, fakePath, map[string]string{
+		"KIMI_REQUESTS_FILE": recordPath,
+	}, ExecOptions{ResumeSessionID: "ses_thinking", ThinkingLevel: "high"})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+
+	wantOrder := []string{"initialize", "session/resume", "session/set_config_option", "session/prompt"}
+	if methods := recordedKimiMethods(t, recordPath); !reflect.DeepEqual(methods, wantOrder) {
+		t.Fatalf("ACP method order = %v, want %v", methods, wantOrder)
+	}
+}
+
+// TestKimiBackendOmitsThinkingConfigOnResumedSessionWhenUnset states the known
+// gap deliberately rather than leaving it undefined: with no configured level,
+// the backend sends nothing, so a resumed session keeps the level its previous
+// turn set. Switching an agent back to "Follow CLI config" therefore does not
+// clear a level already applied to a live session. Changing that means
+// deciding what "follow the CLI config" resolves to on the wire, which is
+// tracked separately; until then this test is what makes the behaviour visible.
+func TestKimiBackendOmitsThinkingConfigOnResumedSessionWhenUnset(t *testing.T) {
+	t.Parallel()
+	recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+	result := runKimiThinkingTest(t, fakePath, map[string]string{
+		"KIMI_REQUESTS_FILE": recordPath,
+	}, ExecOptions{ResumeSessionID: "ses_thinking"})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+
+	wantOrder := []string{"initialize", "session/resume", "session/prompt"}
+	if methods := recordedKimiMethods(t, recordPath); !reflect.DeepEqual(methods, wantOrder) {
+		t.Fatalf("ACP method order = %v, want %v", methods, wantOrder)
 	}
 }
 

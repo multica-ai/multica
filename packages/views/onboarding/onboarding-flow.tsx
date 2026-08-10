@@ -271,7 +271,6 @@ function OnboardingStepFlow({
             workspaceSlug: workspace.slug,
             runtimeId: rt.id,
             model,
-            returning: isNewWorkspace,
             ...getMikaOnboarding(contentLang),
           });
           await completeOnboarding("full", workspace.id);

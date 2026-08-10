@@ -138,6 +138,105 @@ func TestEnqueueChatTaskDefersWhenMediaMessageCommitsDuringEnqueue(t *testing.T)
 	}
 }
 
+// TestEnqueueChatTaskLocksOutAConcurrentArchiveButNotInboundMessages is the
+// other half of the archive guard, and it is about the lock MODE rather than
+// the status check.
+//
+// The handler-side test covers archive-then-flush: the archive has committed,
+// so the re-read under the lock sees 'archived' and the enqueue refuses. This
+// one covers the overlap — an archive arriving while an enqueue is mid-flight.
+// It must not be able to slip past: if it committed inside our transaction its
+// cancel would run against a task row that does not exist yet, and the enqueue
+// would go on to commit that row onto a closed conversation. So the archive has
+// to block on the lock, come through afterwards, and cancel what it then sees.
+//
+// The same transaction must NOT block the room's next message. Every inbound
+// message is an INSERT into chat_message, FK'd to this chat_session, so it takes
+// FOR KEY SHARE on the row we hold — and FOR UPDATE (what the send, delete and
+// draft paths take) conflicts with exactly that. Under FOR UPDATE a group's
+// next message would wait for the previous message's enqueue to finish. Both
+// halves are asserted from inside the enqueue transaction, which is the only
+// moment either is observable.
+func TestEnqueueChatTaskLocksOutAConcurrentArchiveButNotInboundMessages(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+
+	var chatSessionID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id)
+		VALUES ($1, $2, $3) RETURNING id`, workspaceID, agentID, userID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("seed chat session: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, chatSessionID)
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content, channel_ingested)
+		VALUES ($1, 'user', 'first', TRUE)`, chatSessionID); err != nil {
+		t.Fatalf("seed inbound message: %v", err)
+	}
+
+	// Both probes run on their own connections, from inside the enqueue
+	// transaction, with a short lock_timeout: "blocked" and "not blocked" are
+	// then a returned error rather than a wall-clock guess.
+	var archiveErr, appendErr error
+	svc := &TaskService{
+		Queries: q,
+		TxStarter: &raceInjectTxStarter{pool: pool, inject: func() {
+			archiveErr = probeUnderLock(ctx, pool,
+				`UPDATE chat_session SET status = 'archived' WHERE id = $1`, chatSessionID)
+			appendErr = probeUnderLock(ctx, pool,
+				`INSERT INTO chat_message (chat_session_id, role, content, channel_ingested)
+				 VALUES ($1, 'user', 'second', TRUE)`, chatSessionID)
+		}},
+		Bus: events.New(),
+	}
+
+	task, err := svc.EnqueueChatTask(ctx, db.ChatSession{
+		ID:      util.MustParseUUID(chatSessionID),
+		AgentID: util.MustParseUUID(agentID),
+	}, util.MustParseUUID(userID), false)
+	if err != nil {
+		t.Fatalf("EnqueueChatTask: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, task.ID)
+	})
+
+	if !isLockTimeout(archiveErr) {
+		t.Fatalf("an archive landing mid-enqueue got %v, want to be blocked on the chat_session lock — it would otherwise commit while this task row is still invisible, cancel nothing, and leave a queued turn on a closed conversation", archiveErr)
+	}
+	if appendErr != nil {
+		t.Fatalf("the room's next message could not be appended during an enqueue: %v — inbound ingestion must not wait behind the debounced flush of the message before it", appendErr)
+	}
+}
+
+// probeUnderLock runs one statement on its own connection with a short
+// lock_timeout, so a row lock held by the caller's transaction surfaces as
+// SQLSTATE 55P03 instead of hanging the test. The probe always rolls back: it
+// is asking whether it *could* proceed, not changing anything.
+func probeUnderLock(ctx context.Context, pool *pgxpool.Pool, sql, chatSessionID string) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '500ms'`); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, sql, chatSessionID)
+	return err
+}
+
+// isLockTimeout reports the "I was blocked" answer: SQLSTATE 55P03,
+// lock_not_available.
+func isLockTimeout(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "55P03"
+}
+
 func TestDeferredChannelIssueTaskPromotesAfterMediaSettlement(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()

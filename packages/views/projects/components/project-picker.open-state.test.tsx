@@ -14,7 +14,7 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enProjects from "../../locales/en/projects.json";
 import enIssues from "../../locales/en/issues.json";
 import { ProjectPicker } from "./project-picker";
-import { PillButton } from "../../common/pill-button";
+import { ClearablePillButton, PillButton } from "../../common/pill-button";
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
@@ -46,18 +46,25 @@ function withI18n(children: React.ReactNode) {
   );
 }
 
-/** Mirrors the create-issue dialog wiring from packages/views/modals/create-issue.tsx. */
+/** Mirrors the create-issue dialog wiring from packages/views/modals/create-issue.tsx,
+ *  including the clearable pill both create panels use. */
 function CreateDialogHarness({ onUpdate }: { onUpdate: (u: object) => void }) {
   const [fieldPickerOpen, setFieldPickerOpen] = useState<"project" | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
+  const commit = (next: string | null) => {
+    onUpdate({ project_id: next });
+    setProjectId(next);
+  };
   return withI18n(
     <ProjectPicker
       projectId={projectId}
-      onUpdate={(u) => {
-        onUpdate(u);
-        setProjectId((u as { project_id?: string | null }).project_id ?? null);
-      }}
-      triggerRender={<PillButton />}
+      onUpdate={(u) => commit((u as { project_id?: string | null }).project_id ?? null)}
+      triggerRender={
+        <ClearablePillButton
+          onClear={projectId !== null ? () => commit(null) : undefined}
+          clearLabel="Clear project"
+        />
+      }
       align="start"
       open={fieldPickerOpen === "project" ? true : undefined}
       onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
@@ -103,6 +110,39 @@ describe("ProjectPicker open state under create-dialog wiring", () => {
     // Reopen from the (now selected) trigger and close by selecting again.
     await user.click(screen.getByRole("button", { name: /launch command center/i }));
     await user.click(await screen.findByRole("button", { name: /mobile web/i }));
+    await expectClosed();
+  });
+});
+
+// The pill's quick-clear (MUL-5862). It is a sibling button inside the pill
+// shell, not an overlay on the trigger — the overlay version this replaces
+// needed every caller to reserve right padding and three of five didn't
+// (MUL-5666). The trigger stays the popover's anchor, so pressing × must
+// clear the field WITHOUT opening the list.
+describe("ProjectPicker clearable pill", () => {
+  it("offers no × until a project is selected", async () => {
+    render(<CreateDialogHarness onUpdate={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "Clear project" })).not.toBeInTheDocument();
+  });
+
+  it("clears the selection in one click without opening the popover", async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+
+    render(<CreateDialogHarness onUpdate={onUpdate} />);
+
+    await user.click(screen.getByRole("button", { name: /no project/i }));
+    await user.click(await screen.findByRole("button", { name: /mobile web/i }));
+    await expectClosed();
+
+    await user.click(screen.getByRole("button", { name: "Clear project" }));
+
+    expect(onUpdate).toHaveBeenLastCalledWith({ project_id: null });
+    // Trigger is back to the empty label, the × is gone, and the click never
+    // reached the trigger underneath it.
+    expect(screen.getByRole("button", { name: /no project/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear project" })).not.toBeInTheDocument();
     await expectClosed();
   });
 });

@@ -26,8 +26,6 @@ import {
 } from "@multica/ui/components/ui/tooltip"
 import { PanelLeftIcon } from "lucide-react"
 
-const SIDEBAR_COOKIE_NAME = "sidebar_state"
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH_DEFAULT = 256
 const SIDEBAR_WIDTH_MIN = 200
 const SIDEBAR_WIDTH_MAX = 360
@@ -124,6 +122,15 @@ function SidebarProvider({
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
+  //
+  // Deliberately not persisted. Upstream shadcn writes a `sidebar_state` cookie
+  // here and seeds `defaultOpen` from it on the server; we dropped the write
+  // because nothing ever read it, and restoring the pair would be a bug rather
+  // than a feature: the auto-collapse below drives `setOpen(false)` from the
+  // viewport, so persisting its result would carry a collapse the user never
+  // asked for out of the `lg`–`xl` band and into their next session on a wider
+  // display. Persisting this needs a source that distinguishes a user toggle
+  // from an automated one — not a cookie on this callback.
   const [_open, _setOpen] = React.useState(defaultOpen)
   const open = openProp ?? _open
   const setOpen = React.useCallback(
@@ -134,9 +141,6 @@ function SidebarProvider({
       } else {
         _setOpen(openState)
       }
-
-      // This sets the cookie to keep the sidebar state.
-      document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
     },
     [setOpenProp, open]
   )

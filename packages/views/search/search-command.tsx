@@ -61,7 +61,12 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { copyText } from "@multica/ui/lib/clipboard";
-import { useNavigation } from "../navigation";
+import {
+  resolveClickIntent,
+  useIntentNavigate,
+  useNavigation,
+  type LinkClickIntent,
+} from "../navigation";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { HighlightText } from "./highlight-text";
@@ -247,9 +252,27 @@ export function SearchCommand() {
     { key: "skills", label: t(($) => $.pages.skills), keywords: ["skills", "library"] },
     { key: "settings", label: t(($) => $.pages.settings), keywords: ["settings", "config", "preferences", "设置"] },
   ];
-  const { push, pathname, getShareableUrl } = useNavigation();
+  const { pathname, getShareableUrl } = useNavigation();
+  const intentNavigate = useIntentNavigate();
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
+
+  // cmdk's onSelect carries no event, so the activating gesture's modifiers
+  // are recorded on the capture phase (click on a result, Enter in the input)
+  // and consumed by the select handlers below: cmd+click / cmd+Enter opens a
+  // result in a new tab instead of navigating in place.
+  const pendingIntentRef = useRef<LinkClickIntent>("push");
+  const recordIntent = useCallback(
+    (e: Pick<MouseEvent, "button" | "metaKey" | "ctrlKey" | "shiftKey">) => {
+      pendingIntentRef.current = resolveClickIntent(e);
+    },
+    [],
+  );
+  const consumeIntent = useCallback(() => {
+    const intent = pendingIntentRef.current;
+    pendingIntentRef.current = "push";
+    return intent;
+  }, []);
   const wsId = useWorkspaceId();
   const recentItems = useRecentIssuesStore(selectRecentIssues(wsId));
   const p: WorkspacePaths = useWorkspacePaths();
@@ -570,30 +593,29 @@ export function SearchCommand() {
   const handleSelect = useCallback(
     (value: string) => {
       setOpen(false);
-      if (value.startsWith("project:")) {
-        // value is "project:<id>" — slice off the 8-char prefix to extract the id.
-        push(p.projectDetail(value.slice(8)));
-      } else {
-        push(p.issueDetail(value));
-      }
+      const href = value.startsWith("project:")
+        ? // value is "project:<id>" — slice off the 8-char prefix to extract the id.
+          p.projectDetail(value.slice(8))
+        : p.issueDetail(value);
+      intentNavigate(href, consumeIntent());
     },
-    [push, setOpen, p],
+    [intentNavigate, consumeIntent, setOpen, p],
   );
 
   const handlePageSelect = useCallback(
     (key: NavKey) => {
       setOpen(false);
-      push(p[key]());
+      intentNavigate(p[key](), consumeIntent());
     },
-    [push, setOpen, p],
+    [intentNavigate, consumeIntent, setOpen, p],
   );
 
   const handleMemberSelect = useCallback(
     (userId: string) => {
-      push(p.memberDetail(userId));
+      intentNavigate(p.memberDetail(userId), consumeIntent());
       setOpen(false);
     },
-    [push, setOpen, p],
+    [intentNavigate, consumeIntent, setOpen, p],
   );
 
   return (
@@ -611,6 +633,18 @@ export function SearchCommand() {
         </DialogHeader>
         <CommandPrimitive
           shouldFilter={false}
+          onPointerDownCapture={recordIntent}
+          onClickCapture={recordIntent}
+          onKeyDownCapture={(e) => {
+            if (e.key === "Enter") {
+              recordIntent({
+                button: 0,
+                metaKey: e.metaKey,
+                ctrlKey: e.ctrlKey,
+                shiftKey: e.shiftKey,
+              });
+            }
+          }}
           className="flex size-full flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground"
         >
           {/* Search input */}

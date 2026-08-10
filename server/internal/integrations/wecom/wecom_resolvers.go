@@ -73,6 +73,7 @@ func NewResolverSet(
 // production value.
 type engineSessionBinder interface {
 	EnsureSession(ctx context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error)
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error
 	AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error)
 }
 
@@ -214,15 +215,29 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 	})
 }
 
+func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
+	return r.session.MarkPendingFresh(ctx, sessionID)
+}
+
 func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
+	// The adapter's own command source wins, and Text is only the fallback.
+	// Overwriting it with Text — which this used to do — threw away the
+	// mention-stripped line the adapter had already worked out, so in a group
+	// the /issue parser was handed "@Multica Bot /issue …" and saw prose.
+	// Same two lines as lark/feishu_resolvers.go:206 and slack/resolvers.go:337.
+	commandText := p.Message.CommandText
+	if commandText == "" {
+		commandText = p.Message.Text
+	}
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
 		SessionID:      p.SessionID,
 		Sender:         p.Sender,
 		InstallationID: p.InstallationID,
 		Body:           p.Message.Text,
-		CommandText:    p.Message.Text, // wecom has no enrichment; command == body
+		CommandText:    commandText,
 		MessageID:      p.Message.MessageID,
 		ClaimToken:     p.ClaimToken,
+		ForceFresh:     p.Message.ForceFresh,
 	})
 }
 

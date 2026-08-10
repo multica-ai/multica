@@ -64,6 +64,9 @@ func init() {
 }
 
 func runLogin(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("login"); err != nil {
+		return err
+	}
 	// Run the standard auth login flow.
 	if err := runAuthLogin(cmd, args); err != nil {
 		return err
