@@ -77,6 +77,10 @@
     "sticky_comment_bar": {
       "title": "固定评论栏",
       "hint": "滚动任务页面时，评论栏始终固定在底部。"
+    },
+    "detail_pages_collapsed_list": {
+      "title": "详情页默认收起列表",
+      "hint": "进入自动化与智能体详情页时默认收起列表栏，可从列表栏头部重新展开。"
     }
   },
   "shortcuts": {

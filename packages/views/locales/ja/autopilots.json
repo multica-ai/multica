@@ -109,6 +109,11 @@
       "cancel": "キャンセル",
       "confirm": "削除",
       "deleting": "削除中..."
+    },
+    "list_rail": {
+      "toggle_expand_aria": "オートパイロットリストを展開",
+      "toggle_collapse_aria": "オートパイロットリストを折りたたむ",
+      "count_badge": "オートパイロット {{count}} 件"
     }
   },
   "access": {

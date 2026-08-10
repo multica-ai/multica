@@ -77,6 +77,10 @@
     "sticky_comment_bar": {
       "title": "Sticky comment bar",
       "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
+    },
+    "detail_pages_collapsed_list": {
+      "title": "Collapse list on detail pages",
+      "hint": "Open autopilot and agent detail pages with the list rail collapsed. Expand it again from the rail header."
     }
   },
   "shortcuts": {
@@ -121,7 +125,7 @@
       "goMyIssues": { "label": "Go to My Issues", "description": "Open issues assigned to you." },
       "goIssues": { "label": "Go to Issues", "description": "Open the issue list." },
       "goProjects": { "label": "Go to Projects", "description": "Open the project list." },
-      "goAutopilots": { "label": "Go to Autopilot", "description": "Open workspace automations." },
+      "goAutopilots": { "label": "Go to Autopilot", "description": "Open workspace autopilots." },
       "goAgents": { "label": "Go to Agents", "description": "Open the agent list." },
       "goSquads": { "label": "Go to Squads", "description": "Open the squad list." },
       "goUsage": { "label": "Go to Usage", "description": "Open usage analytics." },

@@ -109,6 +109,11 @@
       "cancel": "취소",
       "confirm": "삭제",
       "deleting": "삭제하는 중..."
+    },
+    "list_rail": {
+      "toggle_expand_aria": "오토파일럿 목록 펼치기",
+      "toggle_collapse_aria": "오토파일럿 목록 접기",
+      "count_badge": "오토파일럿 {{count}}개"
     }
   },
   "access": {

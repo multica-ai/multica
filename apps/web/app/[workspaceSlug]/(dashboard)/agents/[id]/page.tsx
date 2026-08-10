@@ -1,13 +1,13 @@
 "use client";
 
 import { use } from "react";
-import { AgentDetailPage } from "@multica/views/agents";
+import { AgentDetailRoute } from "@multica/views/agents";
 
-export default function AgentDetailRoute({
+export default function AgentDetailRoutePage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  return <AgentDetailPage agentId={id} />;
+  return <AgentDetailRoute agentId={id} />;
 }

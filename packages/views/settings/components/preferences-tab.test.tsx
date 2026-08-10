@@ -82,6 +82,7 @@ vi.mock("@multica/core/auth", async () => {
 
 import { PreferencesTab } from "./preferences-tab";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
+import { useListDetailSplitStore } from "@multica/core/list-detail/stores";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, auth: enAuth, settings: enSettings },
@@ -336,5 +337,39 @@ describe("PreferencesTab — Sticky comment bar", () => {
     expect(useCommentComposerStore.getState().sticky).toBe(false);
     expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PreferencesTab — Detail pages collapsed list", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userRef.current = null;
+    useListDetailSplitStore.setState({ collapsed: true, size: undefined });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders on by default and toggles the store with a saved toast", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    const toggle = screen.getByRole("switch", {
+      name: "Collapse list on detail pages",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await user.click(toggle);
+
+    expect(useListDetailSplitStore.getState().collapsed).toBe(false);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+
+    await user.click(toggle);
+
+    expect(useListDetailSplitStore.getState().collapsed).toBe(true);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(mockToastSuccess).toHaveBeenCalledTimes(2);
   });
 });

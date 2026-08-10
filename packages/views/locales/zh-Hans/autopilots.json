@@ -109,6 +109,11 @@
       "cancel": "取消",
       "confirm": "删除",
       "deleting": "删除中..."
+    },
+    "list_rail": {
+      "toggle_expand_aria": "展开自动化列表",
+      "toggle_collapse_aria": "收起自动化列表",
+      "count_badge": "{{count}} 个自动化"
     }
   },
   "access": {

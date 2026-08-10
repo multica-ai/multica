@@ -159,7 +159,12 @@
     "runtime_required_toast": "Bind a runtime before running this agent.",
     "assign_work": "Assign work",
     "more_actions_aria": "Agent actions",
-    "updated": "Updated {{when}}"
+    "updated": "Updated {{when}}",
+    "list_rail": {
+      "toggle_expand_aria": "Expand agent list",
+      "toggle_collapse_aria": "Collapse agent list",
+      "count_badge": "{{count}} agents"
+    }
   },
   "inspector": {
     "section_profile": "Profile",

@@ -21,7 +21,7 @@
       "hint": "Schedule recurring tasks for your AI agents. Pick a template or start from scratch."
     },
     "scope_all": "All",
-    "no_matches": "No automations match",
+    "no_matches": "No autopilots match",
     "retry": "Retry"
   },
   "status": {
@@ -109,6 +109,11 @@
       "cancel": "Cancel",
       "confirm": "Delete",
       "deleting": "Deleting..."
+    },
+    "list_rail": {
+      "toggle_expand_aria": "Expand autopilot list",
+      "toggle_collapse_aria": "Collapse autopilot list",
+      "count_badge": "{{count}} autopilots"
     }
   },
   "access": {
@@ -424,7 +429,7 @@
     "search_placeholder": "Search timezone..."
   },
   "toolbar": {
-    "result_count_title": "Matching automations / all automations",
+    "result_count_title": "Matching autopilots / all autopilots",
     "filter_label": "Filter",
     "filter_active_count_one": "{{count}} filter",
     "filter_active_count_other": "{{count}} filters",
@@ -440,7 +445,7 @@
     "section_columns": "Columns"
   },
   "actions": {
-    "row_menu": "Automation actions",
+    "row_menu": "Autopilot actions",
     "pause": "Pause",
     "resume": "Resume",
     "delete": "Delete",
@@ -448,9 +453,9 @@
     "selected_other": "{{count}} selected",
     "clear_selection": "Clear selection",
     "delete_dialog": {
-      "title": "Delete automation?",
+      "title": "Delete autopilot?",
       "description_one": "This will permanently delete \"{{name}}\" and its run history.",
-      "description_other": "This will permanently delete {{count}} automations and their run history.",
+      "description_other": "This will permanently delete {{count}} autopilots and their run history.",
       "warning": "This action cannot be undone.",
       "cancel": "Cancel",
       "confirm": "Delete permanently",

@@ -143,7 +143,12 @@
     "runtime_required_toast": "このエージェントを実行する前にランタイムを設定してください。",
     "assign_work": "作業を割り当てる",
     "more_actions_aria": "エージェントの操作",
-    "updated": "{{when}}に更新"
+    "updated": "{{when}}に更新",
+    "list_rail": {
+      "toggle_expand_aria": "エージェントリストを展開",
+      "toggle_collapse_aria": "エージェントリストを折りたたむ",
+      "count_badge": "エージェント {{count}} 件"
+    }
   },
   "inspector": {
     "section_profile": "プロフィール",

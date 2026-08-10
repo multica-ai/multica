@@ -19,6 +19,7 @@ import {
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
+import { useListDetailSplitStore } from "@multica/core/list-detail/stores";
 import { api } from "@multica/core/api";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
 import { useT } from "../../i18n";
@@ -163,6 +164,8 @@ export function PreferencesTab() {
           <TimezoneRow />
 
           <StickyCommentBarRow />
+
+          <DetailPagesCollapsedListRow />
         </SettingsCard>
       </SettingsSection>
     </SettingsTab>
@@ -188,6 +191,30 @@ function StickyCommentBarRow() {
           });
         }}
         aria-label={t(($) => $.preferences.sticky_comment_bar.title)}
+      />
+    </SettingsRow>
+  );
+}
+
+function DetailPagesCollapsedListRow() {
+  const { t } = useT("settings");
+  const collapsed = useListDetailSplitStore((s) => s.collapsed);
+  const setCollapsed = useListDetailSplitStore((s) => s.setCollapsed);
+
+  return (
+    <SettingsRow
+      label={t(($) => $.preferences.detail_pages_collapsed_list.title)}
+      description={t(($) => $.preferences.detail_pages_collapsed_list.hint)}
+    >
+      <Switch
+        checked={collapsed}
+        onCheckedChange={(checked) => {
+          setCollapsed(checked === true);
+          toast.success(t(($) => $.auto_save.toast_saved), {
+            id: "settings-auto-save",
+          });
+        }}
+        aria-label={t(($) => $.preferences.detail_pages_collapsed_list.title)}
       />
     </SettingsRow>
   );

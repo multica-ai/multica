@@ -151,7 +151,12 @@
     "runtime_required_toast": "请先绑定运行时，再运行该智能体。",
     "assign_work": "分配工作",
     "more_actions_aria": "智能体操作",
-    "updated": "{{when}}更新"
+    "updated": "{{when}}更新",
+    "list_rail": {
+      "toggle_expand_aria": "展开智能体列表",
+      "toggle_collapse_aria": "收起智能体列表",
+      "count_badge": "{{count}} 个智能体"
+    }
   },
   "inspector": {
     "section_profile": "资料",
