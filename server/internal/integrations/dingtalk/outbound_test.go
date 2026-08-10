@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -492,5 +493,141 @@ func TestOutbound_RetryPendingFailureKeepsTheAckOutstanding(t *testing.T) {
 		t.Fatalf("the retry was cancelled and the room still holds %q — the failure "+
 			"that preceded it discharged a promise the retry had not yet answered "+
 			"(sends: %d)", ackProcessingText, n)
+	}
+}
+
+func TestOutbound_InterleavedRoundsLoseTheSecondPromise(t *testing.T) {
+	const taskA = "33333333-3333-3333-3333-333333333333"
+	const taskB = "44444444-4444-4444-4444-444444444444"
+
+	d := newDingtalkSendServer(t)
+	o, ack, q := newCancelTestOutbound(t, d)
+
+	base := time.Now()
+	now := base
+	ack.now = func() time.Time { return now }
+
+	postProcessingAck(t, ack) // round A promises a reply
+	now = base.Add(10 * time.Second)
+	postProcessingAck(t, ack) // round B, past the window, promises its own
+
+	bus := events.New()
+	o.Register(bus)
+
+	asChannelRun(q)
+	bus.Publish(chatDoneEvent(taskA, "here you go")) // A ends, reply delivered
+	afterA := atomic.LoadInt32(&d.sendCalls)
+
+	bus.Publish(cancelledEvent(taskB)) // B cancelled, ack still standing
+
+	if n := atomic.LoadInt32(&d.sendCalls) - afterA; n != 1 {
+		t.Fatalf("round B was cancelled while its own ack was still standing in the room; "+
+			"cancellation notices posted = %d, want 1", n)
+	}
+}
+
+// postTwoAckedRounds drives the inbound half twice with the second turn past the
+// coalesce window, which is the shape the window is sized for: a burst yields one
+// ack, a genuinely later turn acks again. The room ends up holding two "👀 On it"
+// messages and is owed two endings.
+func postTwoAckedRounds(t *testing.T, ack *ackNotifier) {
+	t.Helper()
+	base := time.Unix(1700000000, 0)
+	now := base
+	ack.now = func() time.Time { return now }
+	postProcessingAck(t, ack)
+	now = base.Add(2 * ackCoalesceWindow)
+	postProcessingAck(t, ack)
+}
+
+// The dedupe that holds a bulk cancel to one message used to be a side effect of
+// there being at most one promise to take. With two rounds acked there are two,
+// and every cancelled row would find one — so a session delete carrying both
+// turns would put two identical notices into one conversation. The user made one
+// request to stop and is owed one answer to it.
+//
+// The third event is the same bulk cancel arriving for a row that never acked
+// here; it must not add a message either.
+func TestOutbound_BulkCancelOfTwoAckedRoundsSpeaksOnce(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	o, ack, _ := newCancelTestOutbound(t, d)
+	postTwoAckedRounds(t, ack)
+	bus := events.New()
+	o.Register(bus)
+
+	for _, taskID := range []string{
+		"33333333-3333-3333-3333-333333333333",
+		"44444444-4444-4444-4444-444444444444",
+		"55555555-5555-5555-5555-555555555555",
+	} {
+		bus.Publish(cancelledEvent(taskID))
+	}
+
+	if n := atomic.LoadInt32(&d.sendCalls); n != 1 {
+		t.Fatalf("one session delete stopped two acked rounds and put %d copies of the "+
+			"same notice into one conversation; the user is owed exactly one", n)
+	}
+	param, _ := d.lastBody["msgParam"].(string)
+	if !strings.Contains(param, "cancelled") {
+		t.Errorf("the one message the room gets must be the cancellation notice; msgParam = %q", param)
+	}
+}
+
+// The counterweight: with two rounds acked and only one of them stopped, a reply
+// really is still coming to that room, and "no reply is coming for it" cannot say
+// which round it means. So the notice waits for the ending that leaves nothing
+// outstanding, and the round still working delivers into a room that was not
+// told to give up on it.
+func TestOutbound_OneRoundStoppedWhileAnotherIsStillOwedStaysSilent(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	o, ack, q := newCancelTestOutbound(t, d)
+	postTwoAckedRounds(t, ack)
+	bus := events.New()
+	o.Register(bus)
+
+	asChannelRun(q)
+	bus.Publish(cancelledEvent("44444444-4444-4444-4444-444444444444"))
+	if n := atomic.LoadInt32(&d.sendCalls); n != 0 {
+		param, _ := d.lastBody["msgParam"].(string)
+		t.Fatalf("one of two rounds was stopped and the room was told %q while the other "+
+			"was still working (sends: %d)", param, n)
+	}
+
+	bus.Publish(chatDoneEvent(cancelTestTaskID, "here you go"))
+
+	if n := atomic.LoadInt32(&d.sendCalls); n != 1 {
+		t.Fatalf("the round that was still working did not deliver (sends: %d)", n)
+	}
+	if param, _ := d.lastBody["msgParam"].(string); !strings.Contains(param, "here you go") {
+		t.Errorf("the last message in the room should be the reply; msgParam = %q", param)
+	}
+}
+
+// A turn whose flush enqueues nothing — the agent went offline or was archived
+// between ingest and flush — settles without any task lifecycle event, so the
+// engine closes that turn's promise directly. It must close that turn's and stop
+// there: an earlier round acked in the same room belongs to a run that is still
+// going, and taking its promise here would leave its own cancellation with
+// nothing to withdraw, which is the stuck "👀 On it" this path exists to prevent.
+func TestOutbound_SettleClosesOneRoundNotTheRoomsWholeQueue(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	o, ack, _ := newCancelTestOutbound(t, d)
+	postTwoAckedRounds(t, ack)
+	bus := events.New()
+	o.Register(bus)
+
+	// The second turn's flush found no runtime to enqueue against.
+	var sessionID pgtype.UUID
+	if err := sessionID.Scan(cancelTestSessionID); err != nil {
+		t.Fatalf("scan session id: %v", err)
+	}
+	ack.OnSettled(context.Background(), sessionID)
+
+	bus.Publish(cancelledEvent(cancelTestTaskID))
+
+	if n := atomic.LoadInt32(&d.sendCalls); n != 1 {
+		t.Fatalf("the round that was actually running was cancelled and the room still "+
+			"holds %q — settling the other turn took its promise too (sends: %d)",
+			ackProcessingText, n)
 	}
 }

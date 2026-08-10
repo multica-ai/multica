@@ -71,13 +71,26 @@ func NewOutbound(q outboundQueries, decrypt Decrypter, client *Client, ack *ackN
 // a real, non-retractable message that promised a reply. Closing it can only
 // mean posting a second message withdrawing that promise. A badge we remove was
 // ours to remove; a message we post is not, so the cancel path posts only where
-// an ack is outstanding and the cancelled run could be the one that made it.
+// an ack is outstanding, the cancelled run could be the one that made it, and
+// the room is owed nothing once it has been taken.
 //
-// One cancel stays out of reach of all three subscriptions: archiving an agent
-// cancels its tasks without broadcasting per row (handler/agent.go,
-// ArchiveAgent), because agent:archived already invalidates every client's task
-// list. Nothing about a refreshed task list withdraws a message already sitting
-// in a DingTalk room, so archiving an agent mid-run still leaves the ack open.
+// Two holes are left, and neither is a missing subscription.
+//
+// Archiving an agent cancels its tasks without broadcasting per row
+// (handler/agent.go, ArchiveAgent), because agent:archived already invalidates
+// every client's task list. Nothing about a refreshed task list withdraws a
+// message already sitting in a DingTalk room, so archiving an agent mid-run
+// still leaves the ack open.
+//
+// And a run that ends while its own ack is still being posted leaves nothing for
+// these subscriptions to find, because OnIngested records the promise only after
+// its send returns. The cancel reads the room as owing one reply fewer than it
+// does — nothing at all, if this was the room's only round — and the promise
+// lands behind it, to be spent by the next unrelated cancel in that room or
+// dropped by the day-long sweep. Slack and Lark have the same window on their
+// add, and it predates task:cancelled in all three; closing it needs a
+// per-session generation the ack can check when its send returns, which is its
+// own change.
 func (o *Outbound) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventChatDone, o.handleEvent)
 	bus.Subscribe(protocol.EventTaskFailed, o.handleEvent)
@@ -142,12 +155,14 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if !deliver {
 		return nil
 	}
-	// This is the run the ack was made for and it has reported an ending, so the
-	// promise is discharged here rather than after a successful send: an empty
-	// completion, a revoked installation and a send that fails all end the run
-	// just as finally as a delivered reply, and a promise left on record after
-	// any of them would be withdrawn by some unrelated later cancel in the same
-	// conversation.
+	// A channel run has reported an ending, so one of this room's promises is
+	// discharged here rather than after a successful send: an empty completion, a
+	// revoked installation and a send that fails all end the run just as finally
+	// as a delivered reply, and a promise left on record after any of them would
+	// be withdrawn by some unrelated later cancel in the same conversation.
+	//
+	// One promise, not the room's whole queue: a second round acked while this
+	// one was working is still owed its own ending.
 	if o.ack != nil {
 		o.ack.releaseOutstandingAck(sessionID)
 	}
@@ -176,12 +191,12 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	return nil
 }
 
-// releaseIfThisRunWasAcked discharges the session's promise when the run that
-// just ended is the one the promise was made for. It asks the same question the
-// delivery path asks below, asked again here because the binding that path
-// needs is gone and it returned early.
+// releaseIfThisRunWasAcked discharges one of the session's promises when the run
+// that just ended is a channel run, and so is one the promises were made for. It
+// asks the same question the delivery path asks below, asked again here because
+// the binding that path needs is gone and it returned early.
 //
-// Failures leave the promise alone. It expires on ackPromiseMaxAge either way,
+// Failures leave the promises alone. They expire on ackPromiseMaxAge either way,
 // and guessing on an unreadable origin is how a web run comes to discharge a
 // channel run's promise.
 func (o *Outbound) releaseIfThisRunWasAcked(ctx context.Context, taskID, sessionID pgtype.UUID) {
@@ -203,17 +218,15 @@ func (o *Outbound) releaseIfThisRunWasAcked(ctx context.Context, taskID, session
 
 // withdrawProcessingAck closes the processing ack for a cancelled run.
 //
-// Two questions have to agree before anything is posted, and neither one can be
-// answered from the other side.
+// Three questions have to agree before anything is posted, and no one of them
+// can be answered from where the others are.
 //
 // Is anything owed in this conversation at all? Only the ack notifier knows. An
 // ack is posted by the inbound path alone, into a real room, so nothing on
-// record means nothing is owed and the cancel stays silent. Taking the promise
-// is also what holds a bulk cancel to one message: the event arrives once per
-// cancelled row and the promise is gone after the first. It is taken before the
-// send, so a failed send cannot re-open it — this message cannot be unsent, and
-// posting it twice is worse than not posting it. The failure is logged by the
-// caller.
+// record means nothing is owed and the cancel stays silent. The promise is
+// taken before the send, so a failed send cannot re-open it — this message
+// cannot be unsent, and posting it twice is worse than not posting it. The
+// failure is logged by the caller.
 //
 // Is this particular cancelled task the run that promise belongs to? Only the
 // task can say, and the promise cannot: it is keyed by session, and a session
@@ -237,6 +250,20 @@ func (o *Outbound) releaseIfThisRunWasAcked(ctx context.Context, taskID, session
 // state by its own account, so this is a narrow, deliberate residue rather than
 // a case the classifier handles.
 //
+// Is anything still owed in this room once that promise is taken? A room holds
+// one promise per ack posted, and a second turn past the coalesce window acks
+// again, so a session delete carrying three turns cancels three rows against
+// three promises. Each cancel takes its own so the books stay straight, and only
+// the one that leaves the room empty speaks — one action, one message. That used
+// to fall out of there being at most one promise to take.
+//
+// It costs the same thing the origin check above costs. One run cancelled out of
+// two still working says nothing, because a reply really is still coming to that
+// room and "no reply is coming for it" cannot say which run it means. The room
+// hears about that round only if the round still running is cancelled too. For a
+// message that cannot be unsent, staying quiet while a reply is on its way is
+// the direction to fail in.
+//
 // The installation comes from the promise instead of the session's binding for
 // the same session-delete reason: the binding is dropped in the transaction
 // that cancels the tasks, and the cancels are broadcast after it commits.
@@ -257,9 +284,14 @@ func (o *Outbound) withdrawProcessingAck(ctx context.Context, taskID, sessionID 
 	if !mine {
 		return nil // a web run on a bound session: its cancel is not this room's news
 	}
-	promise, ok := o.ack.takeOutstandingAck(sessionID)
+	promise, remaining, ok := o.ack.takeOutstandingAck(sessionID)
 	if !ok {
-		return nil // another cancel for the same conversation got here first
+		return nil // another ending for the same conversation got here first
+	}
+	if remaining > 0 {
+		// Another round is still owed a reply in this room. Its own ending will
+		// speak if it is cancelled too.
+		return nil
 	}
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          promise.installationID,
