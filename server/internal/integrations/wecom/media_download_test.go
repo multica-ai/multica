@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 )
 
 func TestDownloadMediaReturnsTheBytes(t *testing.T) {
@@ -124,10 +125,40 @@ func TestTheDispositionFilenameIsFormDecoded(t *testing.T) {
 			`attachment; filename="C++.docx"`, "C  .docx",
 		},
 		{
+			// The same trade, and the rows are here because "C++.docx" reads
+			// as a curiosity while the class it stands for does not: every
+			// name whose only encoder-touched character is a '+' loses it.
+			"a product name loses its plus too",
+			`attachment; filename="React+Redux.md"`, "React Redux.md",
+		},
+		{
+			"and so does a version number",
+			`attachment; filename="C++11.pdf"`, "C  11.pdf",
+		},
+		{
 			// RFC 3986 spelling rather than the form one. Re-encoding gives
 			// "Meeting+notes.docx", the check fails, and the escapes stay.
 			"a %20-encoded name keeps its escapes",
 			`attachment; filename="Meeting%20notes.docx"`, "Meeting%20notes.docx",
+		},
+		{
+			// The round trip re-encodes with url.QueryEscape, whose unreserved
+			// set is A-Za-z0-9-_.~ — so it assumes the server agreed on that
+			// set. Java's URLEncoder also passes '*', and PHP's urlencode
+			// escapes '~' as %7E, which Go would have left alone. Re-encoding
+			// "backup~.docx" gives back the tilde, the lengths differ, and
+			// nothing is decoded.
+			"a tilde escaped by a non-Go encoder keeps its escape",
+			`attachment; filename="backup%7E.docx"`, "backup%7E.docx",
+		},
+		{
+			// The reason the row above is worth pinning: the check is
+			// all-or-nothing. One character outside Go's set and the WHOLE
+			// name stays escaped — including the '+' this decode exists to
+			// remove — so the user is shown exactly the unreadable string the
+			// fix was written to stop showing them.
+			"one foreign escape keeps the whole name escaped, plus and all",
+			`attachment; filename="Q1+report%7E.docx"`, "Q1+report%7E.docx",
 		},
 	}
 	for _, tc := range cases {
@@ -256,5 +287,64 @@ func TestDownloadMediaRefusesAUrlItShouldNotFetch(t *testing.T) {
 		if _, err := downloadMedia(context.Background(), http.DefaultClient, raw); err == nil {
 			t.Fatalf("downloadMedia(%q) returned no error", raw)
 		}
+	}
+}
+
+// TestControlCharactersNeverReachTheFilename covers what the decode widened.
+//
+// Undoing the escapes widened the byte domain of this name. Exactly one
+// control character used to get here: a raw TAB, which net/http passes
+// through in a header value where it rejects the whole response for a NUL, a
+// CR, an LF, an ESC or a DEL. Since mime.ParseMediaType never percent-decodes
+// the plain filename= form, `filename="a%00b.docx"` stayed the printable
+// string it looks like. Decoding turns those escapes into the bytes they name.
+//
+// NUL is the one that costs something. The name is written to
+// attachments.filename, which is Postgres TEXT, and Postgres cannot store a
+// NUL in a text value — so a file whose bytes downloaded and decrypted
+// perfectly is lost on the insert. CR and LF are the header-injection shape;
+// internal/storage's ContentDisposition already replaces them when it builds
+// the download header, so nothing is injectable either way, but the row is
+// written before that and there is no reason to carry them.
+//
+// Every escaped row's value really does survive the round-trip check — that
+// is why it reaches cleanMediaFilename decoded at all — so these assert the
+// strip, not the decode declining to run. The last row is the one that needed
+// no decode to get here and was never handled.
+func TestControlCharactersNeverReachTheFilename(t *testing.T) {
+	cases := []struct {
+		name        string
+		disposition string
+		want        string
+	}{
+		{"a NUL, which Postgres TEXT cannot store", `attachment; filename="a%00b.docx"`, "ab.docx"},
+		{"a CRLF, the header-injection shape", `attachment; filename="a%0D%0Ab.docx"`, "ab.docx"},
+		{"a tab", `attachment; filename="a%09b.docx"`, "ab.docx"},
+		{"an ESC, which a terminal reading the log would act on", `attachment; filename="a%1Bb.docx"`, "ab.docx"},
+		{"a DEL", `attachment; filename="a%7Fb.docx"`, "ab.docx"},
+		{"nothing but control characters leaves no name at all", `attachment; filename="%00%01%02"`, ""},
+		{"a raw tab, the one that never needed the decode", "attachment; filename=\"a\tb.docx\"", "ab.docx"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Disposition", tc.disposition)
+				_, _ = w.Write([]byte("bytes"))
+			}))
+			defer srv.Close()
+
+			got, err := downloadMedia(context.Background(), srv.Client(), srv.URL)
+			if err != nil {
+				t.Fatalf("downloadMedia: %v", err)
+			}
+			if got.Filename != tc.want {
+				t.Fatalf("filename = %q, want %q", got.Filename, tc.want)
+			}
+			for _, r := range got.Filename {
+				if unicode.IsControl(r) {
+					t.Fatalf("filename %q still carries a control character %U", got.Filename, r)
+				}
+			}
+		})
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // maxMediaBytes is the ceiling on one downloaded body. WeCom caps smart-bot
@@ -188,9 +189,10 @@ func checkMediaURL(rawURL string) error {
 // separator (`..%2F..%2Fetc%2Fpasswd`) is a path only once it is decoded, and
 // a cleaner that ran first would hand a traversal straight through.
 //
-// The result is reduced to a base name: the header is remote input and a
-// filename with path separators in it has no business reaching a storage key
-// or a download header.
+// The result goes through cleanMediaFilename, which reduces it to a base name
+// and strips control characters: the header is remote input, and once the
+// escapes above are undone it can carry a separator or a NUL that the raw
+// header could not.
 func mediaFilenameFromDisposition(raw string) string {
 	if strings.TrimSpace(raw) == "" {
 		return ""
@@ -241,19 +243,32 @@ func hasExtendedFilename(raw string) bool {
 //
 // What this does NOT handle, and why:
 //
-//   - A name that contains a '+' and nothing else an encoder would touch —
-//     "C++.docx", "A+B.docx" — IS a canonical encoding of "C  .docx" and
-//     "A B.docx", so the round trip cannot rule it out and this decodes it,
-//     losing the pluses. That ambiguity is irreducible from the header alone.
-//     It is the side chosen deliberately: a name with a space in it is far
-//     more common than one with a '+' and no space, and a name with both is
-//     already safe by the round trip above.
+//   - Any name whose only encoder-touched character is a '+' IS a canonical
+//     encoding of the same name with spaces, so the round trip cannot rule it
+//     out and this decodes it, losing the pluses. That is a wider class than
+//     one odd example: "C++.docx" → "C  .docx", and so do "React+Redux.md",
+//     "Q1+Q2.xlsx", "C++11.pdf", "10+1.pdf". The ambiguity is irreducible from
+//     the header alone, and this is the side chosen deliberately — a name with
+//     a space is far more common than one with a '+' and no space, and a name
+//     with both is already safe by the round trip above.
 //   - A name percent-encoded in the RFC 3986 style, with %20 for space rather
 //     than '+' ("PC%20D&T.docx"), re-encodes to "PC+D%26T.docx", fails the
-//     check, and keeps its escapes. Handling it would mean a second guess at
-//     which scheme a server used, and no observed header calls for one.
+//     check, and keeps its escapes.
+//   - A name from a server whose unreserved set is not Go's. The round trip
+//     re-encodes with url.QueryEscape, which leaves A-Za-z0-9-_.~ alone, so
+//     the check silently assumes the sender agreed on that set. Java's
+//     URLEncoder also passes '*', and PHP's urlencode escapes '~' as %7E, so
+//     "backup~.docx" from either arrives as "backup%7E.docx", re-encodes to
+//     "backup~.docx", and the lengths no longer match. The failure is
+//     all-or-nothing rather than partial: ONE character outside Go's set and
+//     the entire name keeps its escapes, so "Q1 report~.docx" is shown as
+//     "Q1+report%7E.docx" — the unreadable state this decode exists to
+//     remove, with the '+' still in it. Widening the comparison to tolerate
+//     an escape on either side would mean deciding which of several encoders
+//     wrote the header, and the evidence for that decision does not exist
+//     yet.
 //
-// Both gaps stay open because one stored filename is all the evidence there
+// The gaps stay open because one stored filename is all the evidence there
 // is, and the URL that produced it is long expired. traceMediaHeaders records
 // the header as it arrives, so the next live run settles what COS really
 // sends with bytes rather than with another inference from one sample.
@@ -283,6 +298,11 @@ func decodeFormEncodedFilename(name string) string {
 // "%e5%ad%a3%e6%8a%a5.png" — a Chinese filename, the case this decode matters
 // most for, since a non-ASCII name is nothing but escapes — and quietly do
 // nothing.
+//
+// Hex case is the ONLY tolerance, which is what makes the round trip assume
+// the sender's unreserved set is url.QueryEscape's. A server that escapes one
+// character Go leaves alone fails the comparison outright; see the third gap
+// listed on decodeFormEncodedFilename for what that costs.
 func sameFormEncoding(a, b string) bool {
 	if len(a) != len(b) {
 		return false
@@ -303,10 +323,33 @@ func sameFormEncoding(a, b string) bool {
 	return true
 }
 
-// cleanMediaFilename reduces a name from anywhere to a single path segment,
-// or empty when nothing usable is left.
+// cleanMediaFilename reduces a name from anywhere to a single path segment
+// with no control characters in it, or empty when nothing usable is left.
+//
+// The control-character strip is here because decodeFormEncodedFilename
+// widened what can reach this function. Of the control characters, exactly one
+// used to get this far: measured against net/http, a raw TAB in a header value
+// is passed through and every other control byte — NUL, CR, LF, ESC, DEL —
+// makes the transport reject the whole response. Since ParseMediaType never
+// percent-decodes the plain filename= form, `filename="a%00b.docx"` stayed the
+// printable string it looks like. Undoing the escapes turns all of them into
+// the bytes they name: %00 into a real NUL, %0D%0A into a real CRLF.
+//
+// NUL is the one that costs something. This name is written to
+// attachments.filename, which is Postgres TEXT, and Postgres cannot store a
+// NUL in a text value at all — the insert fails and the whole attachment is
+// lost, for a file whose bytes downloaded and decrypted perfectly. CR and LF
+// are the header-injection shape; internal/storage's ContentDisposition
+// already replaces them when it builds the download header, so that end is
+// covered, but the attachments row is written before that and there is no
+// reason to carry them to it.
+//
+// Reaching any of this needs a malicious or buggy CDN — a user cannot type a
+// NUL into a filename. That is the right bar anyway: this header is remote
+// input, and this function is the single choke point both fetch paths reach it
+// through.
 func cleanMediaFilename(name string) string {
-	name = strings.TrimSpace(name)
+	name = strings.TrimSpace(stripControlRunes(name))
 	if name == "" {
 		return ""
 	}
@@ -315,6 +358,21 @@ func cleanMediaFilename(name string) string {
 		return ""
 	}
 	return name
+}
+
+// stripControlRunes drops every control character, dropping rather than
+// substituting: a placeholder would put a character in the name that the
+// sender did not type, and an attachment called "a_b.docx" that was really
+// called "ab.docx" is its own small lie. Runes that decoded to invalid UTF-8
+// are left as they are — RuneError is not a control character, and mangling a
+// name further is not an improvement.
+func stripControlRunes(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // openMedia is downloadMedia without the buffer: it returns the body as a
