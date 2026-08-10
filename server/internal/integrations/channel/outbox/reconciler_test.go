@@ -452,7 +452,7 @@ func TestReconciler_ScanWindowOverlapsAndLags(t *testing.T) {
 }
 
 // Upgrading a running deployment starts with an empty channel_outbound_queue
-// (migration 265 creates it) and no cursor row. "Already delivered" is only ever
+// (migration 281 creates it) and no cursor row. "Already delivered" is only ever
 // tested as "has a queue row", and the pre-queue path wrote straight to the
 // socket, so every terminal task in the seed window looks like a reply the
 // realtime path missed. Nothing that finished before the queue existed can be

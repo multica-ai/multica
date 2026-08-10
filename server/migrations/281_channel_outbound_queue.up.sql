@@ -42,7 +42,7 @@ CREATE TABLE channel_outbound_queue (
     -- (source_kind, source_id) is the business key that makes enqueue
     -- idempotent: the realtime producer and the reconciler both race to
     -- insert the same reply, and exactly one must win. See the unique index
-    -- in migration 267.
+    -- in migration 283.
     source_kind       TEXT NOT NULL,
     source_id         TEXT NOT NULL,
     target_chat_id    TEXT NOT NULL,

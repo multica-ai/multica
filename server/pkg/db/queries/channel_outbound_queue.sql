@@ -1,5 +1,5 @@
 -- Durable outbound delivery queue shared by hold-connection channels
--- (migration 265). Every query here is channel-agnostic: channel_type is a
+-- (migration 281). Every query here is channel-agnostic: channel_type is a
 -- parameter or a column, never a literal, so Lark and Slack can adopt this
 -- path without a second queue.
 --
