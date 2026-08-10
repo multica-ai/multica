@@ -416,13 +416,12 @@ func waitFor(t *testing.T, cond func() bool, msg string) {
 	t.Fatal(msg)
 }
 
-// claimsPaused reads pauseClaims under claimMu, honoring the field's own
-// concurrency contract rather than relying on the test being single-goroutine.
+// claimsPaused reports whether any claim-pause holder is active, honoring the
+// ref-count's own concurrency contract rather than relying on the test being
+// single-goroutine.
 func claimsPaused(t *testing.T, d *Daemon) bool {
 	t.Helper()
-	d.claimMu.Lock()
-	defer d.claimMu.Unlock()
-	return d.pauseClaims
+	return d.claimPaused()
 }
 
 // TestTryAutoUpdate_ResumesClaimingWhenRestartCannotBeScheduled is the

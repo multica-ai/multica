@@ -247,9 +247,9 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 	// release fetch took anywhere from tens of milliseconds (typical) to
 	// seconds (slow link, GitHub hiccup), plenty of time for a poller to
 	// claim a fresh task. trySetClaimBarrier checks claimsInFlight +
-	// activeTasks under claimMu and only flips pauseClaims to true if both
-	// are zero, so once it returns true we can run the upgrade knowing that
-	// no in-flight task will be cancelled by triggerRestart.
+	// activeTasks under claimMu and only takes a server-update claim-pause ref
+	// if both are zero, so once it returns true we can run the upgrade knowing
+	// that no in-flight task will be cancelled by triggerRestart.
 	if !d.trySetClaimBarrier() {
 		d.logger.Info("auto-update: deferring — task or claim in flight at barrier check")
 		return
