@@ -217,7 +217,7 @@ func TestGetChatHistory_NoSlackBindingReadsStoredTranscript(t *testing.T) {
 
 	base := time.Date(2026, 8, 10, 1, 0, 0, 0, time.UTC)
 	insertChatVisibilityMessage(t, sessionID, "first user turn", "message", true, base)
-	insertChatVisibilityMessage(t, sessionID, "assistant reply", "message", true, base.Add(time.Second))
+	insertChatMessageRole(t, sessionID, "assistant", "assistant reply", "message", true, base.Add(time.Second))
 	insertChatVisibilityMessage(t, sessionID, "/issue hidden", "channel_command", true, base.Add(2*time.Second))
 	insertChatVisibilityMessage(t, sessionID, "second user turn", "message", true, base.Add(3*time.Second))
 
