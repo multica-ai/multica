@@ -320,11 +320,22 @@ func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t r
 			return t.Handle.address(), nil
 		}
 		// The frame was refused. Say it as a new message instead, and do not
-		// re-send the stream frame: 846608 and 846605 both mean this stream
-		// will never take another one, and a transport error leaves it unknown
-		// whether the first frame landed — a second could print the answer
-		// twice in the same bubble. The plain message is the one route whose
-		// outcome this process can actually observe.
+		// re-send the stream frame.
+		//
+		// For an errcode that is the whole story: 846608 and 846605 both mean
+		// this stream will never take another frame. For a transport failure it
+		// is a choice rather than a necessity, and worth naming as one. Since
+		// errFrameNotOnTheWire (ws_sender.go) a failed socket write is known
+		// NOT to have reached the peer, so re-sending the stream frame on a
+		// fresh socket would be safe and would seal the bubble the user is
+		// still watching spin. This path does not do that: it hands the handle
+		// back to no one and says the words as a plain message, so the spinner
+		// is left to the guard and the answer arrives beside it rather than
+		// inside it.
+		//
+		// The plain message is the route whose outcome this process can
+		// observe end to end, and it is what shipped. Sealing the bubble on a
+		// reconnect is a better answer and a separate change.
 		//
 		// Not because the handle has gone stale. A callback's req_id belongs to
 		// the turn rather than to the socket it arrived on, and a stream opened

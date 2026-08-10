@@ -123,9 +123,14 @@ const (
 	// retryDeferred — the wait for another delivery of the same run outlasted
 	// this attempt's budget, so nothing was said and nothing recorded.
 	retryDeferred
-	// retryRefused — the words went out and were turned away. Only ever booked
-	// for a refusal this package can name as never having reached the user; an
-	// outcome that is merely unknown is not repeated (deliveryCanBeRepeated).
+	// retryRefused — the delivery was turned away, by the server or by the
+	// socket. Only ever booked where this package can name the words as never
+	// having reached the user: an errcode the server stated, or a socket write
+	// that failed before the frame was on the wire. An outcome that is merely
+	// unknown is not repeated (deliveryCanBeRepeated).
+	//
+	// "Refused" rather than "sent and rejected" on purpose — errFrameNotOnTheWire
+	// books here too, and in that case nothing went out at all.
 	retryRefused
 )
 
@@ -190,11 +195,15 @@ func (r endingRetries) next(cause retryCause, base time.Duration, attempts int, 
 // endingRetryCause reads what the ledger handed back and says which cause the
 // next attempt would be booked under, or that there is no safe next attempt.
 //
-// Three answers, and the third is the one worth naming: a delivery that failed
-// after its frame reached the wire may already be on the user's screen, so
-// saying it again is how one ending becomes two messages. See
-// deliveryCanBeRepeated for why an ack timeout and a context error are in that
-// third group and a server's errcode is not.
+// Three answers, and the third is the one worth naming: a delivery whose
+// outcome this package cannot account for may already be on the user's screen,
+// so saying it again is how one ending becomes two messages. That group is an
+// ack that never came back and a context that ran out — both leave a frame that
+// did reach the wire with no verdict on it.
+//
+// It is NOT every failure. A server's errcode is an answer, and since
+// errFrameNotOnTheWire a socket write that failed is one too: the frame never
+// left. Both are repeatable. See deliveryCanBeRepeated.
 func endingRetryCause(err error) (retryCause, bool) {
 	if errors.Is(err, errEndingDeferred) {
 		return retryDeferred, true
