@@ -370,6 +370,22 @@ with the stored values before probing; an explicitly entered replacement still
 wins. The raw credential is never returned to the browser or included in the
 probe result.
 
+Alongside the mask sentinel (`***`), the Connections response may include a
+derived, non-secret `api_key_hint`: the first five characters of the stored API
+key plus an ellipsis (e.g. `rk_li…`). The editor shows it next to the **Set**
+badge so an admin can tell which key sits on which connection when adjusting
+permissions. Rules that keep it non-secret:
+
+- Response-only — `maskAuth` derives it on every read; create and update both
+  strip any client-supplied hint before persistence, so it never reaches the
+  stored `auth_config`.
+- Fail-closed for short keys — if five characters would give away a meaningful
+  share of the value (same guard as `credentials.MaskValue`), no hint is
+  returned.
+- Fixed preview length — the hint does not reveal the key's real length.
+- Scope is the API key only; bearer token and Cloudflare Access client secret
+  stay plain-masked.
+
 ### Apps Collection access
 
 App catalog listing and app open/use are deny-by-default outside the app owner

@@ -126,6 +126,10 @@ interface FormBodyProps {
   isSaving: boolean;
   // Which secret fields had a value on load (server masks them as "***")
   secretsSet?: { bearerToken: boolean; apiKey: boolean; cfSecret: boolean };
+  // Non-secret preview of the stored API key's first characters, so an admin
+  // can tell which key sits on this connection before adjusting its
+  // permissions. Empty when the server withheld it (no key, or too short).
+  apiKeyHint?: string;
 }
 
 function ConnectionFormBody({
@@ -138,6 +142,7 @@ function ConnectionFormBody({
   onSave,
   isSaving,
   secretsSet,
+  apiKeyHint,
 }: FormBodyProps) {
   const wsId = useWorkspaceId();
   const router = useNavigation();
@@ -586,11 +591,20 @@ function ConnectionFormBody({
                     {secretsSet?.apiKey && !form.api_key && (
                       <Badge variant="secondary" className="text-xs font-normal">Set</Badge>
                     )}
+                    {secretsSet?.apiKey && !form.api_key && apiKeyHint && (
+                      <span className="font-mono text-xs text-muted-foreground">{apiKeyHint}</span>
+                    )}
                   </div>
                   <Input
                     id="conn-apikey"
                     type="password"
-                    placeholder={secretsSet?.apiKey && !form.api_key ? "•••••••• — type to replace" : ""}
+                    placeholder={
+                      secretsSet?.apiKey && !form.api_key
+                        ? apiKeyHint
+                          ? `${apiKeyHint} — type to replace`
+                          : "•••••••• — type to replace"
+                        : ""
+                    }
                     value={form.api_key}
                     onChange={field("api_key")}
                     autoComplete="off"
@@ -1143,6 +1157,7 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
       initialScopableArgs={conn.scopable_args ?? []}
       existingConn={conn}
       secretsSet={secretsSet}
+      apiKeyHint={conn.auth_config.api_key_hint ?? ""}
       onSave={(form, authType, endpoints, scopableArgs) => {
         return handleSave(form, authType, endpoints, scopableArgs).catch(() => {
           toast.error("Something went wrong. Please try again.");

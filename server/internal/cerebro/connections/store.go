@@ -118,9 +118,14 @@ type Tool struct {
 // AuthConfig holds connection credentials. Fields are optional; only the
 // relevant ones are populated per connection type.
 type AuthConfig struct {
-	BearerToken    string `json:"bearer_token,omitempty"`
-	APIKey         string `json:"api_key,omitempty"`
-	APIKeyHeader   string `json:"api_key_header,omitempty"`
+	BearerToken  string `json:"bearer_token,omitempty"`
+	APIKey       string `json:"api_key,omitempty"`
+	APIKeyHeader string `json:"api_key_header,omitempty"`
+	// APIKeyHint is a derived, non-secret preview of APIKey (its first few
+	// characters) that lets an admin tell two stored keys apart in the editor
+	// without revealing either. It is response-only: maskAuth fills it in and
+	// preserveMaskedAuth strips it, so it is never persisted in auth_config.
+	APIKeyHint     string `json:"api_key_hint,omitempty"`
 	CFAccessID     string `json:"cf_access_id,omitempty"`
 	CFAccessSecret string `json:"cf_access_secret,omitempty"`
 	// SessionExchange, when enabled, makes server-side API-connection dispatch

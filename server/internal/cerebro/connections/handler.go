@@ -131,6 +131,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "url required")
 		return
 	}
+	// api_key_hint is derived for responses only; a client echoing one back
+	// must never have it persisted.
+	req.AuthConfig.APIKeyHint = ""
 	c, err := h.Store.Create(r.Context(), CreateParams{
 		WorkspaceID:         wsID,
 		Name:                req.Name,
@@ -365,6 +368,7 @@ func maskAuth(a AuthConfig) AuthConfig {
 		m.BearerToken = "***"
 	}
 	if m.APIKey != "" {
+		m.APIKeyHint = apiKeyHint(a.APIKey)
 		m.APIKey = "***"
 	}
 	if m.CFAccessSecret != "" {
@@ -373,7 +377,30 @@ func maskAuth(a AuthConfig) AuthConfig {
 	return m
 }
 
+// apiKeyHintChars is how many leading characters of a stored API key the
+// editor may show. Registry keys are prefixed (rk_…), so a handful of
+// characters is enough to tell two stored keys apart — which is the whole
+// point: an admin adjusting a key's permissions has to know which key is on
+// which connection.
+const apiKeyHintChars = 5
+
+// apiKeyHint returns the non-secret preview of a stored API key. A key short
+// enough that the preview would give away a meaningful share of it gets no
+// preview at all — the same fail-closed rule credentials.MaskValue applies to
+// short secrets. The preview is a fixed length, so it does not leak the key's
+// real length either.
+func apiKeyHint(key string) string {
+	r := []rune(key)
+	if len(r) <= apiKeyHintChars*2 {
+		return ""
+	}
+	return string(r[:apiKeyHintChars]) + "…"
+}
+
 func preserveMaskedAuth(next, stored AuthConfig) AuthConfig {
+	// The hint is derived for responses only; never let one round-trip back
+	// into the stored auth_config.
+	next.APIKeyHint = ""
 	if next.BearerToken == "***" {
 		next.BearerToken = stored.BearerToken
 	}

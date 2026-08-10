@@ -6,6 +6,9 @@ export interface AuthConfig {
   bearer_token?: string;
   api_key?: string;
   api_key_header?: string;
+  // Read-only preview of the stored key's first characters. The server derives
+  // it on every response and refuses to store one, so never send it back.
+  api_key_hint?: string;
   cf_access_id?: string;
   cf_access_secret?: string;
   session_exchange?: {

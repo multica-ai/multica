@@ -19,6 +19,7 @@ const AuthConfigSchema = z
     bearer_token: z.string().optional(),
     api_key: z.string().optional(),
     api_key_header: z.string().optional(),
+    api_key_hint: z.string().optional(),
     cf_access_id: z.string().optional(),
     cf_access_secret: z.string().optional(),
     session_exchange: z
