@@ -69,10 +69,26 @@ type Outbound struct {
 	// test can run it inline and observe the result deterministically.
 	spawn func(func())
 
-	// pendingAttachments counts deliveries spawned but not finished, so a
-	// steady producer of artifacts sheds rather than accumulating goroutines.
-	pendingMu          sync.Mutex
-	pendingAttachments int
+	// Two counters bound attachment delivery, and they are two because one
+	// cannot be in both places at once.
+	//
+	// admittedAttachments counts goroutines this subscriber has started and
+	// not yet seen return. It is claimed before the spawn, so it bounds the
+	// attachment lookup each goroutine runs as well as the goroutine itself.
+	// Nothing is known about the turn at that point, so exceeding it can only
+	// be logged.
+	//
+	// pendingAttachments counts deliveries that have looked the turn up and
+	// found a file. It is claimed after the lookup, which is what lets a
+	// delivery refused for want of capacity be reported to the user without
+	// ever warning about a file that never existed.
+	//
+	// The admitted cap is deliberately the larger of the two: reaching it
+	// means the pending cap is full AND as many more turns are still in their
+	// lookup, so the honest post-lookup path is the one a backlog meets first.
+	pendingMu           sync.Mutex
+	pendingAttachments  int
+	admittedAttachments int
 }
 
 // NewOutbound builds the WeCom outbound subscriber. senders is the same

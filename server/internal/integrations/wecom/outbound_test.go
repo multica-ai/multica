@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -40,6 +41,12 @@ type fakeOutboundQueries struct {
 	workspaceErr   error
 	attachments    []db.Attachment
 	attachmentsErr error
+	// lookupGate holds every attachment lookup open until it is closed, which
+	// is what a slow database looks like from in here. lookupsEntered counts
+	// the arrivals, so a test can ask how many deliveries got as far as the
+	// query rather than how many the counter was told about.
+	lookupGate     chan struct{}
+	lookupsEntered atomic.Int64
 	// tasks answers the retry-clone lookup: the round is bound under the turn
 	// that owns the input batch, and a clone reaches it through
 	// chat_input_task_id. A task with no row here reads as pgx.ErrNoRows —
@@ -89,6 +96,10 @@ func (f *fakeOutboundQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Wor
 	return f.workspace, f.workspaceErr
 }
 func (f *fakeOutboundQueries) ListAttachmentsByChatMessage(context.Context, db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error) {
+	if f.lookupGate != nil {
+		f.lookupsEntered.Add(1)
+		<-f.lookupGate
+	}
 	return f.attachments, f.attachmentsErr
 }
 func (f *fakeOutboundQueries) GetAgentTask(_ context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {

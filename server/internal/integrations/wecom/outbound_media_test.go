@@ -16,9 +16,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -35,10 +39,13 @@ const (
 )
 
 // fakeObjectStore stands in for the deployment's object storage. reads counts
-// the fetches, which is how "refused before a byte was read" is asserted. No
-// lock: every test here runs the delivery inline (newOutboundWithMedia replaces
-// spawn), so the counter and its assertion share one goroutine.
+// the fetches, which is how "refused before a byte was read" is asserted.
+//
+// Locked, because not every test here runs the delivery inline: the admission
+// rig drives real goroutines so it can watch them pile up, and a counter this
+// one shares would otherwise be written from all of them at once.
 type fakeObjectStore struct {
+	mu    sync.Mutex
 	key   string
 	data  []byte
 	err   error
@@ -47,11 +54,21 @@ type fakeObjectStore struct {
 
 func (f *fakeObjectStore) KeyFromURL(string) string { return f.key }
 func (f *fakeObjectStore) GetReader(context.Context, string) (io.ReadCloser, error) {
+	f.mu.Lock()
 	f.reads++
-	if f.err != nil {
-		return nil, f.err
+	err := f.err
+	data := f.data
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
 	}
-	return io.NopCloser(bytes.NewReader(f.data)), nil
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (f *fakeObjectStore) readCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reads
 }
 
 // newOutboundWithMedia builds the subscriber over a socket double that can
@@ -455,7 +472,9 @@ func TestSendOutcome_TellsARefusalFromAMissingAnswer(t *testing.T) {
 		{"wrapped no verdict", fmt.Errorf("send: %w", errAckTimeout), deliveryUnknown, "the classification must survive being wrapped on the way up"},
 		{"deadline", context.DeadlineExceeded, deliveryUnknown, "request returns the same ctx error before and after the write, so this cannot be told from a send that went out"},
 		{"cancelled", context.Canceled, deliveryUnknown, "same reason"},
-		{"transport", errors.New("write: broken pipe"), deliveryDefinitelyFailed, "the frame did not reach the socket"},
+		{"attempted write", fmt.Errorf("%w: %w", errWriteAttempted, &net.OpError{Op: "write", Err: errors.New("broken pipe")}), deliveryUnknown, "WriteMessage was entered, so the peer may hold the frame the local side is failing to report"},
+		{"wrapped attempted write", fmt.Errorf("send: %w", fmt.Errorf("%w: %w", errWriteAttempted, errors.New("broken pipe"))), deliveryUnknown, "the stage must survive being wrapped on the way up"},
+		{"before the write", errors.New("wecom: marshal frame: bad value"), deliveryDefinitelyFailed, "nothing left the process, so non-delivery is provable"},
 	}
 	for _, tc := range cases {
 		if got := sendOutcome(tc.err); got != tc.want {
@@ -572,8 +591,8 @@ func TestSendAttachment_RefusesAnOversizeAttachmentWithoutReadingIt(t *testing.T
 	if err := o.processEvent(context.Background(), chatDoneEvent("Attached.")); err != nil {
 		t.Fatalf("processEvent: %v", err)
 	}
-	if store.reads != 0 {
-		t.Errorf("object reads = %d, want 0 — a file past the cap is refused on its recorded size, before the bytes are fetched", store.reads)
+	if store.readCount() != 0 {
+		t.Errorf("object reads = %d, want 0 — a file past the cap is refused on its recorded size, before the bytes are fetched", store.readCount())
 	}
 	if n := len(conn.cmdFrames(cmdUploadMediaInit)); n != 0 {
 		t.Errorf("upload init frames = %d, want 0", n)
@@ -707,6 +726,113 @@ func TestDeliverAttachments_ShedsPastThePendingCap(t *testing.T) {
 	o.releaseAttachmentSlot()
 	if !o.claimAttachmentSlot() {
 		t.Error("releasing a slot did not free it")
+	}
+}
+
+// The pending counter above is claimed after the lookup, which is what lets a
+// shed be reported honestly — and is also why it cannot bound the lookup. This
+// drives the real path with a database that never answers, and counts the
+// goroutines and queries that actually happen: filling a counter by hand
+// exercises the counter, not the gate in front of it.
+func TestDeliverAttachments_AdmissionBoundsTheLookupStage(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{ID: mustTestUUID(t), Filename: "a.txt", Url: "u"})
+	q.lookupGate = make(chan struct{})
+	o, instID, _ := newOutboundWithMedia(t, q, &fakeObjectStore{key: "k", data: []byte("x")})
+	q.sessionBinding.InstallationID = instID
+
+	// Real goroutines here, not the inline spawn the other rigs use: what is
+	// under test is what piles up when deliveries cannot finish.
+	var spawned atomic.Int64
+	var running sync.WaitGroup
+	o.spawn = func(f func()) {
+		spawned.Add(1)
+		running.Add(1)
+		go func() { defer running.Done(); f() }()
+	}
+
+	target := attachmentTarget{InstallationID: instID, ChatID: "CHAT_1", ChatType: chatTypeSingleInt}
+	const surplus = 16
+	submitted := maxAdmittedAttachmentDeliveries + surplus
+	for i := 0; i < submitted; i++ {
+		o.deliverAttachments(chatDoneEvent("done"), target)
+	}
+
+	// Wait for the admitted ones to park in the query rather than sleeping: a
+	// ceiling read before the goroutines arrive would pass for the wrong
+	// reason.
+	waitFor(t, "every admitted delivery to reach the lookup", func() bool {
+		return q.lookupsEntered.Load() >= int64(maxAdmittedAttachmentDeliveries)
+	})
+
+	if got := spawned.Load(); got != int64(maxAdmittedAttachmentDeliveries) {
+		t.Errorf("%d submissions spawned %d goroutines, want the admission cap %d",
+			submitted, got, maxAdmittedAttachmentDeliveries)
+	}
+	if got := q.lookupsEntered.Load(); got != int64(maxAdmittedAttachmentDeliveries) {
+		t.Errorf("%d lookups reached the database, want at most %d — the lookup stage is unbounded",
+			got, maxAdmittedAttachmentDeliveries)
+	}
+
+	close(q.lookupGate)
+	running.Wait()
+
+	// Released on the way out, or a burst would refuse every later turn.
+	if !o.admitAttachmentDelivery() {
+		t.Error("admission was not released when the deliveries finished")
+	}
+	o.releaseAttachmentAdmission()
+}
+
+// framedThenBrokenConn takes the frame and then fails, which is what a
+// half-closed socket does: the bytes are gone, the error is real, and neither
+// of those says what the peer received.
+type framedThenBrokenConn struct {
+	mu     sync.Mutex
+	frames [][]byte
+}
+
+func (c *framedThenBrokenConn) WriteMessage(_ int, data []byte) error {
+	c.mu.Lock()
+	c.frames = append(c.frames, append([]byte(nil), data...))
+	c.mu.Unlock()
+	return &net.OpError{Op: "write", Err: errors.New("broken pipe")}
+}
+func (c *framedThenBrokenConn) ReadMessage() (int, []byte, error) { return 0, nil, io.EOF }
+func (c *framedThenBrokenConn) SetReadDeadline(time.Time) error   { return nil }
+func (c *framedThenBrokenConn) SetWriteDeadline(time.Time) error  { return nil }
+func (c *framedThenBrokenConn) Close() error                      { return nil }
+func (c *framedThenBrokenConn) wrote() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.frames)
+}
+
+// The boundary this pins: once the frame has been handed to the socket, a local
+// failure is not evidence the peer did not get it. Reported as definitely
+// failed, it would either deny a delivery that happened or invite a resend of
+// something WeCom already acted on.
+func TestSendMedia_AnAttemptedWriteIsNotProofOfNonDelivery(t *testing.T) {
+	t.Parallel()
+	conn := &framedThenBrokenConn{}
+	sender := newWSSender(conn, nil)
+
+	err := sender.sendMedia(context.Background(), "CHAT_1", chatTypeSingleInt, mediaSend{
+		Kind:    mediaTypeFile,
+		MediaID: "MEDIA_1",
+	})
+	if err == nil {
+		t.Fatal("a broken write returned no error")
+	}
+	if n := conn.wrote(); n == 0 {
+		t.Fatal("the write was never attempted, so this rig proves nothing about the boundary")
+	}
+	if !errors.Is(err, errWriteAttempted) {
+		t.Errorf("error does not carry errWriteAttempted, so callers cannot tell the stage: %v", err)
+	}
+	if got := sendOutcome(err); got != deliveryUnknown {
+		t.Errorf("sendOutcome = %s, want %s — the frame reached the socket and WeCom never ruled on it",
+			got, deliveryUnknown)
 	}
 }
 

@@ -177,7 +177,25 @@ func (o *Outbound) deliverAttachments(e events.Event, to attachmentTarget) {
 	if !to.InstallationID.Valid || to.ChatID == "" {
 		return
 	}
+	// Admission is claimed here rather than inside the goroutine, because a
+	// goroutine that has already started is a goroutine this cap did not
+	// bound. The lookup it runs is on the far side of this gate too: under a
+	// slow database, unbounded lookups are the same failure as unbounded
+	// goroutines wearing a different hat.
+	//
+	// Nothing is known about this turn yet — whether a file is bound to it is
+	// exactly what the lookup would tell us — so a refusal here is logged and
+	// not spoken. Telling the user their file was dropped when the turn may
+	// have carried none is the false alarm the post-lookup gate exists to
+	// avoid.
+	if !o.admitAttachmentDelivery() {
+		o.logger.Warn("wecom outbound: attachment delivery not admitted, too many already running",
+			"installation_id", uuidStringPub(to.InstallationID),
+			"admitted", maxAdmittedAttachmentDeliveries)
+		return
+	}
 	o.spawn(func() {
+		defer o.releaseAttachmentAdmission()
 		ctx, cancel := context.WithTimeout(context.Background(), attachmentBudget)
 		defer cancel()
 		o.sendAttachments(ctx, messageID, workspaceID, to)
@@ -189,14 +207,14 @@ func (o *Outbound) deliverAttachments(e events.Event, to attachmentTarget) {
 // the ones that did not plainly arrive is said once at the end rather than once
 // each.
 //
-// The lookup comes first and the rationing after it, which is the opposite of
-// the obvious order and is deliberate. A turn with no file bound to it must not
-// consume a slot, and — the reason this matters to the user rather than to the
-// scheduler — a delivery refused for want of a slot can only be reported
-// honestly by something that already knows a file was waiting. Rationing ahead
-// of the lookup can either stay silent about a file that was dropped or warn
-// about a file that never existed, and both of those are worse than one indexed
-// read on a turn that turns out to have nothing attached.
+// The caller has already claimed admission, which is what bounds the number of
+// goroutines running this and the number of lookups below. What is rationed
+// here is different and deliberately after the lookup: a turn with no file
+// bound to it must not consume a pending slot, and — the reason this matters
+// to the user rather than to the scheduler — a delivery refused for want of
+// one can only be reported honestly by something that already knows a file was
+// waiting. Rationing this stage ahead of the lookup would either stay silent
+// about a file that was dropped or warn about a file that never existed.
 func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID pgtype.UUID, to attachmentTarget) {
 	rows, err := o.q.ListAttachmentsByChatMessage(ctx, db.ListAttachmentsByChatMessageParams{
 		ChatMessageID: messageID,
@@ -214,10 +232,10 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 	// Past here a file is known to be waiting, so every way out of this
 	// function has to end in either a delivery or a sentence to the user.
 
-	// Shed when too many deliveries are already outstanding. The semaphore
-	// below bounds how many RUN at once; without this, goroutines still
-	// accumulate without limit while they wait for it, and a workspace whose
-	// agents emit artifacts steadily would grow them forever.
+	// Shed when too many deliveries that found a file are already outstanding.
+	// The semaphore below bounds how many RUN at once; this bounds how many
+	// wait for it, and unlike admission it can name what was dropped, so the
+	// user hears about it.
 	if !o.claimAttachmentSlot() {
 		o.logger.WarnContext(ctx, "wecom outbound: attachment delivery shed, too many already pending",
 			"installation_id", uuidStringPub(to.InstallationID),
@@ -359,18 +377,26 @@ func (o *Outbound) sendAttachment(ctx context.Context, sender *wsSender, row db.
 // answer is not an answer. errAckTimeout means the frame reached the socket and
 // the verdict never came, which leaves the message possibly delivered.
 //
+// A transport failure lands there too, and for the same reason rather than a
+// weaker one. errWriteAttempted marks an error raised once WriteMessage had
+// been entered; past that point the frame may already be at the peer, since a
+// half-closed connection reports "broken pipe" to the writer for bytes the
+// reader has. Only what fails before the write — a marshal error, a deadline
+// the connection refused — is provably undelivered.
+//
 // A context error lands on the same side, and less precisely than one would
 // like. wsSender.request returns the same ctx.Err() whether the context ended
 // before the frame was written or while waiting for its verdict, so from out
-// here the two cannot be told apart. Reading both as unknown is the direction
-// that costs least: an unknown is never resent and is described in words that
-// hold either way, so a send that never happened is under-claimed rather than a
-// send that did happen being denied.
+// here the two cannot be told apart. Reading all of these as unknown is the
+// direction that costs least: an unknown is never resent and is described in
+// words that hold either way, so a send that never happened is under-claimed
+// rather than a send that did happen being denied.
 func sendOutcome(err error) deliveryState {
 	switch {
 	case err == nil:
 		return deliveryDelivered
 	case errors.Is(err, errAckTimeout),
+		errors.Is(err, errWriteAttempted),
 		errors.Is(err, context.Canceled),
 		errors.Is(err, context.DeadlineExceeded):
 		return deliveryUnknown
@@ -527,12 +553,20 @@ const (
 	// concurrency buys queueing rather than throughput.
 	maxConcurrentAttachmentDeliveries = 2
 
-	// maxPendingAttachmentDeliveries bounds the goroutines waiting for a
-	// slot. Past it a delivery is shed with a log rather than queued: the
-	// answer's text has already reached the user, the attachment is still in
-	// object storage, and an unbounded queue of goroutines each holding a
-	// completion's context is the failure this exists to avoid.
+	// maxPendingAttachmentDeliveries bounds the deliveries that have found a
+	// file and are waiting for a slot. Past it a delivery is shed and the
+	// user is told: the answer's text has already reached them, the
+	// attachment is still in object storage, and silence would leave them
+	// waiting for a file that is not coming.
 	maxPendingAttachmentDeliveries = 32
+
+	// maxAdmittedAttachmentDeliveries bounds the goroutines themselves, and
+	// with them the attachment lookups they run before anything about the
+	// turn is known. Twice the pending cap, so it is reached only when the
+	// pending cap is already full and as many turns again are still in their
+	// lookup — the ordering that keeps the user-facing shed on the path that
+	// can name a real file.
+	maxAdmittedAttachmentDeliveries = 2 * maxPendingAttachmentDeliveries
 )
 
 // claimAttachmentSlot reserves one of the pending slots, or reports that the
@@ -551,4 +585,24 @@ func (o *Outbound) releaseAttachmentSlot() {
 	o.pendingMu.Lock()
 	defer o.pendingMu.Unlock()
 	o.pendingAttachments--
+}
+
+// admitAttachmentDelivery reserves the right to start one delivery goroutine,
+// or reports that too many are already running. Claimed before the spawn:
+// after it, the goroutine and its lookup are already past anything this could
+// bound.
+func (o *Outbound) admitAttachmentDelivery() bool {
+	o.pendingMu.Lock()
+	defer o.pendingMu.Unlock()
+	if o.admittedAttachments >= maxAdmittedAttachmentDeliveries {
+		return false
+	}
+	o.admittedAttachments++
+	return true
+}
+
+func (o *Outbound) releaseAttachmentAdmission() {
+	o.pendingMu.Lock()
+	defer o.pendingMu.Unlock()
+	o.admittedAttachments--
 }
