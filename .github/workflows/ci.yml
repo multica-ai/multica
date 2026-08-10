@@ -305,6 +305,38 @@ jobs:
       - name: Test
         run: bash scripts/test-go.sh --race
 
+  codex-operational-context:
+    # Characterize the app-server contract against one exact CLI release.
+    # The test points Codex at a local recording endpoint and never uses an
+    # OpenAI account or consumes model quota.
+    runs-on: ubuntu-latest
+    env:
+      CODEX_CHARACTERIZATION_VERSION: 0.146.0
+      MULTICA_RUN_REAL_AGENT_SMOKE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+          cache-dependency-path: server/go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install exact Codex characterization binary
+        run: npm install --global "@openai/codex@${CODEX_CHARACTERIZATION_VERSION}"
+
+      - name: Verify Codex version and operational context boundary
+        working-directory: server
+        run: |
+          test "$(codex --version)" = "codex-cli ${CODEX_CHARACTERIZATION_VERSION}"
+          go test -tags=agentintegration ./internal/daemon -run '^TestOperationalCodexRealBinaryContextBoundary$' -count=1 -v -timeout=5m
+
   windows-execenv:
     # The environment-preparation deadline owns a process tree, not just a Go
     # process. This Windows runtime test verifies Job Object cancellation kills

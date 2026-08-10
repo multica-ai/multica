@@ -64,6 +64,28 @@ Multica stores the session identifier the tool returns. The next time work conti
 
 Retry and session-resumption rules are in [Tasks](/tasks#manual-retry).
 
+## Codex context modes
+
+Codex agents default to the `inherited` context mode. This preserves the normal Codex experience: repository instructions, ambient skills, Multica's runtime brief, managed MCP configuration, custom Codex arguments, and eligible previous sessions remain available.
+
+For small operational agents such as scouts, set this optional agent `runtime_config` field:
+
+```json
+{
+  "codex": {
+    "context_mode": "operational"
+  }
+}
+```
+
+Operational mode starts a fresh Codex thread for every task and loads only Multica's base instructions, the agent instructions, the current task, and the skills explicitly bound to that agent. Repository instruction files, ambient skills, the generated runtime brief, managed MCP configuration, custom Codex arguments, and previous Codex sessions are not loaded. Supporting files belonging to an assigned skill remain available.
+
+The first release supports operational mode only with Multica's built-in Codex provider and its normal OpenAI or ChatGPT authentication. Other fields under `codex` are tolerated for forward compatibility. A malformed or unknown `context_mode` fails the task before Codex starts.
+
+<Callout type="warning">
+Operational mode reduces model context; it does not reduce worker permissions. The task still has the daemon user's repository, shell, environment variables, credentials, and network access.
+</Callout>
+
 ## MCP configuration
 
 Antigravity, GitHub Copilot CLI, DevEco Code, and Pi do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
