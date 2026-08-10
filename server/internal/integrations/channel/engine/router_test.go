@@ -898,11 +898,20 @@ func TestRouter_IssueCommand_ActiveDuplicateIsTerminalProductOutcome(t *testing.
 	}) {
 		t.Fatalf("duplicate result was not delivered to replier: %+v", h.replier.calls())
 	}
-	if !waitFor(time.Second, func() bool { return len(h.binder.boundMedia().MediaRefs) == 1 }) {
+	if !waitFor(time.Second, func() bool { return h.binder.boundMedia().MessageID.Valid }) {
 		t.Fatalf("duplicate media was not finalized: %+v", h.binder.boundMedia())
 	}
-	if got := h.binder.boundMedia().IssueID; got != duplicate.ID {
-		t.Fatalf("duplicate media target = %v, want %v", got, duplicate.ID)
+	if h.media.calls() != 0 {
+		t.Fatalf("duplicate media unexpectedly invoked resolver, calls=%d", h.media.calls())
+	}
+	if got := h.binder.boundMedia().MediaRefs; len(got) != 0 {
+		t.Fatalf("duplicate media unexpectedly persisted refs: %+v", got)
+	}
+	if got := h.binder.boundMedia().IssueID; got.Valid {
+		t.Fatalf("duplicate media unexpectedly targeted existing issue %v", got)
+	}
+	if h.issues.attachmentsChanged.Load() != 0 {
+		t.Fatalf("duplicate media published issue attachment changes = %d, want 0", h.issues.attachmentsChanged.Load())
 	}
 	h.tasks.mu.Lock()
 	issuePromotions := len(h.tasks.issueTaskPromotions)
