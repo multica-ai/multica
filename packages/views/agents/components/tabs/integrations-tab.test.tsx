@@ -565,8 +565,8 @@ describe("IntegrationsTab", () => {
 
   it("lets a non-admin agent owner bind Lark and DingTalk", () => {
     // The agent's owner (user-1) is only a plain workspace member. Lark and
-    // DingTalk both authorize the target agent's owner through canManageAgent;
-    // Slack, WeCom and Telegram remain workspace owner/admin-only.
+    // DingTalk both authorize the target agent's owner's canManageAgent path;
+    // Slack, WeCom, Telegram and ShareCRM remain workspace owner/admin-only.
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     renderTab(<IntegrationsTab agent={agent} />);
     const larkButton = screen.getByTestId("lark-bind-button");
@@ -576,10 +576,12 @@ describe("IntegrationsTab", () => {
     expect(screen.queryByTestId("slack-bind-button")).toBeNull();
     expect(screen.queryByTestId("wecom-bind-button")).toBeNull();
     expect(screen.queryByTestId("telegram-bind-button")).toBeNull();
-    // The Slack, WeCom and Telegram sections fall back to the shared members note.
+    expect(screen.queryByTestId("sharecrm-agent-connect")).toBeNull();
+    // Slack, WeCom, Telegram and ShareCRM each fall back to the shared
+    // members note.
     expect(
       screen.getAllByText(/Only workspace owners and admins can manage this connection/i),
-    ).toHaveLength(3);
+    ).toHaveLength(4);
   });
 
   it("renders the bind entry (not coming-soon) when installs are unavailable but the agent is already bound", () => {
