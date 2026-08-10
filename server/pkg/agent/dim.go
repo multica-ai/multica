@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
+
 	"time"
 )
 
@@ -162,29 +162,15 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	// block for Result.Output while retaining the full text for error
 	// detection.
 	var deliverable acpDeliverableTracker
-	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
-	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
 		cfg:          b.cfg,
 		stdin:        stdin,
 		pending:      make(map[int]*pendingRPC),
 		pendingTools: make(map[string]*pendingToolCall),
-		acceptNotification: func(string) bool {
-			return streamingCurrentTurn.Load()
-		},
-		onActivity: func() {
-			select {
-			case activity <- struct{}{}:
-			default:
-			}
-		},
 		onMessage: func(msg Message) {
-			if !streamingCurrentTurn.Load() {
-				return
-			}
 			if msg.Type == MessageToolUse {
 				// Re-normalise tool titles the same way kimi/traecli do so the
 				// UI sees consistent snake_case names ("write" → "write_file").
@@ -194,9 +180,6 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			msgStream.send(msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
-			if !streamingCurrentTurn.Load() {
-				return
-			}
 			select {
 			case promptDone <- result:
 			default:
@@ -362,7 +345,6 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
 		}
 
-		streamingCurrentTurn.Store(true)
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
@@ -390,31 +372,13 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 				if effectiveModel == "" {
 					effectiveModel = pr.modelID
 				}
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
-				c.usageMu.Unlock()
+				c.mergeUsage(pr.usage)
 			default:
 			}
-			waitForDimNotificationQuiescence(runCtx, activity, readerDone)
 		}
 
 		duration := time.Since(startTime)
 		b.cfg.Logger.Info("dim finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
-
-		// Best-effort session/close so Dim does not accumulate orphaned
-		// sessions in its own session list (each multica task leaves one
-		// otherwise). Cross-process resume stays impossible either way.
-		if sessionID != "" {
-			closeCtx, closeCancel := context.WithTimeout(context.Background(), 3*time.Second)
-			if _, err := c.request(closeCtx, "session/close", map[string]any{
-				"sessionId": sessionID,
-			}); err != nil {
-				b.cfg.Logger.Debug("dim session/close failed (ignored)", "session_id", sessionID, "error", err)
-			}
-			closeCancel()
-		}
 
 		stdin.Close()
 		cancel()
@@ -431,7 +395,6 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		case <-drainCtx.Done():
 		}
 		drainCancel()
-		streamingCurrentTurn.Store(false)
 
 		finalOutput, providerErrorOutput := deliverable.result()
 
@@ -441,12 +404,10 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		// lands before a tool call stays visible.
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
-		c.usageMu.Lock()
 		u := c.accumulatedUsage()
-		c.usageMu.Unlock()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		if acpUsagePresent(u) {
 			model := effectiveModel
 			if model == "" {
 				model = "unknown"
@@ -466,12 +427,4 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	}()
 
 	return &Session{Messages: msgStream.ch, Result: resCh}, nil
-}
-
-// waitForDimNotificationQuiescence gives the ACP stdout reader a bounded
-// chance to consume notifications that Dim may emit just after the
-// session/prompt response. Without this window, cancelling the process at the
-// response boundary can truncate the final text or usage update.
-func waitForDimNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}) {
-	waitForACPNotificationQuiescence(ctx, activity, readerDone, dimNotificationQuietTime, dimReaderDrainGrace)
 }

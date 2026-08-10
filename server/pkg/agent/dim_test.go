@@ -147,9 +147,6 @@ func TestDimSessionNew(t *testing.T) {
 	if !strings.Contains(reqs, "session/prompt") {
 		t.Fatal("expected session/prompt")
 	}
-	if !strings.Contains(reqs, "session/close") {
-		t.Fatal("expected best-effort session/close at the end")
-	}
 }
 
 // TestDimResumeStartsFresh verifies that when the daemon asks to resume a

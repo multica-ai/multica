@@ -24,12 +24,13 @@ describe("ProviderLogo", () => {
   });
 
   it("renders the dedicated Dim mark", () => {
-    const { container } = render(
-      <ProviderLogo provider="dim" className="runtime-logo" />,
-    );
+    const { container } = render(<ProviderLogo provider="dim" className="runtime-logo" />);
 
-    const logo = container.querySelector('svg[aria-label="Dim"]');
-    expect(logo?.querySelector('path[stroke="#4F9CF9"]')).not.toBeNull();
+    const logo = container.querySelector("img");
+    const logoSrc = decodeURIComponent(logo?.getAttribute("src") ?? "");
+
+    expect(logo?.getAttribute("alt")).toBe("");
+    expect(logoSrc).toContain("dim-logo.png");
     expect(logo?.classList.contains("runtime-logo")).toBe(true);
   });
 
