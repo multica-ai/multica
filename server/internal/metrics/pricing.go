@@ -53,11 +53,9 @@ var modelPrices = map[string]ModelPrice{
 	"deepseek:v4-pro":             {Provider: "deepseek", Model: "v4-pro", InputPerM: 1.74, CacheReadPerM: 0.0145, CacheWritePerM: 1.74, OutputPerM: 3.48},
 	"deepseek:v4-flash":           {Provider: "deepseek", Model: "v4-flash", InputPerM: 0.56, CacheReadPerM: 0.0112, CacheWritePerM: 0.56, OutputPerM: 1.12},
 	// MiniMax-M3 (api.minimax.io): input $0.60, output $2.40, cache read $0.12
-	// (0.2x input). Unlike M2.7, MiniMax publishes no separate cache-write rate
-	// for M3, so cache-write tokens bill at the input rate — the same way the
-	// Google, DeepSeek, and xAI rows in this table encode a missing cache-write
-	// rate.
-	"minimax:m3":              {Provider: "minimax", Model: "m3", InputPerM: 0.60, CacheReadPerM: 0.12, CacheWritePerM: 0.60, OutputPerM: 2.40},
+	// (0.2x input). MiniMax does not list a separate cache-write charge for M3,
+	// so leave CacheWritePerM at zero rather than inferring one.
+	"minimax:m3":              {Provider: "minimax", Model: "m3", InputPerM: 0.60, CacheReadPerM: 0.12, CacheWritePerM: 0, OutputPerM: 2.40},
 	"minimax:m2.7":            {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
 	"minimax:m2.7-highspeed":  {Provider: "minimax", Model: "m2.7-highspeed", InputPerM: 0.60, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 2.40},
 	"google:gemini-3-flash":   {Provider: "google", Model: "gemini-3-flash", InputPerM: 0.50, CacheReadPerM: 0.05, CacheWritePerM: 0.50, OutputPerM: 3.00},
@@ -115,7 +113,7 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`deepseek-v4-flash|^deepseek-chat$|^deepseek-reasoner$`), "deepseek:v4-flash"},
 	{regexp.MustCompile(`minimax-m2[.]7.*highspeed|highspeed.*minimax-m2[.]7`), "minimax:m2.7-highspeed"},
 	{regexp.MustCompile(`minimax-m2[.]7`), "minimax:m2.7"},
-	{regexp.MustCompile(`minimax-m3`), "minimax:m3"},
+	{regexp.MustCompile(`(^|/|:)minimax-m3$`), "minimax:m3"},
 	{regexp.MustCompile(`gemini-3-flash`), "google:gemini-3-flash"},
 	{regexp.MustCompile(`gemini-3[.]1-pro`), "google:gemini-3.1-pro"},
 	{regexp.MustCompile(`gemini-2[.]5-pro`), "google:gemini-2.5-pro"},
