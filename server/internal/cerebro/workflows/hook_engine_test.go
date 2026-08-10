@@ -335,6 +335,29 @@ func TestHookEngineTimeoutUsesExplicitFailMode(t *testing.T) {
 	}
 }
 
+// FIR-4797: a slow catalog load must not kill before.session.start (or any
+// other event) just because unrelated fail-closed policies exist in the
+// workspace. timeoutResult only fail-closes for policies that list the event.
+func TestHookEngineTimeoutAllowsWhenNoFailClosedPolicyListsEvent(t *testing.T) {
+	policy := newTestHookPolicy("other-event-only", HookBlock, HookModeEnforce, HookBinding{Kind: HookScopeWorkspace, ID: "ws-1"})
+	policy.FailMode = HookFailClosed
+	// newTestHookPolicy lists BeforeTaskComplete / BeforePromptAssemble / OnError —
+	// not BeforeSessionStart.
+	engine := NewHookEngine(true, NewMemoryHookStore([]HookPolicy{policy}))
+	engine.timeout = time.Nanosecond
+	engine.beforeMatch = func() { time.Sleep(time.Millisecond) }
+
+	result, err := engine.Evaluate(context.Background(), HookEvent{
+		EventID: "session-start-timeout", Type: HookBeforeSessionStart, WorkspaceID: "ws-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != HookAllow || !result.TimedOut {
+		t.Fatalf("unrelated fail-closed policies must not block timed-out session.start: %#v", result)
+	}
+}
+
 func TestHookEngineStopsRemainingActionsAfterRequiredActionFails(t *testing.T) {
 	first := newTestHookPolicy("required-actions", HookAllow, HookModeEnforce, HookBinding{Kind: HookScopeWorkspace, ID: "ws-1"})
 	first.FailMode = HookFailClosed

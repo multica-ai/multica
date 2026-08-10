@@ -44,7 +44,12 @@ func (e *HookEngine) WithConditionResolver(resolver HookConditionResolver) *Hook
 }
 
 func NewHookEngine(enabled bool, store HookStore) *HookEngine {
-	return &HookEngine{enabled: enabled, store: store, timeout: 250 * time.Millisecond, now: time.Now}
+	// Catalog load for every active policy is on the critical path of every
+	// lifecycle event (including before.session.start). 250ms was too tight
+	// under normal DB load and fail-closed killed agent runs with no matching
+	// hook for the event. 2s leaves headroom; timeoutResult still only
+	// fail-closes for policies that actually list the event.
+	return &HookEngine{enabled: enabled, store: store, timeout: 2 * time.Second, now: time.Now}
 }
 
 func (e *HookEngine) Evaluate(ctx context.Context, event HookEvent) (HookResult, error) {
@@ -75,7 +80,7 @@ func (e *HookEngine) Evaluate(ctx context.Context, event HookEvent) (HookResult,
 		e.beforeMatch()
 	}
 	if e.timeout > 0 && e.now().Sub(started) > e.timeout {
-		result := timeoutResult(policies)
+		result := timeoutResult(policies, event.Type)
 		result.RunID = key
 		_ = e.store.SaveResult(ctx, key, event, result)
 		return result, nil
@@ -175,18 +180,28 @@ policyLoop:
 	return result, nil
 }
 
-func timeoutResult(policies []HookPolicy) HookResult {
+// timeoutResult decides what happens when catalog load exceeds the engine
+// budget. Only policies that list this event type can force fail-closed —
+// otherwise a slow ListEffective turns every lifecycle event (including ones
+// with zero configured hooks, e.g. before.session.start) into a silent block.
+func timeoutResult(policies []HookPolicy, eventType HookEventType) HookResult {
 	for _, policy := range policies {
-		if policy.Mode != HookModeOff && policy.FailMode == HookFailClosed {
+		if policy.Mode == HookModeOff || !eventListed(policy.Events, eventType) {
+			continue
+		}
+		if policy.FailMode == HookFailClosed {
 			return HookResult{Evaluated: true, Decision: HookBlock, TimedOut: true, Warning: "Hook evaluation timed out and failed closed"}
 		}
 	}
 	for _, policy := range policies {
-		if policy.Mode != HookModeOff && policy.FailMode == HookFailWarn {
+		if policy.Mode == HookModeOff || !eventListed(policy.Events, eventType) {
+			continue
+		}
+		if policy.FailMode == HookFailWarn {
 			return HookResult{Evaluated: true, Decision: HookAllow, TimedOut: true, Warning: "Hook evaluation timed out"}
 		}
 	}
-	return HookResult{Evaluated: true, Decision: HookAllow, TimedOut: true}
+	return HookResult{Evaluated: true, Decision: HookAllow, TimedOut: true, Warning: "Hook evaluation timed out"}
 }
 
 // actionGateVerdict reads a decision an action reports on success. A quality

@@ -17,7 +17,9 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("HookEditor", () => {
-  it("edits the rule and how to satisfy it", async () => {
+  // CI runners can exceed the default 5s when userEvent types two long fields
+  // character-by-character under load (saw 5237ms on PR #2977 frontend).
+  it("edits the rule and how to satisfy it", { timeout: 15_000 }, async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
     render(<HookEditor initialHook={createHookDraft()} onSave={onSave} />);
