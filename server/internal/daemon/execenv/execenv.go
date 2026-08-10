@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/codexcontext"
 )
 
 // RepoContextForEnv describes a workspace repo available for checkout.
@@ -91,7 +92,11 @@ type PrepareParams struct {
 	// Windows sandbox decision reads them, to honor a `-c windows.sandbox=...`
 	// override that never lands in config.toml (MUL-4957).
 	CodexCustomArgs []string
-	Task            TaskContextForEnv // context data for writing files
+	// CodexContext selects replacement-based operational preparation when
+	// non-nil. The daemon builds this value once and passes the same value to
+	// environment preparation and the Codex backend.
+	CodexContext *codexcontext.OperationalContext
+	Task         TaskContextForEnv // context data for writing files
 }
 
 // TaskContextForEnv is the subset of task context used for writing context files.
@@ -274,6 +279,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if params.TaskID == "" {
 		return nil, fmt.Errorf("execenv: task ID is required")
 	}
+	if params.CodexContext != nil && params.Provider != "codex" {
+		return nil, fmt.Errorf("execenv: operational context requires codex provider")
+	}
 
 	envRoot := filepath.Join(params.WorkspacesRoot, params.WorkspaceID, shortID(params.TaskID))
 
@@ -334,7 +342,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// and avoids a conditional that would silently disable cleanup if the
 	// local_directory detection logic ever drifts.
 	manifest := &sidecarManifest{}
-	if err := writeContextFiles(workDir, params.Provider, params.Task, manifest); err != nil {
+	if err := writeEffectiveContextFiles(workDir, params.Provider, params.Task, params.CodexContext, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
 
@@ -360,11 +368,17 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
-			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
-		}
-		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
-			return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
+		if params.CodexContext != nil {
+			if err := prepareOperationalCodexHome(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != ""}, *params.CodexContext, logger); err != nil {
+				return nil, fmt.Errorf("execenv: prepare operational codex-home: %w", err)
+			}
+		} else {
+			if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+				return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
+			}
+			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
+				return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
+			}
 		}
 		env.CodexHome = codexHome
 	}
@@ -496,12 +510,16 @@ type ReuseParams struct {
 	// Windows sandbox decision honors a `-c windows.sandbox=...` override here
 	// too (MUL-4957).
 	CodexCustomArgs []string
+	CodexContext    *codexcontext.OperationalContext
 	Task            TaskContextForEnv // refreshed context files / skills
 }
 
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
 // Returns nil if the workdir does not exist (caller should fall back to Prepare).
 func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
+	if params.CodexContext != nil && params.Provider != "codex" {
+		return nil
+	}
 	if _, err := os.Stat(params.WorkDir); err != nil {
 		return nil
 	}
@@ -593,7 +611,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// legacy local_directory Reuse fallback — skip the persist in that
 	// case to avoid creating a stray manifest at the filesystem root.
 	manifest := &sidecarManifest{}
-	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task, manifest); err != nil {
+	if err := writeEffectiveContextFiles(params.WorkDir, params.Provider, params.Task, params.CodexContext, manifest); err != nil {
 		logger.Warn("execenv: refresh context files failed", "error", err)
 	}
 
@@ -602,12 +620,20 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
-			logger.Warn("execenv: refresh codex-home failed", "error", err)
-		} else {
+		if params.CodexContext != nil {
+			if err := prepareOperationalCodexHome(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalDirectory}, *params.CodexContext, logger); err != nil {
+				logger.Warn("execenv: refresh operational codex-home failed", "error", err)
+				return nil
+			}
 			env.CodexHome = codexHome
-			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
-				logger.Warn("execenv: refresh codex skills failed", "error", err)
+		} else {
+			if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+				logger.Warn("execenv: refresh codex-home failed", "error", err)
+			} else {
+				env.CodexHome = codexHome
+				if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
+					logger.Warn("execenv: refresh codex skills failed", "error", err)
+				}
 			}
 		}
 	}

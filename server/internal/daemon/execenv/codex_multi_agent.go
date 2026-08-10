@@ -200,7 +200,13 @@ func ensureCodexMultiAgentConfig(configPath string, logger *slog.Logger) error {
 		}
 		return nil
 	}
+	return ensureCodexMultiAgentDisabledConfig(configPath)
+}
 
+// ensureCodexMultiAgentDisabledConfig writes the disabled policy regardless
+// of the daemon-wide inherited-mode escape hatch. Operational context uses it
+// because native subagents are an excluded ambient context source.
+func ensureCodexMultiAgentDisabledConfig(configPath string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read config.toml: %w", err)

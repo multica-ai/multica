@@ -286,7 +286,13 @@ func ensureCodexMemoryConfig(configPath string, logger *slog.Logger) error {
 		}
 		return nil
 	}
+	return ensureCodexMemoryDisabledConfig(configPath)
+}
 
+// ensureCodexMemoryDisabledConfig writes the disabled policy regardless of
+// the daemon-wide inherited-mode escape hatch. Operational context must never
+// inherit cross-task memory.
+func ensureCodexMemoryDisabledConfig(configPath string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read config.toml: %w", err)
