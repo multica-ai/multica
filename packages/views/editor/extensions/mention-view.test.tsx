@@ -10,7 +10,7 @@
  * then return without an adapter, producing a dead click on web. These tests
  * pin the no-adapter path for both chips.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { NavigationProvider } from "../../navigation/context";
 import type { NavigationAdapter } from "../../navigation/types";
@@ -18,6 +18,40 @@ import type { NavigationAdapter } from "../../navigation/types";
 // Tiptap NodeView primitives can't be instantiated without a full editor.
 vi.mock("@tiptap/react", () => ({
   NodeViewWrapper: ({ children, ...rest }: any) => <span {...rest}>{children}</span>,
+}));
+
+const { mentionDisplayState } = vi.hoisted(() => ({
+  mentionDisplayState: { mode: "full" as "plain" | "compact" | "full" },
+}));
+
+vi.mock("@multica/core/issues/stores", () => ({
+  useIssueMentionDisplayStore: (selector: (s: typeof mentionDisplayState) => unknown) =>
+    selector(mentionDisplayState),
+}));
+
+// IssueMentionCard now nests its AppLink inside a real IssueHoverCard, which is
+// left unmocked on purpose so the click assertions below traverse that nesting.
+// Its data dependencies are stubbed the way issue-hover-card.test.tsx stubs
+// them, which also removes the need for a QueryClientProvider.
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: vi.fn(() => ({ data: undefined })),
+}));
+
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "workspace-1",
+}));
+
+vi.mock("@multica/core/issues/queries", () => ({
+  issueDetailOptions: (_workspaceId: string, issueId: string) => ({
+    queryKey: ["issue", issueId],
+  }),
+  childIssueProgressOptions: (workspaceId: string) => ({
+    queryKey: ["child-progress", workspaceId],
+  }),
+}));
+
+vi.mock("../../issues/components/status-icon", () => ({
+  StatusIcon: () => <svg data-testid="status-icon" />,
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -131,6 +165,10 @@ describe("MentionView issue mention", () => {
   const ISSUE_ID = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
   const ISSUE_PATH = `/acme/issues/${ISSUE_ID}`;
 
+  beforeEach(() => {
+    mentionDisplayState.mode = "full";
+  });
+
   it("pushes in place on plain click — same as the readonly chip", () => {
     const push = vi.fn();
     const openInNewTab = vi.fn();
@@ -173,5 +211,34 @@ describe("MentionView issue mention", () => {
     expect(defaultNotPrevented).toBe(false);
     expect(openInNewTab).toHaveBeenCalledWith(ISSUE_PATH, "MUL-7");
     expect(push).not.toHaveBeenCalled();
+  });
+
+  // The NodeViewWrapper is the outermost inline element, so the CSS rule that
+  // centers boxed chips (`[data-node-view-wrapper] { vertical-align: middle }`)
+  // can only be opted out of here — an inner element cannot override it.
+  it("marks the wrapper for baseline alignment in plain mode", () => {
+    mentionDisplayState.mode = "plain";
+    const { container } = renderMention(
+      { type: "issue", id: ISSUE_ID, label: "MUL-7" },
+      makeAdapter(),
+    );
+
+    expect(container.firstElementChild).toHaveClass("issue-mention-plain");
+  });
+
+  it("leaves the wrapper unmarked in the boxed modes", () => {
+    mentionDisplayState.mode = "compact";
+    const { container } = renderMention(
+      { type: "issue", id: ISSUE_ID, label: "MUL-7" },
+      makeAdapter(),
+    );
+
+    expect(container.firstElementChild).not.toHaveClass("issue-mention-plain");
+  });
+
+  it("mounts the hover card so editor mentions match readonly ones", () => {
+    renderMention({ type: "issue", id: ISSUE_ID, label: "MUL-7" }, makeAdapter());
+
+    expect(document.querySelector("[data-slot='hover-card-trigger']")).not.toBeNull();
   });
 });

@@ -41,6 +41,7 @@ import rehypeSanitize from "rehype-sanitize";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useConfigStore } from "@multica/core/config";
+import { useIssueMentionDisplayStore } from "@multica/core/issues/stores";
 import type { Attachment } from "@multica/core/types";
 import {
   isAllowedFileCardHref,
@@ -106,14 +107,21 @@ function useIsFenceClosed(offset: number | undefined): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Issue mention chip. Navigation — plain click, modifier click, and the
- * "open issue links in new tab" preference — is owned by the AppLink inside
- * IssueMentionCard; the wrapper only shields surrounding click handlers
- * (e.g. collapsed-comment expanders) from mention clicks.
+ * Issue mention chip. Navigation — plain click and modifier click — is owned by
+ * the AppLink inside IssueMentionCard; the wrapper only shields surrounding
+ * click handlers (e.g. collapsed-comment expanders) from mention clicks.
+ *
+ * `align-middle` centers the boxed chip in the paragraph's line box. `plain`
+ * renders bare prose-sized text, which belongs on the sentence baseline — this
+ * wrapper is the outermost inline element, so the choice has to be made here.
  */
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
+  const mode = useIssueMentionDisplayStore((s) => s.mode);
   return (
-    <span className="inline align-middle" onClick={(e) => e.stopPropagation()}>
+    <span
+      className={mode === "plain" ? "inline" : "inline align-middle"}
+      onClick={(e) => e.stopPropagation()}
+    >
       <IssueMentionCard issueId={issueId} fallbackLabel={label} />
     </span>
   );

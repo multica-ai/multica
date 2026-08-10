@@ -35,6 +35,12 @@
   vertical-align: middle;
 }
 
+/* Plain issue mentions render as bare prose-sized text, so they sit on the
+   sentence baseline instead of being centered like the boxed chip. */
+.rich-text-editor [data-node-view-wrapper].issue-mention-plain {
+  vertical-align: baseline;
+}
+
 /* Block-level NodeViews (fileCard) need to override the inline default above */
 .rich-text-editor .file-card-node {
   display: block !important;

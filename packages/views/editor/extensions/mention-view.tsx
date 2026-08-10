@@ -16,15 +16,24 @@
  * `vertical-align: middle` rule on `[data-node-view-wrapper]` in CSS handles
  * line-box alignment; setting it on an inner element has no effect because
  * the wrapper is the outermost inline element.
+ *
+ * That last point is the only reason this file reads a store at all: `plain`
+ * mention style renders bare prose-sized text, which belongs on the sentence
+ * baseline rather than centered. The wrapper is the sole element that can
+ * carry that choice, so plain mode marks it with `.issue-mention-plain` (rule
+ * in shell.css). Everything else about the mention — density and click
+ * semantics alike — is decided inside IssueMentionCard.
  */
 
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
+import { useIssueMentionDisplayStore } from "@multica/core/issues/stores";
 import { IssueMentionCard } from "../../issues/components/issue-mention-card";
 import { ProjectMentionCard } from "../../projects/components/project-mention-card";
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
+  const mode = useIssueMentionDisplayStore((s) => s.mode);
 
   // stopPropagation mirrors the readonly renderer's mention wrappers: a chip
   // click must not reach surrounding click handlers.
@@ -32,7 +41,7 @@ export function MentionView({ node }: NodeViewProps) {
     return (
       <NodeViewWrapper
         as="span"
-        className="inline"
+        className={mode === "plain" ? "inline issue-mention-plain" : "inline"}
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
         <IssueMentionCard issueId={id} fallbackLabel={label} />
