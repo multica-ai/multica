@@ -69,14 +69,19 @@ const (
 // third of what the transport could express.
 //
 // The 50 MB the chunk arithmetic allows is the size the FRAMING can describe,
-// not a size the platform accepts. WeCom's own OpenClaw plugin
-// (WecomTeam/wecom-openclaw-plugin src/const.ts) carries the numbers the
-// product enforces: 20 MiB for a file, and ABSOLUTE_MAX_BYTES — the value it
-// documents as "beyond this it cannot be sent" — is that same 20 MiB. Its
-// per-kind ceilings are lower still (10 MiB image, 10 MiB video, 2 MiB voice),
-// and those are already applied a layer up in wecomMediaKind, which demotes an
-// oversize image to a file rather than offering the server something it will
-// refuse. 20 MiB is therefore the widest any kind can be.
+// not a size the platform accepts. WeCom documents the accepted sizes on the
+// init cmd itself: developer.work.weixin.qq.com/document/path/101463,
+// aibot_upload_media_init, the body.total_size row — image at most 10MB, voice
+// 2MB, video 10MB, plain file 20MB. The classic media upload API states the
+// same four (document/path/90253, under the media file limits heading). 20 MB
+// for a plain file is the widest any kind may be.
+//
+// The per-kind ceilings are applied a layer up in wecomMediaKind, which demotes
+// an oversize image to a file rather than offering the server something it will
+// refuse. Tencent's own OpenClaw plugin carries the same numbers
+// (WecomTeam/wecom-openclaw-plugin src/const.ts), which is corroboration rather
+// than the source: those are uncited client constants, and the docs above are
+// the authority.
 //
 // Chunking a 40 MB file to be refused at the end costs eighty round trips, the
 // whole thing resident in memory, and a user who waits minutes to be told no.
