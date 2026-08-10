@@ -2,11 +2,15 @@ package wecom
 
 // stream_ledger_test.go — the ledger's invariants, held shut from the outside.
 //
-// Four review rounds have found four different ways to break the same promise,
-// and every one of them was a scenario nobody had written a test for. So these
-// tests are not scenarios. They enumerate every terminal path a round has and
-// assert the properties the ledger claims for all of them at once, which is the
-// only shape that covers the fifth way before somebody finds it.
+// Five review rounds have found five different ways to break the same promise,
+// and every one of them was a scenario nobody had written a test for. So the
+// table here is not a scenario: it enumerates every terminal path a round has
+// and asserts the properties the ledger claims for all of them at once.
+//
+// The fifth way was the one that shape could not reach. It takes two publishers
+// of one ending overlapping, which no sequential walk of the paths produces, and
+// the tests for it are at the bottom of the file — one publisher held on the
+// wire with its words unanswered, and a second deciding what to do about them.
 
 import (
 	"context"
@@ -173,7 +177,7 @@ func setUpTwoRounds(t *testing.T, p terminalPath, c controlRound) *bubbleRig {
 // TestEveryTerminalPathEndsInWordsOrLeavesTheRunOwed is the ledger's contract,
 // asserted as a property of all of its paths rather than as a story about one.
 //
-// Four rounds of review have found four ways to break the same promise, and
+// The first four rounds of review found four ways to break the same promise, and
 // each was fixed with a scenario test that could not have caught the next one:
 // a FIFO claim, a delivery path that settled nothing, dedup keyed by session,
 // a claim recorded before its send. All four are instances of two properties
@@ -410,6 +414,20 @@ func (r *bubbleRig) publishFailure(taskID string) {
 	})
 }
 
+// waitForRepeatAtTheLedger blocks until a second publisher has reached the
+// ledger for a run this store DOES hold a round or a promise for.
+//
+// The first publisher of such a run never asks the origin gate: knowsRound
+// answers off the open list or the owed list and no row is read. By the time the
+// repeat arrives the first one has taken both — the round is off the list and
+// its promise is in speaking — so the repeat falls through to the row, and that
+// read is the signal. One read means the repeat is past the gate with nothing
+// left to do but reach the store.
+func (r *bubbleRig) waitForRepeatAtTheLedger(t *testing.T) {
+	t.Helper()
+	r.waitForOriginReads(t, 1)
+}
+
 // waitForOriginReads blocks until the origin gate has been asked n times — the
 // last thing a publisher does before it reaches the ledger. It is what lets a
 // test say "the repeat has arrived" without watching a clock.
@@ -523,5 +541,163 @@ func TestARefusedFailureNoticeIsStillTheRepeatsToSay(t *testing.T) {
 			"repeat to have said %q — a delivery nothing accepted is not a delivery, and "+
 			"treating the repeat as told swallows the only retry this news had",
 			got, streamCopyFailed)
+	}
+}
+
+// ---- two publishers of one run's ending, with a round on file ----
+
+// The four tests below are the same race against a round this store DOES hold
+// something for, which is where the exclusion used to be an answer rather than a
+// wait: the repeat found the run on the note's speaking list and returned as
+// though the user had been told. Both states a round can be in are covered, and
+// each in both directions, because the two directions are what a wait is for and
+// only one of them shows the defect.
+//
+// The success direction holds on both sides of the fix, and has to: it forbids
+// the shortest way to write the fix wrong, which is to let the waiter speak
+// whatever the first delivery reports. The failure direction is the regression —
+// before the fix the repeat was gone before the outcome it came for existed, and
+// with the round consumed and no publisher left the asker kept a spinner nothing
+// would ever seal.
+
+// raceTwoFailurePublishers publishes one run's failure twice, holding the first
+// delivery on the wire until the repeat has reached the ledger.
+//
+// sent is where the first delivery reports having got onto the wire and hold is
+// what it is parked on: the closing-frame pair for a round that still has its
+// bubble, the plain-message pair for one the guard has already closed. Both
+// publishers run on goroutines of their own — the bus is synchronous, so a
+// publisher occupies the goroutine that published the event.
+func (r *bubbleRig) raceTwoFailurePublishers(t *testing.T, taskID string, sent, hold chan struct{}) {
+	t.Helper()
+	first := make(chan struct{})
+	go func() { defer close(first); r.publishFailure(taskID) }()
+	<-sent
+
+	second := make(chan struct{})
+	go func() { defer close(second); r.publishFailure(taskID) }()
+	r.waitForRepeatAtTheLedger(t)
+	letTheRepeatSpeak()
+
+	close(hold)
+	<-first
+	<-second
+}
+
+// TestASecondPublisherOfAnOpenRoundsFailureWaitsForTheFirst is the success
+// direction on a round that still has its bubble.
+//
+// The first publisher took the round and its closing frame is on the wire. The
+// repeat must add nothing — but it must not decide that before the frame is
+// answered, because the deciding fact is whether those words landed, and at that
+// moment nobody knows it yet. So it waits, hears that they did, and goes quiet.
+func TestASecondPublisherOfAnOpenRoundsFailureWaitsForTheFirst(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.ran(t, "REQ-RACE-OPEN", 1, "task-1")
+
+	rig.conn.holdClosing = make(chan struct{})
+	rig.conn.closingSent = make(chan struct{}, 4)
+
+	rig.raceTwoFailurePublishers(t, taskUUID(t, "task-1"), rig.conn.closingSent, rig.conn.holdClosing)
+
+	if got := said(t, rig.conn); len(got) != 1 || got[0] != streamCopyFailed {
+		t.Fatalf("one open round's failure left the asker reading %q, want [%q] — its two "+
+			"publishers raced inside the window before the closing frame was answered, and "+
+			"both spoke", got, streamCopyFailed)
+	}
+	if got := pushedTexts(t, rig.conn); len(got) != 0 {
+		t.Fatalf("the repeat also pushed %q underneath the bubble the first publisher had "+
+			"just sealed", got)
+	}
+}
+
+// TestARefusedClosingFrameLeavesTheOpenRoundToTheRepeat is the regression, and
+// the sequence the review describes.
+//
+// The first publisher takes the round, its closing frame is refused, and so is
+// the plain message it falls back to — the reconnect window, in which every
+// delivery path is silent. The round is gone either way: the handle is consumed
+// under the lock that found it, so what the asker is looking at is a spinner
+// nothing can seal any more, and the ledger records the run as owed its ending
+// for whoever says it next.
+//
+// The repeat IS whoever says it next. It is standing right there, past the origin
+// gate, with a live connection; turning it away with "already said" while the
+// first delivery is still on the wire spends the last publisher this news has,
+// and the debt filed a moment later has nobody left to spend it.
+func TestARefusedClosingFrameLeavesTheOpenRoundToTheRepeat(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.ran(t, "REQ-RACE-OPEN-REFUSED", 1, "task-1")
+
+	rig.conn.refuseClosingCode = errcodeStreamExpired
+	rig.conn.refusePushes = 1 // the first notice is refused; a later one is not
+	rig.conn.holdPush = make(chan struct{})
+	rig.conn.pushSent = make(chan struct{}, 4)
+
+	rig.raceTwoFailurePublishers(t, taskUUID(t, "task-1"), rig.conn.pushSent, rig.conn.holdPush)
+
+	got := pushedTexts(t, rig.conn)
+	if len(got) != 2 || got[1] != streamCopyFailed {
+		t.Fatalf("after the first publisher's frame and fallback were both refused, the messages "+
+			"attempted were %q, want two — the refused first one and then %q from the repeat. It "+
+			"was turned away before the outcome it came for existed, and nothing else will ever "+
+			"seal the bubble the asker is watching", got, streamCopyFailed)
+	}
+}
+
+// TestASecondPublisherOfAGuardOwedFailureWaitsForTheFirst is the success
+// direction on a round the guard has already closed.
+//
+// The promise is on the owed list, the first publisher has claimed it, and its
+// message is on the wire. The repeat waits, hears the words landed, and adds
+// nothing — one promise, one reply.
+func TestASecondPublisherOfAGuardOwedFailureWaitsForTheFirst(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.ran(t, "REQ-RACE-OWED", 1, "task-1")
+	rig.guardClosed(t, 1)
+
+	rig.conn.holdPush = make(chan struct{})
+	rig.conn.pushSent = make(chan struct{}, 4)
+
+	rig.raceTwoFailurePublishers(t, taskUUID(t, "task-1"), rig.conn.pushSent, rig.conn.holdPush)
+
+	if got := pushedTexts(t, rig.conn); len(got) != 1 || got[0] != streamCopyFailed {
+		t.Fatalf("one guard-owed round's failure left the asker reading %q, want [%q] — the "+
+			"repeat spoke against a promise the first publisher had already claimed, so the "+
+			"separate reply the guard promised arrived twice", got, streamCopyFailed)
+	}
+}
+
+// TestARefusedGuardOwedNoticeIsStillTheRepeatsToSay is the milder half of the
+// regression, and the one that shows what the discarded retry costs even when
+// the promise survives.
+//
+// The claim comes back to owed when the delivery fails, so a LATER publisher
+// could still spend it — but the concurrent one was already available, already
+// past the origin gate, and had a live connection. Sending it away turns a
+// promise that could have been kept in the same breath into one that waits on
+// whatever publisher happens to come next, and on this path nothing is scheduled
+// to.
+func TestARefusedGuardOwedNoticeIsStillTheRepeatsToSay(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.ran(t, "REQ-RACE-OWED-REFUSED", 1, "task-1")
+	rig.guardClosed(t, 1)
+
+	rig.conn.refusePushes = 1 // the first notice is refused; a later one is not
+	rig.conn.holdPush = make(chan struct{})
+	rig.conn.pushSent = make(chan struct{}, 4)
+
+	rig.raceTwoFailurePublishers(t, taskUUID(t, "task-1"), rig.conn.pushSent, rig.conn.holdPush)
+
+	got := pushedTexts(t, rig.conn)
+	if len(got) != 2 || got[1] != streamCopyFailed {
+		t.Fatalf("after the first notice against the guard's promise was refused, the messages "+
+			"attempted were %q, want two — the refused first one and then %q from the repeat. "+
+			"The promise came back to the owed list with the one publisher that could still "+
+			"have kept it already sent away", got, streamCopyFailed)
 	}
 }

@@ -37,6 +37,12 @@ type bubbleConn struct {
 	// in flight and unanswered while the second decides what to do.
 	holdPush chan struct{}
 	pushSent chan struct{}
+	// holdClosing and closingSent are the same window for a round that still has
+	// its bubble, where the first delivery is a closing frame rather than a
+	// message. Only the CLOSING frame is held: the opening one is written by the
+	// ingest a test sets up with, and parking that would park the setup.
+	holdClosing chan struct{}
+	closingSent chan struct{}
 	// refusePushes is how many plain messages the server answers with an
 	// errcode, counted from the first.
 	refusePushes int
@@ -47,20 +53,24 @@ func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
 	if err := json.Unmarshal(data, &env); err != nil {
 		return err
 	}
+	closing := isClosingFrame(env)
 	c.mu.Lock()
 	c.frames = append(c.frames, env)
 	s := c.sender
 	code := 0
 	switch {
-	case c.refuseClosingCode != 0 && isClosingFrame(env):
+	case c.refuseClosingCode != 0 && closing:
 		code = c.refuseClosingCode
 	case env.Cmd == cmdSendMsg && c.refusePushes > 0:
 		c.refusePushes--
 		code = errcodeRefusedPush
 	}
 	hold, sent := c.holdPush, c.pushSent
+	if closing {
+		hold, sent = c.holdClosing, c.closingSent
+	}
 	c.mu.Unlock()
-	if env.Cmd == cmdSendMsg {
+	if closing || env.Cmd == cmdSendMsg {
 		if sent != nil {
 			select {
 			case sent <- struct{}{}:

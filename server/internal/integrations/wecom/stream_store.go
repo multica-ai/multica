@@ -158,8 +158,8 @@ const (
 	// used to be.
 	roundOwesAnEnding
 	// roundToldAlready — the answer landed, another publisher's failure got
-	// here first, or the words are going out on another goroutine right now.
-	// Nothing to add.
+	// here first, or a delivery this caller waited out put the words on the
+	// screen. Nothing to add.
 	roundToldAlready
 )
 
@@ -239,8 +239,8 @@ func (h streamHandle) address() roundAddress {
 //
 // owed / told / speaking below are one piece of bookkeeping answering one
 // question: has this run's ending been said to the user, and if not, who still
-// owes it. Four review rounds have found four different ways to get that wrong,
-// and all four were the same mistake — the ledger recorded an outcome the user
+// owes it. Five review rounds have found five different ways to get that wrong,
+// and all five were the same mistake — the ledger recorded an outcome the user
 // never got:
 //
 //	1. a promise spent by POSITION, so one round's words settled another
@@ -251,7 +251,11 @@ func (h streamHandle) address() roundAddress {
 //	3. "already told" read off the SESSION rather than the run, so a second
 //	   asker was silenced by a note an unrelated run had left;
 //	4. a promise recorded as kept BEFORE the send meant to keep it, so a send
-//	   refused during a WebSocket reconnect lost the promise for good.
+//	   refused during a WebSocket reconnect lost the promise for good;
+//	5. a repeat answered "already said" while the first delivery was still on
+//	   the wire, so when that delivery was refused the news had no publisher
+//	   left — the one that was standing right there had been sent away before
+//	   the outcome it came for existed.
 //
 // Scenario tests were written for each and did not stop the next one, because
 // each fix was a rule the next caller had to remember. So the ledger states its
@@ -259,7 +263,10 @@ func (h streamHandle) address() roundAddress {
 //
 //	I1. NOTHING IS RECORDED AS SAID UNTIL IT HAS BEEN SAID. A run reaches told,
 //	    and a promise leaves owed, only after a delivery reports that the words
-//	    were accepted for sending.
+//	    were accepted for sending. Nor is anything ANSWERED as said before then:
+//	    a publisher arriving while a delivery is on the wire is handed that
+//	    delivery to wait on, never a verdict of "already said" — until the
+//	    holder reports, there is no such fact to give it.
 //	I2. A RUN'S ENDING IS MATCHED BY THE RUN'S OWN ID — never by position,
 //	    never by session. A promise another round is waiting on is not this
 //	    run's to spend, and a note another round left is not this run's reason
@@ -399,11 +406,11 @@ type pendingEnding struct {
 	// was supposed to decide.
 	held bool
 
-	// flight is the in-flight reservation this delivery is holding, for the one
-	// path that can hold nothing else: a run this store has no round and no note
-	// for. Resolved by endEnding, which is what publishes the outcome to whoever
-	// is waiting behind it. Nil everywhere else — a round on file excludes its
-	// repeats through speaking on the note.
+	// flight is the reservation this delivery is holding: the entry on the
+	// note's speaking list for a round on file, or the one in the inflight map
+	// for a run this store has no note for. Resolved by endEnding, which is what
+	// publishes the outcome to whoever is waiting behind it. Nil only where
+	// nothing was reserved at all.
 	flight *endingInFlight
 }
 
@@ -415,30 +422,50 @@ type inflightKey struct {
 }
 
 // endingInFlight is one delivery that other publishers of the same news wait
-// on, and it exists because the note cannot hold this one.
+// on. Every reserved ending has one, wherever the reservation is kept.
 //
 // task:failed has two publishers and the bus is synchronous, so a repeat can
-// reach the store while the first delivery's words are still on the wire. For a
-// round on file that window is closed by speaking on the note. For a run this
-// store holds NOTHING for there is no note to write to — deliberately, because
-// anything filed there would be read by knowsRound as proof the question was
-// asked in the room, and at that point there is no evidence the session is even
-// WeCom's. So the reservation lives in a map of its own that no origin question
-// reads, and it is gone the moment the delivery reports back.
+// reach the store while the first delivery's words are still on the wire. What
+// differs between a round on file and a run this store holds nothing for is only
+// WHERE the reservation lives: on the note's speaking list for the first, and in
+// a map of its own for the second — because anything filed on a note would be
+// read by knowsRound as proof the question was asked in the room, and at that
+// point there is no evidence the session is even WeCom's. Neither outlives the
+// delivery: both are given up the moment it reports back.
 //
-// Waiting rather than answering "already said" is the point of the channel. If
-// the first delivery fails, the publisher behind it is the retry that news still
-// has, and recording it as told would swallow the words the way defect 4
-// swallowed a promise. The wait costs the caller no more than speaking would
-// have: it is bounded by the same context the send runs on, and what it waits
-// for IS a send on that budget.
+// Waiting rather than answering "already said" is the point of the channel, and
+// it is the point on both paths. If the first delivery fails, the publisher
+// behind it is the retry that news still has, and answering it "already said"
+// would swallow the words the way defect 4 swallowed a promise — which is
+// exactly what the speaking list did before defect 5 was found. The wait costs
+// the caller no more than speaking would have: it is bounded by the same context
+// the send runs on, and what it waits for IS a send on that budget.
+//
+// The outcome is published under s.mu, by the same call that files what the
+// delivery lost. So a waiter released with delivered=false cannot get back into
+// the store before the ledger is settled, and what it finds when it does is the
+// promise restored or the round newly owed one — never a debt still in the air.
 type endingInFlight struct {
 	// done is closed once the delivery has reported. delivered is written
 	// before the close and read only after it, so the close is the whole of the
 	// synchronisation between the two.
 	done      chan struct{}
 	delivered bool
-	at        time.Time
+	// over says the outcome has been published. The sweep can retire a
+	// reservation whose holder never reported, and that holder may still come
+	// back afterwards; without this the second report would close done twice.
+	over bool
+	at   time.Time
+}
+
+// report publishes this delivery's outcome to whoever is waiting on it. Written
+// under s.mu, and a second call is a no-op rather than a panic — see over.
+func (f *endingInFlight) report(delivered bool) {
+	if f.over {
+		return
+	}
+	f.over, f.delivered = true, delivered
+	close(f.done)
 }
 
 // inFlightMaxAge retires a reservation whose holder never reported — a delivery
@@ -489,9 +516,22 @@ type endedRound struct {
 	// been said. It is what keeps the gap between those two safe. The bus is
 	// synchronous and task:failed has two publishers, so a repeat can arrive
 	// while the first delivery is still on the wire — it finds the run here and
-	// stays silent, and if the words never land the run comes off this list and
-	// back onto owed, where the next publisher can still keep the promise.
-	speaking []string
+	// waits on the delivery the entry carries: silent once that delivery reports
+	// the words landed, and the retry when it reports they did not, because the
+	// run is then back on owed for it to claim.
+	speaking []speakingRound
+}
+
+// speakingRound is one run's ending on the wire: the run it is for, and the
+// delivery a publisher arriving behind it waits out.
+//
+// The id alone was what defect 5 had. A list of bare ids can only answer "being
+// said", and the honest answer to that is not "already said" — it is "wait and
+// see", which needs the delivery itself. Every entry carries one, so the answer
+// is always available where the question is asked.
+type speakingRound struct {
+	taskID string
+	flight *endingInFlight
 }
 
 // isTold reports whether this run's ending has already been said.
@@ -582,12 +622,24 @@ const maxFinishedRounds = 10
 // isOwed reports whether anything is still promised.
 func (e endedRound) isOwed() bool { return len(e.owed) > 0 }
 
-// isSpeaking reports whether this run's ending is on the wire right now.
-func (e endedRound) isSpeaking(taskID string) bool { return indexOfRun(e.speaking, taskID) >= 0 }
+// speakingAt finds the delivery saying this run's ending, or -1.
+func (e endedRound) speakingAt(taskID string) int {
+	if taskID == "" {
+		return -1
+	}
+	for i, s := range e.speaking {
+		if s.taskID == taskID {
+			return i
+		}
+	}
+	return -1
+}
 
-// indexOfRun finds a run in one of the note's lists, or -1. Every match in this
-// file goes through it: I2 says a run is matched by its own id and by nothing
-// else, and one lookup is one place for that to stay true.
+// indexOfRun finds a run in one of the note's id lists, or -1. Every match
+// against those goes through it, and speakingAt is the same lookup for the one
+// list whose entries carry a delivery as well: I2 says a run is matched by its
+// own id and by nothing else, and two lookups between them are two places for
+// that to stay true.
 func indexOfRun(runs []string, taskID string) int {
 	if taskID == "" {
 		return -1
@@ -605,6 +657,12 @@ func indexOfRun(runs []string, taskID string) int {
 // array would let one round's edit rewrite another's list.
 func withoutRun(runs []string, i int) []string {
 	return append(runs[:i:i], runs[i+1:]...)
+}
+
+// withoutSpeaker is withoutRun for the speaking list, and copies for the same
+// reason.
+func withoutSpeaker(speaking []speakingRound, i int) []speakingRound {
+	return append(speaking[:i:i], speaking[i+1:]...)
 }
 
 // restoreRun puts a claimed promise back where it was, which is what I3 owes a
@@ -827,6 +885,17 @@ func (s *streamStore) noteLocked(key string) endedRound {
 	return endedRound{}
 }
 
+// speakLocked joins a run to the note's speaking list and hands the delivery to
+// the pending that will resolve it. One call does both, so a reservation cannot
+// be taken without something to report what became of it — the same reason
+// sayEnding hands out no claims. Caller holds s.mu.
+func (s *streamStore) speakLocked(note endedRound, p *pendingEnding) endedRound {
+	f := &endingInFlight{done: make(chan struct{}), at: s.now()}
+	note.speaking = append(note.speaking, speakingRound{taskID: p.taskID, flight: f})
+	p.flight = f
+	return note
+}
+
 // takeAtLocked removes rounds[i] and reserves its ending — the ending of a
 // round, whichever ending it is.
 //
@@ -887,7 +956,7 @@ func (s *streamStore) takeAtLocked(key string, i int, ending roundEnding) (round
 			note.owed = withoutRun(note.owed, at)
 			pending.owedAt, promised = at, true
 		}
-		note.speaking = append(note.speaking, pending.taskID)
+		note = s.speakLocked(note, &pending)
 	}
 	note.at = s.now()
 	s.ended[key] = note
@@ -925,10 +994,12 @@ func (s *streamStore) takeAtLocked(key string, i int, ending roundEnding) (round
 // that found its own chat in the binding row teaches the note an address it did
 // not have. A zero address leaves the note's own alone.
 //
-// resolve is the auto-retry lookup, called at most once and only when the id on
-// the event matches nothing this store holds — a clone carries a fresh id and
-// inherits the round's own on chat_input_task_id. It runs BEFORE anything is
-// said, so whichever name finds the round, the words go out exactly once.
+// resolve is the auto-retry lookup, called only when the id on the event matches
+// nothing this store holds — a clone carries a fresh id and inherits the round's
+// own on chat_input_task_id. Once per attempt at speaking, so a caller that
+// waited out another delivery and came back round asks again, the round having
+// possibly appeared under either name in the meantime. It runs BEFORE anything
+// is said, so whichever name finds the round, the words go out exactly once.
 //
 // ctx is the caller's own budget for speaking, and the only thing this function
 // spends it on is waiting out a delivery already under way for the same run —
@@ -952,58 +1023,77 @@ func (s *streamStore) sayEnding(
 	for {
 		s.mu.Lock()
 		s.sweepLocked()
-		turn, pending, worthResolving := s.beginEndingLocked(key, k, ending)
+		turn, pending, begun := s.beginEndingLocked(key, k, ending)
 		s.mu.Unlock()
 
-		if turn.Verdict == roundForgotten && worthResolving && resolve != nil && !k.byBatch && k.taskID != "" {
+		if turn.Verdict == roundForgotten && begun.worthResolving && resolve != nil && !k.byBatch && k.taskID != "" {
 			if root := resolve(k.taskID); root != "" && root != k.taskID {
 				s.mu.Lock()
-				rootTurn, rootPending, _ := s.beginEndingLocked(key, byTask(root), ending)
+				rootTurn, rootPending, rootBegun := s.beginEndingLocked(key, byTask(root), ending)
 				s.mu.Unlock()
 				if rootTurn.Verdict != roundForgotten {
 					// The round was found under the batch owner's name, so the
 					// ending is said in the clone's name too — a repeat carrying
 					// the clone's own id has to find it on file or it goes looking
 					// for a chat to repeat it in.
-					turn, pending = rootTurn, rootPending
+					turn, pending, begun = rootTurn, rootPending, rootBegun
 					pending.alias = k.taskID
 				}
 			}
 		}
 
-		if turn.Verdict == roundToldAlready {
-			// Said already, or being said on another goroutine right now. Nothing
-			// was reserved, so there is nothing to resolve.
-			return turn.Verdict, nil
-		}
 		if turn.Verdict == roundForgotten && pending.live {
-			// The one delivery with nothing on file to exclude its repeats.
-			// Reserved here rather than in forgottenLocked because the clone
-			// lookup above can replace this pending with a round's, and a
-			// reservation taken for a name that then goes unused would be one
-			// nobody ever resolves.
+			// The one delivery with no note to keep its reservation on — a round
+			// on file had its taken by beginEndingLocked, and this is the path
+			// that reaches here with nothing reserved either way. Taken here
+			// rather than in forgottenLocked because the clone lookup above can
+			// replace this pending with a round's, and a reservation taken for a
+			// name that then goes unused would be one nobody ever resolves.
 			own, wait := s.reserveInFlight(pending.key, pending.taskID)
-			if wait != nil {
-				select {
-				case <-wait.done:
-					if wait.delivered {
-						// The words this caller came to say are on the user's
-						// screen, put there by the publisher that got here first.
-						return roundToldAlready, nil
-					}
-					continue
-				case <-ctx.Done():
-					// No budget left to speak with, so nothing is said and — the
-					// forgotten path holding nothing — nothing is recorded.
-					return turn.Verdict, errNothingToSay
+			begun.wait, pending.flight = wait, own
+		}
+		if begun.wait != nil {
+			// This run's ending is on the wire, said by whoever got here first.
+			// Nothing was reserved for this caller, on either path, so there is
+			// nothing to resolve whichever way the wait goes.
+			select {
+			case <-begun.wait.done:
+				if begun.wait.delivered {
+					// The words this caller came to say are on the user's
+					// screen, put there by the publisher that got here first.
+					return roundToldAlready, nil
 				}
+				// Nobody heard that one. This caller is the retry the news has
+				// left, and what the failure left it — the promise back on owed,
+				// or the round newly owed one — is already filed: the outcome was
+				// published under the lock that filed it.
+				continue
+			case <-ctx.Done():
+				// No budget left to speak with, so nothing is said and — this
+				// caller holding no reservation — nothing is recorded.
+				return turn.Verdict, errNothingToSay
 			}
-			pending.flight = own
+		}
+		if turn.Verdict == roundToldAlready {
+			// Said already. Nothing was reserved, so there is nothing to resolve.
+			return turn.Verdict, nil
 		}
 		addr, err := say(turn)
 		s.endEnding(pending, addr, err == nil)
 		return turn.Verdict, err
 	}
+}
+
+// beginning is what beginEndingLocked found besides the turn itself.
+type beginning struct {
+	// wait is the delivery already saying this run's ending. A caller handed one
+	// has reserved nothing: it waits for that delivery's outcome, and goes quiet
+	// or comes back round as the retry depending on what the outcome is.
+	wait *endingInFlight
+	// worthResolving says whether a second id is worth a database row: true only
+	// when this session holds something a clone could still be reached through —
+	// an open bubble, a promise, or a delivery on the wire.
+	worthResolving bool
 }
 
 // reserveInFlight takes the right to speak for a run this store holds no round
@@ -1024,29 +1114,29 @@ func (s *streamStore) reserveInFlight(key, taskID string) (own, wait *endingInFl
 }
 
 // releaseInFlightLocked publishes a delivery's outcome to whoever is waiting on
-// it and gives the reservation up. A reservation the sweep already retired is
-// left alone — its waiters have been released once and a second close would
-// panic. Caller holds s.mu.
+// it and gives the reservation up. The map entry goes only if it is still this
+// delivery's: a reservation the sweep retired may already have been taken over
+// by a later publisher, whose right to speak is not this one's to withdraw. Its
+// own waiters were released by the sweep, and report says so once. Caller holds
+// s.mu.
 func (s *streamStore) releaseInFlightLocked(k inflightKey, f *endingInFlight, delivered bool) {
-	if s.inflight[k] != f {
-		return
+	if s.inflight[k] == f {
+		delete(s.inflight, k)
 	}
-	delete(s.inflight, k)
-	f.delivered = delivered
-	close(f.done)
+	f.report(delivered)
 }
 
-// beginEndingLocked finds the round and reserves its ending. It is half of
-// sayEnding and has no other caller: on its own it produces exactly the
-// unresolved claim this file exists to make unrepresentable.
+// beginEndingLocked finds the round and reserves its ending, or hands back the
+// delivery already saying it. It is half of sayEnding and has no other caller:
+// on its own it produces exactly the unresolved claim this file exists to make
+// unrepresentable.
 //
-// The third return says whether a second id is worth a database row: true only
-// when this session holds something a clone could still be reached through — an
-// open bubble, or a promise. Caller holds s.mu.
-func (s *streamStore) beginEndingLocked(key string, k roundKey, ending roundEnding) (roundTurn, pendingEnding, bool) {
+// The third return is everything about the attempt that is not the turn — see
+// beginning. Caller holds s.mu.
+func (s *streamStore) beginEndingLocked(key string, k roundKey, ending roundEnding) (roundTurn, pendingEnding, beginning) {
 	if i := s.indexLocked(key, k); i >= 0 {
 		turn, pending := s.takeAtLocked(key, i, ending)
-		return turn, pending, false
+		return turn, pending, beginning{}
 	}
 	// No bubble. Whether a clone could still find one is what the open list
 	// answers; whether it could find a promise is what the note answers.
@@ -1082,25 +1172,38 @@ func (s *streamStore) beginEndingLocked(key string, k roundKey, ending roundEndi
 		// find it. Not forgotten in either case — a caller told to go and find a
 		// chat would announce an ending it cannot attribute to any round in it.
 		bid := batchRunID(k.batch)
+		if at := note.speakingAt(bid); at >= 0 {
+			return roundTurn{Addr: note.addr, Verdict: roundToldAlready}, pendingEnding{},
+				beginning{wait: note.speaking[at].flight}
+		}
 		at := indexOfRun(note.owed, bid)
 		if at < 0 {
-			return roundTurn{Addr: note.addr, Verdict: roundToldAlready}, pendingEnding{}, false
+			return roundTurn{Addr: note.addr, Verdict: roundToldAlready}, pendingEnding{}, beginning{}
 		}
 		note.owed = withoutRun(note.owed, at)
-		note.speaking = append(note.speaking, bid)
+		pending := pendingEnding{live: true, key: key, taskID: bid, ending: ending, owedAt: at, held: true}
+		note = s.speakLocked(note, &pending)
 		note.at = s.now()
 		s.ended[key] = note
-		return roundTurn{Addr: note.addr, Promised: true, Verdict: roundOwesAnEnding},
-			pendingEnding{live: true, key: key, taskID: bid, ending: ending, owedAt: at, held: true},
-			false
+		return roundTurn{Addr: note.addr, Promised: true, Verdict: roundOwesAnEnding}, pending, beginning{}
 	}
 	if taskID == "" {
 		// An unnamed ending claims nothing for the same reason no unnamed
 		// promise is ever filed: there is no round it could be speaking for.
-		return roundTurn{Addr: note.addr, Verdict: roundToldAlready}, pendingEnding{}, false
+		return roundTurn{Addr: note.addr, Verdict: roundToldAlready}, pendingEnding{}, beginning{}
 	}
-	if note.isTold(taskID) || note.isSpeaking(taskID) {
-		return roundTurn{Addr: note.addr, Verdict: roundToldAlready}, pendingEnding{}, false
+	if note.isTold(taskID) {
+		return roundTurn{Addr: note.addr, Verdict: roundToldAlready}, pendingEnding{}, beginning{}
+	}
+	if at := note.speakingAt(taskID); at >= 0 {
+		// Being said right now, on another goroutine — which is not the same
+		// fact as having been said, and answering as though it were is defect 5.
+		// The caller waits on that delivery instead: silent if the words land,
+		// and the retry this news has left if they do not. The verdict alongside
+		// is what it falls back to with no budget left to wait, and it is the
+		// honest one for that case — this caller adds nothing either way.
+		return roundTurn{Addr: note.addr, Verdict: roundToldAlready}, pendingEnding{},
+			beginning{wait: note.speaking[at].flight}
 	}
 	at := indexOfRun(note.owed, taskID)
 	if at < 0 {
@@ -1111,12 +1214,11 @@ func (s *streamStore) beginEndingLocked(key string, k roundKey, ending roundEndi
 		return s.forgottenLocked(key, taskID, ending, worthResolving)
 	}
 	note.owed = withoutRun(note.owed, at)
-	note.speaking = append(note.speaking, taskID)
+	pending := pendingEnding{live: true, key: key, taskID: taskID, ending: ending, owedAt: at, held: true}
+	note = s.speakLocked(note, &pending)
 	note.at = s.now()
 	s.ended[key] = note
-	return roundTurn{Addr: note.addr, Promised: true, Verdict: roundOwesAnEnding},
-		pendingEnding{live: true, key: key, taskID: taskID, ending: ending, owedAt: at, held: true},
-		false
+	return roundTurn{Addr: note.addr, Promised: true, Verdict: roundOwesAnEnding}, pending, beginning{}
 }
 
 // forgottenLocked is the verdict for a run this store holds nothing for, and it
@@ -1134,12 +1236,13 @@ func (s *streamStore) beginEndingLocked(key string, k roundKey, ending roundEndi
 // sees every failed run on a shared bus. Only words that actually reached a
 // WeCom chat produce a note; a delivery that FAILED writes nothing at all, which
 // is what the pending's held flag carries down to endEnding. Caller holds s.mu.
-func (s *streamStore) forgottenLocked(key, taskID string, ending roundEnding, worthResolving bool) (roundTurn, pendingEnding, bool) {
+func (s *streamStore) forgottenLocked(key, taskID string, ending roundEnding, worthResolving bool) (roundTurn, pendingEnding, beginning) {
 	turn := roundTurn{Verdict: roundForgotten}
+	begun := beginning{worthResolving: worthResolving}
 	if taskID == "" {
-		return turn, pendingEnding{}, worthResolving
+		return turn, pendingEnding{}, begun
 	}
-	return turn, pendingEnding{live: true, key: key, taskID: taskID, ending: ending, owedAt: -1}, worthResolving
+	return turn, pendingEnding{live: true, key: key, taskID: taskID, ending: ending, owedAt: -1}, begun
 }
 
 // endEnding is the other half of sayEnding: it records the delivery's account
@@ -1154,10 +1257,14 @@ func (s *streamStore) forgottenLocked(key, taskID string, ending roundEnding, wo
 //
 // False for a run this store held no round for writes nothing whatsoever — see
 // held on pendingEnding for why that asymmetry is the point rather than an
-// omission. What that path does report is the outcome itself, to the publisher
+// omission. What every path does report is the outcome itself, to the publisher
 // waiting behind it: releasing the reservation is the one thing that happens
 // before the live check, because a delivery that reserved the right to speak has
 // to hand on what became of it whether or not there was anything to record.
+//
+// It happens under the lock that files the rest, which is what a waiter released
+// with delivered=false depends on: by the time it can re-enter the store, the
+// promise it is coming back for is already on owed.
 func (s *streamStore) endEnding(p pendingEnding, addr roundAddress, delivered bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1179,8 +1286,8 @@ func (s *streamStore) endEnding(p pendingEnding, addr roundAddress, delivered bo
 		// painted. This is that note.
 		note = endedRound{}
 	}
-	if at := indexOfRun(note.speaking, p.taskID); at >= 0 {
-		note.speaking = withoutRun(note.speaking, at)
+	if at := note.speakingAt(p.taskID); at >= 0 {
+		note.speaking = withoutSpeaker(note.speaking, at)
 	}
 	note.at = s.now()
 	if !delivered {
