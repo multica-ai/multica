@@ -36,6 +36,13 @@ import (
 // messages standing and is owed two endings. So the promises are held as a
 // per-session queue, one entry per ack posted, and each ending discharges one.
 //
+// The queue counts acks, not runs, and those two can drift apart: an ending can
+// arrive while the ack it answers is still being sent, and a run can stop
+// reporting endings altogether. Nothing in memory can tell a promise whose run
+// is still working from one whose run is over, so the queue is not the authority
+// on whether a reply is still coming — agent_task_queue is, and
+// Outbound.withdrawProcessingAck asks it. See takeAckForIdleRoom.
+//
 // Note what that costs. Slack and Lark hold their indicator state in memory
 // because there is nowhere else to hold it — nothing in the database says which
 // message a reaction sits on. Here the room is also in the session's binding
@@ -80,6 +87,34 @@ type ackPromise struct {
 	at             time.Time
 }
 
+// sessionAcks is everything one conversation currently owes: the promises whose
+// "👀 On it" is really in the room, plus the acks still on their way there.
+type sessionAcks struct {
+	// promises are the acks posted and not yet answered, oldest first.
+	promises []ackPromise
+
+	// sending counts the acks whose send call has not returned. A promise is
+	// recorded only once its message is actually in the room, so an ending
+	// arriving in that gap finds nothing to discharge.
+	sending int
+
+	// discharged counts the endings that arrived in that gap. The send that
+	// returns spends one of them instead of recording a promise, so a round
+	// already over does not leave behind a promise nothing will ever answer.
+	// That is the whole point of the counter: without it the promise landed
+	// after its own ending and stood in the room's queue until the day-long
+	// sweep, one entry ahead of every promise made afterwards.
+	//
+	// Never exceeds sending; finishSend clamps it when an ack fails to post.
+	discharged int
+}
+
+// owed reports whether the conversation is still waiting on anything — a posted
+// promise, or an ack in flight that no ending has claimed yet.
+func (s *sessionAcks) owed() bool {
+	return s != nil && (len(s.promises) > 0 || s.discharged < s.sending)
+}
+
 // ackNotifier posts the processing ack, coalesces bursts per session, and
 // remembers how many replies each session is still owed, and in which room. It
 // does not decide whether a given cancellation should withdraw one — a session
@@ -94,10 +129,11 @@ type ackNotifier struct {
 
 	mu      sync.Mutex
 	lastAck map[string]time.Time
-	// outstanding holds, per session, every promise that has been acked and not
-	// yet answered, oldest first. Kept apart from lastAck because the two have
-	// different lives: lastAck expires with the coalesce window, while a promise
-	// stands until the run it acked reports an ending.
+	// outstanding holds, per session, everything the conversation is still owed:
+	// the promises already posted, oldest first, and the acks still being sent.
+	// Kept apart from lastAck because the two have different lives: lastAck
+	// expires with the coalesce window, while a promise stands until the run it
+	// acked reports an ending.
 	//
 	// A queue rather than a single slot because a session can be owed two
 	// replies at once — a second turn past the coalesce window acks again while
@@ -106,23 +142,23 @@ type ackNotifier struct {
 	// room, and then the first round's ending discharged the second round's
 	// promise. Depth is what turns those two rounds back into two endings.
 	//
-	// Which entry a discharge takes does not matter much: every promise in one
+	// Which entry a discharge takes does not matter: every promise in one
 	// session names the same room, so they differ only in age. Oldest first
 	// keeps the ordering the endings arrive in — a session's turns are
-	// serialized — and leaves the youngest to be swept last.
+	// serialized — and leaves the youngest to be dropped last.
 	//
-	// Both maps need sweeping for the same reason, at different scales. Entries
-	// are removed on the paths that answer them — OnSettled for a turn that
-	// enqueued no task, releaseOutstandingAck when the run ends, and
-	// takeOutstandingAck when a cancel withdraws it — but those paths do not
-	// cover everything, and the sweep is what stands behind the ones they miss
-	// rather than a list anybody has to keep complete. A run that never reports
-	// an ending is the plain case; a run whose ending arrives after something
-	// removed the session's binding is the one that has actually bitten. So
-	// recording a promise first drops every entry older than ackPromiseMaxAge,
-	// which bounds the map by the sessions acked within one day rather than by
-	// the process's whole lifetime.
-	outstanding map[string][]ackPromise
+	// Growth is bounded at three scales, because the paths that answer a promise
+	// do not cover every way a run can end. Each ending removes one entry
+	// (OnSettled for a turn that enqueued no task, releaseOutstandingAck when
+	// the run ends, takeAckForIdleRoom when a cancel withdraws it). On top of
+	// that, takeAckForIdleRoom closes out every other promise the database's
+	// answer covered, which is what stops one lost ending from leaving the room
+	// permanently a promise heavy. And recording a promise first drops
+	// everything older than ackPromiseMaxAge, so a session whose agent stops
+	// reporting endings altogether — and that never sees another cancel to
+	// reconcile it — is bounded by a day of turns rather than by the process's
+	// whole lifetime.
+	outstanding map[string]*sessionAcks
 
 	// sendText delivers text into the installation's conversation. Nil uses the
 	// real Open-API send; tests inject a recorder.
@@ -143,12 +179,21 @@ func NewAckNotifier(client *Client, decrypt Decrypter, logger *slog.Logger) *ack
 		logger:      logger,
 		window:      ackCoalesceWindow,
 		lastAck:     make(map[string]time.Time),
-		outstanding: make(map[string][]ackPromise),
+		outstanding: make(map[string]*sessionAcks),
 	}
 }
 
 // OnIngested posts the processing ack unless a recent ack for the same session
 // is still within the coalesce window, and records the promise it just made.
+//
+// The send is announced before it starts and recorded after it returns. The
+// promise cannot be recorded up front — the room only holds an "On it" once the
+// message is really in it, and a cancel that withdrew a promise nobody had been
+// made would post "no reply is coming" ahead of the ack it answers. But the run
+// this ack belongs to can end while the send is still in the air, and that
+// ending has to land somewhere: announcing the send gives it a place to land, so
+// the promise is cancelled out as it is recorded instead of standing in the
+// room's queue with its round already over.
 func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
 	if n.suppress(sessionID) {
 		return
@@ -157,21 +202,63 @@ func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstal
 	if send == nil {
 		send = n.realSend
 	}
-	if err := send(ctx, inst, msg, ackProcessingText); err != nil {
-		n.logger.WarnContext(ctx, "dingtalk ack: send failed",
-			"installation_id", util.UUIDToString(inst.ID), "error", err)
-		return
-	}
 	key := util.UUIDToString(sessionID)
 	if key == "" {
+		// Nothing to key a promise by, so nothing can be discharged either.
+		if err := send(ctx, inst, msg, ackProcessingText); err != nil {
+			n.logger.WarnContext(ctx, "dingtalk ack: send failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 		return
 	}
+	n.beginSend(key)
+	err := send(ctx, inst, msg, ackProcessingText)
+	n.finishSend(key, ackPromise{installationID: inst.ID, target: targetFromMessage(msg)}, err == nil)
+	if err != nil {
+		n.logger.WarnContext(ctx, "dingtalk ack: send failed",
+			"installation_id", util.UUIDToString(inst.ID), "error", err)
+	}
+}
+
+// beginSend announces an ack that is on its way but not yet in the room.
+func (n *ackNotifier) beginSend(key string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.sessionLocked(key).sending++
+}
+
+// finishSend closes the window beginSend opened. posted says whether the ack
+// really reached the room.
+//
+// An ending that arrived while the send was in the air is spent here rather than
+// leaving a promise behind. A send that posted nothing leaves that ending's
+// charge for another ack still in flight, and drops it when there is none: it
+// promised nothing, so there is nothing for the charge to answer.
+func (n *ackNotifier) finishSend(key string, promise ackPromise, posted bool) {
 	now := n.clock()
 	n.mu.Lock()
+	defer n.mu.Unlock()
+	// Sweeping before the append is what bounds the map by a day of acked
+	// sessions; this session survives it either way, because its send is still
+	// counted until the line below.
 	n.sweepPromisesLocked(now)
-	n.outstanding[key] = append(n.outstanding[key],
-		ackPromise{installationID: inst.ID, target: targetFromMessage(msg), at: now})
-	n.mu.Unlock()
+	s := n.outstanding[key]
+	if s == nil {
+		return
+	}
+	s.sending--
+	if posted {
+		if s.discharged > 0 {
+			s.discharged--
+		} else {
+			promise.at = now
+			s.promises = append(s.promises, promise)
+		}
+	}
+	if s.discharged > s.sending {
+		s.discharged = s.sending
+	}
+	n.pruneSessionLocked(key)
 }
 
 // OnSettled clears the session's dedup entry so its next turn acks immediately,
@@ -187,6 +274,10 @@ func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstal
 // One, not all of them: a promise made by an earlier round belongs to a run
 // that is still going, and taking it here would leave that run's own
 // cancellation with nothing to withdraw.
+//
+// The turn's own ack may still be in the air when this runs — the router posts
+// it on a detached goroutine and settles the turn from the flush — in which case
+// the charge is left against that send and the promise is never recorded.
 func (n *ackNotifier) OnSettled(_ context.Context, sessionID pgtype.UUID) {
 	key := util.UUIDToString(sessionID)
 	if key == "" {
@@ -201,6 +292,9 @@ func (n *ackNotifier) OnSettled(_ context.Context, sessionID pgtype.UUID) {
 // hasOutstandingAck reports whether the session is still owed a reply, without
 // consuming anything. Outbound checks this before it spends any query on a
 // cancel: most cancelled runs are nothing to do with DingTalk.
+//
+// An ack still being sent counts. It is about to become a promise, and a cancel
+// that walked away here would leave it to land behind its own ending.
 func (n *ackNotifier) hasOutstandingAck(sessionID pgtype.UUID) bool {
 	key := util.UUIDToString(sessionID)
 	if key == "" {
@@ -208,42 +302,83 @@ func (n *ackNotifier) hasOutstandingAck(sessionID pgtype.UUID) bool {
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return len(n.outstanding[key]) > 0
+	return n.outstanding[key].owed()
 }
 
-// takeOutstandingAck discharges the session's oldest unanswered promise and
-// returns it, along with how many promises are still standing in that room
-// afterwards. ok is false when there was nothing left to take.
+// takeAckForIdleRoom discharges the session's oldest promise and returns it, for
+// a caller that is about to withdraw it out loud, and closes out the rest of the
+// room with it.
 //
-// remaining is what holds a bulk cancel to one message. Cancel is broadcast
-// once per task row, so a "cancel all tasks" click or a session delete with
-// several queued turns delivers several events for one conversation; each takes
-// its own promise, so the books stay straight, but only the one that empties
-// the room's queue says anything. That used to fall out of there being at most
-// one promise to take, which stopped being true once the queue could hold two.
+// The caller must first have established from agent_task_queue that the session
+// has no chat turn in flight, as of idleAsOf. That is what makes closing out the
+// rest right: with nothing running, nothing is left that could answer any of
+// them. Two states are cleared at once here.
 //
-// The count is read under the same lock as the take, so two cancels arriving
-// together cannot both see an empty room and both post.
-func (n *ackNotifier) takeOutstandingAck(sessionID pgtype.UUID) (promise ackPromise, remaining int, ok bool) {
+// A promise whose ending never arrived — an event lost, an agent archived out
+// from under the run (handler/agent.go cancels its tasks without broadcasting
+// per row) — is indistinguishable in memory from one whose run is still working,
+// and left on record it makes the room read as owed a reply for as long as a day.
+// One promise in that state used to be enough to silence every cancellation
+// notice after it, because each later cancel found the room one promise heavier
+// than it really was.
+//
+// And a bulk cancel is broadcast once per task row, so a "cancel all tasks"
+// click or a session delete with several queued turns delivers several events
+// for one room. The user made one request and is owed one message about it: the
+// first event through takes the room's promises together and the rest find it
+// empty.
+//
+// Promises recorded after idleAsOf are kept. The run trigger is debounced behind
+// the ack, so a turn ingested while this cancel was reading the database has no
+// task row for it to have seen, and the room being idle says nothing about that
+// turn.
+//
+// ok is false when there was nothing to return: either the room was already
+// closed out, or the only thing outstanding is an ack whose send has not
+// returned, which this call charges so the promise does not land behind its own
+// cancellation. Nothing can be said in that second case — the room the ack went
+// into is not known until its send returns.
+func (n *ackNotifier) takeAckForIdleRoom(sessionID pgtype.UUID, idleAsOf time.Time) (ackPromise, bool) {
 	key := util.UUIDToString(sessionID)
 	if key == "" {
-		return ackPromise{}, 0, false
+		return ackPromise{}, false
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	queue := n.outstanding[key]
-	if len(queue) == 0 {
-		return ackPromise{}, 0, false
+	s := n.outstanding[key]
+	if !s.owed() {
+		return ackPromise{}, false
 	}
-	n.setPromisesLocked(key, queue[1:])
-	return queue[0], len(queue) - 1, true
+	if len(s.promises) == 0 {
+		s.discharged++
+		n.pruneSessionLocked(key)
+		return ackPromise{}, false
+	}
+	// Oldest first, so the promises this cancel may speak for are a prefix.
+	cut := 0
+	for cut < len(s.promises) && !s.promises[cut].at.After(idleAsOf) {
+		cut++
+	}
+	if cut == 0 {
+		// Everything the room holds was promised after this cancel read the
+		// database, so none of it is this cancel's to withdraw.
+		return ackPromise{}, false
+	}
+	promise := s.promises[0]
+	s.promises = append(s.promises[:0], s.promises[cut:]...)
+	n.pruneSessionLocked(key)
+	return promise, true
 }
 
-// releaseOutstandingAck discharges the session's oldest promise without posting
-// anything. The caller uses it when an acked run has reported an ending of its
-// own: the promise is discharged whether or not a reply could actually be
+// releaseOutstandingAck discharges the session's oldest outstanding ack without
+// posting anything. The caller uses it when an acked run has reported an ending
+// of its own: the promise is discharged whether or not a reply could actually be
 // delivered, and leaving it on record would let an unrelated later cancel in
 // the same conversation withdraw a promise that no longer stands.
+//
+// When the room's own ack is still being sent this charges that send instead, so
+// a run that outran its own "On it" does not leave the promise standing behind
+// it.
 func (n *ackNotifier) releaseOutstandingAck(sessionID pgtype.UUID) {
 	key := util.UUIDToString(sessionID)
 	if key == "" {
@@ -254,36 +389,55 @@ func (n *ackNotifier) releaseOutstandingAck(sessionID pgtype.UUID) {
 	n.mu.Unlock()
 }
 
-// dischargeOldestLocked drops the session's oldest promise, if it has one.
+// dischargeOldestLocked answers one of the session's outstanding acks: its
+// oldest posted promise, or — when none has landed yet — an ack still being
+// sent, charged so that send records nothing when it returns.
 func (n *ackNotifier) dischargeOldestLocked(key string) {
-	if queue := n.outstanding[key]; len(queue) > 0 {
-		n.setPromisesLocked(key, queue[1:])
+	s := n.outstanding[key]
+	switch {
+	case !s.owed():
+		return
+	case len(s.promises) > 0:
+		s.promises = s.promises[1:]
+	default:
+		s.discharged++
 	}
+	n.pruneSessionLocked(key)
 }
 
-// setPromisesLocked stores a session's remaining promises, removing the session
-// entirely once it is owed nothing. Removing rather than keeping an empty slice
-// is what keeps the map bounded by the sessions currently owed a reply.
-func (n *ackNotifier) setPromisesLocked(key string, queue []ackPromise) {
-	if len(queue) == 0 {
-		delete(n.outstanding, key)
-		return
+// sessionLocked returns the session's entry, creating it if this is the first
+// thing the conversation owes.
+func (n *ackNotifier) sessionLocked(key string) *sessionAcks {
+	s := n.outstanding[key]
+	if s == nil {
+		s = &sessionAcks{}
+		n.outstanding[key] = s
 	}
-	n.outstanding[key] = queue
+	return s
+}
+
+// pruneSessionLocked removes a session that owes nothing and has no ack in
+// flight. Removing rather than keeping an empty entry is what keeps the map
+// bounded by the conversations currently waiting on something.
+func (n *ackNotifier) pruneSessionLocked(key string) {
+	if s := n.outstanding[key]; s != nil && len(s.promises) == 0 && s.sending == 0 {
+		delete(n.outstanding, key)
+	}
 }
 
 // sweepPromisesLocked drops every promise older than ackPromiseMaxAge. See the
 // outstanding field for why this stands behind the paths that discharge
 // promises rather than replacing them.
 func (n *ackNotifier) sweepPromisesLocked(now time.Time) {
-	for key, queue := range n.outstanding {
-		kept := queue[:0]
-		for _, p := range queue {
+	for key, s := range n.outstanding {
+		kept := s.promises[:0]
+		for _, p := range s.promises {
 			if now.Sub(p.at) < ackPromiseMaxAge {
 				kept = append(kept, p)
 			}
 		}
-		n.setPromisesLocked(key, kept)
+		s.promises = kept
+		n.pruneSessionLocked(key)
 	}
 }
 

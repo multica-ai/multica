@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -79,6 +80,12 @@ type fakeOutboundQueries struct {
 	binding    db.ChannelChatSessionBinding
 	bindingErr error
 	inst       db.ChannelInstallation
+	// pendingTurn is what agent_task_queue says about the session: whether a
+	// chat turn is still queued, running or waiting. False is the meaningful
+	// default — a cancel is broadcast after its own row is already terminal, so
+	// a session whose only run was the cancelled one reads as idle here.
+	pendingTurn    bool
+	pendingTurnErr error
 }
 
 func (f *fakeOutboundQueries) GetAgentTask(context.Context, pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -91,6 +98,10 @@ func (f *fakeOutboundQueries) TaskHasChannelIngestedMessages(context.Context, pg
 
 func (f *fakeOutboundQueries) ListChatInputMessages(context.Context, pgtype.UUID) ([]db.ChatMessage, error) {
 	return f.inputBatch, nil
+}
+
+func (f *fakeOutboundQueries) HasPendingChatTurnForSession(context.Context, pgtype.UUID) (bool, error) {
+	return f.pendingTurn, f.pendingTurnErr
 }
 
 func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
@@ -159,10 +170,6 @@ func newCancelTestOutbound(t *testing.T, d *dingtalkSendServer) (*Outbound, *ack
 // then has to withdraw.
 func postProcessingAck(t *testing.T, ack *ackNotifier) {
 	t.Helper()
-	var sessionID pgtype.UUID
-	if err := sessionID.Scan(cancelTestSessionID); err != nil {
-		t.Fatalf("scan session id: %v", err)
-	}
 	ack.OnIngested(context.Background(),
 		engine.ResolvedInstallation{ID: testUUID(0x11)},
 		channel.InboundMessage{
@@ -173,7 +180,16 @@ func postProcessingAck(t *testing.T, ack *ackNotifier) {
 				SenderID: "staff-1",
 			},
 		},
-		sessionID)
+		mustScanUUID(t, cancelTestSessionID))
+}
+
+func mustScanUUID(t *testing.T, s string) pgtype.UUID {
+	t.Helper()
+	var u pgtype.UUID
+	if err := u.Scan(s); err != nil {
+		t.Fatalf("scan uuid %q: %v", s, err)
+	}
+	return u
 }
 
 func cancelledEvent(taskID string) events.Event {
@@ -573,26 +589,32 @@ func TestOutbound_BulkCancelOfTwoAckedRoundsSpeaksOnce(t *testing.T) {
 	}
 }
 
-// The counterweight: with two rounds acked and only one of them stopped, a reply
+// The counterweight: with one round stopped and another still running, a reply
 // really is still coming to that room, and "no reply is coming for it" cannot say
-// which round it means. So the notice waits for the ending that leaves nothing
-// outstanding, and the round still working delivers into a room that was not
-// told to give up on it.
-func TestOutbound_OneRoundStoppedWhileAnotherIsStillOwedStaysSilent(t *testing.T) {
+// which round it means. So the notice waits, and the round still working delivers
+// into a room that was not told to give up on it.
+//
+// What makes the room "still owed" is the task queue, not the promise count. Two
+// turns inside the 5s coalesce window share one ack while running as two tasks,
+// so a room with a single promise can still have a reply on the way — the state
+// a count of promises reads as owing nothing.
+func TestOutbound_OneRoundStoppedWhileAnotherIsStillRunningStaysSilent(t *testing.T) {
 	d := newDingtalkSendServer(t)
 	o, ack, q := newCancelTestOutbound(t, d)
-	postTwoAckedRounds(t, ack)
+	postProcessingAck(t, ack)
 	bus := events.New()
 	o.Register(bus)
 
 	asChannelRun(q)
+	q.pendingTurn = true
 	bus.Publish(cancelledEvent("44444444-4444-4444-4444-444444444444"))
 	if n := atomic.LoadInt32(&d.sendCalls); n != 0 {
 		param, _ := d.lastBody["msgParam"].(string)
-		t.Fatalf("one of two rounds was stopped and the room was told %q while the other "+
-			"was still working (sends: %d)", param, n)
+		t.Fatalf("one of two turns sharing an ack was stopped and the room was told %q "+
+			"while the other was still working (sends: %d)", param, n)
 	}
 
+	q.pendingTurn = false
 	bus.Publish(chatDoneEvent(cancelTestTaskID, "here you go"))
 
 	if n := atomic.LoadInt32(&d.sendCalls); n != 1 {
@@ -617,11 +639,7 @@ func TestOutbound_SettleClosesOneRoundNotTheRoomsWholeQueue(t *testing.T) {
 	o.Register(bus)
 
 	// The second turn's flush found no runtime to enqueue against.
-	var sessionID pgtype.UUID
-	if err := sessionID.Scan(cancelTestSessionID); err != nil {
-		t.Fatalf("scan session id: %v", err)
-	}
-	ack.OnSettled(context.Background(), sessionID)
+	ack.OnSettled(context.Background(), mustScanUUID(t, cancelTestSessionID))
 
 	bus.Publish(cancelledEvent(cancelTestTaskID))
 
@@ -629,5 +647,178 @@ func TestOutbound_SettleClosesOneRoundNotTheRoomsWholeQueue(t *testing.T) {
 		t.Fatalf("the round that was actually running was cancelled and the room still "+
 			"holds %q — settling the other turn took its promise too (sends: %d)",
 			ackProcessingText, n)
+	}
+}
+
+// countBodies reports how many of the server's sends carried the given text.
+func countBodies(bodies []string, want string) int {
+	n := 0
+	for _, b := range bodies {
+		if strings.Contains(b, want) {
+			n++
+		}
+	}
+	return n
+}
+
+// The router posts the ack on a detached goroutine, so a short run can report
+// its ending before that send returns. The promise is recorded after the send,
+// so that ending finds nothing to discharge — and the promise then lands in a
+// room whose round is already over.
+//
+// One such promise used to sit at the head of the room's queue until the
+// day-long sweep. Every later cancel there popped it, found the room still
+// reading as owed a reply, and stayed silent: one lost ending, and the
+// conversation never heard about a cancellation again.
+func TestOutbound_ARunThatOutranItsOwnAckStillLetsLaterCancelsSpeak(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	o, ack, q := newCancelTestOutbound(t, d)
+	base := time.Unix(1700000000, 0)
+	now := base
+	ack.now = func() time.Time { return now }
+	bus := events.New()
+	o.Register(bus)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	ack.sendText = func(context.Context, engine.ResolvedInstallation, channel.InboundMessage, string) error {
+		close(entered)
+		<-release
+		return nil
+	}
+	sessionID := mustScanUUID(t, cancelTestSessionID)
+	ingested := make(chan struct{})
+	go func() {
+		defer close(ingested)
+		ack.OnIngested(context.Background(), engine.ResolvedInstallation{ID: testUUID(0x11)},
+			channel.InboundMessage{MessageID: "msg-1", Source: channel.Source{
+				ChatID: "cid-1", ChatType: channel.ChatTypeGroup, SenderID: "staff-1",
+			}}, sessionID)
+	}()
+
+	<-entered
+	bus.Publish(chatDoneEvent(cancelTestTaskID, "round one, answered"))
+	close(release)
+	<-ingested
+
+	afterRoundOne := atomic.LoadInt32(&d.sendCalls)
+	if afterRoundOne != 1 {
+		t.Fatalf("setup: round one should have delivered its reply once, sends = %d", afterRoundOne)
+	}
+
+	// A later turn in the same conversation, past the coalesce window, acks and
+	// is cancelled.
+	ack.sendText = func(context.Context, engine.ResolvedInstallation, channel.InboundMessage, string) error {
+		return nil
+	}
+	now = base.Add(2 * ackCoalesceWindow)
+	postProcessingAck(t, ack)
+	asChannelRun(q)
+	bus.Publish(cancelledEvent("44444444-4444-4444-4444-444444444444"))
+
+	if n := atomic.LoadInt32(&d.sendCalls) - afterRoundOne; n != 1 {
+		t.Fatalf("a later round was cancelled and the room was told %d times, want 1: "+
+			"round one's promise landed after its own reply and stood in front of it", n)
+	}
+	if got := countBodies(d.bodies(), "cancelled"); got != 1 {
+		t.Errorf("the room got %d cancellation notices, want 1", got)
+	}
+}
+
+// The same shape from the other direction, and the one the 24h sweep was the
+// only answer to: a round whose ending never arrives at all. Archiving an agent
+// cancels its tasks without broadcasting per row, and a daemon that goes away
+// mid-run reports nothing either, so the promise simply stands.
+//
+// The next cancellation in that conversation has to speak anyway. Whether it
+// does cannot turn on the count of promises, because that count is exactly what
+// the lost ending corrupted.
+func TestOutbound_APromiseNothingEverAnsweredDoesNotSilenceTheNextCancel(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	o, ack, q := newCancelTestOutbound(t, d)
+	postTwoAckedRounds(t, ack) // round one's ending never arrives
+	bus := events.New()
+	o.Register(bus)
+
+	asChannelRun(q)
+	bus.Publish(cancelledEvent("44444444-4444-4444-4444-444444444444"))
+
+	if n := atomic.LoadInt32(&d.sendCalls); n != 1 {
+		t.Fatalf("the round that was cancelled left the room holding %q; an earlier "+
+			"round whose ending was lost made the room read as still owed a reply "+
+			"(sends: %d)", ackProcessingText, n)
+	}
+	// And the room is clear afterwards, so its next cancel spends no queries and
+	// posts nothing.
+	if ack.hasOutstandingAck(mustScanUUID(t, cancelTestSessionID)) {
+		t.Error("the room still reads as owed a reply, so every cancel in this session " +
+			"keeps paying for queries that find a promise nothing will answer")
+	}
+}
+
+// A reply landing and another round being cancelled are two facts, both already
+// committed before either event is published. Which subscriber the bus runs
+// first must not decide what the user sees.
+//
+// It used to. The cancel took the room's oldest promise — the delivered round's,
+// if that ending had not been processed yet — found one still standing, and said
+// nothing; run the other way round it found the room empty and spoke.
+func TestOutbound_ReplyAndCancelSpeakTheSameInEitherOrder(t *testing.T) {
+	const taskA = cancelTestTaskID
+	const taskB = "44444444-4444-4444-4444-444444444444"
+
+	for _, tc := range []struct {
+		name  string
+		first events.Event
+		then  events.Event
+	}{
+		{"reply handled first", chatDoneEvent(taskA, "here you go"), cancelledEvent(taskB)},
+		{"cancel handled first", cancelledEvent(taskB), chatDoneEvent(taskA, "here you go")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newDingtalkSendServer(t)
+			o, ack, q := newCancelTestOutbound(t, d)
+			postTwoAckedRounds(t, ack)
+			bus := events.New()
+			o.Register(bus)
+
+			asChannelRun(q)
+			bus.Publish(tc.first)
+			bus.Publish(tc.then)
+
+			bodies := d.bodies()
+			if got := countBodies(bodies, "here you go"); got != 1 {
+				t.Errorf("the delivered round's reply reached the room %d times, want 1", got)
+			}
+			if got := countBodies(bodies, "cancelled"); got != 1 {
+				t.Fatalf("the cancelled round was announced %d times, want 1: the same two "+
+					"endings must read the same whichever the bus runs first", got)
+			}
+		})
+	}
+}
+
+// Whether the room is owed a reply is read from agent_task_queue, so a read that
+// fails leaves the question open. Nothing is posted and nothing is discharged:
+// the notice cannot be unsent, and the next cancel asks again.
+func TestOutbound_UnreadableTaskQueueLeavesThePromiseAloneAndSaysNothing(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	o, ack, q := newCancelTestOutbound(t, d)
+	postProcessingAck(t, ack)
+	bus := events.New()
+	o.Register(bus)
+
+	q.pendingTurnErr = errors.New("connection reset")
+	bus.Publish(cancelledEvent(cancelTestTaskID))
+	if n := atomic.LoadInt32(&d.sendCalls); n != 0 {
+		t.Fatalf("the task queue could not be read and the room was told a reply was "+
+			"not coming anyway (sends: %d)", n)
+	}
+
+	q.pendingTurnErr = nil
+	bus.Publish(cancelledEvent("44444444-4444-4444-4444-444444444444"))
+	if n := atomic.LoadInt32(&d.sendCalls); n != 1 {
+		t.Fatalf("the failed read consumed the promise, so the next cancel had nothing "+
+			"to withdraw and the room keeps %q (sends: %d)", ackProcessingText, n)
 	}
 }
