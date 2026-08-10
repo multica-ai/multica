@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/slack-go/slack"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -57,7 +58,7 @@ func TestTypingIndicator_AddThenClear(t *testing.T) {
 	m := newTestTyping(q, fr)
 
 	ts := freshTS()
-	m.Add(context.Background(), db.ChannelInstallation{Config: slackInstallConfigJSON()}, sessionID, "C1", ts)
+	m.Add(context.Background(), db.ChannelInstallation{ID: uid(1), Config: slackInstallConfigJSON()}, sessionID, "C1", ts)
 
 	if len(fr.added) != 1 || fr.added[0].Channel != "C1" || fr.added[0].Timestamp != ts {
 		t.Fatalf("add reaction = %+v, want one on C1/%s", fr.added, ts)
@@ -92,7 +93,7 @@ func TestTypingIndicator_SkipsStaleAndEmpty(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fr := &fakeReactor{}
 			m := newTestTyping(&fakeOutboundQueries{}, fr)
-			m.Add(context.Background(), db.ChannelInstallation{Config: slackInstallConfigJSON()}, uid(7), tc.channelID, tc.ts)
+			m.Add(context.Background(), db.ChannelInstallation{ID: uid(1), Config: slackInstallConfigJSON()}, uid(7), tc.channelID, tc.ts)
 			if len(fr.added) != 0 {
 				t.Errorf("%s: must not add a reaction, added %d", tc.name, len(fr.added))
 			}
@@ -113,7 +114,7 @@ func TestTypingIndicator_ClearsOnTaskFailed(t *testing.T) {
 	}
 	fr := &fakeReactor{}
 	m := newTestTyping(q, fr)
-	m.Add(context.Background(), db.ChannelInstallation{Config: slackInstallConfigJSON()}, sessionID, "C1", freshTS())
+	m.Add(context.Background(), db.ChannelInstallation{ID: uid(1), Config: slackInstallConfigJSON()}, sessionID, "C1", freshTS())
 
 	// EventTaskFailed carries the session id only in the broadcast payload map,
 	// not on the envelope — the clear handler must read it from there.
@@ -148,7 +149,7 @@ func TestSlackTypingNotifier_OnSettledClears(t *testing.T) {
 	}
 	fr := &fakeReactor{}
 	m := newTestTyping(q, fr)
-	m.Add(context.Background(), db.ChannelInstallation{Config: slackInstallConfigJSON()}, sessionID, "C1", freshTS())
+	m.Add(context.Background(), db.ChannelInstallation{ID: uid(1), Config: slackInstallConfigJSON()}, sessionID, "C1", freshTS())
 
 	(&slackTypingNotifier{mgr: m}).OnSettled(context.Background(), sessionID)
 	if len(fr.removed) != 1 || fr.removed[0].Channel != "C1" {
@@ -177,7 +178,7 @@ func TestTypingIndicator_ClearsOnTaskCancelled(t *testing.T) {
 	m.Register(bus)
 
 	ts := freshTS()
-	m.Add(context.Background(), db.ChannelInstallation{Config: slackInstallConfigJSON()}, sessionID, "C1", ts)
+	m.Add(context.Background(), db.ChannelInstallation{ID: uid(1), Config: slackInstallConfigJSON()}, sessionID, "C1", ts)
 
 	// The shape broadcastTaskEvent publishes for a cancel: ids on the envelope
 	// and in the payload map, status "cancelled", and no content of any kind.
@@ -196,6 +197,51 @@ func TestTypingIndicator_ClearsOnTaskCancelled(t *testing.T) {
 		t.Fatalf("the run was cancelled and the :%s: reaction is still on C1/%s — "+
 			"the user is watching a typing indicator spin for an answer nobody is "+
 			"producing (removed %d reactions)", typingEmoji, ts, len(fr.removed))
+	}
+	if fr.removed[0].Channel != "C1" || fr.removed[0].Timestamp != ts {
+		t.Errorf("cleared the wrong message: %+v, want C1/%s", fr.removed[0], ts)
+	}
+}
+
+// Deleting a chat session cancels its queued turns and deletes the Slack binding
+// in one transaction, then broadcasts the cancels after that transaction
+// commits. By the time this manager sees them the binding row is gone, so a
+// clear that resolves its credentials through the binding finds nothing — and
+// because the state is taken from the map first, the reaction cannot be cleared
+// by anything afterwards either. The reaction has to come off from what the add
+// already recorded.
+func TestTypingIndicator_ClearsAfterSessionDeleteRemovedTheBinding(t *testing.T) {
+	sessionID := uid(7)
+	q := &fakeOutboundQueries{
+		inst: db.ChannelInstallation{ID: uid(1), Status: "active", Config: slackInstallConfigJSON()},
+	}
+	fr := &fakeReactor{}
+	m := newTestTyping(q, fr)
+	bus := events.New()
+	m.Register(bus)
+
+	ts := freshTS()
+	m.Add(context.Background(), db.ChannelInstallation{ID: uid(1), Config: slackInstallConfigJSON()}, sessionID, "C1", ts)
+
+	// The session and its binding are deleted; the cancel is broadcast after.
+	q.binding = db.ChannelChatSessionBinding{}
+	q.bindingErr = pgx.ErrNoRows
+
+	bus.Publish(events.Event{
+		Type:          protocol.EventTaskCancelled,
+		TaskID:        util.UUIDToString(uid(9)),
+		ChatSessionID: util.UUIDToString(sessionID),
+		Payload: map[string]any{
+			"task_id":         util.UUIDToString(uid(9)),
+			"chat_session_id": util.UUIDToString(sessionID),
+			"status":          "cancelled",
+		},
+	})
+
+	if len(fr.removed) != 1 {
+		t.Fatalf("the session was deleted and the :%s: reaction is still on C1/%s — "+
+			"deleting a conversation left a processing badge on the message that "+
+			"started it (removed %d reactions)", typingEmoji, ts, len(fr.removed))
 	}
 	if fr.removed[0].Channel != "C1" || fr.removed[0].Timestamp != ts {
 		t.Errorf("cleared the wrong message: %+v, want C1/%s", fr.removed[0], ts)

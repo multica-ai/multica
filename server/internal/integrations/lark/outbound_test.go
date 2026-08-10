@@ -839,3 +839,65 @@ func TestPatcherClearsTypingOnTaskCancelled(t *testing.T) {
 			len(api.sent), len(api.textSent), len(api.patched))
 	}
 }
+
+// Deleting a chat session cancels its queued turns and deletes the Lark binding
+// in one transaction, then broadcasts the cancels after that transaction
+// commits. By the time the Patcher sees them the binding row is gone, so every
+// step that reads it — the Patcher's own lookup and the credential resolution
+// inside Clear — answers "no such session" for a badge that is still on screen.
+// Deleting a conversation must not leave a Typing badge behind on the message
+// that started it.
+func TestPatcherClearsTypingAfterSessionDeleteRemovedTheBinding(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	typingQueries := &fakeTypingQueries{
+		installation: q.installation,
+		bindingErr:   pgx.ErrNoRows,
+	}
+	typingAPI := &fakeTypingAPIClient{addReturn: "reaction-456"}
+	typing := NewTypingIndicatorManager(typingAPI, fakeTypingCreds{secret: "shh"},
+		typingQueries, newDiscardLogger())
+	p.SetTypingIndicatorManager(typing)
+
+	bus := events.New()
+	p.Register(bus)
+
+	sessionID := q.binding.ChatSessionID
+	typing.Add(context.Background(), q.installation, sessionID, "om_trigger", "")
+	if len(typingAPI.addCalled) != 1 {
+		t.Fatalf("setup: expected the Typing reaction to be added, got %d", len(typingAPI.addCalled))
+	}
+
+	// The session and its binding are deleted; the cancel is broadcast after.
+	q.binding = ChatSessionBinding{}
+	q.bindingErr = pgx.ErrNoRows
+
+	taskID := uuidFromString(t, "ee888888-ee88-ee88-ee88-eeeeeeeeeeee")
+	q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+	q.taskChannelIngested = true
+	bus.Publish(events.Event{
+		Type:          protocol.EventTaskCancelled,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(sessionID),
+		Payload: map[string]any{
+			"task_id":         uuidString(taskID),
+			"chat_session_id": uuidString(sessionID),
+			"status":          "cancelled",
+		},
+	})
+
+	if len(typingAPI.deleteCalled) != 1 {
+		t.Fatalf("the session was deleted and the Typing reaction is still on om_trigger — "+
+			"deleting a conversation left a processing badge on the message that "+
+			"started it (delete calls: %d)", len(typingAPI.deleteCalled))
+	}
+	if typingAPI.deleteCalled[0].messageID != "om_trigger" || typingAPI.deleteCalled[0].reactionID != "reaction-456" {
+		t.Errorf("cleared the wrong reaction: %+v", typingAPI.deleteCalled[0])
+	}
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.sent) != 0 || len(api.textSent) != 0 || len(api.patched) != 0 {
+		t.Errorf("a cancelled run must post nothing; sent=%d textSent=%d patched=%d",
+			len(api.sent), len(api.textSent), len(api.patched))
+	}
+}

@@ -19,22 +19,27 @@ const typingEmoji = "Typing"
 // reconnect replays old events. Aligned with OpenClaw's 2-minute bound.
 const typingIndicatorMaxAge = 2 * time.Minute
 
-// TypingIndicatorState holds the identifiers needed to remove a reaction.
+// TypingIndicatorState holds the identifiers needed to remove a reaction, plus
+// the installation whose app credentials added it. The installation id is
+// recorded at add time because that is the last moment it is certainly
+// resolvable: it is reachable from the session's channel_chat_session_binding
+// row, and a session delete drops that row while the cancel it triggers is
+// still on its way to the Patcher.
 type TypingIndicatorState struct {
-	MessageID  string
-	ReactionID string
+	MessageID      string
+	ReactionID     string
+	InstallationID pgtype.UUID
 }
 
 // TypingIndicatorQueries is the narrow DB surface the manager needs.
 type TypingIndicatorQueries interface {
-	GetLarkChatSessionBindingBySession(ctx context.Context, chatSessionID pgtype.UUID) (ChatSessionBinding, error)
 	GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error)
 }
 
 // TypingIndicatorManager owns the "processing" reaction lifecycle for
 // inbound Lark messages. When a message is successfully ingested it adds
-// a Typing reaction; when the agent eventually replies (or fails) it
-// clears the reaction(s) for that chat session.
+// a Typing reaction; when the run ends — with a reply, a failure or a
+// cancellation — it clears the reaction(s) for that chat session.
 //
 // The manager is safe for concurrent use. It tolerates missing or
 // stale state gracefully: adding a reaction to a message that already
@@ -112,8 +117,9 @@ func (m *TypingIndicatorManager) Add(ctx context.Context, inst Installation, cha
 	key := uuidString(chatSessionID)
 	m.mu.Lock()
 	m.states[key] = append(m.states[key], &TypingIndicatorState{
-		MessageID:  messageID,
-		ReactionID: reactionID,
+		MessageID:      messageID,
+		ReactionID:     reactionID,
+		InstallationID: inst.ID,
 	})
 	m.mu.Unlock()
 
@@ -128,6 +134,14 @@ func (m *TypingIndicatorManager) Add(ctx context.Context, inst Installation, cha
 // drops the state entry. It is synchronous so the reaction is gone before
 // the agent's reply is sent, giving the user a clean visual transition.
 // Individual delete failures are logged but do not abort the loop.
+//
+// Credentials come from the installation each state recorded, not from the
+// session's binding, because a clear can outlive that binding: deleting a chat
+// session drops the binding row inside the same transaction that cancels the
+// session's tasks, and the task:cancelled events that reach the Patcher are
+// broadcast after that transaction commits. A binding lookup would miss, and
+// since the state has already been taken here, there would be nothing left to
+// clear from. Installation rows survive the session.
 func (m *TypingIndicatorManager) Clear(ctx context.Context, chatSessionID pgtype.UUID) {
 	key := uuidString(chatSessionID)
 	m.mu.Lock()
@@ -139,39 +153,27 @@ func (m *TypingIndicatorManager) Clear(ctx context.Context, chatSessionID pgtype
 		return
 	}
 
-	binding, err := m.queries.GetLarkChatSessionBindingBySession(ctx, chatSessionID)
-	if err != nil {
-		m.log.Warn("lark typing indicator: failed to lookup binding for clear",
-			"chat_session_id", key,
-			"err", err,
-		)
-		return
-	}
-
-	inst, err := m.queries.GetLarkInstallation(ctx, binding.InstallationID)
-	if err != nil {
-		m.log.Warn("lark typing indicator: failed to lookup installation for clear",
-			"chat_session_id", key,
-			"err", err,
-		)
-		return
-	}
-
-	creds, err := m.resolveCredentials(inst)
-	if err != nil {
-		m.log.Warn("lark typing indicator: failed to resolve credentials for clear",
-			"chat_session_id", key,
-			"err", err,
-		)
-		return
-	}
-
+	// One session's reactions normally share an installation, so the resolved
+	// credentials are memoised; a session rebound to another installation
+	// mid-run still clears every reaction through the app that added it. A nil
+	// entry records an installation that failed to resolve, so it is not
+	// retried once per reaction.
+	resolved := make(map[string]*InstallationCredentials, 1)
 	for _, s := range states {
 		if s.ReactionID == "" {
 			continue
 		}
+		instKey := uuidString(s.InstallationID)
+		creds, seen := resolved[instKey]
+		if !seen {
+			creds = m.credentialsForInstallation(ctx, key, s.InstallationID)
+			resolved[instKey] = creds
+		}
+		if creds == nil {
+			continue
+		}
 		if err := m.client.DeleteMessageReaction(ctx, DeleteReactionParams{
-			InstallationID: creds,
+			InstallationID: *creds,
 			MessageID:      s.MessageID,
 			ReactionID:     s.ReactionID,
 		}); err != nil {
@@ -189,6 +191,32 @@ func (m *TypingIndicatorManager) Clear(ctx context.Context, chatSessionID pgtype
 			"reaction_id", s.ReactionID,
 		)
 	}
+}
+
+// credentialsForInstallation loads an installation row and decrypts its app
+// secret. Nil means the clear cannot proceed for that installation; the reason
+// is already logged. The decrypted secret exists only from here on, never in the
+// state map.
+func (m *TypingIndicatorManager) credentialsForInstallation(ctx context.Context, sessionKey string, id pgtype.UUID) *InstallationCredentials {
+	inst, err := m.queries.GetLarkInstallation(ctx, id)
+	if err != nil {
+		m.log.Warn("lark typing indicator: failed to lookup installation for clear",
+			"chat_session_id", sessionKey,
+			"installation_id", uuidString(id),
+			"err", err,
+		)
+		return nil
+	}
+	creds, err := m.resolveCredentials(inst)
+	if err != nil {
+		m.log.Warn("lark typing indicator: failed to resolve credentials for clear",
+			"chat_session_id", sessionKey,
+			"installation_id", uuidString(id),
+			"err", err,
+		)
+		return nil
+	}
+	return &creds
 }
 
 func isMessageTooOld(createTime string) bool {

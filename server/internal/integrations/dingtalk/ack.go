@@ -25,17 +25,40 @@ import (
 // accepted turn has been persisted and scheduled for an agent run. Terminal
 // commands such as /issue return their synchronous result without posting this
 // non-retractable processing acknowledgement.
+//
+// Because the ack is a promise rather than a badge, the notifier also tracks
+// which sessions are still owed one. Outbound consults that when a run is
+// cancelled: a promise nobody can retract has to be withdrawn with a second
+// message, and only where a promise was actually made.
 
 // ackProcessingText is the stand-in "typing" message. Kept short: it is a real,
 // non-retractable chat message, not an ephemeral indicator.
 const ackProcessingText = "👀 On it — I'll reply here when it's ready."
+
+// ackCancelledText withdraws the ack above. Since the ack cannot be retracted,
+// the only way to close it is a second message saying the reply is not coming.
+// Kept in the ack's own register for the same reason the ack is: it lands in the
+// user's conversation, not in a status badge.
+const ackCancelledText = "⚠️ That run was cancelled — no reply is coming for it."
 
 // ackCoalesceWindow suppresses duplicate acks for the same session. It sits just
 // above the run debounce window so a burst of messages that flush into one run
 // yields a single ack, while a genuinely later turn re-acks.
 const ackCoalesceWindow = 5 * time.Second
 
-// ackNotifier posts the processing ack and coalesces bursts per session.
+// ackPromise is an ack that has been posted and not yet answered. It carries
+// what a withdrawal needs to reach the same conversation: the room the ack went
+// into and the installation that sent it. The installation is kept as an id, so
+// nothing decrypted is held between the ack and its withdrawal — and unlike the
+// session's binding row, an installation row survives the session being deleted.
+type ackPromise struct {
+	installationID pgtype.UUID
+	target         sendTarget
+}
+
+// ackNotifier posts the processing ack, coalesces bursts per session, and
+// remembers which sessions are still owed a reply so a cancelled run can
+// withdraw exactly the promises that are outstanding.
 type ackNotifier struct {
 	client  *Client
 	decrypt Decrypter
@@ -45,6 +68,11 @@ type ackNotifier struct {
 
 	mu      sync.Mutex
 	lastAck map[string]time.Time
+	// outstanding holds one promise per session that has been acked and not yet
+	// answered. Kept apart from lastAck because the two have different lives:
+	// lastAck expires with the coalesce window, while a promise stands until the
+	// run it acked produces something.
+	outstanding map[string]ackPromise
 
 	// sendText delivers text into the installation's conversation. Nil uses the
 	// real Open-API send; tests inject a recorder.
@@ -60,16 +88,17 @@ func NewAckNotifier(client *Client, decrypt Decrypter, logger *slog.Logger) *ack
 		logger = slog.Default()
 	}
 	return &ackNotifier{
-		client:  client,
-		decrypt: decrypt,
-		logger:  logger,
-		window:  ackCoalesceWindow,
-		lastAck: make(map[string]time.Time),
+		client:      client,
+		decrypt:     decrypt,
+		logger:      logger,
+		window:      ackCoalesceWindow,
+		lastAck:     make(map[string]time.Time),
+		outstanding: make(map[string]ackPromise),
 	}
 }
 
 // OnIngested posts the processing ack unless a recent ack for the same session
-// is still within the coalesce window.
+// is still within the coalesce window, and records the promise it just made.
 func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
 	if n.suppress(sessionID) {
 		return
@@ -81,10 +110,26 @@ func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstal
 	if err := send(ctx, inst, msg, ackProcessingText); err != nil {
 		n.logger.WarnContext(ctx, "dingtalk ack: send failed",
 			"installation_id", util.UUIDToString(inst.ID), "error", err)
+		return
 	}
+	key := util.UUIDToString(sessionID)
+	if key == "" {
+		return
+	}
+	n.mu.Lock()
+	n.outstanding[key] = ackPromise{installationID: inst.ID, target: targetFromMessage(msg)}
+	n.mu.Unlock()
 }
 
-// OnSettled clears the session's dedup entry so its next turn acks immediately.
+// OnSettled clears the session's dedup entry so its next turn acks immediately,
+// and drops any outstanding promise with it.
+//
+// The engine calls this when the turn produced no run at all, so no task
+// lifecycle event will ever arrive to close the promise. Dropping it keeps this
+// path posting nothing, which is what it has always done — the offline and
+// archived outcomes get their own notice from the replier — and stops an
+// unrelated later cancel on the same session from withdrawing a promise that
+// belongs to a round already over.
 func (n *ackNotifier) OnSettled(_ context.Context, sessionID pgtype.UUID) {
 	key := util.UUIDToString(sessionID)
 	if key == "" {
@@ -92,7 +137,27 @@ func (n *ackNotifier) OnSettled(_ context.Context, sessionID pgtype.UUID) {
 	}
 	n.mu.Lock()
 	delete(n.lastAck, key)
+	delete(n.outstanding, key)
 	n.mu.Unlock()
+}
+
+// takeOutstandingAck removes the session's unanswered promise and reports
+// whether there was one. It is the dedupe for a bulk cancel: cancel is broadcast
+// once per task row, so a "cancel all tasks" click or a session delete with
+// several queued turns delivers several events for one conversation, and only
+// the first of them finds a promise to withdraw.
+func (n *ackNotifier) takeOutstandingAck(sessionID pgtype.UUID) (ackPromise, bool) {
+	key := util.UUIDToString(sessionID)
+	if key == "" {
+		return ackPromise{}, false
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	promise, ok := n.outstanding[key]
+	if ok {
+		delete(n.outstanding, key)
+	}
+	return promise, ok
 }
 
 // suppress reports whether an ack for sessionID should be skipped, and otherwise

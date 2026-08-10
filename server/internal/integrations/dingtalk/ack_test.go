@@ -22,10 +22,11 @@ func sessionUUID(b byte) pgtype.UUID {
 func newTestAck(now func() time.Time) (*ackNotifier, *[]string) {
 	var sent []string
 	n := &ackNotifier{
-		logger:  slog.Default(),
-		window:  5 * time.Second,
-		now:     now,
-		lastAck: map[string]time.Time{},
+		logger:      slog.Default(),
+		window:      5 * time.Second,
+		now:         now,
+		lastAck:     map[string]time.Time{},
+		outstanding: map[string]ackPromise{},
 		sendText: func(_ context.Context, _ engine.ResolvedInstallation, _ channel.InboundMessage, text string) error {
 			sent = append(sent, text)
 			return nil
