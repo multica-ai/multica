@@ -99,19 +99,27 @@ func (r *PostgresHookRepository) ListEffective(ctx context.Context, workspaceID 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var policies []HookPolicy
 	for rows.Next() {
 		policy, _, scanErr := scanHookPolicy(rows)
 		if scanErr != nil {
+			rows.Close()
 			return nil, scanErr
-		}
-		if loadErr := r.loadPolicyParts(ctx, &policy); loadErr != nil {
-			return nil, loadErr
 		}
 		policies = append(policies, policy)
 	}
-	return policies, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	// Bindings and handlers are loaded for the whole catalog in two queries.
+	// Per-policy loading made this 1+2N round trips, and this runs on the
+	// critical path of every lifecycle event.
+	if err := r.loadPolicyPartsBatch(ctx, policies); err != nil {
+		return nil, err
+	}
+	return policies, nil
 }
 
 // ensureManagedPolicies seeds the code-defined managed policies once per
@@ -811,6 +819,79 @@ func (r *PostgresHookRepository) insertPolicyPartsWith(ctx context.Context, db c
 			return err
 		}
 	}
+	return nil
+}
+
+// loadPolicyPartsBatch fills Bindings and Handlers for every policy in two
+// queries instead of two per policy. Order within a policy matches the
+// per-policy loader (bindings by priority DESC then created_at, handlers by
+// position), so callers see the same catalog either way.
+func (r *PostgresHookRepository) loadPolicyPartsBatch(ctx context.Context, policies []HookPolicy) error {
+	if len(policies) == 0 {
+		return nil
+	}
+	ids := make([]pgtype.UUID, 0, len(policies))
+	byID := make(map[string]*HookPolicy, len(policies))
+	for index := range policies {
+		id, err := util.ParseUUID(policies[index].ID)
+		if err != nil {
+			return err
+		}
+		ids = append(ids, id)
+		byID[policies[index].ID] = &policies[index]
+	}
+
+	bindingRows, err := r.db.Query(ctx, `SELECT policy_id, scope_kind, scope_id, priority
+		FROM cerebro_workflow_hook_binding
+		WHERE policy_id = ANY($1)
+		ORDER BY policy_id, priority DESC, created_at`, ids)
+	if err != nil {
+		return err
+	}
+	for bindingRows.Next() {
+		var policyID pgtype.UUID
+		var binding HookBinding
+		if err := bindingRows.Scan(&policyID, &binding.Kind, &binding.ID, &binding.Priority); err != nil {
+			bindingRows.Close()
+			return err
+		}
+		if policy, ok := byID[util.UUIDToString(policyID)]; ok {
+			policy.Bindings = append(policy.Bindings, binding)
+		}
+	}
+	if err := bindingRows.Err(); err != nil {
+		bindingRows.Close()
+		return err
+	}
+	bindingRows.Close()
+
+	handlerRows, err := r.db.Query(ctx, `SELECT policy_id, id, decision, requirement, modifications, actions
+		FROM cerebro_workflow_hook_handler
+		WHERE policy_id = ANY($1)
+		ORDER BY policy_id, position`, ids)
+	if err != nil {
+		return err
+	}
+	for handlerRows.Next() {
+		var policyID, handlerID pgtype.UUID
+		var handler HookHandler
+		var modifications, actions []byte
+		if err := handlerRows.Scan(&policyID, &handlerID, &handler.Decision, &handler.Requirement, &modifications, &actions); err != nil {
+			handlerRows.Close()
+			return err
+		}
+		handler.ID = util.UUIDToString(handlerID)
+		_ = json.Unmarshal(modifications, &handler.Modifications)
+		_ = json.Unmarshal(actions, &handler.Actions)
+		if policy, ok := byID[util.UUIDToString(policyID)]; ok {
+			policy.Handlers = append(policy.Handlers, handler)
+		}
+	}
+	if err := handlerRows.Err(); err != nil {
+		handlerRows.Close()
+		return err
+	}
+	handlerRows.Close()
 	return nil
 }
 

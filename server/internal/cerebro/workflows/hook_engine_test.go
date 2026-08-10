@@ -317,7 +317,10 @@ func TestHookEngineIsIdempotentAndStopsRecursiveDepth(t *testing.T) {
 	}
 }
 
-func TestHookEngineTimeoutUsesExplicitFailMode(t *testing.T) {
+// FIR-4797: a slow catalog load must never block, not even when a fail-closed
+// policy lists the event. fail_mode judges the guarded content; a slow load has
+// not judged anything yet, so blocking there kills a run over a DB hiccup.
+func TestHookEngineTimeoutAllowsEvenWhenFailClosedPolicyListsEvent(t *testing.T) {
 	policy := newTestHookPolicy("timeout", HookBlock, HookModeEnforce, HookBinding{Kind: HookScopeWorkspace, ID: "ws-1"})
 	policy.FailMode = HookFailClosed
 	engine := NewHookEngine(true, NewMemoryHookStore([]HookPolicy{policy}))
@@ -330,9 +333,60 @@ func TestHookEngineTimeoutUsesExplicitFailMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Decision != HookBlock || !result.TimedOut {
-		t.Fatalf("fail-closed timeout result = %#v", result)
+	if result.Decision != HookAllow || !result.TimedOut {
+		t.Fatalf("slow catalog load must not block: %#v", result)
 	}
+}
+
+// FIR-4797: the budget must be a real deadline on the catalog load. Before this
+// it was only checked after the load returned, so a hung query held the
+// lifecycle event open for as long as the database took.
+func TestHookEngineCancelsCatalogLoadAtTimeout(t *testing.T) {
+	store := &blockingHookStore{released: make(chan struct{})}
+	engine := NewHookEngine(true, store)
+	engine.timeout = 20 * time.Millisecond
+
+	done := make(chan HookResult, 1)
+	go func() {
+		result, err := engine.Evaluate(context.Background(), HookEvent{
+			EventID: "hung-load", Type: HookBeforeSessionStart, WorkspaceID: "ws-1",
+		})
+		if err != nil {
+			t.Error(err)
+		}
+		done <- result
+	}()
+
+	select {
+	case result := <-done:
+		if result.Decision != HookAllow || !result.TimedOut {
+			t.Fatalf("hung catalog load result = %#v", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Evaluate did not return; the catalog load has no deadline")
+	}
+	close(store.released)
+}
+
+type blockingHookStore struct {
+	released chan struct{}
+}
+
+func (s *blockingHookStore) EffectivePolicies(ctx context.Context, _ HookEvent) ([]HookPolicy, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.released:
+		return nil, nil
+	}
+}
+
+func (s *blockingHookStore) GetResult(context.Context, string) (HookResult, bool) {
+	return HookResult{}, false
+}
+
+func (s *blockingHookStore) SaveResult(context.Context, string, HookEvent, HookResult) error {
+	return nil
 }
 
 // FIR-4797: a slow catalog load must not kill before.session.start (or any

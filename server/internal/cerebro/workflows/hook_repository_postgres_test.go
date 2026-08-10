@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 )
 
 func TestPostgresHookRepositoryListReturnsOnlyLatestPolicyVersionPerFamily(t *testing.T) {
@@ -243,4 +246,82 @@ func TestPostgresHookRepositoryReportsSevenDayPassAndBlockCounts(t *testing.T) {
 	if got.PassCount7D != 1 || got.BlockCount7D != 1 {
 		t.Fatalf("pass=%d block=%d, want 1 and 1", got.PassCount7D, got.BlockCount7D)
 	}
+}
+
+// FIR-4797: the hook catalog is loaded on the critical path of every lifecycle
+// event. Loading bindings and handlers per policy made that 1+2N round trips —
+// with the 18 managed policies alone that is 37 sequential queries, and the
+// engine treats a slow load as a timeout. The catalog must load in a constant
+// number of queries, with the same content as the per-policy loader.
+func TestPostgresHookRepositoryListEffectiveLoadsCatalogInConstantQueries(t *testing.T) {
+	pool := openWorkflowIntegrationPool(t)
+	ctx := context.Background()
+	fixture := setupWorkflowIntegrationFixture(t, pool)
+	workspaceID := uuidString(fixture.workspaceID)
+
+	counter := &countingDBTX{DBTX: pool}
+	repo := NewPostgresHookRepository(counter)
+	if _, err := repo.ListEffective(ctx, workspaceID); err != nil {
+		t.Fatalf("seed catalog: %v", err)
+	}
+
+	counter.reset()
+	policies, err := repo.ListEffective(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("list effective: %v", err)
+	}
+	if len(policies) < len(managedHookPolicies(workspaceID)) {
+		t.Fatalf("catalog = %d policies, want at least %d", len(policies), len(managedHookPolicies(workspaceID)))
+	}
+	// One policy list + one binding batch + one handler batch.
+	if got := counter.count(); got > 3 {
+		t.Fatalf("catalog load used %d queries for %d policies, want at most 3", got, len(policies))
+	}
+
+	// Same content as the per-policy loader it replaced.
+	reference := NewPostgresHookRepository(pool)
+	for index := range policies {
+		expected := HookPolicy{ID: policies[index].ID}
+		if err := reference.loadPolicyParts(ctx, &expected); err != nil {
+			t.Fatalf("reference load for %s: %v", policies[index].ID, err)
+		}
+		if !reflect.DeepEqual(policies[index].Bindings, expected.Bindings) {
+			t.Fatalf("bindings for %s = %#v, want %#v", policies[index].ID, policies[index].Bindings, expected.Bindings)
+		}
+		if !reflect.DeepEqual(policies[index].Handlers, expected.Handlers) {
+			t.Fatalf("handlers for %s = %#v, want %#v", policies[index].ID, policies[index].Handlers, expected.Handlers)
+		}
+	}
+}
+
+type countingDBTX struct {
+	cerebrodb.DBTX
+	mu      sync.Mutex
+	queries int
+}
+
+func (c *countingDBTX) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	c.mu.Lock()
+	c.queries++
+	c.mu.Unlock()
+	return c.DBTX.Query(ctx, sql, args...)
+}
+
+func (c *countingDBTX) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	c.mu.Lock()
+	c.queries++
+	c.mu.Unlock()
+	return c.DBTX.QueryRow(ctx, sql, args...)
+}
+
+func (c *countingDBTX) reset() {
+	c.mu.Lock()
+	c.queries = 0
+	c.mu.Unlock()
+}
+
+func (c *countingDBTX) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.queries
 }

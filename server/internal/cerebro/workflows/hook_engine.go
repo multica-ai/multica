@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -46,9 +47,8 @@ func (e *HookEngine) WithConditionResolver(resolver HookConditionResolver) *Hook
 func NewHookEngine(enabled bool, store HookStore) *HookEngine {
 	// Catalog load for every active policy is on the critical path of every
 	// lifecycle event (including before.session.start). 250ms was too tight
-	// under normal DB load and fail-closed killed agent runs with no matching
-	// hook for the event. 2s leaves headroom; timeoutResult still only
-	// fail-closes for policies that actually list the event.
+	// under normal DB load and killed agent runs. 2s leaves headroom, and
+	// exceeding it never blocks — see timeoutResult.
 	return &HookEngine{enabled: enabled, store: store, timeout: 2 * time.Second, now: time.Now}
 }
 
@@ -72,15 +72,33 @@ func (e *HookEngine) Evaluate(ctx context.Context, event HookEvent) (HookResult,
 	}
 
 	started := e.now()
-	policies, err := e.store.EffectivePolicies(ctx, event)
+	loadCtx := ctx
+	if e.timeout > 0 {
+		// A real deadline, not a post-hoc "was that slow?" check: without it a
+		// hung catalog query holds the lifecycle event open indefinitely.
+		var cancel context.CancelFunc
+		loadCtx, cancel = context.WithTimeout(ctx, e.timeout)
+		defer cancel()
+	}
+	policies, err := e.store.EffectivePolicies(loadCtx, event)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			// No SaveResult: the store is the thing that is hung. The log line
+			// is the only trace, so it must always be written — a timeout means
+			// hooks are degraded to allow-all and someone has to see that.
+			logHookLoadTimeout(event, "catalog load exceeded the deadline")
+			result := timeoutResult()
+			result.RunID = key
+			return result, nil
+		}
 		return allow, err
 	}
 	if e.beforeMatch != nil {
 		e.beforeMatch()
 	}
 	if e.timeout > 0 && e.now().Sub(started) > e.timeout {
-		result := timeoutResult(policies, event.Type)
+		logHookLoadTimeout(event, "catalog load exceeded the budget")
+		result := timeoutResult()
 		result.RunID = key
 		_ = e.store.SaveResult(ctx, key, event, result)
 		return result, nil
@@ -180,28 +198,24 @@ policyLoop:
 	return result, nil
 }
 
-// timeoutResult decides what happens when catalog load exceeds the engine
-// budget. Only policies that list this event type can force fail-closed —
-// otherwise a slow ListEffective turns every lifecycle event (including ones
-// with zero configured hooks, e.g. before.session.start) into a silent block.
-func timeoutResult(policies []HookPolicy, eventType HookEventType) HookResult {
-	for _, policy := range policies {
-		if policy.Mode == HookModeOff || !eventListed(policy.Events, eventType) {
-			continue
-		}
-		if policy.FailMode == HookFailClosed {
-			return HookResult{Evaluated: true, Decision: HookBlock, TimedOut: true, Warning: "Hook evaluation timed out and failed closed"}
-		}
-	}
-	for _, policy := range policies {
-		if policy.Mode == HookModeOff || !eventListed(policy.Events, eventType) {
-			continue
-		}
-		if policy.FailMode == HookFailWarn {
-			return HookResult{Evaluated: true, Decision: HookAllow, TimedOut: true, Warning: "Hook evaluation timed out"}
-		}
-	}
-	return HookResult{Evaluated: true, Decision: HookAllow, TimedOut: true, Warning: "Hook evaluation timed out"}
+// timeoutResult is what happens when loading the hook catalog exceeds the
+// engine budget: always allow, with a named warning.
+//
+// fail_mode governs action FAILURES (the judge gateway is unreachable, see the
+// action loop above) — it is a verdict about the guarded content. A slow
+// catalog load says nothing about the content: no policy has been matched yet,
+// let alone evaluated. Blocking there turns a database hiccup into a dead agent
+// run, which is exactly the failure this engine must never cause.
+func timeoutResult() HookResult {
+	return HookResult{Evaluated: true, Decision: HookAllow, TimedOut: true, Warning: "Hook evaluation timed out; the event was allowed through"}
+}
+
+// logHookLoadTimeout makes the allow-all fallback visible. Without it the
+// degraded state is silent: every hook is effectively off and nothing says so.
+func logHookLoadTimeout(event HookEvent, reason string) {
+	slog.Warn("workflow hook catalog load timed out; event allowed through",
+		"reason", reason, "event_type", event.Type, "workspace_id", event.WorkspaceID,
+		"issue_id", event.IssueID, "agent_id", event.AgentID)
 }
 
 // actionGateVerdict reads a decision an action reports on success. A quality
