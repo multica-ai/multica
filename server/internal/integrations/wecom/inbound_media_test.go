@@ -85,6 +85,12 @@ func imageRun(url string) map[string]any {
 	return map[string]any{"msgtype": "image", "image": map[string]any{"url": url, "aeskey": "k"}}
 }
 
+// voiceRun is a spoken run: WeCom sends the transcript it recognised, never
+// audio, so there is no url and no key on it.
+func voiceRun(transcript string) map[string]any {
+	return map[string]any{"msgtype": "voice", "voice": map[string]any{"content": transcript}}
+}
+
 // TestDispatchFrame_MediaCallbacksReachTheHandler is the defect this file
 // exists for. Before inbound media, dispatchFrame routed only msgtype ==
 // "text" and answered every other kind with a receipt, so a photo, a file, a
@@ -244,23 +250,37 @@ func TestUnsupportedReceipt_DoesNotClaimTextOnly(t *testing.T) {
 	}
 }
 
-// TestVoiceStaysOnTheReceiptPath: a STANDALONE voice note is #6599's subject,
-// not this change's. It must still take the receipt path here, so the two
-// land independently. A voice RUN inside a 图文混排 is this change's, because
-// dropping it would lose a spoken sentence out of a message whose other runs
-// are read.
-func TestVoiceStaysOnTheReceiptPath(t *testing.T) {
+// TestAVoiceNoteIsReadWhereverItArrives: WeCom runs the speech recognition on
+// its side and hands over the transcript, so a spoken sentence needs no
+// download and no key — it is words, and it is read like words whether it
+// arrives on its own or as one run of a 图文混排. An empty transcript is the
+// one exception: background noise and a half-second press produce nothing to
+// route, and an empty body would reach the agent as a turn with nothing in it.
+func TestAVoiceNoteIsReadWhereverItArrives(t *testing.T) {
 	t.Parallel()
+
 	standalone := mediaFrame(t, "voice", map[string]any{"voice": map[string]any{"content": "把报表发我"}})
-	if _, called, conn := dispatchOne(t, standalone); called || len(conn.frames) != 1 {
-		t.Errorf("standalone voice should still take the receipt path (called=%v, frames=%d)", called, len(conn.frames))
+	got, called, conn := dispatchOne(t, standalone)
+	if !called {
+		t.Fatal("a voice note with a transcript was refused — the sentence was already in hand")
+	}
+	if got.Text != "把报表发我" {
+		t.Errorf("body = %q, want the transcript", got.Text)
+	}
+	if len(conn.frames) != 0 {
+		t.Errorf("a readable voice note got %d receipt(s); it was answered instead of routed", len(conn.frames))
+	}
+
+	empty := mediaFrame(t, "voice", map[string]any{"voice": map[string]any{"content": "  "}})
+	if _, called, conn := dispatchOne(t, empty); called || len(conn.frames) != 1 {
+		t.Errorf("an empty transcript should take the receipt path (called=%v, frames=%d)", called, len(conn.frames))
 	}
 
 	inMixed := mediaFrame(t, "mixed", map[string]any{"mixed": map[string]any{"msg_item": []map[string]any{
 		{"msgtype": "voice", "voice": map[string]any{"content": "把报表发我"}},
 		{"msgtype": "file", "file": map[string]any{"url": "https://cos.example.com/x", "aeskey": "k"}},
 	}}})
-	got, called, _ := dispatchOne(t, inMixed)
+	got, called, _ = dispatchOne(t, inMixed)
 	if !called {
 		t.Fatal("a mixed message with a voice run must be routed")
 	}
@@ -381,6 +401,87 @@ func TestDispatchFrame_GroupMentionedMixedCommand(t *testing.T) {
 	}
 	if !got.SkipAgentRun {
 		t.Error("SkipAgentRun = false; the group would get the slash command read back to it")
+	}
+}
+
+// TestDispatchFrame_GroupMentionedSpokenIssueWithAnImage is the intersection
+// of all three decisions that meet in this function, and the only test that
+// holds them together.
+//
+// Someone in a group photographs the broken screen, holds the mic and says
+// "@Multica Bot /issue 登录坏了". WeCom delivers one 图文混排 with an image run
+// and a voice run, and the command has to survive three separate strips:
+//
+//   - the placeholder — the image run is first, and the parser reads the first
+//     non-empty line and only that one, so a body opening with "[Image]" files
+//     nothing;
+//   - the transcript — the spoken words live in voice.content, and a command
+//     source built from the typed field is empty, at which point the engine
+//     falls back to the body and reads "[Image]" anyway;
+//   - the addressing — an @-mention is the only way to reach a bot in a group,
+//     so it arrives glued to the front of the words.
+//
+// Take any one side of the merge wholesale and one of the three is missing.
+// The sender then gets no issue and no explanation, and the message they would
+// have to send to report it is the one that does not work.
+func TestDispatchFrame_GroupMentionedSpokenIssueWithAnImage(t *testing.T) {
+	t.Parallel()
+	group := map[string]any{"chattype": "group", "chatid": "GROUP_1"}
+
+	for _, tc := range []struct {
+		name     string
+		items    []map[string]any
+		wantBody string
+	}{
+		{
+			// Everything spoken: the mention rides in front of the transcript,
+			// which is how it arrives when the whole message is said out loud.
+			name:     "the mention and the command are both in the voice run",
+			items:    []map[string]any{imageRun("https://cos.example.com/a"), voiceRun("@Multica Bot /issue 登录坏了")},
+			wantBody: "[Image]\n@Multica Bot /issue 登录坏了",
+		},
+		{
+			// Mention typed, command spoken — the composer's own order when
+			// someone picks the bot from the @ menu and then talks.
+			name:     "the mention is typed and the command is spoken",
+			items:    []map[string]any{textRun("@Multica Bot"), imageRun("https://cos.example.com/a"), voiceRun("/issue 登录坏了")},
+			wantBody: "@Multica Bot\n[Image]\n/issue 登录坏了",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, called, _ := dispatchOneAs(t, mixedFrame(t, group, tc.items...), "Multica Bot")
+			if !called {
+				t.Fatal("the group message never reached the handler")
+			}
+			if got.Source.ChatType != channel.ChatTypeGroup {
+				t.Fatalf("chat type = %v, want group — the mention strip is gated on it", got.Source.ChatType)
+			}
+			// The stored body keeps everything: the placeholder marks where the
+			// screenshot goes, and the addressing is part of what was said.
+			if got.Text != tc.wantBody {
+				t.Errorf("stored body = %q, want %q", got.Text, tc.wantBody)
+			}
+			cmd, ok := engine.ParseIssueCommand(got.CommandText)
+			if !ok {
+				t.Fatalf("engine.ParseIssueCommand(%q) declined — a spoken, @-mentioned /issue with a screenshot files nothing and says nothing", got.CommandText)
+			}
+			if cmd.Title != "登录坏了" {
+				t.Errorf("issue title = %q, want 登录坏了 — the title is what the strips left behind", cmd.Title)
+			}
+			if !got.SkipAgentRun {
+				t.Error("SkipAgentRun = false; the group would get the issue AND the agent reading the slash command back at it")
+			}
+			// The picture still travels. Losing it here would file the issue
+			// without the one thing the sender attached to explain it.
+			wm, err := wecomMsgFromRaw(got)
+			if err != nil {
+				t.Fatalf("decode raw: %v", err)
+			}
+			if len(wm.Media) != 1 || wm.Media[0].URL != "https://cos.example.com/a" {
+				t.Errorf("attachments = %+v, want the one image the sender took", wm.Media)
+			}
+		})
 	}
 }
 
