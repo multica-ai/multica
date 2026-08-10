@@ -197,10 +197,22 @@ func (m *TypingIndicatorManager) apiForInstallation(ctx context.Context, id pgty
 //
 // EventTaskCancelled has to be here or a cancelled run leaves the 👀 on the
 // user's message for good: a cancellation publishes no chat-done and no
-// task-failed, so nothing else would ever take the reaction off. Every cancel
-// path lands here — CancelTask for a running or queued task, the queued
-// follow-up cancel behind it, and the agent- and issue-level bulk cancels all
-// broadcast task:cancelled per row.
+// task-failed, so nothing else would ever take the reaction off.
+//
+// task:cancelled is broadcast once per cancelled row by CancelTask, the queued
+// follow-up cancel behind it, the agent- and issue-level bulk cancels, the
+// runtime and member revocations, and deleting the chat session. The delete is
+// the one that used to publish nothing: BroadcastCancelledTasks resolved each
+// task's workspace through its chat_session, the same row its transaction had
+// just deleted, and an event with no workspace is dropped before it reaches the
+// bus. It now takes the workspace from its caller.
+//
+// One cancel path is still silent by choice and this subscription cannot help
+// it: archiving an agent cancels its tasks without broadcasting per row, on the
+// grounds that the agent:archived event already invalidates every client's task
+// list (handler/agent.go, ArchiveAgent). No client-side list refresh takes a
+// reaction off a Slack message, so archiving an agent mid-run leaves the 👀 in
+// place.
 //
 // Call once at boot against a fresh bus; register it before the outbound
 // subscriber so the reaction clears ahead of the reply on EventChatDone (bus

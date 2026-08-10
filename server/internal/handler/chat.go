@@ -756,7 +756,11 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 
 	// Post-commit broadcasts. Subscribers should never observe events for a
 	// tx that didn't actually persist.
-	h.TaskService.BroadcastCancelledTasks(r.Context(), cancelled)
+	//
+	// The workspace has to come from the session we just deleted: the tasks were
+	// cancelled and returned before the delete, so they still carry its id, but
+	// the row they would be resolved through is gone by now.
+	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, cancelled)
 
 	resolvedSessionID := uuidToString(session.ID)
 	h.publishChat(protocol.EventChatSessionDeleted, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionDeletedPayload{

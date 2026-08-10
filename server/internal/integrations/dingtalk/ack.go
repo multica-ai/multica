@@ -27,9 +27,19 @@ import (
 // non-retractable processing acknowledgement.
 //
 // Because the ack is a promise rather than a badge, the notifier also tracks
-// which sessions are still owed one. Outbound consults that when a run is
-// cancelled: a promise nobody can retract has to be withdrawn with a second
-// message, and only where a promise was actually made.
+// which conversation each outstanding promise was made in. Outbound uses that
+// to address the withdrawal a cancelled run owes, and to hold a bulk cancel to
+// one message.
+//
+// Note what that costs. Slack and Lark hold their indicator state in memory
+// because there is nowhere else to hold it — nothing in the database says which
+// message a reaction sits on. Here the room is also in the session's binding
+// row, so keeping the promise in memory is a choice, and it buys the two things
+// the binding cannot answer: whether an ack was actually posted, and whether
+// something has already answered it. The price is that a process restart
+// forgets every outstanding promise and the cancel that follows posts nothing.
+// That failure direction is the intended one: the notice cannot be unsent, so
+// with no record of what was promised, silence is the safe answer.
 
 // ackProcessingText is the stand-in "typing" message. Kept short: it is a real,
 // non-retractable chat message, not an ephemeral indicator.
@@ -46,6 +56,14 @@ const ackCancelledText = "⚠️ That run was cancelled — no reply is coming f
 // yields a single ack, while a genuinely later turn re-acks.
 const ackCoalesceWindow = 5 * time.Second
 
+// ackPromiseMaxAge bounds how long an unanswered promise is kept. Nothing
+// expires the run it belongs to, so this is not an indicator timeout: it posts
+// nothing and the user sees no difference. It exists only so a session whose run
+// never reports any ending — a lost event, a daemon that went away mid-run —
+// cannot hold a map entry for the life of the process. A day is far longer than
+// any run and far shorter than an uptime.
+const ackPromiseMaxAge = 24 * time.Hour
+
 // ackPromise is an ack that has been posted and not yet answered. It carries
 // what a withdrawal needs to reach the same conversation: the room the ack went
 // into and the installation that sent it. The installation is kept as an id, so
@@ -54,11 +72,14 @@ const ackCoalesceWindow = 5 * time.Second
 type ackPromise struct {
 	installationID pgtype.UUID
 	target         sendTarget
+	at             time.Time
 }
 
 // ackNotifier posts the processing ack, coalesces bursts per session, and
-// remembers which sessions are still owed a reply so a cancelled run can
-// withdraw exactly the promises that are outstanding.
+// remembers which sessions are still owed a reply, and in which room. It does
+// not decide whether a given cancellation should withdraw one — a session can
+// carry a run that never acked here — only whether there is anything to
+// withdraw and where it would go. Outbound.withdrawProcessingAck decides.
 type ackNotifier struct {
 	client  *Client
 	decrypt Decrypter
@@ -71,7 +92,16 @@ type ackNotifier struct {
 	// outstanding holds one promise per session that has been acked and not yet
 	// answered. Kept apart from lastAck because the two have different lives:
 	// lastAck expires with the coalesce window, while a promise stands until the
-	// run it acked produces something.
+	// run it acked reports an ending.
+	//
+	// Both maps need sweeping for the same reason, at different scales. Entries
+	// are removed on the paths that answer them — OnSettled for a turn that
+	// enqueued no task, releaseOutstandingAck when the run ends, and
+	// takeOutstandingAck when a cancel withdraws it — but a run that never
+	// reports any ending leaves its promise behind, and nothing else would ever
+	// collect it. So recording a promise first drops every entry older than
+	// ackPromiseMaxAge, which bounds the map by the sessions acked within one
+	// day rather than by the process's whole lifetime.
 	outstanding map[string]ackPromise
 
 	// sendText delivers text into the installation's conversation. Nil uses the
@@ -116,8 +146,14 @@ func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstal
 	if key == "" {
 		return
 	}
+	now := n.clock()
 	n.mu.Lock()
-	n.outstanding[key] = ackPromise{installationID: inst.ID, target: targetFromMessage(msg)}
+	for k, p := range n.outstanding {
+		if now.Sub(p.at) >= ackPromiseMaxAge {
+			delete(n.outstanding, k)
+		}
+	}
+	n.outstanding[key] = ackPromise{installationID: inst.ID, target: targetFromMessage(msg), at: now}
 	n.mu.Unlock()
 }
 
@@ -141,6 +177,20 @@ func (n *ackNotifier) OnSettled(_ context.Context, sessionID pgtype.UUID) {
 	n.mu.Unlock()
 }
 
+// hasOutstandingAck reports whether the session is still owed a reply, without
+// consuming the promise. Outbound checks this before it spends any query on a
+// cancel: most cancelled runs are nothing to do with DingTalk.
+func (n *ackNotifier) hasOutstandingAck(sessionID pgtype.UUID) bool {
+	key := util.UUIDToString(sessionID)
+	if key == "" {
+		return false
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	_, ok := n.outstanding[key]
+	return ok
+}
+
 // takeOutstandingAck removes the session's unanswered promise and reports
 // whether there was one. It is the dedupe for a bulk cancel: cancel is broadcast
 // once per task row, so a "cancel all tasks" click or a session delete with
@@ -158,6 +208,21 @@ func (n *ackNotifier) takeOutstandingAck(sessionID pgtype.UUID) (ackPromise, boo
 		delete(n.outstanding, key)
 	}
 	return promise, ok
+}
+
+// releaseOutstandingAck drops the session's promise without posting anything.
+// The caller uses it when the acked run has reported an ending of its own: the
+// promise is discharged whether or not a reply could actually be delivered, and
+// leaving it on record would let an unrelated later cancel in the same
+// conversation withdraw a promise that no longer stands.
+func (n *ackNotifier) releaseOutstandingAck(sessionID pgtype.UUID) {
+	key := util.UUIDToString(sessionID)
+	if key == "" {
+		return
+	}
+	n.mu.Lock()
+	delete(n.outstanding, key)
+	n.mu.Unlock()
 }
 
 // suppress reports whether an ack for sessionID should be skipped, and otherwise

@@ -70,9 +70,14 @@ func TestEventContent(t *testing.T) {
 type fakeOutboundQueries struct {
 	task            db.AgentTaskQueue
 	channelIngested bool
-	binding         db.ChannelChatSessionBinding
-	bindingErr      error
-	inst            db.ChannelInstallation
+	// inputBatch is what the task's chat_input_task_id owns. Empty is the
+	// meaningful default: a task that reads as a web run through
+	// channelIngested but owns no user messages is unclassifiable, not a web
+	// run, and the two shapes must not behave alike.
+	inputBatch []db.ChatMessage
+	binding    db.ChannelChatSessionBinding
+	bindingErr error
+	inst       db.ChannelInstallation
 }
 
 func (f *fakeOutboundQueries) GetAgentTask(context.Context, pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -81,6 +86,10 @@ func (f *fakeOutboundQueries) GetAgentTask(context.Context, pgtype.UUID) (db.Age
 
 func (f *fakeOutboundQueries) TaskHasChannelIngestedMessages(context.Context, pgtype.UUID) (bool, error) {
 	return f.channelIngested, nil
+}
+
+func (f *fakeOutboundQueries) ListChatInputMessages(context.Context, pgtype.UUID) ([]db.ChatMessage, error) {
+	return f.inputBatch, nil
 }
 
 func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
@@ -179,6 +188,33 @@ func cancelledEvent(taskID string) events.Event {
 			"status":          "cancelled",
 		},
 	}
+}
+
+func chatDoneEvent(taskID, content string) events.Event {
+	return events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        taskID,
+		ChatSessionID: cancelTestSessionID,
+		Payload: protocol.ChatDonePayload{
+			TaskID:        taskID,
+			ChatSessionID: cancelTestSessionID,
+			Content:       content,
+		},
+	}
+}
+
+// asWebRun points the stub queries at a task that owns an input batch of
+// messages the user typed in Multica — the one shape that proves a cancelled
+// run is not the channel turn.
+func asWebRun(q *fakeOutboundQueries) {
+	q.channelIngested = false
+	q.inputBatch = []db.ChatMessage{{Role: "user", Content: "typed into Multica"}}
+}
+
+// asChannelRun points them back at the turn the DingTalk message started.
+func asChannelRun(q *fakeOutboundQueries) {
+	q.channelIngested = true
+	q.inputBatch = nil
 }
 
 // DingTalk's processing indicator is not a reaction. The classic robot API this
@@ -294,16 +330,7 @@ func TestOutbound_ReplyDeliveredLeavesNothingToWithdraw(t *testing.T) {
 	bus := events.New()
 	o.Register(bus)
 
-	bus.Publish(events.Event{
-		Type:          protocol.EventChatDone,
-		TaskID:        cancelTestTaskID,
-		ChatSessionID: cancelTestSessionID,
-		Payload: protocol.ChatDonePayload{
-			TaskID:        cancelTestTaskID,
-			ChatSessionID: cancelTestSessionID,
-			Content:       "here you go",
-		},
-	})
+	bus.Publish(chatDoneEvent(cancelTestTaskID, "here you go"))
 	if n := atomic.LoadInt32(&d.sendCalls); n != 1 {
 		t.Fatalf("setup: the reply should have been delivered once, sends = %d", n)
 	}
@@ -313,5 +340,127 @@ func TestOutbound_ReplyDeliveredLeavesNothingToWithdraw(t *testing.T) {
 	if n := atomic.LoadInt32(&d.sendCalls); n != 1 {
 		t.Fatalf("the ack was already answered by the reply; a later cancel must not "+
 			"withdraw it again (sends: %d)", n)
+	}
+}
+
+// One chat session can be carrying two runs at once: the turn the DingTalk
+// message started, and a turn the same user typed into Multica with the session
+// open in the browser. The promise is recorded per session, so nothing in it
+// distinguishes the two — and stopping the browser turn must not tell the room
+// its answer is not coming, because it is, from the run still working.
+func TestOutbound_WebRunCancelDoesNotWithdrawTheChannelTurnsAck(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	o, ack, q := newCancelTestOutbound(t, d)
+	postProcessingAck(t, ack)
+	bus := events.New()
+	o.Register(bus)
+
+	asWebRun(q)
+	bus.Publish(cancelledEvent("44444444-4444-4444-4444-444444444444"))
+
+	if n := atomic.LoadInt32(&d.sendCalls); n != 0 {
+		param, _ := d.lastBody["msgParam"].(string)
+		t.Fatalf("stopping a run started in the browser posted %q into the DingTalk "+
+			"room while the channel turn is still working (sends: %d)", param, n)
+	}
+
+	// The channel turn finishes and delivers the reply the ack promised. Had the
+	// cancel above spoken, the room would have been told no reply was coming and
+	// then handed one.
+	asChannelRun(q)
+	bus.Publish(chatDoneEvent(cancelTestTaskID, "here you go"))
+
+	if n := atomic.LoadInt32(&d.sendCalls); n != 1 {
+		t.Fatalf("the channel turn's reply did not land (sends: %d)", n)
+	}
+	if param, _ := d.lastBody["msgParam"].(string); !strings.Contains(param, "here you go") {
+		t.Errorf("the last message in the room should be the reply; msgParam = %q", param)
+	}
+}
+
+// The other half of the same rule: leaving the promise alone has to mean
+// leaving it, not quietly consuming it. A gate that silences the web run's
+// cancel but still takes the promise would leave the channel turn's own
+// cancellation with nothing to withdraw — the exact indicator this PR is about,
+// back again and harder to see.
+func TestOutbound_ChannelTurnCancelStillSpeaksAfterAWebRunWasCancelled(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	o, ack, q := newCancelTestOutbound(t, d)
+	postProcessingAck(t, ack)
+	bus := events.New()
+	o.Register(bus)
+
+	asWebRun(q)
+	bus.Publish(cancelledEvent("44444444-4444-4444-4444-444444444444"))
+	if n := atomic.LoadInt32(&d.sendCalls); n != 0 {
+		t.Fatalf("setup: the web run's cancel must be silent, sends = %d", n)
+	}
+
+	asChannelRun(q)
+	bus.Publish(cancelledEvent(cancelTestTaskID))
+
+	if n := atomic.LoadInt32(&d.sendCalls); n != 1 {
+		t.Fatalf("the channel turn was cancelled and the room still holds %q — an "+
+			"earlier cancel on an unrelated run consumed its promise (sends: %d)",
+			ackProcessingText, n)
+	}
+}
+
+// A run can end with nothing to post: an empty completion, an installation
+// revoked mid-flight, a send that fails. The promise is discharged all the same,
+// because the run it belongs to is over. Otherwise it sits on record until some
+// later cancel in that conversation withdraws a promise nobody is waiting on.
+func TestOutbound_EmptyCompletionStillDischargesTheAck(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	o, ack, _ := newCancelTestOutbound(t, d)
+	postProcessingAck(t, ack)
+	bus := events.New()
+	o.Register(bus)
+
+	bus.Publish(chatDoneEvent(cancelTestTaskID, ""))
+	if n := atomic.LoadInt32(&d.sendCalls); n != 0 {
+		t.Fatalf("setup: an empty completion posts nothing, sends = %d", n)
+	}
+
+	bus.Publish(cancelledEvent("44444444-4444-4444-4444-444444444444"))
+
+	if n := atomic.LoadInt32(&d.sendCalls); n != 0 {
+		t.Fatalf("the run that made the ack already ended; a later cancel must not "+
+			"withdraw its promise (sends: %d)", n)
+	}
+}
+
+// A failure with a retry behind it is not an ending — the retry reports its own
+// outcome — so it neither delivers nor discharges the promise. If it did, the
+// retry's own cancellation would find nothing to withdraw.
+func TestOutbound_RetryPendingFailureKeepsTheAckOutstanding(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	o, ack, _ := newCancelTestOutbound(t, d)
+	postProcessingAck(t, ack)
+	bus := events.New()
+	o.Register(bus)
+
+	bus.Publish(events.Event{
+		Type:          protocol.EventTaskFailed,
+		TaskID:        cancelTestTaskID,
+		ChatSessionID: cancelTestSessionID,
+		Payload: map[string]any{
+			"task_id":         cancelTestTaskID,
+			"chat_session_id": cancelTestSessionID,
+			"status":          "failed",
+			"failure_reason":  "timeout",
+			"retry_pending":   true,
+		},
+	})
+	if n := atomic.LoadInt32(&d.sendCalls); n != 0 {
+		t.Fatalf("setup: a retry-pending failure posts nothing, sends = %d", n)
+	}
+
+	bus.Publish(cancelledEvent(cancelTestTaskID))
+
+	if n := atomic.LoadInt32(&d.sendCalls); n != 1 {
+		t.Fatalf("the retry was cancelled and the room still holds %q — the failure "+
+			"that preceded it discharged a promise the retry had not yet answered "+
+			"(sends: %d)", ackProcessingText, n)
 	}
 }

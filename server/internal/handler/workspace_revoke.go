@@ -243,7 +243,10 @@ func (h *Handler) publishRevocation(ctx context.Context, result revocationResult
 	// subscribers see "task cancelled" before the parent agent disappears
 	// from active lists, matching the order ArchiveAgent uses.
 	if h.TaskService != nil && len(result.CancelledTasks) > 0 {
-		h.TaskService.BroadcastCancelledTasks(ctx, result.CancelledTasks)
+		// Revocation only archives agents, so a per-task lookup would still
+		// resolve here; the workspace is passed for the same reason as
+		// everywhere else — it is known, and it is the one being revoked.
+		h.TaskService.BroadcastCancelledTasks(ctx, workspaceIDStr, result.CancelledTasks)
 	}
 
 	for _, agent := range result.ArchivedAgents {

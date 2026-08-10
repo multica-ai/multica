@@ -247,3 +247,51 @@ func TestTypingIndicator_ClearsAfterSessionDeleteRemovedTheBinding(t *testing.T)
 		t.Errorf("cleared the wrong message: %+v, want C1/%s", fr.removed[0], ts)
 	}
 }
+
+// The reply path asks TaskInputIsChannelIngested whether an answer belongs on
+// Slack, and a task cancelled for owning an empty input batch answers no — it
+// has no user rows at all, so nothing in it is stamped channel-ingested. That
+// is the run of #6611, and the run whose badge most needs removing.
+//
+// The clear must not consult it. Nothing is posted for a cancellation, so there
+// is no answer to misroute and no question for the gate to decide; the badge is
+// this process's own and Clear only touches sessions it put one on. The fake is
+// set to the answers that gate would give — a task owning a batch with no
+// channel-ingested message — so adding the gate to this path breaks this test.
+func TestTypingIndicator_ClearsOnCancelOfATaskThatReadsAsAWebRun(t *testing.T) {
+	sessionID := uid(7)
+	q := &fakeOutboundQueries{
+		binding:             db.ChannelChatSessionBinding{InstallationID: uid(1)},
+		inst:                db.ChannelInstallation{ID: uid(1), Status: "active", Config: slackInstallConfigJSON()},
+		task:                db.AgentTaskQueue{ChatInputTaskID: uid(9)},
+		taskChannelIngested: false,
+	}
+	fr := &fakeReactor{}
+	m := newTestTyping(q, fr)
+	bus := events.New()
+	m.Register(bus)
+
+	ts := freshTS()
+	m.Add(context.Background(), db.ChannelInstallation{ID: uid(1), Config: slackInstallConfigJSON()}, sessionID, "C1", ts)
+
+	bus.Publish(events.Event{
+		Type:          protocol.EventTaskCancelled,
+		TaskID:        util.UUIDToString(uid(9)),
+		ChatSessionID: util.UUIDToString(sessionID),
+		Payload: map[string]any{
+			"task_id":         util.UUIDToString(uid(9)),
+			"chat_session_id": util.UUIDToString(sessionID),
+			"status":          "cancelled",
+		},
+	})
+
+	if len(fr.removed) != 1 {
+		t.Fatalf("the cancelled run owned an empty input batch, so the origin query "+
+			"calls it a web run, and the :%s: reaction stayed on C1/%s — the badge is "+
+			"stuck on exactly the cancel it was added for (removed %d reactions)",
+			typingEmoji, ts, len(fr.removed))
+	}
+	if fr.removed[0].Channel != "C1" || fr.removed[0].Timestamp != ts {
+		t.Errorf("cleared the wrong message: %+v, want C1/%s", fr.removed[0], ts)
+	}
+}

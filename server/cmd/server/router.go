@@ -622,8 +622,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			channelRouter.Register(dingtalk.TypeDingTalk, dingtalk.NewDingTalkResolverSet(queries, pool, replier, ack, media))
 			// The ack notifier is shared with the resolver set above on purpose:
 			// it is the only record of which DingTalk conversations are still
-			// holding an unanswered "👀 On it", which is what tells a cancelled
-			// run where — and whether — to withdraw that promise.
+			// holding an unanswered "👀 On it", and of the room each one went
+			// into. A cancelled run needs both to withdraw the promise.
 			dingtalk.NewOutbound(queries, box.Open, dingtalkClient, ack, slog.Default()).Register(bus)
 			dingtalk.RegisterDingTalk(channelRegistry, dingtalk.ChannelDeps{
 				Decrypt: box.Open,

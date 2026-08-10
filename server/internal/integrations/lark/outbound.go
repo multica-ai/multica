@@ -255,10 +255,18 @@ func (p *Patcher) SetTypingIndicatorManager(m *TypingIndicatorManager) {
 //   - EventTaskCancelled — the run ended without an answer. Nothing is
 //     sent for it; the subscription exists so the Typing reaction comes
 //     off. A cancellation publishes no chat-done and no task-failed, so
-//     without this the badge sits on the user's message for good. Every
-//     cancel path lands here — CancelTask for a running or queued task,
-//     the queued follow-up cancel behind it, and the agent- and
-//     issue-level bulk cancels all broadcast task:cancelled per row.
+//     without this the badge sits on the user's message for good.
+//     task:cancelled is broadcast once per cancelled row by CancelTask,
+//     the queued follow-up cancel behind it, the agent- and issue-level
+//     bulk cancels, the runtime and member revocations, and deleting the
+//     chat session. The delete is the one that used to publish nothing:
+//     BroadcastCancelledTasks resolved each task's workspace through its
+//     chat_session, the same row its transaction had just deleted, and an
+//     event with no workspace is dropped before it reaches the bus. It now
+//     takes the workspace from its caller. Archiving an agent stays silent
+//     by choice — agent:archived invalidates every client's task list
+//     instead — and no list refresh removes a Lark reaction, so that one
+//     path still leaves the badge on.
 //
 // We deliberately do NOT subscribe to EventTaskQueued / EventTaskRunning
 // (no thinking-card lifecycle anymore — adds noise without value) or to

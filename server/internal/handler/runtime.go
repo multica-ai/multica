@@ -847,7 +847,10 @@ func unbindRuntimeForDelete(ctx context.Context, qtx *db.Queries, runtimeID pgty
 // then the runtime-list refresh.
 func (h *Handler) publishRuntimeTeardown(ctx context.Context, res runtimeTeardownResult, wsID, userID string) {
 	if h.TaskService != nil && len(res.CancelledTasks) > 0 {
-		h.TaskService.BroadcastCancelledTasks(ctx, res.CancelledTasks)
+		// The teardown deletes the runtime's system agents, and a system agent's
+		// chat sessions go with it, so the workspace of a cancelled chat task is
+		// no longer resolvable from the task row. It is this workspace.
+		h.TaskService.BroadcastCancelledTasks(ctx, wsID, res.CancelledTasks)
 	}
 	for _, a := range res.UnboundAgents {
 		// agent:status is the generic "this agent changed" broadcast the agent
