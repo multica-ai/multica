@@ -49,35 +49,30 @@ var ErrMediaAddrBlocked = errors.New("wecom: media host resolves to a non-public
 // mediaDownloadTimeout, which bounds the whole fetch.
 const mediaDialTimeout = 10 * time.Second
 
-// reservedMediaPrefixes are the ranges netip's own predicates do not cover
-// and that a media URL has no business resolving to. IsLoopback / IsPrivate /
-// IsLinkLocal* / IsMulticast / IsUnspecified handle the rest.
+// The reserved ranges come in two groups, and the difference is not
+// taxonomy — it is whether an operator is allowed to open them.
 //
-// The list is the IANA IPv4 and IPv6 Special-Purpose Address Registries minus
-// what those predicates already catch, minus the handful of special-purpose
-// blocks that are ordinary globally-routed unicast (the AS112 delegations
-// 192.31.196.0/24, 192.175.48.0/24 and 2620:4f:8000::/48, and AMT's
-// 192.52.193.0/24) — those are "special" in who runs them, not in where they
-// point, and refusing them would buy nothing.
+// Both lists are the IANA IPv4 and IPv6 Special-Purpose Address Registries
+// minus what netip's own predicates already catch (IsLoopback / IsPrivate /
+// IsLinkLocal* / IsMulticast / IsUnspecified), minus the handful of
+// special-purpose blocks that are ordinary globally-routed unicast (the AS112
+// delegations 192.31.196.0/24, 192.175.48.0/24 and 2620:4f:8000::/48, and
+// AMT's 192.52.193.0/24) — those are "special" in who runs them, not in where
+// they point, and refusing them would buy nothing.
 //
-// Two groups, and they fail differently.
+// reservedMediaPrefixes is space that is not the public internet: a media URL
+// resolving there is either a mistake or an attempt, and either way there is
+// no object at the end of it. 100.64.0.0/10 is the one that matters most —
+// RFC 6598 shared address space, which no standard-library predicate reports
+// as private, and which is exactly what Tailscale hands out. A tailnet peer
+// is a machine inside the trust boundary reachable by IP with no credential.
 //
-// The first is space that is not the public internet: a media URL resolving
-// there is either a mistake or an attempt, and either way there is no object
-// at the end of it. 100.64.0.0/10 is the one that matters most — RFC 6598
-// shared address space, which no standard-library predicate reports as
-// private, and which is exactly what Tailscale hands out. A tailnet peer is a
-// machine inside the trust boundary reachable by IP with no credential.
-//
-// The second is TRANSLATION space, and it is the more dangerous of the two:
-// these addresses are not destinations, they are IPv4 destinations wearing an
-// IPv6 costume. 64:ff9b:1::a9fe:a9fe is 169.254.169.254 the moment a NAT64
-// translator sees it; 2002:a9fe:a9fe:: is the same address through a 6to4
-// relay; a Teredo address carries its IPv4 endpoint in the same way. Every
-// one of them reaches straight past a guard that only knows how to recognise
-// an IPv4 address when it is written as one.
+// This group is what mediaAllowedPrefixes can reopen, because a real
+// deployment shape lives in it: a fake-IP proxy hands out 198.18.0.0/15 for
+// every public hostname, WeCom's own COS host included. An operator who knows
+// their proxy's pool can say so.
 var reservedMediaPrefixes = []netip.Prefix{
-	// ---- IPv4: not the public internet ----
+	// ---- IPv4 ----
 	netip.MustParsePrefix("0.0.0.0/8"),       // "this network"
 	netip.MustParsePrefix("100.64.0.0/10"),   // RFC 6598 CGNAT — Tailscale lives here
 	netip.MustParsePrefix("192.0.0.0/24"),    // IETF protocol assignments
@@ -88,7 +83,7 @@ var reservedMediaPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("240.0.0.0/4"),     // reserved, includes 255.255.255.255
 	netip.MustParsePrefix("192.88.99.0/24"),  // deprecated 6to4 relay anycast — the v4 end of 2002::/16
 
-	// ---- IPv6: not the public internet ----
+	// ---- IPv6 ----
 	netip.MustParsePrefix("100::/64"),       // discard-only
 	netip.MustParsePrefix("100:0:0:1::/64"), // dummy prefix, also discard-only
 	// The whole IETF protocol-assignments block, not its dozen sub-entries.
@@ -107,8 +102,28 @@ var reservedMediaPrefixes = []netip.Prefix{
 	// were numbered out of it before 2004 still route it internally, and it
 	// is one line.
 	netip.MustParsePrefix("fec0::/10"),
+}
 
-	// ---- IPv6: translation space, i.e. IPv4 addresses in disguise ----
+// translationMediaPrefixes is TRANSLATION space, and no configuration reopens
+// it. These addresses are not destinations, they are IPv4 destinations
+// wearing an IPv6 costume: 64:ff9b:1::a9fe:a9fe is 169.254.169.254 the moment
+// a NAT64 translator sees it, and 2002:7f00:1::1 is 127.0.0.1 through a 6to4
+// relay.
+//
+// That costume is why the split exists. The early IsLoopback / IsPrivate /
+// IsLinkLocalUnicast checks never fire on these — at that point they are
+// IPv6 addresses, and every one of them reaches straight past a guard that
+// only knows how to recognise an IPv4 address when it is written as one. This
+// list is the ONLY thing standing between the guard and the address embedded
+// inside. Letting mediaAllowedPrefixes override it would mean
+// MULTICA_WECOM_MEDIA_ALLOW_CIDRS=::/0 — or, just as well, =2002::/16 —
+// reaching the loopback and the metadata endpoint the guard exists to refuse,
+// written in a spelling the operator never thought they were opening.
+//
+// So it is a hard block, and it costs nothing: no COS object, no proxy pool
+// and no deployment lives in translation space, so there is no shape to
+// accommodate here the way there is for a fake-IP proxy.
+var translationMediaPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("64:ff9b::/96"),   // NAT64, well-known prefix
 	netip.MustParsePrefix("64:ff9b:1::/48"), // NAT64, local-use prefix (RFC 8215)
 	netip.MustParsePrefix("2002::/16"),      // 6to4 — the last 112 bits open with an IPv4 address
@@ -132,6 +147,12 @@ type addrPolicy func(netip.Addr) bool
 // listed here can be reached by a URL somebody else controls, which is exactly
 // what the guard exists to prevent. It is opt-in per deployment, and worth
 // setting only where the operator knows the range belongs to their proxy.
+//
+// What it CANNOT open, at any width: loopback, the private ranges and
+// link-local, which are refused above the loop this list is consulted in; and
+// translationMediaPrefixes, which is refused for the same reason one step
+// later. Those are the ranges an over-wide CIDR would otherwise hand to
+// whoever supplied the URL.
 var mediaAllowedPrefixes []netip.Prefix
 
 // SetMediaAllowedPrefixes declares ranges the media guard may dial. Called at
@@ -171,6 +192,15 @@ func publicAddrOnly(a netip.Addr) bool {
 		a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
 		a.IsInterfaceLocalMulticast() || a.IsMulticast() {
 		return false
+	}
+	// Translation space first, and before the allow-list is consulted at all.
+	// The address inside one of these is an IPv4 address the checks above
+	// would have refused on sight; the only reason they did not fire is the
+	// spelling. Nothing an operator configures reopens it.
+	for _, p := range translationMediaPrefixes {
+		if p.Contains(a) {
+			return false
+		}
 	}
 	for _, p := range reservedMediaPrefixes {
 		if p.Contains(a) {

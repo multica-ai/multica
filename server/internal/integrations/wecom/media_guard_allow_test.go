@@ -137,6 +137,90 @@ func TestAWideOpenAllowListStillCannotReachLoopback(t *testing.T) {
 	}
 }
 
+// Translation space is the other half of that promise, and it is the half the
+// IPv4 literals above cannot see.
+//
+// Loopback and the private ranges are refused above the allow-list loop by
+// IsLoopback / IsPrivate / IsLinkLocalUnicast. Those predicates never fire on
+// a NAT64 or 6to4 address, because at that point it IS an IPv6 address — the
+// IPv4 destination is embedded in the low bits and only the translator on the
+// other end unwraps it. So for these prefixes the deny list was the only thing
+// in the way, and letting an operator's CIDR override it put
+// 64:ff9b:1::a9fe:a9fe (→ 169.254.169.254) and 2002:7f00:1::1 (→ 127.0.0.1)
+// back within reach of a URL WeCom supplies — the exact addresses the entry
+// above proves are unreachable when they are written as IPv4.
+//
+// ::/0 is the widest an operator can paste, and 2002::/16 is the narrow,
+// plausible version of the same mistake: someone widening the range until
+// images load. Neither may open translation space.
+//
+// Driven through the real dialer, like the loopback case, and for the same
+// reason: WHICH error comes back is the whole assertion. ErrMediaAddrBlocked
+// means the address never got past the policy; a connect timeout or "no route
+// to host" means a socket was opened toward an address that reaches inside.
+func TestAWideOpenAllowListStillCannotReachTranslationSpace(t *testing.T) {
+	// nat64 carries 169.254.169.254, sixToFour carries 127.0.0.1.
+	const (
+		nat64     = "64:ff9b:1::a9fe:a9fe"
+		sixToFour = "2002:7f00:1::1"
+	)
+
+	for _, allow := range [][]string{
+		{"0.0.0.0/0", "::/0"}, // the widest thing there is
+		{"2002::/16"},         // widened until images loaded
+		{"64:ff9b:1::/48"},    // the same mistake, NAT64 side
+	} {
+		t.Run(strings.Join(allow, ","), func(t *testing.T) {
+			withAllowed(t, allow...)
+
+			for _, addr := range []string{nat64, sixToFour} {
+				if publicAddrOnly(netip.MustParseAddr(addr)) {
+					t.Errorf("%s became reachable under an allow-list of %v — it is %s in an IPv6 spelling",
+						addr, allow, map[string]string{nat64: "169.254.169.254", sixToFour: "127.0.0.1"}[addr])
+				}
+			}
+
+			// A literal in the signed URL, straight through the client every
+			// media fetch goes through.
+			for _, target := range []string{
+				"http://[" + nat64 + "]/latest/meta-data/",
+				"http://[" + sixToFour + "]:9/object",
+			} {
+				_, err := downloadMedia(context.Background(), newMediaHTTPClient(mediaGuard{}), target)
+				if !errors.Is(err, ErrMediaAddrBlocked) {
+					t.Errorf("%s under an allow-list of %v: err = %v, want the guard's refusal — anything else means a socket was opened", target, allow, err)
+				}
+			}
+
+			// And an innocent hostname whose answer is not, which is the shape
+			// a rebinding attempt takes.
+			for _, resolved := range []string{nat64, sixToFour} {
+				var refused []netip.Addr
+				client := newMediaHTTPClient(mediaGuard{
+					resolve:  staticResolver{addr: netip.MustParseAddr(resolved)},
+					onRefuse: func(_ string, a netip.Addr) { refused = append(refused, a) },
+				})
+				_, err := downloadMedia(context.Background(), client, "https://cos.example.com/object")
+				if !errors.Is(err, ErrMediaAddrBlocked) {
+					t.Errorf("a host resolving to %s under an allow-list of %v: err = %v, want the guard's refusal", resolved, allow, err)
+				}
+				if len(refused) != 1 || refused[0].String() != resolved {
+					t.Errorf("refused = %v, want exactly %s — the refusal has to come from the policy, not from a failed connect", refused, resolved)
+				}
+			}
+		})
+	}
+}
+
+// The escape hatch still has to work, or the split above would have been paid
+// for by breaking the deployment it exists for.
+func TestTheProxyEscapeHatchSurvivesTheTranslationBlock(t *testing.T) {
+	withAllowed(t, "198.18.0.0/15")
+	if !publicAddrOnly(netip.MustParseAddr("198.18.0.80")) {
+		t.Fatal("a declared proxy range is refused — media stays broken on a fake-IP machine")
+	}
+}
+
 // classifyMediaFailure has to tell the guard's refusal apart from an ordinary
 // failed download, because those two put an operator in completely different
 // places: one is a URL that should not have been sent (or a proxy range that
