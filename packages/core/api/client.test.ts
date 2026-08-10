@@ -665,6 +665,35 @@ describe("ApiClient", () => {
     ]);
   });
 
+  it("preserves a valid cancellation acknowledgement and drops only a malformed one", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              id: "task-1",
+              status: "cancelled",
+              cancel_acknowledged_at: "2026-08-09T01:30:00Z",
+            },
+            {
+              id: "task-2",
+              status: "cancelled",
+              cancel_acknowledged_at: 42,
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const tasks = await new ApiClient("https://api.example.test").listTasksByIssue("issue-1");
+
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]?.cancel_acknowledged_at).toBe("2026-08-09T01:30:00Z");
+    expect(tasks[1]?.cancel_acknowledged_at).toBeUndefined();
+  });
+
   it("keeps task runs when optional comment coverage is malformed", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1969,5 +1998,82 @@ describe("ApiClient startMikaOnboarding", () => {
         language: "en",
       }),
     ).resolves.toEqual({ started: false });
+  });
+});
+
+describe("ApiClient terminal capability", () => {
+  it("strictly parses terminal metadata", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            available: true,
+            protocol_version: 1,
+            capability: "terminal-pty-v1",
+            session_id: "019fe469-33bc-75c2-9492-ca640a1788a4",
+            task_id: "task-1",
+            mode: "pty",
+            status: "running",
+            structured_observation: "stale",
+            cols: 120,
+            rows: 32,
+            replay_available: true,
+            observer_count: 2,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").getTaskTerminal("task-1"),
+    ).resolves.toMatchObject({
+      available: true,
+      task_id: "task-1",
+      capability: "terminal-pty-v1",
+      structured_observation: "stale",
+      observer_count: 2,
+    });
+  });
+
+  it("degrades malformed metadata to structured fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ available: true, rows: 1000 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").getTaskTerminal("task-1"),
+    ).resolves.toEqual({ available: false, protocol_version: 1, task_id: "task-1" });
+  });
+
+  it("keeps bearer credentials out of the WebSocket URL", () => {
+    const client = new ApiClient("https://api.example.test", {
+      identity: { platform: "desktop", version: "1.2.3", os: "macos" },
+    });
+    client.setToken("super-secret-token");
+
+    const config = client.getTaskTerminalWebSocketConfig("task/1");
+
+    expect(config.url).toBe(
+      "wss://api.example.test/api/tasks/task%2F1/terminal/ws?client_platform=desktop&client_version=1.2.3&client_os=macos",
+    );
+    expect(config.url).not.toContain("super-secret-token");
+    expect(config.token).toBe("super-secret-token");
+  });
+
+  it("uses the realtime proxy path for same-origin web terminals", () => {
+    const client = new ApiClient("");
+
+    expect(client.getTaskTerminalWebSocketConfig("task/1")).toEqual({
+      url: "ws://localhost/ws/tasks/task%2F1/terminal",
+      token: null,
+    });
   });
 });

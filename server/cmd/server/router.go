@@ -234,6 +234,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
 		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
 		ServerVersion:            normalizeServerVersion(version),
+		TerminalPTYEnabled:       envBool("MULTICA_PTY_ENABLED", false),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	h.Metrics = opts.BusinessMetrics
@@ -910,6 +911,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
 		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
 	})
+	r.Get("/api/tasks/{taskId}/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
+		h.TaskTerminalWebSocket(mc, pr, slugResolver, w, r)
+	})
+	// Same-origin web clients use the established /ws proxy namespace so PTY
+	// upgrades traverse the same reverse-proxy path as the realtime socket.
+	// Keep the /api route above for direct backend and native clients.
+	r.Get("/ws/tasks/{taskId}/terminal", func(w http.ResponseWriter, r *http.Request) {
+		h.TaskTerminalWebSocket(mc, pr, slugResolver, w, r)
+	})
 
 	// Local file serving (when using local storage). Served through the
 	// handler so /uploads/* carries the same preview security headers as the
@@ -1001,6 +1011,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/deregister", h.DaemonDeregister)
 		r.Post("/heartbeat", h.DaemonHeartbeat)
 		r.Get("/ws", h.DaemonWebSocket)
+		r.Get("/terminal/ws", h.DaemonTerminalWebSocket)
 		r.Get("/workspaces", h.ListDaemonWorkspaces)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
 		r.Get("/workspaces/{workspaceId}/runtime-profiles", h.DaemonListRuntimeProfiles)
@@ -1348,6 +1359,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+			r.Get("/api/tasks/{taskId}/terminal", h.GetTaskTerminalByUser)
 
 			// Issue quick actions (definitions; running one lives under
 			// /api/issues/{id}/quick-actions/{quickActionId}/run)

@@ -34,7 +34,7 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
-import { ThinkingPropRow } from "./thinking-prop-row";
+import { ThinkingPropRow, ThinkingSettingField } from "./thinking-prop-row";
 
 const CLAUDE_MODEL: RuntimeModel = {
   id: "claude-sonnet-4-6",
@@ -117,6 +117,34 @@ function renderRow(
             {...props}
           />
         </div>
+      </QueryClientProvider>
+    </I18nProvider>,
+  );
+  return { ...utils, onChange, queryClient };
+}
+
+function renderSettingField(
+  props: Partial<React.ComponentProps<typeof ThinkingSettingField>> = {},
+) {
+  const onChange = vi.fn();
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const utils = render(
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={queryClient}>
+        <ThinkingSettingField
+          label="Thinking"
+          runtimeId="runtime-1"
+          runtimeOnline
+          provider="codex"
+          model="gpt-5.6-sol"
+          value=""
+          canEdit
+          showUnavailable
+          onChange={onChange}
+          {...props}
+        />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -267,5 +295,50 @@ describe("ThinkingPropRow", () => {
     await screen.findByText("Thinking");
     // CLAUDE_MODEL (Default) advertises Low/Medium/High — the picker shows them.
     expect((await screen.findAllByText("Follow CLI config")).length).toBeGreaterThan(0);
+  });
+});
+
+describe("ThinkingSettingField", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockInitiateListModels.mockResolvedValue(listResult([CODEX_DEFAULT_MODEL]));
+    mockGetListModelsResult.mockResolvedValue(listResult([CODEX_DEFAULT_MODEL]));
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("keeps the reasoning row visible and explains when the runtime is offline", () => {
+    renderSettingField({ runtimeOnline: false });
+
+    expect(screen.getByText("Thinking")).toBeInTheDocument();
+    expect(screen.getByText("Not configured · runtime offline")).toBeInTheDocument();
+    expect(mockInitiateListModels).not.toHaveBeenCalled();
+  });
+
+  it("explains that a runtime must be selected", () => {
+    renderSettingField({ runtimeId: null, runtimeOnline: false });
+
+    expect(screen.getByText("Select a runtime to configure reasoning")).toBeInTheDocument();
+  });
+
+  it("offers the exact discovered levels when the runtime is online", async () => {
+    renderSettingField();
+
+    const picker = await screen.findByRole("button", {
+      name: "Thinking · Follow CLI config",
+    });
+    fireEvent.click(picker);
+    expect(await screen.findByText("High")).toBeInTheDocument();
+    expect(await screen.findByText("Ultra")).toBeInTheDocument();
+  });
+
+  it("states when the selected model exposes no reasoning levels", async () => {
+    mockInitiateListModels.mockResolvedValue(listResult([NO_THINKING_MODEL]));
+    mockGetListModelsResult.mockResolvedValue(listResult([NO_THINKING_MODEL]));
+    renderSettingField({ provider: "gemini", model: "gemini-2.5-pro" });
+
+    expect(await screen.findByText("Not available for this model")).toBeInTheDocument();
   });
 });

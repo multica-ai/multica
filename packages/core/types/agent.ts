@@ -268,6 +268,39 @@ export interface TaskAttribution {
   rerun_of_task_id?: string;
 }
 
+export interface TerminalSessionMetadata {
+  available: boolean;
+  protocol_version: number;
+  session_id?: string;
+  task_id: string;
+  issue_id?: string;
+  agent_id?: string;
+  workspace_id?: string;
+  runtime_id?: string;
+  daemon_id?: string;
+  provider?: string;
+  mode?: "pty";
+  status?: "starting" | "running" | "reconnecting" | "exited" | "failed";
+  structured_observation?: "available" | "stale" | "unavailable";
+  generation?: number;
+  cols?: number;
+  rows?: number;
+  output_seq?: number;
+  provider_session_id?: string;
+  exit_code?: number | null;
+  exit_reason?: string;
+  capability?: "terminal-pty-v1";
+  replay_available?: boolean;
+  oldest_seq?: number;
+  observer_count?: number;
+  controller_active?: boolean;
+}
+
+export interface TerminalWebSocketConfig {
+  url: string;
+  token: string | null;
+}
+
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -293,6 +326,12 @@ export interface AgentTask {
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
+  /**
+   * Set after the daemon has observed cancellation, exited the local runner,
+   * and flushed the task transcript. A cancelled task without this field has
+   * accepted the stop request but may still have a live local process.
+   */
+  cancel_acknowledged_at?: string;
   result: unknown;
   error: string | null;
   // Empty string when the task is not in a failed state (the backend uses

@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop _selfhost-env _selfhost _selfhost-build
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -31,6 +31,7 @@ export
 MULTICA_ARGS ?= $(ARGS)
 
 COMPOSE := docker compose
+SELFHOST_OPENSSL ?= $(if $(filter Darwin,$(shell uname -s)),/usr/bin/openssl,openssl)
 
 define REQUIRE_ENV
 	@if [ ! -f "$(ENV_FILE)" ]; then \
@@ -79,27 +80,58 @@ makehelp: help ## Alias for `make help`
 # ---------- Self-hosting (Docker Compose) ----------
 ##@ Self-hosting
 
-selfhost: ## Create .env if needed, then pull and start the official self-hosted images
+selfhost: _selfhost-env ## Create .env if needed, then pull and start the official self-hosted images
 	$(REQUIRE_COMPOSE)
-	@if [ ! -f .env ]; then \
+	@$(MAKE) --no-print-directory _selfhost
+
+selfhost-build: _selfhost-env ## Build backend/web from the current checkout and start the self-hosted stack
+	$(REQUIRE_COMPOSE)
+	@$(MAKE) --no-print-directory _selfhost-build
+
+_selfhost-env:
+	@set -eu; \
+	if [ -L .env ]; then \
+		echo "Refusing to write secrets through symlink: .env" >&2; \
+		exit 1; \
+	fi; \
+	umask 077; \
+	if [ ! -f .env ]; then \
 		echo "==> Creating .env from .env.example..."; \
-		cp .env.example .env; \
-		JWT=$$(openssl rand -hex 32); \
-		PGPASS=$$(openssl rand -hex 24); \
-		VCSKEY=$$(openssl rand -base64 32); \
+		COCKPIT_ENV_TMP=$$(mktemp ./.env.tmp.XXXXXX); \
+		trap 'rm -f "$$COCKPIT_ENV_TMP"' EXIT HUP INT TERM; \
+		cp .env.example "$$COCKPIT_ENV_TMP"; \
+		JWT=$$($(SELFHOST_OPENSSL) rand -hex 32); \
+		PGPASS=$$($(SELFHOST_OPENSSL) rand -hex 24); \
+		VCSKEY=$$($(SELFHOST_OPENSSL) rand -base64 32); \
+		[ "$${#JWT}" -eq 64 ]; \
+		[ "$${#PGPASS}" -eq 48 ]; \
+		[ "$${#VCSKEY}" -eq 44 ]; \
 		if [ "$$(uname)" = "Darwin" ]; then \
-			sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
-			sed -i '' "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$$PGPASS/" .env; \
-			sed -i '' -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$$PGPASS\2#" .env; \
-			sed -i '' "s#^MULTICA_VCS_SECRET_KEY=.*#MULTICA_VCS_SECRET_KEY=$$VCSKEY#" .env; \
+			sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" "$$COCKPIT_ENV_TMP"; \
+			sed -i '' "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$$PGPASS/" "$$COCKPIT_ENV_TMP"; \
+			sed -i '' -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$$PGPASS\2#" "$$COCKPIT_ENV_TMP"; \
+			sed -i '' "s#^MULTICA_VCS_SECRET_KEY=.*#MULTICA_VCS_SECRET_KEY=$$VCSKEY#" "$$COCKPIT_ENV_TMP"; \
 		else \
-			sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
-			sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$$PGPASS/" .env; \
-			sed -i -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$$PGPASS\2#" .env; \
-			sed -i "s#^MULTICA_VCS_SECRET_KEY=.*#MULTICA_VCS_SECRET_KEY=$$VCSKEY#" .env; \
+			sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" "$$COCKPIT_ENV_TMP"; \
+			sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$$PGPASS/" "$$COCKPIT_ENV_TMP"; \
+			sed -i -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$$PGPASS\2#" "$$COCKPIT_ENV_TMP"; \
+			sed -i "s#^MULTICA_VCS_SECRET_KEY=.*#MULTICA_VCS_SECRET_KEY=$$VCSKEY#" "$$COCKPIT_ENV_TMP"; \
 		fi; \
+		if ! grep -Eq '^JWT_SECRET=[0-9a-f]{64}$$' "$$COCKPIT_ENV_TMP" || \
+		   ! grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{48}$$' "$$COCKPIT_ENV_TMP" || \
+		   ! grep -Eq '^MULTICA_VCS_SECRET_KEY=[A-Za-z0-9+/]{43}=$$' "$$COCKPIT_ENV_TMP" || \
+		   ! grep -Fq ":$$PGPASS@" "$$COCKPIT_ENV_TMP"; then \
+			echo "Generated .env failed secret validation" >&2; \
+			exit 1; \
+		fi; \
+		chmod 600 "$$COCKPIT_ENV_TMP"; \
+		mv "$$COCKPIT_ENV_TMP" .env; \
 		echo "==> Generated random JWT_SECRET, POSTGRES_PASSWORD, and MULTICA_VCS_SECRET_KEY"; \
+	else \
+		chmod 600 .env; \
 	fi
+
+_selfhost:
 	@echo "==> Pulling official Multica images..."
 	@if ! $(COMPOSE) -f docker-compose.selfhost.yml pull; then \
 		echo ""; \
@@ -112,27 +144,7 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 	$(COMPOSE) -f docker-compose.selfhost.yml up -d
 	@bash scripts/selfhost-wait.sh official
 
-selfhost-build: ## Build backend/web from the current checkout and start the self-hosted stack
-	$(REQUIRE_COMPOSE)
-	@if [ ! -f .env ]; then \
-		echo "==> Creating .env from .env.example..."; \
-		cp .env.example .env; \
-		JWT=$$(openssl rand -hex 32); \
-		PGPASS=$$(openssl rand -hex 24); \
-		VCSKEY=$$(openssl rand -base64 32); \
-		if [ "$$(uname)" = "Darwin" ]; then \
-			sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
-			sed -i '' "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$$PGPASS/" .env; \
-			sed -i '' -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$$PGPASS\2#" .env; \
-			sed -i '' "s#^MULTICA_VCS_SECRET_KEY=.*#MULTICA_VCS_SECRET_KEY=$$VCSKEY#" .env; \
-		else \
-			sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
-			sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$$PGPASS/" .env; \
-			sed -i -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$$PGPASS\2#" .env; \
-			sed -i "s#^MULTICA_VCS_SECRET_KEY=.*#MULTICA_VCS_SECRET_KEY=$$VCSKEY#" .env; \
-		fi; \
-		echo "==> Generated random JWT_SECRET, POSTGRES_PASSWORD, and MULTICA_VCS_SECRET_KEY"; \
-	fi
+_selfhost-build:
 	@echo "==> Building Multica from the current checkout..."
 	$(COMPOSE) -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
 	@bash scripts/selfhost-wait.sh build

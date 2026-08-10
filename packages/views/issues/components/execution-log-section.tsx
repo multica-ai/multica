@@ -5,6 +5,10 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Loader2, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api, dispatchReasonCode } from "@multica/core/api";
+import {
+  useCancelIssueTask,
+  useRerunIssueTask,
+} from "@multica/core/issues/mutations";
 import { issueKeys } from "@multica/core/issues/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import type { AgentTask } from "@multica/core/types";
@@ -29,6 +33,11 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { IssueUsageDialog } from "./issue-usage-dialog";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
+import {
+  AgentCockpitIconButton,
+  AgentCockpitLauncher,
+  AgentCockpitSession,
+} from "./agent-cockpit";
 
 // Right-panel section that lists every agent run for this issue. Active
 // runs sit at the top (always visible when present); past runs (terminal
@@ -74,6 +83,7 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
   const [open, setOpen] = useState(true);
   const [showPast, setShowPast] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [cockpitTaskId, setCockpitTaskId] = useState<string | null>(null);
 
   // Cache key registered in `issueKeys.tasks` (packages/core/issues/queries.ts)
   // so the global useRealtimeSync `task:` prefix path invalidates it via
@@ -120,6 +130,26 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
       );
     });
   }, [tasks]);
+
+  const runningTasks = useMemo(
+    () => activeTasks
+      .filter((task) => task.status === "running")
+      .toSorted((a, b) =>
+        new Date(b.started_at ?? b.created_at).getTime() -
+        new Date(a.started_at ?? a.created_at).getTime()),
+    [activeTasks],
+  );
+  const primaryRunningTask = runningTasks[0];
+  const cockpitTask = cockpitTaskId
+    ? tasks.find((task) => task.id === cockpitTaskId)
+    : undefined;
+  const latestTaskForCockpitAgent = cockpitTask?.agent_id
+    ? tasks
+        .filter((task) => task.agent_id === cockpitTask.agent_id)
+        .toSorted((a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime() ||
+          b.id.localeCompare(a.id))[0]
+    : undefined;
 
   if (activeTasks.length === 0 && pastTasks.length === 0) return null;
 
@@ -169,8 +199,23 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
       </div>
       {open && (
         <div className="space-y-0.5 pl-2">
+          {primaryRunningTask && (
+            <AgentCockpitLauncher
+              runningCount={runningTasks.length}
+              onOpen={() => setCockpitTaskId(primaryRunningTask.id)}
+            />
+          )}
           {activeTasks.map((task) => (
-            <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
+            <ActiveTaskRow
+              key={task.id}
+              task={task}
+              issueId={issueId}
+              onCockpitOpen={
+                task.status === "running"
+                  ? () => setCockpitTaskId(task.id)
+                  : undefined
+              }
+            />
           ))}
 
           {pastTasks.length > 0 && (
@@ -195,7 +240,12 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
               {showPast && (
                 <div className="mt-0.5 space-y-0.5">
                   {pastTasks.map((task) => (
-                    <PastRow key={task.id} task={task} issueId={issueId} />
+                    <PastRow
+                      key={task.id}
+                      task={task}
+                      issueId={issueId}
+                      onCockpitOpen={() => setCockpitTaskId(task.id)}
+                    />
                   ))}
                 </div>
               )}
@@ -209,6 +259,17 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
         identifier={identifier ?? ""}
         tasks={tasks}
       />
+      {cockpitTask && (
+        <AgentCockpitSession
+          task={cockpitTask}
+          issueId={issueId}
+          open={true}
+          allowTerminalContinuation={latestTaskForCockpitAgent?.id === cockpitTask.id}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setCockpitTaskId(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -308,13 +369,16 @@ export function ActiveTaskRow({
   task,
   issueId,
   onTranscriptOpenChange,
+  onCockpitOpen,
 }: {
   task: AgentTask;
   issueId: string;
   onTranscriptOpenChange?: (open: boolean) => void;
+  onCockpitOpen?: () => void;
 }) {
   const { t } = useT("issues");
-  const [cancelling, setCancelling] = useState(false);
+  const cancelTask = useCancelIssueTask(issueId);
+  const cancelling = cancelTask.isPending;
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
@@ -343,12 +407,10 @@ export function ActiveTaskRow({
 
   const handleCancel = async () => {
     if (cancelling) return;
-    setCancelling(true);
     try {
-      await api.cancelTask(issueId, task.id);
+      await cancelTask.mutateAsync(task.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.cancel_failed));
-      setCancelling(false);
     }
   };
 
@@ -380,13 +442,17 @@ export function ActiveTaskRow({
       </RowStatus>
       <RowActions>
         {showTranscript && (
-          <TranscriptButton
-            task={task}
-            agentName=""
-            isLive={task.status === "running"}
-            title={t(($) => $.execution_log.transcript_tooltip)}
-            onOpenChange={onTranscriptOpenChange}
-          />
+          task.status === "running" && onCockpitOpen ? (
+            <AgentCockpitIconButton onOpen={onCockpitOpen} />
+          ) : (
+            <TranscriptButton
+              task={task}
+              agentName=""
+              isLive={task.status === "running"}
+              title={t(($) => $.execution_log.transcript_tooltip)}
+              onOpenChange={onTranscriptOpenChange}
+            />
+          )
         )}
         <Tooltip>
           <TooltipTrigger
@@ -425,10 +491,19 @@ export function ActiveTaskRow({
 
 // ─── Past row ──────────────────────────────────────────────────────────────
 
-function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+function PastRow({
+  task,
+  issueId,
+  onCockpitOpen,
+}: {
+  task: AgentTask;
+  issueId: string;
+  onCockpitOpen?: () => void;
+}) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
-  const [retrying, setRetrying] = useState(false);
+  const rerunTask = useRerunIssueTask(issueId);
+  const retrying = rerunTask.isPending;
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
   const time = task.completed_at ? timeAgo(task.completed_at) : "—";
@@ -467,9 +542,8 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
   const handleRetry = async () => {
     if (retrying) return;
-    setRetrying(true);
     try {
-      await api.rerunIssue(issueId, task.id);
+      await rerunTask.mutateAsync(task.id);
     } catch (e) {
       // A rerun is now re-gated on the operator's invoke permission (MUL-4525):
       // a structured 403 means the agent can't be triggered, not a transient
@@ -481,11 +555,6 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
             ? e.message
             : t(($) => $.execution_log.retry_failed),
       );
-    } finally {
-      // Reset on both success and failure: the past row stays mounted
-      // (its task.id is unchanged), so leaving `retrying` true on success
-      // would pin the button as a permanent spinner.
-      setRetrying(false);
     }
   };
 
@@ -505,7 +574,15 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
         )}
       </RowStatus>
       <RowActions>
-        <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
+        {onCockpitOpen ? (
+          <AgentCockpitIconButton onOpen={onCockpitOpen} />
+        ) : (
+          <TranscriptButton
+            task={task}
+            agentName=""
+            title={t(($) => $.execution_log.transcript_tooltip)}
+          />
+        )}
         {canRetry && (
           <Tooltip>
             <TooltipTrigger

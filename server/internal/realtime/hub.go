@@ -191,6 +191,11 @@ func checkOrigin(r *http.Request) bool {
 	return false
 }
 
+// CheckOrigin exposes the server's single WebSocket origin policy to dedicated
+// data planes such as Web PTY. Keeping one implementation prevents a new socket
+// from quietly trusting proxy headers or origins differently from /ws.
+func CheckOrigin(r *http.Request) bool { return checkOrigin(r) }
+
 const (
 	writeWait  = 10 * time.Second
 	pongWait   = 60 * time.Second
@@ -761,6 +766,72 @@ func writeWSAuthFrame(conn wsMessageWriter, payload []byte, frame string, attrs 
 func writeWSAuthErrorAndClose(conn *websocket.Conn, payload []byte, attrs ...any) {
 	writeWSAuthFrame(conn, payload, "auth_error", attrs...)
 	conn.Close()
+}
+
+// AuthenticateWebSocket upgrades a browser connection using the same cookie
+// or first-message bearer-token flow as /ws. Dedicated sockets call this before
+// their own resource authorization so desktop tokens never enter URLs.
+func AuthenticateWebSocket(mc MembershipChecker, pr PATResolver, resolveSlug SlugResolver, w http.ResponseWriter, r *http.Request) (*websocket.Conn, string, string, bool) {
+	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		if slug := r.URL.Query().Get("workspace_slug"); slug != "" && resolveSlug != nil {
+			resolved, err := resolveSlug(r.Context(), slug)
+			if err != nil {
+				http.Error(w, `{"error":"workspace not found"}`, http.StatusNotFound)
+				return nil, "", "", false
+			}
+			workspaceID = resolved
+		}
+	}
+	if workspaceID == "" {
+		http.Error(w, `{"error":"workspace_id or workspace_slug required"}`, http.StatusBadRequest)
+		return nil, "", "", false
+	}
+
+	var userID string
+	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
+		uid, errMsg := authenticateToken(cookie.Value, pr, r.Context())
+		if errMsg != "" {
+			http.Error(w, errMsg, http.StatusUnauthorized)
+			return nil, "", "", false
+		}
+		if !mc.IsMember(r.Context(), uid, workspaceID) {
+			http.Error(w, `{"error":"not a member of this workspace"}`, http.StatusForbidden)
+			return nil, "", "", false
+		}
+		userID = uid
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return nil, "", "", false
+	}
+	conn.SetReadLimit(inboundReadLimit)
+	if userID == "" {
+		tokenStr, errMsg, closed := firstMessageAuth(conn)
+		if closed {
+			return nil, "", "", false
+		}
+		if errMsg != "" {
+			writeWSAuthErrorAndClose(conn, []byte(errMsg), "workspace_id", workspaceID)
+			return nil, "", "", false
+		}
+		uid, errMsg := authenticateToken(tokenStr, pr, r.Context())
+		if errMsg != "" {
+			writeWSAuthErrorAndClose(conn, []byte(errMsg), "workspace_id", workspaceID)
+			return nil, "", "", false
+		}
+		if !mc.IsMember(r.Context(), uid, workspaceID) {
+			writeWSAuthErrorAndClose(conn, []byte(`{"error":"not a member of this workspace"}`), "workspace_id", workspaceID, "user_id", uid)
+			return nil, "", "", false
+		}
+		userID = uid
+		if !writeWSAuthFrame(conn, []byte(`{"type":"auth_ack"}`), "auth_ack", "workspace_id", workspaceID, "user_id", userID) {
+			_ = conn.Close()
+			return nil, "", "", false
+		}
+	}
+	return conn, userID, workspaceID, true
 }
 
 // HandleWebSocket upgrades an HTTP connection to WebSocket with cookie or

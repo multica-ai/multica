@@ -6,6 +6,7 @@ export interface TimelineItem {
   seq: number;
   type: "tool_use" | "tool_result" | "thinking" | "text" | "error";
   tool?: string;
+  call_id?: string;
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
@@ -57,6 +58,7 @@ export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
       seq: msg.seq,
       type: msg.type,
       tool: msg.tool,
+      call_id: msg.call_id,
       content: msg.content,
       input: msg.input,
       output: msg.output,

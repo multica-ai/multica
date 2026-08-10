@@ -36,7 +36,7 @@ import {
 import { useWorkspaceId } from "../hooks";
 import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
-import type { GroupedIssuesResponse, InboxItem, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
+import type { AgentTask, GroupedIssuesResponse, InboxItem, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
 import type {
   CreateIssueRequest,
   ListIssuesCache,
@@ -70,6 +70,67 @@ export type UpdateIssueMutationInput = {
    */
   move_intent?: Pick<MoveIssueRequest, "before_id" | "after_id">;
 } & UpdateIssueRequest;
+
+// ---------------------------------------------------------------------------
+// Issue task lifecycle
+// ---------------------------------------------------------------------------
+
+const TASK_CANCELLATION_ACK_POLL_MS = 750;
+const TASK_CANCELLATION_ACK_TIMEOUT_MS = 20_000;
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+export function useCancelIssueTask(issueId: string) {
+  const qc = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: (taskId: string) => api.cancelTask(issueId, taskId),
+    onSettled: () =>
+      qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
+  });
+
+  const waitForAcknowledgement = useCallback(async (
+    taskId: string,
+    previousStatus: AgentTask["status"],
+  ): Promise<void> => {
+    // A queued task has never been claimed, so there is no local process or
+    // transcript buffer to drain. The successful cancel response is enough.
+    if (previousStatus === "queued") return;
+
+    const deadline = Date.now() + TASK_CANCELLATION_ACK_TIMEOUT_MS;
+    let lastError: unknown;
+    while (Date.now() < deadline) {
+      try {
+        const tasks = await api.listTasksByIssue(issueId);
+        qc.setQueryData(issueKeys.tasks(issueId), tasks);
+        const task = tasks.find((candidate) => candidate.id === taskId);
+        if (task?.cancel_acknowledged_at) return;
+        lastError = undefined;
+      } catch (error) {
+        // A transient reconnect should not turn an accepted stop into an
+        // unsafe redirect. Keep polling until the bounded deadline instead.
+        lastError = error;
+      }
+      await wait(TASK_CANCELLATION_ACK_POLL_MS);
+    }
+
+    throw new Error("task cancellation was not acknowledged", {
+      cause: lastError,
+    });
+  }, [issueId, qc]);
+
+  return { ...mutation, waitForAcknowledgement };
+}
+
+export function useRerunIssueTask(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) => api.rerunIssue(issueId, taskId),
+    onSettled: () =>
+      qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Per-status pagination

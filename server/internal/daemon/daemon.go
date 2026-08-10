@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	daemonterminal "github.com/multica-ai/multica/server/internal/daemon/terminal"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -289,11 +290,14 @@ type repoCacheBackend interface {
 
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
-	cfg        Config
-	client     *Client
-	repoCache  repoCacheBackend
-	skillCache *SkillBundleCache
-	logger     *slog.Logger
+	cfg               Config
+	client            *Client
+	repoCache         repoCacheBackend
+	skillCache        *SkillBundleCache
+	logger            *slog.Logger
+	terminalManager   *daemonterminal.Manager
+	terminalEvents    chan daemonterminal.Event
+	terminalConnected atomic.Bool
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -584,6 +588,10 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
+	if cfg.PTYEnabled {
+		d.terminalEvents = make(chan daemonterminal.Event, 4096)
+		d.terminalManager = daemonterminal.NewManager(daemonterminal.Options{OnEvent: d.enqueueTerminalEvent})
+	}
 	return d
 }
 
@@ -1725,6 +1733,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
+	if d.terminalManager != nil {
+		defer d.terminalManager.StopAll()
+		go d.terminalConnectionLoop(ctx)
+	}
 
 	// Preflight succeeded and the background loops are up: the daemon has
 	// registered its runtimes and can now claim and run tasks. Flip /health
@@ -4538,6 +4550,16 @@ func shouldInterruptAgent(status string, err error) bool {
 	return isAgentTaskTerminal(status)
 }
 
+// acknowledgeTaskCancellation is called only after the local runner has
+// returned (or before it was launched) and any transcript writes are complete.
+// The server persists this acknowledgement for user-facing stop/redirect flows
+// and also uses it to settle deferred chat cancellation state.
+func (d *Daemon) acknowledgeTaskCancellation(ctx context.Context, taskID string, taskLog *slog.Logger) {
+	if err := d.client.AckTaskCancelled(ctx, taskID); err != nil {
+		taskLog.Warn("cancel acknowledgement failed", "error", err)
+	}
+}
+
 // watchTaskCancellation polls the server for the task's status on the given
 // interval and returns a channel that is closed when the running agent
 // should be interrupted. The polling goroutine stops when ctx is cancelled,
@@ -4721,14 +4743,19 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	select {
 	case <-cancelledByPoll:
 		taskLog.Info("task cancelled during execution, discarding result")
-		// runner.run has returned, so the transcript flush is complete —
-		// tell the server it can settle its deferred chat finalization
-		// (#5219). Best-effort: the sweeper grace period covers a lost ack.
-		if ackErr := d.client.AckTaskCancelled(ctx, task.ID); ackErr != nil {
-			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
-		}
+		d.acknowledgeTaskCancellation(ctx, task.ID, taskLog)
 		return
 	default:
+	}
+
+	// The runner can return before the polling goroutine observes a cancellation
+	// (for example, StartTask rejects a task cancelled during preparation). Check
+	// the authoritative status before reporting either success or failure so the
+	// daemon still emits the process-stopped acknowledgement in that race.
+	if status, statusErr := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, statusErr) {
+		taskLog.Info("task reached a terminal state during execution, discarding result", "status", status, "error", statusErr)
+		d.acknowledgeTaskCancellation(ctx, task.ID, taskLog)
+		return
 	}
 
 	if err != nil {
@@ -4751,21 +4778,6 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	}
 
 	_ = d.client.ReportProgress(ctx, task.ID, "Finishing task", 2, 2)
-
-	// Final pre-completion check: if the server already moved the task to a
-	// terminal state (completed/failed/cancelled) or deleted the row
-	// outright, skip reporting — the complete/fail callbacks would fail
-	// anyway. Reuse shouldInterruptAgent so this guard honors the same
-	// signals as the in-flight watcher.
-	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
-		taskLog.Info("task cancelled during execution, discarding result", "status", status, "error", err)
-		// Same contract as the poll-cancelled path above: the transcript is
-		// flushed, so let the server settle its deferred chat finalization.
-		if ackErr := d.client.AckTaskCancelled(ctx, task.ID); ackErr != nil {
-			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
-		}
-		return
-	}
 
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
 
@@ -4935,6 +4947,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			select {
 			case <-cancelledByPoll:
 				taskLog.Info("local_directory: wait aborted by server-side terminal state")
+				d.acknowledgeTaskCancellation(ctx, task.ID, taskLog)
 				return nil, true
 			default:
 			}
@@ -6104,14 +6117,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
-	taskLog.Info("starting agent",
-		"provider", provider,
-		"workdir", env.WorkDir,
-		"model", entry.Model,
-		"reused", reused,
-	)
-	if task.PriorSessionID != "" {
-		taskLog.Info("resuming session", "session_id", task.PriorSessionID)
+	ptyMode := d.ptyTaskAllowed(provider, task.WorkspaceID, usesCustomProfileCommand)
+	if !ptyMode {
+		taskLog.Info("starting agent",
+			"provider", provider,
+			"workdir", env.WorkDir,
+			"model", entry.Model,
+			"reused", reused,
+		)
+		if task.PriorSessionID != "" {
+			taskLog.Info("resuming session", "session_id", task.PriorSessionID)
+		}
 	}
 
 	taskStart := time.Now()
@@ -6277,6 +6293,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			"target_task", shortID(task.RegenerateQuickActionsFor),
 		)
 		return TaskResult{Status: "completed", Comment: "", WorkDir: env.WorkDir, EnvRoot: env.RootDir}, nil
+	}
+
+	if ptyMode {
+		return d.runInteractivePTYTask(ctx, task, entry.Path, env, agentEnv, prompt, execOpts, taskLog)
 	}
 
 	taskLog.Debug("invoking backend",
@@ -6954,9 +6974,10 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					s := msgSeq.Add(1)
 					mu.Lock()
 					batch = append(batch, TaskMessageData{
-						Seq:  int(s),
-						Type: "tool_use",
-						Tool: msg.Tool,
+						Seq:    int(s),
+						Type:   "tool_use",
+						Tool:   msg.Tool,
+						CallID: msg.CallID,
 						// Redact before the payload leaves this process, not
 						// only on arrival. The server redacts again in its
 						// ingest handler, but that is the *remote* side: a
@@ -7001,6 +7022,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						Seq:    int(s),
 						Type:   "tool_result",
 						Tool:   toolName,
+						CallID: msg.CallID,
 						Output: output,
 					})
 					mu.Unlock()

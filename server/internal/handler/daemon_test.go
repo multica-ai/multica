@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -4760,6 +4761,95 @@ func TestClaimTaskByRuntime_CommentResumeDefaultOn(t *testing.T) {
 	}
 }
 
+// TestReportTaskMessages_PreservesCallIDForUserCatchup pins the daemon-to-DB-
+// to-user-API path used to pair concurrent edit calls with their results.
+func TestReportTaskMessages_PreservesCallIDForUserCatchup(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID, taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
+		VALUES ($1, 'task-message-call-id', 'todo', 'medium', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at)
+		VALUES ($1, $2, $3, 'running', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM task_message WHERE task_id = $1`, taskID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	const callID = "provider-edit-17"
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/messages", map[string]any{
+		"messages": []map[string]any{
+			{
+				"seq": 1, "type": "tool_use", "tool": "patch_apply", "call_id": callID,
+				"input": map[string]any{"path": "src/a.ts"},
+			},
+			{
+				"seq": 2, "type": "tool_result", "tool": "patch_apply", "call_id": callID,
+				"output": "completed",
+			},
+		},
+	}, testWorkspaceID, "call-id-daemon")
+	req = withURLParam(req, "taskId", taskID)
+	testHandler.ReportTaskMessages(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ReportTaskMessages: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/tasks/"+taskID+"/messages", nil)
+	req = withURLParam(req, "taskId", taskID)
+	memberRow, err := testHandler.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      util.MustParseUUID(testUserID),
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("setup: load workspace member: %v", err)
+	}
+	// The production route is wrapped by RequireWorkspaceMember, which
+	// injects this context before the handler runs. Direct handler tests must
+	// model that boundary explicitly; request headers alone are intentionally
+	// not trusted by WorkspaceIDFromContext.
+	req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, memberRow))
+	testHandler.ListTaskMessagesByUser(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListTaskMessagesByUser: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var messages []protocol.TaskMessagePayload
+	if err := json.NewDecoder(w.Body).Decode(&messages); err != nil {
+		t.Fatalf("decode task messages: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("task messages = %d, want 2: %s", len(messages), w.Body.String())
+	}
+	for _, message := range messages {
+		if message.CallID != callID {
+			t.Errorf("seq %d call_id = %q, want %q", message.Seq, message.CallID, callID)
+		}
+	}
+}
+
 // TestAckTaskCancelled verifies the cancel-ack endpoint settles a deferred
 // chat finalization (marker claimed, Stopped. row written for a transcript
 // that filled in late) and keeps the anti-enumeration shape of
@@ -4822,14 +4912,18 @@ func TestAckTaskCancelled(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("AckTaskCancelled with cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
 	}
-	var deferredAt *time.Time
+	var deferredAt, cancelAcknowledgedAt *time.Time
 	if err := testPool.QueryRow(ctx, `
-		SELECT chat_finalize_deferred_at FROM agent_task_queue WHERE id = $1
-	`, taskID).Scan(&deferredAt); err != nil {
+		SELECT chat_finalize_deferred_at, cancel_acknowledged_at
+		FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&deferredAt, &cancelAcknowledgedAt); err != nil {
 		t.Fatalf("read marker: %v", err)
 	}
 	if deferredAt == nil {
 		t.Fatal("cross-workspace ack must not claim the marker")
+	}
+	if cancelAcknowledgedAt != nil {
+		t.Fatal("cross-workspace ack must not mark the process stopped")
 	}
 
 	// Same-workspace token settles the deferred finalize.
@@ -4842,13 +4936,18 @@ func TestAckTaskCancelled(t *testing.T) {
 		t.Fatalf("AckTaskCancelled same-workspace: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	if err := testPool.QueryRow(ctx, `
-		SELECT chat_finalize_deferred_at FROM agent_task_queue WHERE id = $1
-	`, taskID).Scan(&deferredAt); err != nil {
+		SELECT chat_finalize_deferred_at, cancel_acknowledged_at
+		FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&deferredAt, &cancelAcknowledgedAt); err != nil {
 		t.Fatalf("read marker: %v", err)
 	}
 	if deferredAt != nil {
 		t.Errorf("marker should be claimed, got %v", deferredAt)
 	}
+	if cancelAcknowledgedAt == nil {
+		t.Fatal("same-workspace ack must persist the process-stopped timestamp")
+	}
+	firstAcknowledgedAt := *cancelAcknowledgedAt
 	var stopped int
 	if err := testPool.QueryRow(ctx, `
 		SELECT count(*) FROM chat_message WHERE task_id = $1 AND role = 'assistant' AND content = 'Stopped.'
@@ -4875,5 +4974,13 @@ func TestAckTaskCancelled(t *testing.T) {
 	}
 	if stopped != 1 {
 		t.Errorf("Stopped. rows after second ack = %d, want 1", stopped)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT cancel_acknowledged_at FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&cancelAcknowledgedAt); err != nil {
+		t.Fatalf("read cancellation acknowledgement: %v", err)
+	}
+	if cancelAcknowledgedAt == nil || !cancelAcknowledgedAt.Equal(firstAcknowledgedAt) {
+		t.Errorf("second ack changed cancellation timestamp: got %v, want %v", cancelAcknowledgedAt, firstAcknowledgedAt)
 	}
 }

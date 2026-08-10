@@ -161,6 +161,8 @@ type AgentTaskQueue struct {
 	RetiredSessionID          pgtype.Text `json:"retired_session_id"`
 	QuickActionsDisabled      bool        `json:"quick_actions_disabled"`
 	RegenerateQuickActionsFor pgtype.UUID `json:"regenerate_quick_actions_for"`
+	// Daemon-confirmed time the cancelled task process exited and its transcript was flushed.
+	CancelAcknowledgedAt pgtype.Timestamptz `json:"cancel_acknowledged_at"`
 }
 
 type AgentToLabel struct {
@@ -993,6 +995,8 @@ type TaskMessage struct {
 	Input     []byte             `json:"input"`
 	Output    pgtype.Text        `json:"output"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	// Provider-local tool call identifier used to pair tool_use and tool_result transcript rows.
+	CallID pgtype.Text `json:"call_id"`
 }
 
 type TaskToken struct {

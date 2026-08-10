@@ -2316,6 +2316,26 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 	}, nil
 }
 
+// AcknowledgeTaskCancellation persists the daemon's confirmation that the
+// local runner exited and finished flushing its transcript. The query keeps
+// the first timestamp, so daemon retries are idempotent. Acknowledgements for
+// tasks that reached another terminal state remain harmless no-ops for
+// compatibility with older daemon cancellation watchers.
+func (s *TaskService) AcknowledgeTaskCancellation(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
+	task, err := s.Queries.AcknowledgeAgentTaskCancellation(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		existing, getErr := s.Queries.GetAgentTask(ctx, taskID)
+		if getErr != nil {
+			return nil, fmt.Errorf("acknowledge task cancellation: %w", getErr)
+		}
+		return &existing, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("acknowledge task cancellation: %w", err)
+	}
+	return &task, nil
+}
+
 // CancelQueuedChatTasks atomically cancels every queued follow-up in a chat
 // session. The session lock preserves the delete path's session -> agent -> task
 // order; the agent lock then prevents ClaimTask from promoting a row mid-update.

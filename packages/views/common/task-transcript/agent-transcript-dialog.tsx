@@ -20,6 +20,8 @@ import {
   ListCollapse,
   Info,
   Coins,
+  Files,
+  SquareTerminal,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -69,6 +71,7 @@ import {
 } from "./trace-event-presenter";
 import type { TraceDiffLine, TracePatchFile, TraceSummaryLabels } from "./trace-event-presenter";
 import { highlightBlock, highlightToLines, languageForPath } from "./diff-highlight";
+import { summarizeCockpitFileChanges } from "./cockpit-changes";
 import { useT } from "../../i18n";
 import {
   formatTokens,
@@ -85,6 +88,14 @@ interface AgentTranscriptDialogProps {
   items: TimelineItem[];
   agentName: string;
   isLive?: boolean;
+  variant?: "transcript" | "cockpit";
+  /**
+   * Optional run controls placed beside the details and close buttons. A
+   * render function receives the resolved agent name after metadata loads,
+   * which lets issue-scoped controls address the exact running agent without
+   * making the generic transcript own comment or cancellation mutations.
+   */
+  headerActions?: React.ReactNode | ((context: { agentName: string }) => React.ReactNode);
   /**
    * Optional content rendered between the header chips and the event list.
    * Used by autopilot run rows to surface the inbound webhook trigger
@@ -92,6 +103,8 @@ interface AgentTranscriptDialogProps {
    * The dialog stays generic — slot content is the caller's concern.
    */
   headerSlot?: React.ReactNode;
+  /** Live terminal surface. Its presence upgrades cockpit mode to three tabs. */
+  terminalSlot?: React.ReactNode;
 }
 
 // ─── Color mapping for timeline segments ────────────────────────────────────
@@ -226,7 +239,10 @@ export function AgentTranscriptDialog({
   items,
   agentName,
   isLive = false,
+  variant = "transcript",
+  headerActions,
   headerSlot,
+  terminalSlot,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
@@ -235,6 +251,10 @@ export function AgentTranscriptDialog({
   const [copiedWorkdir, setCopiedWorkdir] = useState(false);
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
+  const hasTerminal = Boolean(terminalSlot);
+  const [cockpitTab, setCockpitTab] = useState<"terminal" | "transcript" | "files">(
+    hasTerminal ? "terminal" : "transcript",
+  );
   // Row-level expand overrides. A row the user toggled follows the toggle; any
   // other row follows the density preference (see traceEventDefaultExpanded).
   // Switching density or task resets the overrides wholesale.
@@ -334,6 +354,10 @@ export function AgentTranscriptDialog({
   useEffect(() => {
     setRowOverrides(new Map());
   }, [task.id, density]);
+
+  useEffect(() => {
+    setCockpitTab(hasTerminal ? "terminal" : "transcript");
+  }, [task.id, hasTerminal]);
 
   // Derive filter options from each item:
   //   tool_use / tool_result → filter value = tool, display = "tool:Bash"
@@ -637,21 +661,41 @@ export function AgentTranscriptDialog({
     !!startedLabel ||
     !!completedLabel ||
     !!usage;
+  const resolvedAgentName = agentName || agentInfo?.name || "";
+  const resolvedHeaderActions =
+    typeof headerActions === "function"
+      ? headerActions({ agentName: resolvedAgentName })
+      : headerActions;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="!max-w-4xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
+        className={cn(
+          "flex flex-col !p-0 !gap-0 overflow-hidden",
+          hasTerminal
+            ? "!max-w-[calc(100vw-1.5rem)] !w-[calc(100vw-1.5rem)] !max-h-[calc(100vh-1.5rem)] !h-[calc(100vh-1.5rem)]"
+            : "!max-w-4xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)]",
+        )}
         showCloseButton={false}
       >
-        <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>
+        <DialogTitle className="sr-only">
+          {variant === "cockpit"
+            ? t(($) => $.cockpit.title)
+            : t(($) => $.transcript.dialog_title)}
+        </DialogTitle>
 
         {/* ── Header: identity only ──────────────────────────────────
             Tier 1 — everything a viewer needs BEFORE reading: outcome
             (status anchors the left), who ran it, why it exists (trigger),
             and who's accountable. All diagnostics move to the ⓘ popover. */}
         <div className="border-b px-4 py-3 shrink-0">
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+            {variant === "cockpit" && (
+              <div className="flex shrink-0 items-center gap-1.5 text-body font-semibold">
+                <SquareTerminal className="h-4 w-4 text-brand" />
+                <span className="hidden sm:inline">{t(($) => $.cockpit.title)}</span>
+              </div>
+            )}
             {statusBadge}
             {/* Primary identity: the agent that ran this. It is the one
                 foreground entity — avatar + medium weight. */}
@@ -664,7 +708,7 @@ export function AgentTranscriptDialog({
                 </div>
               )}
               <span className="truncate font-medium text-body">
-                {agentName || agentInfo?.name || ""}
+                {resolvedAgentName}
               </span>
             </div>
             {/* Provenance, one muted secondary unit set apart from the agent:
@@ -703,6 +747,7 @@ export function AgentTranscriptDialog({
             )}
 
             <div className="flex shrink-0 items-center gap-0.5">
+              {resolvedHeaderActions}
               {hasRunDetails && (
                 <Popover>
                   <PopoverTrigger
@@ -799,6 +844,47 @@ export function AgentTranscriptDialog({
             </div>
           </div>
         </div>
+
+        {variant === "cockpit" && terminalSlot && (
+          <div
+            className={cn(
+              "flex shrink-0 items-center gap-1 border-b px-4 py-1.5",
+              cockpitTab === "terminal" && "border-slate-800 bg-[#0d131f]",
+            )}
+            role="tablist"
+          >
+            {(["terminal", "transcript", "files"] as const).map((tab) => (
+              <Button
+                key={tab}
+                type="button"
+                role="tab"
+                size="sm"
+                variant={cockpitTab === tab ? "secondary" : "ghost"}
+                aria-selected={cockpitTab === tab}
+                onClick={() => setCockpitTab(tab)}
+              >
+                {t(($) => $.cockpit[`tab_${tab}`])}
+              </Button>
+            ))}
+          </div>
+        )}
+
+        {variant === "cockpit" && terminalSlot && cockpitTab === "terminal" && (
+          <div className="min-h-0 flex-1">{terminalSlot}</div>
+        )}
+
+        {variant === "cockpit" && terminalSlot && cockpitTab === "files" && (
+          <div className="min-h-0 flex-1 overflow-auto">
+            <CockpitFileChanges items={items} isLive={isLive} />
+          </div>
+        )}
+
+        {variant === "cockpit" && !terminalSlot && (
+          <CockpitFileChanges items={items} isLive={isLive} />
+        )}
+
+        {(!terminalSlot || cockpitTab === "transcript") && (
+          <>
 
         {/* ── List toolbar: read-before-you-read summary (left) + controls
             (right). Duration + event count fill the left, so the row balances
@@ -1023,6 +1109,8 @@ export function AgentTranscriptDialog({
             />
           )}
         </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -1069,6 +1157,98 @@ function FactDot() {
     <span aria-hidden className="text-faint-foreground">
       ·
     </span>
+  );
+}
+
+const MAX_COCKPIT_FILES = 6;
+
+function CockpitFileChanges({ items, isLive }: { items: TimelineItem[]; isLive: boolean }) {
+  const { t } = useT("agents");
+  const changes = useMemo(() => summarizeCockpitFileChanges(items), [items]);
+  const visible = changes.slice(0, MAX_COCKPIT_FILES);
+  const hiddenCount = Math.max(0, changes.length - visible.length);
+
+  return (
+    <div
+      className="shrink-0 border-b bg-muted/20 px-4 py-2.5"
+      title={t(($) => $.cockpit.change_counts_note)}
+    >
+      <div className="mb-2 flex items-center gap-1.5 text-caption font-medium text-foreground">
+        <Files className="h-3.5 w-3.5 text-muted-foreground" />
+        <span>{t(($) => $.cockpit.file_activity, { count: changes.length })}</span>
+      </div>
+      {visible.length === 0 ? (
+        <div className="text-caption text-muted-foreground">
+          {t(($) => $.cockpit.no_file_changes)}
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {visible.map((change) => {
+            const statusLabel = change.status === "applied"
+              ? t(($) => $.cockpit.change_applied)
+              : change.status === "failed"
+                ? t(($) => $.cockpit.change_failed)
+                : isLive
+                  ? t(($) => $.cockpit.change_pending)
+                  : t(($) => $.cockpit.change_unconfirmed);
+            return (
+              <div
+                key={change.path}
+                className={cn(
+                  "flex min-w-0 max-w-full items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-micro",
+                  change.status === "failed" && "border-destructive/30 bg-destructive/5",
+                  change.status === "pending" && "border-warning/30 bg-warning/5",
+                )}
+                title={`${change.path} — ${statusLabel}`}
+              >
+                <span
+                  className={cn(
+                    "font-mono font-semibold",
+                    change.status !== "applied"
+                      ? "text-muted-foreground"
+                      : change.changeKind === "add"
+                        ? "text-success"
+                        : change.changeKind === "delete"
+                          ? "text-destructive"
+                          : "text-info",
+                  )}
+                >
+                  {change.changeKind === "add" ? "A" : change.changeKind === "delete" ? "D" : "M"}
+                </span>
+                <span className="max-w-64 truncate font-mono text-foreground">{change.path}</span>
+                {change.status === "applied" && change.hasLineCounts ? (
+                  <span className="flex shrink-0 items-center gap-1 font-mono tabular-nums">
+                    <span className="text-success">+{change.additions}</span>
+                    <span className="text-destructive">-{change.deletions}</span>
+                  </span>
+                ) : (
+                  <span
+                    className={cn(
+                      "flex shrink-0 items-center gap-1",
+                      change.status === "failed"
+                        ? "text-destructive"
+                        : change.status === "pending"
+                          ? "text-warning"
+                          : "text-muted-foreground",
+                    )}
+                  >
+                    {change.status === "failed" && <XCircle className="h-3 w-3" />}
+                    {change.status === "pending" && isLive && <Loader2 className="h-3 w-3 animate-spin" />}
+                    {change.status === "pending" && !isLive && <Clock className="h-3 w-3" />}
+                    {statusLabel}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          {hiddenCount > 0 && (
+            <span className="inline-flex items-center rounded-md border border-dashed px-2 py-1 text-micro text-muted-foreground">
+              {t(($) => $.cockpit.more_files, { count: hiddenCount })}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

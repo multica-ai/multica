@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, ScrollText } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
@@ -34,6 +34,7 @@ interface TranscriptButtonProps {
    */
   items?: TimelineItem[];
   isLive?: boolean;
+  variant?: "transcript" | "cockpit";
   className?: string;
   title?: string;
   renderButton?: boolean;
@@ -44,6 +45,8 @@ interface TranscriptButtonProps {
    * surface autopilot webhook payloads inline with the run history.
    */
   headerSlot?: React.ReactNode;
+  headerActions?: React.ReactNode | ((context: { agentName: string }) => React.ReactNode);
+  terminalSlot?: React.ReactNode;
 }
 
 /**
@@ -65,16 +68,23 @@ export function TranscriptButton({
   agentName,
   items: providedItems,
   isLive = false,
+  variant = "transcript",
   className,
   title = "View transcript",
   renderButton = true,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   headerSlot,
+  headerActions,
+  terminalSlot,
 }: TranscriptButtonProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadedItems, setLoadedItems] = useState<TimelineItem[] | null>(null);
+  const controlledLoadRef = useRef<{
+    taskId: string;
+    promise: Promise<TimelineItem[]>;
+  } | null>(null);
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = controlledOnOpenChange ?? setUncontrolledOpen;
 
@@ -132,6 +142,49 @@ export function TranscriptButton({
     [liveCacheMode, providedItems, loadedItems, setOpen, task.id],
   );
 
+  // A parent can open the dialog without rendering/clicking this component's
+  // own button (Agent Cockpit does this from an issue-row launcher). Terminal
+  // tasks are not on the live cache path, so perform the same lazy backfill
+  // when a controlled dialog is opened externally. Reuse one in-flight
+  // promise across React Strict Mode's effect replay.
+  useEffect(() => {
+    if (
+      controlledOpen !== true ||
+      liveSession ||
+      liveCacheMode ||
+      providedItems !== undefined ||
+      loadedItems !== null
+    ) {
+      return;
+    }
+
+    let request = controlledLoadRef.current;
+    if (!request || request.taskId !== task.id) {
+      request = {
+        taskId: task.id,
+        promise: api
+          .listTaskMessages(task.id)
+          .then((messages) => buildTimeline(messages))
+          .catch((error) => {
+            console.error(error);
+            return [];
+          }),
+      };
+      controlledLoadRef.current = request;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    void request.promise.then((timeline) => {
+      if (cancelled) return;
+      setLoadedItems(timeline);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [controlledOpen, liveSession, liveCacheMode, providedItems, loadedItems, task.id]);
+
   useEffect(() => {
     if (!open) return;
 
@@ -176,7 +229,10 @@ export function TranscriptButton({
             agentName={agentName}
             isLive={isLive}
             onOpenChange={setOpen}
+            variant={variant}
             headerSlot={headerSlot}
+            headerActions={headerActions}
+            terminalSlot={terminalSlot}
           />
         ) : (
           <AgentTranscriptDialog
@@ -186,7 +242,10 @@ export function TranscriptButton({
             items={items}
             agentName={agentName}
             isLive={isLive}
+            variant={variant}
             headerSlot={headerSlot}
+            headerActions={headerActions}
+            terminalSlot={terminalSlot}
           />
         ))}
     </>
@@ -198,8 +257,13 @@ interface LiveTranscriptDialogProps {
   agentName: string;
   isLive: boolean;
   onOpenChange: (open: boolean) => void;
+  variant: "transcript" | "cockpit";
   headerSlot?: React.ReactNode;
+  headerActions?: React.ReactNode | ((context: { agentName: string }) => React.ReactNode);
+  terminalSlot?: React.ReactNode;
 }
+
+const LIVE_TRANSCRIPT_RECONCILE_MS = 5_000;
 
 /**
  * Live transcript view backed by the shared task-messages cache. Mounted only
@@ -217,7 +281,10 @@ function LiveTranscriptDialog({
   agentName,
   isLive,
   onOpenChange,
+  variant,
   headerSlot,
+  headerActions,
+  terminalSlot,
 }: LiveTranscriptDialogProps) {
   const queryClient = useQueryClient();
   const { data } = useQuery({
@@ -225,7 +292,8 @@ function LiveTranscriptDialog({
     enabled: false,
   });
 
-  // Force a backfill on open, and again when the task reaches a terminal state.
+  // Force a backfill on open, periodically while live, and again when the task
+  // reaches a terminal state.
   // `taskMessagesOptions` is `staleTime: Infinity`, so a plain subscription
   // never refetches — a WS reconnect gap (or the final tail of messages a
   // completed issue task never re-broadcasts) would otherwise leave a hole.
@@ -233,20 +301,31 @@ function LiveTranscriptDialog({
   useEffect(() => {
     if (!isTaskMessageTaskId(task.id)) return;
     let cancelled = false;
-    api
-      .listTaskMessages(task.id)
-      .then((msgs) => {
+    let inFlight = false;
+    const reconcile = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const msgs = await api.listTaskMessages(task.id);
         if (cancelled) return;
         queryClient.setQueryData<TaskMessagePayload[]>(
           chatKeys.taskMessages(task.id),
           (old = []) => mergeTaskMessagesBySeq(old, msgs),
         );
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error(err);
-      });
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void reconcile();
+    const intervalId = isLive
+      ? window.setInterval(() => void reconcile(), LIVE_TRANSCRIPT_RECONCILE_MS)
+      : undefined;
     return () => {
       cancelled = true;
+      if (intervalId !== undefined) window.clearInterval(intervalId);
     };
   }, [task.id, isLive, queryClient]);
 
@@ -260,7 +339,10 @@ function LiveTranscriptDialog({
       items={items}
       agentName={agentName}
       isLive={isLive}
+      variant={variant}
       headerSlot={headerSlot}
+      headerActions={headerActions}
+      terminalSlot={terminalSlot}
     />
   );
 }

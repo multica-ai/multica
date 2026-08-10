@@ -1168,6 +1168,15 @@ SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
+-- name: AcknowledgeAgentTaskCancellation :one
+-- The daemon calls this only after its local runner has returned and the
+-- transcript flush has completed. Keep the first acknowledgement timestamp so
+-- retries remain idempotent and the UI has a durable process-stopped signal.
+UPDATE agent_task_queue
+SET cancel_acknowledged_at = COALESCE(cancel_acknowledged_at, now())
+WHERE id = $1 AND status = 'cancelled'
+RETURNING *;
+
 -- name: CancelQueuedAgentTask :one
 -- Queue editing is a compare-and-set: never cancel a task that the daemon
 -- promoted between the user's click and this statement.

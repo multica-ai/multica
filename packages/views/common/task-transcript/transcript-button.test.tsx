@@ -98,6 +98,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
@@ -172,6 +173,33 @@ describe("TranscriptButton", () => {
     );
   });
 
+  it("live mode: periodically reconciles persisted messages while the dialog stays open", async () => {
+    vi.useFakeTimers();
+    const qc = newClient();
+    listTaskMessages
+      .mockResolvedValueOnce([msg(1, "Bash")])
+      .mockResolvedValueOnce([msg(1, "Bash"), msg(2, "Read")]);
+
+    renderWith(qc, <TranscriptButton task={baseTask} agentName="Codex" isLive />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "View transcript" }));
+      await Promise.resolve();
+    });
+    expect(listTaskMessages).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(listTaskMessages).toHaveBeenCalledTimes(2);
+    expect(qc.getQueryData<TaskMessagePayload[]>(chatKeys.taskMessages(LIVE_TASK_ID))).toHaveLength(2);
+  });
+
   it("terminal mode: fetches once on open and does not subscribe to the cache", async () => {
     const qc = newClient();
     listTaskMessages.mockResolvedValue([msg(1, "Bash")]);
@@ -199,6 +227,31 @@ describe("TranscriptButton", () => {
     });
 
     expect(screen.getAllByTestId("event")).toHaveLength(1);
+    expect(listTaskMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("controlled terminal mode: backfills when an external launcher opens it", async () => {
+    const qc = newClient();
+    listTaskMessages.mockResolvedValue([msg(1, "Bash")]);
+
+    renderWith(
+      qc,
+      <TranscriptButton
+        task={{
+          ...baseTask,
+          status: "completed",
+          completed_at: "2026-05-15T10:00:10.000Z",
+        }}
+        agentName="Codex"
+        renderButton={false}
+        open
+        onOpenChange={() => {}}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId("event")).toHaveLength(1),
+    );
     expect(listTaskMessages).toHaveBeenCalledTimes(1);
   });
 

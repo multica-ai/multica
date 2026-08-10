@@ -128,8 +128,8 @@ export function runtimeRewriteDestination(
   if (pathname === "/uploads" || pathname.startsWith("/uploads/")) {
     return appendPath(remoteApiUrl, pathname);
   }
-  if (pathname === "/ws") {
-    return appendPath(remoteApiUrl, "/ws");
+  if (pathname === "/ws" || pathname.startsWith("/ws/")) {
+    return appendPath(remoteApiUrl, pathname);
   }
   if (isBackendAuthPath(pathname)) {
     return appendPath(remoteApiUrl, pathname);

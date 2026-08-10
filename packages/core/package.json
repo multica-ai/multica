@@ -20,6 +20,7 @@
     "./api/schema": "./api/schema.ts",
     "./api/schemas": "./api/schemas.ts",
     "./api/ws-client": "./api/ws-client.ts",
+    "./terminal": "./terminal/index.ts",
     "./config": "./config/index.ts",
     "./auth": "./auth/index.ts",
     "./workspace": "./workspace/index.ts",

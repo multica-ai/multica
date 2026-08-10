@@ -10,6 +10,10 @@ const (
 	// Gated so only daemons+servers that both support it route claim over WS;
 	// everyone else keeps using the HTTP claim endpoint.
 	DaemonCapabilityRPCV1 = "rpc-v1"
+	// DaemonCapabilityTerminalPTYV1 advertises support for the dedicated,
+	// versioned Web PTY data plane. Availability for a particular task is still
+	// negotiated through terminal metadata and the server/daemon feature gates.
+	DaemonCapabilityTerminalPTYV1 = "terminal-pty-v1"
 
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:
@@ -151,6 +155,7 @@ type TaskMessagePayload struct {
 	Seq       int            `json:"seq"`
 	Type      string         `json:"type"`              // "text", "tool_use", "tool_result", "error"
 	Tool      string         `json:"tool,omitempty"`    // tool name for tool_use/tool_result
+	CallID    string         `json:"call_id,omitempty"` // provider-local id pairing a tool_use with its tool_result
 	Content   string         `json:"content,omitempty"` // text content
 	Input     map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
 	Output    string         `json:"output,omitempty"`  // tool output (tool_result only)

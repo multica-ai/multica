@@ -321,6 +321,38 @@ VALUES ($1, 'delete-test', 'workspace-delete', 10, 5)
 		t.Fatalf("create workspace task usage: %v", err)
 	}
 
+	var terminalSessionID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO agent_terminal_session (
+	id, workspace_id, issue_id, task_id, agent_id, runtime_id, daemon_id, provider
+)
+VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, gen_random_uuid(), 'codex')
+RETURNING id
+`, wsID, issueID, taskID, agentID, runtimeID).Scan(&terminalSessionID); err != nil {
+		t.Fatalf("create workspace terminal session: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO agent_terminal_control_lease (
+	session_id, controller_user_id, lease_token_hash, expires_at
+)
+VALUES ($1, $2, decode('00', 'hex'), now() + interval '1 minute')
+`, terminalSessionID, testUserID); err != nil {
+		t.Fatalf("create workspace terminal control lease: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO agent_terminal_control_event (
+	id, terminal_session_id, user_id, event_type
+)
+VALUES (gen_random_uuid(), $1, $2, 'claim')
+`, terminalSessionID, testUserID); err != nil {
+		t.Fatalf("create workspace terminal control event: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_terminal_control_event WHERE terminal_session_id = $1`, terminalSessionID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_terminal_control_lease WHERE session_id = $1`, terminalSessionID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_terminal_session WHERE id = $1`, terminalSessionID)
+	})
+
 	var rollupRuntimeID, rollupAgentID string
 	if err := testPool.QueryRow(ctx, `SELECT gen_random_uuid(), gen_random_uuid()`).Scan(&rollupRuntimeID, &rollupAgentID); err != nil {
 		t.Fatalf("create rollup fixture IDs: %v", err)
@@ -422,6 +454,20 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
 	}
 	if propertyCount != 0 {
 		t.Fatalf("issue properties were not cleaned up for deleted workspace: %d", propertyCount)
+	}
+
+	for table, column := range map[string]string{
+		"agent_terminal_control_event": "terminal_session_id",
+		"agent_terminal_control_lease": "session_id",
+		"agent_terminal_session":       "id",
+	} {
+		var count int
+		if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM `+table+` WHERE `+column+` = $1`, terminalSessionID).Scan(&count); err != nil {
+			t.Fatalf("verify %s cleanup: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s rows survived workspace delete: %d", table, count)
+		}
 	}
 
 	for _, table := range []string{

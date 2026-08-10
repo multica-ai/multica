@@ -550,6 +550,7 @@ func TestAcquireLocalDirectoryLock_CancelDuringWait(t *testing.T) {
 	var (
 		parked   atomic.Bool
 		waitCall atomic.Int32
+		ackCall  atomic.Int32
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -564,6 +565,9 @@ func TestAcquireLocalDirectoryLock_CancelDuringWait(t *testing.T) {
 			} else {
 				_, _ = w.Write([]byte(`{"status":"running"}`))
 			}
+		case strings.HasSuffix(r.URL.Path, "/cancel-ack"):
+			ackCall.Add(1)
+			w.WriteHeader(http.StatusOK)
 		default:
 			// We don't expect /fail in the cancel path — assert that
 			// by failing loud if it gets called.
@@ -629,6 +633,9 @@ func TestAcquireLocalDirectoryLock_CancelDuringWait(t *testing.T) {
 
 	if got := waitCall.Load(); got != 1 {
 		t.Errorf("wait-local-directory calls = %d, want 1", got)
+	}
+	if got := ackCall.Load(); got != 1 {
+		t.Errorf("cancel-ack calls = %d, want 1", got)
 	}
 }
 
