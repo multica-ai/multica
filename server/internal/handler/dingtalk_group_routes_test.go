@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -261,6 +262,25 @@ func TestDingTalkGroupRouteAuthorizationWiring(t *testing.T) {
 	base := "/api/workspaces/" + testWorkspaceID + "/dingtalk/group-routes"
 	if rec := exercise(http.MethodGet, base, memberID, nil); rec.Code != http.StatusOK {
 		t.Errorf("member GET status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE channel_installation SET status = 'revoked' WHERE id = $1`, fx.installationID); err != nil {
+		t.Fatalf("revoke DingTalk installation before member GET: %v", err)
+	}
+	revokedGET := exercise(http.MethodGet, base, memberID, nil)
+	if revokedGET.Code != http.StatusOK {
+		t.Fatalf("member GET after revoke status = %d: %s", revokedGET.Code, revokedGET.Body.String())
+	}
+	var revokedBody struct {
+		Routes []DingTalkGroupRouteResponse `json:"routes"`
+	}
+	if err := json.Unmarshal(revokedGET.Body.Bytes(), &revokedBody); err != nil {
+		t.Fatalf("decode member GET after revoke: %v", err)
+	}
+	if len(revokedBody.Routes) != 0 || strings.Contains(revokedGET.Body.String(), "Handler routes") || strings.Contains(revokedGET.Body.String(), "cid-handler-routes") {
+		t.Fatalf("member GET leaked revoked route metadata: %s", revokedGET.Body.String())
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE channel_installation SET status = 'active' WHERE id = $1`, fx.installationID); err != nil {
+		t.Fatalf("restore DingTalk installation after member GET regression: %v", err)
 	}
 	if rec := exercise(http.MethodGet, base, outsiderID, nil); rec.Code != http.StatusNotFound {
 		t.Errorf("outsider GET status = %d: %s", rec.Code, rec.Body.String())

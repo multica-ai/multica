@@ -8,13 +8,24 @@
 -- default is the installation's agent; a later admin reassignment survives
 -- subsequent inbound events because the conflict update refreshes only the
 -- human-readable title. The returned active bit revalidates the effective route
--- target at runtime while preserving the route across archive/restore.
-WITH installation AS (
+-- target at runtime while preserving the route across archive/restore. The
+-- workspace/installation locks serialize discovery with teardown and revoke:
+-- revoke-first rechecks status after the wait and returns no row; discovery-
+-- first completes before revoke, matching the existing in-flight semantics.
+WITH workspace_guard AS MATERIALIZED (
+    SELECT w.id
+    FROM workspace w
+    WHERE w.id = sqlc.arg(workspace_id)
+    FOR KEY SHARE
+), installation AS MATERIALIZED (
     SELECT i.*
     FROM channel_installation i
+    JOIN workspace_guard w ON w.id = i.workspace_id
     WHERE i.id = sqlc.arg(installation_id)
       AND i.workspace_id = sqlc.arg(workspace_id)
       AND i.channel_type = 'dingtalk'
+      AND i.status = 'active'
+    FOR SHARE OF i
 ), group_route AS (
     INSERT INTO dingtalk_group_route (
         workspace_id, installation_id, conversation_id,
@@ -55,6 +66,7 @@ JOIN channel_installation i ON i.id = r.installation_id
 WHERE r.workspace_id = sqlc.arg(workspace_id)
   AND i.workspace_id = sqlc.arg(workspace_id)
   AND i.channel_type = 'dingtalk'
+  AND i.status = 'active'
 ORDER BY r.discovered_at ASC;
 
 -- name: GetDingTalkGroupRouteInWorkspace :one

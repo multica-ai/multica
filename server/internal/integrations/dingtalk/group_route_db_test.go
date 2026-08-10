@@ -64,6 +64,72 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	exec(`INSERT INTO channel_installation (id, workspace_id, agent_id, channel_type, config, installer_user_id) VALUES ($1, $2, $3, 'dingtalk', jsonb_build_object('app_id', $4::text), $5)`, installation, workspaceID, defaultAgent, appKey, installerID)
 
 	queries := db.New(pool)
+	// Revocation is a query-level fail-closed boundary, not only a Router gate:
+	// a callback that reaches discovery after revoke must neither create a route
+	// nor expose anything through the workspace list.
+	exec(`UPDATE channel_installation SET status = 'revoked' WHERE id = $1`, installation)
+	_, err := queries.DiscoverDingTalkGroupRoute(ctx, db.DiscoverDingTalkGroupRouteParams{
+		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
+		ConversationID: "cid-revoked-before-discovery", ConversationTitle: "Revoked secret group",
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("discover route after revoke error = %v, want no rows", err)
+	}
+	var revokedDiscoveryCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM dingtalk_group_route WHERE installation_id = $1`, installation).Scan(&revokedDiscoveryCount); err != nil || revokedDiscoveryCount != 0 {
+		t.Fatalf("routes created after pre-discovery revoke = %d, err=%v", revokedDiscoveryCount, err)
+	}
+	revokedRoutes, err := queries.ListDingTalkGroupRoutesByWorkspace(ctx, util.MustParseUUID(workspaceID))
+	if err != nil || len(revokedRoutes) != 0 {
+		t.Fatalf("routes listed after pre-discovery revoke = %+v, err=%v", revokedRoutes, err)
+	}
+	exec(`UPDATE channel_installation SET status = 'active' WHERE id = $1`, installation)
+
+	// Controlled revoke-wins interleaving: discovery starts from an active
+	// snapshot but must block on the installation row, re-check status after the
+	// revoke commits, and return no rows without persisting the group metadata.
+	revokeTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin controlled pre-discovery revoke: %v", err)
+	}
+	defer revokeTx.Rollback(context.Background())
+	if _, err := revokeTx.Exec(ctx, `UPDATE channel_installation SET status = 'revoked' WHERE id = $1`, installation); err != nil {
+		t.Fatalf("lock installation for controlled revoke: %v", err)
+	}
+	discoveryConn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire controlled discovery connection: %v", err)
+	}
+	defer discoveryConn.Release()
+	var discoveryPID int32
+	if err := discoveryConn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&discoveryPID); err != nil {
+		t.Fatalf("read controlled discovery backend pid: %v", err)
+	}
+	discoveryDone := make(chan error, 1)
+	go func() {
+		_, discoverErr := db.New(discoveryConn).DiscoverDingTalkGroupRoute(context.Background(), db.DiscoverDingTalkGroupRouteParams{
+			InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
+			ConversationID: "cid-revoke-race", ConversationTitle: "Revoke race secret group",
+		})
+		discoveryDone <- discoverErr
+	}()
+	waitForDingTalkBackendBlocked(t, pool, discoveryPID)
+	if err := revokeTx.Commit(ctx); err != nil {
+		t.Fatalf("commit controlled pre-discovery revoke: %v", err)
+	}
+	select {
+	case discoverErr := <-discoveryDone:
+		if !errors.Is(discoverErr, pgx.ErrNoRows) {
+			t.Fatalf("revoke-wins discovery error = %v, want no rows", discoverErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("discovery did not resume after revoke committed")
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM dingtalk_group_route WHERE installation_id = $1`, installation).Scan(&revokedDiscoveryCount); err != nil || revokedDiscoveryCount != 0 {
+		t.Fatalf("revoke-wins discovery persisted %d routes, err=%v", revokedDiscoveryCount, err)
+	}
+	exec(`UPDATE channel_installation SET status = 'active' WHERE id = $1`, installation)
+
 	resolved, err := queries.DiscoverDingTalkGroupRoute(ctx, db.DiscoverDingTalkGroupRouteParams{
 		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
 		ConversationID: conversation, ConversationTitle: "Platform team",
