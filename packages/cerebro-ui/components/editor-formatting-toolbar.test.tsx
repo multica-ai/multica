@@ -11,6 +11,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { EditorFormattingToolbar } from "./editor-formatting-toolbar";
 
 // Preferences are mutable so a test can simulate the value the server sends
@@ -723,6 +724,34 @@ describe("EditorFormattingToolbar — the row as a field", () => {
     render(<EditorFormattingToolbar editor={fakeEditor() as never} />);
     expect(toolbarEl().className).toContain("min-h-9");
     expect(toolbarEl().className).not.toContain("min-h-11");
+  });
+
+  it("waits in the same field it ends up as", () => {
+    // The loading row used to keep the old full-bleed bar at 44px, so the row
+    // changed shape and height under the text the moment the editor mounted.
+    render(<EditorFormattingToolbar editor={null as never} />);
+    const { className } = toolbarEl();
+    expect(className).toContain("min-h-9");
+    expect(className).toContain("rounded-");
+    expect(className).toContain("bg-card");
+    expect(className).not.toContain("border-b");
+    expect(className).not.toContain("bg-muted/20");
+  });
+
+  // FIR-4028 design review, findings 7 and 8 — the two active-state tokens were
+  // raw hex from a different grey family, in the embedded-app stylesheet, and
+  // switched on the operating system's colour scheme instead of the app's.
+  it("keeps the active-state tokens on the app's own grey ramp and theme class", () => {
+    // Vitest roots at this package, so the stylesheet is one relative read
+    // away — import.meta.url is not a file URL under jsdom.
+    const css = readFileSync("styles/editor-toolbar.css", "utf8");
+    expect(css).toMatch(/--toolbar-active:\s*oklch\([^)]*28[56]/);
+    expect(css).toMatch(/--toolbar-active-border:\s*oklch\([^)]*28[56]/);
+    // The app's theme is a .dark class; prefers-color-scheme would follow the
+    // machine and go wrong the moment the two disagree.
+    expect(css).toContain(".dark");
+    expect(css).not.toMatch(/@media[^{]*prefers-color-scheme/);
+    expect(css).not.toMatch(/--toolbar-active[^:]*:\s*#/);
   });
 
   it("separates the groups, wherever the user has dragged Bold", () => {

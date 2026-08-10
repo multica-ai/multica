@@ -1,0 +1,14 @@
+/* Active-state fill + border for the editor formatting toolbar (FIR-4028).
+   Kept on the app's own neutral ramp — oklch, hue ~286 — so a pressed control
+   reads as one step off --muted instead of a different family of grey, and
+   bound to the app's .dark class rather than prefers-color-scheme so it follows
+   the theme the user picked in the app, not the operating system's. */
+:root {
+    --toolbar-active: oklch(0.905 0.004 286.32);
+    --toolbar-active-border: oklch(0.845 0.005 286.32);
+}
+
+.dark {
+    --toolbar-active: oklch(0.336 0.006 286.033);
+    --toolbar-active-border: oklch(0.394 0.007 286.033);
+}

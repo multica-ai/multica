@@ -246,8 +246,12 @@ function MarkdownDocumentEditor({
   const Editor = imagesEnabled ? EditorImageTray : ContentEditor;
 
   return (
-    <section className="overflow-hidden rounded-md border border-border bg-card shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
+    // FIR-4028 design review, finding 1 — `overflow-hidden` here made this card
+    // the formatting row's scroll container, which silently cancelled the row's
+    // `sticky`: it scrolled off with the page. The rounding moves onto the two
+    // children instead, which is all the clipping was ever doing.
+    <section className="rounded-md border border-border bg-card shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-t-md border-b bg-muted/30 px-3 py-2">
         <div className="text-xs font-medium text-muted-foreground">Note</div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           {status === "saving" && (
@@ -270,7 +274,7 @@ function MarkdownDocumentEditor({
           onCommentOnSelection={onCommentOnSelection}
         />
       )}
-      <div className="min-h-[65vh] bg-background px-4 py-4 md:px-6 md:py-5">
+      <div className="min-h-[65vh] rounded-b-md bg-background px-4 py-4 md:px-6 md:py-5">
         <Editor
           key={`${artifact.id}:${remountToken}`}
           defaultValue={value}

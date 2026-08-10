@@ -85,6 +85,29 @@ describe("DocumentToolsSidebar — desktop edge panel (FIR-4028 slice 7)", () =>
     expect(root.className).not.toMatch(/lg:/);
   });
 
+  // FIR-4028 design review, finding 6 — the edge used to be an 8px aria-hidden
+  // div with no border, icon or text. A user who had Outline as a fixed column
+  // could not tell it still existed, and a screen reader could not reach it.
+  it("shows the edge as a labelled control, not an invisible hit strip", () => {
+    renderSidebar();
+    const edge = screen.getByTestId("document-tools-edge");
+    expect(edge.tagName).toBe("BUTTON");
+    expect(edge).toHaveAccessibleName(/outline/i);
+    expect(edge).not.toHaveAttribute("aria-hidden");
+    expect(edge).toHaveTextContent(/outline/i);
+  });
+
+  it("pins the panel on a click and lets the close button unpin it", () => {
+    renderSidebar();
+    fireEvent.click(screen.getByTestId("document-tools-edge"));
+    // Pinned: the pointer leaving must not take it away again.
+    fireEvent.mouseLeave(screen.getByTestId("document-tools-panel"));
+    expect(screen.getByTestId("document-tools-panel")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /close outline/i }));
+    expect(screen.queryByTestId("document-tools-panel")).not.toBeInTheDocument();
+  });
+
   it("renders References inside the panel as its own section", () => {
     renderSidebar(<div data-testid="references-slot">References</div>);
     fireEvent.mouseEnter(screen.getByTestId("document-tools-edge"));

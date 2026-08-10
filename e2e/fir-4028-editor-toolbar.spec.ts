@@ -11,7 +11,9 @@ test.describe("FIR-4028 — configurable editor toolbar", () => {
     // The release default stays off until Track C finishes. Every toolbar
     // interaction test turns it on only in its isolated E2E workspace.
     await api.setWorkspaceFeatureFlag("cerebro_editor_toolbar", true);
-    workspaceSlug = await loginAsDefault(page);
+    // A cold Next.js dev server compiles the dashboard route on the first
+    // navigation, which regularly exceeds the helper's 15s default.
+    workspaceSlug = await loginAsDefault(page, { workspaceReadyTimeout: 60000 });
   });
 
   test.afterEach(async ({ request }) => {
@@ -297,6 +299,57 @@ test.describe("FIR-4028 — configurable editor toolbar", () => {
       });
       expect(overflowing).toEqual([]);
     }
+  });
+
+  // FIR-4028 design review, findings 1 and 3 — the row belongs above the
+  // document and has to survive scrolling it. Both were reported as fixed while
+  // neither held on a real screen, which is why the check lives here and not in
+  // a component test.
+  test("the row sits above the note title and stays on screen while the note scrolls", async ({
+    page,
+  }) => {
+    const longBody = Array.from(
+      { length: 120 },
+      (_, i) => `Paragraph ${i + 1} of a note long enough to scroll.`,
+    ).join("\n\n");
+    const note = await api.createSharedNote(
+      `Scrolling note ${Date.now()}`,
+      longBody,
+    );
+
+    await page.goto(`/${workspaceSlug}/notes/${note.id}`);
+    const toolbar = page.getByRole("toolbar", { name: "Formatting toolbar" });
+    await expect(toolbar).toBeVisible({ timeout: 15000 });
+
+    // DOM order: the row precedes the title, so it reads as a control surface
+    // for the whole document rather than a strip inside it.
+    const title = page.locator('input[aria-label="Title"]');
+    await expect(title).toBeVisible();
+    const rowIsFirst = await page.evaluate(() => {
+      const row = document.querySelector(
+        '[role="toolbar"][aria-label="Formatting toolbar"]',
+      );
+      const heading = document.querySelector('input[aria-label="Title"]');
+      if (!row || !heading) return null;
+      return (
+        (row.compareDocumentPosition(heading) &
+          Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0
+      );
+    });
+    expect(rowIsFirst).toBe(true);
+
+    const before = await toolbar.boundingBox();
+    await page.locator(".rich-text-editor").first().click();
+    await page.mouse.wheel(0, 4000);
+    await page.waitForTimeout(300);
+    const after = await toolbar.boundingBox();
+
+    await expect(toolbar).toBeVisible();
+    expect(before).not.toBeNull();
+    expect(after).not.toBeNull();
+    // Same y as before the scroll: it never travelled with the text.
+    expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThan(2);
   });
 
   test("with the flag off, the row disappears and the selection bubble still formats", async ({

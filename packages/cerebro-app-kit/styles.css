@@ -5,8 +5,6 @@
   --multica-app-border: #e5e7eb;
   --multica-app-accent: #18181b;
   --multica-app-radius: 12px;
-  --toolbar-active: #f1f3f5;
-  --toolbar-active-border: #d7dbe0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -16,8 +14,6 @@
     --multica-app-muted: #a6abb3;
     --multica-app-border: #303237;
     --multica-app-accent: #f5f5f5;
-    --toolbar-active: #2a2d32;
-    --toolbar-active-border: #454a52;
   }
 }
 

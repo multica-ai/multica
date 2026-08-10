@@ -35,7 +35,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import "@multica/cerebro-app-kit/styles.css";
+import "../styles/editor-toolbar.css";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -129,6 +129,20 @@ const ACTION_SHORTCUTS: Partial<Record<EditorToolbarActionId, string>> = {
   link: "⌘K",
   blockquote: "⌘⇧B",
 };
+
+// The row is a field over the text, not another edge of the pane: its own
+// border all round, mx-6 so its edges line up with the writing pane's own 24px
+// gutter, and sticky so the Documents surface — where it still mounts inside a
+// scrolling card — keeps it on screen. In Notes it mounts above the scroll
+// container, so it is fixed there by construction.
+const TOOLBAR_FIELD_CLASS =
+  "@container sticky top-0 z-20 mx-6 mt-3 flex min-h-9 items-center gap-0.5 rounded-lg border bg-card px-1.5 py-1";
+
+// Docked to the keyboard the row spans the full width, so the field shape would
+// only cut it off from the edges it is meant to sit on — and it keeps the 44px
+// touch height a thumb needs.
+const TOOLBAR_PHONE_DOCK_CLASS =
+  "m-0 min-h-11 rounded-none border-x-0 border-b-0 bg-background";
 
 const TOGGLE_CLASS_NAME =
   "border border-transparent hover:bg-muted data-pressed:border-[var(--toolbar-active-border)] data-pressed:bg-[var(--toolbar-active)] data-pressed:hover:bg-[var(--toolbar-active)]";
@@ -862,8 +876,11 @@ export function EditorFormattingToolbar({
         role="toolbar"
         aria-label="Formatting toolbar"
         aria-busy="true"
+        // Same field as the loaded row, so the row does not change shape or
+        // height under the text the moment the editor mounts.
         className={cn(
-          "flex min-h-11 items-center gap-1 border-b bg-muted/20 px-2 py-1.5",
+          TOOLBAR_FIELD_CLASS,
+          dock.isPhone && TOOLBAR_PHONE_DOCK_CLASS,
           className,
         )}
       >
@@ -898,15 +915,8 @@ export function EditorFormattingToolbar({
           : undefined
       }
       className={cn(
-        // The row is a field over the text, not another edge of the pane: its
-        // own border all round, and sticky so it survives scrolling the note —
-        // it mounts inside the writing pane's scroll container.
-        "@container sticky top-0 z-20 m-2 flex min-h-9 items-center gap-0.5 rounded-lg border bg-card px-1.5 py-1",
-        // Docked to the keyboard the row spans the full width, so the field
-        // shape would only cut it off from the edges it is meant to sit on —
-        // and it keeps the 44px touch height a thumb needs.
-        dock.isPhone &&
-          "m-0 min-h-11 rounded-none border-x-0 border-b-0 bg-background",
+        TOOLBAR_FIELD_CLASS,
+        dock.isPhone && TOOLBAR_PHONE_DOCK_CLASS,
         className,
       )}
     >

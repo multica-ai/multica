@@ -1440,9 +1440,24 @@ export function NoteEditor({
       </div>
 
       <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 flex-col">
+        {/* FIR-4028 design review, finding 3 — the row belongs above the
+            document, not inside it: action row → formatting row → title →
+            metadata → text. Mounting it outside contentScrollRef is what makes
+            "always at the top" literal; the sticky class on the row itself is
+            what keeps the Documents surface, where it still sits inside a
+            scrolling card, from losing it. */}
+        {editorToolbarEnabled && !readOnly && (
+          <EditorFormattingToolbar
+            editor={editor}
+            onCommentOnSelection={
+              commentsEnabled ? startCommentOnSelection : undefined
+            }
+          />
+        )}
         <div
           ref={contentScrollRef}
-          className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-6"
+          className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-6 pt-3"
         >
           <EditableTitle
             value={note.title}
@@ -1569,14 +1584,6 @@ export function NoteEditor({
                   <span>{presenceLabel(live.peers)}</span>
                 </div>
               )}
-              {editorToolbarEnabled && (
-                <EditorFormattingToolbar
-                  editor={editor}
-                  onCommentOnSelection={
-                    commentsEnabled ? startCommentOnSelection : undefined
-                  }
-                />
-              )}
               {/* FIR-4028 slice 8 — right-click on a selection leads with
                   Comment. With nothing selected the browser's own menu opens
                   instead; the block menu that belongs there is track B's, and
@@ -1612,6 +1619,7 @@ export function NoteEditor({
           )}
           </div>
           </div>
+        </div>
         </div>
 
         {/* Heading navigation + word/character count + References, shared with

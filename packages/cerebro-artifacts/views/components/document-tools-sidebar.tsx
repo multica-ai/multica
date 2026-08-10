@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { List } from "lucide-react";
+import { List, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { cn } from "@multica/ui/lib/utils";
 import {
   Sheet,
   SheetContent,
@@ -177,15 +178,35 @@ export function DocumentToolsSidebar({
   // Desktop: a zero-width anchor at the right edge of the writing pane. The
   // panel is absolute inside it, so it overlays the content and never sits on
   // top of a neighbouring rail (the comments panel renders after this one).
+  //
+  // The edge is a labelled tab, not a bare hit strip: a user who used to have
+  // Outline as a fixed column has to be able to SEE that it still exists.
+  // Hovering it opens the panel, clicking it pins the panel, and it carries a
+  // real accessible name so a screen reader and the keyboard both reach it.
   const open = pinned || hovering;
   return (
     <div className="relative shrink-0">
-      <div
+      <button
+        type="button"
         data-testid="document-tools-edge"
-        aria-hidden="true"
         onMouseEnter={() => setHovering(true)}
-        className="absolute inset-y-0 right-0 w-2"
-      />
+        onClick={() => {
+          setHovering(false);
+          setPinned((p) => !p);
+        }}
+        aria-label="Outline and references"
+        aria-expanded={open}
+        title="Outline and references (⌘⇧O)"
+        className={cn(
+          "absolute right-0 top-6 z-20 flex flex-col items-center gap-1.5 rounded-l-md border border-r-0 bg-card px-1 py-2.5 text-muted-foreground shadow-sm transition-colors hover:text-foreground",
+          open && "invisible",
+        )}
+      >
+        <List className="size-3.5" />
+        <span className="text-[10px] font-medium tracking-wide [writing-mode:vertical-rl]">
+          Outline
+        </span>
+      </button>
       {open && (
         <div
           data-testid="document-tools-panel"
@@ -193,8 +214,20 @@ export function DocumentToolsSidebar({
           aria-label="Document tools"
           onMouseEnter={() => setHovering(true)}
           onMouseLeave={() => setHovering(false)}
-          className="absolute right-0 top-0 z-30 max-h-[70vh] w-56 overflow-y-auto rounded-md border bg-popover p-3 shadow-lg"
+          className="absolute right-0 top-0 z-30 max-h-[70vh] w-[280px] overflow-y-auto rounded-md border bg-popover p-3 shadow-lg"
         >
+          {/* Clicking the tab pins the panel, and the tab is then behind it —
+              so the pin needs its own way out besides Escape / ⌘⇧O. */}
+          {pinned && (
+            <button
+              type="button"
+              onClick={() => setPinned(false)}
+              aria-label="Close outline"
+              className="absolute right-2 top-2 rounded p-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
           <OutlineContent body={body} contentRef={contentRef} />
           {references && <ReferencesSection>{references}</ReferencesSection>}
         </div>
