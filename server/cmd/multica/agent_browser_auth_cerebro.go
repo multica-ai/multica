@@ -313,7 +313,7 @@ func init() {
 	agentBrowserProvisionAuthCmd.Flags().String("username-key", "", "Credential key containing the login username")
 	agentBrowserProvisionAuthCmd.Flags().String("password-key", "", "Credential key containing the login password")
 	agentBrowserCmd.AddCommand(agentBrowserProvisionAuthCmd)
-	agentBrowserInternalVerifyCmd.Flags().String("app", "", "Allowlisted app: multica, multica-permissions, cerebro, cerebro-permission-profiles, registry, finance, pricing, customer-service, warehouse, data-catalog, data-catalog-reader, data-catalog-reader-permissions, or data-catalog-unknown")
+	agentBrowserInternalVerifyCmd.Flags().String("app", "", "Allowlisted app: multica, multica-permissions, cerebro, cerebro-permission-profiles, registry, finance, finance-phone, pricing, customer-service, warehouse, data-catalog, data-catalog-reader, data-catalog-reader-permissions, or data-catalog-unknown")
 	agentBrowserInternalVerifyCmd.Flags().String("page", "", "In-app path to end on after login, e.g. /controls (default: the app's own verification page)")
 	agentBrowserInternalVerifyCmd.Flags().String("screenshot", "", "PNG output path (default: <app>-internal-verify.png)")
 	agentBrowserCmd.AddCommand(agentBrowserInternalVerifyCmd)

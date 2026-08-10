@@ -1467,6 +1467,9 @@ func TestVerifyOpensRequestedPageAfterTheAppsOwnChecks(t *testing.T) {
 	pageIndex := slices.IndexFunc(commander.calls, func(call string) bool {
 		return strings.HasSuffix(call, "open http://firtal-agents-private.internal:3000/controls")
 	})
+	pageReadyIndex := slices.IndexFunc(commander.calls, func(call string) bool {
+		return strings.HasSuffix(call, "wait --load networkidle")
+	})
 	snapshotIndex := slices.IndexFunc(commander.calls, func(call string) bool {
 		return strings.HasSuffix(call, "snapshot")
 	})
@@ -1482,11 +1485,33 @@ func TestVerifyOpensRequestedPageAfterTheAppsOwnChecks(t *testing.T) {
 	if screenshotIndex < pageIndex {
 		t.Fatalf("screenshot captured before the requested page: %v", commander.calls)
 	}
+	if pageReadyIndex < pageIndex || pageReadyIndex > screenshotIndex {
+		t.Fatalf("screenshot captured before the requested page became idle: %v", commander.calls)
+	}
 	if result.FinalURL != "http://firtal-agents-private.internal:3000/controls" {
 		t.Fatalf("final URL = %q", result.FinalURL)
 	}
 	if !slices.Equal(result.Markers, []string{"Monthly overview", "Controllership review", "Versus budget"}) {
 		t.Fatalf("the app's own marker check changed: %v", result.Markers)
+	}
+}
+
+func TestVerifyUsesTheFixedPhoneViewportForFinancePhone(t *testing.T) {
+	commander := &pageCommander{urls: []string{
+		"http://firtal-agents-private.internal:3000/cfo",
+		"http://firtal-agents-private.internal:3000/controls",
+	}}
+
+	if _, err := testRunner(commander).Verify(context.Background(), "finance-phone", "/controls", financeCredential()); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	viewportIndex := slices.IndexFunc(commander.calls, func(call string) bool {
+		return strings.HasSuffix(call, "set viewport 390 844")
+	})
+	screenshotIndex := slices.Index(commander.calls, "capture-screenshot")
+	if viewportIndex < 0 || screenshotIndex < viewportIndex {
+		t.Fatalf("phone viewport was not set before the screenshot: %v", commander.calls)
 	}
 }
 

@@ -76,6 +76,11 @@ type Target struct {
 	AccessHeaders         bool
 	AccessClientIDKey     string
 	AccessClientSecretKey string
+	// ViewportWidth/ViewportHeight select a fixed browser size for a dedicated
+	// allowlisted target. They are paired so callers cannot supply arbitrary
+	// browser settings through the verification endpoint.
+	ViewportWidth  int
+	ViewportHeight int
 }
 
 func (t Target) Host() string {
@@ -131,7 +136,7 @@ var targets = map[string]Target{
 		CodeSelector: "input[data-input-otp]",
 		NavigatePath: "/firtal/settings?tab=permissions", NavigateTabName: "Permission profiles",
 		ExpectedPathSuffix: "/firtal/settings",
-		ExpectedText: []string{"Permission profiles", "When should I use a Permission profile?", "One agent", "Several agents or members"},
+		ExpectedText:       []string{"Permission profiles", "When should I use a Permission profile?", "One agent", "Several agents or members"},
 	},
 	"registry": {
 		// Registry and the verifier run on different Sliplane servers. Internal
@@ -157,6 +162,13 @@ var targets = map[string]Target{
 		Vault: "Shared/browser-login/finance", UsernameSelector: "#email", PasswordSelector: "#password",
 		SubmitSelector: "button[type=submit]", NavigatePath: "/cfo", ExpectedPathSuffix: "/cfo",
 		ExpectedText: []string{"Monthly overview", "Controllership review", "Versus budget"},
+	},
+	"finance-phone": {
+		Name: "finance-phone", URL: "http://firtal-agents-private.internal:3000/auth/login?manual=true",
+		Vault: "Shared/browser-login/finance", UsernameSelector: "#email", PasswordSelector: "#password",
+		SubmitSelector: "button[type=submit]", NavigatePath: "/cfo", ExpectedPathSuffix: "/cfo",
+		ExpectedText:  []string{"Monthly overview", "Controllership review", "Versus budget"},
+		ViewportWidth: 390, ViewportHeight: 844,
 	},
 	"pricing": {
 		Name: "pricing", URL: "http://ecommerce-pricing-engine-private.internal:3000/login?manual=true",
@@ -240,6 +252,9 @@ func TargetFor(name string) (Target, error) {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	if target.ExpectedURLPart != "" && (!strings.HasPrefix(target.ExpectedURLPart, "/") || strings.Contains(target.ExpectedURLPart, "://")) {
+		return Target{}, fmt.Errorf("internal browser target is misconfigured")
+	}
+	if (target.ViewportWidth == 0) != (target.ViewportHeight == 0) || target.ViewportWidth < 0 || target.ViewportHeight < 0 {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	return target, nil
@@ -833,7 +848,7 @@ func (r *Runner) failure(target Target, baseArgs []string, detail string, err er
 var safeStageErrors = buildSafeStageErrors()
 
 func buildSafeStageErrors() map[string]struct{} {
-	stages := []string{dnsStage, openStage, "auth", "reload", "render", "navigation", "snapshot", "markers", "url", "version", "errors", "screenshot"}
+	stages := []string{dnsStage, openStage, "viewport", "auth", "reload", "render", "navigation", "snapshot", "markers", "url", "version", "errors", "screenshot"}
 	kinds := []commandFailureKind{
 		"", commandFailureUnknown, commandFailureTimeout, commandFailureDNS, commandFailureDNSTimeout,
 		commandFailureConnection, commandFailureBrowserLaunch, commandFailureNotFound,
@@ -936,6 +951,11 @@ func (r *Runner) Verify(ctx context.Context, app, page string, credential Creden
 		}
 	} else if _, err := r.runStage(ctx, target, openStage, "", append(baseArgs, "open", target.URL)...); err != nil {
 		return r.failure(target, baseArgs, target.URL, err)
+	}
+	if target.ViewportWidth > 0 {
+		if _, err := r.runStage(ctx, target, "viewport", "", append(baseArgs, "set", "viewport", fmt.Sprint(target.ViewportWidth), fmt.Sprint(target.ViewportHeight))...); err != nil {
+			return r.failure(target, baseArgs, target.URL, err)
+		}
 	}
 	if formLogin || target.SessionCookie {
 		commands := make([][]string, 0, 6)
@@ -1069,7 +1089,8 @@ func (r *Runner) Verify(ctx context.Context, app, page string, credential Creden
 		if _, err := r.runStage(ctx, target, "navigation", "", append(baseArgs, "open", pageURL)...); err != nil {
 			return r.failure(target, baseArgs, pageURL, err)
 		}
-		if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
+		// A fixed delay captured data-backed report pages before their requests finished.
+		if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "--load", "networkidle")...); err != nil {
 			return r.failure(target, baseArgs, pageURL, err)
 		}
 		pageURLOutput, err := r.runStage(ctx, target, "url", "", append(baseArgs, "get", "url")...)
