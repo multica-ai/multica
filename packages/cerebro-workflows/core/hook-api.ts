@@ -1,6 +1,6 @@
 import { api, parseWithFallback } from "@multica/core/api";
 import { z } from "zod";
-import { createHookDraft, type HookActionDraft, type HookEventType, type HookRun, type WorkflowHook } from "./hook-types";
+import { createHookDraft, type HookActionDraft, type HookEventType, type HookRun, type HookRunSummary, type WorkflowHook } from "./hook-types";
 
 const hookBindingSchema = z.object({ kind: z.enum(["workspace", "project", "workflow", "agent", "model", "issue", "session"]), id: z.string() });
 const hookConditionSchema = z.object({ field: z.string(), op: z.string(), value: z.unknown().optional(), values: z.array(z.unknown()).optional() });
@@ -32,7 +32,30 @@ const hookPolicySchema = z.object({
   observed_run_count: z.number().int().nonnegative().optional().default(0), pass_count_7d: z.number().int().nonnegative().optional().default(0), block_count_7d: z.number().int().nonnegative().optional().default(0), can_publish: z.boolean().optional().default(false), updated_at: z.string().optional(), last_run_at: z.string().optional(),
   lifecycle: hookLifecycleSchema.optional(),
   compatible_events: z.array(hookJournalEventSchema).optional().default([]),
+  live: z.object({
+    policy_id: z.string().optional().default(""),
+    version: z.number().int().nonnegative().optional().default(0),
+    name: z.string().optional().default(""),
+    decision: z.enum(["allow", "block", "modify", "require"]).optional().default("allow"),
+    requirement: z.string().optional().default(""),
+    fail_mode: z.enum(["open", "closed", "warn"]).optional().default("warn"),
+  }).optional(),
 });
+const hookRunSummarySchema = z.object({
+  id: z.string(),
+  family_id: z.string().optional().default(""),
+  hook_name: z.string().optional().default(""),
+  policy_version: z.number().int().nonnegative().optional().default(0),
+  event: z.object({ event_type: z.string().optional().default(""), agent_id: z.string().optional().default(""), issue_id: z.string().optional().default("") }).optional().default({ event_type: "", agent_id: "", issue_id: "" }),
+  decision: z.enum(["allow", "block", "modify", "require"]).optional().default("allow"),
+  would_decision: z.enum(["allow", "block", "modify", "require"]).optional(),
+  enforced: z.boolean().optional().default(false),
+  requirements: z.array(z.string()).optional().default([]),
+  timed_out: z.boolean().optional().default(false),
+  latency_ms: z.number().optional().default(0),
+  created_at: z.string().optional().default(""),
+});
+const hookRunSummaryListSchema = z.object({ runs: z.array(hookRunSummarySchema).nullish() });
 const hookPartialErrorSchema = z.object({
   record_id: z.string(),
   code: z.literal("hook_record_malformed"),
@@ -89,7 +112,22 @@ function fromTransport(policy: HookPolicyTransport): WorkflowHook {
     last_run_at: policy.last_run_at,
     lifecycle: policy.lifecycle ?? legacyLifecycle(policy),
     compatible_events: policy.compatible_events.map((event) => ({ ...event, event_type: event.event_type as HookEventType })),
+    live: policy.live,
   };
+}
+
+export function parseHookRunSummaries(raw: unknown): HookRunSummary[] {
+  const parsed = parseWithFallback<z.infer<typeof hookRunSummaryListSchema> | null>(raw, hookRunSummaryListSchema, null, { endpoint: "workflowHookRecentRuns" });
+  return (parsed?.runs ?? []).map((run) => ({
+    id: run.id, family_id: run.family_id, hook_name: run.hook_name, policy_version: run.policy_version,
+    event_type: run.event.event_type, agent_id: run.event.agent_id, issue_id: run.event.issue_id,
+    decision: run.decision, would_decision: run.would_decision, enforced: run.enforced,
+    requirements: run.requirements, timed_out: run.timed_out, latency_ms: run.latency_ms, created_at: run.created_at,
+  }));
+}
+
+export async function fetchRecentHookRuns(limit = 200): Promise<HookRunSummary[]> {
+  return parseHookRunSummaries(await api.cerebroRequest<unknown>(`/api/cerebro/workflow-hooks/runs?limit=${limit}`));
 }
 
 export function parseHookResponse(raw: unknown): WorkflowHook {
@@ -211,6 +249,7 @@ export function parseHookRunsResponse(raw: unknown): HookRun[] {
       would_action: actions.length > 0 ? actions.map((action) => String(asObject(action).type || "action")).join(", ") : String((Array.isArray(result.requirements) ? result.requirements[0] : "No action") || "No action"),
       fail_mode: (["open", "closed", "warn"].includes(String(record.fail_mode)) ? String(record.fail_mode) : "open") as WorkflowHook["fail_mode"],
       remediation,
+      dry_run: Boolean(result.would_decision),
       side_effects: false as const,
       latency_ms: Number(record.latency_ms || 0),
       event,

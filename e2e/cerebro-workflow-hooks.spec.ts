@@ -163,18 +163,18 @@ test.describe("FIR-3321 Workflow Hooks Live/Draft delivery", () => {
 
       // event → no-match → matching Test → Publish → Disable on Live+Draft family
       await page.goto(`/${slug}/workflows/hooks/${FAMILY_ID}`);
-      await expect(page.getByText("Live v4 stays active until you publish this Draft.")).toBeVisible();
+      await expect(page.getByLabel("What is enforcing")).toContainText("Live v4 keeps running on every matching event until someone publishes this Draft.");
       await page.getByRole("button", { name: "Test" }).click();
       await expect(page.getByRole("region", { name: "Test and history" })).toBeVisible();
       await page.getByLabel("Past event").click();
-      await page.getByRole("option", { name: /seed-no-match|before.task.complete/ }).first().click();
+      await page.getByRole("option", { name: /Before task completes/ }).first().click();
       await page.getByRole("button", { name: "Run test with selected event" }).click();
-      await expect(page.getByText("Test run — no side effects")).toBeVisible();
+      await expect(page.getByText("Dry run · changed nothing")).toBeVisible();
 
       await page.getByLabel("Past event").click();
       await page.getByRole("option").nth(1).click();
       await page.getByRole("button", { name: "Run test with selected event" }).click();
-      await expect(page.getByText(/Would block/)).toBeVisible();
+      await expect(page.getByText(/Would have: Stopped the action/)).toBeVisible();
 
       const publish = page.getByRole("button", { name: "Publish" });
       await expectClickable(page, publish);
@@ -208,7 +208,7 @@ test.describe("FIR-3321 Workflow Hooks Live/Draft delivery", () => {
     const slug = "e2e-workspace";
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(`/${slug}/workflows/hooks`);
-    await expect(page.getByRole("heading", { name: "Hooks" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Hooks", exact: true })).toBeVisible();
     // A family-backed hook shows its lifecycle state, not its raw mode.
     for (const state of ["Off", "Draft", "Enforced", "Enforced · Draft changes", "Managed"]) {
       await expect(page.getByText(state, { exact: true }).first()).toBeVisible();
@@ -222,7 +222,7 @@ test.describe("FIR-3321 Workflow Hooks Live/Draft delivery", () => {
     await page.getByRole("button", { name: "Configure Actions" }).click();
     await page.getByRole("button", { name: "Add action", exact: true }).click();
     await page.getByLabel("Action 1 type").click();
-    await expect(page.getByRole("option", { name: "Start agent" })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Instruct an agent" })).toBeVisible();
     await expect(page.getByRole("option", { name: "Run skill" })).toBeVisible();
     await expect(page.getByRole("option", { name: "Judge gate" })).toBeVisible();
     await page.getByRole("option", { name: "Notify member" }).click();

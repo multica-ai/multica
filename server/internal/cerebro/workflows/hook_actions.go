@@ -61,6 +61,74 @@ var versionOneHookActionTypes = manifestHookActionTypes()
 
 var issueStatusActionValues = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
 
+// Symbolic action targets. A hook is written once but runs against many events,
+// so "the agent that triggered this hook" is the only way to instruct the agent
+// that is actually running — picking one agent up front cannot express it.
+const (
+	EventTargetAgent = "event.agent"
+	EventTargetTask  = "event.task"
+)
+
+// HookEventTargetLabels is the single source for how a symbolic target reads to
+// a person. The editor renders these; nothing else may invent its own wording.
+var HookEventTargetLabels = map[string]string{
+	EventTargetAgent: "The agent that triggered this hook",
+	EventTargetTask:  "The task that produced this event",
+}
+
+func isEventTarget(value string) bool {
+	_, ok := HookEventTargetLabels[value]
+	return ok
+}
+
+func resolveEventTarget(target string, event HookEvent) (string, error) {
+	switch target {
+	case EventTargetAgent:
+		if event.AgentID == "" {
+			return "", fmt.Errorf("this event has no agent, so %q cannot be resolved", HookEventTargetLabels[target])
+		}
+		return event.AgentID, nil
+	case EventTargetTask:
+		task, _ := event.Context["task"].(map[string]any)
+		id, _ := task["id"].(string)
+		if id == "" {
+			return "", fmt.Errorf("this event has no task, so %q cannot be resolved", HookEventTargetLabels[target])
+		}
+		return id, nil
+	default:
+		return "", fmt.Errorf("unknown event target %q", target)
+	}
+}
+
+// resolveActionEventTargets rewrites symbolic config values into concrete ids
+// for this one event, so every downstream reader keeps parsing plain UUIDs.
+func resolveActionEventTargets(action HookAction, event HookEvent) (HookAction, error) {
+	definition, configured := hookActionManifestByType[action.Type]
+	if !configured {
+		return action, nil
+	}
+	// Clone before writing: the stored policy config is shared across every
+	// event this hook sees and must never be mutated by one of them.
+	config := make(map[string]any, len(action.Config))
+	for key, value := range action.Config {
+		config[key] = value
+	}
+	for _, field := range definition.Fields {
+		if field.EventTarget == "" {
+			continue
+		}
+		if value, _ := action.Config[field.Key].(string); value != field.EventTarget {
+			continue
+		}
+		concrete, err := resolveEventTarget(field.EventTarget, event)
+		if err != nil {
+			return action, fmt.Errorf("%s %s: %w", action.Type, field.Key, err)
+		}
+		config[field.Key] = concrete
+	}
+	return HookAction{Type: action.Type, Config: config}, nil
+}
+
 func validateTypedHookAction(action HookAction) error {
 	definition, configured := hookActionManifestByType[action.Type]
 	if !configured {
@@ -80,6 +148,12 @@ func validateTypedHookAction(action HookAction) error {
 		}
 		if missing {
 			return fmt.Errorf("%s %s is required", action.Type, field.Key)
+		}
+	}
+	for _, field := range definition.Fields {
+		text, ok := action.Config[field.Key].(string)
+		if ok && isEventTarget(text) && field.EventTarget != text {
+			return fmt.Errorf("%s %s does not accept %q", action.Type, field.Key, text)
 		}
 	}
 	switch action.Type {

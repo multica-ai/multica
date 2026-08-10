@@ -141,6 +141,19 @@ type HookPolicy struct {
 	CanPublish       bool               `json:"can_publish"`
 	Lifecycle        HookLifecycle      `json:"lifecycle"`
 	CompatibleEvents []HookJournalEvent `json:"compatible_events,omitempty"`
+	// Live describes the version that is actually enforcing right now. It is
+	// set only when the configuration above is a Draft, because in that case
+	// every other field describes something that is NOT running yet.
+	Live *HookPolicyLive `json:"live,omitempty"`
+}
+
+type HookPolicyLive struct {
+	PolicyID    string       `json:"policy_id"`
+	Version     int          `json:"version"`
+	Name        string       `json:"name"`
+	Decision    HookDecision `json:"decision"`
+	Requirement string       `json:"requirement,omitempty"`
+	FailMode    HookFailMode `json:"fail_mode"`
 }
 
 func (p *HookPolicy) UnmarshalJSON(data []byte) error {

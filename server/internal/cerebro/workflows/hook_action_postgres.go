@@ -48,6 +48,12 @@ func NewPostgresHookActionExecutor(db cerebrodb.DBTX, authorizer HookAuthorizer,
 }
 
 func (e *PostgresHookActionExecutor) ExecuteHookAction(ctx context.Context, policy HookPolicy, event HookEvent, action HookAction) (map[string]any, error) {
+	// One place turns "the agent that triggered this hook" into a real id, so
+	// every branch below keeps reading plain UUIDs out of the config.
+	action, err := resolveActionEventTargets(action, event)
+	if err != nil {
+		return nil, err
+	}
 	actor := HookPermissionActor{Type: policy.CreatedByType, ID: policy.CreatedByID}
 	if e.authorizer == nil || !e.authorizer.Can(ctx, event.WorkspaceID, actor, HookPermissionWrite) {
 		return nil, ErrHookActionPermissionDenied

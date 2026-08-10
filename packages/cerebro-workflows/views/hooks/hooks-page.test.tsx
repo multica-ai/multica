@@ -166,3 +166,58 @@ describe("HooksPage", () => {
     expect(summary).not.toHaveTextContent("Private message");
   });
 });
+
+describe("HooksPage — reading the list without opening every hook (FIR-4797)", () => {
+  const live = Object.assign(createHookDraft(), {
+    id: "draft-rev", family_id: "family-1", name: "Chain approval",
+    contract_rule: "Approve the final step first.", contract_satisfy: "Approve it.",
+    mode: "dry_run" as const, decision: "allow" as const, actions: [],
+    lifecycle: { state: "live_with_draft" as const, live_policy_id: "live-1", live_version: 1, draft_id: "draft-rev", live_unchanged_by_draft: true },
+    live: { policy_id: "live-1", version: 1, name: "Chain approval", decision: "block" as const, requirement: "Approve it.", fail_mode: "closed" as const },
+  });
+
+  it("explains every state at the top of the page instead of leaving the words unexplained", () => {
+    render(<HooksPage onOpenHook={vi.fn()} hooks={[Object.assign(createHookDraft(), { id: "a", name: "A", mode: "enforce" as const })]} />);
+
+    const legend = screen.getByLabelText("What the states mean");
+    expect(legend).toHaveTextContent("It runs on every matching event and can stop, change, or start work.");
+    expect(legend).toHaveTextContent("it never stops, changes, or starts anything");
+    expect(legend).toHaveTextContent("The edit is saved as a Draft that changes nothing until someone presses");
+  });
+
+  it("shows the decision that is actually enforcing, not the unpublished draft's", () => {
+    render(<HooksPage onOpenHook={vi.fn()} hooks={[live]} />);
+
+    const row = screen.getByRole("button", { name: /Chain approval/ });
+    expect(row).toHaveTextContent("Stop the action");
+    expect(row).toHaveTextContent("Draft (not live):");
+  });
+
+  it("flags a draft that cannot be published without calling the live hook broken", () => {
+    render(<HooksPage onOpenHook={vi.fn()} hooks={[live]} />);
+
+    const row = screen.getByRole("button", { name: /Chain approval/ });
+    expect(row).toHaveTextContent("Enforced · Draft changes");
+    expect(row).toHaveTextContent("Draft cannot be published");
+  });
+
+  it("filters on trigger, decision, scope, and action, not only on state", () => {
+    const complete = Object.assign(createHookDraft(), { id: "one", family_id: "f1", name: "Completion guard", events: ["before.task.complete" as const], bindings: [{ kind: "workspace" as const, value: "" }], decision: "block" as const, actions: [{ type: "audit.record", label: "Record audit event", config: {} }] });
+    const message = Object.assign(createHookDraft(), { id: "two", family_id: "f2", name: "Message guard", events: ["before.message.send" as const], bindings: [{ kind: "agent" as const, value: "agent-1" }], decision: "allow" as const, actions: [{ type: "issue.comment", label: "Comment on issue", config: {} }] });
+    render(<HooksPage onOpenHook={vi.fn()} hooks={[complete, message]} />);
+
+    fireEvent.change(screen.getByLabelText("Trigger"), { target: { value: "before.message.send" } });
+    expect(screen.getByLabelText("Trigger")).toBeInTheDocument();
+    expect(screen.getByLabelText("Decision")).toBeInTheDocument();
+    expect(screen.getByLabelText("Applies to")).toBeInTheDocument();
+    expect(screen.getByLabelText("Action")).toBeInTheDocument();
+  });
+
+  it("offers a way to reach the history of every hook at once", () => {
+    const onOpenHistory = vi.fn();
+    render(<HooksPage onOpenHook={vi.fn()} onOpenHistory={onOpenHistory} hooks={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    expect(onOpenHistory).toHaveBeenCalled();
+  });
+});

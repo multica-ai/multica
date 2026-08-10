@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { RadioGroup, RadioGroupItem } from "@multica/ui/components/ui/radio-group";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import type { HookBinding, HookCondition, HookEventType, WorkflowHook } from "../../core/hook-types";
-import { HOOK_EVENT_OPTIONS } from "../../core/hook-types";
+import { HOOK_EVENT_OPTIONS, HOOK_EVENT_TARGET_LABELS } from "../../core/hook-types";
 import { fieldsForEvents, validateHookStep } from "../../core/hook-validation";
 import { ACTION_CONFIGURATION, HOOK_ACTION_OPTIONS, fieldDefinition } from "../../core/hook-ux";
 import type { HookStepKey } from "./hook-chain";
@@ -68,8 +68,8 @@ export function HookStepPanel({ step, hook, onChange, directory = {} }: { step: 
       <label className={`flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm ${hook.condition_mode === "all" ? "border-primary bg-primary/10" : ""}`}><RadioGroupItem value="all" />All conditions</label>
       <label className={`flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm ${hook.condition_mode === "any" ? "border-primary bg-primary/10" : ""}`}><RadioGroupItem value="any" />Any condition</label>
     </RadioGroup></fieldset>}
-    {hook.conditions.map((condition, index) => { const definition = fieldDefinition(condition.field); const rowError = conditionError(condition, fields); return <div key={index} aria-label={`Condition group ${index + 1}`} className="grid gap-2 rounded-xl border-l-4 border-l-primary/40 pl-2"><div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)_auto] sm:items-end">
-      <label className="grid gap-1 text-sm">Field<ChoiceSelect label={`Filter field ${index + 1}`} value={condition.field} placeholder="Select field" options={fields.map((field) => ({ value: field, label: fieldDefinition(field).label }))} onChange={(value) => updateCondition(index, { field: value, value: "" })} /></label>
+    {hook.conditions.map((condition, index) => { const definition = fieldDefinition(condition.field); const rowError = conditionError(condition); return <div key={index} aria-label={`Condition group ${index + 1}`} className="grid gap-2 rounded-xl border-l-4 border-l-primary/40 pl-2"><div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)_auto] sm:items-end">
+      <label className="grid gap-1 text-sm">Field<ChoiceSelect label={`Filter field ${index + 1}`} value={condition.field} placeholder="Select field" options={fieldOptions(fields, condition.field)} onChange={(value) => updateCondition(index, { field: value, value: "" })} /></label>
       <label className="grid gap-1 text-sm">Operator<ChoiceSelect label={`Filter operator ${index + 1}`} value={condition.operator} options={operatorOptions} onChange={(value) => updateCondition(index, { operator: value })} /></label>
       <label className="grid gap-1 text-sm">Value<ConditionValue index={index} condition={condition} definition={definition} onChange={(value) => updateCondition(index, { value })} /></label>
       <Button type="button" variant="outline" size="icon" aria-label={`Remove filter ${index + 1}`} onClick={() => onChange({ ...hook, conditions: hook.conditions.filter((_, current) => current !== index) })}><Trash2 className="size-4" /></Button>
@@ -113,7 +113,12 @@ function ActionConfiguration({ action, directory, update }: { action: WorkflowHo
 
 function ActionField({ field, value, directory, update }: { field: (typeof ACTION_CONFIGURATION)[string]["fields"][number]; value: unknown; directory: HookDirectory; update: (value: string | number | boolean) => void }) {
   const label = `${field.label}${field.required ? "" : " (optional)"}`;
-  if (field.input === "target") return <label className="grid gap-1 text-sm">{label}<HookTargetPicker label={field.key === "target" ? "Handoff target" : field.key === "plan_ref" ? "Handoff plan reference" : field.label} value={String(value ?? "")} options={directory[field.target ?? "agent"] ?? []} onSearch={field.target === "issue" ? directory.searchIssues : undefined} onChange={update} />{field.help && <span className="text-xs text-muted-foreground">{field.help}</span>}</label>;
+  // A hook is written once and runs against many events, so "the agent that
+  // triggered this hook" is offered first — picking one agent up front cannot
+  // express "instruct whoever is running right now".
+  const eventTargetOption = field.event_target ? [{ value: field.event_target, label: HOOK_EVENT_TARGET_LABELS[field.event_target] ?? field.event_target, description: "Resolved for each event when the hook runs" }] : [];
+  if (field.input === "target") return <label className="grid gap-1 text-sm">{label}<HookTargetPicker label={field.key === "target" ? "Handoff target" : field.key === "plan_ref" ? "Handoff plan reference" : field.label} value={String(value ?? "")} options={[...eventTargetOption, ...(directory[field.target ?? "agent"] ?? [])]} onSearch={field.target === "issue" ? directory.searchIssues : undefined} onChange={update} />{field.help && <span className="text-xs text-muted-foreground">{field.help}</span>}</label>;
+  if (field.event_target && field.input === "text") return <label className="grid gap-1 text-sm">{label}<ChoiceSelect label={field.label} value={String(value ?? "")} placeholder={`Select ${field.label.toLowerCase()}`} options={[{ value: field.event_target, label: HOOK_EVENT_TARGET_LABELS[field.event_target] ?? field.event_target }]} onChange={update} /><span className="text-xs text-muted-foreground">{field.help ?? "Resolved for each event when the hook runs."}</span></label>;
   if (field.input === "textarea") return <label className="grid gap-1 text-sm">{label}<Textarea aria-label={field.key === "rubric" ? "Judge rubric" : field.key === "summary" ? "Handoff summary" : field.key === "done" ? "Handoff done" : field.key === "remaining" ? "Handoff remaining" : field.label} value={String(value ?? "")} onChange={(event) => update(event.target.value)} /></label>;
   if (field.input === "checkbox") return <label className="flex items-center gap-2 text-sm"><Checkbox aria-label={field.label} checked={typeof value === "boolean" ? value : ("default" in field ? field.default : true) !== false} onCheckedChange={(checked) => update(checked === true)} />{field.label}{field.help && <span className="text-xs text-muted-foreground">{field.help}</span>}</label>;
   if (field.input === "select") return <label className="grid gap-1 text-sm">{label}<ChoiceSelect label={field.label} value={String(value ?? "")} options={field.options ?? []} onChange={update} /></label>;
@@ -137,8 +142,16 @@ function ConditionValue({ index, condition, definition, onChange }: { index: num
   return <Input aria-label={`Filter value ${index + 1}`} type={definition.input === "select" ? "text" : definition.input} value={condition.value} onChange={(event) => onChange(event.target.value)} />;
 }
 
-function conditionError(condition: HookCondition, fields: string[]) {
-  if (!fields.includes(condition.field)) return "Choose a field available for this trigger.";
+// The suggestion list plus whatever this hook already uses. A platform hook
+// filters on fields the list never contained, and dropping them silently made
+// the editor show an empty Field box on a working hook.
+function fieldOptions(fields: string[], current: string) {
+  const all = fields.includes(current) || !current.trim() ? fields : [current, ...fields];
+  return all.map((field) => ({ value: field, label: fieldDefinition(field).label }));
+}
+
+function conditionError(condition: HookCondition) {
+  if (!condition.field.trim()) return "Choose a field.";
   if (!condition.operator) return "Choose an operator.";
   if (!["exists", "not_exists"].includes(condition.operator) && !condition.value.trim()) return "Choose or enter a value.";
   return "";

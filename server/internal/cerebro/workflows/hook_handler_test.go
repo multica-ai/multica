@@ -731,3 +731,51 @@ func hookRequest(t *testing.T, method, path string, body any, actorID string, ow
 	}
 	return req
 }
+
+// A hook whose whole job is to tell the agent what to do could be saved but
+// never tested or published: the execution validator demanded an action on top
+// of the requirement, so "instruct instead of stop" died at 422 (FIR-4797).
+func TestHookExecutionAcceptsARequirementWithoutAnAction(t *testing.T) {
+	policy := newTestHookPolicy("33333333-3333-3333-3333-333333333333", HookRequire, HookModeDryRun, HookBinding{Kind: HookScopeWorkspace, ID: hookTestWorkspaceID})
+	policy.Handlers[0].Requirement = "Try again and address the rule this hook checks."
+	policy.Handlers[0].Actions = nil
+	policy.ConditionMode = HookConditionAll
+
+	if err := validateHookForExecution(&policy, hookTestWorkspaceID); err != nil {
+		t.Fatalf("a Require decision with a requirement should be saveable: %v", err)
+	}
+}
+
+func TestHookExecutionStillRequiresAnActionWhenItOnlyGuides(t *testing.T) {
+	policy := newTestHookPolicy("44444444-4444-4444-4444-444444444444", HookAllow, HookModeDryRun, HookBinding{Kind: HookScopeWorkspace, ID: hookTestWorkspaceID})
+	policy.Handlers[0].Actions = nil
+	policy.ConditionMode = HookConditionAll
+
+	if err := validateHookForExecution(&policy, hookTestWorkspaceID); err == nil {
+		t.Fatal("an Allow decision with no action does nothing and must be rejected")
+	}
+}
+
+// Drafts saved before the Live/Draft split carry revision 0. Refusing anything
+// below 1 made them impossible to test at any number, and the only clue was
+// "Draft revision is stale" (FIR-4797).
+func TestHookAPITestAcceptsRevisionZeroOnALegacyDraft(t *testing.T) {
+	repo := NewMemoryHookRepository()
+	policy := newTestHookPolicy("55555555-5555-5555-5555-555555555555", HookBlock, HookModeDryRun, HookBinding{Kind: HookScopeWorkspace})
+	policy.Handlers[0].Actions = []HookAction{{Type: "audit.record", Config: map[string]any{"event": "test"}}}
+	policy.Revision = 0
+	repo.Seed(hookTestWorkspaceID, policy)
+	retained, err := repo.CaptureEvent(context.Background(), hookTestWorkspaceID, HookEvent{EventID: "legacy-draft-event", Type: HookBeforeTaskComplete, WorkspaceID: hookTestWorkspaceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := &fakeHookAuthorizer{allow: map[HookPermission]bool{HookPermissionWrite: true}}
+	router := hookTestRouter(NewHookAPI(repo, auth))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, hookRequest(t, http.MethodPost, "/"+policy.ID+"/test", map[string]any{"event_id": retained.ID, "revision": 0}, "member-1", false))
+
+	if rec.Code == http.StatusBadRequest {
+		t.Fatalf("revision 0 must be accepted as a revision, got %d: %s", rec.Code, rec.Body.String())
+	}
+}

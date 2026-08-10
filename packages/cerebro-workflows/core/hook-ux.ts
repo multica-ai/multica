@@ -1,29 +1,15 @@
-import { createHookDraft, HOOK_EVENT_OPTIONS, type WorkflowHook } from "./hook-types";
-import type { HookStepKey } from "./hook-validation";
-import { HOOK_ACTION_CATALOG } from "./hook-action-catalog.generated";
+import { createHookDraft, HOOK_EVENT_OPTIONS, HOOK_EVENT_TARGET_LABELS, type WorkflowHook } from "./hook-types";
+import { validateHook, type HookStepKey } from "./hook-validation";
+import { ACTION_CONFIGURATION, HOOK_ACTION_OPTIONS } from "./hook-action-config";
+
+export { ACTION_CONFIGURATION, HOOK_ACTION_OPTIONS };
+export type { ActionDefinition, ActionFieldDefinition } from "./hook-action-config";
 
 export interface HookFieldDefinition {
   label: string;
   input: "text" | "number" | "boolean" | "select";
   options?: ReadonlyArray<{ value: string; label: string }>;
   sensitive?: boolean;
-}
-
-export interface ActionFieldDefinition {
-  key: string;
-  label: string;
-  input: "text" | "textarea" | "number" | "datetime-local" | "checkbox" | "target" | "select";
-  required?: boolean;
-  target?: "agent" | "member" | "issue" | "workflow" | "skill" | "squad" | "artifact" | "eval";
-  summary: "target" | "safe" | "redacted" | "omit";
-  help?: string;
-  options?: ReadonlyArray<{ value: string; label: string }>;
-}
-
-export interface ActionDefinition {
-  label: string;
-  description: string;
-  fields: readonly ActionFieldDefinition[];
 }
 
 export interface HookSummaryTarget { value: string; label: string }
@@ -50,9 +36,6 @@ export function fieldDefinition(field: string): HookFieldDefinition {
     input: field.endsWith(".id") ? "text" : "text",
   };
 }
-
-export const ACTION_CONFIGURATION = Object.fromEntries(HOOK_ACTION_CATALOG.map(({ type, label, description, fields }) => [type, { label, description, fields }])) as unknown as Record<string, ActionDefinition>;
-export const HOOK_ACTION_OPTIONS = HOOK_ACTION_CATALOG.map(({ type, label }) => ({ value: type, label }));
 
 export function triggerSummary(hook: WorkflowHook): string {
   const firstEvent = hook.events.at(0);
@@ -98,6 +81,84 @@ export const HOOK_STATE_FILTERS: ReadonlyArray<{ value: HookStateFilter; label: 
   { value: "managed", label: "Managed" },
 ];
 
+// One vocabulary, used by the list badge, the legend, and the editor header.
+// Every word here answers the only question a reader has: does this stop or
+// change my run right now? Nothing else may invent its own phrasing.
+export const HOOK_STATE_MEANING: Record<Exclude<HookStateFilter, "all">, string> = {
+  enforce: "Live. It runs on every matching event and can stop, change, or start work.",
+  dry_run: "Watching only. It sees real events and records what it would have done, and it never stops, changes, or starts anything.",
+  off: "Not running. It stays saved, and nothing reaches it.",
+  managed: "Live and owned by the workspace. It runs like Enforced, and it cannot be edited or published here.",
+};
+
+// A hook that is live can still carry an unpublished edit. The edit is what the
+// editor shows, so the list must say so — otherwise a red draft error reads as
+// "this hook is broken" when the live version is enforcing perfectly.
+export interface HookDraftState {
+  present: boolean;
+  publishable: boolean;
+  blocker?: string;
+  overLive: boolean;
+}
+
+export function hookDraftState(hook: WorkflowHook): HookDraftState {
+  const present = Boolean(hook.lifecycle.draft_id) || (!hook.family_id && hook.mode === "dry_run");
+  if (!present) return { present: false, publishable: true, overLive: false };
+  const validation = validateHook(hook);
+  return { present: true, publishable: validation.valid, blocker: validation.message, overLive: Boolean(hook.live) };
+}
+
+// What the hook does to a run right now — the LIVE decision when an unpublished
+// draft is sitting on top of it, never the draft's.
+export function enforcedDecisionSummary(hook: WorkflowHook): string {
+  return hook.live ? decisionSummary({ ...hook, decision: hook.live.decision }) : decisionSummary(hook);
+}
+
+export interface HookFilterState {
+  query: string;
+  state: HookStateFilter;
+  trigger: string;
+  decision: string;
+  scope: string;
+  action: string;
+  attention: boolean;
+}
+
+export const EMPTY_HOOK_FILTERS: HookFilterState = { query: "", state: "all", trigger: "all", decision: "all", scope: "all", action: "all", attention: false };
+
+export interface HookFilterOption { value: string; label: string }
+export interface HookFilterOptions {
+  trigger: HookFilterOption[];
+  decision: HookFilterOption[];
+  scope: HookFilterOption[];
+  action: HookFilterOption[];
+}
+
+// Options are derived from the hooks on screen, so every value that exists is
+// filterable and no filter ever offers an empty result.
+export function hookFilterOptions(hooks: readonly WorkflowHook[]): HookFilterOptions {
+  const collect = (values: Iterable<[string, string]>): HookFilterOption[] =>
+    [...new Map(values)].map(([value, label]) => ({ value, label })).sort((left, right) => left.label.localeCompare(right.label));
+  return {
+    trigger: collect(hooks.flatMap((hook) => hook.events.map((event): [string, string] => [event, HOOK_EVENT_OPTIONS.find((option) => option.value === event)?.label ?? event]))),
+    decision: collect(hooks.map((hook): [string, string] => [hook.live?.decision ?? hook.decision, enforcedDecisionSummary(hook)])),
+    scope: collect(hooks.flatMap((hook) => hook.bindings.map((binding): [string, string] => [binding.kind, binding.kind === "workspace" ? "This workspace" : binding.kind.replace(/^./, (letter) => letter.toUpperCase())]))),
+    action: collect(hooks.flatMap((hook) => hook.actions.map((action): [string, string] => [action.type, ACTION_CONFIGURATION[action.type]?.label ?? action.type]))),
+  };
+}
+
+export function filterHooks(hooks: readonly WorkflowHook[], filters: HookFilterState, directory: HookSummaryDirectory = {}): WorkflowHook[] {
+  return hooks.filter((hook) => {
+    if (filters.state !== "all" && hookStateKey(hook) !== filters.state) return false;
+    if (filters.trigger !== "all" && !hook.events.includes(filters.trigger as WorkflowHook["events"][number])) return false;
+    if (filters.decision !== "all" && (hook.live?.decision ?? hook.decision) !== filters.decision) return false;
+    if (filters.scope !== "all" && !hook.bindings.some((binding) => binding.kind === filters.scope)) return false;
+    if (filters.action !== "all" && !hook.actions.some((action) => action.type === filters.action)) return false;
+    if (filters.attention && hookDraftState(hook).publishable) return false;
+    return hookMatchesQuery(hook, filters.query, directory);
+  });
+}
+
 // The list groups a hook by what it actually does to a run right now, not by
 // its lifecycle wording: "Enforced · Draft changes" still enforces.
 export function hookStateKey(hook: WorkflowHook): Exclude<HookStateFilter, "all"> {
@@ -139,8 +200,12 @@ function conditionSummary(condition: WorkflowHook["conditions"][number]): string
   const definition = fieldDefinition(condition.field);
   const operator = conditionOperators[condition.operator] ?? condition.operator;
   if (condition.operator === "exists" || condition.operator === "not_exists") return `${definition.label} ${operator}`;
-  const knownField = Object.hasOwn(FIELD_DEFINITIONS, condition.field);
-  const sensitive = definition.sensitive || !knownField || /(?:^|\.)(?:body|content|id|message|prompt|reason|rubric|secret|token)(?:$|\.)/i.test(condition.field);
+  // Redact free text and identifiers, not everything unfamiliar. The old rule
+  // hid the value of any field it did not recognise and of anything under
+  // "message.", so "was this comment written by an agent: yes" printed as
+  // <redacted> — and the search box then searched the word <redacted> instead
+  // of the values (FIR-4797).
+  const sensitive = definition.sensitive || /(?:^|\.)(?:body|content|id|prompt|reason|rubric|secret|token)(?:$|\.)/i.test(condition.field);
   const value = sensitive ? "<redacted>" : humanConditionValue(condition.value, definition);
   return `${definition.label} ${operator} ${value}`;
 }
@@ -160,7 +225,7 @@ function actionSummary(action: WorkflowHook["actions"][number], directory: HookS
     const value = action.config[field.key];
     if (value === undefined || value === null || value === "" || field.summary === "omit") return [];
     if (field.summary === "redacted") return [`${field.label}: <redacted>`];
-    if (field.summary === "target") return [`${field.label}: ${resolvedTarget(directory, field.target ?? "agent", String(value))}`];
+    if (field.summary === "target") return [`${field.label}: ${HOOK_EVENT_TARGET_LABELS[String(value)] ?? resolvedTarget(directory, field.target ?? "agent", String(value))}`];
     const optionLabel = field.options?.find((option) => option.value === String(value))?.label;
     const displayed = field.input === "checkbox" ? value === true ? "Yes" : "No" : optionLabel ?? String(value);
     return [`${field.label}: ${displayed}`];
@@ -180,6 +245,10 @@ function templateHook(patch: Partial<WorkflowHook>): WorkflowHook {
 export const HOOK_TEMPLATES: ReadonlyArray<{ id: string; title: string; description: string; hook: WorkflowHook }> = [
   { id: "scratch", title: "Start from scratch", description: "Build a hook one step at a time.", hook: createHookDraft() },
   { id: "require-continuation", title: "Require a continuation before completion", description: "Stop tasks from ending without a clear next step.", hook: templateHook({ name: "Require a continuation", description: "Protects work from ending without a registered continuation.", events: ["before.task.complete"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "continuation", operator: "eq", value: "false" }], decision: "block", requirement: "Register a valid continuation before completing the task.", actions: [{ type: "audit.record", label: "Record audit event", config: { event: "continuation_required" } }] }) },
+  // The attempt cap is load-bearing: without it a failing retry re-triggers the
+  // same hook and the pair loops. Keep a condition on every recipe that starts
+  // work in response to a failure.
+  { id: "instruct-retry", title: "Tell the agent to try again instead of stopping it", description: "The run continues; on the first failure only, the same agent is started again with an instruction naming what to fix.", hook: templateHook({ name: "Instruct instead of stop", description: "Guides the agent that triggered the hook instead of blocking its work.", contract_rule: "A first failed attempt must be retried with the reason stated, not silently stopped.", contract_satisfy: "Read the instruction, fix what it names, and finish the work.", events: ["on.task.failure"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "attempt", operator: "lt", value: "2" }], decision: "allow", actions: [{ type: "agent.dispatch", label: "Instruct an agent", config: { agent_id: "event.agent", prompt: "Your last attempt stopped early. Read the failure reason on this issue, fix what it names, and continue the work." } }] }) },
   { id: "notify-task-failure", title: "Notify someone when a task fails", description: "Send an actionable notification after a task failure.", hook: templateHook({ name: "Notify on task failure", events: ["on.task.failure"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "attempt", operator: "gte", value: "1" }], decision: "allow", actions: [{ type: "member.notify", label: "Notify member", config: { title: "Task failed", message: "Review the failed task and choose the next action." } }] }) },
   { id: "no-silent-failure", title: "No silent task failures", description: "When a run dies without a pending retry, post the reason and next step on the issue and mark it blocked.", hook: templateHook({ name: "No silent task failures", description: "Guarantees a failed run leaves a visible trail: a comment with the failure reason and next step, and a blocked status so the issue cannot die quietly.", events: ["on.task.failure"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "retry.pending", operator: "eq", value: "false" }], decision: "allow", actions: [{ type: "issue.comment", label: "Comment on issue", config: { body: "This run stopped before it could finish (reason: {{task.failure_reason}}, attempt {{task.attempt}} of {{task.max_attempts}}).\n\nNext step: review the run log for this task, then restart the work or reassign it. The issue is marked blocked until someone acts." } }, { type: "issue.status", label: "Set issue status", config: { status: "blocked" } }] }) },
   { id: "wakeup-failure", title: "Record wakeup failures", description: "Keep a visible audit trail when a wakeup cannot fire.", hook: templateHook({ name: "Record wakeup failures", events: ["on.wakeup.fire_failure"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "attempt", operator: "gte", value: "1" }], decision: "allow", actions: [{ type: "audit.record", label: "Record audit event", config: { event: "wakeup_fire_failed" } }] }) },

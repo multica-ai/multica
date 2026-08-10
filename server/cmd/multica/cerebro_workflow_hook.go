@@ -122,7 +122,8 @@ func runWorkflowHookTest(cmd *cobra.Command, args []string) error {
 	} else {
 		eventID, _ := cmd.Flags().GetString("event")
 		revision, _ := cmd.Flags().GetInt("revision")
-		if eventID == "" || revision < 1 {
+		// Revision 0 is valid: Drafts saved before the Live/Draft split carry it.
+		if eventID == "" || revision < 0 {
 			return fmt.Errorf("--event and --revision are required")
 		}
 		body = map[string]any{"event_id": eventID, "revision": revision}

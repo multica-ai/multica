@@ -335,7 +335,7 @@ describe("HookEditor", () => {
     await user.click(screen.getByRole("button", { name: "Save draft" }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ mode: "dry_run" }));
     expect(screen.queryByRole("dialog", { name: "Save as draft?" })).not.toBeInTheDocument();
-    expect(screen.getByText("Live v4 stays active until you publish this Draft.")).toBeInTheDocument();
+    expect(screen.getByLabelText("What is enforcing")).toHaveTextContent("Version 4 runs on every matching event right now.");
   });
 
   it("offers Discard draft only when a separate Draft exists", async () => {

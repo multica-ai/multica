@@ -33,8 +33,8 @@
     },
     {
       "type": "agent.dispatch",
-      "label": "Start agent",
-      "description": "Start a named agent with this Hook context.",
+      "label": "Instruct an agent",
+      "description": "Give an agent an instruction and start it. Pair with Guide to instruct instead of stopping.",
       "capability": "trigger_other_agent",
       "fields": [
         {
@@ -43,7 +43,15 @@
           "input": "target",
           "target": "agent",
           "required": true,
-          "summary": "target"
+          "summary": "target",
+          "event_target": "event.agent"
+        },
+        {
+          "key": "prompt",
+          "label": "Instruction",
+          "input": "textarea",
+          "summary": "redacted",
+          "help": "What the agent should do next, for example: try again and address the rule this hook checks."
         }
       ]
     },
@@ -284,7 +292,8 @@
           "label": "Task ID",
           "input": "text",
           "required": true,
-          "summary": "redacted"
+          "summary": "redacted",
+          "event_target": "event.task"
         }
       ]
     },
@@ -299,7 +308,8 @@
           "label": "Task ID",
           "input": "text",
           "required": true,
-          "summary": "redacted"
+          "summary": "redacted",
+          "event_target": "event.task"
         }
       ]
     },

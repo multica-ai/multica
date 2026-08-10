@@ -47,6 +47,28 @@ type HookRunRecord struct {
 	CreatedAt     time.Time    `json:"created_at"`
 }
 
+// HookRunSummary is one line of the workspace-wide hook history: enough to see
+// which hook ran, on whose work, and whether it actually changed anything —
+// without loading every action result for every hook in the workspace.
+type HookRunSummary struct {
+	ID            string       `json:"id"`
+	FamilyID      string       `json:"family_id"`
+	HookName      string       `json:"hook_name"`
+	PolicyVersion int          `json:"policy_version"`
+	Event         HookEvent    `json:"event"`
+	SourceScope   HookBinding  `json:"source_scope"`
+	Decision      HookDecision `json:"decision"`
+	WouldDecision HookDecision `json:"would_decision,omitempty"`
+	// Enforced is false for a Dry run or a replayed test — the run was observed
+	// but nothing was stopped, changed, or started.
+	Enforced     bool         `json:"enforced"`
+	FailMode     HookFailMode `json:"fail_mode"`
+	Requirements []string     `json:"requirements,omitempty"`
+	LatencyMS    int          `json:"latency_ms"`
+	TimedOut     bool         `json:"timed_out"`
+	CreatedAt    time.Time    `json:"created_at"`
+}
+
 type HookRepository interface {
 	List(context.Context, string) ([]HookPolicy, error)
 	ListEffective(context.Context, string) ([]HookPolicy, error)
@@ -59,6 +81,7 @@ type HookRepository interface {
 	Delete(context.Context, string, HookPermissionActor, string) error
 	Publish(context.Context, string, string, string) (HookPolicy, error)
 	Runs(context.Context, string, string) ([]HookRunRecord, error)
+	RecentRuns(context.Context, string, int) ([]HookRunSummary, error)
 	RecordRun(context.Context, string, HookRunRecord) error
 	RefreshBaseline(context.Context, string, string) (time.Time, error)
 	RecordTestEvidence(context.Context, string, string, HookRunRecord) (time.Time, error)
@@ -319,6 +342,36 @@ func (r *MemoryHookRepository) Runs(_ context.Context, workspaceID, policyID str
 	defer r.mu.Unlock()
 	key := workspaceID + ":" + policyID
 	return append([]HookRunRecord(nil), r.runs[key]...), nil
+}
+
+func (r *MemoryHookRepository) RecentRuns(_ context.Context, workspaceID string, limit int) ([]HookRunSummary, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []HookRunSummary
+	for key, runs := range r.runs {
+		if !strings.HasPrefix(key, workspaceID+":") {
+			continue
+		}
+		for _, run := range runs {
+			name, familyID := "", run.PolicyID
+			if row := r.find(workspaceID, run.PolicyID); row != nil && row.live != nil {
+				name, familyID = row.live.Name, row.live.FamilyID
+			}
+			out = append(out, HookRunSummary{
+				ID: run.ID, FamilyID: familyID, HookName: name, PolicyVersion: run.PolicyVersion,
+				Event: run.Event, SourceScope: run.SourceScope,
+				Decision: run.Result.Decision, WouldDecision: run.Result.WouldDecision,
+				Enforced: run.Result.WouldDecision == "", FailMode: run.FailMode,
+				Requirements: run.Result.Requirements, LatencyMS: run.LatencyMS,
+				TimedOut: run.Result.TimedOut, CreatedAt: run.CreatedAt,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 func (r *MemoryHookRepository) RecordRun(_ context.Context, workspaceID string, run HookRunRecord) error {

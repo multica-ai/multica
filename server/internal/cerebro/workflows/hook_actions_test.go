@@ -233,3 +233,54 @@ func TestEvalActionsValidationAndRegistry(t *testing.T) {
 		}
 	}
 }
+
+// A hook is written once and runs against many events, so "the agent that
+// triggered this hook" must resolve per event — the reason a hook could not
+// instruct the agent it was actually gating (FIR-4797).
+func TestResolveActionEventTargetsInstructsTheTriggeringAgent(t *testing.T) {
+	action := HookAction{Type: "agent.dispatch", Config: map[string]any{"agent_id": EventTargetAgent, "prompt": "Try again."}}
+	event := HookEvent{AgentID: "3f1a4f42-1f0e-4f2b-9a4c-64b0f9e0d001"}
+
+	resolved, err := resolveActionEventTargets(action, event)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolved.Config["agent_id"] != event.AgentID {
+		t.Fatalf("agent_id = %v, want %s", resolved.Config["agent_id"], event.AgentID)
+	}
+	if resolved.Config["prompt"] != "Try again." {
+		t.Fatalf("prompt was rewritten: %v", resolved.Config["prompt"])
+	}
+	if action.Config["agent_id"] != EventTargetAgent {
+		t.Fatalf("stored policy config was mutated: %v", action.Config["agent_id"])
+	}
+}
+
+func TestResolveActionEventTargetsReadsTaskFromEventContext(t *testing.T) {
+	action := HookAction{Type: "task.retry", Config: map[string]any{"task_id": EventTargetTask}}
+	event := HookEvent{Context: map[string]any{"task": map[string]any{"id": "9c2b7a10-0000-4000-8000-000000000abc"}}}
+
+	resolved, err := resolveActionEventTargets(action, event)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolved.Config["task_id"] != "9c2b7a10-0000-4000-8000-000000000abc" {
+		t.Fatalf("task_id = %v", resolved.Config["task_id"])
+	}
+}
+
+func TestResolveActionEventTargetsFailsLoudlyWhenTheEventHasNoAgent(t *testing.T) {
+	action := HookAction{Type: "agent.dispatch", Config: map[string]any{"agent_id": EventTargetAgent}}
+
+	if _, err := resolveActionEventTargets(action, HookEvent{}); err == nil {
+		t.Fatal("expected an error naming the missing agent")
+	}
+}
+
+func TestValidateTypedHookActionRejectsAnEventTargetOnAFieldThatCannotTakeOne(t *testing.T) {
+	action := HookAction{Type: "member.notify", Config: map[string]any{"member_id": EventTargetAgent, "title": "t", "message": "m"}}
+
+	if err := validateTypedHookAction(action); err == nil {
+		t.Fatal("expected member_id to reject an event target")
+	}
+}

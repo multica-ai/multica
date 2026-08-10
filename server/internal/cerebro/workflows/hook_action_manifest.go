@@ -35,6 +35,10 @@ type HookActionManifestField struct {
 	Summary  string                     `json:"summary"`
 	Help     string                     `json:"help,omitempty"`
 	Options  []HookActionManifestOption `json:"options,omitempty"`
+	// EventTarget names the symbolic value this field accepts instead of a
+	// hand-picked id — "the agent that triggered this hook" rather than one
+	// agent chosen up front. Resolved per event in the action executor.
+	EventTarget string `json:"event_target,omitempty"`
 }
 
 type HookActionManifestOption struct {

@@ -54,6 +54,24 @@ export interface HookActionDraft {
   config: Record<string, unknown>;
 }
 
+// Symbolic action targets, resolved per event by the server. Mirrors
+// HookEventTargetLabels in server/internal/cerebro/workflows/hook_actions.go.
+export const HOOK_EVENT_TARGET_LABELS: Record<string, string> = {
+  "event.agent": "The agent that triggered this hook",
+  "event.task": "The task that produced this event",
+};
+
+// What is actually enforcing right now. Present only when the hook body above
+// is an unpublished Draft, so the list can stop describing a draft as live.
+export interface HookLive {
+  policy_id: string;
+  version: number;
+  name: string;
+  decision: HookDecision;
+  requirement?: string;
+  fail_mode: HookFailMode;
+}
+
 export interface WorkflowHook {
   id?: string;
   family_id?: string;
@@ -80,6 +98,25 @@ export interface WorkflowHook {
   last_run_at?: string;
   lifecycle: HookLifecycle;
   compatible_events?: HookJournalEvent[];
+  live?: HookLive;
+}
+
+// One row of the workspace-wide hook history.
+export interface HookRunSummary {
+  id: string;
+  family_id: string;
+  hook_name: string;
+  policy_version: number;
+  event_type: string;
+  agent_id: string;
+  issue_id: string;
+  decision: HookDecision;
+  would_decision?: HookDecision;
+  enforced: boolean;
+  requirements: string[];
+  timed_out: boolean;
+  latency_ms: number;
+  created_at: string;
 }
 
 export interface HookJournalEvent {
@@ -104,6 +141,9 @@ export interface HookRun {
   would_action: string;
   fail_mode: HookFailMode;
   remediation: string[];
+  // A run recorded from a Dry run or a replayed test changed nothing. A live
+  // run did. Calling every row a test was the old panel's worst lie.
+  dry_run: boolean;
   side_effects: false;
   latency_ms: number;
   event?: Record<string, unknown>;

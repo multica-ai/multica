@@ -1,5 +1,5 @@
 import type { HookEventType, WorkflowHook } from "./hook-types";
-import { ACTION_CONFIGURATION } from "./hook-ux";
+import { ACTION_CONFIGURATION } from "./hook-action-config";
 
 export type HookStepKey = "when" | "guide" | "actions";
 export interface HookValidationResult { valid: boolean; message?: string }
@@ -41,9 +41,13 @@ export function validateHookStep(hook: WorkflowHook, step: HookStepKey): HookVal
         return { valid: false, message: "Choose a named target for every scope." };
       }
       // Filters are optional — no conditions means the hook runs every time.
-      const fields = fieldsForEvents(hook.events);
-      if (hook.conditions.some((condition) => !fields.includes(condition.field))) {
-        return { valid: false, message: "Choose a filter field available for the selected trigger." };
+      // The field list below is the picker's suggestions, NOT the set of legal
+      // fields: the server accepts any non-empty field name, and the platform's
+      // own hooks use fields it never listed (message.agent_authored,
+      // chain.active). Rejecting those printed a red error on hooks that were
+      // enforcing perfectly (FIR-4797).
+      if (hook.conditions.some((condition) => !condition.field.trim())) {
+        return { valid: false, message: "Choose a filter field." };
       }
       if (hook.conditions.some((condition) => !condition.operator || (!["exists", "not_exists"].includes(condition.operator) && !condition.value.trim()))) {
         return { valid: false, message: "Complete every filter." };
@@ -55,7 +59,12 @@ export function validateHookStep(hook: WorkflowHook, step: HookStepKey): HookVal
       if (["block", "require"].includes(hook.decision) && !hook.requirement.trim()) return { valid: false, message: "Describe what the agent must do." };
       return { valid: true };
     case "actions":
-      if (hook.actions.length === 0) return { valid: false, message: "Add at least one action." };
+      // Mirrors the server: a Stop or Require decision already tells the agent
+      // what to do, so it needs no action on top. Only a hook that merely
+      // guides has to run something to have any effect at all.
+      if (hook.actions.length === 0 && !["block", "require"].includes(hook.decision)) {
+        return { valid: false, message: "Add an action, or choose Stop or Require an outcome so the agent is told what to do." };
+      }
       for (const action of hook.actions) {
         const message = actionConfigurationError(action);
         if (message) return { valid: false, message };

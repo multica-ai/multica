@@ -12,5 +12,6 @@ export { HooksPage } from "./hooks/hooks-page";
 export { HookEditor } from "./hooks/hook-editor";
 export { HookTestHistory } from "./hooks/hook-test-history";
 export { EffectiveHooks } from "./hooks/effective-hooks";
-export { WorkflowHooksPage } from "./hooks/workflow-hooks-page";
+export { WorkflowHooksPage, WorkflowHookHistoryPage } from "./hooks/workflow-hooks-page";
+export { HookHistoryPage } from "./hooks/hook-history-page";
 export { WorkflowHookEditorPage } from "./hooks/workflow-hook-editor-page";

@@ -10,7 +10,10 @@ describe("workflow hook validation", () => {
     expect(validateHook(draft).valid).toBe(false);
   });
 
-  it("offers a field catalog for every supported trigger and rejects unknown fields", () => {
+  // The catalog is the picker's suggestions, not the set of legal fields: the
+  // server accepts any non-empty name, and the platform's own hooks filter on
+  // fields the catalog never listed. Only an empty field is an error.
+  it("offers a field catalog for every supported trigger and accepts a field outside it", () => {
     for (const event of HOOK_EVENT_OPTIONS) {
       expect(fieldsForEvents([event.value]).length, event.value).toBeGreaterThan(0);
     }
@@ -24,7 +27,8 @@ describe("workflow hook validation", () => {
       requirement: "Add a continuation",
       actions: [{ type: "audit.record", label: "Record audit event", config: { event: "hook.test" } }],
     };
-    expect(validateHookStep(hook, "when")).toEqual({ valid: false, message: "Choose a filter field available for the selected trigger." });
+    expect(validateHookStep(hook, "when")).toEqual({ valid: true });
+    expect(validateHookStep({ ...hook, conditions: [{ field: "  ", operator: "eq", value: "x" }] }, "when")).toEqual({ valid: false, message: "Choose a filter field." });
   });
 
   it("requires both plain-language contract lines before publish", () => {

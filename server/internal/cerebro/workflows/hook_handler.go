@@ -47,6 +47,7 @@ func (h *HookAPI) Routes() http.Handler {
 	r.Get("/", h.List)
 	r.Post("/", h.Create)
 	r.Get("/active-rules", h.ListActiveRules)
+	r.Get("/runs", h.RecentRuns)
 	r.Get("/{id}", h.Get)
 	r.Put("/{id}", h.Update)
 	r.Delete("/{id}", h.Delete)
@@ -376,8 +377,12 @@ func validateHookForExecution(policy *HookPolicy, workspaceID string) error {
 		if (handler.Decision == HookBlock || handler.Decision == HookRequire) && strings.TrimSpace(handler.Requirement) == "" {
 			return fmt.Errorf("workflow hook requirement is required for %q decisions", handler.Decision)
 		}
-		if len(handler.Actions) == 0 {
-			return fmt.Errorf("at least one workflow hook action is required")
+		// A hook must do something, but stating what the agent must do IS
+		// something: a block/require decision carries its requirement to the
+		// agent. Demanding an action on top of that made "instruct instead of
+		// stop" impossible to save (FIR-4797).
+		if len(handler.Actions) == 0 && handler.Decision != HookBlock && handler.Decision != HookRequire {
+			return fmt.Errorf("a workflow hook that only guides needs at least one action, or a decision that states what the agent must do")
 		}
 	}
 	return validateTypedHookActions(*policy)
@@ -429,12 +434,15 @@ func (h *HookAPI) Test(w http.ResponseWriter, r *http.Request) {
 		EventID  string `json:"event_id"`
 		Revision int    `json:"revision"`
 	}
-	if r.Body == nil || json.NewDecoder(r.Body).Decode(&request) != nil || request.EventID == "" || request.Revision < 1 {
+	// Revision 0 is a real revision: Drafts saved before the Live/Draft split
+	// carry it. Rejecting it below 1 made those Drafts impossible to test at
+	// any number, with "revision is stale" as the only clue (FIR-4797).
+	if r.Body == nil || json.NewDecoder(r.Body).Decode(&request) != nil || request.EventID == "" || request.Revision < 0 {
 		writeError(w, http.StatusBadRequest, "event_id and revision are required")
 		return
 	}
 	if policy.Revision != request.Revision {
-		h.writeRepositoryError(w, ErrHookDraftRevisionStale)
+		h.writeRepositoryError(w, fmt.Errorf("%w: this Draft is at revision %d, not %d — reload the hook and try again", ErrHookDraftRevisionStale, policy.Revision, request.Revision))
 		return
 	}
 	if err := validateHookForExecution(&policy, workspaceID); err != nil {
@@ -500,6 +508,22 @@ func (h *HookAPI) Runs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runs, err := h.repository.Runs(r.Context(), workspaceID, id)
+	if err != nil {
+		h.writeRepositoryError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
+// RecentRuns answers "what have the hooks actually done lately?" across every
+// hook in the workspace, instead of forcing a person to open all 44 of them.
+func (h *HookAPI) RecentRuns(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, ok := h.authorize(w, r, HookPermissionRead)
+	if !ok {
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	runs, err := h.repository.RecentRuns(r.Context(), workspaceID, limit)
 	if err != nil {
 		h.writeRepositoryError(w, err)
 		return

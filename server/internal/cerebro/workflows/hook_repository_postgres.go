@@ -610,6 +610,28 @@ func (r *PostgresHookRepository) familyResponse(ctx context.Context, db cerebrod
 		default:
 			policy.Lifecycle.State = HookLifecycleLive
 		}
+		// The configuration above is the Draft, so say what is still enforcing.
+		// Without this the list describes an unpublished edit as if it were live.
+		if family.CurrentDraftRevisionID.Valid {
+			live := HookPolicyLive{PolicyID: policy.Lifecycle.LivePolicyID, Version: policy.Lifecycle.LiveVersion}
+			if err := db.QueryRow(ctx, `
+				SELECT policy.name, policy.fail_mode,
+				       COALESCE(handler.decision,''), COALESCE(handler.requirement,'')
+				FROM cerebro_workflow_hook_policy policy
+				LEFT JOIN cerebro_workflow_hook_handler handler ON handler.policy_id=policy.id
+				WHERE policy.id=$1 AND policy.workspace_id=$2
+				ORDER BY handler.position
+				LIMIT 1`, family.ActivePolicyID, family.WorkspaceID,
+			).Scan(&live.Name, &live.FailMode, &live.Decision, &live.Requirement); err != nil {
+				return HookPolicy{}, err
+			}
+			// A live policy with no handler row has no decision to report. Send
+			// nothing rather than an empty enum: the client rejects an invalid
+			// value and would drop the whole hook from the list.
+			if live.Decision != "" {
+				policy.Live = &live
+			}
+		}
 	}
 	if family.CurrentDraftRevisionID.Valid {
 		policy.Lifecycle.DraftID = util.UUIDToString(family.CurrentDraftRevisionID)
@@ -1173,6 +1195,60 @@ func (r *PostgresHookRepository) Runs(ctx context.Context, workspaceID, policyID
 			return nil, err
 		}
 		actionRows.Close()
+		out = append(out, run)
+	}
+	return out, rows.Err()
+}
+
+// RecentRuns is the workspace-wide hook history: every hook's runs on one
+// timeline, newest first. It deliberately skips per-run action results — that
+// detail belongs on a single hook's page, and loading it here would cost one
+// query per run.
+func (r *PostgresHookRepository) RecentRuns(ctx context.Context, workspaceID string, limit int) ([]HookRunSummary, error) {
+	wsID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT run.id, COALESCE(policy.family_id,revision.family_id),
+		       COALESCE(policy.name, revision.configuration->>'name', ''),
+		       run.policy_version, run.input_event, run.source_scope,
+		       run.decision, COALESCE(run.would_decision,''), run.policy_id IS NOT NULL,
+		       run.fail_mode, run.remediation, run.latency_ms, run.timed_out, run.created_at
+		FROM cerebro_workflow_hook_run run
+		LEFT JOIN cerebro_workflow_hook_policy policy ON policy.id=run.policy_id
+		LEFT JOIN cerebro_workflow_hook_draft_revision revision ON revision.id=run.draft_revision_id
+		WHERE run.workspace_id=$1
+		ORDER BY run.created_at DESC
+		LIMIT $2`, wsID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []HookRunSummary
+	for rows.Next() {
+		var runID, familyID pgtype.UUID
+		var eventJSON, scopeJSON []byte
+		var decision, wouldDecision, remediation string
+		var created pgtype.Timestamptz
+		var run HookRunSummary
+		if err := rows.Scan(&runID, &familyID, &run.HookName, &run.PolicyVersion, &eventJSON, &scopeJSON,
+			&decision, &wouldDecision, &run.Enforced, &run.FailMode, &remediation, &run.LatencyMS, &run.TimedOut, &created); err != nil {
+			return nil, err
+		}
+		run.ID = util.UUIDToString(runID)
+		run.FamilyID = util.UUIDToString(familyID)
+		run.Decision = HookDecision(decision)
+		run.WouldDecision = HookDecision(wouldDecision)
+		run.CreatedAt = created.Time
+		_ = json.Unmarshal(eventJSON, &run.Event)
+		_ = json.Unmarshal(scopeJSON, &run.SourceScope)
+		if remediation != "" {
+			run.Requirements = strings.Split(remediation, "\n")
+		}
 		out = append(out, run)
 	}
 	return out, rows.Err()

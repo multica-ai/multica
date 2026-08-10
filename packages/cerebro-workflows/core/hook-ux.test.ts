@@ -3,7 +3,12 @@ import { createHookDraft, HOOK_EVENT_OPTIONS } from "./hook-types";
 import { validateHook } from "./hook-validation";
 import {
   ACTION_CONFIGURATION,
+  EMPTY_HOOK_FILTERS,
   HOOK_TEMPLATES,
+  enforcedDecisionSummary,
+  filterHooks,
+  hookDraftState,
+  hookFilterOptions,
   decisionSummary,
   describeHook,
   failModeSummary,
@@ -49,15 +54,15 @@ describe("Hooks UX contract", () => {
 
   it("provides useful starter recipes plus a scratch option", () => {
     expect(HOOK_TEMPLATES.length).toBeGreaterThanOrEqual(5);
-    expect(HOOK_TEMPLATES.length).toBeLessThanOrEqual(8);
+    expect(HOOK_TEMPLATES.length).toBeLessThanOrEqual(9);
     expect(HOOK_TEMPLATES.some((template) => template.id === "scratch")).toBe(true);
     expect(HOOK_TEMPLATES.filter((template) => template.id !== "scratch").every((template) => template.hook.events.length > 0)).toBe(true);
   });
 
-  it("keeps all seven guided recipes structurally saveable as This workspace Drafts", () => {
+  it("keeps all eight guided recipes structurally saveable as This workspace Drafts", () => {
     const recipes = HOOK_TEMPLATES.filter((template) => template.id !== "scratch");
 
-    expect(recipes).toHaveLength(7);
+    expect(recipes).toHaveLength(8);
     expect(recipes.every((template) =>
       template.hook.events.length > 0
       && template.hook.bindings.some((binding) => binding.kind === "workspace" && binding.value === "")
@@ -146,5 +151,111 @@ describe("Hooks UX contract", () => {
     };
 
     expect(scopeSummary(hook)).toBe("This workspace");
+  });
+});
+
+describe("Reading a hook list without opening every hook (FIR-4797)", () => {
+  const withLive = Object.assign(createHookDraft(), {
+    id: "draft-1", family_id: "family-1", name: "Chain approval",
+    contract_rule: "Approve the final step.", contract_satisfy: "Approve it.",
+    events: ["before.issue.status_change" as const], bindings: [{ kind: "workspace" as const, value: "" }],
+    decision: "allow" as const, actions: [],
+    lifecycle: { state: "live_with_draft" as const, live_policy_id: "live-1", live_version: 1, draft_id: "draft-1", live_unchanged_by_draft: true },
+    live: { policy_id: "live-1", version: 1, name: "Chain approval", decision: "block" as const, requirement: "Approve it.", fail_mode: "closed" as const },
+  });
+  const plain = Object.assign(createHookDraft(), {
+    id: "plain", family_id: "family-2", name: "Message guard",
+    contract_rule: "Address someone.", contract_satisfy: "Mention a recipient.",
+    events: ["before.message.send" as const], bindings: [{ kind: "agent" as const, value: "agent-1" }],
+    decision: "require" as const, requirement: "Mention a recipient.",
+    actions: [{ type: "issue.comment", label: "Comment on issue", config: { body: "hi" } }],
+    mode: "enforce" as const,
+    lifecycle: { state: "live" as const, live_policy_id: "live-2", live_version: 1, live_unchanged_by_draft: false },
+  });
+
+  it("reports the decision that is enforcing, not the unpublished draft's", () => {
+    expect(enforcedDecisionSummary(withLive)).toBe("Stop the action");
+    expect(decisionSummary(withLive)).toBe("Guide (let it continue)");
+  });
+
+  it("separates a draft that cannot be published from a hook that is broken", () => {
+    const draft = hookDraftState(withLive);
+
+    expect(draft).toMatchObject({ present: true, publishable: false, overLive: true });
+    expect(draft.blocker).toBeTruthy();
+    expect(hookDraftState(plain)).toMatchObject({ present: false, publishable: true });
+  });
+
+  it("offers a filter for every value the hooks on screen actually use", () => {
+    const options = hookFilterOptions([withLive, plain]);
+
+    expect(options.trigger.map((option) => option.value)).toEqual(["before.issue.status_change", "before.message.send"]);
+    expect(options.decision.map((option) => option.value).sort()).toEqual(["block", "require"]);
+    expect(options.scope.map((option) => option.value).sort()).toEqual(["agent", "workspace"]);
+    expect(options.action.map((option) => option.value)).toEqual(["issue.comment"]);
+  });
+
+  it("filters on trigger, decision, scope, and action — not only on state", () => {
+    const hooks = [withLive, plain];
+
+    expect(filterHooks(hooks, { ...EMPTY_HOOK_FILTERS, trigger: "before.message.send" })).toEqual([plain]);
+    expect(filterHooks(hooks, { ...EMPTY_HOOK_FILTERS, decision: "block" })).toEqual([withLive]);
+    expect(filterHooks(hooks, { ...EMPTY_HOOK_FILTERS, scope: "agent" })).toEqual([plain]);
+    expect(filterHooks(hooks, { ...EMPTY_HOOK_FILTERS, action: "issue.comment" })).toEqual([plain]);
+    expect(filterHooks(hooks, { ...EMPTY_HOOK_FILTERS, attention: true })).toEqual([withLive]);
+  });
+
+  it("names the symbolic action target instead of calling it an unknown target", () => {
+    const instruct = Object.assign(createHookDraft(), {
+      events: ["on.task.failure" as const], bindings: [{ kind: "workspace" as const, value: "" }],
+      actions: [{ type: "agent.dispatch", label: "Instruct an agent", config: { agent_id: "event.agent", prompt: "Try again." } }],
+    });
+
+    expect(describeHook(instruct)).toContain("The agent that triggered this hook");
+    expect(describeHook(instruct)).not.toContain("Unknown target");
+  });
+});
+
+describe("The editor must not call a working hook broken (FIR-4797)", () => {
+  const platformHook = Object.assign(createHookDraft(), {
+    name: "Require a recipient on agent comments",
+    contract_rule: "An agent comment must address someone.",
+    contract_satisfy: "Name the recipient.",
+    mode: "managed" as const,
+    events: ["before.message.send" as const],
+    bindings: [{ kind: "workspace" as const, value: "" }],
+    // Fields the platform's own hooks use, which the editor's suggestion list
+    // never contained.
+    conditions: [{ field: "message.agent_authored", operator: "eq", value: "true" }],
+    decision: "require" as const, requirement: "Name the recipient.",
+    actions: [],
+  });
+
+  it("accepts a filter field the suggestion list does not know", () => {
+    expect(validateHook(platformHook)).toEqual({ valid: true });
+  });
+
+  it("accepts a Require decision with no action, because the requirement IS the instruction", () => {
+    expect(validateHook({ ...platformHook, conditions: [] })).toEqual({ valid: true });
+  });
+
+  it("still demands an action from a hook that only guides", () => {
+    const guiding = { ...platformHook, decision: "allow" as const, requirement: "", actions: [] };
+
+    expect(validateHook(guiding).valid).toBe(false);
+  });
+
+  it("prints the value of an unfamiliar field instead of hiding it as redacted", () => {
+    const summary = describeHook(platformHook);
+
+    expect(summary).toContain("Message · agent authored is true");
+    expect(summary).not.toContain("<redacted>");
+  });
+
+  it("still hides free text and identifiers", () => {
+    const secretive = { ...platformHook, conditions: [{ field: "message.body", operator: "starts_with", value: "Hi Jesper" }] };
+
+    expect(describeHook(secretive)).toContain("<redacted>");
+    expect(describeHook(secretive)).not.toContain("Hi Jesper");
   });
 });

@@ -44,7 +44,11 @@ export function HookEditor({ initialHook, onSave, onPublish, onTest, onDisable, 
   useEffect(() => setHook(initialHook), [initialHook]);
   const dirty = JSON.stringify(hook) !== JSON.stringify(initialHook);
   const validation = validateHook(hook);
-  const publishEnabled = !dirty && canPublish && hook.baseline_run_count > 0 && hook.mode !== "managed" && validation.valid;
+  // A Managed hook is defined in code and is live from the moment it exists.
+  // Offering Publish and "Before you can publish:" on it read as "this hook is
+  // incomplete", when nothing was ever missing (FIR-4797).
+  const managed = hook.mode === "managed" || hook.lifecycle.state === "managed";
+  const publishEnabled = !dirty && canPublish && hook.baseline_run_count > 0 && !managed && validation.valid;
   const selectedIndex = HOOK_STEPS.findIndex((step) => step.key === selected);
   const selectStep = (step: HookStepKey) => {
     setSelected(step);
@@ -75,8 +79,8 @@ export function HookEditor({ initialHook, onSave, onPublish, onTest, onDisable, 
         <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">{({ off: "Off", dry_run: "Dry run", enforce: "Enforced", managed: "Managed" })[hook.mode]}</span>
         {hook.id && <Button variant="outline" size="sm" onClick={() => { setTesting(true); onOpenHistory?.(); }}>History</Button>}
         <Button variant="outline" size="sm" disabled={!hook.id || !hook.revision || dirty || pending} onClick={() => setTesting(true)}><FlaskConical className="size-4" />Test</Button>
-        <Button variant="outline" size="sm" disabled={pending} onClick={saveDraft}>{pending ? "Saving…" : "Save draft"}</Button>
-        <Button title={publishRequirement} size="sm" disabled={!publishEnabled || pending} onClick={() => setPublishOpen(true)}>Publish</Button>
+        {!managed && <Button variant="outline" size="sm" disabled={pending} onClick={saveDraft}>{pending ? "Saving…" : "Save draft"}</Button>}
+        {!managed && <Button title={publishRequirement} size="sm" disabled={!publishEnabled || pending} onClick={() => setPublishOpen(true)}>Publish</Button>}
         {hook.id && (onDisable || onDiscard || onDelete || onDuplicate) && <DropdownMenu><DropdownMenuTrigger render={<Button variant="outline" size="icon-sm" aria-label="More hook actions" />}><MoreHorizontal className="size-4" /></DropdownMenuTrigger><DropdownMenuContent align="end">
           {onDisable && <DropdownMenuItem onClick={() => setDisableOpen(true)}>Disable hook</DropdownMenuItem>}
           {onDiscard && hasDraft && <DropdownMenuItem onClick={() => setDiscardOpen(true)}>Discard draft</DropdownMenuItem>}
@@ -85,9 +89,10 @@ export function HookEditor({ initialHook, onSave, onPublish, onTest, onDisable, 
         </DropdownMenuContent></DropdownMenu>}
       </div>
     </header>
-    {hasLive && <p className="border-b bg-primary/5 px-4 py-2 text-xs text-muted-foreground">Live v{liveVersion} stays active until you publish this Draft.</p>}
-    {dirty && <p aria-label="Draft save requirement" className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">Save draft before testing or publishing.</p>}
-    {!publishEnabled && publishRequirement && <p aria-label="Publish requirements" className="border-b bg-muted/20 px-4 py-2 text-xs text-muted-foreground"><strong className="text-foreground">Before you can publish:</strong> {publishRequirement}</p>}
+    {hasLive && hasDraft && <p aria-label="What is enforcing" className="border-b bg-primary/5 px-4 py-2 text-xs text-muted-foreground"><strong className="text-foreground">You are editing a Draft. Nothing below is running yet.</strong> Live v{liveVersion} keeps running on every matching event until someone publishes this Draft. Anything reported below as missing or invalid is about the Draft — it does not affect Live v{liveVersion}.</p>}
+    {hasLive && !hasDraft && <p aria-label="What is enforcing" className="border-b bg-success/5 px-4 py-2 text-xs text-muted-foreground"><strong className="text-foreground">This hook is live.</strong> {hook.mode === "managed" ? "It is owned by the workspace, so it runs on every matching event and cannot be published or edited here." : `Version ${liveVersion} runs on every matching event right now.`}</p>}
+    {!managed && dirty && <p aria-label="Draft save requirement" className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">Save draft before testing or publishing.</p>}
+    {!managed && !publishEnabled && publishRequirement && <p aria-label="Publish requirements" className="border-b bg-muted/20 px-4 py-2 text-xs text-muted-foreground"><strong className="text-foreground">Before you can publish {hasLive ? "this draft" : "this hook"}:</strong> {publishRequirement}</p>}
     <div className="grid gap-2 border-b bg-muted/20 px-4 py-3 sm:grid-cols-[minmax(12rem,22rem)_minmax(0,1fr)] sm:items-center">
       <Input aria-label="Hook description" placeholder="Add a short description" value={hook.description} onChange={(event) => setHook({ ...hook, description: event.target.value })} />
       <p aria-label="What this hook does" className="text-sm text-muted-foreground"><strong className="text-foreground">What this hook does: </strong>{describeHook(hook, directory)}</p>
