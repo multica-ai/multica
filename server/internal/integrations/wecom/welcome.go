@@ -1,11 +1,14 @@
 package wecom
 
-// welcome.go — what the bot says when somebody opens the chat for the first
-// time.
+// welcome.go — what the bot says when somebody opens the chat.
 //
-// WeCom pushes an `enter_chat` event the moment a user opens the bot's
-// conversation, and expects an `aibot_respond_welcome_msg` echoing that
-// frame's req_id. The event type was already named here (eventEnterChat) but
+// WeCom pushes an `enter_chat` event on a user's FIRST entry into the bot's
+// 1:1 that DAY — not once per person and not on every open
+// (developer.work.weixin.qq.com/document/path/101463, supported event types) —
+// and expects an `aibot_respond_welcome_msg` echoing that frame's req_id. So
+// this greeting recurs daily for anyone who keeps opening the chat, which is
+// why it stays short and why the unbound branch below must not hand out a
+// fresh link every time. The event type was already named here (eventEnterChat) but
 // nothing acted on it, so it fell through to a log line: a first-time user
 // opened the bot and got an empty window — no statement of what the bot is
 // for, and no hint that they have to link an account before it will answer
@@ -44,16 +47,11 @@ const cmdRespondWelcome = "aibot_respond_welcome_msg"
 // lookup, mint and write — so a slow database produces no greeting rather than
 // a frame WeCom refuses for arriving late.
 //
-// ASSUMPTION, not a documented figure: the reply window for enter_chat is
-// taken to be around five seconds, by analogy with the 5s window documented
-// for aibot_respond_msg (ws_frame.go). WeCom's long-connection docs do not
-// state one for enter_chat, and we have not measured it against a live
-// tenant. 4s is that assumption minus room for the write itself.
-//
-// What would settle it: send a respond_welcome deliberately late against a
-// real bot and read the errcode. If the real window is wider, this is merely
-// conservative; if it is narrower, greetings are being refused and the fix is
-// to cut the lookup, not this number.
+// Five seconds is the documented window, stated for this event rather than
+// borrowed from the message path: developer.work.weixin.qq.com/document/path/101463
+// requires the reply within five seconds of the event callback or the greeting
+// cannot be sent, and WecomTeam/aibot-node-sdk says the same of
+// aibot_respond_welcome_msg. 4s is that window minus room for the write.
 const welcomeDeadline = 4 * time.Second
 
 // welcomeQueueDepth is small on purpose, and the queue behind it DROPS when
@@ -83,6 +81,17 @@ const (
 	// should not have to work out whether they are the same link.
 	welcomeUnboundPrefix = "👋 你好，我是 Multica 智能助手。请先绑定你的 Multica 账号，才能与我对话：\n"
 	welcomeUnboundSuffix = "\n（链接 15 分钟内有效）"
+
+	// welcomeLinkAlreadySent is the greeting when the mint throttle suppressed
+	// a token: a live link is already with this user and only its hash was
+	// stored, so there is no URL to rebuild. Points at the message they have
+	// rather than handing them a second one.
+	//
+	// Reachable on the ordinary first-contact path, not just in theory: the
+	// bot answers an unbound user in a group, replier mints and posts the link
+	// into their 1:1, and the user opens that 1:1 to click it — which is their
+	// first entry of the day, so enter_chat fires seconds after the mint.
+	welcomeLinkAlreadySent = "👋 你好，我是 Multica 智能助手。绑定链接刚才已经发给你了，就在上方，请直接点击完成绑定。"
 )
 
 // defaultBindingPath is where the web app serves the bind page.
@@ -235,6 +244,13 @@ func (c *wecomChannel) welcomeText(ctx context.Context, wecomUserID string, log 
 	if err != nil {
 		log.WarnContext(ctx, "wecom: welcome could not mint a binding token", "error", err)
 		return welcomeBoundText
+	}
+	if token.Reused {
+		// Raw is empty here by contract — the throttle stored only a hash, so
+		// there is no URL to rebuild. Building one anyway yields "?token=" and
+		// a link that cannot bind anyone. replier.go makes the same call at
+		// :179; this is the same answer.
+		return welcomeLinkAlreadySent
 	}
 	bindURL := c.appURL + c.bindingPath() + "?token=" + url.QueryEscape(token.Raw)
 	return welcomeUnboundPrefix + bindURL + welcomeUnboundSuffix

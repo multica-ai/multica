@@ -59,6 +59,10 @@ type countingBinder struct {
 	calls int
 	raw   string
 	err   error
+	// reused makes Mint answer the way the throttle does: a live link is
+	// already with this user, so only its expiry comes back and Raw stays
+	// empty — the raw secret was never stored.
+	reused bool
 }
 
 func (b *countingBinder) Mint(context.Context, pgtype.UUID, pgtype.UUID, string) (BindingToken, error) {
@@ -67,6 +71,9 @@ func (b *countingBinder) Mint(context.Context, pgtype.UUID, pgtype.UUID, string)
 	b.mu.Unlock()
 	if b.err != nil {
 		return BindingToken{}, b.err
+	}
+	if b.reused {
+		return BindingToken{ExpiresAt: time.Now().Add(BindingTokenTTL), Reused: true}, nil
 	}
 	return BindingToken{Raw: b.raw, ExpiresAt: time.Now().Add(BindingTokenTTL)}, nil
 }
@@ -173,6 +180,36 @@ func TestOpeningTheChatUnboundHandsOverTheLink(t *testing.T) {
 	}
 	if !strings.Contains(said, "https://multica.example/wecom/bind?token=s3cret") {
 		t.Fatalf("the greeting carries no bind link: %q", said)
+	}
+}
+
+// The throttle suppressed the mint, so there is no raw secret to put in a URL.
+// Building one anyway yields "?token=" and a link that binds nobody.
+//
+// Not a corner case: the bot answers an unbound user in a group, replier mints
+// and posts the link into their 1:1, and the user opens that 1:1 to click it —
+// their first entry of the day, so enter_chat fires seconds after the mint and
+// lands inside the throttle window.
+func TestOpeningTheChatWithALinkAlreadySentDoesNotSendAnEmptyToken(t *testing.T) {
+	t.Parallel()
+	lookup := &fakeWelcomeLookup{
+		bindingErr: pgx.ErrNoRows,
+		install:    db.ChannelInstallation{ID: mustTestUUID(t), WorkspaceID: mustTestUUID(t)},
+	}
+	minter := &countingBinder{raw: "s3cret", reused: true}
+	c, conn, sender := welcomeRig(t, lookup, minter)
+
+	c.handleEnterChat(context.Background(), enterChatFrame(t, "req-1", "single", "T-alex"), sender, slog.Default())
+
+	said := welcomeSaid(t, conn)
+	if said == "" {
+		t.Fatal("opening the chat produced nothing")
+	}
+	if strings.Contains(said, "token=") {
+		t.Errorf("the greeting carries a bind link built from a suppressed mint: %q", said)
+	}
+	if said != welcomeLinkAlreadySent {
+		t.Errorf("greeting = %q, want the one pointing at the link already in the chat", said)
 	}
 }
 
