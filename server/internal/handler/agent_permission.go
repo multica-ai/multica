@@ -28,6 +28,18 @@ const (
 	invocationTargetTeam      = "team"
 )
 
+// A2A invocation mode values (NEX-24). The empty string is the stored default
+// and means "unset": the invoke gate falls through to the permission_mode
+// judgment, preserving the status-quo fail-closed behavior for agent/system
+// callers with no top-of-chain human originator. The three non-empty values
+// are explicit, owner-authored grants. There is deliberately no "default"
+// enum value in the CHECK constraint — empty IS the default.
+const (
+	a2aModeAnyAgent       = "any_agent"
+	a2aModeSquadLeaders   = "squad_leaders"
+	a2aModeSpecificAgents = "specific_agents"
+)
+
 // deriveLegacyVisibility maps the permission model back onto the legacy
 // two-value visibility field so old clients never observe a widening:
 //   - public_to WITH a workspace target -> "workspace" (everyone can invoke)
@@ -302,4 +314,203 @@ func (h *Handler) enrichAgentResponseWithTargetsHTTP(w http.ResponseWriter, r *h
 		return false
 	}
 	return true
+}
+
+// --- A2A invocation axis (NEX-24) ---
+
+// resolvedA2AInvocation is the normalised outcome of parsing the A2A
+// invocation fields (a2a_invocation_mode + a2a_invocation_grants) off a
+// create/update request. grants is only ever non-empty for specific_agents.
+type resolvedA2AInvocation struct {
+	mode   string
+	grants []pgtype.UUID
+}
+
+// a2aModeValid reports whether the value is one of the A2A modes the DB CHECK
+// constraint accepts (the empty string means "unset / status quo").
+func a2aModeValid(mode string) bool {
+	return mode == "" || mode == a2aModeAnyAgent || mode == a2aModeSquadLeaders || mode == a2aModeSpecificAgents
+}
+
+// parseA2AInvocationInput validates + normalises the A2A invocation fields.
+//
+// Tri-state semantics mirror permission_mode / thinking_level:
+//   - mode absent AND grants nil  -> ok=false (nothing to do)
+//   - mode present (any value, "" included) -> authoritative; "" clears the
+//     axis back to status-quo fail-closed
+//   - only grants present         -> mode is kept at currentMode (the caller's
+//     existing value); the grants only survive when that mode is
+//     specific_agents
+//
+// Grants are de-duped and each entry must be a well-formed UUID. Grants are
+// only retained for specific_agents — any other mode drops them, so a stale
+// whitelist can never linger behind a mode change.
+func parseA2AInvocationInput(mode string, hasMode bool, grants []string, currentMode string) (resolvedA2AInvocation, bool, error) {
+	if !hasMode && grants == nil {
+		return resolvedA2AInvocation{}, false, nil
+	}
+
+	m := currentMode
+	if hasMode {
+		m = mode
+	}
+	if !a2aModeValid(m) {
+		return resolvedA2AInvocation{}, false, fmt.Errorf("a2a_invocation_mode must be 'any_agent', 'squad_leaders', 'specific_agents', or empty")
+	}
+
+	res := resolvedA2AInvocation{mode: m}
+	if m != a2aModeSpecificAgents {
+		// any_agent / squad_leaders / unset: no whitelist is meaningful. The
+		// caller still clears any previously-persisted grants.
+		return res, true, nil
+	}
+
+	seen := make(map[string]struct{}, len(grants))
+	for _, raw := range grants {
+		if raw == "" {
+			continue
+		}
+		if _, dup := seen[raw]; dup {
+			continue
+		}
+		gid, err := util.ParseUUID(raw)
+		if err != nil {
+			return resolvedA2AInvocation{}, false, fmt.Errorf("a2a_invocation_grants entries must be valid agent uuids")
+		}
+		seen[raw] = struct{}{}
+		res.grants = append(res.grants, gid)
+	}
+	return res, true, nil
+}
+
+// replaceA2AInvocationGrants rewrites an agent's specific_agents whitelist
+// wholesale: clear then re-insert. Called inside create/update after the agent
+// row exists.
+func (h *Handler) replaceA2AInvocationGrants(ctx context.Context, agentID pgtype.UUID, createdBy pgtype.UUID, granteeIDs []pgtype.UUID) error {
+	return replaceA2AInvocationGrantsWithQueries(ctx, h.Queries, agentID, createdBy, granteeIDs)
+}
+
+// replaceA2AInvocationGrantsWithQueries is the tx-friendly variant: callers
+// that hold a `qtx := h.Queries.WithTx(tx)` can pass it here so the grant rows
+// are written inside the same transaction as the agent row (the template
+// create path depends on this, mirroring replaceInvocationTargetsWithQueries).
+func replaceA2AInvocationGrantsWithQueries(ctx context.Context, q *db.Queries, agentID pgtype.UUID, createdBy pgtype.UUID, granteeIDs []pgtype.UUID) error {
+	if err := q.DeleteAgentInvocationGrants(ctx, agentID); err != nil {
+		return err
+	}
+	for _, gid := range granteeIDs {
+		if err := q.CreateAgentInvocationGrant(ctx, db.CreateAgentInvocationGrantParams{
+			AgentID:        agentID,
+			GranteeAgentID: gid,
+			CreatedBy:      createdBy,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// clearA2AInvocationGrants deletes every whitelist row for an agent. Used when
+// the mode is not specific_agents (so a stale whitelist can never outlive a
+// mode change).
+func (h *Handler) clearA2AInvocationGrants(ctx context.Context, agentID pgtype.UUID) error {
+	return h.Queries.DeleteAgentInvocationGrants(ctx, agentID)
+}
+
+// a2aInputChangesAgent reports whether the A2A invocation fields on an update
+// request would actually CHANGE the agent's current A2A invocation state
+// (mode or the grantee set). Used to let a non-owner's no-op resubmit through
+// (PATCH-as-PUT that echoes unchanged A2A settings) while rejecting a real
+// change with 403 — the same contract as permissionInputChangesAgent. Fails
+// safe: on a DB error it returns changed=true so a non-owner attempt is
+// rejected rather than silently applied.
+func (h *Handler) a2aInputChangesAgent(ctx context.Context, existing db.Agent, mode *string, grants *[]string) (bool, error) {
+	if mode == nil && grants == nil {
+		return false, nil
+	}
+
+	hasMode := mode != nil
+	var grantList []string
+	if grants != nil {
+		grantList = *grants
+	}
+	// mode may be nil (grants-only request): pass "" with hasMode=false so
+	// currentMode is retained instead of dereferencing a nil pointer.
+	modeVal := ""
+	if mode != nil {
+		modeVal = *mode
+	}
+	desired, ok, err := parseA2AInvocationInput(modeVal, hasMode, grantList, existing.A2aInvocationMode)
+	if err != nil || !ok {
+		// Unparseable or effectively no A2A fields → treat as no change.
+		return false, nil
+	}
+	if desired.mode != existing.A2aInvocationMode {
+		return true, nil
+	}
+	if desired.mode != a2aModeSpecificAgents {
+		// Non-specific_agents mode: whitelist rows must be absent.
+		n, err := h.countA2AInvocationGrants(ctx, existing.ID)
+		if err != nil {
+			return true, err
+		}
+		return n != 0, nil
+	}
+	current, err := h.Queries.ListAgentInvocationGrants(ctx, existing.ID)
+	if err != nil {
+		return true, err
+	}
+	want := make(map[string]struct{}, len(desired.grants))
+	for _, g := range desired.grants {
+		want[uuidToString(g)] = struct{}{}
+	}
+	have := make(map[string]struct{}, len(current))
+	for _, row := range current {
+		have[uuidToString(row.GranteeAgentID)] = struct{}{}
+	}
+	if len(want) != len(have) {
+		return true, nil
+	}
+	for k := range want {
+		if _, ok := have[k]; !ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// countA2AInvocationGrants reports how many whitelist rows an agent has. Used
+// by a2aInputChangesAgent for the "mode is not specific_agents, grants must be
+// absent" comparison without materialising the rows.
+func (h *Handler) countA2AInvocationGrants(ctx context.Context, agentID pgtype.UUID) (int64, error) {
+	rows, err := h.Queries.ListAgentInvocationGrants(ctx, agentID)
+	if err != nil {
+		return 0, err
+	}
+	return int64(len(rows)), nil
+}
+
+// applyA2AInvocationToResponse fills A2aInvocationMode and the
+// specific_agents whitelist (A2aInvocationGrants) from the loaded grant rows.
+// Keeps the response consistent in one place, mirroring
+// applyInvocationTargetsToResponse.
+func applyA2AInvocationToResponse(resp *AgentResponse, mode string, grants []db.AgentInvocationGrant) {
+	resp.A2aInvocationMode = mode
+	ids := make([]string, 0, len(grants))
+	for _, g := range grants {
+		ids = append(ids, uuidToString(g.GranteeAgentID))
+	}
+	resp.A2aInvocationGrants = ids
+}
+
+// enrichAgentResponseWithA2A loads an agent's A2A whitelist and applies it to
+// the response (A2aInvocationGrants). Used by the single-agent detail /
+// create / update responses, mirroring enrichAgentResponseWithTargets.
+func (h *Handler) enrichAgentResponseWithA2A(ctx context.Context, resp *AgentResponse, agentID pgtype.UUID) error {
+	grants, err := h.Queries.ListAgentInvocationGrants(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	applyA2AInvocationToResponse(resp, resp.A2aInvocationMode, grants)
+	return nil
 }

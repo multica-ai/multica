@@ -85,10 +85,20 @@ type AgentResponse struct {
 	// InvocationTargets is the allow-list for a public_to agent. Empty for
 	// private agents. Only populated on the detail / list / create / update
 	// responses that load it; broadcast payloads leave it empty.
-	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
-	Status             string                     `json:"status"`
-	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
-	Model              string                     `json:"model"`
+	InvocationTargets []AgentInvocationTargetDTO `json:"invocation_targets"`
+	// A2aInvocationMode is the independent A2A invocation axis (NEX-24),
+	// orthogonal to PermissionMode: it ONLY governs agent/system callers and
+	// is judged on the immediate actor principal. "" (unset) = status-quo
+	// fail-closed; "any_agent" / "squad_leaders" / "specific_agents" are the
+	// explicit owner-authored grants.
+	A2aInvocationMode string `json:"a2a_invocation_mode"`
+	// A2aInvocationGrants is the specific_agents whitelist (grantee agent
+	// ids). Non-empty only when A2aInvocationMode == "specific_agents".
+	// Populated on the same responses that load InvocationTargets.
+	A2aInvocationGrants []string `json:"a2a_invocation_grants"`
+	Status              string   `json:"status"`
+	MaxConcurrentTasks  int32    `json:"max_concurrent_tasks"`
+	Model               string   `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
@@ -195,6 +205,8 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Visibility:               a.Visibility,
 		PermissionMode:           a.PermissionMode,
 		InvocationTargets:        []AgentInvocationTargetDTO{},
+		A2aInvocationMode:        a.A2aInvocationMode,
+		A2aInvocationGrants:      []string{},
 		Status:                   a.Status,
 		MaxConcurrentTasks:       a.MaxConcurrentTasks,
 		Model:                    a.Model.String,
@@ -1002,12 +1014,18 @@ type CreateAgentRequest struct {
 	// and Visibility is ignored; when absent, legacy Visibility is mapped
 	// (private -> private, workspace -> public_to+workspace target). On create
 	// only the caller can be the owner, so targets are accepted unconditionally.
-	PermissionMode     *string                    `json:"permission_mode"`
-	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
-	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
-	Model              string                     `json:"model"`
-	ThinkingLevel      string                     `json:"thinking_level"`
-	ServiceTier        string                     `json:"service_tier"`
+	PermissionMode    *string                    `json:"permission_mode"`
+	InvocationTargets []AgentInvocationTargetDTO `json:"invocation_targets"`
+	// A2aInvocationMode + A2aInvocationGrants are the independent A2A
+	// invocation axis (NEX-24). Empty mode = unset = status-quo fail-closed;
+	// grants only matter for specific_agents. On create only the caller can be
+	// the owner, so the fields are accepted unconditionally.
+	A2aInvocationMode   string   `json:"a2a_invocation_mode"`
+	A2aInvocationGrants []string `json:"a2a_invocation_grants"`
+	MaxConcurrentTasks  int32    `json:"max_concurrent_tasks"`
+	Model               string   `json:"model"`
+	ThinkingLevel       string   `json:"thinking_level"`
+	ServiceTier         string   `json:"service_tier"`
 	// ComposioToolkitAllowlist seeds the per-task overlay gate (MUL-3869). On
 	// create only the calling user can be the owner, so we accept the field
 	// unconditionally here; the cross-owner permission gate lives on PUT.
@@ -1100,6 +1118,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	perm, _, permErr := parsePermissionInput(wsUUID, req.PermissionMode, req.InvocationTargets, req.PermissionMode != nil, hasTargets, &legacyVis)
 	if permErr != nil {
 		writeError(w, http.StatusBadRequest, permErr.Error())
+		return
+	}
+
+	// A2A invocation axis (NEX-24). On create the caller is always the owner,
+	// so the fields are accepted unconditionally. hasA2aMode is always true
+	// here (create writes the axis explicitly; "" = unset = status quo), which
+	// also validates that any submitted mode is a legal value.
+	a2a, _, a2aErr := parseA2AInvocationInput(req.A2aInvocationMode, true, req.A2aInvocationGrants, req.A2aInvocationMode)
+	if a2aErr != nil {
+		writeError(w, http.StatusBadRequest, a2aErr.Error())
 		return
 	}
 	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
@@ -1217,6 +1245,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		RuntimeID:                runtime.ID,
 		Visibility:               perm.legacyVisibility(),
 		PermissionMode:           perm.mode,
+		A2aInvocationMode:        a2a.mode,
 		MaxConcurrentTasks:       req.MaxConcurrentTasks,
 		OwnerID:                  parseUUID(ownerID),
 		CustomEnv:                ce,
@@ -1242,6 +1271,14 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, created.ID, parseUUID(ownerID), perm.targets); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save agent access")
 		return
+	}
+	// A2A whitelist (NEX-24): persist the specific_agents grants inside the
+	// same tx as the agent row, mirroring the invocation targets above.
+	if a2a.mode == a2aModeSpecificAgents {
+		if err := replaceA2AInvocationGrantsWithQueries(r.Context(), qtx, created.ID, parseUUID(ownerID), a2a.grants); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to save agent A2A invocation grants")
+			return
+		}
 	}
 	for _, skillID := range skillUUIDs {
 		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
@@ -1269,6 +1306,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, created.ID); err != nil {
 		slog.Warn("create agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+	}
+	if err := h.enrichAgentResponseWithA2A(r.Context(), &resp, created.ID); err != nil {
+		slog.Warn("create agent: load A2A invocation grants for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
 	}
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
@@ -1316,11 +1356,20 @@ type UpdateAgentRequest struct {
 	// gate is owner/allow-list based and an admin-authored allow-list would
 	// confuse the owner about who can run their agent. permission_mode is
 	// authoritative when present; otherwise legacy visibility is mapped.
-	PermissionMode     *string                     `json:"permission_mode"`
-	InvocationTargets  *[]AgentInvocationTargetDTO `json:"invocation_targets"`
-	Status             *string                     `json:"status"`
-	MaxConcurrentTasks *int32                      `json:"max_concurrent_tasks"`
-	Model              *string                     `json:"model"`
+	PermissionMode    *string                     `json:"permission_mode"`
+	InvocationTargets *[]AgentInvocationTargetDTO `json:"invocation_targets"`
+	// A2aInvocationMode follows the same tri-state contract as
+	// thinking_level: field omitted → no change; present with "" → clear the
+	// axis back to status-quo fail-closed; present with a value → set. Like
+	// the permission fields it is an OWNER-ONLY write: a non-owner real change
+	// is 403, a no-op resubmit is tolerated. A2aInvocationGrants is the
+	// specific_agents whitelist; it only has effect when the (effective) mode
+	// is specific_agents.
+	A2aInvocationMode   *string   `json:"a2a_invocation_mode"`
+	A2aInvocationGrants *[]string `json:"a2a_invocation_grants"`
+	Status              *string   `json:"status"`
+	MaxConcurrentTasks  *int32    `json:"max_concurrent_tasks"`
+	Model               *string   `json:"model"`
 	// ThinkingLevel is treated as a tri-state per-MUL-2339:
 	//   - field omitted → no change (leave existing value alone)
 	//   - field present with "" → explicit clear (use runtime default)
@@ -1667,6 +1716,63 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			params.Visibility = pgtype.Text{String: perm.legacyVisibility(), Valid: true}
 		}
 	}
+	// A2A invocation axis (NEX-24). OWNER-ONLY write, same contract as the
+	// permission fields above: a non-owner submitting a *real* A2A change is
+	// rejected with 403; a no-op resubmit (PATCH-as-PUT echoing the current
+	// settings back) is tolerated and dropped. The owner path applies the
+	// tri-state semantics (omitted mode = no change, "" = clear to status-quo
+	// fail-closed, value = set).
+	_, hasA2aMode := rawFields["a2a_invocation_mode"]
+	a2aTouched := hasA2aMode || req.A2aInvocationGrants != nil
+	var resolvedA2A resolvedA2AInvocation
+	replaceA2AGrants := false
+	clearA2AGrants := false
+	if a2aTouched {
+		isAgentOwner := uuidToString(existing.OwnerID) == requestUserID(r)
+		if !isAgentOwner {
+			changed, a2aErr := h.a2aInputChangesAgent(r.Context(), existing, req.A2aInvocationMode, req.A2aInvocationGrants)
+			if a2aErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to evaluate A2A invocation change")
+				return
+			}
+			if changed {
+				writeError(w, http.StatusForbidden, "only the agent owner can change A2A invocation settings")
+				return
+			}
+			slog.Debug("update agent: non-owner A2A fields matched current state; ignored",
+				append(logger.RequestAttrs(r), "agent_id", id)...)
+		} else {
+			var grantList []string
+			if req.A2aInvocationGrants != nil {
+				grantList = *req.A2aInvocationGrants
+			}
+			// A JSON null under the key decodes to a nil pointer; treat it like
+			// an explicit "" (clear back to status-quo fail-closed) rather than
+			// dereferencing a nil pointer.
+			modeVal := ""
+			if req.A2aInvocationMode != nil {
+				modeVal = *req.A2aInvocationMode
+			}
+			a2a, _, a2aErr := parseA2AInvocationInput(modeVal, hasA2aMode, grantList, existing.A2aInvocationMode)
+			if a2aErr != nil {
+				writeError(w, http.StatusBadRequest, a2aErr.Error())
+				return
+			}
+			resolvedA2A = a2a
+			if hasA2aMode {
+				params.A2aInvocationMode = pgtype.Text{String: a2a.mode, Valid: true}
+			}
+			// The whitelist is only meaningful for specific_agents; every other
+			// mode clears it. When the mode was omitted but grants were sent,
+			// the effective mode is the existing one (already folded in by
+			// parseA2AInvocationInput via currentMode).
+			if a2a.mode == a2aModeSpecificAgents {
+				replaceA2AGrants = true
+			} else {
+				clearA2AGrants = true
+			}
+		}
+	}
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
 	}
@@ -1889,11 +1995,32 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A2A whitelist (NEX-24): replace when the effective mode is
+	// specific_agents, otherwise clear any stale grants so a mode change never
+	// leaves a dead whitelist behind.
+	if replaceA2AGrants {
+		if err := h.replaceA2AInvocationGrants(r.Context(), updated.ID, parseUUID(requestUserID(r)), resolvedA2A.grants); err != nil {
+			slog.Warn("update agent: persist A2A invocation grants failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update A2A invocation grants: "+err.Error())
+			return
+		}
+	} else if clearA2AGrants {
+		if err := h.clearA2AInvocationGrants(r.Context(), updated.ID); err != nil {
+			slog.Warn("update agent: clear A2A invocation grants failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear A2A invocation grants: "+err.Error())
+			return
+		}
+	}
 
 	resp := h.agentToResponse(updated)
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, updated.ID); err != nil {
 		slog.Warn("update agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
+		return
+	}
+	if err := h.enrichAgentResponseWithA2A(r.Context(), &resp, updated.ID); err != nil {
+		slog.Warn("update agent: load A2A invocation grants for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent A2A invocation grants")
 		return
 	}
 	// agentToResponse always initialises Skills as []; junction-table rows

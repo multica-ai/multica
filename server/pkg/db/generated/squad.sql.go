@@ -210,6 +210,28 @@ func (q *Queries) GetSquadInWorkspace(ctx context.Context, arg GetSquadInWorkspa
 	return i, err
 }
 
+const isAgentSquadLeader = `-- name: IsAgentSquadLeader :one
+SELECT EXISTS(
+    SELECT 1 FROM squad
+    WHERE workspace_id = $1 AND leader_id = $2 AND archived_at IS NULL
+) AS is_leader
+`
+
+type IsAgentSquadLeaderParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	LeaderID    pgtype.UUID `json:"leader_id"`
+}
+
+// Whether the given agent is the leader of a non-archived squad in the
+// workspace. Backs the A2A invoke gate's `squad_leaders` mode (NEX-24); an
+// archived squad no longer grants its leader any invoke authority.
+func (q *Queries) IsAgentSquadLeader(ctx context.Context, arg IsAgentSquadLeaderParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isAgentSquadLeader, arg.WorkspaceID, arg.LeaderID)
+	var is_leader bool
+	err := row.Scan(&is_leader)
+	return is_leader, err
+}
+
 const isSquadMember = `-- name: IsSquadMember :one
 SELECT EXISTS(
     SELECT 1 FROM squad_member

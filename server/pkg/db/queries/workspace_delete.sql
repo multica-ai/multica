@@ -207,6 +207,15 @@ deleted_agent_invocation_targets AS (
     DELETE FROM agent_invocation_target
     WHERE agent_id IN (SELECT id FROM ws_agents)
 ),
+deleted_agent_invocation_grants AS (
+    -- A2A whitelist (NEX-24): agent_id is the target agent being deleted and
+    -- grantee_agent_id names a workspace agent that may invoke it. Both sides
+    -- are scoped to the workspace's agents so no grant row can survive the
+    -- teardown (no DB FK; application-layer cleanup).
+    DELETE FROM agent_invocation_grant
+    WHERE agent_id IN (SELECT id FROM ws_agents)
+       OR grantee_agent_id IN (SELECT id FROM ws_agents)
+),
 deleted_agent_skills AS (
     DELETE FROM agent_skill
     WHERE agent_id IN (SELECT id FROM ws_agents)

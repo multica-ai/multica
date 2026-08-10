@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS agent_invocation_grant_grantee_agent_id_idx;

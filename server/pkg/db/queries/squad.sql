@@ -101,6 +101,15 @@ SELECT EXISTS(
     WHERE squad_id = $1 AND member_type = $2 AND member_id = $3
 ) AS is_member;
 
+-- name: IsAgentSquadLeader :one
+-- Whether the given agent is the leader of a non-archived squad in the
+-- workspace. Backs the A2A invoke gate's `squad_leaders` mode (NEX-24); an
+-- archived squad no longer grants its leader any invoke authority.
+SELECT EXISTS(
+    SELECT 1 FROM squad
+    WHERE workspace_id = $1 AND leader_id = $2 AND archived_at IS NULL
+) AS is_leader;
+
 -- name: CountSquadMembers :one
 SELECT count(*) FROM squad_member WHERE squad_id = $1;
 

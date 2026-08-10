@@ -58,14 +58,15 @@ INSERT INTO agent (
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     service_tier,
-    composio_toolkit_allowlist, permission_mode
+    composio_toolkit_allowlist, permission_mode, a2a_invocation_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
     $17,
     sqlc.narg('composio_toolkit_allowlist')::text[],
-    COALESCE(sqlc.narg('permission_mode'), 'private')
+    COALESCE(sqlc.narg('permission_mode'), 'private'),
+    COALESCE(sqlc.narg('a2a_invocation_mode'), '')
 )
 RETURNING *;
 
@@ -133,6 +134,7 @@ UPDATE agent SET
     runtime_id = COALESCE(sqlc.narg('runtime_id'), runtime_id),
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
     permission_mode = COALESCE(sqlc.narg('permission_mode'), permission_mode),
+    a2a_invocation_mode = COALESCE(sqlc.narg('a2a_invocation_mode'), a2a_invocation_mode),
     status = COALESCE(sqlc.narg('status'), status),
     max_concurrent_tasks = COALESCE(sqlc.narg('max_concurrent_tasks'), max_concurrent_tasks),
     instructions = COALESCE(sqlc.narg('instructions'), instructions),

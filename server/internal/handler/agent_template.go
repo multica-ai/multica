@@ -136,6 +136,12 @@ type CreateAgentFromTemplateRequest struct {
 	// asked for a workspace-shared agent.
 	PermissionMode    *string                    `json:"permission_mode,omitempty"`
 	InvocationTargets []AgentInvocationTargetDTO `json:"invocation_targets,omitempty"`
+	// A2aInvocationMode + A2aInvocationGrants are the independent A2A
+	// invocation axis (NEX-24), mirroring the manual CreateAgent path. Empty
+	// mode = unset = status-quo fail-closed; grants only matter for
+	// specific_agents.
+	A2aInvocationMode   string   `json:"a2a_invocation_mode,omitempty"`
+	A2aInvocationGrants []string `json:"a2a_invocation_grants,omitempty"`
 	// Optional overrides — let the picker UI customise the template before
 	// creation without forcing a second round-trip to the detail page.
 	// When nil/empty, the template's own values are used.
@@ -236,6 +242,14 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	perm, _, permErr := parsePermissionInput(wsUUID, req.PermissionMode, req.InvocationTargets, req.PermissionMode != nil, hasTargets, &legacyVis)
 	if permErr != nil {
 		writeError(w, http.StatusBadRequest, permErr.Error())
+		return
+	}
+
+	// A2A invocation axis (NEX-24), mirroring CreateAgent. On create the
+	// caller is always the owner, so the fields are accepted unconditionally.
+	a2a, _, a2aErr := parseA2AInvocationInput(req.A2aInvocationMode, true, req.A2aInvocationGrants, req.A2aInvocationMode)
+	if a2aErr != nil {
+		writeError(w, http.StatusBadRequest, a2aErr.Error())
 		return
 	}
 
@@ -472,6 +486,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		RuntimeID:          runtime.ID,
 		Visibility:         perm.legacyVisibility(),
 		PermissionMode:     perm.mode,
+		A2aInvocationMode:  a2a.mode,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		OwnerID:            creatorUUID,
 		CustomEnv:          ce,
@@ -537,6 +552,20 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 			)...)
 		writeError(w, http.StatusInternalServerError, "failed to persist invocation targets: "+err.Error())
 		return
+	}
+
+	// Persist the A2A whitelist (NEX-24) inside the same tx as the agent row,
+	// mirroring the invocation targets above.
+	if a2a.mode == a2aModeSpecificAgents {
+		if err := replaceA2AInvocationGrantsWithQueries(r.Context(), qtx, agent.ID, creatorUUID, a2a.grants); err != nil {
+			slog.Error("agent-template create: persist A2A invocation grants failed",
+				append(logger.RequestAttrs(r),
+					"agent_id", uuidToString(agent.ID),
+					"error", err,
+				)...)
+			writeError(w, http.StatusInternalServerError, "failed to persist A2A invocation grants: "+err.Error())
+			return
+		}
 	}
 
 	// Attach user-supplied extra skills (selected in the create dialog
@@ -606,6 +635,10 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	// "private" and re-render the wrong access badge.
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, agent.ID); err != nil {
 		slog.Warn("agent-template create: load invocation targets for response failed",
+			append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(agent.ID))...)
+	}
+	if err := h.enrichAgentResponseWithA2A(r.Context(), &resp, agent.ID); err != nil {
+		slog.Warn("agent-template create: load A2A invocation grants for response failed",
 			append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(agent.ID))...)
 	}
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)

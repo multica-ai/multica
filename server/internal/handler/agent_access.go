@@ -58,6 +58,24 @@ func (h *Handler) canInvokeAgent(ctx context.Context, agent db.Agent, actorType,
 		return true
 	}
 
+	// A2A invocation axis (NEX-24): an INDEPENDENT, owner-authored opt-in that
+	// ONLY widens the gate for AGENT actors, judged on the IMMEDIATE actor
+	// principal (not the top-of-chain originator). It sits after the owner
+	// branch and before the permission_mode judgment below.
+	//
+	// system actors NEVER enter this branch: the A2A axis only governs agent
+	// callers (CEO ruling), so system keeps its pre-existing judgment exactly
+	// — `public_to workspace` via workspaceBroad below, everything else
+	// fail-closed. Empty (unset) mode also fails closed and falls through to
+	// the permission_mode judgment, so the historical "no human originator ->
+	// deny" behavior is preserved unchanged for every existing agent. See
+	// a2aInvocationAllowed for the per-mode semantics and security boundary.
+	if actorType == "agent" {
+		if h.a2aInvocationAllowed(ctx, agent, actorType, actorID, workspaceID) {
+			return true
+		}
+	}
+
 	if agent.PermissionMode != "public_to" {
 		// private (or any unknown mode) is deny-by-default: no admin bypass,
 		// no A2A bypass. Only the owner branch above passes.
@@ -456,4 +474,98 @@ func (h *Handler) canEnqueueSquadLeader(ctx context.Context, leaderID pgtype.UUI
 		return false
 	}
 	return h.canInvokeAgent(ctx, agent, actorType, actorID, originatorUserID, workspaceID)
+}
+
+// a2aInvocationAllowed is the pure predicate for the independent A2A
+// invocation axis (NEX-24). It decides whether an AGENT actor may invoke
+// `agent` under `agent.A2aInvocationMode`, ORTHOGONAL to permission_mode.
+//
+// Security boundary: every granting mode is an EXPLICIT, owner-authored opt-in
+// that widens the invoke gate ONLY for agent callers and is judged on the
+// IMMEDIATE actor principal — this axis is specifically about "which agent
+// principals may call me", unlike the permission_mode axis which keys on the
+// top-of-chain human originator. system actors are deliberately OUT OF SCOPE
+// for this axis (CEO ruling): they never enter this branch in canInvokeAgent
+// and keep their pre-existing judgment (public_to workspace via workspaceBroad;
+// everything else fail-closed). The empty value (the default for every
+// pre-existing agent) fails closed, so nothing widens unless the owner
+// explicitly opts in. Any lookup error also fails closed.
+//
+// Mode semantics:
+//   - ""               -> false (unset = status quo fail-closed; canInvokeAgent
+//     falls through to the permission_mode judgment, preserving the historical
+//     "no human originator -> deny" behavior)
+//   - "any_agent"      -> true for agent actors only (NEVER system)
+//   - "squad_leaders"  -> true only for agent actors that lead a (non-archived)
+//     squad in the agent's workspace; system actors carry no agent identity and
+//     never match
+//   - "specific_agents"-> true only for agent actors on the owner's whitelist
+//     (agent_invocation_grant); system actors never match
+//
+// The two DB-backed lookups are injected as functions so every mode + edge
+// case can be unit-tested without a database. Production wiring lives in the
+// Handler method of the same name.
+func a2aInvocationAllowed(
+	ctx context.Context,
+	agent db.Agent,
+	actorType, actorID, workspaceID string,
+	isAgentSquadLeader func(ctx context.Context, agentID, wsID pgtype.UUID) (bool, error),
+	isAgentInvocationGranted func(ctx context.Context, agentID, granteeAgentID pgtype.UUID) (bool, error),
+) bool {
+	switch agent.A2aInvocationMode {
+	case a2aModeAnyAgent:
+		// Broadest grant: every agent principal may invoke, human originator
+		// or not. Deliberately NOT system — the A2A axis only governs agent
+		// callers, so system stays on its pre-existing workspaceBroad path
+		// and this branch never admits it.
+		return actorType == "agent"
+	case a2aModeSquadLeaders:
+		if actorType != "agent" || actorID == "" {
+			return false
+		}
+		actorUUID, err := util.ParseUUID(actorID)
+		if err != nil {
+			return false
+		}
+		wsUUID, err := util.ParseUUID(workspaceID)
+		if err != nil {
+			return false
+		}
+		ok, err := isAgentSquadLeader(ctx, actorUUID, wsUUID)
+		return err == nil && ok
+	case a2aModeSpecificAgents:
+		if actorType != "agent" || actorID == "" {
+			return false
+		}
+		actorUUID, err := util.ParseUUID(actorID)
+		if err != nil {
+			return false
+		}
+		ok, err := isAgentInvocationGranted(ctx, agent.ID, actorUUID)
+		return err == nil && ok
+	default:
+		// Empty (unset) or unknown mode: fail closed. This is the load-bearing
+		// default — it keeps the pre-NEX-24 behavior identical for every
+		// existing agent.
+		return false
+	}
+}
+
+// a2aInvocationAllowed wires the pure predicate to the production query
+// functions (IsAgentSquadLeader / IsAgentInvocationGranted).
+func (h *Handler) a2aInvocationAllowed(ctx context.Context, agent db.Agent, actorType, actorID, workspaceID string) bool {
+	return a2aInvocationAllowed(ctx, agent, actorType, actorID, workspaceID,
+		func(ctx context.Context, agentID, wsID pgtype.UUID) (bool, error) {
+			return h.Queries.IsAgentSquadLeader(ctx, db.IsAgentSquadLeaderParams{
+				WorkspaceID: wsID,
+				LeaderID:    agentID,
+			})
+		},
+		func(ctx context.Context, agentID, granteeAgentID pgtype.UUID) (bool, error) {
+			return h.Queries.IsAgentInvocationGranted(ctx, db.IsAgentInvocationGrantedParams{
+				AgentID:        agentID,
+				GranteeAgentID: granteeAgentID,
+			})
+		},
+	)
 }
