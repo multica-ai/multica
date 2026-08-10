@@ -1078,11 +1078,7 @@ func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, batch engine.Ru
 		defer cancel()
 		m.fireGuard(ctx, sessionID, batch)
 	})
-	// The deadline goes with the timer because the store may have to re-arm it:
-	// a round whose ending reached nobody goes back on the open list with the
-	// bubble it had, and the guard it gets back is the one it had left, not a
-	// fresh nine minutes past the window this whole timer exists to stay inside.
-	m.streams.arm(sessionID, batch, t, time.Now().Add(m.guardAfter))
+	m.streams.arm(sessionID, batch, t)
 }
 
 // fireGuard is what the timer does, kept apart from the timer so the guard's
@@ -1111,6 +1107,15 @@ func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, batch engine.Ru
 // saying why the run never started — the round's real ending, and one that books
 // its own retry if it fails. The promise this guard came to make is about a run
 // that has already finished having anything to promise.
+//
+// One round it is refused outright, and the ledger refuses it rather than this
+// function: a round put back because its own ending reached nobody
+// (refuseTakeLocked). Its run is over, so streamCopyStillWorking promises work
+// that has already finished — and the user may have been the one who stopped it. The
+// bubble matters as much as the sentence: sealing it would consume the handle
+// the restore is holding for the publisher that has the real words, so this
+// guard would trade a truthful ending for a false promise. It says nothing and
+// leaves the round where it is.
 func (m *TypingIndicatorManager) fireGuard(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID) {
 	m.streams.sayEnding(ctx, sessionID, byBatch(batch), roundContinues, nil,
 		func(ctx context.Context, t roundTurn) (roundAddress, error) {

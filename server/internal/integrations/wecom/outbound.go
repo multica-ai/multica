@@ -348,8 +348,13 @@ func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t r
 		//
 		// Which publisher that is, is not this subscriber: an answer books a
 		// retry only for a deferral. What a restored round buys here is that a
-		// failure, a cancellation or the guard arriving afterwards writes into
-		// the bubble rather than under it.
+		// failure or a cancellation arriving afterwards writes into the bubble
+		// rather than under it. Not the guard, which is refused a round whose
+		// run is over (refuseTakeLocked) — its sentence promises a reply that is
+		// still coming, and this run has already answered. So when no other
+		// publisher turns up, the spinner stays until the sweep retires the
+		// round and files the debt, which is where it stood before the bubble
+		// was kept at all.
 		streamErr = err
 		content = text
 	}
@@ -362,11 +367,11 @@ func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t r
 		// the same reason; after the guard the words go out as the separate
 		// reply instead.
 		//
-		// The promise is what makes this safe to send at all. One exists only
-		// where the guard closed a bubble this adapter opened, so it is itself
-		// the proof that a WeCom round is waiting on these words — no binding
-		// row is consulted and no session that never asked anything here is
-		// written to.
+		// The promise is what makes this safe to send at all. One is filed only
+		// for a round this adapter opened a bubble for — whichever of the three
+		// ways left it (roundTurn.Promised) — so it is itself the proof that a
+		// WeCom round is waiting on these words: no binding row is consulted
+		// and no session that never asked anything here is written to.
 		if !t.Promised || !t.Addr.known() || o.senders == nil {
 			return roundAddress{}, errNothingToSay
 		}

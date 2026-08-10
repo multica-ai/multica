@@ -15,6 +15,11 @@ package wecom
 // These tests are about that fork. What comes out of it is the difference
 // between an answer inside the bubble and an answer sitting next to a spinner
 // that never stops.
+//
+// And about what a round handed back is NOT. It is a bubble waiting for words
+// that already exist, not a run still going, so it does not queue the next round
+// behind it, it is not the guard's to promise anything about, and it is not
+// anybody's to seal twice. The rest of these say so one reader at a time.
 
 import (
 	"context"
@@ -261,18 +266,16 @@ func TestThePublisherBehindAFailedDeliverySealsTheBubbleItLeft(t *testing.T) {
 	}
 }
 
-// TestARoundPutBackKeepsTheGuardItHadLeft is the timer the restore has to hand
-// back with the round.
+// TestARoundPutBackComesBackWithoutItsGuard is the timer the restore
+// deliberately does not hand back.
 //
-// The take stops the guard, because a round that has left the list has nothing
-// to guard. Putting the round back without it leaves a bubble with no closer of
-// last resort: if the attempt that comes next never happens, the spinner runs
-// past the protocol's window and the server stops accepting frames for it at
-// all. Re-arming it for a fresh nine minutes is the same failure with extra
-// steps — the window runs from the OPENING frame, not from whenever an ending
-// was last attempted — so what goes back on is what was left of the deadline
-// this timer already had.
-func TestARoundPutBackKeepsTheGuardItHadLeft(t *testing.T) {
+// The take stops the guard, and a round that comes back is one whose run has
+// already produced its ending — so the guard has nothing left to promise. Giving
+// it the timer would let it seal the bubble at nine minutes with
+// streamCopyStillWorking, which is false about a finished run and, worse,
+// consumes the handle the restore is holding for the publisher that has the
+// real words.
+func TestARoundPutBackComesBackWithoutItsGuard(t *testing.T) {
 	t.Parallel()
 	s := newStreamStore()
 	sessionID := bubbleSessionID(t)
@@ -283,8 +286,7 @@ func TestARoundPutBackKeepsTheGuardItHadLeft(t *testing.T) {
 	s.bind(sessionID, 1, taskID)
 
 	fired := make(chan struct{}, 1)
-	due := time.Now().Add(150 * time.Millisecond)
-	s.arm(sessionID, 1, time.AfterFunc(time.Until(due), func() { fired <- struct{}{} }), due)
+	s.arm(sessionID, 1, time.AfterFunc(60*time.Millisecond, func() { fired <- struct{}{} }))
 
 	if _, err := s.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
 		func(context.Context, roundTurn) (roundAddress, error) {
@@ -295,10 +297,10 @@ func TestARoundPutBackKeepsTheGuardItHadLeft(t *testing.T) {
 
 	select {
 	case <-fired:
-	case <-time.After(3 * time.Second):
-		t.Fatal("the guard never fired for a round that came back — it was stopped by the take, " +
-			"so a restore that drops it leaves the bubble with nothing to close it, and one " +
-			"that re-arms it for a fresh nine minutes fires past the window entirely")
+		t.Fatal("the guard fired for a round whose run had already ended — its sentence promises " +
+			"a reply that is still coming, and saying it consumes the bubble the next " +
+			"publisher was going to put the real ending in")
+	case <-time.After(250 * time.Millisecond):
 	}
 	if n := openRounds(s, sessionID); n != 1 {
 		t.Errorf("%d round(s) on the open list after the failed ending, want the one that came "+
@@ -310,14 +312,278 @@ func TestARoundPutBackKeepsTheGuardItHadLeft(t *testing.T) {
 	}
 }
 
+// TestTheGuardSaysNothingAboutARunTheUserStopped is the same refusal reached the
+// way production reaches it, and the reason it cannot be left to the timer
+// alone.
+//
+// The user cancels the run. The cancel notice finds a socket that takes nothing,
+// so it reaches nobody and the round goes back with its bubble. The guard is
+// then a goroutine already on its way here — Stop() lost the race, or the timer
+// had fired before the cancel arrived — and it asks for the same round. Letting
+// it speak seals the spinner with streamCopyStillWorking about a run the user
+// themselves stopped, and consumes the bubble on the way.
+func TestTheGuardSaysNothingAboutARunTheUserStopped(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	// No booked retry: what this test watches is the guard arriving on its own.
+	rig.typing.endingRetryAfter = -1
+	rig.ran(t, "REQ-CANCEL-GUARD", 1, "task-1")
+	rig.conn.breakTheSocket()
+
+	rig.cancelled(t, "task-1") // both routes fail; the round comes back
+	next := rig.reconnect()    // and the socket the guard would write on works
+
+	rig.typing.fireGuard(context.Background(), bubbleSessionID(t), 1)
+
+	if frames := next.streamFrames(t); len(frames) != 0 {
+		t.Fatalf("the guard wrote %v into the bubble of a run the user cancelled, want nothing — "+
+			"the promise is false and the handle it spends is the one the cancellation's own "+
+			"next attempt needs", frames)
+	}
+	if got := pushedTexts(t, next); len(got) != 0 {
+		t.Fatalf("the guard pushed %q beside the bubble of a cancelled run, want nothing", got)
+	}
+	if n := openRounds(rig.streams, bubbleSessionID(t)); n != 1 {
+		t.Fatalf("%d round(s) on the open list after the guard was refused, want the one it was "+
+			"refused — the bubble is still the asker's and still writable", n)
+	}
+}
+
+// TestARoundPutBackAfterItsEndingWasSaidIsNotSaidAgain is the hole the restore
+// opened in the take.
+//
+// Finding a round used to be the whole of the right to take it, because a taken
+// round never came back. Now one can, and it can come back to a run that has
+// been spoken for in the meantime — this is that sequence, and every step of it
+// is a path this store already had. The first publisher takes the round and its
+// delivery goes quiet for longer than a reservation lives. The sweep retires it
+// and leaves the debt. The second publisher spends the debt and its words reach
+// the user, so the run is on told. Only then does the first report, naming a
+// write that never left the wire — and the round goes back on the list under a
+// run whose ending is already on somebody's screen.
+//
+// What must not happen next is the third publisher sealing that bubble with the
+// same ending a second time.
+func TestARoundPutBackAfterItsEndingWasSaidIsNotSaidAgain(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	s := newStreamStore()
+	s.now = func() time.Time { return now }
+
+	sessionID := bubbleSessionID(t)
+	taskID := taskUUID(t, "task-1")
+	handle := streamHandle{
+		ReqID: "REQ-TOLD-BACK", StreamID: "STREAM-1",
+		InstallationID: mustTestUUID(t), ChatID: "CHAT_1",
+	}
+	if v := s.open(sessionID, 1, handle); v != roundOpened {
+		t.Fatalf("open = %v, want roundOpened", v)
+	}
+	s.bind(sessionID, 1, taskID)
+
+	heldIn, releaseHeld := make(chan struct{}), make(chan struct{})
+	held := make(chan struct{})
+	go func() {
+		defer close(held)
+		s.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
+			func(context.Context, roundTurn) (roundAddress, error) {
+				close(heldIn)
+				<-releaseHeld
+				return roundAddress{}, fmt.Errorf("%w: write: broken pipe", errFrameNotOnTheWire)
+			})
+	}()
+	<-heldIn
+	now = now.Add(inFlightMaxAge + time.Second)
+
+	// The second publisher sweeps the first's reservation away on its way in,
+	// takes the debt that leaves behind, and delivers.
+	if _, err := s.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
+		func(context.Context, roundTurn) (roundAddress, error) { return handle.address(), nil }); err != nil {
+		t.Fatalf("the publisher that spent the debt reported %v", err)
+	}
+	if !s.wasTold(sessionID, taskID) {
+		t.Fatal("the run is not on told after its ending reached the user")
+	}
+
+	close(releaseHeld)
+	<-held
+	if n := openRounds(s, sessionID); n != 1 {
+		t.Fatalf("%d round(s) on the open list, want the one the late holder put back — without "+
+			"it this test proves nothing about what the next publisher finds", n)
+	}
+
+	spoke := false
+	verdict, err := s.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
+		func(context.Context, roundTurn) (roundAddress, error) {
+			spoke = true
+			return handle.address(), nil
+		})
+	if err != nil {
+		t.Fatalf("the publisher after the restore reported %v", err)
+	}
+	if spoke {
+		t.Fatal("a round whose ending was already said was taken and said again — the asker " +
+			"reads the same ending twice, once beside the spinner and once sealed into it")
+	}
+	if verdict != roundToldAlready {
+		t.Errorf("the publisher after the restore was answered %v, want roundToldAlready", verdict)
+	}
+}
+
+// TestASweptRoundStillLeavesTheRunOwedItsEnding is what the round was standing
+// in for while it was on the list.
+//
+// A failed ending used to file a debt on the note, which lives for roundMemory.
+// The restore files no debt because the round itself is the better record — but
+// only until the protocol's window runs out, which is six times sooner. Left
+// there, a change made to keep a bubble would have quietly cut the ledger's
+// memory of an undelivered ending from an hour to ten minutes, and a publisher
+// arriving in between would find nothing owed and nothing on file. So the sweep
+// hands the debt on as it takes the round away.
+func TestASweptRoundStillLeavesTheRunOwedItsEnding(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	s := newStreamStore()
+	s.now = func() time.Time { return now }
+
+	sessionID := bubbleSessionID(t)
+	taskID := taskUUID(t, "task-1")
+	handle := streamHandle{
+		ReqID: "REQ-SWEPT-DEBT", StreamID: "STREAM-1",
+		InstallationID: mustTestUUID(t), ChatID: "CHAT_1",
+	}
+	if v := s.open(sessionID, 1, handle); v != roundOpened {
+		t.Fatalf("open = %v, want roundOpened", v)
+	}
+	s.bind(sessionID, 1, taskID)
+	if _, err := s.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
+		func(context.Context, roundTurn) (roundAddress, error) {
+			return roundAddress{}, fmt.Errorf("%w: write: broken pipe", errFrameNotOnTheWire)
+		}); err == nil {
+		t.Fatal("the delivery reported success")
+	}
+	if s.owesEnding(sessionID, taskID) {
+		t.Fatal("a debt was filed while the round was still on the list — the round is the record " +
+			"there, and a claim against the debt would hand a second publisher the promise")
+	}
+
+	// A publisher arriving past the window: the sweep runs in front of it, the
+	// round it would have sealed is gone, and what it is handed is what the
+	// round was standing in for.
+	now = now.Add(streamMaxAge + time.Minute)
+	var late roundTurn
+	verdict, err := s.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
+		func(_ context.Context, got roundTurn) (roundAddress, error) {
+			late = got
+			return handle.address(), nil
+		})
+	if err != nil {
+		t.Fatalf("the late publisher reported %v", err)
+	}
+	if verdict != roundOwesAnEnding || !late.Promised {
+		t.Fatalf("the late publisher was answered %v (promised=%v), want roundOwesAnEnding with "+
+			"the debt the swept round left — without it a cancel or a settle finds no reason to "+
+			"speak and no address to speak in, and the ending is dropped in silence",
+			verdict, late.Promised)
+	}
+	if late.HasBubble {
+		t.Error("a handle past the protocol's window was handed out; the server refuses that frame")
+	}
+	if !late.Addr.known() {
+		t.Error("the late publisher was given no address, so it has nowhere to say the ending")
+	}
+	if n := s.depth(); n != 0 {
+		t.Errorf("%d bubble(s) survived the protocol's window, want 0", n)
+	}
+}
+
+// TestASweptRoundCannotBePaintedASecondBubble is the protection the restore used
+// to give up.
+//
+// The take files the batch as finished, which is the one thing standing between
+// a badly delayed OnIngested and a second bubble for a run that has already
+// answered. Unfiling it on the way back was safe only while the round stayed on
+// the list to be found instead; once the sweep took the round, nothing was left
+// and a late paint opened a spinner nothing would ever close. So the take's
+// filing is permanent, and bind — the one caller that needed the unfile — asks
+// the round before it asks the list.
+func TestASweptRoundCannotBePaintedASecondBubble(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	s := newStreamStore()
+	s.now = func() time.Time { return now }
+
+	sessionID := bubbleSessionID(t)
+	taskID := taskUUID(t, "task-1")
+	handle := streamHandle{
+		ReqID: "REQ-SWEPT-PAINT", StreamID: "STREAM-1",
+		InstallationID: mustTestUUID(t), ChatID: "CHAT_1",
+	}
+	if v := s.open(sessionID, 1, handle); v != roundOpened {
+		t.Fatalf("open = %v, want roundOpened", v)
+	}
+	s.bind(sessionID, 1, taskID)
+	if _, err := s.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
+		func(context.Context, roundTurn) (roundAddress, error) {
+			return roundAddress{}, fmt.Errorf("%w: write: broken pipe", errFrameNotOnTheWire)
+		}); err == nil {
+		t.Fatal("the delivery reported success")
+	}
+
+	now = now.Add(streamMaxAge + time.Minute)
+	late := streamHandle{ReqID: "REQ-SWEPT-PAINT", StreamID: "STREAM-2", InstallationID: mustTestUUID(t), ChatID: "CHAT_1"}
+	if v := s.open(sessionID, 1, late); v != roundFinished {
+		t.Fatalf("a badly delayed ingest for a swept round was answered %v, want roundFinished — "+
+			"this run has had its closer, and the bubble this would paint is one no ending is "+
+			"left to close", v)
+	}
+}
+
+// TestARoundPutBackDoesNotQueueTheNextOneBehindIt is what the open list says
+// about a round whose run is over.
+//
+// QueuedBehind is how an empty answer picks its copy: a round that waited in
+// line behind another closes with streamCopyMerged, because the reply ahead of
+// it covered the message. A round put back is not ahead of anything —
+// its run finished, and its ending is on the list precisely because nobody read
+// it. Counting it tells the next asker their message was folded into a reply
+// that was never delivered.
+func TestARoundPutBackDoesNotQueueTheNextOneBehindIt(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	// No booked retry: the first round has to still be on the list when the
+	// second one opens, which is the state under test.
+	rig.typing.endingRetryAfter = -1
+	rig.ran(t, "REQ-QB-1", 1, "task-1")
+	rig.conn.breakTheSocket()
+
+	rig.cancelled(t, "task-1") // the notice reaches nobody; round 1 comes back
+	next := rig.reconnect()
+
+	rig.ran(t, "REQ-QB-2", 2, "task-2")
+	rig.answer(t, "", "task-2")
+
+	frames := next.streamFrames(t)
+	if len(frames) != 2 {
+		t.Fatalf("the second round wrote %d frames, want 2 (its open and its seal): %v", len(frames), frames)
+	}
+	if frames[1]["content"] != streamCopyNoReply {
+		t.Fatalf("the second round's empty answer closed with %q, want %q — the round ahead of "+
+			"it never delivered anything, so there is no reply above for this message to have "+
+			"been folded into", frames[1]["content"], streamCopyNoReply)
+	}
+}
+
 // TestARoundPutBackCanStillLearnItsRunsName is the bookkeeping the take files on
-// its way out and the restore has to unfile.
+// its way out, and the one caller of it the restore has to get past.
 //
 // The take records the batch as finished, which is what stops a badly delayed
 // OnIngested from painting a second bubble for a run that has already answered.
-// It also stops bind: a round whose flush has not reported yet would never learn
-// which run it belongs to, and every ending after that names a task this store
-// cannot match to a bubble.
+// It also used to stop bind: a round whose flush had not reported yet would
+// never learn which run it belongs to, and every ending after that names a task
+// this store cannot match to a bubble. bind asks the open list first for exactly
+// this round — the finished list is not unfiled for it, because the round is
+// back holding the bubble that list is protecting.
 func TestARoundPutBackCanStillLearnItsRunsName(t *testing.T) {
 	t.Parallel()
 	s := newStreamStore()
@@ -343,9 +609,11 @@ func TestARoundPutBackCanStillLearnItsRunsName(t *testing.T) {
 			"batch as finished and bind refuses a finished batch, so every ending after this " +
 			"one names a task the store cannot match to the bubble it is holding")
 	}
-	if v := s.open(sessionID, batch, handle); v != roundJoined {
-		t.Errorf("a late ingest for the round that came back was answered %v, want roundJoined "+
-			"— its bubble is on screen and this message is not painting a second one", v)
+	if v := s.open(sessionID, batch, handle); v != roundFinished {
+		t.Errorf("a late ingest for the round that came back was answered %v, want roundFinished "+
+			"— the finished list answers first and it is not unfiled, which is what keeps the "+
+			"protection alive after the sweep takes the round; either way nothing is painted, "+
+			"and the bubble on screen is the one this round is already holding", v)
 	}
 }
 

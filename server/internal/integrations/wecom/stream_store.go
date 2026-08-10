@@ -39,11 +39,16 @@ package wecom
 //
 // The rounds are kept sorted by batch id (insertLocked), which for one session
 // reads as the order its runs execute in: the engine serializes chat tasks per
-// session (ClaimAgentTask), so the oldest round is the running one and
-// everything behind it is waiting. Nothing consumes that order, though —
-// QueuedBehind compares batch ids rather than list positions, and it is
-// decided once when the round opens and never revised. The sorting is for
-// whoever reads the list, not for a caller that depends on it.
+// session (ClaimAgentTask). Nothing consumes that order, though — QueuedBehind
+// compares batch ids rather than list positions, and it is decided once when the
+// round opens and never revised. The sorting is for whoever reads the list, not
+// for a caller that depends on it.
+//
+// Being on the list is not the same as still running, and one round breaks the
+// resemblance: a round whose ending was said and reached nobody is put back with
+// the bubble it had (putRoundBackLocked), so the oldest round of a session can
+// be one whose run finished long ago. Every reader that cares reads runEnded
+// rather than the position — see the field.
 //
 // The catch is req_id. Every frame of one stream has to echo the req_id of the
 // aibot_msg_callback that started the turn, and that value is only ever seen
@@ -160,14 +165,22 @@ const (
 	// roundToldAlready — nothing for THIS caller to say, and no delivery runs
 	// for it. Usually the words are already on the screen: the answer landed,
 	// another publisher's failure got here first, or a delivery this caller
-	// waited out reported this run's ending accepted. Once it is weaker than
-	// that — a caller whose budget ran out while it waited never learns what
-	// became of the delivery it was waiting on, and comes back with this and
-	// errEndingDeferred together. There the verdict is not a fact about the
-	// user's screen and it is not the end of the matter either: the error is
-	// what says so, and it says come back. Nothing is recorded on the strength
-	// of this verdict in any case: the ledger is written from what a delivery
-	// reports and from nothing else (I1), and no delivery ever runs to see it.
+	// waited out reported this run's ending accepted. A round put back after its
+	// ending had already been said is the same fact reached from a new
+	// direction: the round is on the open list, and the words are on the screen
+	// all the same, so sealing the bubble with them would be the second copy
+	// (refuseTakeLocked).
+	//
+	// Twice it is weaker than that. The guard meeting a round whose run is over
+	// gets this because its own sentence would be false, not because anyone has
+	// been told anything. And a caller whose budget ran out while it waited
+	// never learns what became of the delivery it was waiting on, and comes
+	// back with this and errEndingDeferred together. There the verdict is not a
+	// fact about the user's screen and it is not the end of the matter either:
+	// the error is what says so, and it says come back. Nothing is recorded on
+	// the strength of this verdict in any case: the ledger is written from what
+	// a delivery reports and from nothing else (I1), and no delivery ever runs
+	// to see it.
 	roundToldAlready
 )
 
@@ -183,10 +196,15 @@ const (
 	// roundJoined — another message of a run whose bubble is already on
 	// screen. The bubble is this message's receipt too and nothing is painted.
 	roundJoined
-	// roundFinished — this run's bubble is already closed. Only a badly
+	// roundFinished — this run has had its closer already. Only a badly
 	// delayed OnIngested reaches this: the goroutine that paints the bubble
 	// outlived the run it was painting for. Painting now would open a bubble
 	// whose answer has already been delivered and which nothing would close.
+	//
+	// Usually the first bubble is closed by now. It need not be — a round whose
+	// ending reached nobody is back on the open list still holding it — and
+	// that changes nothing for this caller: there is a bubble for this run on
+	// the user's screen either way, and a second one is what must not happen.
 	roundFinished
 )
 
@@ -304,9 +322,16 @@ func (h streamHandle) address() roundAddress {
 //	    round this store WAS HOLDING it leaves one of two things behind, decided
 //	    by whether the words can be placed on the near side of the wire:
 //	      - the ROUND, back on the open list with the bubble it had, when the
-//	        delivery provably reached nobody. Nothing is filed as owed, because
-//	        the round on file is the stronger fact and every reader — the next
-//	        publisher, knowsRound, the guard — already reads it;
+//	        delivery provably reached nobody. Nothing is filed as owed while it
+//	        is there, because the round is the better record of the two — it
+//	        carries a writable bubble, and the next publisher, knowsRound and
+//	        owesEnding's callers all reach it. It is the shorter-lived record,
+//	        though: a round dies with the protocol's window at streamMaxAge and
+//	        a note lives for roundMemory, so when the sweep retires such a round
+//	        still unanswered it files the debt then (handOnTheDebtLocked). The
+//	        record handed to a late publisher is the same one it would have
+//	        found before, and it starts at the same moment — the note's clock
+//	        has been running since the delivery failed;
 //	      - the run OWED an ending, for every other failure. Its bubble went
 //	        with the attempt, so the next publisher of the same news says the
 //	        words somewhere else rather than finding them filed as already said.
@@ -319,13 +344,26 @@ func (h streamHandle) address() roundAddress {
 // an argument rather than handing out the right to speak. A caller cannot hold
 // a claim it forgets to resolve because it never holds one: it is given the
 // round, it reports whether the words went out, and the store records that and
-// nothing else. Adding a fifth way to end a round means writing another say
+// nothing else. Adding another way to end a round means writing another say
 // function, which cannot be written in the wrong order.
 //
-// The one thing that is NOT conditional is the bubble. A handle is consumed by
-// whichever closer reaches the round first — that is what makes two racing
-// closers produce one closing frame — so it is taken under the same lock that
-// finds the round, whether or not the frame it is taken for lands.
+// THE BUBBLE IS TAKEN UNDER THE SAME LOCK THAT FINDS THE ROUND, and that is
+// what makes two racing closers produce one closing frame: from the moment a
+// closer is handed the handle, nothing else holds this round.
+//
+// It is not taken for good, though. Whether the round comes back is decided by
+// the one question the ledger asks about the delivery's error rather than about
+// its success: did those words provably reach nobody. If they did, the spinner
+// on the user's screen is untouched and the handle that writes over it is worth
+// more to the next publisher than any debt, so the round goes back on the list
+// holding it (putRoundBackLocked) — still exclusive, since the restore happens
+// under the lock that publishes the outcome, so whoever was waiting resumes to
+// find the round rather than the race for it.
+//
+// A round that comes back is a round whose RUN is already over, which is a shape
+// nothing on this list had before. The three readers it would otherwise mislead
+// are named on runEnded, and the take itself is gated for the two it would:
+// refuseTakeLocked.
 // ────────────────────────────────────────────────────────────────────────────
 
 // errNothingToSay is how a delivery reports that it declined to speak: a cancel
@@ -377,10 +415,21 @@ type roundTurn struct {
 	// left. Unknown for a round this process holds nothing for.
 	Addr roundAddress
 
-	// Promised says the guard closed this round's bubble with "还在处理，完成后
-	// 我再单独回复你" and this turn holds that promise. It is what separates
-	// "nothing to add" from "a promise to keep" when a run finishes silently,
-	// and what lets a cancel speak without chasing an address it should not.
+	// Promised says this round was on owed and this turn claimed the debt:
+	// words this session owes the asker that nobody has said. It is what
+	// separates "nothing to add" from "something still to say" when a run
+	// finishes silently, and what lets a cancel speak without chasing an
+	// address it should not.
+	//
+	// The guard is the commonest source and the one to picture — it closed the
+	// bubble with streamCopyStillWorking, and the separate reply that sentence
+	// promised is still outstanding. The other two are the same debt filed
+	// where no words reached the screen at all: a terminal ending whose
+	// delivery failed with the bubble already spent (I3), and a round put back
+	// with its bubble that reached the end of the protocol's window before any
+	// publisher came for it (handOnTheDebtLocked). All three are written only
+	// for a round this store was holding, which is what makes the debt proof
+	// that a WeCom round is waiting on these words.
 	Promised bool
 
 	// Verdict is the store's answer to "may I speak for this round". A delivery
@@ -470,27 +519,17 @@ type pendingEnding struct {
 	flight *endingInFlight
 
 	// entry is the round this delivery was handed a WRITABLE BUBBLE off, kept
-	// so a failure that reached nobody can put it back on the open list exactly
-	// as it was — see putRoundBackLocked. Nil everywhere else, which is what
+	// so a failure that reached nobody can put it back on the open list with
+	// that bubble — see putRoundBackLocked. Nil everywhere else, which is what
 	// makes the restore unreachable by accident: a round with no bubble, a
 	// handle past the protocol's window, and a run this store held nothing for
 	// all leave it nil, and none of the three has a bubble worth keeping.
 	entry *roundEntry
-	// guardPending is what entry.guard.Stop() said when the round was taken:
-	// true only if the guard was still waiting. False means it had already
-	// fired, and the round goes back WITHOUT one — re-arming a timer whose
-	// deadline is already behind it fires it again at once, which for a guard
-	// whose own attempt just failed is a loop with a frame in it.
-	guardPending bool
-	// finishedFiled says this take is the one that filed the round's batch as
-	// finished. Only then may the restore unfile it: a batch already on that
-	// list when the take found it is not this delivery's to remove.
-	finishedFiled bool
 }
 
-// keepsItsBubble reports whether a failed delivery leaves this round on the
-// open list rather than owed an ending — the one exception to "a taken round
-// stays taken", and deliberately three conditions rather than one.
+// keepsItsBubble reports whether a failed delivery puts this round back on the
+// open list rather than leaving it owed an ending — the one exception to "a
+// taken round stays taken", and deliberately three conditions rather than one.
 //
 // entry is the round, and the take sets it only where the bubble it handed out
 // was actually writable.
@@ -505,6 +544,11 @@ type pendingEnding struct {
 // it, and it would give up the debt I3 files in exchange for nothing. It fires
 // at nine minutes besides, so what it would be handing back is a bubble with a
 // minute left to live.
+//
+// That last condition is why every round on the list with runEnded set arrived
+// there through a TERMINAL ending, which is what lets the guard be refused one
+// outright (refuseTakeLocked) rather than having to work out what it could
+// truthfully say about it.
 func (p pendingEnding) keepsItsBubble(err error) bool {
 	return p.entry != nil && p.ending == roundOver && bubbleSurvivedTheFailure(err)
 }
@@ -618,10 +662,13 @@ type endedRound struct {
 	// oldest first, each holding its run id. A round's own ending settles its
 	// own entry; another round's cannot.
 	owed []string
-	// finished lists the batches whose bubble is over, so a badly delayed
-	// OnIngested cannot paint a second one for a run that has already
-	// answered. Bounded: a batch old enough to have fallen off cannot still
-	// have a message in flight for it.
+	// finished lists the batches a closer has already been handed the bubble
+	// for, so a badly delayed OnIngested cannot paint a second one for a run
+	// that has already answered. An entry is permanent for as long as the note
+	// is: what it records is that this run has had its closer, which stays true
+	// even when the delivery failed and the round went back on the open list
+	// still holding the bubble it was painted with. Bounded: a batch old enough
+	// to have fallen off cannot still have a message in flight for it.
 	finished []engine.RunBatchID
 	// told lists the RUNS whose ending has already been said — a bubble
 	// sealed, a promise kept, a plain message sent. It is what makes a second
@@ -812,20 +859,6 @@ func withoutSpeaker(speaking []speakingRound, i int) []speakingRound {
 	return append(speaking[:i:i], speaking[i+1:]...)
 }
 
-// withoutBatch is withoutRun for the finished list, matched by value rather
-// than by position because the only caller knows which batch it filed and not
-// where. Copies for the same reason the others do. A batch that is not there is
-// not an error: the take files one only when it was missing, so this is called
-// only where it was this delivery that put it there.
-func withoutBatch(batches []engine.RunBatchID, batch engine.RunBatchID) []engine.RunBatchID {
-	for i, id := range batches {
-		if id == batch {
-			return append(batches[:i:i], batches[i+1:]...)
-		}
-	}
-	return batches
-}
-
 // restoreRun puts a claimed promise back where it was, which is what I3 owes a
 // delivery that failed. Position carries no meaning any more — every match is
 // by id — but a list that comes back in the order it went out is one less thing
@@ -873,18 +906,37 @@ type roundEntry struct {
 	taskID string
 
 	// guard closes the bubble if nothing else does before the protocol's
-	// stream window runs out. guardAt is when it is due, on the same clock the
-	// timer runs on — a real one, never the store's own now(), because that is
-	// what a Reset would be measured against. It is here so a round that is put
-	// back on this list can be handed the guard it had rather than a fresh nine
-	// minutes, which would run past the window the guard exists to stay inside
-	// of.
-	guard   *time.Timer
-	guardAt time.Time
+	// stream window runs out. Stopped by the take and never re-armed: the only
+	// round that comes back is one whose run has already ended (runEnded), and
+	// the guard has nothing true to say about one of those.
+	guard *time.Timer
+
+	// runEnded says this round is on the list for the second time: its run
+	// produced an ending, a delivery said it, and those words provably reached
+	// nobody, so putRoundBackLocked handed the round back with the bubble the
+	// user is still watching. The run itself is over.
+	//
+	// Three readers need that apart from a first-time round, and all three would
+	// otherwise state something false about a run that has already finished:
+	// queuedBehind, which would make the NEXT round open claiming it was queued
+	// behind this one; the guard, whose only sentence promises more work; and
+	// the sweep, which is what hands the debt on when this round finally goes.
+	runEnded bool
 
 	// createdAt bounds the entry for the sweep when there is no handle to read
 	// a time off.
 	createdAt time.Time
+}
+
+// endingName is the id this round's ending is filed under: the run the flush
+// bound to it, or — for the round that never became a run — the stand-in built
+// from its batch. It is the one name told, owed and speaking ever carry for this
+// round, so every lookup against those goes through it.
+func (e *roundEntry) endingName() string {
+	if e.taskID != "" {
+		return e.taskID
+	}
+	return batchRunID(e.batch)
 }
 
 // streamStore maps chat_session_id to that session's rounds, oldest first, and
@@ -980,12 +1032,20 @@ func (s *streamStore) open(sessionID pgtype.UUID, batch engine.RunBatchID, h str
 	return roundOpened
 }
 
-// queuedBehind reports whether any OLDER round of this session is still on
-// file — this round will wait for it, and an empty answer of its own then
-// means "the reply ahead of it covered this", not plain silence.
+// queuedBehind reports whether any OLDER round of this session is still WAITING
+// TO BE ANSWERED — this round will wait for it, and an empty answer of its own
+// then means "the reply ahead of it covered this", not plain silence.
+//
+// A round whose run has already ended does not count, however long its bubble
+// stays on the list. It is there because its ending reached nobody, not because
+// anything is still running for it, and the engine's queue moved on the moment
+// it finished. Counting it would open the next round with QueuedBehind set, and
+// an empty completion for THAT round would then close with streamCopyMerged —
+// telling the user this message was folded into a reply that was never
+// delivered.
 func (e *roundEntry) queuedBehind(rounds []*roundEntry) bool {
 	for _, r := range rounds {
-		if r.batch < e.batch {
+		if r.batch < e.batch && !r.runEnded {
 			return true
 		}
 	}
@@ -999,6 +1059,16 @@ func (e *roundEntry) queuedBehind(rounds []*roundEntry) bool {
 // It files a round even when no bubble has been painted yet, because the
 // Router runs OnIngested on a detached goroutine and the flush that names the
 // task can win the race. The bubble attaches to the same entry when it lands.
+//
+// The round on the list is consulted BEFORE the finished list, and the order is
+// the whole of what lets a round that came back learn its run's name. The take
+// files the batch as finished on its way out and never unfiles it, because that
+// list is the one thing standing between a badly delayed OnIngested and a second
+// bubble for a run that has already answered. A round in front of it is not that
+// case: it is the same round, still on the list, still holding the bubble it was
+// painted with, and a flush that has yet to report is exactly what it is waiting
+// for. Without the name, every ending after this one arrives carrying a task id
+// this store cannot match to the bubble it is holding.
 func (s *streamStore) bind(sessionID pgtype.UUID, batch engine.RunBatchID, taskID string) {
 	if taskID == "" || batch == 0 {
 		return
@@ -1007,11 +1077,11 @@ func (s *streamStore) bind(sessionID pgtype.UUID, batch engine.RunBatchID, taskI
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if note, ok := s.ended[key]; ok && note.isFinished(batch) {
-		return
-	}
 	if e := s.entryLocked(key, batch); e != nil {
 		e.taskID = taskID
+		return
+	}
+	if note, ok := s.ended[key]; ok && note.isFinished(batch) {
 		return
 	}
 	s.insertLocked(key, &roundEntry{batch: batch, taskID: taskID, createdAt: s.now()})
@@ -1021,15 +1091,14 @@ func (s *streamStore) bind(sessionID pgtype.UUID, batch engine.RunBatchID, taskI
 // open and this call has already left the list, so there is nothing to guard
 // and the timer is stopped instead of leaked.
 //
-// at is when the caller set the timer for, on the wall clock the timer itself
-// runs on. The store keeps it rather than deriving it, because the length of
-// the guard belongs to the manager (guardAfter) and a round put back on this
-// list has to be handed what is LEFT of it.
-func (s *streamStore) arm(sessionID pgtype.UUID, batch engine.RunBatchID, t *time.Timer, at time.Time) {
+// Armed once per round and never re-armed. The take stops it, and a round the
+// take hands back is one whose run is over — see putRoundBackLocked for why the
+// guard is not the closer such a round wants.
+func (s *streamStore) arm(sessionID pgtype.UUID, batch engine.RunBatchID, t *time.Timer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e := s.entryLocked(util.UUIDToString(sessionID), batch); e != nil {
-		e.guard, e.guardAt = t, at
+		e.guard = t
 		return
 	}
 	t.Stop()
@@ -1094,11 +1163,16 @@ func (s *streamStore) speakLocked(note endedRound, p *pendingEnding) endedRound 
 // this round until that decision has been made, under this same lock.
 //
 // What the round IS gets filed here too, because none of it depends on words
-// reaching anyone: the batch is over, so a badly delayed OnIngested cannot
-// paint a second bubble for a run that has already answered, and this is the
-// chat the round was speaking in. What the round has been TOLD is the only part
-// that waits for the delivery (I1), and the pendingEnding is what carries it
-// there. Caller holds s.mu.
+// reaching anyone: this run has had its closer, so a badly delayed OnIngested
+// cannot paint a second bubble for a run that has already answered, and this is
+// the chat the round was speaking in. Neither is undone by the restore. The finished
+// list in particular is permanent — a round handed back is handed back with the
+// bubble it already had, so nothing about it wants a second one painted, and
+// unfiling would reopen that hole for good the moment the sweep took the round
+// away. bind consults the round in front of the list for the one thing that did
+// need the unfile. What the round has been TOLD is the only part that waits for
+// the delivery (I1), and the pendingEnding is what carries it there. Caller
+// holds s.mu.
 func (s *streamStore) takeAtLocked(key string, i int, ending roundEnding) (roundTurn, pendingEnding) {
 	rounds := s.sessions[key]
 	entry := rounds[i]
@@ -1108,17 +1182,15 @@ func (s *streamStore) takeAtLocked(key string, i int, ending roundEnding) (round
 	} else {
 		s.sessions[key] = rounds
 	}
-	guardPending := false
 	if entry.guard != nil {
-		// Stop reports whether the timer was still waiting. That answer is the
-		// only thing that can tell a guard which has yet to fire from one whose
-		// goroutine is already on its way here, and the restore needs it — see
-		// pendingEnding.guardPending.
-		guardPending = entry.guard.Stop()
+		// A round off the list has nothing to guard. Whether the timer was still
+		// waiting does not matter: it is never re-armed, and a guard whose
+		// goroutine is already on its way here finds a round it is refused
+		// (beginEndingLocked) or no round at all.
+		entry.guard.Stop()
 	}
 
 	note := s.noteLocked(key)
-	finishedFiled := entry.batch != 0 && !note.isFinished(entry.batch)
 	note.finished = note.finish(entry.batch)
 	addr := roundAddress{}
 	if entry.painted {
@@ -1132,16 +1204,13 @@ func (s *streamStore) takeAtLocked(key string, i int, ending roundEnding) (round
 		addr = note.addr
 	}
 
+	// endingName is the run the flush bound, or — for the settled flush's round,
+	// where the enqueue produced no task and nothing later ever will — the
+	// stand-in built from the batch. It is still a round of this adapter's with a
+	// bubble on somebody's screen, so its ending is filed under the only name it
+	// has.
 	pending := pendingEnding{
-		key: key, taskID: entry.taskID, ending: ending, owedAt: -1, held: true,
-		guardPending: guardPending, finishedFiled: finishedFiled,
-	}
-	if pending.taskID == "" {
-		// The settled flush's round: the enqueue produced no task, so the flush
-		// never named one and nothing later ever will. It is still a round of
-		// this adapter's with a bubble on somebody's screen, so its ending is
-		// filed under the only name it has.
-		pending.taskID = batchRunID(entry.batch)
+		key: key, taskID: entry.endingName(), ending: ending, owedAt: -1, held: true,
 	}
 	promised := false
 	if pending.taskID != "" {
@@ -1179,37 +1248,29 @@ func (s *streamStore) takeAtLocked(key string, i int, ending roundEnding) (round
 // is the whole of what the ledger does differently for a delivery that provably
 // reached nobody.
 //
-// The take is written to be undone (takeAtLocked), so this is the mirror of it
-// and nothing else: the entry goes back in batch order, the guard gets what was
-// left of its deadline, and the batch stops claiming to be finished. What it
-// deliberately does NOT undo is the note's address — it was true before the take
-// and it is true after, being where this round is speaking rather than anything
-// about the round's fate.
+// What goes back is the entry, in batch order, and the ONE thing that changes
+// about it is that it now says its run is over (runEnded). Nothing else the take
+// filed is undone: the note's address was true before the take and is true
+// after, and the finished list is what stops a second bubble being painted for
+// this run — see takeAtLocked.
 //
 // Only from endEnding, under the lock that publishes the delivery's outcome. A
 // publisher released by that outcome finds the round already back, which is what
 // makes "wait, then come round" land on a bubble rather than on a debt.
 //
-// The guard is re-armed to the deadline it had, never to a fresh nine minutes.
-// The window it is keeping the bubble inside of runs from the OPENING frame, so
-// a guard restarted on every failed ending would eventually fire past the point
-// where the server stopped accepting frames — the one outcome the guard exists
-// to prevent. Caller holds s.mu.
-func (s *streamStore) putRoundBackLocked(p pendingEnding, note endedRound) endedRound {
+// The guard does not come back with it, and the stopped timer is dropped for
+// good. The guard's only sentence is streamCopyStillWorking, a reply still to
+// come, which for a run that has already ended is false; worse, saying it would
+// CONSUME the bubble, so the attempt this restore exists for would find nothing
+// to seal and would speak beside the spinner after all. What closes the bubble
+// instead is the publisher that comes back for the ending — a failure, a
+// cancellation and a settle each book one; an answer books only for a deferral
+// and takes whatever other publisher the run has. If none comes, the sweep
+// retires the round and hands the debt on. Caller holds s.mu.
+func (s *streamStore) putRoundBackLocked(p pendingEnding) {
+	p.entry.runEnded = true
+	p.entry.guard = nil
 	s.insertLocked(p.key, p.entry)
-	if p.guardPending && p.entry.guard != nil {
-		p.entry.guard.Reset(time.Until(p.entry.guardAt))
-	} else {
-		// Either this round never had a guard, or it had already fired — in
-		// which case its own goroutine is on its way to this store and will take
-		// the round straight back off this list. What must not happen is a
-		// second arming behind it.
-		p.entry.guard = nil
-	}
-	if p.finishedFiled {
-		note.finished = withoutBatch(note.finished, p.entry.batch)
-	}
-	return note
 }
 
 // sayEnding is the only way this store's ending ledger is written, and the
@@ -1410,6 +1471,42 @@ type beginning struct {
 	worthResolving bool
 }
 
+// refuseTakeLocked is the gate in front of takeAtLocked: two questions the note
+// and the round answer between them, both of which only became askable once a
+// round could come back from a failed ending (putRoundBackLocked). Before that a
+// round on this list had never been spoken for and its run was still going, so
+// finding it was the whole of the right to take it. Caller holds s.mu.
+//
+// The first is whether this round's ending has already been SAID. A round that
+// came back can outlive its own ending: the sweep retires a holder that never
+// reported, the next publisher claims the debt that leaves and delivers, and the
+// holder then turns up naming a write that never reached the wire — so the round
+// is handed back with the run on told. Taking it there puts a second copy of the
+// same ending on the user's screen, which is the one thing the told list exists
+// to prevent.
+//
+// The second is the guard meeting a round whose run is over. Its sentence
+// promises a reply that is still coming, and there is none: what the user did
+// was cancel the run, or the answer already happened and only its delivery
+// failed. It would also consume the bubble the restore is keeping for the
+// publisher that has the real words — see putRoundBackLocked.
+//
+// Refusing is roundToldAlready in both cases, which is that verdict's own
+// meaning: nothing for THIS caller to say, and no delivery runs for it. The
+// round stays on the list, because the publisher it IS waiting for is still
+// entitled to seal the bubble.
+func (s *streamStore) refuseTakeLocked(key string, entry *roundEntry, ending roundEnding) (roundTurn, bool) {
+	note := s.noteLocked(key)
+	silent := roundTurn{Addr: note.addr, Verdict: roundToldAlready}
+	if note.isTold(entry.endingName()) {
+		return silent, true
+	}
+	if entry.runEnded && ending == roundContinues {
+		return silent, true
+	}
+	return roundTurn{}, false
+}
+
 // reserveInFlight takes the right to speak for a run this store holds no round
 // for, or hands back the reservation somebody else is already holding. ending is
 // what THIS caller would be saying, and it is recorded on the reservation for
@@ -1451,6 +1548,9 @@ func (s *streamStore) releaseInFlightLocked(k inflightKey, f *endingInFlight, de
 // beginning. Caller holds s.mu.
 func (s *streamStore) beginEndingLocked(key string, k roundKey, ending roundEnding) (roundTurn, pendingEnding, beginning) {
 	if i := s.indexLocked(key, k); i >= 0 {
+		if why, refused := s.refuseTakeLocked(key, s.sessions[key][i], ending); refused {
+			return why, pendingEnding{}, beginning{}
+		}
 		turn, pending := s.takeAtLocked(key, i, ending)
 		return turn, pending, beginning{}
 	}
@@ -1590,8 +1690,10 @@ func (s *streamStore) forgottenLocked(key, taskID string, ending roundEnding, wo
 //   - the round itself, back on the open list with the handle it had, when the
 //     words provably reached nobody. The spinner is still on the screen and
 //     still writable, so the next publisher SEALS it instead of speaking beside
-//     it. Nothing goes on owed: the round is on file, which knowsRound reads the
-//     same way and I3 is satisfied by the stronger of the two facts.
+//     it. Nothing goes on owed here: the round is on file, which knowsRound
+//     reads the same way, and I3 is satisfied by the better of the two records
+//     for as long as that record lasts. The sweep files the debt if the round
+//     reaches the end of the protocol's window with nobody having come for it.
 //   - the run owed an ending it was not owed before (I3), for every other
 //     failure of a round this store was holding. The bubble was consumed and may
 //     be carrying words already, so only a later ending said somewhere else can
@@ -1658,8 +1760,10 @@ func (s *streamStore) endEnding(p pendingEnding, addr roundAddress, err error) {
 			// server has heard nothing about since it was opened. Put it back
 			// rather than filing a debt against it — the publisher that comes
 			// next then writes a closing frame over that spinner instead of
-			// speaking beside it, which is the whole of what the user sees.
-			note = s.putRoundBackLocked(p, note)
+			// speaking beside it, which is the whole of what the user sees. The
+			// debt is not lost, only deferred: sweepLocked files it if the round
+			// reaches the end of the protocol's window still unanswered.
+			s.putRoundBackLocked(p)
 		case p.owedAt < 0 && p.held && note.addr.known():
 			// A round this store was holding, nothing claimed, nothing landed,
 			// and nothing that can be put back. Its bubble has been consumed, so
@@ -1740,10 +1844,12 @@ func (s *streamStore) wasTold(sessionID pgtype.UUID, taskID string) bool {
 // exactly why it is still worth answering yes for.
 //
 // That second half only holds because owed is written for a round this store
-// was HOLDING and for nothing else. Two places write it and both are that: the
-// held flag gates endEnding's, and the sweep's comes off the note's speaking
-// list, which only a round taken off the open list or claimed against its own
-// promise ever joins — the delivery with no round of its own keeps its
+// was HOLDING and for nothing else. Three places write it and all three are
+// that: the held flag gates endEnding's; the sweep's retired speakers come off
+// the note's speaking list, which only a round taken off the open list or
+// claimed against its own promise ever joins; and the debt the sweep hands on
+// when it retires a round that was put back comes off that round itself
+// (handOnTheDebtLocked). The delivery with no round of its own keeps its
 // reservation in the inflight map, where no origin question reads it. A ledger
 // that filed a debt for any run whose delivery failed would put runs asked in
 // the installer's browser on this list, and this function would then answer yes
@@ -1887,7 +1993,16 @@ func (s *streamStore) expiredLocked(createdAt time.Time) bool {
 // and it is the only thing that bounds the notes and the reservations, which no
 // timer touches. It runs at the head of every ending and every open, so a stale
 // reservation is gone before the publisher that would have parked on it looks.
-// Caller holds s.mu.
+//
+// One round it evicts is not stale bookkeeping but an unpaid debt, and that one
+// it hands on rather than drops: a round put back because its ending reached
+// nobody (runEnded). While it was on the list it WAS the record — knowsRound,
+// the next publisher and I3 all read it there — and the bubble is what made it
+// the better record of the two. Past the protocol's window the handle is worth
+// nothing and the round stops being read at all, so what I3 asks for goes back
+// to being the debt. Without the handover the record's life would have been
+// quietly cut from roundMemory to streamMaxAge by a change that only meant to
+// keep a bubble. Caller holds s.mu.
 func (s *streamStore) sweepLocked() {
 	for key, rounds := range s.sessions {
 		live := rounds[:0]
@@ -1896,6 +2011,7 @@ func (s *streamStore) sweepLocked() {
 				if r.guard != nil {
 					r.guard.Stop()
 				}
+				s.handOnTheDebtLocked(key, r)
 				continue
 			}
 			live = append(live, r)
@@ -1924,6 +2040,42 @@ func (s *streamStore) sweepLocked() {
 			s.releaseInFlightLocked(k, f, false)
 		}
 	}
+}
+
+// handOnTheDebtLocked leaves a run owed its ending as the sweep takes away the
+// round that was standing in for that debt. Caller holds s.mu.
+//
+// Only a round put back by a failed ending has one to hand on. Every other round
+// the sweep evicts has never been spoken for: its run may still be going, and a
+// debt filed for it would be a promise nobody made about words nobody has. That
+// silent drop is the one an untaken round has always had, and it is unchanged.
+//
+// Not for a run already on told, which the sweep can reach: a round put back by a
+// holder the sweep had retired comes back to a run somebody else has since
+// spoken for (refuseTakeLocked), and filing a debt would hand the next publisher
+// the right to say the same ending a second time.
+//
+// The address gate and the shape of the filing are retireSpeakersLocked's, for
+// its reasons: a note with no address is one beginEndingLocked answers
+// roundForgotten for, so a debt on it could never be handed to anybody, and owe
+// dedups by id so a second filing is a no-op. The note's own clock is
+// deliberately not touched. It has been running since the delivery that failed
+// wrote this note, which is exactly where the debt would have started had the
+// round never been put back.
+func (s *streamStore) handOnTheDebtLocked(key string, r *roundEntry) {
+	if !r.runEnded {
+		return
+	}
+	note, ok := s.ended[key]
+	if !ok || !note.addr.known() {
+		return
+	}
+	name := r.endingName()
+	if name == "" || note.isTold(name) {
+		return
+	}
+	note.owed = note.owe(name)
+	s.ended[key] = note
 }
 
 // retireSpeakersLocked drops the note's reservations whose holder never came
