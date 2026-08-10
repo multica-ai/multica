@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -153,6 +154,259 @@ func TestUnbindAgentsAndDeleteRuntime_KeepsTaskHistory(t *testing.T) {
 	}
 }
 
+func TestRuntimeUnbindPoolAffinityRemovalAndHistory(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID := createCascadeFixtureRuntime(t, ctx, "Pool Affinity Delete Runtime")
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, permission_mode, max_concurrent_tasks,
+			owner_id, runtime_binding_mode, runtime_requirements
+		) VALUES (
+			$1, 'Pool Affinity Delete Agent', '', 'pool', '{}'::jsonb,
+			NULL, 'private', 'private', 1, $2, 'pool', '{}'::jsonb
+		)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("insert Pool Agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	var chatSessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (
+			workspace_id, agent_id, creator_id, title, session_id, work_dir, runtime_id
+		) VALUES ($1, $2, $3, 'Pool affinity delete', 'provider-session', '/work/affinity', $4)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("insert Pool ChatSession: %v", err)
+	}
+
+	var waitingTaskID, terminalTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, chat_session_id, runtime_id, status, runtime_binding_mode,
+			runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+			session_affinity_state, session_affinity_runtime_id, wait_reason
+		) VALUES (
+			$1, $2, NULL, 'waiting_runtime', 'pool', '{}'::jsonb, $3, $4,
+			'pinned', $5, 'session_runtime_offline'
+		)
+		RETURNING id
+	`, agentID, chatSessionID, testWorkspaceID, testUserID, runtimeID).Scan(&waitingTaskID); err != nil {
+		t.Fatalf("insert waiting pinned Pool Task: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, chat_session_id, runtime_id, status, completed_at,
+			runtime_binding_mode, runtime_requirements, placement_workspace_id,
+			runtime_requester_user_id, session_affinity_state,
+			session_affinity_runtime_id, session_id, work_dir
+		) VALUES (
+			$1, $2, $3, 'completed', now(), 'pool', '{}'::jsonb, $4, $5,
+			'pinned', $3, 'provider-session', '/work/affinity'
+		)
+		RETURNING id
+	`, agentID, chatSessionID, runtimeID, testWorkspaceID, testUserID).Scan(&terminalTaskID); err != nil {
+		t.Fatalf("insert terminal pinned Pool Task: %v", err)
+	}
+
+	unbindRuntime(t, ctx, runtimeID)
+
+	var (
+		waitingStatus      string
+		waitingCompleted   bool
+		waitingRuntime     bool
+		waitingAffinity    string
+		waitingAffinityID  bool
+		waitingReason      *string
+		terminalStatus     string
+		terminalRuntime    bool
+		terminalAffinity   string
+		terminalAffinityID pgtype.UUID
+		chatSessionPointer *string
+		chatWorkDirPointer *string
+		chatRuntimePointer bool
+	)
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, completed_at IS NOT NULL, runtime_id IS NOT NULL,
+		       session_affinity_state, session_affinity_runtime_id IS NOT NULL, wait_reason
+		FROM agent_task_queue WHERE id = $1
+	`, waitingTaskID).Scan(
+		&waitingStatus, &waitingCompleted, &waitingRuntime,
+		&waitingAffinity, &waitingAffinityID, &waitingReason,
+	); err != nil {
+		t.Fatalf("read waiting pinned Pool Task: %v", err)
+	}
+	if waitingStatus != "cancelled" || !waitingCompleted || waitingRuntime ||
+		waitingAffinity != "removed" || waitingAffinityID || waitingReason == nil || *waitingReason != "session_runtime_removed" {
+		t.Fatalf("waiting Task after delete = status=%q completed=%v runtime=%v affinity=%q affinity_runtime=%v reason=%v; want observable removed cancellation",
+			waitingStatus, waitingCompleted, waitingRuntime, waitingAffinity, waitingAffinityID, waitingReason)
+	}
+
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, runtime_id IS NOT NULL, session_affinity_state, session_affinity_runtime_id
+		FROM agent_task_queue WHERE id = $1
+	`, terminalTaskID).Scan(&terminalStatus, &terminalRuntime, &terminalAffinity, &terminalAffinityID); err != nil {
+		t.Fatalf("read terminal Pool Task history: %v", err)
+	}
+	if terminalStatus != "completed" || terminalRuntime || terminalAffinity != "pinned" || uuidToString(terminalAffinityID) != runtimeID {
+		t.Fatalf("terminal history after delete = status=%q runtime=%v affinity=%q affinity_runtime=%s; want completed/null/pinned/%s",
+			terminalStatus, terminalRuntime, terminalAffinity, uuidToString(terminalAffinityID), runtimeID)
+	}
+
+	if err := testPool.QueryRow(ctx, `
+		SELECT session_id, work_dir, runtime_id IS NOT NULL
+		FROM chat_session WHERE id = $1
+	`, chatSessionID).Scan(&chatSessionPointer, &chatWorkDirPointer, &chatRuntimePointer); err != nil {
+		t.Fatalf("read Pool ChatSession after delete: %v", err)
+	}
+	if chatSessionPointer == nil || *chatSessionPointer != "provider-session" ||
+		chatWorkDirPointer == nil || *chatWorkDirPointer != "/work/affinity" || chatRuntimePointer {
+		t.Fatalf("ChatSession pointers after delete = session=%v workdir=%v runtime=%v; want pointers preserved and Runtime cleared",
+			chatSessionPointer, chatWorkDirPointer, chatRuntimePointer)
+	}
+}
+
+func TestRuntimeUnbindPoolLockOrder(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	type fixture struct {
+		runtimeID string
+		agentID   string
+		chatID    string
+		taskID    string
+	}
+	newFixture := func(t *testing.T, suffix string) fixture {
+		t.Helper()
+		runtimeID := createCascadeFixtureRuntime(t, ctx, "Pool Lock Order Runtime "+suffix)
+		agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "Pool Lock Order Agent "+suffix)
+		var chatID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO chat_session (workspace_id, agent_id, creator_id, runtime_id, title)
+			VALUES ($1, $2, $3, $4, $5)
+			RETURNING id
+		`, testWorkspaceID, agentID, testUserID, runtimeID, "Pool lock order "+suffix).Scan(&chatID); err != nil {
+			t.Fatalf("insert lock-order ChatSession: %v", err)
+		}
+		return fixture{
+			runtimeID: runtimeID,
+			agentID:   agentID,
+			chatID:    chatID,
+			taskID:    insertFixtureTask(t, ctx, runtimeID, agentID, "queued", false),
+		}
+	}
+
+	waitForBlock := func(t *testing.T, blockerPID, subjectPID int32) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			var blocked bool
+			if err := testPool.QueryRow(ctx, `
+				SELECT $1::int = ANY(pg_blocking_pids($2::int))
+			`, blockerPID, subjectPID).Scan(&blocked); err != nil {
+				t.Fatalf("inspect lock wait: %v", err)
+			}
+			if blocked {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("backend %d did not block behind %d", subjectPID, blockerPID)
+	}
+
+	assertRowLockable := func(t *testing.T, query, id string) {
+		t.Helper()
+		probe, err := testPool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin lock probe: %v", err)
+		}
+		defer probe.Rollback(ctx)
+		if _, err := probe.Exec(ctx, query, id); err != nil {
+			t.Fatalf("later relation was locked before its turn: %v", err)
+		}
+	}
+
+	runSubject := func(t *testing.T, f fixture, blockerQuery string, blockerID string, assertLater func(*testing.T)) {
+		t.Helper()
+		blocker, err := testPool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin blocker: %v", err)
+		}
+		defer blocker.Rollback(ctx)
+		if _, err := blocker.Exec(ctx, blockerQuery, blockerID); err != nil {
+			t.Fatalf("acquire blocker lock: %v", err)
+		}
+		var blockerPID int32
+		if err := blocker.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
+			t.Fatalf("read blocker pid: %v", err)
+		}
+
+		subject, err := testPool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin subject: %v", err)
+		}
+		defer subject.Rollback(ctx)
+		qtx := testHandler.Queries.WithTx(subject)
+		if _, err := qtx.LockAgentRuntime(ctx, parseUUID(f.runtimeID)); err != nil {
+			t.Fatalf("lock Runtime prefix: %v", err)
+		}
+		var subjectPID int32
+		if err := subject.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&subjectPID); err != nil {
+			t.Fatalf("read subject pid: %v", err)
+		}
+
+		done := make(chan error, 1)
+		go func() {
+			done <- lockRuntimeDeleteDependencies(ctx, qtx, []pgtype.UUID{parseUUID(f.runtimeID)})
+		}()
+		waitForBlock(t, blockerPID, subjectPID)
+		assertLater(t)
+		if err := blocker.Commit(ctx); err != nil {
+			t.Fatalf("release blocker: %v", err)
+		}
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("lock Runtime delete dependencies: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("Runtime delete dependency locks did not resume")
+		}
+	}
+
+	t.Run("ChatSession precedes Agent and Task", func(t *testing.T) {
+		f := newFixture(t, "chat-first")
+		runSubject(t, f,
+			`SELECT id FROM chat_session WHERE id = $1 FOR UPDATE`, f.chatID,
+			func(t *testing.T) {
+				assertRowLockable(t, `SELECT id FROM agent WHERE id = $1 FOR UPDATE NOWAIT`, f.agentID)
+				assertRowLockable(t, `SELECT id FROM agent_task_queue WHERE id = $1 FOR UPDATE NOWAIT`, f.taskID)
+			},
+		)
+	})
+
+	t.Run("Agent precedes Task", func(t *testing.T) {
+		f := newFixture(t, "agent-first")
+		runSubject(t, f,
+			`SELECT id FROM agent WHERE id = $1 FOR UPDATE`, f.agentID,
+			func(t *testing.T) {
+				assertRowLockable(t, `SELECT id FROM agent_task_queue WHERE id = $1 FOR UPDATE NOWAIT`, f.taskID)
+			},
+		)
+	})
+}
+
 // TestUnbindAgentsAndDeleteRuntime_CancelsDeferredTasks covers the status the
 // cancel query used to miss. 'deferred' arrived with migration 128 and was never
 // added to CancelAgentTasksByRuntimeOrAgent; it went unnoticed only because the
@@ -226,7 +480,7 @@ func TestDeleteStaleOfflineRuntimes_UnboundAgentDoesNotDisableGC(t *testing.T) {
 			device_info, metadata, owner_id, last_seen_at
 		)
 		VALUES ($1, 'GC stale candidate', 'cloud', 'gc-regression', 'offline',
-			'GC stale candidate', '{}'::jsonb, $2, now() - interval '200 years')
+			'GC stale candidate', '{}'::jsonb, $2, now() - interval '1000 years')
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&staleRuntimeID); err != nil {
 		t.Fatalf("seed stale runtime: %v", err)
@@ -235,13 +489,13 @@ func TestDeleteStaleOfflineRuntimes_UnboundAgentDoesNotDisableGC(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, staleRuntimeID)
 	})
 
-	deleted, err := testHandler.Queries.DeleteStaleOfflineRuntimes(ctx, 3_000_000_000)
+	deleted, err := testHandler.GarbageCollectStaleRuntimes(ctx, 3_000_000_000, 32)
 	if err != nil {
 		t.Fatalf("delete stale runtimes: %v", err)
 	}
 	found := false
 	for _, row := range deleted {
-		if uuidToString(row.ID) == staleRuntimeID {
+		if uuidToString(row.RuntimeID) == staleRuntimeID {
 			found = true
 			break
 		}

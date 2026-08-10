@@ -744,6 +744,103 @@ type runtimeTeardownResult struct {
 	PausedAutopilots []db.Autopilot
 }
 
+// lockRuntimeDeleteDependencies completes the canonical lock prefix after the
+// caller has locked every Runtime row in UUID order. Single-Runtime delete and
+// profile cascade both use this batch form so the latter never acquires a Chat
+// or Agent lock after starting teardown of an earlier Runtime.
+func lockRuntimeDeleteDependencies(ctx context.Context, qtx *db.Queries, runtimeIDs []pgtype.UUID) error {
+	if len(runtimeIDs) == 0 {
+		return nil
+	}
+	if _, err := qtx.LockPoolChatSessionsForRuntimeDelete(ctx, runtimeIDs); err != nil {
+		return fmt.Errorf("lock Runtime ChatSessions: %w", err)
+	}
+	if _, err := qtx.LockPoolAgentsForRuntimeDelete(ctx, runtimeIDs); err != nil {
+		return fmt.Errorf("lock Runtime Agents: %w", err)
+	}
+	if _, err := qtx.LockPoolTasksForRuntimeDelete(ctx, runtimeIDs); err != nil {
+		return fmt.Errorf("lock Runtime Tasks: %w", err)
+	}
+	return nil
+}
+
+// RuntimeGCResult describes one Runtime whose complete teardown committed.
+// Publication is performed before GarbageCollectStaleRuntimes returns.
+type RuntimeGCResult struct {
+	RuntimeID   pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+// GarbageCollectStaleRuntimes is the bounded background entry into the same
+// deletion transaction used by the interactive and profile paths. Candidate
+// discovery never authorizes deletion: each short transaction re-locks and
+// revalidates Runtime status/TTL and the absence of every bound Agent before
+// acquiring ChatSession -> Agent -> Task dependencies.
+func (h *Handler) GarbageCollectStaleRuntimes(ctx context.Context, staleSeconds float64, candidateLimit int32) ([]RuntimeGCResult, error) {
+	if h == nil || h.Queries == nil || h.TxStarter == nil || candidateLimit <= 0 {
+		return nil, nil
+	}
+	candidates, err := h.Queries.ListStaleOfflineRuntimesForGC(ctx, db.ListStaleOfflineRuntimesForGCParams{
+		StaleSeconds:   staleSeconds,
+		CandidateLimit: candidateLimit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list stale Runtime GC candidates: %w", err)
+	}
+
+	results := make([]RuntimeGCResult, 0, len(candidates))
+	for _, candidate := range candidates {
+		tx, err := h.TxStarter.Begin(ctx)
+		if err != nil {
+			return results, fmt.Errorf("begin stale Runtime GC: %w", err)
+		}
+		qtx := h.Queries.WithTx(tx)
+		rt, err := qtx.LockStaleOfflineRuntimeForGC(ctx, db.LockStaleOfflineRuntimeForGCParams{
+			RuntimeID:    candidate.ID,
+			StaleSeconds: staleSeconds,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			continue
+		}
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return results, fmt.Errorf("lock stale Runtime for GC: %w", err)
+		}
+
+		hasBoundAgents, err := qtx.RuntimeHasBoundAgents(ctx, rt.ID)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return results, fmt.Errorf("revalidate stale Runtime Agent bindings: %w", err)
+		}
+		if hasBoundAgents {
+			_ = tx.Rollback(ctx)
+			continue
+		}
+		if err := lockRuntimeDeleteDependencies(ctx, qtx, []pgtype.UUID{rt.ID}); err != nil {
+			_ = tx.Rollback(ctx)
+			return results, err
+		}
+		teardown, err := unbindRuntimeForDelete(ctx, qtx, rt.ID)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return results, fmt.Errorf("teardown stale Runtime for GC: %w", err)
+		}
+		if err := qtx.DeleteAgentRuntime(ctx, rt.ID); err != nil {
+			_ = tx.Rollback(ctx)
+			return results, fmt.Errorf("delete stale Runtime after teardown: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return results, fmt.Errorf("commit stale Runtime GC: %w", err)
+		}
+
+		result := RuntimeGCResult{RuntimeID: rt.ID, WorkspaceID: rt.WorkspaceID}
+		results = append(results, result)
+		h.publishRuntimeTeardownAs(ctx, teardown, uuidToString(rt.WorkspaceID), "system", "", "runtime_gc")
+	}
+	return results, nil
+}
+
 // unbindRuntimeForDelete is the teardown every runtime-delete path runs inside
 // its transaction, immediately before deleting the agent_runtime row (MUL-5559).
 //
@@ -819,6 +916,9 @@ func unbindRuntimeForDelete(ctx context.Context, qtx *db.Queries, runtimeID pgty
 	if _, err := qtx.UnbindTasksFromRuntime(ctx, runtimeID); err != nil {
 		return out, fmt.Errorf("unbind task history: %w", err)
 	}
+	if _, err := qtx.ClearChatSessionRuntimesForDelete(ctx, []pgtype.UUID{runtimeID}); err != nil {
+		return out, fmt.Errorf("unbind ChatSession history: %w", err)
+	}
 
 	// agent_invocation_target has no agent_id FK (MUL-3963).
 	if err := qtx.DeleteAgentInvocationTargetsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
@@ -852,6 +952,10 @@ func unbindRuntimeForDelete(ctx context.Context, qtx *db.Queries, runtimeID pgty
 // other revocation paths: task:cancelled, then per-agent and Autopilot updates,
 // then the runtime-list refresh.
 func (h *Handler) publishRuntimeTeardown(ctx context.Context, res runtimeTeardownResult, wsID, userID string) {
+	h.publishRuntimeTeardownAs(ctx, res, wsID, "member", userID, "delete")
+}
+
+func (h *Handler) publishRuntimeTeardownAs(ctx context.Context, res runtimeTeardownResult, wsID, actorType, actorID, action string) {
 	if h.TaskService != nil && len(res.CancelledTasks) > 0 {
 		h.TaskService.BroadcastCancelledTasks(ctx, res.CancelledTasks)
 	}
@@ -859,17 +963,17 @@ func (h *Handler) publishRuntimeTeardown(ctx context.Context, res runtimeTeardow
 		// agent:status is the generic "this agent changed" broadcast the agent
 		// update path already uses; subscribers refresh the row and see
 		// runtime_bound=false. No agent:archived here — nothing was archived.
-		h.publish(protocol.EventAgentStatus, wsID, "member", userID, map[string]any{
+		h.publish(protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{
 			"agent": broadcastAgentResponse(h.agentToResponse(a)),
 		})
 	}
 	for _, a := range res.PausedAutopilots {
-		h.publish(protocol.EventAutopilotUpdated, wsID, "member", userID, map[string]any{
+		h.publish(protocol.EventAutopilotUpdated, wsID, actorType, actorID, map[string]any{
 			"autopilot": autopilotToResponse(a, nil),
 		})
 	}
-	h.publish(protocol.EventDaemonRegister, wsID, "member", userID, map[string]any{
-		"action": "delete",
+	h.publish(protocol.EventDaemonRegister, wsID, actorType, actorID, map[string]any{
+		"action": action,
 	})
 }
 
@@ -952,7 +1056,7 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to lock runtime")
 		return
 	}
-	if _, err := qtx.ListUserAgentsByRuntimeForUpdate(r.Context(), rt.ID); err != nil {
+	if err := lockRuntimeDeleteDependencies(r.Context(), qtx, []pgtype.UUID{rt.ID}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to lock runtime dependencies")
 		return
 	}
@@ -1147,7 +1251,7 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "failed to lock runtime")
 		return
 	}
-	if _, err := qtx.ListUserAgentsByRuntimeForUpdate(r.Context(), rt.ID); err != nil {
+	if err := lockRuntimeDeleteDependencies(r.Context(), qtx, []pgtype.UUID{rt.ID}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to lock runtime dependencies")
 		return
 	}

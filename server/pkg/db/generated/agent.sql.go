@@ -4256,6 +4256,120 @@ func (q *Queries) GetGlobalEligibleStaleAgentHeadSnapshot(ctx context.Context, a
 	return i, err
 }
 
+const getLastPoolIssueAffinitySource = `-- name: GetLastPoolIssueAffinitySource :one
+WITH retired_sessions AS (
+    SELECT DISTINCT r.retired_session_id AS session_id
+    FROM agent_task_queue r
+    WHERE r.agent_id = $1 AND r.issue_id = $2
+      AND r.retired_session_id IS NOT NULL
+), resume_overflow_at AS (
+    SELECT MAX(COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at)) AS at
+    FROM agent_task_queue t
+    WHERE t.agent_id = $1 AND t.issue_id = $2
+      AND t.status = 'failed'
+      AND (
+        COALESCE(t.failure_reason, '') = 'codex_resume_oversized'
+        OR (COALESCE(t.error, '') ILIKE '%thread/resume failed%' AND COALESCE(t.error, '') ILIKE '%token too long%')
+      )
+), latest_per_session AS (
+    SELECT DISTINCT ON (t.session_id)
+        t.id, t.session_id, t.work_dir, t.runtime_id,
+        t.session_affinity_runtime_id, t.session_affinity_state,
+        t.status, t.failure_reason, t.error,
+        COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
+    FROM agent_task_queue t
+    WHERE t.agent_id = $1 AND t.issue_id = $2
+      AND t.runtime_binding_mode = 'pool'
+      AND t.session_id IS NOT NULL
+      AND t.status IN ('completed', 'failed', 'cancelled')
+    ORDER BY t.session_id, COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC, t.id DESC
+), eligible_sessions AS (
+    SELECT id, session_id, work_dir, runtime_id,
+           session_affinity_runtime_id, session_affinity_state, terminal_at
+    FROM latest_per_session
+    WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
+      AND (
+        status IN ('completed', 'cancelled')
+        OR (
+          status = 'failed'
+          AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
+          AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+          AND NOT (COALESCE(error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(error, '') ILIKE '%image.source.base64.data%')
+          AND NOT (COALESCE(error, '') ILIKE '%could not resolve authentication method%')
+          AND NOT (COALESCE(error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
+                   AND COALESCE(error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
+        )
+      )
+      AND ((SELECT at FROM resume_overflow_at) IS NULL OR terminal_at > (SELECT at FROM resume_overflow_at))
+), pointer_sources AS (
+    SELECT t.id, t.session_id, t.work_dir, t.runtime_id,
+           t.session_affinity_runtime_id, t.session_affinity_state,
+           COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
+    FROM agent_task_queue t
+    LEFT JOIN agent_runtime affinity_runtime ON affinity_runtime.id = t.session_affinity_runtime_id
+    WHERE t.agent_id = $1 AND t.issue_id = $2
+      AND t.runtime_binding_mode = 'pool'
+      AND t.session_id IS NULL
+      AND t.status IN ('completed', 'failed', 'cancelled')
+      AND (
+        t.work_dir IS NOT NULL
+        OR t.session_affinity_state = 'removed'
+        OR (t.session_affinity_state = 'pinned' AND affinity_runtime.id IS NULL)
+      )
+      AND (
+        t.status IN ('completed', 'cancelled')
+        OR (
+          t.status = 'failed'
+          AND COALESCE(t.failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
+          AND NOT (COALESCE(t.error, '') ILIKE '%400%' AND COALESCE(t.error, '') ILIKE '%invalid_request_error%')
+          AND NOT (COALESCE(t.error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(t.error, '') ILIKE '%image.source.base64.data%')
+          AND NOT (COALESCE(t.error, '') ILIKE '%could not resolve authentication method%')
+          AND NOT (COALESCE(t.error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
+                   AND COALESCE(t.error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
+        )
+      )
+), affinity_sources AS (
+    SELECT id, session_id, work_dir, runtime_id, session_affinity_runtime_id, session_affinity_state, terminal_at FROM eligible_sessions
+    UNION ALL
+    SELECT id, session_id, work_dir, runtime_id, session_affinity_runtime_id, session_affinity_state, terminal_at FROM pointer_sources
+)
+SELECT session_id, work_dir,
+       COALESCE(session_affinity_runtime_id, runtime_id)::uuid AS source_runtime_id,
+       session_affinity_state
+FROM affinity_sources
+ORDER BY terminal_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLastPoolIssueAffinitySourceParams struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	IssueID pgtype.UUID `json:"issue_id"`
+}
+
+type GetLastPoolIssueAffinitySourceRow struct {
+	SessionID            pgtype.Text `json:"session_id"`
+	WorkDir              pgtype.Text `json:"work_dir"`
+	SourceRuntimeID      pgtype.UUID `json:"source_runtime_id"`
+	SessionAffinityState string      `json:"session_affinity_state"`
+}
+
+// Pool placement resolves Session, workdir-only, and deleted pinned soft
+// references in one terminal ordering. Fixed claim keeps using
+// GetLastTaskSession unchanged. Session candidates retain the established
+// per-session poison/retirement rules so a newer poisoned row cannot reopen an
+// older pointer to the same provider Session.
+func (q *Queries) GetLastPoolIssueAffinitySource(ctx context.Context, arg GetLastPoolIssueAffinitySourceParams) (GetLastPoolIssueAffinitySourceRow, error) {
+	row := q.db.QueryRow(ctx, getLastPoolIssueAffinitySource, arg.AgentID, arg.IssueID)
+	var i GetLastPoolIssueAffinitySourceRow
+	err := row.Scan(
+		&i.SessionID,
+		&i.WorkDir,
+		&i.SourceRuntimeID,
+		&i.SessionAffinityState,
+	)
+	return i, err
+}
+
 const getLastTaskSession = `-- name: GetLastTaskSession :one
 WITH retired_sessions AS (
     SELECT DISTINCT r.retired_session_id AS session_id
@@ -6865,6 +6979,78 @@ func (q *Queries) LockPoolAgentForPlacement(ctx context.Context, agentID pgtype.
 	return i, err
 }
 
+const lockPoolAgentsForRuntimeDelete = `-- name: LockPoolAgentsForRuntimeDelete :many
+SELECT a.id, a.workspace_id, a.name, a.avatar_url, a.runtime_mode, a.runtime_config, a.visibility, a.status, a.max_concurrent_tasks, a.owner_id, a.created_at, a.updated_at, a.description, a.runtime_id, a.instructions, a.archived_at, a.archived_by, a.custom_env, a.custom_args, a.mcp_config, a.model, a.thinking_level, a.composio_toolkit_allowlist, a.permission_mode, a.kind, a.system_key, a.disabled_runtime_skills, a.service_tier, a.runtime_binding_mode, a.runtime_requirements
+FROM agent a
+WHERE a.runtime_id = ANY($1::uuid[])
+   OR EXISTS (
+        SELECT 1
+        FROM agent_task_queue task
+        WHERE task.agent_id = a.id
+          AND (
+            task.runtime_id = ANY($1::uuid[])
+            OR task.session_affinity_runtime_id = ANY($1::uuid[])
+          )
+   )
+ORDER BY a.id
+FOR UPDATE
+`
+
+// Called only after all Runtime and affected ChatSession rows are locked.
+// Includes agents bound to the Runtime plus Pool agents whose current or
+// affinity-only Task history references it. UUID order is the canonical
+// multi-row Agent lock order shared by single- and multi-Runtime teardown.
+func (q *Queries) LockPoolAgentsForRuntimeDelete(ctx context.Context, runtimeIds []pgtype.UUID) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, lockPoolAgentsForRuntimeDelete, runtimeIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.RuntimeBindingMode,
+			&i.RuntimeRequirements,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockPoolChatSessionForClaim = `-- name: LockPoolChatSessionForClaim :one
 SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id FROM chat_session
 WHERE id = $1::uuid
@@ -6950,6 +7136,101 @@ func (q *Queries) LockPoolRuntimeForClaim(ctx context.Context, runtimeID pgtype.
 		&i.Capabilities,
 	)
 	return i, err
+}
+
+const lockPoolTasksForRuntimeDelete = `-- name: LockPoolTasksForRuntimeDelete :many
+SELECT task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.runtime_binding_mode, task.runtime_requirements, task.placement_workspace_id, task.runtime_requester_user_id, task.session_affinity_state, task.session_affinity_runtime_id, task.explicit_fresh_session
+FROM agent_task_queue task
+WHERE task.runtime_id = ANY($1::uuid[])
+   OR task.session_affinity_runtime_id = ANY($1::uuid[])
+   OR task.agent_id IN (
+        SELECT a.id FROM agent a WHERE a.runtime_id = ANY($1::uuid[])
+   )
+ORDER BY task.id
+FOR UPDATE
+`
+
+// Final relation in Runtime -> ChatSession -> Agent -> Task. The agent leg
+// preserves the existing teardown guarantee that moving an Agent does not
+// strand work on another Runtime; affinity-only waiting rows are included so
+// deletion can materialize their observable removed cancellation.
+func (q *Queries) LockPoolTasksForRuntimeDelete(ctx context.Context, runtimeIds []pgtype.UUID) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, lockPoolTasksForRuntimeDelete, runtimeIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.RuntimeBindingMode,
+			&i.RuntimeRequirements,
+			&i.PlacementWorkspaceID,
+			&i.RuntimeRequesterUserID,
+			&i.SessionAffinityState,
+			&i.SessionAffinityRuntimeID,
+			&i.ExplicitFreshSession,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markAgentTaskWaitingLocalDirectory = `-- name: MarkAgentTaskWaitingLocalDirectory :one

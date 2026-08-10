@@ -13,9 +13,50 @@ import (
 
 const cancelAgentTasksByRuntimeOrAgent = `-- name: CancelAgentTasksByRuntimeOrAgent :many
 UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now()
-WHERE (runtime_id = ANY($1::uuid[]) OR agent_id = ANY($2::uuid[]))
-  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+SET status = 'cancelled',
+    completed_at = now(),
+    prepare_lease_expires_at = NULL,
+    runtime_id = CASE
+      WHEN runtime_binding_mode = 'pool'
+       AND session_affinity_state = 'pinned'
+       AND session_affinity_runtime_id = ANY($1::uuid[])
+      THEN NULL
+      ELSE runtime_id
+    END,
+    session_affinity_state = CASE
+      WHEN runtime_binding_mode = 'pool'
+       AND session_affinity_state = 'pinned'
+       AND session_affinity_runtime_id = ANY($1::uuid[])
+      THEN 'removed'
+      WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved'
+      THEN 'none'
+      ELSE session_affinity_state
+    END,
+    session_affinity_runtime_id = CASE
+      WHEN runtime_binding_mode = 'pool'
+       AND session_affinity_state IN ('pinned', 'unresolved')
+       AND (
+         session_affinity_state = 'unresolved'
+         OR session_affinity_runtime_id = ANY($1::uuid[])
+       )
+      THEN NULL
+      ELSE session_affinity_runtime_id
+    END,
+    wait_reason = CASE
+      WHEN runtime_binding_mode = 'pool'
+       AND session_affinity_state = 'pinned'
+       AND session_affinity_runtime_id = ANY($1::uuid[])
+      THEN 'session_runtime_removed'
+      WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved'
+      THEN NULL
+      ELSE wait_reason
+    END
+WHERE (
+    runtime_id = ANY($1::uuid[])
+    OR session_affinity_runtime_id = ANY($1::uuid[])
+    OR agent_id = ANY($2::uuid[])
+  )
+  AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session
 `
 
@@ -154,7 +195,11 @@ func (q *Queries) CountRuntimeCapacityBearingTasks(ctx context.Context, runtimeI
 
 const countUndrainedTasksByRuntimeOrAgent = `-- name: CountUndrainedTasksByRuntimeOrAgent :one
 SELECT count(*) FROM agent_task_queue
-WHERE (runtime_id = ANY($1::uuid[]) OR agent_id = ANY($2::uuid[]))
+WHERE (
+    runtime_id = ANY($1::uuid[])
+    OR session_affinity_runtime_id = ANY($1::uuid[])
+    OR agent_id = ANY($2::uuid[])
+  )
   AND completed_at IS NULL
 `
 
@@ -185,46 +230,6 @@ DELETE FROM agent_runtime WHERE id = $1
 func (q *Queries) DeleteAgentRuntime(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteAgentRuntime, id)
 	return err
-}
-
-const deleteStaleOfflineRuntimes = `-- name: DeleteStaleOfflineRuntimes :many
-DELETE FROM agent_runtime
-WHERE status = 'offline'
-  AND last_seen_at < now() - make_interval(secs => $1::double precision)
-  AND NOT EXISTS (
-    SELECT 1
-    FROM agent
-    WHERE agent.runtime_id = agent_runtime.id
-  )
-RETURNING id, workspace_id
-`
-
-type DeleteStaleOfflineRuntimesRow struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-// Deletes runtimes that have been offline for longer than the TTL and have
-// no agents bound (active or archived). The FK constraint on agent.runtime_id
-// is ON DELETE RESTRICT, so we must exclude all agent references.
-func (q *Queries) DeleteStaleOfflineRuntimes(ctx context.Context, staleSeconds float64) ([]DeleteStaleOfflineRuntimesRow, error) {
-	rows, err := q.db.Query(ctx, deleteStaleOfflineRuntimes, staleSeconds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []DeleteStaleOfflineRuntimesRow{}
-	for rows.Next() {
-		var i DeleteStaleOfflineRuntimesRow
-		if err := rows.Scan(&i.ID, &i.WorkspaceID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const deleteSystemAgentsByRuntime = `-- name: DeleteSystemAgentsByRuntime :exec
@@ -930,6 +935,53 @@ func (q *Queries) ListPoolRuntimeCandidates(ctx context.Context, arg ListPoolRun
 	return items, nil
 }
 
+const listStaleOfflineRuntimesForGC = `-- name: ListStaleOfflineRuntimesForGC :many
+SELECT id, workspace_id
+FROM agent_runtime
+WHERE status = 'offline'
+  AND last_seen_at < now() - make_interval(secs => $1::double precision)
+  AND NOT EXISTS (
+    SELECT 1
+    FROM agent
+    WHERE agent.runtime_id = agent_runtime.id
+  )
+ORDER BY last_seen_at, id
+LIMIT $2::integer
+`
+
+type ListStaleOfflineRuntimesForGCParams struct {
+	StaleSeconds   float64 `json:"stale_seconds"`
+	CandidateLimit int32   `json:"candidate_limit"`
+}
+
+type ListStaleOfflineRuntimesForGCRow struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Bounded, unlocked discovery only. Each candidate is revalidated under its
+// Runtime row lock before the shared Runtime -> ChatSession -> Agent -> Task
+// teardown runs; direct DELETE would bypass Pool affinity/history cleanup.
+func (q *Queries) ListStaleOfflineRuntimesForGC(ctx context.Context, arg ListStaleOfflineRuntimesForGCParams) ([]ListStaleOfflineRuntimesForGCRow, error) {
+	rows, err := q.db.Query(ctx, listStaleOfflineRuntimesForGC, arg.StaleSeconds, arg.CandidateLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStaleOfflineRuntimesForGCRow{}
+	for rows.Next() {
+		var i ListStaleOfflineRuntimesForGCRow
+		if err := rows.Scan(&i.ID, &i.WorkspaceID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockAgentRuntime = `-- name: LockAgentRuntime :one
 SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, capabilities FROM agent_runtime
 WHERE id = $1
@@ -1200,6 +1252,50 @@ func (q *Queries) LockRuntimeOwnerWrites(ctx context.Context, workspaceID pgtype
 	return err
 }
 
+const lockStaleOfflineRuntimeForGC = `-- name: LockStaleOfflineRuntimeForGC :one
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, capabilities
+FROM agent_runtime
+WHERE id = $1
+  AND status = 'offline'
+  AND last_seen_at < now() - make_interval(secs => $2::double precision)
+FOR UPDATE
+`
+
+type LockStaleOfflineRuntimeForGCParams struct {
+	RuntimeID    pgtype.UUID `json:"runtime_id"`
+	StaleSeconds float64     `json:"stale_seconds"`
+}
+
+// Recheck mutable Runtime eligibility after taking the first relation lock in
+// the common deletion order. Bound-Agent absence is deliberately re-read by a
+// separate statement after this lock so a just-committed FK reference cannot
+// be hidden by the SELECT snapshot.
+func (q *Queries) LockStaleOfflineRuntimeForGC(ctx context.Context, arg LockStaleOfflineRuntimeForGCParams) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, lockStaleOfflineRuntimeForGC, arg.RuntimeID, arg.StaleSeconds)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+		&i.CustomName,
+		&i.Capabilities,
+	)
+	return i, err
+}
+
 const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
@@ -1435,6 +1531,19 @@ func (q *Queries) RequeuePoolTaskAfterCapabilityDowngrade(ctx context.Context, a
 		&i.ExplicitFreshSession,
 	)
 	return i, err
+}
+
+const runtimeHasBoundAgents = `-- name: RuntimeHasBoundAgents :one
+SELECT EXISTS (
+  SELECT 1 FROM agent WHERE runtime_id = $1
+)
+`
+
+func (q *Queries) RuntimeHasBoundAgents(ctx context.Context, runtimeID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, runtimeHasBoundAgents, runtimeID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const selectStaleOnlineRuntimes = `-- name: SelectStaleOnlineRuntimes :many

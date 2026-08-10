@@ -80,6 +80,127 @@ type TaskService struct {
 	analyticsContextOrder []string
 }
 
+// PoolPlacementRequest is the immutable input used to resolve a Pool Task's
+// Session affinity before its routing snapshot is persisted.
+type PoolPlacementRequest struct {
+	ExplicitFreshSession bool
+	ForceFreshSession    bool
+	RerunOfTaskID        pgtype.UUID
+	RetryOfTaskID        pgtype.UUID
+	ParentTaskID         pgtype.UUID
+	AgentID              pgtype.UUID
+	IssueID              pgtype.UUID
+	ChatSessionID        pgtype.UUID
+}
+
+// PoolPlacement is the resolved affinity half of a Pool Task routing snapshot.
+// A removed placement is persisted as an observable cancelled Task by the
+// caller; it never enters the ordinary Runtime candidate set.
+type PoolPlacement struct {
+	State      string
+	RuntimeID  pgtype.UUID
+	WaitReason string
+}
+
+func (s *TaskService) poolPlacementFromPointers(ctx context.Context, sessionID, workDir pgtype.Text, runtimeID pgtype.UUID, historicalRuntime bool) (PoolPlacement, error) {
+	hasRecoverableState := sessionID.Valid || workDir.Valid || historicalRuntime
+	if !hasRecoverableState {
+		return PoolPlacement{State: runtimepool.SessionAffinityNone}, nil
+	}
+	if runtimeID.Valid {
+		if _, err := s.Queries.GetAgentRuntime(ctx, runtimeID); err == nil {
+			return PoolPlacement{State: runtimepool.SessionAffinityPinned, RuntimeID: runtimeID}, nil
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return PoolPlacement{}, fmt.Errorf("load affinity Runtime: %w", err)
+		}
+	}
+	return PoolPlacement{
+		State:      runtimepool.SessionAffinityRemoved,
+		WaitReason: "session_runtime_removed",
+	}, nil
+}
+
+func (s *TaskService) poolPlacementFromExactSource(ctx context.Context, source db.AgentTaskQueue, terminalPoolWithoutRuntimeIsRemoved bool) (PoolPlacement, error) {
+	runtimeID := source.SessionAffinityRuntimeID
+	if !runtimeID.Valid {
+		runtimeID = source.RuntimeID
+	}
+	historicalRuntime := runtimeID.Valid ||
+		source.SessionAffinityState == runtimepool.SessionAffinityPinned ||
+		source.SessionAffinityState == runtimepool.SessionAffinityRemoved ||
+		(terminalPoolWithoutRuntimeIsRemoved && source.RuntimeBindingMode == runtimepool.BindingPool && source.CompletedAt.Valid)
+	return s.poolPlacementFromPointers(ctx, source.SessionID, source.WorkDir, runtimeID, historicalRuntime)
+}
+
+func (s *TaskService) poolIssueHistoryPlacement(ctx context.Context, agentID, issueID pgtype.UUID) (PoolPlacement, error) {
+	prior, err := s.Queries.GetLastPoolIssueAffinitySource(ctx, db.GetLastPoolIssueAffinitySourceParams{
+		AgentID: agentID,
+		IssueID: issueID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PoolPlacement{State: runtimepool.SessionAffinityNone}, nil
+	}
+	if err != nil {
+		return PoolPlacement{}, fmt.Errorf("load Issue affinity history: %w", err)
+	}
+	historicalPinned := prior.SessionAffinityState == runtimepool.SessionAffinityPinned ||
+		prior.SessionAffinityState == runtimepool.SessionAffinityRemoved
+	return s.poolPlacementFromPointers(ctx, prior.SessionID, prior.WorkDir, prior.SourceRuntimeID, historicalPinned)
+}
+
+func (s *TaskService) poolChatHistoryPlacement(ctx context.Context, chatSessionID pgtype.UUID) (PoolPlacement, error) {
+	session, err := s.Queries.GetChatSession(ctx, chatSessionID)
+	if err == nil && (session.SessionID.Valid || session.WorkDir.Valid) {
+		return s.poolPlacementFromPointers(ctx, session.SessionID, session.WorkDir, session.RuntimeID, false)
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return PoolPlacement{}, fmt.Errorf("load ChatSession affinity: %w", err)
+	}
+	prior, err := s.Queries.GetLastPoolChatAffinitySource(ctx, chatSessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PoolPlacement{State: runtimepool.SessionAffinityNone}, nil
+	}
+	if err != nil {
+		return PoolPlacement{}, fmt.Errorf("load Chat affinity history: %w", err)
+	}
+	historicalPinned := prior.SessionAffinityState == runtimepool.SessionAffinityPinned ||
+		prior.SessionAffinityState == runtimepool.SessionAffinityRemoved
+	return s.poolPlacementFromPointers(ctx, prior.SessionID, prior.WorkDir, prior.SourceRuntimeID, historicalPinned)
+}
+
+// ResolvePoolTaskPlacement applies the precedence contract before Pool Task
+// creation. Explicit fresh is intentionally independent of database state and
+// therefore wins even when a rerun/retry source was supplied for lineage.
+func (s *TaskService) ResolvePoolTaskPlacement(ctx context.Context, request PoolPlacementRequest) (PoolPlacement, error) {
+	if request.ExplicitFreshSession {
+		return PoolPlacement{State: runtimepool.SessionAffinityNone}, nil
+	}
+	for sourceIndex, sourceID := range []pgtype.UUID{request.RerunOfTaskID, request.RetryOfTaskID, request.ParentTaskID} {
+		if !sourceID.Valid {
+			continue
+		}
+		source, err := s.Queries.GetAgentTask(ctx, sourceID)
+		if err != nil {
+			return PoolPlacement{}, fmt.Errorf("load affinity source Task: %w", err)
+		}
+		// A manual rerun's exact terminal Pool source is deletion history when
+		// its Runtime soft reference was cleared. Retry/parent is different: a
+		// waiting Pool Task can be cancelled before its first assignment, and
+		// such a source must remain affinity-none (Spec 7.6).
+		return s.poolPlacementFromExactSource(ctx, source, sourceIndex == 0)
+	}
+	if request.ForceFreshSession {
+		return PoolPlacement{State: runtimepool.SessionAffinityNone}, nil
+	}
+	if request.IssueID.Valid {
+		return s.poolIssueHistoryPlacement(ctx, request.AgentID, request.IssueID)
+	}
+	if request.ChatSessionID.Valid {
+		return s.poolChatHistoryPlacement(ctx, request.ChatSessionID)
+	}
+	return PoolPlacement{State: runtimepool.SessionAffinityNone}, nil
+}
+
 // RuntimePoolScheduler is the post-persistence placement seam. Implementations
 // commit assignments before returning; TaskService owns all resulting events
 // and daemon wakeups so none can escape a rolled-back transaction.
@@ -864,7 +985,7 @@ func (s *TaskService) taskAnalyticsContext(ctx context.Context, task db.AgentTas
 			if tc.WorkspaceID == "" {
 				tc.WorkspaceID = util.UUIDToString(agent.WorkspaceID)
 			}
-			if tc.RuntimeMode == "" {
+			if tc.RuntimeMode == "" && task.RuntimeBindingMode != runtimepool.BindingPool {
 				tc.RuntimeMode = agent.RuntimeMode
 			}
 		}
@@ -4902,6 +5023,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 // current operator may not invoke the resolved target agent. The handler maps it
 // to a structured 403 (no task was cancelled or created).
 var ErrRerunInvokeNotAllowed = errors.New("rerun: operator not allowed to invoke target agent")
+var ErrFreshSessionRequiresPool = errors.New("fresh_session requires a Pool Agent")
 
 // Only tasks belonging to the target agent on this issue are cancelled.
 // Tasks owned by other agents on the same issue (e.g. a parallel
@@ -4916,6 +5038,17 @@ var ErrRerunInvokeNotAllowed = errors.New("rerun: operator not allowed to invoke
 // rerun as a back door — and a blocked rerun mutates nothing. Pass nil only
 // from trusted internal callers (tests, backfill) that have already gated.
 func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourceTaskID pgtype.UUID, triggerCommentID pgtype.UUID, actorUserID pgtype.UUID, canInvoke func(agent db.Agent) bool) (*db.AgentTaskQueue, error) {
+	return s.rerunIssue(ctx, issueID, sourceTaskID, triggerCommentID, actorUserID, false, canInvoke)
+}
+
+// RerunIssueWithFreshSession is the HTTP rerun extension. Task 8 validates the
+// mode before any cancellation; Task 9 supplies the shared Pool creation path
+// that persists ExplicitFreshSession and performs placement.
+func (s *TaskService) RerunIssueWithFreshSession(ctx context.Context, issueID pgtype.UUID, sourceTaskID pgtype.UUID, triggerCommentID pgtype.UUID, actorUserID pgtype.UUID, freshSession bool, canInvoke func(agent db.Agent) bool) (*db.AgentTaskQueue, error) {
+	return s.rerunIssue(ctx, issueID, sourceTaskID, triggerCommentID, actorUserID, freshSession, canInvoke)
+}
+
+func (s *TaskService) rerunIssue(ctx context.Context, issueID pgtype.UUID, sourceTaskID pgtype.UUID, triggerCommentID pgtype.UUID, actorUserID pgtype.UUID, freshSession bool, canInvoke func(agent db.Agent) bool) (*db.AgentTaskQueue, error) {
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("load issue: %w", err)
@@ -4981,14 +5114,17 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	// so a since-reassigned issue can't be used to re-fire a private agent the
 	// operator may only view. A block fails closed: no prior task is cancelled,
 	// no new task is created.
+	targetAgent, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("load target agent: %w", err)
+	}
 	if canInvoke != nil {
-		targetAgent, err := s.Queries.GetAgent(ctx, agentID)
-		if err != nil {
-			return nil, fmt.Errorf("load target agent: %w", err)
-		}
 		if !canInvoke(targetAgent) {
 			return nil, ErrRerunInvokeNotAllowed
 		}
+	}
+	if freshSession && targetAgent.RuntimeBindingMode != runtimepool.BindingPool {
+		return nil, ErrFreshSessionRequiresPool
 	}
 
 	// Cancel only the target agent's active/queued tasks on this issue.

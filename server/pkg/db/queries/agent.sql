@@ -412,6 +412,41 @@ WHERE runtime_id = $1 AND kind = 'user'
 ORDER BY id
 FOR UPDATE;
 
+-- name: LockPoolAgentsForRuntimeDelete :many
+-- Called only after all Runtime and affected ChatSession rows are locked.
+-- Includes agents bound to the Runtime plus Pool agents whose current or
+-- affinity-only Task history references it. UUID order is the canonical
+-- multi-row Agent lock order shared by single- and multi-Runtime teardown.
+SELECT a.*
+FROM agent a
+WHERE a.runtime_id = ANY(@runtime_ids::uuid[])
+   OR EXISTS (
+        SELECT 1
+        FROM agent_task_queue task
+        WHERE task.agent_id = a.id
+          AND (
+            task.runtime_id = ANY(@runtime_ids::uuid[])
+            OR task.session_affinity_runtime_id = ANY(@runtime_ids::uuid[])
+          )
+   )
+ORDER BY a.id
+FOR UPDATE;
+
+-- name: LockPoolTasksForRuntimeDelete :many
+-- Final relation in Runtime -> ChatSession -> Agent -> Task. The agent leg
+-- preserves the existing teardown guarantee that moving an Agent does not
+-- strand work on another Runtime; affinity-only waiting rows are included so
+-- deletion can materialize their observable removed cancellation.
+SELECT task.*
+FROM agent_task_queue task
+WHERE task.runtime_id = ANY(@runtime_ids::uuid[])
+   OR task.session_affinity_runtime_id = ANY(@runtime_ids::uuid[])
+   OR task.agent_id IN (
+        SELECT a.id FROM agent a WHERE a.runtime_id = ANY(@runtime_ids::uuid[])
+   )
+ORDER BY task.id
+FOR UPDATE;
+
 -- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1
@@ -1383,6 +1418,95 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
     OR terminal_at > (SELECT at FROM resume_overflow_at)
   )
 ORDER BY terminal_at DESC
+LIMIT 1;
+
+-- name: GetLastPoolIssueAffinitySource :one
+-- Pool placement resolves Session, workdir-only, and deleted pinned soft
+-- references in one terminal ordering. Fixed claim keeps using
+-- GetLastTaskSession unchanged. Session candidates retain the established
+-- per-session poison/retirement rules so a newer poisoned row cannot reopen an
+-- older pointer to the same provider Session.
+WITH retired_sessions AS (
+    SELECT DISTINCT r.retired_session_id AS session_id
+    FROM agent_task_queue r
+    WHERE r.agent_id = @agent_id AND r.issue_id = @issue_id
+      AND r.retired_session_id IS NOT NULL
+), resume_overflow_at AS (
+    SELECT MAX(COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at)) AS at
+    FROM agent_task_queue t
+    WHERE t.agent_id = @agent_id AND t.issue_id = @issue_id
+      AND t.status = 'failed'
+      AND (
+        COALESCE(t.failure_reason, '') = 'codex_resume_oversized'
+        OR (COALESCE(t.error, '') ILIKE '%thread/resume failed%' AND COALESCE(t.error, '') ILIKE '%token too long%')
+      )
+), latest_per_session AS (
+    SELECT DISTINCT ON (t.session_id)
+        t.id, t.session_id, t.work_dir, t.runtime_id,
+        t.session_affinity_runtime_id, t.session_affinity_state,
+        t.status, t.failure_reason, t.error,
+        COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
+    FROM agent_task_queue t
+    WHERE t.agent_id = @agent_id AND t.issue_id = @issue_id
+      AND t.runtime_binding_mode = 'pool'
+      AND t.session_id IS NOT NULL
+      AND t.status IN ('completed', 'failed', 'cancelled')
+    ORDER BY t.session_id, COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC, t.id DESC
+), eligible_sessions AS (
+    SELECT id, session_id, work_dir, runtime_id,
+           session_affinity_runtime_id, session_affinity_state, terminal_at
+    FROM latest_per_session
+    WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
+      AND (
+        status IN ('completed', 'cancelled')
+        OR (
+          status = 'failed'
+          AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
+          AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+          AND NOT (COALESCE(error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(error, '') ILIKE '%image.source.base64.data%')
+          AND NOT (COALESCE(error, '') ILIKE '%could not resolve authentication method%')
+          AND NOT (COALESCE(error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
+                   AND COALESCE(error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
+        )
+      )
+      AND ((SELECT at FROM resume_overflow_at) IS NULL OR terminal_at > (SELECT at FROM resume_overflow_at))
+), pointer_sources AS (
+    SELECT t.id, t.session_id, t.work_dir, t.runtime_id,
+           t.session_affinity_runtime_id, t.session_affinity_state,
+           COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
+    FROM agent_task_queue t
+    LEFT JOIN agent_runtime affinity_runtime ON affinity_runtime.id = t.session_affinity_runtime_id
+    WHERE t.agent_id = @agent_id AND t.issue_id = @issue_id
+      AND t.runtime_binding_mode = 'pool'
+      AND t.session_id IS NULL
+      AND t.status IN ('completed', 'failed', 'cancelled')
+      AND (
+        t.work_dir IS NOT NULL
+        OR t.session_affinity_state = 'removed'
+        OR (t.session_affinity_state = 'pinned' AND affinity_runtime.id IS NULL)
+      )
+      AND (
+        t.status IN ('completed', 'cancelled')
+        OR (
+          t.status = 'failed'
+          AND COALESCE(t.failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
+          AND NOT (COALESCE(t.error, '') ILIKE '%400%' AND COALESCE(t.error, '') ILIKE '%invalid_request_error%')
+          AND NOT (COALESCE(t.error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(t.error, '') ILIKE '%image.source.base64.data%')
+          AND NOT (COALESCE(t.error, '') ILIKE '%could not resolve authentication method%')
+          AND NOT (COALESCE(t.error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
+                   AND COALESCE(t.error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
+        )
+      )
+), affinity_sources AS (
+    SELECT * FROM eligible_sessions
+    UNION ALL
+    SELECT * FROM pointer_sources
+)
+SELECT session_id, work_dir,
+       COALESCE(session_affinity_runtime_id, runtime_id)::uuid AS source_runtime_id,
+       session_affinity_state
+FROM affinity_sources
+ORDER BY terminal_at DESC, id DESC
 LIMIT 1;
 
 -- name: GetLatestTaskRolloutMissing :one

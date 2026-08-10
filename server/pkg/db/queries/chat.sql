@@ -295,6 +295,38 @@ SELECT id FROM chat_session
 WHERE id = $1
 FOR UPDATE;
 
+-- name: LockPoolChatSessionsForRuntimeDelete :many
+-- Runtime deletion acquires every affected ChatSession before any Agent or
+-- Task row. The agent leg includes fixed/system conversations whose
+-- chat_session.runtime_id was never populated; the Pool task leg includes a
+-- Session whose only remaining reference is a pinned affinity soft pointer.
+SELECT cs.*
+FROM chat_session cs
+WHERE cs.runtime_id = ANY(@runtime_ids::uuid[])
+   OR cs.agent_id IN (
+        SELECT a.id FROM agent a WHERE a.runtime_id = ANY(@runtime_ids::uuid[])
+   )
+   OR EXISTS (
+        SELECT 1
+        FROM agent_task_queue task
+        WHERE task.chat_session_id = cs.id
+          AND task.runtime_binding_mode = 'pool'
+          AND (
+            task.runtime_id = ANY(@runtime_ids::uuid[])
+            OR task.session_affinity_runtime_id = ANY(@runtime_ids::uuid[])
+          )
+   )
+ORDER BY cs.id
+FOR UPDATE;
+
+-- name: ClearChatSessionRuntimesForDelete :execrows
+-- Preserve provider Session/workdir pointers as history while detaching only
+-- the physical Runtime that is about to be removed.
+UPDATE chat_session
+SET runtime_id = NULL,
+    updated_at = now()
+WHERE runtime_id = ANY(@runtime_ids::uuid[]);
+
 -- name: LockChatSessionForDraftWrite :one
 -- The autosave half of the agent_builder_draft protocol, and the writer's
 -- answer to LockChatSessionForDelete.
@@ -877,6 +909,91 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
     OR completed_at > (SELECT at FROM resume_overflow_at)
   )
 ORDER BY completed_at DESC
+LIMIT 1;
+
+-- name: GetLastPoolChatAffinitySource :one
+-- Pool-only equivalent of GetLastChatTaskSession that also orders workdir-only
+-- history and deleted pinned soft references in the same terminal stream.
+WITH retired_sessions AS (
+    SELECT DISTINCT r.retired_session_id AS session_id
+    FROM agent_task_queue r
+    WHERE r.chat_session_id = $1
+      AND r.retired_session_id IS NOT NULL
+), resume_overflow_at AS (
+    SELECT MAX(t.completed_at) AS at
+    FROM agent_task_queue t
+    WHERE t.chat_session_id = $1
+      AND t.status = 'failed'
+      AND (
+        COALESCE(t.failure_reason, '') = 'codex_resume_oversized'
+        OR (COALESCE(t.error, '') ILIKE '%thread/resume failed%' AND COALESCE(t.error, '') ILIKE '%token too long%')
+      )
+), latest_per_session AS (
+    SELECT DISTINCT ON (t.session_id)
+        t.id, t.session_id, t.work_dir, t.runtime_id,
+        t.session_affinity_runtime_id, t.session_affinity_state,
+        t.status, t.failure_reason, t.error, t.completed_at AS terminal_at
+    FROM agent_task_queue t
+    WHERE t.chat_session_id = $1
+      AND t.runtime_binding_mode = 'pool'
+      AND t.session_id IS NOT NULL
+      AND t.status IN ('completed', 'failed', 'cancelled')
+    ORDER BY t.session_id, t.completed_at DESC, t.id DESC
+), eligible_sessions AS (
+    SELECT id, session_id, work_dir, runtime_id,
+           session_affinity_runtime_id, session_affinity_state, terminal_at
+    FROM latest_per_session
+    WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
+      AND (
+        status IN ('completed', 'cancelled')
+        OR (
+          status = 'failed'
+          AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
+          AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+          AND NOT (COALESCE(error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(error, '') ILIKE '%image.source.base64.data%')
+          AND NOT (COALESCE(error, '') ILIKE '%could not resolve authentication method%')
+          AND NOT (COALESCE(error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
+                   AND COALESCE(error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
+        )
+      )
+      AND ((SELECT at FROM resume_overflow_at) IS NULL OR terminal_at > (SELECT at FROM resume_overflow_at))
+), pointer_sources AS (
+    SELECT t.id, t.session_id, t.work_dir, t.runtime_id,
+           t.session_affinity_runtime_id, t.session_affinity_state,
+           t.completed_at AS terminal_at
+    FROM agent_task_queue t
+    LEFT JOIN agent_runtime affinity_runtime ON affinity_runtime.id = t.session_affinity_runtime_id
+    WHERE t.chat_session_id = $1
+      AND t.runtime_binding_mode = 'pool'
+      AND t.session_id IS NULL
+      AND t.status IN ('completed', 'failed', 'cancelled')
+      AND (
+        t.work_dir IS NOT NULL
+        OR t.session_affinity_state = 'removed'
+        OR (t.session_affinity_state = 'pinned' AND affinity_runtime.id IS NULL)
+      )
+      AND (
+        t.status IN ('completed', 'cancelled')
+        OR (
+          t.status = 'failed'
+          AND COALESCE(t.failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
+          AND NOT (COALESCE(t.error, '') ILIKE '%400%' AND COALESCE(t.error, '') ILIKE '%invalid_request_error%')
+          AND NOT (COALESCE(t.error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(t.error, '') ILIKE '%image.source.base64.data%')
+          AND NOT (COALESCE(t.error, '') ILIKE '%could not resolve authentication method%')
+          AND NOT (COALESCE(t.error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
+                   AND COALESCE(t.error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
+        )
+      )
+), affinity_sources AS (
+    SELECT * FROM eligible_sessions
+    UNION ALL
+    SELECT * FROM pointer_sources
+)
+SELECT session_id, work_dir,
+       COALESCE(session_affinity_runtime_id, runtime_id)::uuid AS source_runtime_id,
+       session_affinity_state
+FROM affinity_sources
+ORDER BY terminal_at DESC, id DESC
 LIMIT 1;
 
 -- name: HasActiveChatTaskForSession :one

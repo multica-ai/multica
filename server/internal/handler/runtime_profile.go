@@ -405,11 +405,9 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "runtime profile not found")
 		return
 	}
-	for _, runtimeID := range runtimeIDs {
-		if _, err := qtx.ListUserAgentsByRuntimeForUpdate(r.Context(), runtimeID); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to lock profile dependencies")
-			return
-		}
+	if err := lockRuntimeDeleteDependencies(r.Context(), qtx, runtimeIDs); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock profile dependencies")
+		return
 	}
 
 	agentCount, err := qtx.CountAgentsByProfile(r.Context(), db.CountAgentsByProfileParams{

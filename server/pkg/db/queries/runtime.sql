@@ -373,9 +373,50 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 -- rejects an active row without a runtime — so a missed status now surfaces as
 -- a failed delete (runtime_delete_not_drained) instead of silent data loss.
 UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now()
-WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid[]))
-  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+SET status = 'cancelled',
+    completed_at = now(),
+    prepare_lease_expires_at = NULL,
+    runtime_id = CASE
+      WHEN runtime_binding_mode = 'pool'
+       AND session_affinity_state = 'pinned'
+       AND session_affinity_runtime_id = ANY(@runtime_ids::uuid[])
+      THEN NULL
+      ELSE runtime_id
+    END,
+    session_affinity_state = CASE
+      WHEN runtime_binding_mode = 'pool'
+       AND session_affinity_state = 'pinned'
+       AND session_affinity_runtime_id = ANY(@runtime_ids::uuid[])
+      THEN 'removed'
+      WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved'
+      THEN 'none'
+      ELSE session_affinity_state
+    END,
+    session_affinity_runtime_id = CASE
+      WHEN runtime_binding_mode = 'pool'
+       AND session_affinity_state IN ('pinned', 'unresolved')
+       AND (
+         session_affinity_state = 'unresolved'
+         OR session_affinity_runtime_id = ANY(@runtime_ids::uuid[])
+       )
+      THEN NULL
+      ELSE session_affinity_runtime_id
+    END,
+    wait_reason = CASE
+      WHEN runtime_binding_mode = 'pool'
+       AND session_affinity_state = 'pinned'
+       AND session_affinity_runtime_id = ANY(@runtime_ids::uuid[])
+      THEN 'session_runtime_removed'
+      WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved'
+      THEN NULL
+      ELSE wait_reason
+    END
+WHERE (
+    runtime_id = ANY(@runtime_ids::uuid[])
+    OR session_affinity_runtime_id = ANY(@runtime_ids::uuid[])
+    OR agent_id = ANY(@agent_ids::uuid[])
+  )
+  AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CountUndrainedTasksByRuntimeOrAgent :one
@@ -388,7 +429,11 @@ RETURNING *;
 -- runtime_delete_not_drained rather than letting the CHECK constraint turn it
 -- into an opaque 500, and rather than deleting rows to make it go away.
 SELECT count(*) FROM agent_task_queue
-WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid[]))
+WHERE (
+    runtime_id = ANY(@runtime_ids::uuid[])
+    OR session_affinity_runtime_id = ANY(@runtime_ids::uuid[])
+    OR agent_id = ANY(@agent_ids::uuid[])
+  )
   AND completed_at IS NULL;
 
 -- name: UnbindTasksFromRuntime :execrows
@@ -476,11 +521,12 @@ UPDATE agent_runtime
 SET legacy_daemon_id = COALESCE(legacy_daemon_id, $2)
 WHERE id = $1;
 
--- name: DeleteStaleOfflineRuntimes :many
--- Deletes runtimes that have been offline for longer than the TTL and have
--- no agents bound (active or archived). The FK constraint on agent.runtime_id
--- is ON DELETE RESTRICT, so we must exclude all agent references.
-DELETE FROM agent_runtime
+-- name: ListStaleOfflineRuntimesForGC :many
+-- Bounded, unlocked discovery only. Each candidate is revalidated under its
+-- Runtime row lock before the shared Runtime -> ChatSession -> Agent -> Task
+-- teardown runs; direct DELETE would bypass Pool affinity/history cleanup.
+SELECT id, workspace_id
+FROM agent_runtime
 WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
   AND NOT EXISTS (
@@ -488,7 +534,25 @@ WHERE status = 'offline'
     FROM agent
     WHERE agent.runtime_id = agent_runtime.id
   )
-RETURNING id, workspace_id;
+ORDER BY last_seen_at, id
+LIMIT @candidate_limit::integer;
+
+-- name: LockStaleOfflineRuntimeForGC :one
+-- Recheck mutable Runtime eligibility after taking the first relation lock in
+-- the common deletion order. Bound-Agent absence is deliberately re-read by a
+-- separate statement after this lock so a just-committed FK reference cannot
+-- be hidden by the SELECT snapshot.
+SELECT *
+FROM agent_runtime
+WHERE id = @runtime_id
+  AND status = 'offline'
+  AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
+FOR UPDATE;
+
+-- name: RuntimeHasBoundAgents :one
+SELECT EXISTS (
+  SELECT 1 FROM agent WHERE runtime_id = @runtime_id
+);
 
 -- name: ListPoolRuntimeCandidates :many
 -- Fresh placement only. Authorization, capability, strict DB idle and the

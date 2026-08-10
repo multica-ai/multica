@@ -150,6 +150,9 @@ type RerunIssueRequest struct {
 	// assignee — so clicking retry on row that belonged to a now-displaced
 	// agent re-fires that same agent, not the new assignee.
 	TaskID string `json:"task_id,omitempty"`
+	// FreshSession is Pool-only. It preserves rerun lineage for audit while
+	// explicitly suppressing every prior Session/workdir source at claim time.
+	FreshSession bool `json:"fresh_session,omitempty"`
 }
 
 // RerunIssue manually re-enqueues an agent run for the issue. By default it
@@ -208,9 +211,16 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
 	}
 
-	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, actorUserID, canInvoke)
+	task, err := h.TaskService.RerunIssueWithFreshSession(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, actorUserID, req.FreshSession, canInvoke)
 	if errors.Is(err, service.ErrRerunInvokeNotAllowed) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		return
+	}
+	if errors.Is(err, service.ErrFreshSessionRequiresPool) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": "fresh_session is only supported by Pool Agents",
+			"code":  "FRESH_SESSION_REQUIRES_POOL",
+		})
 		return
 	}
 	if err != nil {

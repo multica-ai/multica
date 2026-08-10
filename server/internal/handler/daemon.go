@@ -25,6 +25,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/internal/runtimepool"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -1613,6 +1614,36 @@ type claimBuildFailure struct {
 // feed the same delivery receipt into FinalizeTaskClaim. A non-nil failure
 // means the task must not be dispatched; the builder has already cancelled it
 // where the failure semantics require it.
+func exactClaimAffinitySourceID(task db.AgentTaskQueue) pgtype.UUID {
+	if task.RerunOfTaskID.Valid {
+		return task.RerunOfTaskID
+	}
+	// Retry/parent precedence is a Pool routing contract. Fixed retry keeps its
+	// legacy Session lookup behavior unchanged.
+	if task.RuntimeBindingMode == runtimepool.BindingPool {
+		if task.RetryOfTaskID.Valid {
+			return task.RetryOfTaskID
+		}
+		if task.ParentTaskID.Valid {
+			return task.ParentTaskID
+		}
+	}
+	return pgtype.UUID{}
+}
+
+func applyExactClaimAffinity(resp *AgentTaskResponse, task, source db.AgentTaskQueue) {
+	if source.WorkDir.Valid {
+		resp.PriorWorkDir = source.WorkDir.String
+	}
+	if !service.ResumeUnsafeFailure(source.FailureReason.String, source.Error.String) &&
+		source.SessionID.Valid && source.RuntimeID == task.RuntimeID {
+		resp.PriorSessionID = source.SessionID.String
+	}
+	if source.SessionRolloutMissing {
+		resp.PriorSessionResumeUnavailable = true
+	}
+}
+
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
@@ -2052,73 +2083,42 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.TriggerCommentContent = "The newest triggering comment is no longer available. Address every earlier comment included below."
 		}
 
-		// Resolve the prior agent session / workdir to resume.
-		if task.RerunOfTaskID.Valid {
-			// Manual retry: resume precisely from the source task the user
-			// clicked, NOT the most-recent (agent, issue) row — a parallel task
-			// on the same issue must never hijack the resume (MUL-4869). The
-			// workdir is ALWAYS reused when it still exists; the session is
-			// resumed only when the source failure did not poison the
-			// conversation AND the source ran on this runtime.
-			//
-			// Resume-safety is computed HERE from the source task, not read off
-			// task.ForceFreshSession: RerunIssue pins that flag to true so an OLD
-			// claim handler mid rolling-deploy degrades to a clean start instead
-			// of resuming a different execution via the (agent, issue) lookup.
-			// service.ResumeUnsafeFailure mirrors GetLastTaskSession, including
-			// its 400/invalid_request_error text defense for legacy /
-			// mis-classified rows that the exact-source path would otherwise miss.
-			//
-			// When the source workdir is gone (GC'd), absent on this runtime, or
-			// was never recorded (failed too early), execenv.Reuse falls back to a
-			// fresh Prepare and gateResumeToReusedWorkdir drops the now-unusable
-			// session — reuse is best-effort, never a silent swap onto a stale
-			// directory. PriorWorkDir is offered regardless of runtime (a shared
-			// mount may still resolve it); only the per-cwd session is
-			// runtime-gated.
-			if src, err := h.Queries.GetAgentTask(r.Context(), task.RerunOfTaskID); err == nil {
-				if src.WorkDir.Valid {
-					resp.PriorWorkDir = src.WorkDir.String
+		// Explicit fresh is the highest-precedence persisted instruction: keep
+		// rerun/retry lineage for audit, but never expose its Session or workdir.
+		if !task.ExplicitFreshSession {
+			if sourceID := exactClaimAffinitySourceID(*task); sourceID.Valid {
+				if source, err := h.Queries.GetAgentTask(r.Context(), sourceID); err == nil {
+					applyExactClaimAffinity(&resp, *task, source)
 				}
-				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
-					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = src.SessionID.String
+			} else if !task.ForceFreshSession {
+				// Non-rerun follow-up on the same issue: resume the most recent
+				// (agent, issue) session so the agent keeps the issue's conversation
+				// context across turns. The "Focus on THIS comment" guard in
+				// prompt.go defends against inheriting the prior turn's "Done."
+				// marker, and GetLastTaskSession already excludes poisoned sessions.
+				if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
+					AgentID: task.AgentID,
+					IssueID: task.IssueID,
+				}); err == nil && prior.SessionID.Valid {
+					if prior.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = prior.SessionID.String
+					}
+					if prior.WorkDir.Valid {
+						resp.PriorWorkDir = prior.WorkDir.String
+					}
 				}
-				// MUL-5305: if the source task withheld its Codex session because
-				// the rollout was missing, this rerun has nothing resumable from it
-				// — disclose the gap rather than silently starting fresh.
-				if src.SessionRolloutMissing {
+				// MUL-5305: if the most recent terminal task withheld its Codex
+				// session because the rollout was missing, GetLastTaskSession fell
+				// back to an older session (or none). Disclose the continuity gap so
+				// the next run tells the user the most recent turn's context could not
+				// be carried over — even when that older session resumes cleanly,
+				// which the resume-presence gate would otherwise pass silently.
+				if missing, err := h.Queries.GetLatestTaskRolloutMissing(r.Context(), db.GetLatestTaskRolloutMissingParams{
+					AgentID: task.AgentID,
+					IssueID: task.IssueID,
+				}); err == nil && missing {
 					resp.PriorSessionResumeUnavailable = true
 				}
-			}
-		} else if !task.ForceFreshSession {
-			// Non-rerun follow-up on the same issue: resume the most recent
-			// (agent, issue) session so the agent keeps the issue's conversation
-			// context across turns. The "Focus on THIS comment" guard in
-			// prompt.go defends against inheriting the prior turn's "Done."
-			// marker, and GetLastTaskSession already excludes poisoned sessions.
-			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
-				AgentID: task.AgentID,
-				IssueID: task.IssueID,
-			}); err == nil && prior.SessionID.Valid {
-				if prior.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = prior.SessionID.String
-				}
-				if prior.WorkDir.Valid {
-					resp.PriorWorkDir = prior.WorkDir.String
-				}
-			}
-			// MUL-5305: if the most recent terminal task withheld its Codex
-			// session because the rollout was missing, GetLastTaskSession fell
-			// back to an older session (or none). Disclose the continuity gap so
-			// the next run tells the user the most recent turn's context could not
-			// be carried over — even when that older session resumes cleanly,
-			// which the resume-presence gate would otherwise pass silently.
-			if missing, err := h.Queries.GetLatestTaskRolloutMissing(r.Context(), db.GetLatestTaskRolloutMissingParams{
-				AgentID: task.AgentID,
-				IssueID: task.IssueID,
-			}); err == nil && missing {
-				resp.PriorSessionResumeUnavailable = true
 			}
 		}
 	}
@@ -2235,35 +2235,41 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					resp.Repos = repos
 				}
 			}
-			if !task.ForceFreshSession {
-				// Resume chat sessions only when the stored pointer was produced
-				// by the same runtime as the claiming task. When the chat_session
-				// pointer is missing (legacy NULL runtime_id), stale (last task
-				// failed before reporting completion), or runtime-mismatched, fall
-				// back to the most recent task row that recorded a session_id —
-				// otherwise a single failed turn would silently drop the entire
-				// conversation memory on the next message. The fallback also
-				// requires runtime to match.
-				if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = cs.SessionID.String
-				}
-				if cs.WorkDir.Valid {
-					resp.PriorWorkDir = cs.WorkDir.String
-				}
-				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
-					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
-						resp.PriorSessionID = prior.SessionID.String
+			if !task.ExplicitFreshSession {
+				if sourceID := exactClaimAffinitySourceID(*task); sourceID.Valid {
+					if source, err := h.Queries.GetAgentTask(r.Context(), sourceID); err == nil {
+						applyExactClaimAffinity(&resp, *task, source)
 					}
-					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
-						resp.PriorWorkDir = prior.WorkDir.String
+				} else if !task.ForceFreshSession {
+					// Resume chat sessions only when the stored pointer was produced
+					// by the same runtime as the claiming task. When the chat_session
+					// pointer is missing (legacy NULL runtime_id), stale (last task
+					// failed before reporting completion), or runtime-mismatched, fall
+					// back to the most recent task row that recorded a session_id —
+					// otherwise a single failed turn would silently drop the entire
+					// conversation memory on the next message. The fallback also
+					// requires runtime to match.
+					if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = cs.SessionID.String
 					}
-				}
-				// MUL-5305: if the most recent terminal task on this chat session
-				// withheld its Codex session (rollout missing), we resumed an older
-				// session (or none) above — disclose the continuity gap so the next
-				// turn tells the user the most recent turn's context is missing.
-				if missing, err := h.Queries.GetLatestChatTaskRolloutMissing(r.Context(), cs.ID); err == nil && missing {
-					resp.PriorSessionResumeUnavailable = true
+					if cs.WorkDir.Valid {
+						resp.PriorWorkDir = cs.WorkDir.String
+					}
+					if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
+						if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
+							resp.PriorSessionID = prior.SessionID.String
+						}
+						if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+							resp.PriorWorkDir = prior.WorkDir.String
+						}
+					}
+					// MUL-5305: if the most recent terminal task on this chat session
+					// withheld its Codex session (rollout missing), we resumed an older
+					// session (or none) above — disclose the continuity gap so the next
+					// turn tells the user the most recent turn's context is missing.
+					if missing, err := h.Queries.GetLatestChatTaskRolloutMissing(r.Context(), cs.ID); err == nil && missing {
+						resp.PriorSessionResumeUnavailable = true
+					}
 				}
 			}
 			// Resolve the user-message input batch for this run. A task-owned
