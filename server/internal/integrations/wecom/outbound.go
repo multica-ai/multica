@@ -100,6 +100,13 @@ func (o *Outbound) Register(bus *events.Bus) {
 func (o *Outbound) handleEvent(e events.Event) {
 	// Bus delivery is synchronous — a stuck WS write must not wedge the
 	// publish call site. Fresh ctx with a tight timeout, same as Slack.
+	//
+	// It is the ceiling on everything up to the words going out, not on the
+	// whole handler: an answer that waits out another delivery for the same run
+	// can spend all of this waiting, and the delivery behind the wait then takes
+	// a bounded budget of its own rather than the nothing that is left. So the
+	// worst case here is this plus one streamCloseTimeout — see deliveryBudget
+	// in stream_store.go for why the alternative is losing the answer.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := o.processEvent(ctx, e); err != nil {
@@ -164,7 +171,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// the ledger records the ending only from what deliverAnswer reports. There
 	// is no path here that sends without recording, and none that records
 	// without sending — see the ending ledger's contract in stream_store.go.
-	return o.sayTheAnswer(ctx, sessionID, taskIDFromEvent(e), content, 0)
+	return o.sayTheAnswer(ctx, sessionID, taskIDFromEvent(e), content, endingRetries{})
 }
 
 // answerRetryAfter is how long an answer the ledger handed back undelivered
@@ -172,6 +179,11 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 // shape and the same numbers as the typing indicator's endingRetryAfter, and for
 // the same reason — what an attempt is waiting out is a delivery bounded by
 // streamCloseTimeout, and every attempt is over long inside roundMemory.
+//
+// One cause books them here rather than two, so the three attempts fall at 15s,
+// 45s and 105s after the answer was first attempted and the chain is finished
+// inside two minutes. See sayTheAnswer for why a refused send is not the second
+// cause it is on the endings.
 const (
 	answerRetryAfter    = 15 * time.Second
 	answerRetryAttempts = 3
@@ -197,18 +209,38 @@ const (
 // it files streamCopyStillWorking and the answer IS the separate reply that copy
 // has just promised.
 //
+// The wait is not the only way the budget goes. Winning it costs the same time,
+// and what would be left for the binding row, the installation row and the ack
+// is then nothing — a delivery that fails on a context error with the round
+// already consumed and no deferral to book from. That one is fixed a layer down:
+// the ledger hands the delivery a budget of its own rather than the remainder
+// (deliveryBudget in stream_store.go), so this path never has to tell a context
+// error apart from a refusal.
+//
 // Everything else is the end of the matter. A delivery that said nothing on
 // purpose (errNothingToSay) is a completion nobody was owed; a delivery that was
 // refused is reported to the caller's WARN and leaves the round owed its ending
-// on the note, exactly as it did before.
-func (o *Outbound) sayTheAnswer(ctx context.Context, sessionID pgtype.UUID, taskID, content string, attempt int) error {
+// on the note, exactly as it did before. Deliberately NOT retried, unlike the
+// endings in typing_indicator.go: an answer's first route is the bubble, and a
+// refused frame is already followed by the same words as a plain message, so a
+// third attempt is the one that prints the answer twice. See deliverAnswer.
+//
+// WHAT A BOOKED RETRY COSTS. Returning nil once one is booked reports the
+// chat:done handled while this subscriber is still holding the answer. The
+// in-process bus has no redelivery, so returning an error instead would only add
+// a WARN — but for as long as the chain runs, up to about two minutes, the
+// answer exists nowhere but in a time.AfterFunc closure. A restart or a panic in
+// that window loses it with no log line and no metric, and chat:done does not
+// fire again.
+func (o *Outbound) sayTheAnswer(ctx context.Context, sessionID pgtype.UUID, taskID, content string, retries endingRetries) error {
+	retries = retries.begin(time.Now())
 	_, err := o.rounds().sayEnding(ctx, sessionID, byTask(taskID), roundOver,
-		func(t roundTurn) (roundAddress, error) {
+		func(ctx context.Context, t roundTurn) (roundAddress, error) {
 			return o.deliverAnswer(ctx, sessionID, t, content)
 		})
 	switch {
 	case errors.Is(err, errEndingDeferred):
-		if o.bookAnswerRetry(sessionID, taskID, content, attempt+1) {
+		if o.bookAnswerRetry(sessionID, taskID, content, retries) {
 			return nil
 		}
 		// Out of attempts, or retries disabled. The answer is lost either way,
@@ -224,19 +256,31 @@ func (o *Outbound) sayTheAnswer(ctx context.Context, sessionID pgtype.UUID, task
 // completion with it, and reports whether it booked one.
 //
 // Bounded twice over, the same way the typing indicator's retries are:
-// answerRetryAttempts caps how many there are and the delay doubles, so the last
-// lands inside three minutes of the first and well inside roundMemory. The
-// attempt takes a budget of its own because the caller's is what ran out, and it
-// goes back through sayEnding like any other publisher — an answer something
-// else delivered in the meantime finds the run on told and says nothing.
-func (o *Outbound) bookAnswerRetry(sessionID pgtype.UUID, taskID, content string, attempt int) bool {
-	if o.retryAfter <= 0 || attempt > answerRetryAttempts {
+// answerRetryAttempts caps how many there are and the delay doubles, so the
+// three fall at 15s, 45s and 105s and the last is well inside roundMemory.
+//
+// Measured from the answer's FIRST attempt rather than from the one that just
+// deferred. An attempt spends its whole budget parked on the delivery it is
+// waiting out before it defers, so a schedule measured from the end restarts its
+// clock after every wait: the same three attempts then land at 15s, 55s and
+// 125s. See endingRetries.next.
+//
+// The attempt takes a budget of its own because the caller's is what ran out,
+// and it goes back through sayEnding like any other publisher — an answer
+// something else delivered in the meantime finds the run on told and says
+// nothing.
+func (o *Outbound) bookAnswerRetry(sessionID pgtype.UUID, taskID, content string, retries endingRetries) bool {
+	if o.retryAfter <= 0 {
 		return false
 	}
-	time.AfterFunc(o.retryAfter<<(attempt-1), func() {
+	next, wait, ok := retries.next(retryDeferred, o.retryAfter, answerRetryAttempts, time.Now())
+	if !ok {
+		return false
+	}
+	time.AfterFunc(wait, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 		defer cancel()
-		if err := o.sayTheAnswer(ctx, sessionID, taskID, content, attempt); err != nil {
+		if err := o.sayTheAnswer(ctx, sessionID, taskID, content, next); err != nil {
 			o.logger.WarnContext(ctx, "wecom outbound: reply delivery failed",
 				"error", err, "chat_session_id", util.UUIDToString(sessionID))
 		}

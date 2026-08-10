@@ -192,7 +192,55 @@ var (
 
 	// errNoLiveConnection — the installation has no socket right now.
 	errNoLiveConnection = errors.New("wecom: no live connection for installation")
+
+	// errWordsMayBeOnScreen marks a failed delivery that got at least as far as
+	// the wire, so the user may be reading the words it is reporting as
+	// undelivered. A delivery made of two sends carries it when the FIRST of
+	// them ended that way and the second was cleanly refused — the second
+	// error alone would say the whole attempt is safe to repeat, and it is not.
+	// See deliveryCanBeRepeated.
+	errWordsMayBeOnScreen = errors.New("wecom: the delivery may already have reached the user")
 )
+
+// deliveryCanBeRepeated reports whether a failed delivery is one this adapter
+// may simply say again.
+//
+// The distinction is not "did it error" — it is whether the words got to the
+// wire. write() takes the writer mutex and the socket deadline on
+// context.Background() and never looks at the caller's context; the caller's
+// context is consulted only in the ack select afterwards. So a send can put a
+// frame on the socket and STILL come back with an ack timeout or a context
+// error, and a caller that reads any error as "nothing reached the user" turns
+// one message into two. deliverAnswer already refuses to re-send a stream frame
+// for exactly this reason (outbound.go).
+//
+// Hence a whitelist rather than a blacklist: true only for the failures this
+// package can name as never having reached the user — a server verdict, a frame
+// dropped before the socket, a registry holding no socket at all. Everything
+// else, including an ack that never came and a context that expired, is
+// unknown, and unknown is not repeated.
+//
+// What that costs is a retry on a delivery that did fail; what it buys is that
+// no retry in this package can duplicate a message. The endings a retry exists
+// for are the ones it still covers: a reconnect window returns
+// errNoLiveConnection, and a refusal returns the server's errcode.
+func deliveryCanBeRepeated(err error) bool {
+	if err == nil || errors.Is(err, errWordsMayBeOnScreen) {
+		return false
+	}
+	switch {
+	case errors.Is(err, errNoLiveConnection),
+		errors.Is(err, errStreamBusy),
+		errors.Is(err, errStreamSuperseded):
+		return true
+	}
+	var se *streamError
+	if errors.As(err, &se) {
+		return true
+	}
+	var ae *wecomAPIError
+	return errors.As(err, &ae)
+}
 
 // ackWaiter is one stream frame's standing request for a verdict. seq is where
 // the frame sits in its req_id's write order, stamped at the moment it goes on

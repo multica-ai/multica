@@ -46,6 +46,11 @@ type bubbleConn struct {
 	// refusePushes is how many plain messages the server answers with an
 	// errcode, counted from the first.
 	refusePushes int
+	// swallowClosingAck writes the closing frame and then answers nothing, which
+	// is the one outcome a refusal cannot model: the frame is on the wire and
+	// the bubble may be sealing right now, but this process will never learn
+	// whether it was. The sender gives up on it after its own ackTimeout.
+	swallowClosingAck bool
 }
 
 func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
@@ -69,6 +74,7 @@ func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
 	if closing {
 		hold, sent = c.holdClosing, c.closingSent
 	}
+	silent := closing && c.swallowClosingAck
 	c.mu.Unlock()
 	if closing || env.Cmd == cmdSendMsg {
 		if sent != nil {
@@ -81,7 +87,7 @@ func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
 			<-hold
 		}
 	}
-	if s != nil {
+	if s != nil && !silent {
 		s.routeResponse(frameEnvelope{
 			Headers: frameHeaders{ReqID: env.Headers.ReqID},
 			ErrCode: code,

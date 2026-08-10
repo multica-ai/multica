@@ -45,11 +45,15 @@ type fakeOutboundQueries struct {
 	// cancelled and reaped while its ending was in flight.
 	tasks   map[string]db.AgentTaskQueue
 	taskErr error
-	// mu guards the two counters below. task:failed has two publishers and the
-	// bus is synchronous, so a test modelling both of them runs this fake on two
-	// goroutines at once.
+	// mu guards the counters and the hook below. task:failed has two publishers
+	// and the bus is synchronous, so a test modelling both of them runs this
+	// fake on two goroutines at once.
 	mu       sync.Mutex
 	taskGets int
+	// atBinding runs on every chat-binding lookup, which is the first round trip
+	// a delivery with no bubble left has to make. It is where a test says "and
+	// by the time the delivery got here, the caller's budget was gone".
+	atBinding func()
 	// channelIngested is the channel_ingested stamp on the input batch the
 	// task owns: askedOverWecom for a question typed in the room,
 	// askedInTheWebUI for one typed in Multica.
@@ -79,6 +83,12 @@ func askedOverWecom() *bool  { asked := true; return &asked }
 func askedInTheWebUI() *bool { asked := false; return &asked }
 
 func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
+	f.mu.Lock()
+	at := f.atBinding
+	f.mu.Unlock()
+	if at != nil {
+		at()
+	}
 	return f.sessionBinding, f.sessionErr
 }
 func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {

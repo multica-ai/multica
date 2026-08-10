@@ -67,23 +67,134 @@ const (
 
 // streamCloseTimeout bounds a closing frame written from a timer or a bus
 // subscriber, neither of which has a caller's context to inherit.
+//
+// It is also the floor the ledger guarantees a delivery (deliveryBudget in
+// stream_store.go), which is what puts a ceiling on the bus subscribers here: a
+// subscriber that spends its whole budget waiting out another delivery for the
+// same run, and then speaks, holds the publishing goroutine for this twice over.
+// The alternative is a delivery with nothing to speak in and news nobody else
+// holds.
 const streamCloseTimeout = 10 * time.Second
 
 // endingRetryAfter is how long an ending this manager could not deliver waits
-// before trying again, and endingRetryAttempts is how many times. The delay
-// doubles, so the three attempts fall at 15s, 45s and 105s after the first —
-// long enough for a Supervisor reconnect to have happened, short enough that
+// before trying again, and endingRetryAttempts is how many times EACH of the two
+// causes below may book. The delay doubles, so a chain that meets only one cause
+// runs its three attempts 15s, 45s and 105s after the ending was first attempted
+// — long enough for a Supervisor reconnect to have happened, short enough that
 // all of them are over well inside roundMemory.
 //
-// Two things book them. A settled round's send that nothing accepted, which has
-// no other publisher at all (see settleRound). And any ending whose wait for
-// another delivery ran past its caller's budget (errEndingDeferred): the news is
-// then still this publisher's to deliver and it has no time left to do it in, so
-// it comes back with a budget of its own.
+// Measured from the FIRST attempt, not from the one that just failed. An attempt
+// can spend its whole streamCloseTimeout parked on another delivery before it
+// gives up, so a schedule measured from the end restarts its clock after every
+// wait: the same three attempts then land at 15s, 55s and 125s, and the chain
+// runs half a minute past what this says. See endingRetries.next.
+//
+// A delivery that never reports cannot exhaust a chain of deferrals, and the
+// numbers are why: sweepLocked retires a reservation at inFlightMaxAge, which is
+// 60s, so the attempt at 105s finds it gone and speaks. The two before it do
+// not — at 15s and 45s the holder is still inside its age and they park and
+// defer again — so the third attempt is doing the work here, not the second.
+//
+// Two things book them, and they are counted apart because they are two
+// different failures with two different cures. A send that nothing accepted —
+// which on a settled round has no other publisher at all (see settleRound) — is
+// waiting out a socket. An ending whose wait for another delivery ran past its
+// caller's budget (errEndingDeferred) is waiting out a publisher that is still
+// speaking; the news is then still this one's to deliver and it has no time left
+// to do it in, so it comes back with a budget of its own. Sharing one counter
+// let a round that lost three waits arrive at a refused send with nothing left,
+// which is the case the schedule was built for in the first place.
 const (
 	endingRetryAfter    = 15 * time.Second
 	endingRetryAttempts = 3
 )
+
+// retryCause is why another attempt is being booked. Each has its own count on
+// endingRetries; the delay comes off the total.
+type retryCause int
+
+const (
+	// retryDeferred — the wait for another delivery of the same run outlasted
+	// this attempt's budget, so nothing was said and nothing recorded.
+	retryDeferred retryCause = iota
+	// retryRefused — the words went out and were turned away. Only ever booked
+	// for a refusal this package can name as never having reached the user; an
+	// outcome that is merely unknown is not repeated (deliveryCanBeRepeated).
+	retryRefused
+)
+
+// endingRetries is what one round's ending has already spent trying to reach the
+// user: when it was first attempted, and how many attempts each cause has taken.
+// It travels with the retry rather than living on the manager, so two rounds
+// retrying at once cannot spend each other's attempts.
+type endingRetries struct {
+	// first is when the ending was first attempted, which is what every slot in
+	// the schedule is measured from.
+	first time.Time
+	// deferred and refused are the two causes' counts. Capped separately at
+	// endingRetryAttempts, so at most six attempts exist and the last of them is
+	// inside sixteen minutes of the first — still far inside roundMemory, past
+	// which the note holding the debt is gone and there is nothing left to say
+	// it against.
+	deferred int
+	refused  int
+}
+
+// begin stamps when this ending was first attempted. Idempotent: every later
+// attempt in the chain carries the same stamp, which is what keeps the schedule
+// from restarting.
+func (r endingRetries) begin(now time.Time) endingRetries {
+	if r.first.IsZero() {
+		r.first = now
+	}
+	return r
+}
+
+// next books one more attempt for cause and reports how long from now it should
+// run, along with the counts to carry into it. ok is false once that cause has
+// spent its attempts.
+//
+// The slot is cumulative over BOTH causes — base, then base*3, then base*7 —
+// so a round that keeps failing keeps backing off however it is failing. A slot
+// already in the past, which is what an attempt that outlasted its own slot
+// leaves, runs as soon as the timer can rather than in the past.
+func (r endingRetries) next(cause retryCause, base time.Duration, attempts int, now time.Time) (endingRetries, time.Duration, bool) {
+	switch cause {
+	case retryRefused:
+		if r.refused >= attempts {
+			return r, 0, false
+		}
+		r.refused++
+	default:
+		if r.deferred >= attempts {
+			return r, 0, false
+		}
+		r.deferred++
+	}
+	at := r.first.Add(base * time.Duration(1<<(r.deferred+r.refused)-1))
+	if wait := at.Sub(now); wait > 0 {
+		return r, wait, true
+	}
+	return r, 0, true
+}
+
+// endingRetryCause reads what the ledger handed back and says which cause the
+// next attempt would be booked under, or that there is no safe next attempt.
+//
+// Three answers, and the third is the one worth naming: a delivery that failed
+// after its frame reached the wire may already be on the user's screen, so
+// saying it again is how one ending becomes two messages. See
+// deliveryCanBeRepeated for why an ack timeout and a context error are in that
+// third group and a server's errcode is not.
+func endingRetryCause(err error) (retryCause, bool) {
+	if errors.Is(err, errEndingDeferred) {
+		return retryDeferred, true
+	}
+	if deliveryCanBeRepeated(err) {
+		return retryRefused, true
+	}
+	return retryDeferred, false
+}
 
 // taskLookup resolves a task id to the chat session it belongs to. Both
 // publishers of task:failed stamp the session whenever the task row has one,
@@ -352,11 +463,11 @@ func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype
 	if m.senders == nil || m.streams == nil || !sessionID.Valid {
 		return
 	}
-	m.settleRound(ctx, sessionID, batch, 0)
+	m.settleRound(ctx, sessionID, batch, endingRetries{})
 }
 
-// settleRound says the settled flush's ending, and books itself again when
-// nothing reached the user.
+// settleRound says the settled flush's ending, and books itself again when it
+// can establish that nothing reached the user.
 //
 // The retry is the part this path cannot do without. Every other ending has a
 // second publisher — a sweeper tick, a repeat on the bus, WeCom's own
@@ -370,9 +481,10 @@ func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype
 // what keeps it inside the ledger: if anything else closed the round in the
 // meantime the repeat finds nothing owed and says nothing, and if this attempt
 // fails too the debt goes back where it was for the next one.
-func (m *TypingIndicatorManager) settleRound(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID, attempt int) {
+func (m *TypingIndicatorManager) settleRound(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID, retries endingRetries) {
+	retries = retries.begin(time.Now())
 	_, err := m.streams.sayEnding(ctx, sessionID, byBatch(batch), roundOver, nil,
-		func(t roundTurn) (roundAddress, error) {
+		func(ctx context.Context, t roundTurn) (roundAddress, error) {
 			if t.HasBubble {
 				return t.Handle.address(), m.writeClosing(ctx, sessionID, t.Handle, streamCopyNotStarted, "settled")
 			}
@@ -395,37 +507,59 @@ func (m *TypingIndicatorManager) settleRound(ctx context.Context, sessionID pgty
 	// is the one publisher this round can be waiting behind, and its promise
 	// ends nothing, so this settle is still the only closer a run that never
 	// started will ever have.
-	if !m.bookEndingRetry(attempt+1, func(ctx context.Context) {
-		m.settleRound(ctx, sessionID, batch, attempt+1)
+	//
+	// The third way is the one that must NOT come back: a delivery that reached
+	// the wire and then lost its ack. Those words may be on the screen already,
+	// and a settle is the one ending whose repeat nothing would deduplicate —
+	// the bubble is gone, so the repeat goes out as another plain message.
+	if !m.sayItAgain(retries, err, func(ctx context.Context, retries endingRetries) {
+		m.settleRound(ctx, sessionID, batch, retries)
 	}) {
-		m.log.WarnContext(ctx, "wecom typing: giving up on a settled round's ending",
+		m.log.WarnContext(ctx, "wecom typing: a settled round's ending will not be said again",
 			"chat_session_id", util.UUIDToString(sessionID), "batch", uint64(batch),
-			"attempts", attempt+1, "error", err)
+			"deferred", retries.deferred, "refused", retries.refused, "error", err)
 	}
+}
+
+// sayItAgain books another attempt at an ending the ledger handed back
+// undelivered, and reports whether one is coming. It is the one place the two
+// halves of that decision meet: WHETHER these words can safely be said again,
+// and whether that cause has any attempts left.
+func (m *TypingIndicatorManager) sayItAgain(retries endingRetries, err error, again func(context.Context, endingRetries)) bool {
+	cause, ok := endingRetryCause(err)
+	if !ok {
+		return false
+	}
+	return m.bookEndingRetry(retries, cause, again)
 }
 
 // bookEndingRetry schedules another attempt at an ending that did not reach the
 // user, and reports whether it booked one.
 //
-// Bounded twice over: endingRetryAttempts caps how many there are, and the delay
-// doubles, so the last one lands inside three minutes of the first. That is the
-// shape of what it is waiting out — a Supervisor reconnect takes seconds, and a
-// delivery it lost the wait to is bounded by streamCloseTimeout — and it stays
-// far inside roundMemory, past which the note holding the debt is gone and there
-// is nothing left to say it against.
+// Bounded twice over: endingRetryAttempts caps each cause, and the delay doubles
+// over both of them together, so the last attempt of even a chain that meets
+// both lands inside sixteen minutes of the first. That is the shape of what it
+// is waiting out — a Supervisor reconnect takes seconds, and a delivery it lost
+// the wait to is bounded by streamCloseTimeout — and it stays far inside
+// roundMemory, past which the note holding the debt is gone and there is nothing
+// left to say it against.
 //
 // The attempt runs on a budget of its own rather than the caller's, because the
 // caller's is what ran out. It goes back through sayEnding like every other
 // publisher, so an ending anything else delivered in the meantime finds nothing
 // owed and says nothing.
-func (m *TypingIndicatorManager) bookEndingRetry(attempt int, again func(context.Context)) bool {
-	if m.endingRetryAfter <= 0 || attempt > endingRetryAttempts {
+func (m *TypingIndicatorManager) bookEndingRetry(retries endingRetries, cause retryCause, again func(context.Context, endingRetries)) bool {
+	if m.endingRetryAfter <= 0 {
 		return false
 	}
-	time.AfterFunc(m.endingRetryAfter<<(attempt-1), func() {
+	next, wait, ok := retries.next(cause, m.endingRetryAfter, endingRetryAttempts, time.Now())
+	if !ok {
+		return false
+	}
+	time.AfterFunc(wait, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 		defer cancel()
-		again(ctx)
+		again(ctx, next)
 	})
 	return true
 }
@@ -530,7 +664,7 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 	defer cancel()
-	m.sayFailedRun(ctx, sessionID, taskID, bound, 0)
+	m.sayFailedRun(ctx, sessionID, taskID, bound, endingRetries{})
 }
 
 // sayFailedRun is handleTaskFailed past its gates: the ledger call and what to
@@ -541,29 +675,38 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 // them again would be two more reads per attempt on a bus event this deployment
 // publishes for every run in it.
 //
-// The deferral is the case worth naming. task:failed has two publishers, so a
-// notice can arrive while another delivery for the same run is on the wire, and
-// waiting it out is what keeps the two from both speaking. A wait that loses to
-// this attempt's budget reserved nothing and recorded nothing — so unless
-// something else says this run's ending, streamCopyFailed is still owed, and
-// this publisher is still the one holding it. It is also the reply the guard's
-// promise promised whenever the delivery ahead was the guard's.
-func (m *TypingIndicatorManager) sayFailedRun(ctx context.Context, sessionID pgtype.UUID, taskID string, bound roundAddress, attempt int) {
+// The deferral is one of the two cases worth naming. task:failed has two
+// publishers, so a notice can arrive while another delivery for the same run is
+// on the wire, and waiting it out is what keeps the two from both speaking. A
+// wait that loses to this attempt's budget reserved nothing and recorded nothing
+// — so unless something else says this run's ending, streamCopyFailed is still
+// owed, and this publisher is still the one holding it. It is also the reply the
+// guard's promise promised whenever the delivery ahead was the guard's.
+//
+// The other is a send the socket turned away, which is the commoner failure of
+// the two: a reconnect window refuses everything, and the second publisher this
+// notice has may not fire again at all — the sweeper repeats a run it timed out,
+// not one FailTask already reported. So a refusal comes back on the same
+// schedule as a deferral, under a count of its own, and only when the refusal is
+// one this package can name as never having reached the user.
+func (m *TypingIndicatorManager) sayFailedRun(ctx context.Context, sessionID pgtype.UUID, taskID string, bound roundAddress, retries endingRetries) {
+	retries = retries.begin(time.Now())
 	_, err := m.rounds().sayEnding(ctx, sessionID, byTask(taskID), roundOver,
-		func(t roundTurn) (roundAddress, error) {
+		func(ctx context.Context, t roundTurn) (roundAddress, error) {
 			if !t.HasBubble && !t.Addr.known() && bound.known() {
 				t.Addr = bound
 			}
 			return m.sayTheRunFailed(ctx, sessionID, t)
 		})
-	if !errors.Is(err, errEndingDeferred) {
+	if err == nil || errors.Is(err, errNothingToSay) {
 		return
 	}
-	if !m.bookEndingRetry(attempt+1, func(ctx context.Context) {
-		m.sayFailedRun(ctx, sessionID, taskID, bound, attempt+1)
+	if !m.sayItAgain(retries, err, func(ctx context.Context, retries endingRetries) {
+		m.sayFailedRun(ctx, sessionID, taskID, bound, retries)
 	}) {
-		m.log.WarnContext(ctx, "wecom typing: giving up on a failed run's notice after waiting out other deliveries",
-			"chat_session_id", util.UUIDToString(sessionID), "task_id", taskID, "attempts", attempt+1)
+		m.log.WarnContext(ctx, "wecom typing: a failed run's notice will not be said again",
+			"chat_session_id", util.UUIDToString(sessionID), "task_id", taskID,
+			"deferred", retries.deferred, "refused", retries.refused, "error", err)
 	}
 }
 
@@ -681,21 +824,27 @@ func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 	defer cancel()
-	m.sayCancelledRun(ctx, sessionID, taskIDFromEvent(e), 0)
+	m.sayCancelledRun(ctx, sessionID, taskIDFromEvent(e), endingRetries{})
 }
 
 // sayCancelledRun is handleTaskCancelled's ledger call, and what to do when the
 // ledger hands the cancellation back undelivered.
 //
 // This is the ending with the fewest publishers of all — one broadcast, no
-// sweeper repeat, no redelivery — so a wait that outlasts its budget is the
-// whole of it unless this comes back. What the asker is left with otherwise is
-// whatever the delivery ahead put on the screen: a spinner it consumed and could
-// not seal, or the guard's streamCopyStillWorking promise about a run the user
-// themselves stopped.
-func (m *TypingIndicatorManager) sayCancelledRun(ctx context.Context, sessionID pgtype.UUID, taskID string, attempt int) {
+// sweeper repeat, no redelivery — so an attempt that does not reach the user is
+// the whole of it unless this comes back. What the asker is left with otherwise
+// is whatever the delivery ahead put on the screen: a spinner it consumed and
+// could not seal, or the guard's streamCopyStillWorking promise about a run the
+// user themselves stopped.
+//
+// That reasoning does not distinguish between a wait this attempt lost and a
+// send the socket turned away, so neither does this: both come back, on counts
+// of their own. A refusal is in fact the commoner of the two — a reconnect
+// window refuses every route a cancellation has.
+func (m *TypingIndicatorManager) sayCancelledRun(ctx context.Context, sessionID pgtype.UUID, taskID string, retries endingRetries) {
+	retries = retries.begin(time.Now())
 	_, err := m.rounds().sayEnding(ctx, sessionID, byTask(taskID), roundOver,
-		func(t roundTurn) (roundAddress, error) {
+		func(ctx context.Context, t roundTurn) (roundAddress, error) {
 			if m.senders == nil {
 				return roundAddress{}, errNothingToSay
 			}
@@ -713,14 +862,15 @@ func (m *TypingIndicatorManager) sayCancelledRun(ctx context.Context, sessionID 
 			}
 			return t.Addr, m.sayAsPlainMessage(ctx, sessionID, t.Addr, streamCopyCancelled)
 		})
-	if !errors.Is(err, errEndingDeferred) {
+	if err == nil || errors.Is(err, errNothingToSay) {
 		return
 	}
-	if !m.bookEndingRetry(attempt+1, func(ctx context.Context) {
-		m.sayCancelledRun(ctx, sessionID, taskID, attempt+1)
+	if !m.sayItAgain(retries, err, func(ctx context.Context, retries endingRetries) {
+		m.sayCancelledRun(ctx, sessionID, taskID, retries)
 	}) {
-		m.log.WarnContext(ctx, "wecom typing: giving up on a cancelled run's notice after waiting out other deliveries",
-			"chat_session_id", util.UUIDToString(sessionID), "task_id", taskID, "attempts", attempt+1)
+		m.log.WarnContext(ctx, "wecom typing: a cancelled run's notice will not be said again",
+			"chat_session_id", util.UUIDToString(sessionID), "task_id", taskID,
+			"deferred", retries.deferred, "refused", retries.refused, "error", err)
 	}
 }
 
@@ -936,7 +1086,7 @@ func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, batch engine.Ru
 // that has already finished having anything to promise.
 func (m *TypingIndicatorManager) fireGuard(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID) {
 	m.streams.sayEnding(ctx, sessionID, byBatch(batch), roundContinues, nil,
-		func(t roundTurn) (roundAddress, error) {
+		func(ctx context.Context, t roundTurn) (roundAddress, error) {
 			if !t.HasBubble {
 				return roundAddress{}, errNothingToSay
 			}
@@ -961,6 +1111,13 @@ func (m *TypingIndicatorManager) fireGuard(ctx context.Context, sessionID pgtype
 // records nothing as SAID, so this run's ending is still owed and the next
 // publisher of it — a sweeper tick, WeCom's own redelivery — says it instead of
 // finding it filed as already said.
+//
+// That error carries both attempts' verdicts, not just the last one. The closing
+// frame is written on a socket that ignores the caller's context until the ack
+// (ws_sender.go), so a frame that timed out may be sealing the bubble this very
+// moment; if the fallback is then cleanly refused, the refusal alone would tell
+// a retry that nothing reached the user and the retry would put the same words
+// on the screen a second time. errWordsMayBeOnScreen is what stops it.
 func (m *TypingIndicatorManager) writeClosing(ctx context.Context, sessionID pgtype.UUID, h streamHandle, text, why string) error {
 	err := m.senders.stream(ctx, h, text, true)
 	if err == nil {
@@ -970,9 +1127,13 @@ func (m *TypingIndicatorManager) writeClosing(ctx context.Context, sessionID pgt
 		"chat_session_id", util.UUIDToString(sessionID),
 		"reason", why, "unusable", streamUnusable(err), "error", err)
 	sendErr := m.senders.sendTextCtx(ctx, h.InstallationID, h.ChatID, h.ChatType, text)
-	if sendErr != nil {
-		m.log.WarnContext(ctx, "wecom typing: the fallback message was unsendable too",
-			"chat_session_id", util.UUIDToString(sessionID), "reason", why, "error", sendErr)
+	if sendErr == nil {
+		return nil
+	}
+	m.log.WarnContext(ctx, "wecom typing: the fallback message was unsendable too",
+		"chat_session_id", util.UUIDToString(sessionID), "reason", why, "error", sendErr)
+	if !deliveryCanBeRepeated(err) {
+		return errors.Join(errWordsMayBeOnScreen, err, sendErr)
 	}
 	return sendErr
 }

@@ -488,13 +488,17 @@ type inflightKey struct {
 // behind it is the retry that news still has, and answering it "already said"
 // would swallow the words the way defect 4 swallowed a promise — which is
 // exactly what the speaking list did before defect 5 was found. The wait is
-// bounded by the same context the send runs on, and what it waits for IS a send
-// on that budget.
+// bounded by the caller's own context, and what it waits for is a send bounded
+// by streamCloseTimeout.
 //
 // What it can cost the caller is that whole budget, which is defect 7: a wait
 // the caller loses leaves it with the news and no time to send it in. That is
 // not silence and it is not an ending, so it goes back as errEndingDeferred and
 // the caller returns on a budget of its own.
+//
+// A wait the caller WINS costs it the same time and leaves the same nothing to
+// speak in, which is why the delivery does not run on the remainder — see
+// deliveryBudget.
 //
 // The outcome is published under s.mu, by the same call that files what the
 // delivery lost. So a waiter released with delivered=false cannot get back into
@@ -1106,19 +1110,23 @@ func (s *streamStore) takeAtLocked(key string, i int, ending roundEnding) (round
 // possibly appeared under either name in the meantime. It runs BEFORE anything
 // is said, so whichever name finds the round, the words go out exactly once.
 //
-// ctx is the caller's own budget for speaking, and the only thing this function
-// spends it on is waiting out a delivery already under way for the same run —
-// see endingInFlight. A caller whose budget runs out while it waits says nothing
+// ctx is the caller's own budget, and the only thing this function spends it on
+// is waiting out a delivery already under way for the same run — see
+// endingInFlight. A caller whose budget runs out while it waits says nothing
 // this time round and gets errEndingDeferred back, which is this store telling
 // it to return with a budget of its own: the delivery ahead is still running, so
 // there is no outcome yet that could account for the news this caller came with.
+//
+// say is handed a context rather than closing over the caller's, because a wait
+// that is WON costs exactly as much of the caller's budget as one that is lost —
+// see deliveryBudget for what the remainder would otherwise buy.
 func (s *streamStore) sayEnding(
 	ctx context.Context,
 	sessionID pgtype.UUID,
 	k roundKey,
 	ending roundEnding,
 	resolve func(string) string,
-	say func(roundTurn) (roundAddress, error),
+	say func(context.Context, roundTurn) (roundAddress, error),
 ) (roundVerdict, error) {
 	key := util.UUIDToString(sessionID)
 
@@ -1198,10 +1206,41 @@ func (s *streamStore) sayEnding(
 			// Said already. Nothing was reserved, so there is nothing to resolve.
 			return turn.Verdict, nil
 		}
-		addr, err := say(turn)
+		sayCtx, done := deliveryBudget(ctx)
+		addr, err := say(sayCtx, turn)
+		done()
 		s.endEnding(pending, addr, err == nil)
 		return turn.Verdict, err
 	}
+}
+
+// deliveryBudget is what a delivery speaks on, which is deliberately not
+// whatever its caller has left.
+//
+// One thing eats a caller's budget before a word goes out: the wait. A
+// publisher parked on another delivery for the same run pays up to its whole
+// deadline there, and losing that wait is not the costly half — that one comes
+// back as errEndingDeferred and books a retry. WINNING it costs the same time
+// and then hands the remainder to the send, the binding row and the
+// installation row. When the remainder is nothing, those fail with a context
+// error, the round has already been consumed, and there is no deferral to book
+// a retry from because the wait did not lose. That is a silent drop with the
+// news still in hand.
+//
+// So a delivery that would start with less than streamCloseTimeout takes a
+// fresh one. Detached from the caller's cancellation, because the caller's
+// budget is precisely what ran out; still bounded, and bounded by the same
+// constant every closing frame written from a timer runs on.
+//
+// The price is the ceiling on a synchronous bus subscriber: an ending that
+// waits out another delivery and then speaks can hold the publishing goroutine
+// for the caller's budget and this one, back to back. handleEvent in
+// outbound.go states that ceiling where it is paid.
+func deliveryBudget(ctx context.Context) (context.Context, context.CancelFunc) {
+	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) >= streamCloseTimeout {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), streamCloseTimeout)
 }
 
 // beginning is what beginEndingLocked found besides the turn itself.
@@ -1771,10 +1810,12 @@ func (r roundTaker) sayEnding(
 	sessionID pgtype.UUID,
 	k roundKey,
 	ending roundEnding,
-	say func(roundTurn) (roundAddress, error),
+	say func(context.Context, roundTurn) (roundAddress, error),
 ) (roundVerdict, error) {
 	if r.streams == nil {
-		_, err := say(roundTurn{Verdict: roundForgotten})
+		sayCtx, done := deliveryBudget(ctx)
+		defer done()
+		_, err := say(sayCtx, roundTurn{Verdict: roundForgotten})
 		return roundForgotten, err
 	}
 	return r.streams.sayEnding(ctx, sessionID, k, ending,

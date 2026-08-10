@@ -921,6 +921,25 @@ func (r *bubbleRig) waitUntilSaid(t *testing.T, want []string, why string) {
 	}
 }
 
+// waitUntilPushed is waitUntilSaid over the plain messages alone, for a round
+// whose bubble is already gone. It counts what was ATTEMPTED, refusals
+// included, which is the only way to see a first attempt the server turned away
+// and the one that came back for it as two separate things.
+func (r *bubbleRig) waitUntilPushed(t *testing.T, want []string, why string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		got := pushedTexts(t, r.conn)
+		if sameTexts(got, want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the messages attempted were %q, want %q — %s", got, want, why)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // TestAnAnswerWhoseWaitOutlastsItsBudgetIsNotConfirmedAsHandled is the
 // regression, and the costliest of the three: what is dropped is the answer.
 //
@@ -962,9 +981,10 @@ func TestAnAnswerWhoseWaitOutlastsItsBudgetIsNotConfirmedAsHandled(t *testing.T)
 // A run that never became a run has no task and therefore no lifecycle event: a
 // settle that returns having said nothing is the end of it, and the asker keeps
 // "还在处理，完成后我再单独回复你" about a run that never started. The bounded
-// schedule this manager already books for a refused settle is the answer here
-// too — a spent wait is the same fact as a refused send, that the words did not
-// go out — and the point of the test is that the path reaches it.
+// schedule this manager books for a refused settle is the answer here too — the
+// two causes are counted apart, but both mean the same thing about the screen,
+// that these words did not go out — and the point of the test is that the path
+// reaches it.
 func TestASettleWhoseWaitOutlastsItsBudgetBooksItsRetry(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
@@ -1003,7 +1023,7 @@ func TestAFailureNoticeWhoseWaitOutlastsItsBudgetIsStillSaid(t *testing.T) {
 
 	budget, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	rig.typing.sayFailedRun(budget, sessionID, taskID, roundAddress{}, 0)
+	rig.typing.sayFailedRun(budget, sessionID, taskID, roundAddress{}, endingRetries{})
 
 	release()
 	rig.waitUntilSaid(t, []string{streamCopyStillWorking, streamCopyFailed},
@@ -1029,7 +1049,7 @@ func TestACancellationWhoseWaitOutlastsItsBudgetIsStillSaid(t *testing.T) {
 
 	budget, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	rig.typing.sayCancelledRun(budget, sessionID, taskID, 0)
+	rig.typing.sayCancelledRun(budget, sessionID, taskID, endingRetries{})
 
 	release()
 	rig.waitUntilSaid(t, []string{streamCopyStillWorking, streamCopyCancelled},
@@ -1072,7 +1092,7 @@ func TestADeliveryThatNeverReportedIsRetiredAndItsRunLeftOwed(t *testing.T) {
 	func() {
 		defer func() { _ = recover() }()
 		store.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
-			func(roundTurn) (roundAddress, error) { panic("listener blew up mid-send") })
+			func(context.Context, roundTurn) (roundAddress, error) { panic("listener blew up mid-send") })
 	}()
 
 	// Inside the window a holder could still report, so the reservation stands
@@ -1081,7 +1101,7 @@ func TestADeliveryThatNeverReportedIsRetiredAndItsRunLeftOwed(t *testing.T) {
 	defer cancel()
 	spoke := false
 	if _, err := store.sayEnding(stillHeld, sessionID, byTask(taskID), roundOver, nil,
-		func(roundTurn) (roundAddress, error) { spoke = true; return roundAddress{}, nil }); err == nil {
+		func(context.Context, roundTurn) (roundAddress, error) { spoke = true; return roundAddress{}, nil }); err == nil {
 		t.Fatal("a publisher arriving while the reservation was still live spoke instead of " +
 			"waiting — the words it would have doubled may still have been on the wire")
 	}
@@ -1094,7 +1114,7 @@ func TestADeliveryThatNeverReportedIsRetiredAndItsRunLeftOwed(t *testing.T) {
 	budget, cancelBudget := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelBudget()
 	verdict, err := store.sayEnding(budget, sessionID, byTask(taskID), roundOver, nil,
-		func(t roundTurn) (roundAddress, error) { spoke = true; return t.Addr, nil })
+		func(_ context.Context, t roundTurn) (roundAddress, error) { spoke = true; return t.Addr, nil })
 	if err != nil {
 		t.Fatalf("the publisher after the reservation went stale reported %v, want it to have "+
 			"spoken — nobody is coming back for that delivery and it holds the round's only "+
@@ -1140,7 +1160,7 @@ func TestARetiredReservationIsNotFiledTwice(t *testing.T) {
 	// claims is a promise off the owed list rather than nothing — the case where
 	// the failed delivery restores rather than files.
 	if _, err := store.sayEnding(context.Background(), sessionID, byBatch(1), roundContinues, nil,
-		func(t roundTurn) (roundAddress, error) { return t.Handle.address(), nil }); err != nil {
+		func(_ context.Context, t roundTurn) (roundAddress, error) { return t.Handle.address(), nil }); err != nil {
 		t.Fatalf("the guard could not close the round: %v", err)
 	}
 	if !store.owesEnding(sessionID, taskID) {
@@ -1155,7 +1175,7 @@ func TestARetiredReservationIsNotFiledTwice(t *testing.T) {
 	go func() {
 		defer close(slow)
 		store.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
-			func(roundTurn) (roundAddress, error) {
+			func(context.Context, roundTurn) (roundAddress, error) {
 				close(claimed)
 				<-held
 				return roundAddress{}, errNothingToSay
@@ -1171,7 +1191,10 @@ func TestARetiredReservationIsNotFiledTwice(t *testing.T) {
 	defer cancel()
 	spoke := false
 	if _, err := store.sayEnding(budget, sessionID, byTask(taskID), roundOver, nil,
-		func(roundTurn) (roundAddress, error) { spoke = true; return roundAddress{}, errNothingToSay }); err == nil {
+		func(context.Context, roundTurn) (roundAddress, error) {
+			spoke = true
+			return roundAddress{}, errNothingToSay
+		}); err == nil {
 		t.Fatal("the publisher after the sweep reported success from a delivery that said nothing")
 	}
 	if !spoke {
@@ -1233,7 +1256,7 @@ func TestALateHolderDoesNotWithdrawTheNextPublishersReservation(t *testing.T) {
 	go func() {
 		defer close(first)
 		store.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
-			func(roundTurn) (roundAddress, error) {
+			func(context.Context, roundTurn) (roundAddress, error) {
 				close(firstIn)
 				<-releaseFirst
 				return roundAddress{}, errNothingToSay
@@ -1249,7 +1272,7 @@ func TestALateHolderDoesNotWithdrawTheNextPublishersReservation(t *testing.T) {
 	go func() {
 		defer close(second)
 		store.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
-			func(roundTurn) (roundAddress, error) {
+			func(context.Context, roundTurn) (roundAddress, error) {
 				close(secondIn)
 				<-releaseSecond
 				return roundAddress{}, nil
@@ -1266,7 +1289,7 @@ func TestALateHolderDoesNotWithdrawTheNextPublishersReservation(t *testing.T) {
 	defer cancel()
 	spoke := false
 	if _, err := store.sayEnding(third, sessionID, byTask(taskID), roundOver, nil,
-		func(roundTurn) (roundAddress, error) { spoke = true; return roundAddress{}, nil }); err == nil {
+		func(context.Context, roundTurn) (roundAddress, error) { spoke = true; return roundAddress{}, nil }); err == nil {
 		t.Fatal("a third publisher spoke while the second's words were still on the wire")
 	}
 	if spoke {
