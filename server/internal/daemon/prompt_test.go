@@ -7,6 +7,46 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
+func TestBuildOperationalPromptIsSelfContained(t *testing.T) {
+	t.Parallel()
+
+	out := BuildOperationalPrompt(Task{
+		IssueID:     "issue-123",
+		HandoffNote: "Inspect the stale runner image.",
+	}, "codex")
+	for _, want := range []string{
+		"issue-123",
+		"Inspect the stale runner image.",
+		"Result contract",
+		"Complete all required work synchronously",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("BuildOperationalPrompt() missing %q:\n%s", want, out)
+		}
+	}
+	for _, excluded := range []string{"AGENTS.md", ".agent_context", "runtime workflow file", "runtime brief"} {
+		if strings.Contains(out, excluded) {
+			t.Errorf("BuildOperationalPrompt() refers to excluded source %q:\n%s", excluded, out)
+		}
+	}
+}
+
+func TestBuildOperationalPromptEmbedsAutopilotInstructions(t *testing.T) {
+	t.Parallel()
+
+	out := BuildOperationalPrompt(Task{
+		AutopilotRunID:       "run-123",
+		AutopilotID:          "autopilot-123",
+		AutopilotTitle:       "Runner scout",
+		AutopilotDescription: "Inspect runner versions and report anomalies.",
+	}, "codex")
+	for _, want := range []string{"run-123", "Runner scout", "Inspect runner versions and report anomalies.", "Result contract"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("BuildOperationalPrompt() missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestBuildQuickCreatePromptRules locks in the rules that govern how the
 // quick-create agent is allowed to translate raw user input into the issue
 // description body. Each substring corresponds to a concrete failure mode

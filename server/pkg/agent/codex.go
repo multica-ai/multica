@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/codexcontext"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
@@ -919,6 +920,14 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 }
 
 func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts ExecOptions, attempt int) (*Session, error) {
+	if opts.CodexContextMode == codexcontext.ModeOperational {
+		opts.ResumeSessionID = ""
+		opts.ResumeExpected = false
+		opts.ResumeContinuityNotice = ""
+		opts.ExtraArgs = nil
+		opts.CustomArgs = nil
+		opts.McpConfig = nil
+	}
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
 		execPath = "codex"
@@ -1743,7 +1752,8 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 // turn/start calls must reference, and resumed indicates whether the prior
 // thread was picked up (only useful for logging).
 func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions, logger *slog.Logger) (string, bool, error) {
-	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
+	operational := opts.CodexContextMode == codexcontext.ModeOperational
+	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" && !operational {
 		// thread/resume reuses the thread's persisted model and reasoning
 		// effort; only override fields the daemon actually cares about.
 		// developerInstructions stays nil for the reason given on thread/start
@@ -1782,6 +1792,12 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	// Confirmed end-to-end against codex-cli 0.144.6 driving the real
 	// app-server (thread/start -> turn/start) with developerInstructions unset
 	// (MUL-5392).
+	var baseInstructions any
+	var developerInstructions any
+	if operational {
+		baseInstructions = opts.BaseInstructions
+		developerInstructions = opts.DeveloperInstructions
+	}
 	startParams := map[string]any{
 		"model":                  nilIfEmpty(opts.Model),
 		"modelProvider":          nil,
@@ -1790,8 +1806,8 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"approvalPolicy":         nil,
 		"sandbox":                nil,
 		"config":                 nil,
-		"baseInstructions":       nil,
-		"developerInstructions":  nil,
+		"baseInstructions":       baseInstructions,
+		"developerInstructions":  developerInstructions,
 		"compactPrompt":          nil,
 		"includeApplyPatchTool":  nil,
 		"experimentalRawEvents":  false,

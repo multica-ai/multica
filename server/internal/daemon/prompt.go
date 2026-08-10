@@ -55,6 +55,28 @@ const (
 	turnModeOwnership = "**Turn mode: Ownership.** Follow the Ownership-mode block in your runtime workflow file for this turn; the Reply-mode rules do not apply.\n\n"
 )
 
+type promptPolicy struct {
+	turnReply         string
+	turnOwnership     string
+	assignmentHistory func(issueID string) string
+}
+
+var inheritedPromptPolicy = promptPolicy{
+	turnReply:     turnModeReply,
+	turnOwnership: turnModeOwnership,
+	assignmentHistory: func(issueID string) string {
+		return fmt.Sprintf("For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Scan the threads first with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. For `--since` incremental polling, pagination, and folding, see `multica issue comment list --help`.\n", issueID)
+	},
+}
+
+var operationalPromptPolicy = promptPolicy{
+	turnReply:     "**Turn mode: Reply.** Address the triggering comment directly. Do not change issue status unless the comment explicitly requires it.\n\n",
+	turnOwnership: "**Turn mode: Ownership.** Complete the assigned task and report the resulting evidence and action.\n\n",
+	assignmentHistory: func(issueID string) string {
+		return fmt.Sprintf("If comment history is relevant, scan it with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand only the threads needed for this task.\n", issueID)
+	},
+}
+
 // perTurnContextBlocks renders the run-scoped context blocks that used to live
 // in the runtime brief (CLAUDE.md / AGENTS.md).
 //
@@ -86,7 +108,7 @@ func perTurnContextBlocks(task Task) string {
 // post with `--content-file`) because the shell-layer corruption it guards
 // against is not specific to any one provider or host (MUL-2904, #4182).
 func BuildPrompt(task Task, provider string) string {
-	body := buildPromptBody(task, provider)
+	body := buildPromptBody(task, provider, inheritedPromptPolicy)
 	// Run-scoped context is appended, never prepended: everything ahead of it
 	// is stable across runs of a resumed session, and appending keeps it after
 	// the cached prefix (MUL-5377).
@@ -99,12 +121,29 @@ func BuildPrompt(task Task, provider string) string {
 	return body
 }
 
-func buildPromptBody(task Task, provider string) string {
+// BuildOperationalPrompt returns a self-contained per-task prompt. It never
+// delegates task semantics to repository instructions or daemon sidecar files.
+func BuildOperationalPrompt(task Task, provider string) string {
+	body := buildPromptBody(task, provider, operationalPromptPolicy)
+	if initiator := execenv.BuildTaskInitiatorBlock(task.InitiatorType, task.InitiatorName, task.InitiatorEmail); initiator != "" {
+		if !strings.HasSuffix(body, "\n\n") {
+			body += "\n"
+		}
+		body += initiator
+	}
+	if !strings.HasSuffix(body, "\n\n") {
+		body += "\n"
+	}
+	body += "**Result contract.** Complete all required work synchronously before ending the turn. Your final response is the Multica task result: state the outcome, the evidence, and any required next action. Do not leave work running in the background.\n"
+	return body
+}
+
+func buildPromptBody(task Task, provider string, policy promptPolicy) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
 	if task.TriggerCommentID != "" {
-		return buildCommentPrompt(task, provider)
+		return buildCommentPrompt(task, provider, policy.turnReply)
 	}
 	if task.AutopilotRunID != "" {
 		return buildAutopilotPrompt(task)
@@ -115,7 +154,7 @@ func buildPromptBody(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
-	b.WriteString(turnModeOwnership)
+	b.WriteString(policy.turnOwnership)
 	// Assignment handoff (MUL-3375): a free-text instruction the person who
 	// assigned/promoted this issue left for you. Frame it as a handoff, not a
 	// comment to reply to — there is no comment thread to answer here.
@@ -124,7 +163,7 @@ func buildPromptBody(task Task, provider string) string {
 		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
-	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Scan the threads first with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. For `--since` incremental polling, pagination, and folding, see `multica issue comment list --help`.\n", task.IssueID)
+	b.WriteString(policy.assignmentHistory(task.IssueID))
 	return b.String()
 }
 
@@ -238,7 +277,7 @@ func buildQuickCreatePrompt(task Task) string {
 // The reply instructions (including the current TriggerCommentID as --parent)
 // are re-emitted on every turn so resumed sessions cannot carry forward a
 // previous turn's --parent UUID.
-func buildCommentPrompt(task Task, provider string) string {
+func buildCommentPrompt(task Task, provider, turnMode string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
@@ -248,7 +287,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	// TriggerCommentContent: an empty comment body (or an older server that
 	// doesn't send one) would otherwise leave the turn unlabelled, and the
 	// agent would fall through to Ownership mode and change the issue status.
-	b.WriteString(turnModeReply)
+	b.WriteString(turnMode)
 	if task.TriggerCommentContent != "" {
 		authorLabel := "A user"
 		if task.TriggerAuthorType == "agent" {

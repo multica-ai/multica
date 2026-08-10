@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/codexcontext"
 )
 
 // Backend is the unified interface for executing prompts via coding agents.
@@ -34,6 +36,9 @@ type ExecOptions struct {
 	// A backend must therefore NOT assume this is populated, and adding a new
 	// backend that only reads SystemPrompt will silently receive nothing.
 	SystemPrompt              string
+	CodexContextMode          codexcontext.Mode
+	BaseInstructions          string
+	DeveloperInstructions     string
 	ThreadName                string
 	MaxTurns                  int
 	Timeout                   time.Duration

@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/multica-ai/multica/server/pkg/codexcontext"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
@@ -1708,6 +1709,41 @@ func TestCodexStartOrResumeThreadStartsFresh(t *testing.T) {
 	}
 	if resumed {
 		t.Error("resumed should be false when no prior session is provided")
+	}
+}
+
+func TestCodexOperationalContextAlwaysStartsWithExplicitInstructions(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_operational"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if got := params["baseInstructions"]; got != "base instructions" {
+					t.Errorf("baseInstructions = %v", got)
+				}
+				if got := params["developerInstructions"]; got != "developer instructions" {
+					t.Errorf("developerInstructions = %v", got)
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(context.Background(), ExecOptions{
+		Cwd:                   "/work",
+		ResumeSessionID:       "thr_prior_must_be_ignored",
+		CodexContextMode:      codexcontext.ModeOperational,
+		BaseInstructions:      "base instructions",
+		DeveloperInstructions: "developer instructions",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_operational" || resumed {
+		t.Fatalf("threadID=%q resumed=%v", threadID, resumed)
 	}
 }
 

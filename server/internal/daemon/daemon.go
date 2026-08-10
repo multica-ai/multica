@@ -5743,6 +5743,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceContext:                 task.WorkspaceContext,
 		ConnectedApps:                    task.ConnectedApps,
 	}
+	_, operationalContext, err := resolveCodexTaskContext(task, provider)
+	if err != nil {
+		return TaskResult{}, err
+	}
+	if operationalContext != nil {
+		// Operational tasks may reuse the daemon-owned workdir, but never the
+		// provider conversation or its continuity warnings.
+		task.PriorSessionID = ""
+		task.PriorSessionResumeUnavailable = false
+		taskCtx.PriorSessionResumed = false
+		taskCtx.PriorSessionResumeUnavailable = false
+	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
 	// can't reclaim artifacts inside them mid-execution. We mark both the
@@ -5790,7 +5802,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentMcpConfig json.RawMessage
 	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
-	if task.Agent != nil {
+	if task.Agent != nil && operationalContext == nil {
 		agentMcpConfig = task.Agent.McpConfig
 		effectiveMcpConfig = agentMcpConfig
 		if merged, mergeErr := mergeRuntimeAndAgentMcpConfig(provider, agentMcpConfig); mergeErr != nil {
@@ -5818,7 +5830,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentCustomArgs []string
 	if task.Agent != nil {
 		agentEnvOverrides = task.Agent.CustomEnv
-		agentCustomArgs = task.Agent.CustomArgs
+		if operationalContext == nil {
+			agentCustomArgs = task.Agent.CustomArgs
+		}
 	}
 	// Effective Codex CLI args the task will launch with, normalized through the
 	// same agent.NormalizeCodexLaunchArgs pipeline buildCodexArgs uses (shell
@@ -5829,7 +5843,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// that never lands in config.toml — even when it arrives shell-quoted —
 	// instead of silently downgrading a user's isolation opt-in (MUL-4957).
 	var codexSandboxArgs []string
-	if provider == "codex" {
+	if provider == "codex" && operationalContext == nil {
 		extraArgs := append(append([]string{}, profileFixedArgs...), defaultArgsForProvider(d.cfg, provider)...)
 		codexSandboxArgs = agent.NormalizeCodexLaunchArgs(extraArgs, agentCustomArgs, effectiveMcpConfig, d.logger)
 	}
@@ -5876,7 +5890,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// task, starting before Prepare/Reuse mounts it — so a prune that samples the
 	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
 	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
-	if provider == "codex" {
+	if provider == "codex" && operationalContext == nil {
 		if store := execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx); store != "" {
 			d.markActiveStore(store)
 			defer d.unmarkActiveStore(store)
@@ -5900,6 +5914,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesEnv:             hermesEnv,
 			HermesMemoryStore:     hermesMemoryStore,
 			CodexCustomArgs:       codexSandboxArgs,
+			CodexContext:          operationalContext,
 			Task:                  taskCtx,
 		})
 		if err != nil {
@@ -5925,6 +5940,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesEnv:             hermesEnv,
 			HermesMemoryStore:     hermesMemoryStore,
 			CodexCustomArgs:       codexSandboxArgs,
+			CodexContext:          operationalContext,
 			Task:                  taskCtx,
 		}
 		if localAssignment != nil {
@@ -5977,14 +5993,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// sessions (MUL-4424 isolates them). Drop the resume before the brief is
 	// generated below if it isn't, so we never tell the agent it is continuing a
 	// conversation Codex will silently restart from scratch.
-	if reused {
+	if reused && operationalContext == nil {
 		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
 	}
 
-	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
-	if err != nil {
-		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+	// Inherited tasks keep the file-backed runtime brief. Operational Codex
+	// receives explicit app-server instructions and must remove any managed
+	// brief left by a previously inherited run on the reused workdir.
+	var runtimeBrief string
+	if operationalContext != nil {
+		if err := execenv.CleanupRuntimeConfig(env.WorkDir, provider); err != nil {
+			return TaskResult{}, fmt.Errorf("execenv: remove inherited runtime config for operational task: %w", err)
+		}
+	} else {
+		runtimeBrief, err = execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+		if err != nil {
+			d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+		}
 	}
 	// Workdir is preserved for reuse by future tasks on the same (agent,
 	// issue) pair in cloud mode; the work_dir path is stored in DB on task
@@ -6018,6 +6043,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	prompt := BuildPrompt(task, provider)
+	if operationalContext != nil {
+		prompt = operationalContext.Prompt
+	}
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -6274,6 +6302,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ClaudeSettingsPath:     env.ClaudeSettingsPath,
 		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
+	applyOperationalExecOptions(&execOpts, operationalContext)
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
 	//   - openclaw is pinned to the task workdir via the per-task config we
@@ -6401,6 +6430,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// session keeps firstResult so the bad session stays excluded rather
 		// than being relabeled resumable by a benign-looking second error.
 		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
+	}
+	if operationalContext != nil {
+		result.SessionID = ""
 	}
 
 	elapsed := time.Since(taskStart).Round(time.Second)
