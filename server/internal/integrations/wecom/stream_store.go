@@ -301,13 +301,18 @@ func (h streamHandle) address() roundAddress {
 //	    were accepted for sending. Nor is anything ANSWERED as said before then:
 //	    a publisher arriving while a delivery is on the wire is handed that
 //	    delivery to wait on rather than a verdict of "already said" — until the
-//	    holder reports, there is no such fact to give it. One exception, and it
-//	    records nothing and settles nothing: a waiter whose own budget runs out
-//	    returns the verdict it came in holding, paired with errEndingDeferred,
-//	    having reserved nothing and said nothing. The verdict is not a claim
-//	    about the screen there — see roundToldAlready's own doc — and the error
-//	    beside it is the store telling that caller to come back, because the
-//	    news it walked in with is still undelivered and still nobody else's.
+//	    holder reports, there is no such fact to give it. Two callers are
+//	    answered roundToldAlready without that being a claim about the screen,
+//	    and neither records or settles anything — see roundToldAlready's own doc,
+//	    which says the verdict is about whether THIS caller should speak:
+//	      - a waiter whose own budget runs out returns the verdict it came in
+//	        holding, paired with errEndingDeferred. The error beside it is the
+//	        store telling that caller to come back, because the news it walked in
+//	        with is still undelivered and still nobody else's;
+//	      - the guard, when it reaches a round whose run has already ended
+//	        (refuseTakeLocked). It is refused rather than answered: its only
+//	        sentence promises a reply still to come, and there is none. The round
+//	        keeps its bubble for the publisher that has the real words.
 //	    And what a waiter that IS released reads off the holder is the whole
 //	    outcome, words and ending together: only a delivery that ENDED the round
 //	    answers the run's other publishers, and one that landed a promise leaves
@@ -324,8 +329,13 @@ func (h streamHandle) address() roundAddress {
 //	      - the ROUND, back on the open list with the bubble it had, when the
 //	        delivery provably reached nobody. Nothing is filed as owed while it
 //	        is there, because the round is the better record of the two — it
-//	        carries a writable bubble, and the next publisher, knowsRound and
-//	        owesEnding's callers all reach it. It is the shorter-lived record,
+//	        carries a writable bubble, and the two readers that decide whether
+//	        anyone speaks reach it: the next publisher, through indexLocked, and
+//	        knowsRound, which scans the open list. owesEnding does NOT — it reads
+//	        the note alone — so a caller asking that question while the round is
+//	        back on the list is answered no. That is why the sweep hands the debt
+//	        on rather than leaving the round to be the only record forever.
+//	        It is the shorter-lived record,
 //	        though: a round dies with the protocol's window at streamMaxAge and
 //	        a note lives for roundMemory, so when the sweep retires such a round
 //	        still unanswered it files the debt then (handOnTheDebtLocked). The
