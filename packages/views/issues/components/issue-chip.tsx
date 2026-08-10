@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { issueListOptions, issueDetailOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import type { IssueMentionMode } from "@multica/core/issues/stores";
 import { StatusIcon } from "./status-icon";
 
 /**
@@ -17,9 +18,8 @@ import { StatusIcon } from "./status-icon";
  *
  * This is the single source of truth for the "issue-mention card" look.
  * It is intentionally **not** a link or button: callers wrap it in whatever
- * interactive shell they need (AppLink for markdown mentions, an <a> with
- * cmd-click support inside the editor's NodeView, a plain span next to a
- * dismiss button in chat's context anchor card, …).
+ * interactive shell they need (IssueMentionCard's AppLink for mentions, a plain
+ * span next to a dismiss button in chat's context anchor card, …).
  *
  * Size budget: must fit within a 14px line-box when used inline — hence
  * `py-0.5` + text-caption (see MentionView docstring for the math).
@@ -28,6 +28,14 @@ export interface IssueChipProps {
   issueId: string;
   /** Shown when the issue can't be resolved (deleted, other workspace, …). */
   fallbackLabel?: string;
+  /**
+   * How much of the issue to show. `full` (default) is the historical
+   * rendering. `compact` keeps the box and status icon but drops the title;
+   * `plain` drops the box entirely and reads as prose. Callers that render
+   * content mentions pass the reader's preference; callers placing a
+   * deliberate UI affordance (chat's context anchor card) leave it `full`.
+   */
+  variant?: IssueMentionMode;
   /** Extra classes — callers layer interaction hints here
    *  (e.g. `hover:bg-accent cursor-pointer` for navigable variants). */
   className?: string;
@@ -36,7 +44,23 @@ export interface IssueChipProps {
 const BASE_CLASS =
   "issue-mention inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-caption";
 
-export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps) {
+// `plain` deliberately inherits the surrounding prose font size instead of
+// `text-caption` — it should read as part of the sentence, not as a shrunken
+// chip. Bare text is well inside the 22.75px line box the editor NodeView
+// sizing math protects (see mention-view.tsx).
+//
+// It also deliberately omits `min-w-0 truncate`, which the boxed variants need.
+// A bare identifier is short and should wrap with the sentence around it; an
+// ellipsis mid-prose would read as damage. Do not "restore" truncation here.
+//
+// Uses `text-brand` (the link color token, see prose.css `.rich-text-editor a`)
+// rather than `text-primary`: `--primary` is a solid FILL color for buttons
+// and is near-white in dark mode, which made this render indistinguishable
+// from surrounding prose. `--brand` is the token this codebase actually uses
+// for link-colored text.
+const PLAIN_CLASS = "issue-mention text-brand hover:underline";
+
+export function IssueChip({ issueId, fallbackLabel, variant = "full", className }: IssueChipProps) {
   const wsId = useWorkspaceId();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
   const listIssue = issues.find((i) => i.id === issueId);
@@ -48,14 +72,19 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
   });
 
   const issue = listIssue ?? detailIssue;
-  const cls = className ? `${BASE_CLASS} ${className}` : BASE_CLASS;
+  const base = variant === "plain" ? PLAIN_CLASS : BASE_CLASS;
+  const cls = className ? `${base} ${className}` : base;
+
+  const label = issue?.identifier ?? fallbackLabel ?? issueId.slice(0, 8);
+
+  if (variant === "plain") {
+    return <span className={cls}>{label}</span>;
+  }
 
   if (!issue) {
     return (
       <span className={cls}>
-        <span className="min-w-0 truncate font-medium text-muted-foreground">
-          {fallbackLabel ?? issueId.slice(0, 8)}
-        </span>
+        <span className="min-w-0 truncate font-medium text-muted-foreground">{label}</span>
       </span>
     );
   }
@@ -63,10 +92,10 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
   return (
     <span className={cls}>
       <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
-      <span className="font-medium text-muted-foreground shrink-0">
-        {issue.identifier}
-      </span>
-      <span className="min-w-0 truncate text-foreground">{issue.title}</span>
+      <span className="font-medium text-muted-foreground shrink-0">{issue.identifier}</span>
+      {variant === "full" && (
+        <span className="min-w-0 truncate text-foreground">{issue.title}</span>
+      )}
     </span>
   );
 }
