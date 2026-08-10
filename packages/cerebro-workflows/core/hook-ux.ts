@@ -88,6 +88,35 @@ export function stepSummary(hook: WorkflowHook, step: HookStepKey, directory: Ho
   return hook.actions.length === 0 ? "Choose an action" : hook.actions.map((action) => actionSummary(action, directory)).join("; ");
 }
 
+export type HookStateFilter = "all" | "enforce" | "dry_run" | "off" | "managed";
+
+export const HOOK_STATE_FILTERS: ReadonlyArray<{ value: HookStateFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "enforce", label: "Enforced" },
+  { value: "dry_run", label: "Dry run" },
+  { value: "off", label: "Off" },
+  { value: "managed", label: "Managed" },
+];
+
+// The list groups a hook by what it actually does to a run right now, not by
+// its lifecycle wording: "Enforced · Draft changes" still enforces.
+export function hookStateKey(hook: WorkflowHook): Exclude<HookStateFilter, "all"> {
+  const state = hook.family_id ? hook.lifecycle.state : hook.mode;
+  if (state === "managed") return "managed";
+  if (state === "dry_run" || state === "draft") return "dry_run";
+  if (state === "off" || state === "off_with_draft") return "off";
+  return "enforce";
+}
+
+// Search covers everything the row shows — including the generated summary —
+// so "the hook that comments on my issue" is findable without opening each one.
+export function hookMatchesQuery(hook: WorkflowHook, query: string, directory: HookSummaryDirectory = {}): boolean {
+  const needle = query.trim().toLowerCase();
+  if (needle === "") return true;
+  return [hook.name, hook.contract_rule, hook.contract_satisfy, hook.description, describeHook(hook, directory)]
+    .some((field) => (field ?? "").toLowerCase().includes(needle));
+}
+
 export function describeHook(hook: WorkflowHook, directory: HookSummaryDirectory = {}): string {
   const conditions = hook.conditions.length === 0
     ? "if no conditions"

@@ -255,6 +255,7 @@ type RuntimeHookResult struct {
 	Decision      string         `json:"decision"`
 	Modifications map[string]any `json:"modifications,omitempty"`
 	Warning       string         `json:"warning,omitempty"`
+	BlockedBy     *hookRef       `json:"blocked_by,omitempty"` // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-4797 name the hook that stopped the run.
 }
 
 // EmitRuntimeHookEvent sends lifecycle events that only the local runtime can

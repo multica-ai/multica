@@ -22,9 +22,35 @@ func (d *Daemon) evaluateBlockingRuntimeHook(ctx context.Context, taskID string,
 		return RuntimeHookResult{Decision: "allow", Warning: err.Error()}, nil
 	}
 	if result.Decision == "block" {
-		return result, fmt.Errorf("workflow hook blocked %s", event.EventType)
+		return result, fmt.Errorf("%s blocked %s%s", hookLabel(result.BlockedBy), event.EventType, hookDetail(result.Warning))
 	}
 	return result, nil
+}
+
+// hookRef is the hook identity the server reports alongside a block decision.
+type hookRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// hookLabel names the hook responsible for a stop. A run killed by an unnamed
+// "workflow hook" leaves the owner with nothing to switch off or fix, which is
+// exactly how a single slow policy looked like a platform outage (FIR-4797).
+func hookLabel(ref *hookRef) string {
+	if ref == nil {
+		return "an unnamed workflow hook"
+	}
+	if ref.Name != "" {
+		return fmt.Sprintf("workflow hook %q", ref.Name)
+	}
+	return fmt.Sprintf("workflow hook %s", ref.ID)
+}
+
+func hookDetail(warning string) string {
+	if warning == "" {
+		return ""
+	}
+	return ": " + warning
 }
 
 func (d *Daemon) emitRuntimeHookAsync(taskID string, event RuntimeHookEvent) {

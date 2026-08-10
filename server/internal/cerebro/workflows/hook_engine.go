@@ -170,6 +170,11 @@ policyLoop:
 				if actionResult.Status == HookActionSuccess {
 					if decision, requirement, ok := actionGateVerdict(actionResult.Result); ok {
 						result.Decision = strongerDecision(result.Decision, decision)
+						// The match was recorded with the handler's own decision
+						// ("allow"); this verdict came from the action. Raise it
+						// so the stopped user is told which hook judged them.
+						last := &result.Matches[len(result.Matches)-1]
+						last.Decision = strongerDecision(last.Decision, decision)
 						if requirement != "" {
 							result.Requirements = append(result.Requirements, policy.Name+": "+requirement)
 						}
@@ -181,9 +186,15 @@ policyLoop:
 					switch policy.FailMode {
 					case HookFailClosed:
 						result.Decision = HookBlock
+						// Name the hook on the match too: without this the stop
+						// carries no author at all, which is the "mystery hook
+						// blocked my run" report this engine keeps producing.
+						last := &result.Matches[len(result.Matches)-1]
+						last.Decision = HookBlock
+						result.Warning = fmt.Sprintf("Hook %q stopped this because one of its actions failed: %s", policy.Name, actionResult.Error)
 						break policyLoop
 					case HookFailWarn:
-						result.Warning = "A hook action failed"
+						result.Warning = fmt.Sprintf("An action in hook %q failed and was allowed through: %s", policy.Name, actionResult.Error)
 					}
 				}
 			}
@@ -191,6 +202,11 @@ policyLoop:
 	}
 	if len(result.Modifications) == 0 {
 		result.Modifications = nil
+	}
+	// One place decides who gets named. Every gate downstream reads BlockedBy
+	// instead of inventing its own anonymous "blocked by a workflow hook" text.
+	if result.Decision == HookBlock || result.Decision == HookRequire {
+		result.BlockedBy = result.blockingHook()
 	}
 	if err := e.store.SaveResult(ctx, key, event, result); err != nil {
 		return allow, err

@@ -2,6 +2,8 @@ package workflows
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -191,10 +193,26 @@ type HookMatch struct {
 	MatchedAt   time.Time    `json:"matched_at"`
 }
 
+// HookRef names the enforcing policy behind a decision. Every user-visible
+// message about a stopped action carries it, so nobody has to guess which of
+// the workspace's hooks made the call.
+type HookRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func (r HookRef) Label() string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return r.ID
+}
+
 type HookResult struct {
 	RunID             string             `json:"run_id,omitempty"`
 	Evaluated         bool               `json:"evaluated"`
 	Decision          HookDecision       `json:"decision"`
+	BlockedBy         *HookRef           `json:"blocked_by,omitempty"`
 	WouldDecision     HookDecision       `json:"would_decision,omitempty"`
 	Requirements      []string           `json:"requirements,omitempty"`
 	Modifications     map[string]any     `json:"modifications,omitempty"`
@@ -203,4 +221,30 @@ type HookResult struct {
 	TimedOut          bool               `json:"timed_out,omitempty"`
 	Warning           string             `json:"warning,omitempty"`
 	ActionResults     []HookActionResult `json:"action_results,omitempty"`
+}
+
+// blockingHook finds the enforcing policy that raised the decision to block or
+// require. Dry-run matches are skipped: they never stop anything, so naming one
+// would point at an innocent hook.
+func (r HookResult) blockingHook() *HookRef {
+	for _, match := range r.Matches {
+		if !match.DryRun && (match.Decision == HookBlock || match.Decision == HookRequire) {
+			return &HookRef{ID: match.PolicyID, Name: match.PolicyName}
+		}
+	}
+	return nil
+}
+
+// ReasonWithHook is the one place a stopped action turns into a sentence a
+// human can act on. It always names the hook when one is known, so "workflow
+// hook blocked before.session.start" can never reach a user again.
+func (r HookResult) ReasonWithHook(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if r.BlockedBy == nil {
+		return detail
+	}
+	if detail == "" {
+		return fmt.Sprintf("Hook %q stopped this.", r.BlockedBy.Label())
+	}
+	return fmt.Sprintf("Hook %q stopped this: %s", r.BlockedBy.Label(), detail)
 }

@@ -1,22 +1,32 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { LockKeyhole, Plus } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { LockKeyhole, Plus, Search } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import { PageHeader } from "@multica/views/layout/page-header";
 import type { HookPartialError } from "../../core/hook-api";
 import type { HookLifecycleState, HookMode, WorkflowHook } from "../../core/hook-types";
-import { describeHook, type HookSummaryDirectory } from "../../core/hook-ux";
+import { decisionSummary, describeHook, hookMatchesQuery, hookStateKey, HOOK_STATE_FILTERS, type HookStateFilter, type HookSummaryDirectory } from "../../core/hook-ux";
 
 export function HooksPage({ hooks, partialErrors = [], directory = {}, activeRulesPanel, onOpenHook }: { hooks: WorkflowHook[]; partialErrors?: HookPartialError[]; directory?: HookSummaryDirectory; activeRulesPanel?: ReactNode; onOpenHook: (id?: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [state, setState] = useState<HookStateFilter>("all");
+  const visible = useMemo(() => hooks.filter((hook) => (state === "all" || hookStateKey(hook) === state) && hookMatchesQuery(hook, query, directory)), [hooks, query, state, directory]);
   return <div className="flex h-full flex-col bg-background">
     <PageHeader className="justify-between gap-2 px-3 sm:px-5"><div className="min-w-0 flex-1"><h1 className="text-sm font-semibold">Hooks</h1><p className="truncate text-[11px] text-muted-foreground">Workflows · trigger, filter, decide, and act</p></div><Button className="shrink-0" size="sm" onClick={() => onOpenHook()}><Plus className="size-4" />New hook</Button></PageHeader>
-    <div className="overflow-y-auto p-4 sm:p-6">{activeRulesPanel}{partialErrors.length > 0 && <div role="alert" className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{partialErrors.length} {partialErrors.length === 1 ? "Hook could" : "Hooks could"} not be displayed. The remaining Hooks are still available.</div>}<div className="grid gap-2">{hooks.map((hook) => <button type="button" key={hook.family_id ?? hook.id ?? hook.name} className="grid w-full gap-3 rounded-lg border p-4 text-left transition hover:bg-muted/40 md:grid-cols-[minmax(15rem,1.4fr)_minmax(16rem,1fr)_minmax(8rem,auto)_auto] md:items-center" onClick={() => onOpenHook(hook.family_id ?? hook.id)}>
+    <div className="overflow-y-auto p-4 sm:p-6">{activeRulesPanel}{partialErrors.length > 0 && <div role="alert" className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{partialErrors.length} {partialErrors.length === 1 ? "Hook could" : "Hooks could"} not be displayed. The remaining Hooks are still available.</div>}
+      {hooks.length > 0 && <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-0 flex-1 sm:max-w-xs"><Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-8" value={query} placeholder="Search hooks" aria-label="Search hooks" onChange={(event) => setQuery(event.target.value)} /></div>
+        <div className="flex flex-wrap items-center gap-1">{HOOK_STATE_FILTERS.map((filter) => <button type="button" key={filter.value} aria-pressed={state === filter.value} className={`rounded-full border px-3 py-1 text-xs font-medium transition ${state === filter.value ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted/50"}`} onClick={() => setState(filter.value)}>{filter.label}</button>)}</div>
+        <span className="text-xs text-muted-foreground">{visible.length} of {hooks.length}</span>
+      </div>}
+      <div className="grid gap-2">{visible.map((hook) => <button type="button" key={hook.family_id ?? hook.id ?? hook.name} className="grid w-full gap-3 rounded-lg border p-4 text-left transition hover:bg-muted/40 md:grid-cols-[minmax(15rem,1.4fr)_minmax(16rem,1fr)_minmax(8rem,auto)_auto] md:items-center" onClick={() => onOpenHook(hook.family_id ?? hook.id)}>
       <span className="min-w-0"><strong className="block truncate">{hook.name || "Untitled hook"}</strong><span className="block truncate text-xs text-foreground">{hook.contract_rule || hook.description || "No rule provided"}</span><span className="block truncate text-xs text-muted-foreground">{hook.contract_satisfy || "No satisfaction guidance"}</span></span>
-      <span className="truncate text-xs" title={describeHook(hook, directory)}>{describeHook(hook, directory)}</span>
+      <span className="min-w-0"><span className="mb-1 inline-flex w-fit items-center rounded border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">{decisionSummary(hook)}</span><span className="block truncate text-xs" title={describeHook(hook, directory)}>{describeHook(hook, directory)}</span></span>
       <span className="grid gap-0.5 text-xs"><span className="text-success">{hook.pass_count_7d} passed</span><span className="text-warning">{hook.block_count_7d} blocked</span><span className="text-muted-foreground">{hook.last_run_at ? new Date(hook.last_run_at).toLocaleString() : "Never"}</span></span>
       <HookState mode={hook.mode} lifecycle={hook.family_id ? hook.lifecycle.state : undefined} />
-    </button>)}</div>{hooks.length === 0 && <div className="rounded-xl border border-dashed bg-muted/20 p-8 text-center"><div className="mx-auto flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary"><Plus className="size-5" /></div><h2 className="mt-4 font-semibold">Turn workflow moments into safe automation</h2><p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">A Hook watches an event, applies it to named work, checks conditions, makes a decision, and runs an action. Start from a plain-language recipe and verify it in Dry run before publishing.</p><Button className="mt-4" onClick={() => onOpenHook()}><Plus className="size-4" />Choose a recipe</Button></div>}<div className="mt-4 rounded-md border border-l-[3px] border-l-primary bg-muted/30 p-3 text-sm text-muted-foreground"><strong className="text-foreground">Dry run is required.</strong> Every new or changed hook records what it would do before an authorised person can publish it. Managed hooks are locked by the workspace owner.</div></div>
+    </button>)}</div>{hooks.length > 0 && visible.length === 0 && <div className="rounded-xl border border-dashed bg-muted/20 p-8 text-center text-sm text-muted-foreground">No hook matches this search or filter.</div>}{hooks.length === 0 &&<div className="rounded-xl border border-dashed bg-muted/20 p-8 text-center"><div className="mx-auto flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary"><Plus className="size-5" /></div><h2 className="mt-4 font-semibold">Turn workflow moments into safe automation</h2><p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">A Hook watches an event, applies it to named work, checks conditions, makes a decision, and runs an action. Start from a plain-language recipe and verify it in Dry run before publishing.</p><Button className="mt-4" onClick={() => onOpenHook()}><Plus className="size-4" />Choose a recipe</Button></div>}<div className="mt-4 rounded-md border border-l-[3px] border-l-primary bg-muted/30 p-3 text-sm text-muted-foreground"><strong className="text-foreground">Dry run is required.</strong> Every new or changed hook records what it would do before an authorised person can publish it. Managed hooks are locked by the workspace owner.</div></div>
   </div>;
 }
 

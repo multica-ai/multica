@@ -2468,6 +2468,7 @@ The brief-rendering block moved out of `execenv/context.go` into a sibling
 
 - **Why:** FIR-3437 — the hook catalog exposes runtime-layer lifecycle events (`before.session.start`, `after.session.start`, `before.session.end`, `after.session.end`, `before.prompt.assemble`, `after.tool.call`, `on.error`, plus allowlisted siblings), but those boundaries only exist inside the local daemon. Without a daemon→server channel they can be selected in the UI and never fire.
 - **Where:** `server/internal/daemon/client.go` (request/response contract + `EmitRuntimeHookEvent`), `server/internal/daemon/runtime_hooks_cerebro.go` (cerebro carve-out helpers), `server/internal/daemon/daemon.go` (marked call sites at prompt/session/tool/error boundaries), `server/internal/handler/runtime_hook_event_cerebro.go` (authenticated `/api/daemon/tasks/{taskId}/hook-events` evaluator), `server/internal/handler/handler.go` (`RuntimeHookEvents` field), `server/cmd/server/router.go` (wire `workflowHooksFeature.Evaluator` + mount route).
+- **FIR-4797 extension:** one added field, `RuntimeHookResult.BlockedBy`, so a stopped run can name the hook responsible. The runtime error was `workflow hook blocked before.session.start` — an event name with no author, which left the workspace owner nothing to switch off or fix. The `hookRef` type and the message builder live in the cerebro-zone `runtime_hooks_cerebro.go`; only the struct field is in the upstream file.
 
 # `list-editing`
 

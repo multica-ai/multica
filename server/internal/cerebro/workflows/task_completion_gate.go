@@ -186,6 +186,9 @@ func combineCompletionEvaluations(results ...HookResult) HookResult {
 		combined.Matches = append(combined.Matches, result.Matches...)
 		combined.Warning = result.Warning
 	}
+	if combined.Decision == HookBlock || combined.Decision == HookRequire {
+		combined.BlockedBy = combined.blockingHook()
+	}
 	return combined
 }
 
@@ -196,12 +199,9 @@ func completionGuidance(requirement string, attempt int, evaluation HookResult) 
 		Alternatives: completionAlternatives(),
 		Attempt:      attempt,
 	}
-	for _, match := range evaluation.Matches {
-		if !match.DryRun && (match.Decision == HookBlock || match.Decision == HookRequire) {
-			guidance.HookID = match.PolicyID
-			guidance.HookName = match.PolicyName
-			break
-		}
+	if blocking := evaluation.blockingHook(); blocking != nil {
+		guidance.HookID = blocking.ID
+		guidance.HookName = blocking.Name
 	}
 	return guidance
 }

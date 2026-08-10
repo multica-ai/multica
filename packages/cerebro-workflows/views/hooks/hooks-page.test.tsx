@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHookDraft } from "../../core/hook-types";
 import { HooksPage } from "./hooks-page";
@@ -43,10 +43,11 @@ describe("HooksPage", () => {
       { ...base, id: "managed", name: "Managed policy", mode: "managed" },
     ]} />);
     expect(screen.getAllByText("When Choose a trigger for Choose what this applies to, if no conditions, Guide (let it continue), then No follow-up action.")).toHaveLength(4);
-    expect(screen.getByText("Off")).toBeInTheDocument();
-    expect(screen.getByText("Dry run")).toBeInTheDocument();
-    expect(screen.getByText("Enforced")).toBeInTheDocument();
-    expect(screen.getByText("Managed")).toBeInTheDocument();
+    // Scoped to the rows: the state filter above the list uses the same words.
+    expect(screen.getByRole("button", { name: /Off policy/ })).toHaveTextContent("Off");
+    expect(screen.getByRole("button", { name: /Dry policy/ })).toHaveTextContent("Dry run");
+    expect(screen.getByRole("button", { name: /Live policy/ })).toHaveTextContent("Enforced");
+    expect(screen.getByRole("button", { name: /Managed policy/ })).toHaveTextContent("Managed");
     expect(screen.getAllByText("Never")).toHaveLength(4);
   });
 
@@ -91,6 +92,55 @@ describe("HooksPage", () => {
 
     expect(screen.getByText("Valid Hook")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("1 Hook could not be displayed");
+  });
+
+  it("searches hooks by name, rule and generated summary", async () => {
+    const base = createHookDraft();
+    render(<HooksPage onOpenHook={vi.fn()} hooks={[
+      { ...base, id: "a", name: "Guard completion", contract_rule: "An unfinished issue needs a continuation." },
+      { ...base, id: "b", name: "Notify on failure", contract_rule: "A failed run must reach a person." },
+    ]} />);
+
+    expect(screen.getByRole("button", { name: /Guard completion/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search hooks"), { target: { value: "failed run" } });
+
+    expect(screen.queryByRole("button", { name: /Guard completion/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Notify on failure/ })).toBeInTheDocument();
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+  });
+
+  it("filters by what a hook does to a run right now", () => {
+    const base = createHookDraft();
+    render(<HooksPage onOpenHook={vi.fn()} hooks={[
+      { ...base, id: "live", name: "Live policy", mode: "enforce" },
+      { ...base, id: "dry", name: "Dry policy", mode: "dry_run" },
+    ]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dry run" }));
+
+    expect(screen.getByRole("button", { name: /Dry policy/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Live policy/ })).not.toBeInTheDocument();
+  });
+
+  it("says so when the search matches nothing instead of showing an empty page", () => {
+    const base = createHookDraft();
+    render(<HooksPage onOpenHook={vi.fn()} hooks={[{ ...base, id: "a", name: "Guard completion" }]} />);
+
+    fireEvent.change(screen.getByLabelText("Search hooks"), { target: { value: "zzz" } });
+
+    expect(screen.getByText("No hook matches this search or filter.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Turn workflow moments into safe automation" })).not.toBeInTheDocument();
+  });
+
+  it("shows on every row whether the hook can stop an action", () => {
+    const base = createHookDraft();
+    render(<HooksPage onOpenHook={vi.fn()} hooks={[
+      { ...base, id: "stop", name: "Blocking policy", decision: "block" },
+      { ...base, id: "guide", name: "Guiding policy", decision: "allow" },
+    ]} />);
+
+    expect(screen.getByRole("button", { name: /Blocking policy/ })).toHaveTextContent("Stop the action");
+    expect(screen.getByRole("button", { name: /Guiding policy/ })).toHaveTextContent("Guide (let it continue)");
   });
 
   it("renders a truncated safe summary with resolved labels on each card", () => {

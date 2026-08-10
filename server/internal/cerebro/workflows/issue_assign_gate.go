@@ -197,7 +197,7 @@ func (g *IssueAssignGate) CheckIssueAssignment(ctx context.Context, assignment I
 	if result.Decision != HookBlock && result.Decision != HookRequire {
 		return allowed, nil
 	}
-	reasonText := strings.Join(result.Requirements, " ")
+	reasonText := result.ReasonWithHook(strings.Join(result.Requirements, " "))
 	if strings.TrimSpace(reasonText) == "" {
 		reasonText = "This hand-over was blocked by a workflow hook policy."
 	}

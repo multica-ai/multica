@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
 )
 
 func TestClientEmitRuntimeHookEventUsesTaskScopedChannel(t *testing.T) {
@@ -70,5 +73,61 @@ func TestBlockingRuntimeHookStopsLifecycle(t *testing.T) {
 	_, err := daemon.evaluateBlockingRuntimeHook(context.Background(), "task-1", RuntimeHookEvent{EventType: "before.session.start"})
 	if err == nil {
 		t.Fatal("blocking runtime hook was allowed")
+	}
+}
+
+// FIR-4797: the run-killing error must name the hook and its reason. Reading
+// only "workflow hook blocked before.session.start" is what made a single
+// policy look like an unexplained platform failure.
+func TestBlockingRuntimeHookErrorNamesTheHook(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"decision":"block","warning":"Hook \"Comment quality gate\" stopped this because one of its actions failed: judge gateway unreachable","blocked_by":{"id":"hook-1","name":"Comment quality gate"}}`))
+	}))
+	defer server.Close()
+
+	daemon := &Daemon{client: NewClient(server.URL)}
+	_, err := daemon.evaluateBlockingRuntimeHook(context.Background(), "task-1", RuntimeHookEvent{EventType: "before.session.start"})
+	if err == nil {
+		t.Fatal("blocking runtime hook was allowed")
+	}
+	if !strings.Contains(err.Error(), `workflow hook "Comment quality gate"`) {
+		t.Fatalf("error = %q, want the hook name", err)
+	}
+	if !strings.Contains(err.Error(), "before.session.start") || !strings.Contains(err.Error(), "judge gateway unreachable") {
+		t.Fatalf("error = %q, want the event and the reason", err)
+	}
+}
+
+// The producing and consuming structs are declared in different packages and
+// are held together only by their JSON tags. Without this the runtime can go
+// back to "an unnamed workflow hook" while every other test stays green.
+func TestRuntimeHookResultReadsTheServerBlockedByShape(t *testing.T) {
+	raw, err := json.Marshal(cerebroworkflows.HookResult{
+		Decision:  cerebroworkflows.HookBlock,
+		BlockedBy: &cerebroworkflows.HookRef{ID: "hook-1", Name: "Comment quality gate"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got RuntimeHookResult
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.BlockedBy == nil || got.BlockedBy.Name != "Comment quality gate" || got.BlockedBy.ID != "hook-1" {
+		t.Fatalf("server payload %s did not survive into %#v", raw, got.BlockedBy)
+	}
+}
+
+// Without an identity the message must say so rather than imply a named hook.
+func TestBlockingRuntimeHookErrorMarksAnUnnamedHook(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(RuntimeHookResult{Decision: "block"})
+	}))
+	defer server.Close()
+
+	daemon := &Daemon{client: NewClient(server.URL)}
+	_, err := daemon.evaluateBlockingRuntimeHook(context.Background(), "task-1", RuntimeHookEvent{EventType: "before.session.start"})
+	if err == nil || !strings.Contains(err.Error(), "an unnamed workflow hook blocked before.session.start") {
+		t.Fatalf("error = %v", err)
 	}
 }

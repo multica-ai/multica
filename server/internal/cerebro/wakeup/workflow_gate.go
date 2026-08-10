@@ -89,7 +89,7 @@ func (s *Service) beforeWakeupCreate(ctx context.Context, workspaceID pgtype.UUI
 		if len(result.Requirements) > 0 {
 			requirement = strings.Join(result.Requirements, " ")
 		}
-		return fmt.Errorf("%s", requirement)
+		return fmt.Errorf("%s", result.ReasonWithHook(requirement))
 	}
 	return nil
 }

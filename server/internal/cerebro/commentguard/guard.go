@@ -81,7 +81,7 @@ func (s *Service) EvaluateComment(ctx context.Context, input handler.CommentWork
 		if input.NoAction {
 			allowed.StatusCode = http.StatusConflict
 		}
-		allowed.Message = strings.Join(result.Requirements, " ")
+		allowed.Message = result.ReasonWithHook(strings.Join(result.Requirements, " "))
 		if allowed.Message == "" {
 			allowed.Message = "comment blocked by Workflow policy"
 		}
