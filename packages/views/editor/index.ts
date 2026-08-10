@@ -20,4 +20,6 @@ export {
   isPreviewable,
 } from "./attachment-preview-modal";
 export type { AttachmentPreviewHandle } from "./attachment-preview-modal";
+// CEREBRO-PATCH(editor-image-drop-export): FIR-4699 — field tray reuses the shared upload-and-insert flow.
+export { uploadAndInsertFile } from "./extensions/file-upload";
 export { copyMarkdown } from "./utils/clipboard";

@@ -32,6 +32,14 @@
     "view": "画像を表示",
     "download": "ダウンロード",
     "copy_link": "リンクをコピー",
+    "size": "サイズ",
+    "small": "小",
+    "medium": "中",
+    "full_width": "全幅",
+    "align_left": "左揃え",
+    "align_center": "中央揃え",
+    "align_right": "右揃え",
+    "move_to_bottom": "下部に移動",
     "delete": "削除",
     "link_copied": "リンクをコピーしました",
     "copy_link_failed": "リンクをコピーできませんでした"
@@ -88,7 +96,9 @@
     "no_skills_configured": "設定済みスキルなし",
     "no_results": "一致するスキルなし",
     "commands": {
-      "note": "メモを追加 — エージェントをトリガーしません"
+      "_comment_cerebro_editor_image_entry": "CEREBRO-PATCH(editor-image-entry): FIR-4699 Insert image command",
+      "note": "メモを追加 — エージェントをトリガーしません",
+      "image": "画像を挿入"
     }
   }
 }

@@ -504,3 +504,12 @@
   text-align: center;
   margin-top: 0.25rem;
 }
+
+/* CEREBRO-PATCH(image-placement-toggle): FIR-4699 — Move to bottom only exists where EditorImageTray can accept it. */
+.rich-text-editor .image-move-to-tray {
+  display: none;
+}
+
+[data-editor-image-tray] .rich-text-editor .image-move-to-tray {
+  display: inline-flex;
+}

@@ -58,6 +58,15 @@ describe("serializeTrayImages", () => {
   it("returns empty when nothing is completed", () => {
     expect(serializeTrayImages([])).toEqual({ markdown: "", attachmentIds: [] });
   });
+
+  it("keeps an inline caption while the image is in the tray", () => {
+    const { markdown } = serializeTrayImages([
+      item({ caption: 'Quarterly "result"' }),
+    ]);
+    expect(markdown).toBe(
+      '![image 1](https://cdn/a.png "Quarterly \\"result\\"")',
+    );
+  });
 });
 
 describe("useImageTray", () => {
@@ -115,5 +124,33 @@ describe("useImageTray", () => {
     });
     expect(taken).toBe(f);
     expect(result.current.items).toHaveLength(0);
+  });
+
+  it("moves an already-uploaded image into and back out of the tray without uploading again", () => {
+    const upload = vi.fn();
+    const { result } = renderHook(() => useImageTray(upload));
+
+    act(() => {
+      result.current.addUploaded({
+        uploadedUrl: "https://cdn/a.png",
+        filename: "a.png",
+        caption: "Quarterly result",
+      });
+    });
+
+    const localId = result.current.items[0]!.localId;
+    let taken: ImageTrayItem | null = null;
+    act(() => {
+      taken = result.current.takeForInline(localId);
+    });
+
+    expect(taken).toMatchObject({
+      uploadedUrl: "https://cdn/a.png",
+      filename: "a.png",
+      caption: "Quarterly result",
+      status: "completed",
+    });
+    expect(result.current.items).toHaveLength(0);
+    expect(upload).not.toHaveBeenCalled();
   });
 });

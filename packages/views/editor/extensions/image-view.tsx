@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile"; // CEREBRO-PATCH(image-phone-controls): FIR-4699 — presets replace drag handles on phones.
 // CEREBRO-PATCH(zoomable-image-preview): pinch/wheel zoom on the image lightbox (TECH-3695)
 // CEREBRO-PATCH(image-chip-thumbnail): FIR-2034 — compact image card behind cerebro_attachment_chips.
 import { ZoomableImage, AttachmentChip } from "@multica/cerebro-ui";
@@ -24,9 +25,19 @@ import { useFlagValue } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(image-view-gallery): FIR-2710 — inline images join the surface image gallery.
 import { useGalleryImage } from "@multica/cerebro-attachments/views";
 // CEREBRO-PATCH(image-resize-controls): FIR-4699 Phase 5 — corner resize handles.
-import { ImageResizeControls } from "@multica/cerebro-editor-image";
+// CEREBRO-PATCH(image-placement-toggle): FIR-4699 — tray placement actions.
+import {
+  ImageResizeControls,
+  deleteInlineImageAndCaption,
+  moveInlineImageToTray,
+} from "@multica/cerebro-editor-image";
 import { useT } from "../../i18n";
 import { useAttachmentDownloadResolver } from "../attachment-download-context";
+// CEREBRO-PATCH(image-phone-controls): FIR-4699 — shared desktop right-click / phone long-press image menu.
+import {
+  CerebroImageContextMenu,
+  inlineImageFigureStyle,
+} from "./cerebro-image-context-menu";
 
 // ---------------------------------------------------------------------------
 // Lightbox — full-screen image preview (ESC or click backdrop to close)
@@ -70,7 +81,8 @@ function ImageLightbox({
 // Image NodeView — renders img with hover toolbar + lightbox
 // ---------------------------------------------------------------------------
 
-function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps) {
+// CEREBRO-PATCH(image-placement-toggle): FIR-4699 — caption-aware node actions.
+function ImageView({ node, editor, selected, getPos }: NodeViewProps) {
   const { t } = useT("editor");
   const src = node.attrs.src as string;
   const alt = (node.attrs.alt as string) || "";
@@ -78,22 +90,26 @@ function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps
   const uploading = node.attrs.uploading as boolean;
   // CEREBRO-PATCH(image-resize-controls): FIR-4699 Phase 5 — inline size/align.
   const widthPct = node.attrs.widthPct as number | null;
-  const align = node.attrs.align as string | null;
+  const align = node.attrs.align as "left" | "center" | "right" | null;
+  const placement = node.attrs.placement as string | null; // CEREBRO-PATCH(image-placement-toggle): explicit inline state.
   const figureRef = useRef<HTMLElement>(null);
   const { openByUrl } = useAttachmentDownloadResolver();
 
   const [lightbox, setLightbox] = useState(false);
   const isEditable = editor.isEditable;
+  const isMobile = useIsMobile(); // CEREBRO-PATCH(image-phone-controls): phone uses presets, not handles.
   // CEREBRO-PATCH(image-view-gallery): FIR-2710 — inline images open the surface gallery. Registration is harmless in an editable editor: only the Maximize button / non-editor figure click call handleView, never ProseMirror selection.
   const gallery = useGalleryImage(uploading ? null : { src, alt, downloadHref: src });
   const handleView = () => (gallery.enabled ? gallery.open() : setLightbox(true));
   // CEREBRO-PATCH(image-chip-thumbnail): FIR-2034 — compact thumbnail card + existing lightbox instead of the large figure.
   const chipsEnabled = useFlagValue("cerebro_attachment_chips");
-  if (chipsEnabled)
+  // CEREBRO-PATCH(image-placement-toggle): explicit inline images escape the chip view.
+  const inlinePlaced = placement === "inline" || widthPct != null || align != null;
+  if (chipsEnabled && !inlinePlaced)
     return (
       // CEREBRO-PATCH(image-view-gallery): FIR-2710 — register this image with the surface gallery via ref.
       <NodeViewWrapper as="span" className="image-node" ref={gallery.ref}>
-        <AttachmentChip filename={alt || "image"} thumbnailSrc={src} onActivate={uploading ? undefined : handleView} activateLabel={t(($) => $.image.view)} onRemove={isEditable ? () => deleteNode() : undefined} uploading={uploading} />
+        <AttachmentChip filename={alt || "image"} thumbnailSrc={src} onActivate={uploading ? undefined : handleView} activateLabel={t(($) => $.image.view)} onRemove={isEditable ? () => deleteInlineImageAndCaption(editor, node, getPos) : undefined} uploading={uploading} />
         {lightbox && <ImageLightbox src={src} alt={alt} onClose={() => setLightbox(false)} />}
       </NodeViewWrapper>
     );
@@ -115,113 +131,145 @@ function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps
     }
   };
 
-  const handleConvertToFileCard = () => {
-    const pos = typeof getPos === "function" ? getPos() : undefined;
-    if (typeof pos !== "number") return;
-    editor
-      .chain()
-      .focus()
-      .insertContentAt(
-        { from: pos, to: pos + node.nodeSize },
-        {
-          type: "fileCard",
-          attrs: { href: src, filename: alt || "image", fileSize: 0 },
-        },
-      )
-      .run();
+  const handleMoveToBottom = () => {
+    if (figureRef.current) {
+      moveInlineImageToTray(figureRef.current, editor, node, getPos);
+    }
   };
+  const canMoveToBottom = Boolean(
+    (editor.view?.dom as HTMLElement | undefined)?.closest?.("[data-editor-image-tray]"),
+  );
 
+  // CEREBRO-PATCH(image-placement-toggle): the toolbar action below replaces Convert to attachment.
   return (
     // CEREBRO-PATCH(image-view-gallery): FIR-2710 — register this image with the surface gallery via ref.
     <NodeViewWrapper className="image-node" ref={gallery.ref}>
-      <figure
-        // CEREBRO-PATCH(image-resize-controls): FIR-4699 Phase 5 — width is a
-        // percentage of the text column; alignment rides a data- attribute.
-        ref={figureRef}
-        data-align={align || undefined}
-        style={widthPct ? { width: `${widthPct}%` } : undefined}
-        className={cn(
-          "image-figure",
-          selected && isEditable && "image-selected",
-        )}
-        contentEditable={false}
-        onClick={!isEditable && !uploading ? handleView : undefined}
-      >
-        <img
-          src={src}
-          alt={alt}
-          title={title || undefined}
-          className={cn("image-content", uploading && "image-uploading")}
-          draggable={false}
-        />
-        {/* CEREBRO-PATCH(image-resize-controls): FIR-4699 Phase 5 — corner handles when selected. */}
-        {isEditable && selected && !uploading && (
-          <ImageResizeControls editor={editor} figureRef={figureRef} />
-        )}
-        {!uploading && (
-          <div
-            className="image-toolbar"
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
+      {/* CEREBRO-PATCH(image-phone-controls): the native ContextMenu supplies desktop right-click and 500 ms touch long-press. */}
+      <CerebroImageContextMenu
+        widthPct={widthPct}
+        align={align}
+        editable={isEditable && !uploading}
+        disabled={uploading}
+        labels={{
+          view: t(($) => $.image.view),
+          download: t(($) => $.image.download),
+          copyLink: t(($) => $.image.copy_link),
+          size: t(($) => $.image.size),
+          small: t(($) => $.image.small),
+          medium: t(($) => $.image.medium),
+          fullWidth: t(($) => $.image.full_width),
+          alignLeft: t(($) => $.image.align_left),
+          alignCenter: t(($) => $.image.align_center),
+          alignRight: t(($) => $.image.align_right),
+          moveToBottom: t(($) => $.image.move_to_bottom),
+          delete: t(($) => $.image.delete),
+        }}
+        canMoveToBottom={canMoveToBottom}
+        onWidthChange={(value) => {
+          const pos = getPos();
+          if (typeof pos === "number") {
+            editor.chain().setNodeSelection(pos).setImageWidthPct(value).run();
+          }
+        }}
+        onAlignChange={(value) => {
+          const pos = getPos();
+          if (typeof pos === "number") {
+            editor.chain().setNodeSelection(pos).setImageAlign(value).run();
+          }
+        }}
+        onView={handleView}
+        onDownload={handleDownload}
+        onCopyLink={handleCopyLink}
+        onMoveToBottom={handleMoveToBottom}
+        onDelete={() => deleteInlineImageAndCaption(editor, node, getPos)}
+        trigger={
+          <figure
+            ref={figureRef}
+            data-align={align || undefined}
+            style={inlineImageFigureStyle(widthPct)}
+            className={cn(
+              "image-figure",
+              selected && isEditable && "image-selected",
+            )}
+            contentEditable={false}
+            onClick={!isEditable && !uploading ? handleView : undefined}
           >
-            <button type="button" onClick={handleView} title={t(($) => $.image.view)}>
-              <Maximize2 className="size-3.5" />
-            </button>
-            <button type="button" onClick={handleDownload} title={t(($) => $.image.download)}>
-              <Download className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={handleCopyLink}
-              title={t(($) => $.image.copy_link)}
-            >
-              <LinkIcon className="size-3.5" />
-            </button>
-            {/* CEREBRO-PATCH(image-resize-controls): FIR-4699 Phase 5 — inline alignment. */}
-            {isEditable &&
-              (
-                [
-                  ["left", AlignLeft, "Align left"],
-                  ["center", AlignCenter, "Align center"],
-                  ["right", AlignRight, "Align right"],
-                ] as const
-              ).map(([value, Icon, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={cn(align === value && "image-toolbar-active")}
-                  onClick={() =>
-                    editor
-                      .chain()
-                      .setImageAlign(align === value ? null : value)
-                      .run()
-                  }
-                  title={label}
-                >
-                  <Icon className="size-3.5" />
+            <img
+              src={src}
+              alt={alt}
+              title={title || undefined}
+              className={cn("image-content", uploading && "image-uploading")}
+              draggable={false}
+            />
+            {isEditable && selected && !uploading && !isMobile && (
+              <ImageResizeControls editor={editor} figureRef={figureRef} />
+            )}
+            {!uploading && !isMobile && (
+              <div
+                className="image-toolbar"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button type="button" onClick={handleView} title={t(($) => $.image.view)}>
+                  <Maximize2 className="size-3.5" />
                 </button>
-              ))}
-            {isEditable && (
-              <button
-                type="button"
-                onClick={handleConvertToFileCard}
-                title="Convert to attachment"
-              >
-                <Paperclip className="size-3.5" />
-              </button>
+                <button type="button" onClick={handleDownload} title={t(($) => $.image.download)}>
+                  <Download className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  title={t(($) => $.image.copy_link)}
+                >
+                  <LinkIcon className="size-3.5" />
+                </button>
+                {isEditable &&
+                  (
+                    [
+                      ["left", AlignLeft, "Align left"],
+                      ["center", AlignCenter, "Align center"],
+                      ["right", AlignRight, "Align right"],
+                    ] as const
+                  ).map(([value, Icon, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={cn(align === value && "image-toolbar-active")}
+                      onClick={() =>
+                        editor
+                          .chain()
+                          .setImageAlign(align === value ? null : value)
+                          .run()
+                      }
+                      title={label}
+                    >
+                      <Icon className="size-3.5" />
+                    </button>
+                  ))}
+                {isEditable && (
+                  <button
+                    type="button"
+                    className="image-move-to-tray"
+                    onClick={handleMoveToBottom}
+                    title="Move to bottom"
+                  >
+                    <Paperclip className="size-3.5" />
+                  </button>
+                )}
+                {isEditable && (
+                  <button
+                    type="button"
+                    onClick={() => deleteInlineImageAndCaption(editor, node, getPos)}
+                    title={t(($) => $.image.delete)}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                )}
+              </div>
             )}
-            {isEditable && (
-              <button
-                type="button"
-                onClick={() => deleteNode()}
-                title={t(($) => $.image.delete)}
-              >
-                <Trash2 className="size-3.5" />
-              </button>
-            )}
-          </div>
-        )}
-      </figure>
+          </figure>
+        }
+      />
       {lightbox && (
         <ImageLightbox
           src={src}

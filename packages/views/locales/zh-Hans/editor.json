@@ -32,6 +32,14 @@
     "view": "查看图片",
     "download": "下载",
     "copy_link": "复制链接",
+    "size": "大小",
+    "small": "小",
+    "medium": "中",
+    "full_width": "全宽",
+    "align_left": "左对齐",
+    "align_center": "居中对齐",
+    "align_right": "右对齐",
+    "move_to_bottom": "移到底部",
     "delete": "删除",
     "link_copied": "已复制链接",
     "copy_link_failed": "复制链接失败"
@@ -72,7 +80,9 @@
     "no_skills_configured": "暂无配置的技能",
     "no_results": "没有匹配的技能",
     "commands": {
-      "note": "添加备注 — 不触发任何 Agent"
+      "_comment_cerebro_editor_image_entry": "CEREBRO-PATCH(editor-image-entry): FIR-4699 Insert image command",
+      "note": "添加备注 — 不触发任何 Agent",
+      "image": "插入图片"
     }
   },
   "code_block": {

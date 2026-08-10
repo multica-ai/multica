@@ -44,6 +44,8 @@ import {
   type SlashCommandItem,
   buildBuiltinCommandItems,
   BUILTIN_COMMANDS,
+  buildImageCommandItems,
+  createImageCommandSuggestion,
 } from "./slash-command-suggestion";
 
 function agent(overrides: Partial<Agent>): Agent {
@@ -380,5 +382,43 @@ describe("SlashCommandList built-in command rendering", () => {
     expect(
       getByText("Add a note — won't trigger any agents"),
     ).toBeInTheDocument();
+  });
+});
+
+describe("image slash command", () => {
+  it("offers /image and filters unrelated slash text", () => {
+    expect(buildImageCommandItems("").map((c) => c.id)).toEqual(["image"]);
+    expect(buildImageCommandItems("im").map((c) => c.id)).toEqual(["image"]);
+    expect(buildImageCommandItems("note")).toEqual([]);
+  });
+
+  it("removes the typed command and opens the image picker at that position", () => {
+    const onSelectImage = vi.fn();
+    const deleteRange = vi.fn();
+    const focus = vi.fn();
+    const run = vi.fn();
+    const chain = {
+      focus: () => {
+        focus();
+        return chain;
+      },
+      deleteRange: (range: { from: number; to: number }) => {
+        deleteRange(range);
+        return chain;
+      },
+      run,
+    };
+    const config = createImageCommandSuggestion(onSelectImage);
+
+    config.command?.({
+      editor: { chain: () => chain } as never,
+      range: { from: 7, to: 13 },
+      props: { id: "image", label: "image", descriptionKey: "image" },
+    });
+
+    expect(focus).toHaveBeenCalledOnce();
+    expect(deleteRange).toHaveBeenCalledWith({ from: 7, to: 13 });
+    expect(run).toHaveBeenCalledOnce();
+    expect(onSelectImage).toHaveBeenCalledWith(7);
   });
 });

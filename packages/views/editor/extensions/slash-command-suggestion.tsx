@@ -24,7 +24,8 @@ import { createSuggestionPopupRender } from "./suggestion-popup";
 const MAX_ITEMS = 20;
 
 /** Known built-in command ids — the keys under editor `slash_command.commands`. */
-export type BuiltinCommandKey = "note";
+// CEREBRO-PATCH(editor-image-entry): FIR-4699 — /image opens the shared image picker.
+export type BuiltinCommandKey = "note" | "image";
 
 export interface SlashCommandItem {
   id: string;
@@ -119,10 +120,16 @@ export const SlashCommandList = forwardRef<
 
   // Built-in commands carry an i18n key so the visible description stays
   // localized; skills carry a raw description string from their config.
-  const describe = (item: SlashCommandItem): string | undefined =>
-    item.descriptionKey === "note"
-      ? t(($) => $.slash_command.commands.note)
-      : item.description;
+  // CEREBRO-PATCH(editor-image-entry): FIR-4699 localized /image description.
+  const describe = (item: SlashCommandItem): string | undefined => {
+    if (item.descriptionKey === "note") {
+      return t(($) => $.slash_command.commands.note);
+    }
+    if (item.descriptionKey === "image") {
+      return t(($) => $.slash_command.commands.image);
+    }
+    return item.description;
+  };
 
   return (
     <div className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[300px] overflow-y-auto">
@@ -280,6 +287,51 @@ export function createBuiltinCommandSuggestion(): Omit<
         .run();
 
       window.getSelection()?.collapseToEnd();
+    },
+    render: createSuggestionPopupRender<SlashCommandItem, SlashCommandItem, SlashCommandListRef, SlashCommandListProps>({
+      pluginKey,
+      component: SlashCommandList,
+      getProps: (props) => ({
+        items: props.items,
+        query: props.query,
+        command: props.command,
+        hideOnEmpty: true,
+      }),
+      onKeyDown: (ref, props) => ref?.onKeyDown(props) ?? false,
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Image command menu (Notes and Documents)
+// ---------------------------------------------------------------------------
+
+// CEREBRO-PATCH(editor-image-entry): FIR-4699 image-only command source.
+export const IMAGE_COMMANDS: SlashCommandItem[] = [
+  { id: "image", label: "image", descriptionKey: "image" },
+];
+
+export function buildImageCommandItems(query: string): SlashCommandItem[] {
+  const q = query.toLowerCase();
+  return IMAGE_COMMANDS.filter((c) => c.label.toLowerCase().startsWith(q));
+}
+
+/**
+ * Notes and Documents use a dedicated command set so their picker shows
+ * `/image` without leaking comment-only commands such as `/note`.
+ */
+export function createImageCommandSuggestion(
+  onSelectImage: (position: number) => void,
+): Omit<SuggestionOptions<SlashCommandItem>, "editor"> {
+  const pluginKey = new PluginKey("imageCommandSuggestion");
+
+  return {
+    char: "/",
+    pluginKey,
+    items: ({ query }) => buildImageCommandItems(query),
+    command: ({ editor, range }) => {
+      editor.chain().focus().deleteRange(range).run();
+      onSelectImage(range.from);
     },
     render: createSuggestionPopupRender<SlashCommandItem, SlashCommandItem, SlashCommandListRef, SlashCommandListProps>({
       pluginKey,

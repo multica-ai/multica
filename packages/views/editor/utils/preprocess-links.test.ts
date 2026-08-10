@@ -111,4 +111,20 @@ describe("preprocessLinks — CJK punctuation boundary", () => {
       "数据来源：[NBA.com Schedule](https://www.nba.com/schedule)，官网 [NBA.com](http://NBA.com)",
     );
   });
+
+  it("does not linkify URLs inside raw HTML attributes", () => {
+    const input =
+      '<img src="http://localhost:8080/uploads/image.png" alt="Preview" data-placement="inline">';
+
+    expect(preprocessLinks(input)).toBe(input);
+  });
+
+  it("still linkifies prose URLs beside raw HTML", () => {
+    const image =
+      '<img src="http://localhost:8080/uploads/image.png" alt="Preview">';
+
+    expect(preprocessLinks(`${image} See https://example.com`)).toBe(
+      `${image} See [https://example.com](https://example.com)`,
+    );
+  });
 });

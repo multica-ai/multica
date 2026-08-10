@@ -35,6 +35,10 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
   const upload = useUploadArtifactFile();
   // Uploader for images dropped/pasted into the document body (image tray, FIR-2693).
   const { uploadWithToast } = useFileUpload(api);
+  const uploadDocumentImage = React.useCallback(
+    (file: File) => uploadWithToast(file, { artifactId }),
+    [artifactId, uploadWithToast],
+  );
 
   const [title, setTitle] = React.useState("");
   const [body, setBody] = React.useState("");
@@ -173,7 +177,7 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
                   <EditorImageTray
                     ref={editorRef}
                     defaultValue={artifact.body}
-                    onUploadFile={uploadWithToast}
+                    onUploadFile={uploadDocumentImage}
                     placeholder="Write something…"
                   />
                 )}

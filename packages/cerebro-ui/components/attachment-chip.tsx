@@ -163,6 +163,8 @@ export interface AttachmentChipProps {
   activateLabel?: string;
   /** Optional remove handler — shows an × on hover/focus when provided. */
   onRemove?: () => void;
+  /** Optional responsive styling for the remove action. */
+  removeButtonClassName?: string;
   /** Renders a spinner + dimmed state while an upload is in flight. */
   uploading?: boolean;
   className?: string;
@@ -174,6 +176,7 @@ export function AttachmentChip({
   onActivate,
   activateLabel,
   onRemove,
+  removeButtonClassName,
   uploading,
   className,
 }: AttachmentChipProps) {
@@ -186,6 +189,7 @@ export function AttachmentChip({
       className={cn(
         "absolute -right-1.5 -top-1.5 z-10 rounded-full border border-border bg-background p-0.5 text-muted-foreground opacity-0 shadow-sm transition-opacity",
         "hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
+        removeButtonClassName,
       )}
       // Stop the editor / drag handlers from hijacking the click in composer
       // surfaces (mirrors the upstream AttachmentCard guards).

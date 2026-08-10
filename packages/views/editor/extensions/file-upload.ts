@@ -153,7 +153,8 @@ export async function uploadAndInsertFile(
 
   if (embed) {
     const blobUrl = URL.createObjectURL(file);
-    const imgAttrs = { src: blobUrl, alt: file.name, uploading: true };
+    // CEREBRO-PATCH(image-placement-toggle): FIR-4699 — explicit inline state survives default width/alignment.
+    const imgAttrs = { src: blobUrl, alt: file.name, uploading: true, placement: "inline" };
     if (pos !== undefined) {
       editor.chain().focus().insertContentAt(pos, { type: "image", attrs: imgAttrs }).run();
     } else {

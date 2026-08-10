@@ -501,7 +501,11 @@ export class TestApiClient {
    * root note (no folder) is owner-only and cannot be co-edited. This creates
    * a folder carrying the "whole workspace" grant and puts the note inside it.
    */
-  async createSharedNote(title: string, body = "") {
+  async createSharedNote(
+    title: string,
+    body = "",
+    workspaceRole: "viewer" | "editor" | "full_access" = "full_access",
+  ) {
     if (!this.workspaceId) {
       throw new Error("createSharedNote: no workspace — call login() first");
     }
@@ -520,9 +524,9 @@ export class TestApiClient {
     try {
       await client.query(
         `INSERT INTO cerebro_folder_grant (surface, folder_id, grantee_type, grantee_id, role, created_by)
-         VALUES ('artifact', $1, 'workspace', NULL, 'full_access', $2)
+         VALUES ('artifact', $1, 'workspace', NULL, $2, $3)
          ON CONFLICT DO NOTHING`,
-        [folder.id, this.userId],
+        [folder.id, workspaceRole, this.userId],
       );
     } finally {
       await client.end();
@@ -538,6 +542,47 @@ export class TestApiClient {
     const note = await noteRes.json();
     this.createdArtifactIds.push(note.id);
     return { id: note.id as string, folderId: folder.id as string };
+  }
+
+  async getArtifactBody(id: string): Promise<string> {
+    if (!this.workspaceId) {
+      throw new Error("getArtifactBody: no workspace — call login() first");
+    }
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      const result = await client.query<{ body: string }>(
+        "SELECT body FROM artifact WHERE id = $1 AND workspace_id = $2",
+        [id, this.workspaceId],
+      );
+      if (!result.rows[0]) throw new Error(`artifact ${id} not found`);
+      return result.rows[0].body;
+    } finally {
+      await client.end();
+    }
+  }
+
+  async getLatestAttachmentArtifactId(filename: string): Promise<string | null> {
+    if (!this.workspaceId) {
+      throw new Error(
+        "getLatestAttachmentArtifactId: no workspace — call login() first",
+      );
+    }
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      const result = await client.query<{ artifact_id: string | null }>(
+        `SELECT artifact_id
+         FROM attachment
+         WHERE workspace_id = $1 AND filename = $2
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [this.workspaceId, filename],
+      );
+      return result.rows[0]?.artifact_id ?? null;
+    } finally {
+      await client.end();
+    }
   }
 
   /** Clean up all issues + inbox items created during this test. */

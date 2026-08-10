@@ -34,6 +34,8 @@ export interface ImageTrayItem {
   uploadedUrl?: string;
   /** Populated on "completed" — server attachment id (channels/comments). */
   attachmentId?: string;
+  /** Caption retained while an inline image is parked in the tray. */
+  caption?: string;
 }
 
 export type ImageTrayUploader = (file: File) => Promise<UploadResult | null>;
@@ -51,7 +53,12 @@ export function serializeTrayImages(items: ImageTrayItem[]): {
     (i) => i.status === "completed" && !!i.uploadedUrl,
   );
   const markdown = completed
-    .map((i, idx) => `![image ${idx + 1}](${i.uploadedUrl})`)
+    .map((i, idx) => {
+      const caption = i.caption
+        ? ` "${i.caption.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\s*\n\s*/g, " ")}"`
+        : "";
+      return `![image ${idx + 1}](${i.uploadedUrl}${caption})`;
+    })
     .join("\n");
   const attachmentIds = completed
     .map((i) => i.attachmentId)
@@ -76,10 +83,14 @@ export interface ImageTray {
   items: ImageTrayItem[];
   /** Add image files: create thumbnails immediately, upload in the background. */
   addFiles: (files: File[]) => void;
+  /** Park an existing inline image without uploading it again. */
+  addUploaded: (item: Pick<ImageTrayItem, "uploadedUrl" | "filename" | "caption" | "attachmentId">) => void;
   remove: (localId: string) => void;
   /** Drop from the tray and hand the original file back to the caller (used to
    *  embed the image inline in the editor instead). */
   takeForEmbed: (localId: string) => File | null;
+  /** Remove and return a completed tray item for inline placement. */
+  takeForInline: (localId: string) => ImageTrayItem | null;
   clear: () => void;
   hasUploading: boolean;
   hasCompleted: boolean;
@@ -154,6 +165,22 @@ export function useImageTray(
     [patch],
   );
 
+  const addUploaded = useCallback(
+    (item: Pick<ImageTrayItem, "uploadedUrl" | "filename" | "caption" | "attachmentId">) => {
+      if (!item.uploadedUrl) return;
+      setItems((prev) => [
+        ...prev,
+        {
+          ...item,
+          localId: createSafeId(),
+          blobUrl: "",
+          status: "completed",
+        },
+      ]);
+    },
+    [],
+  );
+
   // remove / takeForEmbed / clear read the current items off the ref (not from
   // inside the setItems updater) so the blob-URL revoke and the returned file
   // resolve synchronously — a state updater runs at flush time, not on call.
@@ -171,6 +198,14 @@ export function useImageTray(
     return target.file ?? null;
   }, []);
 
+  const takeForInline = useCallback((localId: string) => {
+    const target = itemsRef.current.find((i) => i.localId === localId) ?? null;
+    if (!target) return null;
+    revoke(target.blobUrl);
+    setItems((prev) => prev.filter((i) => i.localId !== localId));
+    return target;
+  }, []);
+
   const clear = useCallback(() => {
     itemsRef.current.forEach((i) => revoke(i.blobUrl));
     setItems([]);
@@ -179,8 +214,10 @@ export function useImageTray(
   return {
     items,
     addFiles,
+    addUploaded,
     remove,
     takeForEmbed,
+    takeForInline,
     clear,
     hasUploading: items.some((i) => i.status === "uploading"),
     hasCompleted: items.some((i) => i.status === "completed"),

@@ -13,6 +13,7 @@ import {
   Replace,
   MessageSquare,
   History,
+  ImagePlus,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -43,7 +44,10 @@ import { useCurrentMember } from "@multica/core/permissions";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
-import { ContentEditor } from "@multica/views/editor";
+import {
+  ContentEditor,
+  type ContentEditorRef,
+} from "@multica/views/editor";
 import { EditorImageTray } from "@multica/cerebro-composer";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -165,7 +169,9 @@ function MarkdownDocumentEditor({
   value,
   remountToken,
   editor,
+  editorRef,
   toolbarEnabled,
+  imagesEnabled,
   onSave,
   onBodyChange,
   onEditorReady,
@@ -178,7 +184,9 @@ function MarkdownDocumentEditor({
   value: string;
   remountToken: number;
   editor: DocumentEditorInstance | null;
+  editorRef: React.Ref<ContentEditorRef>;
   toolbarEnabled: boolean;
+  imagesEnabled: boolean;
   onSave: (body: string) => Promise<void>;
   onBodyChange?: (body: string) => void;
   // FIR-1621 — same select-and-comment bridge the Notes editor uses. onEditorReady
@@ -241,8 +249,11 @@ function MarkdownDocumentEditor({
   // paste, attach button, numbered tray); off leaves the bare ContentEditor
   // untouched. EditorImageTray shares ContentEditor's props, so only onUploadFile
   // is added.
-  const imagesEnabled = useFeatureFlag("cerebro_editor_images");
   const { uploadWithToast } = useFileUpload(api);
+  const uploadDocumentImage = React.useCallback(
+    (file: File) => uploadWithToast(file, { artifactId: artifact.id }),
+    [artifact.id, uploadWithToast],
+  );
   const Editor = imagesEnabled ? EditorImageTray : ContentEditor;
 
   return (
@@ -276,6 +287,7 @@ function MarkdownDocumentEditor({
       )}
       <div className="min-h-[65vh] rounded-b-md bg-background px-4 py-4 md:px-6 md:py-5">
         <Editor
+          ref={editorRef}
           key={`${artifact.id}:${remountToken}`}
           defaultValue={value}
           onUpdate={handleUpdate}
@@ -284,7 +296,9 @@ function MarkdownDocumentEditor({
           showBubbleMenu={!toolbarEnabled}
           debounceMs={800}
           placeholder="Just start writing…"
-          {...(imagesEnabled ? { onUploadFile: uploadWithToast } : {})}
+          {...(imagesEnabled ? { onUploadFile: uploadDocumentImage } : {})}
+          enableSlashCommands={imagesEnabled}
+          slashCommandMode="image"
           // FIR-1621 — Documents are full-page surfaces, so the editor fills the
           // card. Override the global .rich-text-editor 70ch readability cap
           // (FIR-2114), which otherwise leaves a wide gap on the right here.
@@ -329,6 +343,8 @@ export function DocumentViewPage({
   // controls only when cerebro_note_agent_collab is also on.
   const commentsEnabled = useFeatureFlag("cerebro_note_comments");
   const editorToolbarEnabled = useFeatureFlag("cerebro_editor_toolbar");
+  const imagesEnabled = useFeatureFlag("cerebro_editor_images");
+  const contentEditorRef = React.useRef<ContentEditorRef>(null);
   const agentCollabEnabled = useFeatureFlag("cerebro_note_agent_collab");
   const [showComments, setShowComments] = React.useState(false);
   // FIR-2697 — version history for this document (reuses the note version engine).
@@ -524,6 +540,14 @@ export function DocumentViewPage({
                   onSelect: () => setShowVersions(true),
                 },
               canEdit &&
+                artifact.format === "md" &&
+                imagesEnabled && {
+                  key: "insert-image",
+                  label: "Insert image",
+                  icon: ImagePlus,
+                  onSelect: () => contentEditorRef.current?.chooseImage(),
+                },
+              canEdit &&
                 artifact.format === "md" && {
                   key: "find-replace",
                   label: "Find & replace",
@@ -617,7 +641,9 @@ export function DocumentViewPage({
                   value={docBody || artifact.body}
                   remountToken={replaceToken}
                   editor={editor}
+                  editorRef={contentEditorRef}
                   toolbarEnabled={editorToolbarEnabled}
+                  imagesEnabled={imagesEnabled}
                   onSave={handleSaveMarkdownBody}
                   onBodyChange={setDocBody}
                   onEditorReady={handleEditorReady}

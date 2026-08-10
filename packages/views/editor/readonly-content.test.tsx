@@ -239,6 +239,16 @@ describe("ReadonlyContent image strip", () => {
 // caption) even while the attachment-chip flag is ON; a plain ![alt](url) still
 // renders as the tray chip so comments/chat/DMs/channels are unchanged.
 describe("ReadonlyContent inline image parity (FIR-4699 Phase 7)", () => {
+  it("renders explicit inline placement at the default size as a figure", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={'<img src="https://cdn/a.png" alt="A photo" data-placement="inline">'}
+      />,
+    );
+    expect(container.querySelector(".image-figure img.image-content")).not.toBeNull();
+    expect(container.querySelector(".rte-image-strip")).toBeNull();
+  });
+
   it("renders a width+align image with a caption as a figure, not a chip", () => {
     const { container } = render(
       <ReadonlyContent

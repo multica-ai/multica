@@ -11,6 +11,7 @@ const deleteArtifactMutateAsync = vi.hoisted(() =>
   vi.fn().mockResolvedValue(undefined),
 );
 const navigationPush = vi.hoisted(() => vi.fn());
+const chooseImage = vi.hoisted(() => vi.fn());
 const currentMember = vi.hoisted(() => ({
   userId: "user-1" as string | null,
   role: "member" as string | null,
@@ -62,6 +63,34 @@ vi.mock("@multica/views/navigation", () => ({
   }),
 }));
 
+vi.mock("../components/editor-actions-menu", () => ({
+  EditorActionsMenu: ({
+    items,
+  }: {
+    items: Array<
+      | false
+      | null
+      | undefined
+      | { key: string; label: string; onSelect?: () => void }
+    >;
+  }) => (
+    <div>
+      {items.filter(Boolean).map((item) => {
+        const action = item as {
+          key: string;
+          label: string;
+          onSelect?: () => void;
+        };
+        return (
+          <button key={action.key} type="button" onClick={action.onSelect}>
+            {action.label}
+          </button>
+        );
+      })}
+    </div>
+  ),
+}));
+
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
     getActorName: () => "Alice",
@@ -92,7 +121,10 @@ vi.mock("@multica/views/editor", () => ({
         onEditorReady?: (editor: unknown) => void;
         showBubbleMenu?: boolean;
       },
-      ref: React.ForwardedRef<{ getMarkdown: () => string }>,
+      ref: React.ForwardedRef<{
+        getMarkdown: () => string;
+        chooseImage: () => void;
+      }>,
     ) => {
       const [value, setValue] = React.useState(props.defaultValue ?? "");
       React.useEffect(() => {
@@ -102,6 +134,7 @@ vi.mock("@multica/views/editor", () => ({
       }, []);
       React.useImperativeHandle(ref, () => ({
         getMarkdown: () => value,
+        chooseImage,
       }));
       return (
         <>
@@ -154,14 +187,20 @@ vi.mock("@multica/cerebro-composer", () => ({
         onEditorReady?: (editor: unknown) => void;
         onUploadFile?: (file: File) => unknown;
       },
-      ref: React.ForwardedRef<{ getMarkdown: () => string }>,
+      ref: React.ForwardedRef<{
+        getMarkdown: () => string;
+        chooseImage: () => void;
+      }>,
     ) => {
       const [value, setValue] = React.useState(props.defaultValue ?? "");
       React.useEffect(() => {
         props.onEditorReady?.({ state: { selection: { empty: true } } });
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, []);
-      React.useImperativeHandle(ref, () => ({ getMarkdown: () => value }));
+      React.useImperativeHandle(ref, () => ({
+        getMarkdown: () => value,
+        chooseImage,
+      }));
       return (
         <>
           <span
@@ -225,6 +264,7 @@ describe("DocumentViewPage markdown body", () => {
     updateArtifactMutateAsync.mockClear();
     deleteArtifactMutateAsync.mockClear();
     navigationPush.mockClear();
+    chooseImage.mockClear();
     currentMember.userId = "user-1";
     currentMember.role = "member";
     featureFlags.map = {};
@@ -253,6 +293,18 @@ describe("DocumentViewPage markdown body", () => {
 
     expect(screen.queryByTestId("document-image-tray")).toBeNull();
     expect(screen.getByLabelText("Markdown editor")).toBeInTheDocument();
+  });
+
+  it("offers Insert image only when cerebro_editor_images is on", () => {
+    const first = renderPage(artifact());
+    expect(screen.queryByRole("button", { name: "Insert image" })).toBeNull();
+    first.unmount();
+
+    featureFlags.map["cerebro_editor_images"] = true;
+    renderPage(artifact());
+    fireEvent.click(screen.getByRole("button", { name: "Insert image" }));
+
+    expect(chooseImage).toHaveBeenCalledOnce();
   });
 
   it("renders owned markdown documents as an inline editor and autosaves body changes", async () => {

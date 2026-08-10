@@ -32,6 +32,14 @@
     "view": "이미지 보기",
     "download": "다운로드",
     "copy_link": "링크 복사",
+    "size": "크기",
+    "small": "작게",
+    "medium": "중간",
+    "full_width": "전체 너비",
+    "align_left": "왼쪽 정렬",
+    "align_center": "가운데 정렬",
+    "align_right": "오른쪽 정렬",
+    "move_to_bottom": "아래로 이동",
     "delete": "삭제",
     "link_copied": "링크를 복사했습니다",
     "copy_link_failed": "링크를 복사하지 못했습니다"
@@ -88,7 +96,9 @@
     "no_skills_configured": "구성된 스킬 없음",
     "no_results": "일치하는 스킬 없음",
     "commands": {
-      "note": "메모 추가 — 에이전트를 트리거하지 않음"
+      "_comment_cerebro_editor_image_entry": "CEREBRO-PATCH(editor-image-entry): FIR-4699 Insert image command",
+      "note": "메모 추가 — 에이전트를 트리거하지 않음",
+      "image": "이미지 삽입"
     }
   }
 }

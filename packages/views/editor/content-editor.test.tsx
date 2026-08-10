@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { createRef } from "react";
+import type { ContentEditorRef } from "./content-editor";
 
 const mockFocus = vi.hoisted(() => vi.fn());
+const uploadAndInsertFileMock = vi.hoisted(() => vi.fn());
 const lastUseEditorOptions = vi.hoisted(
   () => ({ value: undefined as Record<string, unknown> | undefined }),
 );
@@ -22,7 +25,7 @@ vi.mock("./extensions", () => ({
 }));
 
 vi.mock("./extensions/file-upload", () => ({
-  uploadAndInsertFile: vi.fn(),
+  uploadAndInsertFile: uploadAndInsertFileMock,
 }));
 
 vi.mock("./utils/preprocess", () => ({
@@ -45,11 +48,12 @@ vi.mock("@tiptap/react", () => ({
       state: {
         doc: {
           content: {
-            size: 0,
+            size: 10,
           },
         },
         selection: {
           empty: true,
+          from: 3,
         },
       },
     };
@@ -102,6 +106,30 @@ describe("ContentEditor", () => {
     fireEvent.mouseDown(screen.getByTestId("prosemirror"));
 
     expect(mockFocus).not.toHaveBeenCalled();
+  });
+
+  it("opens the shared image picker and inserts the selected image at the caret", () => {
+    const ref = createRef<ContentEditorRef>();
+    const onUploadFile = vi.fn();
+    const inputClick = vi.spyOn(HTMLInputElement.prototype, "click");
+    const image = new File(["image"], "example.png", { type: "image/png" });
+
+    render(<ContentEditor ref={ref} onUploadFile={onUploadFile} />);
+    ref.current?.chooseImage();
+
+    expect(inputClick).toHaveBeenCalledOnce();
+
+    fireEvent.change(screen.getByLabelText("Insert image"), {
+      target: { files: [image] },
+    });
+
+    expect(uploadAndInsertFileMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      image,
+      onUploadFile,
+      3,
+      { embedImage: true },
+    );
   });
 });
 

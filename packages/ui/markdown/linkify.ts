@@ -175,6 +175,21 @@ export function findMarkdownLinkRanges(text: string): CodeRange[] {
   return ranges
 }
 
+// CEREBRO-PATCH(linkify-raw-html-attributes): FIR-4699 — URLs inside raw HTML
+// attributes are data, not prose. Rewriting an image src as Markdown corrupts
+// the persisted inline-image URL when ReadonlyContent preprocesses it.
+function findHtmlTagRanges(text: string): CodeRange[] {
+  const ranges: CodeRange[] = []
+  const tagRegex = /<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>/g
+  let match
+
+  while ((match = tagRegex.exec(text)) !== null) {
+    ranges.push({ start: match.index, end: match.index + match[0].length })
+  }
+
+  return ranges
+}
+
 /**
  * Check if a link at given position is already a markdown link
  * Looks for patterns like [text](url) or [text][ref]
@@ -309,6 +324,7 @@ export function preprocessLinks(text: string): string {
 
   const codeRanges = findCodeRanges(text)
   const markdownLinkRanges = findMarkdownLinkRanges(text)
+  const htmlTagRanges = findHtmlTagRanges(text)
   const links = detectLinks(text)
 
   if (links.length === 0) return text
@@ -323,6 +339,9 @@ export function preprocessLinks(text: string): string {
 
     // Skip if this match is inside an existing markdown link or image.
     if (markdownLinkRanges.some((range) => rangesOverlap(link, range))) continue
+
+    // Skip URLs inside raw HTML attributes such as <img src="…">.
+    if (htmlTagRanges.some((range) => rangesOverlap(link, range))) continue
 
     // Skip if already a markdown link
     if (isAlreadyLinked(text, link.start, link.end)) continue

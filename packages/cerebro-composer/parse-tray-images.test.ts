@@ -62,6 +62,13 @@ describe("parseTrayImages", () => {
     );
     expect(images[0]?.filename).toBe("photo one.png");
   });
+
+  it("recovers an escaped caption stored with a tray image", () => {
+    const { images } = parseTrayImages(
+      'Body\n\n![image 1](https://cdn/a.png "Quarterly \\"result\\"")',
+    );
+    expect(images[0]?.caption).toBe('Quarterly "result"');
+  });
 });
 
 describe("combineBodyAndTray", () => {
@@ -90,6 +97,21 @@ describe("round trip parse ↔ serialize", () => {
     expect(body).toBe("The body text.");
     const reserialized = serializeTrayImages(
       images.map((i) => completed(i.url, i.filename)),
+    );
+    expect(combineBodyAndTray(body, reserialized.markdown)).toBe(saved);
+  });
+
+  it("reproduces a tray image with a caption", () => {
+    const items = [
+      completed("https://cdn/one.png", "one.png"),
+    ];
+    items[0]!.caption = 'Quarterly "result"';
+    const { markdown } = serializeTrayImages(items);
+    const saved = combineBodyAndTray("The body text.", markdown);
+
+    const { body, images } = parseTrayImages(saved);
+    const reserialized = serializeTrayImages(
+      images.map((i) => ({ ...completed(i.url, i.filename), caption: i.caption })),
     );
     expect(combineBodyAndTray(body, reserialized.markdown)).toBe(saved);
   });

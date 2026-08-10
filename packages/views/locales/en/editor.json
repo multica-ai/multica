@@ -32,6 +32,14 @@
     "view": "View image",
     "download": "Download",
     "copy_link": "Copy link",
+    "size": "Size",
+    "small": "Small",
+    "medium": "Medium",
+    "full_width": "Full width",
+    "align_left": "Align left",
+    "align_center": "Align center",
+    "align_right": "Align right",
+    "move_to_bottom": "Move to bottom",
     "delete": "Delete",
     "link_copied": "Link copied",
     "copy_link_failed": "Failed to copy link"
@@ -72,7 +80,9 @@
     "no_skills_configured": "No skills configured",
     "no_results": "No matching skills",
     "commands": {
-      "note": "Add a note — won't trigger any agents"
+      "_comment_cerebro_editor_image_entry": "CEREBRO-PATCH(editor-image-entry): FIR-4699 Insert image command",
+      "note": "Add a note — won't trigger any agents",
+      "image": "Insert an image"
     }
   },
   "code_block": {

@@ -134,7 +134,7 @@ interface ContentEditorProps {
    * lists the active agent's skills (chat); "command" shows the fixed built-in
    * command menu (issue comments), e.g. /note.
    */
-  slashCommandMode?: "skill" | "command";
+  slashCommandMode?: "skill" | "command" | "image"; // CEREBRO-PATCH(editor-image-entry): FIR-4699 image-only command menu.
   /**
    * CEREBRO-PATCH(input-autofocus): JEH-756 — when true, focus the editor
    * once it finishes initialising. The focus call is owned by ContentEditor
@@ -178,6 +178,8 @@ interface ContentEditorRef {
   /** Upload and insert a file. Pass `embedImage: true` to render an image
    *  inline instead of the default attached file card. */
   uploadFile: (file: File, options?: { embedImage?: boolean }) => void;
+  /** CEREBRO-PATCH(editor-image-entry): Open the shared native image picker at the caret. */
+  chooseImage: () => void;
   /** True when file uploads are still in progress. */
   hasActiveUploads: () => boolean;
 }
@@ -222,6 +224,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
     const dictationPreviewRangeRef = useRef<{ from: number; to: number } | null>(null);
+    // CEREBRO-PATCH(editor-image-entry): FIR-4699 — one native image picker
+    // serves /image, the overflow menu, and phone actions.
+    const imageInputRef = useRef<HTMLInputElement>(null);
+    const pendingImagePositionRef = useRef<number | null>(null);
 
     // Current workspace slug kept in a ref so the click handler always sees the
     // latest value without recreating the editor. Used by openLink to prefix
@@ -238,6 +244,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     mentionContextItemsRef.current = mentionContextItems ?? [];
 
     const queryClient = useQueryClient();
+
+    // CEREBRO-PATCH(editor-image-entry): preserve the caret across the native picker.
+    const openImagePicker = (position: number) => {
+      pendingImagePositionRef.current = position;
+      imageInputRef.current?.click();
+    };
 
     // CEREBRO-PATCH(input-autofocus): JEH-756 — snapshot once per editor
     // instance. Parent re-keying (e.g. `key={draftKey}`) remounts the editor
@@ -333,6 +345,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         getMentionContextItems: () => mentionContextItemsRef.current,
         enableSlashCommands,
         slashCommandMode,
+        onSelectImage: openImagePicker, // CEREBRO-PATCH(editor-image-entry): wire /image to the shared picker.
         resolveIssueIdentifierRef,
       }),
       onUpdate: ({ editor: ed }) => {
@@ -476,6 +489,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         const endPos = editor.state.doc.content.size;
         uploadAndInsertFile(editor, file, onUploadFileRef.current, endPos, options);
       },
+      // CEREBRO-PATCH(editor-image-entry): shared overflow/phone picker command.
+      chooseImage: () => {
+        if (!editor || !onUploadFileRef.current) return;
+        openImagePicker(editor.state.selection.from);
+      },
       hasActiveUploads: () => {
         if (!editor) return false;
         let uploading = false;
@@ -514,6 +532,34 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         className="relative flex min-h-full flex-col"
         onMouseDown={handleContainerMouseDown}
       >
+        {/* CEREBRO-PATCH(editor-image-entry): native picker shared by /image and EditorActionsMenu. */}
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          aria-label="Insert image"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            if (!file || !onUploadFileRef.current) return;
+            const position = Math.max(
+              0,
+              Math.min(
+                pendingImagePositionRef.current ?? editor.state.selection.from,
+                editor.state.doc.content.size,
+              ),
+            );
+            pendingImagePositionRef.current = null;
+            uploadAndInsertFile(
+              editor,
+              file,
+              onUploadFileRef.current,
+              position,
+              { embedImage: true },
+            );
+          }}
+        />
         {/* CEREBRO-PATCH(list-editing): FIR-4707 Phase 6 slice 13 — task-list
             progress summary + "Hide N completed", on rich surfaces, gated. */}
         {showBubbleMenu && isListEditingEnabled() && (

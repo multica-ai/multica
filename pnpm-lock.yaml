@@ -2339,6 +2339,9 @@ importers:
       '@multica/cerebro-dictation':
         specifier: workspace:*
         version: link:../cerebro-dictation
+      '@multica/cerebro-editor-image':
+        specifier: workspace:*
+        version: link:../cerebro-editor-image
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags

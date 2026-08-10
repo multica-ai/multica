@@ -15,12 +15,17 @@
 export interface ParsedTrayImage {
   url: string;
   filename: string;
+  caption?: string;
 }
 
 // Matches one serialized tray line: `![image 3](https://cdn/…png)`. Anchored so
 // a normal inline image (`![alt](url)` mid-paragraph, or a different alt text)
 // is left in the body untouched.
-const TRAY_IMAGE_LINE = /^!\[image \d+\]\(([^)]+)\)$/;
+const TRAY_IMAGE_LINE = /^!\[image \d+\]\((\S+?)(?: "((?:\\.|[^"])*)")?\)$/;
+
+function unescapeTitle(value: string | undefined): string | undefined {
+  return value?.replace(/\\(["\\])/g, "$1");
+}
 
 function filenameFromUrl(url: string): string {
   try {
@@ -56,7 +61,11 @@ export function parseTrayImages(md: string): {
     const match = (lines[start - 1] ?? "").trim().match(TRAY_IMAGE_LINE);
     const url = match?.[1];
     if (!url) break;
-    images.unshift({ url, filename: filenameFromUrl(url) });
+    images.unshift({
+      url,
+      filename: filenameFromUrl(url),
+      caption: unescapeTitle(match?.[2]),
+    });
     start -= 1;
   }
 

@@ -109,6 +109,12 @@ export function createImageExtension(deps: ImageExtensionDeps) {
             attrs.align ? { "data-align": attrs.align as string } : {},
           parseHTML: (el: HTMLElement) => el.getAttribute("data-align") || null,
         },
+        placement: {
+          default: null,
+          renderHTML: (attrs: Record<string, unknown>) =>
+            attrs.placement ? { "data-placement": attrs.placement as string } : {},
+          parseHTML: (el: HTMLElement) => el.getAttribute("data-placement") || null,
+        },
       };
     },
     addNodeView() {
@@ -137,10 +143,12 @@ export function createImageExtension(deps: ImageExtensionDeps) {
       const title = node.attrs?.title as string | undefined;
       const pct = node.attrs?.widthPct as number | undefined;
       const align = node.attrs?.align as string | undefined;
-      if (pct || align) {
+      const placement = node.attrs?.placement as string | undefined;
+      if (pct || align || placement === "inline") {
         const w = pct ? ` data-width-pct="${pct}"` : "";
         const a = align ? ` data-align="${attr(align)}"` : "";
-        return `<img src="${attr(src)}" alt="${attr(rawAlt)}"${w}${a}>`;
+        const p = placement === "inline" ? ' data-placement="inline"' : "";
+        return `<img src="${attr(src)}" alt="${attr(rawAlt)}"${w}${a}${p}>`;
       }
       const alt = escapeMarkdownLabel(rawAlt);
       if (title) {

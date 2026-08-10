@@ -29,10 +29,14 @@ import {
   ContentEditor,
   type ContentEditorProps,
   type ContentEditorRef,
-  FileDropOverlay,
+  uploadAndInsertFile,
   useAttachmentPreview,
 } from "@multica/views/editor";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import {
+  MOVE_IMAGE_TO_TRAY_EVENT,
+  type MoveImageToTrayDetail,
+} from "@multica/cerebro-editor-image";
 import { ComposerImageTray } from "./composer-image-tray";
 import {
   useImageTray,
@@ -40,17 +44,19 @@ import {
   type ImageTrayItem,
 } from "./use-image-tray";
 import { parseTrayImages, combineBodyAndTray } from "./parse-tray-images";
+import { editorImageDropLanding } from "./editor-image-drop";
 
 export type EditorImageTrayProps = ContentEditorProps;
 
 /**
- * Drop-in replacement for ContentEditor in field editors. When the tray flag is
- * off it renders a plain ContentEditor (today's inline-image behavior); when on
- * it wraps the editor with the numbered tray + round-trip persistence below.
+ * Drop-in replacement for ContentEditor in field editors. The numbered tray is
+ * active when either the legacy tray or the unified editor-images feature is on.
  */
 export const EditorImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
   function EditorImageTray(props, ref) {
-    const enabled = useFeatureFlag("cerebro_composer_image_tray");
+    const trayEnabled = useFeatureFlag("cerebro_composer_image_tray");
+    const editorImagesEnabled = useFeatureFlag("cerebro_editor_images");
+    const enabled = trayEnabled || editorImagesEnabled;
     if (!enabled) return <ContentEditor ref={ref} {...props} />;
     return <FieldImageTray ref={ref} {...props} />;
   },
@@ -102,6 +108,7 @@ const FieldImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
           filename: img.filename,
           status: "completed" as const,
           uploadedUrl: img.url,
+          caption: img.caption,
         })),
       [initial],
     );
@@ -144,54 +151,119 @@ const FieldImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [traySignature]);
 
-    // Route dropped/pasted files: images → tray, other files → inline card.
-    const routeFiles = useCallback(
-      (files: File[]) => {
-        const images = files.filter((f) => f.type.startsWith("image/"));
-        const others = files.filter((f) => !f.type.startsWith("image/"));
-        if (images.length) tray.addFiles(images);
-        others.forEach((f) => innerRef.current?.uploadFile(f));
+    const trayAddRef = useRef(tray.addFiles);
+    trayAddRef.current = tray.addFiles;
+    const trayAddUploadedRef = useRef(tray.addUploaded);
+    trayAddUploadedRef.current = tray.addUploaded;
+    const uploadRef = useRef(onUploadFile);
+    uploadRef.current = onUploadFile;
+
+    const rootRef = useRef<HTMLDivElement>(null);
+    const editorBoxRef = useRef<HTMLDivElement>(null);
+    const [landingTop, setLandingTop] = useState<number | null>(null);
+
+    const placeInText = useCallback(
+      (item: ImageTrayItem) => {
+        const editor = editorRef.current;
+        if (!editor || !item.uploadedUrl) return;
+        const content: Array<Record<string, unknown>> = [
+          {
+            type: "image",
+            attrs: {
+              src: item.uploadedUrl,
+              alt: item.filename,
+              placement: "inline",
+            },
+          },
+        ];
+        if (item.caption) {
+          content.push({
+            type: "imageCaption",
+            content: [{ type: "text", text: item.caption }],
+          });
+        }
+        const placed = editor
+          .chain()
+          .focus()
+          .insertContentAt(editor.state.selection.from, content)
+          .run();
+        if (placed) tray.takeForInline(item.localId);
       },
       [tray],
     );
-    const routeFilesRef = useRef(routeFiles);
-    routeFilesRef.current = routeFiles;
-    const trayAddRef = useRef(tray.addFiles);
-    trayAddRef.current = tray.addFiles;
-
-    const boxRef = useRef<HTMLDivElement>(null);
-    const [dragOver, setDragOver] = useState(false);
 
     // Capture-phase drop/paste on the field box (an ancestor of ProseMirror's
     // contenteditable). Capturing lets us divert image files to the tray BEFORE
     // the editor's own handlers insert them inline — same technique BaseComposer
     // uses, so the upstream editor stays untouched.
     useEffect(() => {
-      const el = boxRef.current;
+      const el = rootRef.current;
       if (!el) return;
 
       const hasFiles = (dt: DataTransfer | null) =>
         !!dt && Array.from(dt.types).includes("Files");
 
+      const isTrayTarget = (target: EventTarget | null) =>
+        target instanceof Element && Boolean(target.closest("[data-image-tray]"));
+      const updateLanding = (e: DragEvent) => {
+        const editor = editorRef.current;
+        const box = editorBoxRef.current;
+        if (!editor || !box || isTrayTarget(e.target)) {
+          setLandingTop(null);
+          return null;
+        }
+        const landing = editorImageDropLanding(editor, e.clientY);
+        setLandingTop(
+          landing ? landing.lineY - box.getBoundingClientRect().top : null,
+        );
+        return landing;
+      };
       const onDragEnter = (e: DragEvent) => {
         if (!hasFiles(e.dataTransfer)) return;
         e.preventDefault();
-        setDragOver(true);
+        updateLanding(e);
       };
       const onDragOver = (e: DragEvent) => {
         if (!hasFiles(e.dataTransfer)) return;
         e.preventDefault();
+        updateLanding(e);
       };
       const onDragLeave = (e: DragEvent) => {
-        if (!el.contains(e.relatedTarget as Node)) setDragOver(false);
+        if (!el.contains(e.relatedTarget as Node)) setLandingTop(null);
       };
       const onDrop = (e: DragEvent) => {
-        setDragOver(false);
+        setLandingTop(null);
         const files = e.dataTransfer?.files;
         if (!files?.length) return;
+        const allFiles = Array.from(files);
+        const images = allFiles.filter((file) =>
+          file.type.startsWith("image/"),
+        );
+        const others = allFiles.filter(
+          (file) => !file.type.startsWith("image/"),
+        );
+        if (images.length === 0) return;
         e.preventDefault();
         e.stopPropagation();
-        routeFilesRef.current(Array.from(files));
+        if (isTrayTarget(e.target)) {
+          trayAddRef.current(images);
+          others.forEach((file) => innerRef.current?.uploadFile(file));
+          return;
+        }
+        const editor = editorRef.current;
+        const handler = uploadRef.current;
+        if (!editor || !handler) return;
+        const landing = editorImageDropLanding(editor, e.clientY);
+        images.forEach((file, index) => {
+          void uploadAndInsertFile(
+            editor,
+            file,
+            handler,
+            index === 0 ? landing?.position : undefined,
+            { embedImage: true },
+          );
+        });
+        others.forEach((file) => innerRef.current?.uploadFile(file));
       };
       const onPaste = (e: ClipboardEvent) => {
         const files = e.clipboardData?.files;
@@ -205,13 +277,24 @@ const FieldImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
         e.stopPropagation();
         trayAddRef.current(images);
       };
-      const clearDrag = () => setDragOver(false);
+      const onMoveToTray = (event: Event) => {
+        const moveEvent = event as CustomEvent<MoveImageToTrayDetail>;
+        if (!moveEvent.detail?.src) return;
+        moveEvent.preventDefault();
+        trayAddUploadedRef.current({
+          uploadedUrl: moveEvent.detail.src,
+          filename: moveEvent.detail.filename,
+          caption: moveEvent.detail.caption,
+        });
+      };
+      const clearDrag = () => setLandingTop(null);
 
       el.addEventListener("dragenter", onDragEnter, true);
       el.addEventListener("dragover", onDragOver, true);
       el.addEventListener("dragleave", onDragLeave, true);
       el.addEventListener("drop", onDrop, true);
       el.addEventListener("paste", onPaste, true);
+      el.addEventListener(MOVE_IMAGE_TO_TRAY_EVENT, onMoveToTray);
       document.addEventListener("drop", clearDrag);
       document.addEventListener("dragend", clearDrag);
       return () => {
@@ -220,6 +303,7 @@ const FieldImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
         el.removeEventListener("dragleave", onDragLeave, true);
         el.removeEventListener("drop", onDrop, true);
         el.removeEventListener("paste", onPaste, true);
+        el.removeEventListener(MOVE_IMAGE_TO_TRAY_EVENT, onMoveToTray);
         document.removeEventListener("drop", clearDrag);
         document.removeEventListener("dragend", clearDrag);
       };
@@ -255,6 +339,7 @@ const FieldImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
           }
           innerRef.current?.uploadFile(file, options);
         },
+        chooseImage: () => innerRef.current?.chooseImage(),
         hasActiveUploads: () => innerRef.current?.hasActiveUploads() ?? false,
       }),
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -262,11 +347,15 @@ const FieldImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
     );
 
     return (
-      <div className={cn("flex flex-col", className)}>
+      <div
+        ref={rootRef}
+        data-editor-image-tray
+        className={cn("flex min-w-0 max-w-full flex-col", className)}
+      >
         {preview.modal}
         <ComposerImageTray
           items={tray.items}
-          hideEmbed
+          embedLabel="Place in text"
           onPreview={(item) =>
             preview.open({
               kind: "url",
@@ -274,10 +363,14 @@ const FieldImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
               filename: item.filename,
             })
           }
-          onEmbed={() => {}}
+          onEmbed={placeInText}
           onRemove={tray.remove}
         />
-        <div ref={boxRef} className="relative flex flex-1 flex-col">
+        <div
+          ref={editorBoxRef}
+          data-editor-image-box
+          className="relative flex min-w-0 max-w-full flex-1 flex-col"
+        >
           <ContentEditor
             ref={innerRef}
             defaultValue={initial.body}
@@ -286,7 +379,13 @@ const FieldImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
             {...rest}
             onEditorReady={handleEditorReady}
           />
-          {dragOver && <FileDropOverlay />}
+          {landingTop != null && (
+            <div
+              data-testid="image-drop-landing-line"
+              className="pointer-events-none absolute inset-x-0 z-20 h-0.5 bg-brand"
+              style={{ top: landingTop }}
+            />
+          )}
         </div>
       </div>
     );

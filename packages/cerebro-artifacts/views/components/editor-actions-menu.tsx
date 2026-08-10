@@ -90,7 +90,9 @@ export function EditorActionsMenu({
           <Button
             size="icon-sm"
             variant="ghost"
-            className={cn("shrink-0", className)}
+            // Keep the always-present action entry above the phone keyboard's
+            // fixed formatting row, so Insert image remains reachable while typing.
+            className={cn("relative z-40 shrink-0", className)}
             aria-label={triggerLabel}
           >
             <MoreHorizontal className="size-4" />

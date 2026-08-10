@@ -24,6 +24,7 @@ import {
   Users,
   PenLine,
   Type,
+  ImagePlus,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -854,6 +855,7 @@ export function NoteEditor({
   const liveCollabEnabled = useFeatureFlag("cerebro_note_live_collab");
   const commentsEnabled = useFeatureFlag("cerebro_note_comments");
   const editorToolbarEnabled = useFeatureFlag("cerebro_editor_toolbar");
+  const imagesEnabled = useFeatureFlag("cerebro_editor_images");
   const versionsEnabled = useFeatureFlag("cerebro_note_versions");
   // FIR-2595 point 3: scope the note's @mention picker to people with access.
   const scopedMentions = useFeatureFlag("cerebro_note_scoped_mentions");
@@ -954,6 +956,10 @@ export function NoteEditor({
   const editorRef = React.useRef<ContentEditorRef>(null);
   // Uploader for images dropped/pasted into the note (image tray, FIR-2693).
   const { uploadWithToast } = useFileUpload(api);
+  const uploadNoteImage = React.useCallback(
+    (file: File) => uploadWithToast(file, { artifactId: note.id }),
+    [note.id, uploadWithToast],
+  );
   // Live body driving the outline + word/character count. Seeded from the note
   // and kept current by the editor's debounced onUpdate so the "Oversigt" and
   // counts react while typing, without waiting for the save round-trip.
@@ -1324,6 +1330,13 @@ export function NoteEditor({
           triggerLabel="Note actions"
           className="ml-auto"
           items={[
+            !readOnly &&
+              imagesEnabled && {
+                key: "insert-image",
+                label: "Insert image",
+                icon: ImagePlus,
+                onSelect: () => editorRef.current?.chooseImage(),
+              },
             // FIR-4028 slice 8 — Text size leaves the action row. It is a
             // personal reading preference, not something about the note, and
             // the row has no width to spare on a phone.
@@ -1602,7 +1615,9 @@ export function NoteEditor({
                 ref={editorRef}
                 defaultValue={liveBody}
                 onUpdate={saveBody}
-                onUploadFile={uploadWithToast}
+                onUploadFile={uploadNoteImage}
+                enableSlashCommands={imagesEnabled}
+                slashCommandMode="image"
                 onBlur={() => saveBody(editorRef.current?.getMarkdown() ?? "")}
                 onEditorReady={setEditor}
                 showBubbleMenu={!editorToolbarEnabled}

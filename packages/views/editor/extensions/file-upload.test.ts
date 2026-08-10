@@ -126,7 +126,7 @@ describe("uploadAndInsertFile", () => {
 
     editor.commands.insertContent("after");
     expect(editor.getMarkdown().trimEnd()).toBe(
-      [`![photo.png](${BLOB_URL})`, "", "after"].join("\n"),
+      [`<img src="${BLOB_URL}" alt="photo.png" data-placement="inline">`, "", "after"].join("\n"),
     );
 
     upload.resolve(
@@ -135,7 +135,11 @@ describe("uploadAndInsertFile", () => {
     await uploadTask;
 
     const saved = editor.getMarkdown().trimEnd();
-    expect(saved).toBe([`![photo.png](${FINAL_URL})`, "", "after"].join("\n"));
+    expect(saved).toBe([
+      `<img src="${FINAL_URL}" alt="photo.png" data-placement="inline">`,
+      "",
+      "after",
+    ].join("\n"));
 
     const reparsed = makeEditor();
     reparsed.commands.setContent(saved, { contentType: "markdown" });
@@ -181,7 +185,9 @@ describe("uploadAndInsertFile", () => {
       expect(finalAttrs?.height).toBe(600);
 
       // width/height are render-only — they never reach the markdown.
-      expect(editor.getMarkdown().trimEnd()).toBe(`![photo.png](${FINAL_URL})`);
+      expect(editor.getMarkdown().trimEnd()).toBe(
+        `<img src="${FINAL_URL}" alt="photo.png" data-placement="inline">`,
+      );
     } finally {
       vi.unstubAllGlobals();
     }

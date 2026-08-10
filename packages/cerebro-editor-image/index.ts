@@ -5,3 +5,9 @@ export { ImageResizeControls } from "./image-resize-controls";
 export { snapWidthPct, WIDTH_STOPS } from "./resize-magnet";
 export { dropLanding } from "./drop-landing";
 export type { DropBlock, DropLanding } from "./drop-landing";
+export {
+  MOVE_IMAGE_TO_TRAY_EVENT,
+  deleteInlineImageAndCaption,
+  moveInlineImageToTray,
+} from "./image-placement";
+export type { MoveImageToTrayDetail } from "./image-placement";

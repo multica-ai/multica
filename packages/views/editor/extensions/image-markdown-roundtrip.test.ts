@@ -126,6 +126,14 @@ describe("ImageExtension inline resize round-trip (Phase 5)", () => {
     expect(out).not.toContain("<img");
     expect(out).not.toContain("data-width-pct");
   });
+
+  it("keeps explicit inline placement without forcing a size or alignment", () => {
+    const placed = `<img src="${IMAGE_URL}" alt="screen" data-placement="inline">`;
+    const [out] = roundTripMany(placed, 2);
+    expect(out).toContain('data-placement="inline"');
+    expect(out).not.toContain("data-width-pct");
+    expect(out).not.toContain("data-align");
+  });
 });
 
 describe("ImageCaption markdown round-trip (Phase 5)", () => {

@@ -44,12 +44,17 @@ import { createMentionSuggestion, type MentionItem } from "./mention-suggestion"
 // CEREBRO-PATCH(skill-mention-register): register the cerebro `/skill` trigger
 // extension alongside BaseMentionExtension. Feature-flagged inside the extension.
 import { createSkillMentionExtension } from "@multica/cerebro-skill-mention";
+// CEREBRO-PATCH(editor-image-entry): FIR-4699 image-only slash menu.
 import {
   createIssueIdentifierAutolinkExtension,
   type IssueIdentifierResolver,
 } from "./issue-identifier-autolink";
 import { SlashCommandExtension } from "./slash-command-extension";
-import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
+import {
+  createSlashCommandSuggestion,
+  createBuiltinCommandSuggestion,
+  createImageCommandSuggestion,
+} from "./slash-command-suggestion";
 import { CodeBlockView } from "./code-block-view";
 import { PatchedListItem, PatchedTaskItem } from "./list-item";
 // CEREBRO-PATCH(list-editing): FIR-4707 Phase 6 — Backspace-outdent, ⌥↑/⌥↓ move,
@@ -126,8 +131,12 @@ export interface EditorExtensionsOptions {
    * Which `/` menu to attach when enableSlashCommands is true:
    * - "skill" (default) — the chat picker listing the active agent's skills.
    * - "command" — the fixed built-in command menu (issue comments), e.g. /note.
+   * - "image" — the image picker command used by Notes and Documents. CEREBRO-PATCH(editor-image-entry): FIR-4699.
    */
-  slashCommandMode?: "skill" | "command";
+  slashCommandMode?: "skill" | "command" | "image";
+  // CEREBRO-PATCH(editor-image-entry): FIR-4699 — /image opens the host picker
+  // and preserves the command's caret position while the native dialog is open.
+  onSelectImage?: (position: number) => void;
   /**
    * Resolver for Linear-style bare issue-identifier autolinking. When present
    * (and mentions are enabled), typing a boundary after `MUL-123` or pasting
@@ -231,6 +240,8 @@ export function createEditorExtensions(
         ? { char: "/", allow: () => false }
         : options.slashCommandMode === "command"
           ? createBuiltinCommandSuggestion()
+          : options.slashCommandMode === "image" && options.onSelectImage // CEREBRO-PATCH(editor-image-entry): route /image.
+            ? createImageCommandSuggestion(options.onSelectImage)
           : options.queryClient
             ? createSlashCommandSuggestion(options.queryClient)
             : { char: "/", allow: () => false },

@@ -131,6 +131,7 @@ const sanitizeSchema = {
       // CEREBRO-PATCH(image-size-attributes): FIR-4699 — keep inline width/align through sanitize.
       "dataWidthPct",
       "dataAlign",
+      "dataPlacement", // CEREBRO-PATCH(image-size-attributes): explicit inline placement at default size.
     ],
     // CEREBRO-PATCH(stacked-data-tables): keep the data-table class + per-cell data-label through sanitize (FIR-1727).
     table: [...(defaultSchema.attributes?.table ?? []), ["className", "data-table"]],
@@ -534,7 +535,8 @@ const components: Partial<Components> = {
     // Clamp to 1–100: the attribute is untrusted Markdown, so `data-width-pct="99999"` must not blow the column out.
     const widthPct = Number.isFinite(pctRaw) ? Math.min(100, Math.max(1, pctRaw)) : null;
     const align = (node?.properties?.dataAlign as string | undefined) || null;
-    const inlinePlaced = widthPct != null || align != null;
+    const placement = (node?.properties?.dataPlacement as string | undefined) || null;
+    const inlinePlaced = placement === "inline" || widthPct != null || align != null; // CEREBRO-PATCH(image-size-attributes): explicit placement survives sanitize.
     // CEREBRO-PATCH(readonly-image-gallery): FIR-2710 — open the surface gallery when present, else the legacy lightbox.
     const gallery = useGalleryImage({ src: imgSrc, alt: imgAlt, downloadHref: imgSrc });
     const handleView = () => (gallery.enabled ? gallery.open() : setLightbox(true));
