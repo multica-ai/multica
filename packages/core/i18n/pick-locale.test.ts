@@ -15,7 +15,7 @@ function makeAdapter(
 
 describe("matchLocale", () => {
   it("returns DEFAULT_LOCALE when given an empty list", () => {
-    expect(matchLocale([])).toBe("en");
+    expect(matchLocale([])).toBe("zh-Hans");
   });
 
   it("matches a clean supported tag", () => {
@@ -33,7 +33,7 @@ describe("matchLocale", () => {
   });
 
   it("falls back to DEFAULT_LOCALE when no candidate matches", () => {
-    expect(matchLocale(["fr", "de"])).toBe("en");
+    expect(matchLocale(["fr", "de"])).toBe("zh-Hans");
   });
 
   it("zh-Hant (traditional) collapses to zh-Hans — same base subtag, better UX than English fallback", () => {
@@ -47,8 +47,8 @@ describe("matchLocale", () => {
   });
 
   it("returns DEFAULT_LOCALE for malformed BCP-47 tags rather than throwing", () => {
-    expect(matchLocale(["----"])).toBe("en");
-    expect(matchLocale(["x-private-only"])).toBe("en");
+    expect(matchLocale(["----"])).toBe("zh-Hans");
+    expect(matchLocale(["x-private-only"])).toBe("zh-Hans");
   });
 });
 
@@ -73,7 +73,7 @@ describe("pickLocale", () => {
       getUserChoice: () => null,
       getSystemPreferences: () => ["fr", "de"],
     });
-    expect(pickLocale(adapter)).toBe("en");
+    expect(pickLocale(adapter)).toBe("zh-Hans");
   });
 
   it("ignores empty-string user choice and falls through to system", () => {

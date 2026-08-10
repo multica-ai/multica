@@ -10,7 +10,7 @@
     "squads": "小队",
     "usage": "统计",
     "runtimes": "运行时",
-    "skills": "Skills",
+    "skills": "skill",
     "settings": "设置"
   },
   "tab": {
@@ -20,7 +20,7 @@
     "agent": "智能体",
     "member": "成员",
     "squad": "小队",
-    "skill": "Skill",
+    "skill": "skill",
     "machine": "机器",
     "runtime": "运行时",
     "attachment": "附件",

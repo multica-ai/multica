@@ -9,9 +9,9 @@ describe("pickContentLang", () => {
     expect(pickContentLang("ja-JP")).toBe("ja");
   });
 
-  it("falls back to English for unsupported or missing languages", () => {
-    expect(pickContentLang("fr-FR")).toBe("en");
-    expect(pickContentLang(null)).toBe("en");
-    expect(pickContentLang(undefined)).toBe("en");
+  it("falls back to Chinese for unsupported or missing languages", () => {
+    expect(pickContentLang("fr-FR")).toBe("zh");
+    expect(pickContentLang(null)).toBe("zh");
+    expect(pickContentLang(undefined)).toBe("zh");
   });
 });
