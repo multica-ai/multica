@@ -289,6 +289,39 @@ func deliveryCanBeRepeated(err error) bool {
 	return errors.As(err, &ae)
 }
 
+// bubbleSurvivedTheFailure reports whether a failed delivery left the round's
+// bubble exactly as the user last saw it: a spinner, on a stream the server has
+// heard nothing about since the frame that opened it.
+//
+// It is what the ledger reads to decide whether a round goes back on the open
+// list rather than owed an ending (keepsItsBubble, stream_store.go), and it is
+// deliberately narrower than deliveryCanBeRepeated. That one asks whether the
+// WORDS may be said again, and a server errcode qualifies: 846605 and 846608 are
+// answers, so nothing was shown. But an errcode is also the server saying this
+// stream will never take another frame, so the bubble those words were meant for
+// is beyond saving and handing the handle back would spend a frame proving it.
+//
+// Two failures say both things at once, and they are the reconnect window's own
+// two shapes (see deliveryCanBeRepeated's last paragraph): a write that did not
+// finish, so no application ever saw a frame and the server's view of the stream
+// is where the opening frame left it; and no socket at all, where there was
+// nothing to see. Both leave a handle that writes to the same bubble over
+// whatever connection the installation holds next — measured, and
+// sendersRegistry.stream carries the measurement.
+//
+// The repeatability test is kept in front of them rather than assumed, because
+// a delivery is often two sends and only the second one's error comes back
+// whole. writeClosing and deliverAnswer both mark an attempt whose FIRST send
+// may be on the screen (errWordsMayBeOnScreen), and that mark has to win here:
+// a bubble handed back for one of those is a bubble a retry would seal a second
+// copy of the answer into.
+func bubbleSurvivedTheFailure(err error) bool {
+	if !deliveryCanBeRepeated(err) {
+		return false
+	}
+	return errors.Is(err, errFrameNotOnTheWire) || errors.Is(err, errNoLiveConnection)
+}
+
 // ackWaiter is one stream frame's standing request for a verdict. seq is where
 // the frame sits in its req_id's write order, stamped at the moment it goes on
 // the wire — see streamAcks for why a verdict has to be matched rather than
@@ -725,6 +758,10 @@ func (s *wsSender) writeStreamFrame(ctx context.Context, reqID string, w *ackWai
 	if !s.beginStreamFrameLocked(reqID, w, finish) {
 		return errStreamSuperseded
 	}
+	// Where a manufactured outage starts, when one is armed and this frame is a
+	// seal. Compiled out of a normal build (faults_off.go), and inside the
+	// writer either way, so the frame that arms it is the first one it refuses.
+	faultDeadSocketOnSeal(s.log, finish)
 	if err := s.writeLocked(ctx, payload, t); err != nil {
 		s.abortStreamFrameLocked(reqID)
 		return err
@@ -759,11 +796,19 @@ func (s *wsSender) writeLocked(ctx context.Context, payload []byte, t *outTrace)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
-	stage := traceStageDeadline
-	err := s.conn.SetWriteDeadline(deadline)
+	// A manufactured outage stands in front of the socket rather than beside it,
+	// so the frame really does not go out and the trace records the same failed
+	// write a real one would. In a normal build the call is a no-op the compiler
+	// inlines and the branch disappears with it — see faults_off.go.
+	stage := traceStageWrite
+	err := faultDeadSocketRefusesWrite()
 	if err == nil {
-		stage = traceStageWrite
-		err = s.conn.WriteMessage(websocket.TextMessage, payload)
+		stage = traceStageDeadline
+		err = s.conn.SetWriteDeadline(deadline)
+		if err == nil {
+			stage = traceStageWrite
+			err = s.conn.WriteMessage(websocket.TextMessage, payload)
+		}
 	}
 	traceOutResult(s.log, seq, t, stage, err)
 	if err != nil {

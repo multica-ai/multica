@@ -217,13 +217,15 @@ const (
 // (deliveryBudget in stream_store.go), so this path never has to tell a context
 // error apart from a refusal.
 //
-// Everything else is the end of the matter. A delivery that said nothing on
-// purpose (errNothingToSay) is a completion nobody was owed; a delivery that was
-// refused is reported to the caller's WARN and leaves the round owed its ending
-// on the note, exactly as it did before. Deliberately NOT retried, unlike the
-// endings in typing_indicator.go: an answer's first route is the bubble, and a
-// refused frame is already followed by the same words as a plain message, so a
-// third attempt is the one that prints the answer twice. See deliverAnswer.
+// Everything else is the end of the matter for THIS subscriber. A delivery that
+// said nothing on purpose (errNothingToSay) is a completion nobody was owed; a
+// delivery that was refused is reported to the caller's WARN and leaves the
+// round to the ledger — owed its ending on the note, or back on the open list
+// with its bubble when the words provably reached nobody. Deliberately NOT
+// retried, unlike the endings in typing_indicator.go: an answer's first route is
+// the bubble, and a refused frame is already followed by the same words as a
+// plain message, so a third attempt is the one that prints the answer twice. See
+// deliverAnswer.
 //
 // WHAT A BOOKED RETRY COSTS. Returning nil once one is booked reports the
 // chat:done handled while this subscriber is still holding the answer. The
@@ -303,6 +305,12 @@ func (o *Outbound) bookAnswerRetry(sessionID pgtype.UUID, taskID, content string
 // every attempt descends from the one processEvent that gated this event, so a
 // later attempt inherits that decision rather than paying for it again.
 func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t roundTurn, content string) (roundAddress, error) {
+	// What the closing frame did, kept until the end. A delivery made of two
+	// sends is accounted for by both of them: the second one's error alone can
+	// say "nothing reached the user" about an attempt whose first half is on the
+	// screen with its verdict missing. writeClosing carries the same pair for
+	// the same reason (typing_indicator.go).
+	var streamErr error
 	if t.HasBubble {
 		// A bubble on screen has to end in words. An empty completion is a
 		// legitimate outcome — the agent had nothing to add — but an endless
@@ -316,31 +324,33 @@ func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t r
 				text = streamCopyMerged
 			}
 		}
-		if err := o.finishStream(ctx, t.Handle, text); err == nil {
+		err := o.finishStream(ctx, t.Handle, text)
+		if err == nil {
 			return t.Handle.address(), nil
 		}
-		// The frame was refused. Say it as a new message instead, and do not
-		// re-send the stream frame.
+		// The frame did not go. Say it as a new message instead, and do not
+		// re-send the stream frame INSIDE THIS ATTEMPT: an ordinary message is a
+		// second ROUTE and worth trying now, while a second frame on the stream
+		// that just failed is the same route twice — and for an errcode it is
+		// not even that, since 846608 and 846605 both mean this stream will
+		// never take another frame.
 		//
-		// For an errcode that is the whole story: 846608 and 846605 both mean
-		// this stream will never take another frame. For a transport failure it
-		// is a choice rather than a necessity, and worth naming as one. Since
-		// errFrameNotOnTheWire (ws_sender.go) a failed socket write is known
-		// NOT to have reached the peer, so re-sending the stream frame on a
-		// fresh socket would be safe and would seal the bubble the user is
-		// still watching spin. This path does not do that: it hands the handle
-		// back to no one and says the words as a plain message, so the spinner
-		// is left to the guard and the answer arrives beside it rather than
-		// inside it.
-		//
-		// The plain message is the route whose outcome this process can
-		// observe end to end, and it is what shipped. Sealing the bubble on a
-		// reconnect is a better answer and a separate change.
-		//
-		// Not because the handle has gone stale. A callback's req_id belongs to
-		// the turn rather than to the socket it arrived on, and a stream opened
+		// The bubble is not written off with it. A callback's req_id belongs to
+		// the turn rather than to the socket it arrived on, so a stream opened
 		// before a reconnect is still writable after it — measured against a
-		// live tenant, see senders_registry.go.
+		// live tenant, see senders_registry.go — and since errFrameNotOnTheWire
+		// (ws_sender.go) a failed socket write is known not to have reached the
+		// peer. So when the plain message below fails too and the failure is one
+		// of those, the ledger puts this round back on its list with the handle
+		// intact rather than consuming it (endEnding, stream_store.go), and
+		// whichever publisher comes next seals the spinner the user is watching
+		// instead of speaking beside it.
+		//
+		// Which publisher that is, is not this subscriber: an answer books a
+		// retry only for a deferral. What a restored round buys here is that a
+		// failure, a cancellation or the guard arriving afterwards writes into
+		// the bubble rather than under it.
+		streamErr = err
 		content = text
 	}
 	if !hasVisibleChar(content) {
@@ -362,7 +372,17 @@ func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t r
 		}
 		return t.Addr, o.senders.sendTextCtx(ctx, t.Addr.InstallationID, t.Addr.ChatID, t.Addr.ChatType, streamCopyNoReply)
 	}
-	return o.sendAsMessage(ctx, sessionID, content)
+	addr, err := o.sendAsMessage(ctx, sessionID, content)
+	if err != nil && streamErr != nil && !deliveryCanBeRepeated(streamErr) {
+		// The closing frame's outcome is one this package cannot account for —
+		// an ack that never came back, a context that expired around the write —
+		// so the answer may be sealing the bubble this very moment. What the
+		// fallback came back with says nothing about that, and on its own it
+		// reads as "the user has nothing", which is how a round gets handed back
+		// for a later publisher to print the same answer into a second time.
+		return addr, errors.Join(errWordsMayBeOnScreen, streamErr, err)
+	}
+	return addr, err
 }
 
 // sendAsMessage pushes an answer to the chat this session is bound to, for a

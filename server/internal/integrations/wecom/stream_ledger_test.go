@@ -327,28 +327,36 @@ func said(t *testing.T, c *bubbleConn) []string {
 
 // ---- the terminal path with no second publisher of its own ----
 
-// TestASettledRoundThatCouldNotBeToldIsStillOwedItsWords is the reconnect
+// TestASettledRoundThatCouldNotBeToldIsStillSaidAfterwards is the reconnect
 // window on the one path that has no natural second chance.
 //
 // A flush that started no run — agent offline, archived, an enqueue that failed
 // — is closed by OnSettled and by nothing else: with no task there is no task
 // lifecycle event, so neither the chat-done subscriber nor the failure
 // subscriber will ever fire for it. If the closing frame and the plain message
-// both fail in a reconnect window, the round has already left the open list and
-// its bubble has gone with the attempt. A ledger that recorded nothing for it
-// leaves the asker a spinner that nothing can ever seal and no words at all —
-// the one loss I3 exists to make impossible, on the one path where nothing else
-// can recover from it.
+// both fail in a reconnect window and the ledger records nothing for it, the
+// asker is left a spinner nothing can ever seal and no words at all — the one
+// loss I3 exists to make impossible, on the one path where nothing else can
+// recover from it.
 //
-// The retry is switched off here on purpose: what this pins is that the ROUND
-// is still owed its ending afterwards, so whoever says it next says it, rather
-// than that a timer happens to be the one who does.
-func TestASettledRoundThatCouldNotBeToldIsStillOwedItsWords(t *testing.T) {
+// Nothing left this process on that attempt, so the bubble is where it was and
+// the round goes back on the list holding it. That is what the second settle
+// finds, which is why the words end up INSIDE the spinner rather than beside
+// it: same stream, sealed on the connection that came back.
+//
+// The retry is switched off here on purpose: what this pins is what the round
+// is worth to whoever says its ending next, rather than that a timer happens to
+// be the one who does.
+func TestASettledRoundThatCouldNotBeToldIsStillSaidAfterwards(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
 	rig.typing.endingRetryAfter = -1
 	sessionID := bubbleSessionID(t)
 	rig.ask(t, "REQ-SETTLE", 1) // a bubble, and a flush that never named a run
+	opened := rig.conn.streamFrames(t)
+	if len(opened) != 1 {
+		t.Fatalf("the question opened %d bubbles, want 1", len(opened))
+	}
 
 	// The socket drops, and the flush settles into it: the closing frame is
 	// refused and so is the plain message it falls back to.
@@ -359,17 +367,27 @@ func TestASettledRoundThatCouldNotBeToldIsStillOwedItsWords(t *testing.T) {
 	conn := rig.reconnect()
 	rig.typing.OnSettled(context.Background(), sessionID, 1)
 
-	got := pushedTexts(t, conn)
+	got := said(t, conn)
 	if len(got) != 1 || got[0] != streamCopyNotStarted {
 		t.Fatalf("after a settle nothing accepted, the asker ended up reading %q, want [%q] — "+
 			"a round that never became a run has no later lifecycle event to rescue it, so a "+
-			"replay that finds nothing owed leaves them watching a spinner for good",
+			"replay that finds nothing left of it leaves them watching a spinner for good",
 			got, streamCopyNotStarted)
+	}
+	sealed := conn.streamFrames(t)
+	if len(sealed) != 1 || sealed[0]["id"] != opened[0]["id"] || sealed[0]["finish"] != true {
+		t.Fatalf("the words went out as %v, want one closing frame on stream %v — the attempt "+
+			"that failed reached nobody, so the spinner the asker is watching is still there "+
+			"and still writable, and words beside it leave it spinning for good",
+			sealed, opened[0]["id"])
+	}
+	if got := pushedTexts(t, conn); len(got) != 0 {
+		t.Fatalf("the settle also said %q as a new message", got)
 	}
 
 	// And having been said, it is said once: a third publisher adds nothing.
 	rig.typing.OnSettled(context.Background(), sessionID, 1)
-	if got := pushedTexts(t, conn); len(got) != 1 {
+	if got := said(t, conn); len(got) != 1 {
 		t.Fatalf("a repeated settle brought the asker to %q, want one message", got)
 	}
 }
@@ -380,7 +398,7 @@ func TestASettledRoundThatCouldNotBeToldIsStillOwedItsWords(t *testing.T) {
 // Exactly one of OnRunStarted and OnSettled fires per batch, so unlike every
 // other ending this one has no second publisher in production: no sweeper tick
 // repeats it, no redelivery reaches it, and there is no task for a lifecycle
-// event to hang off. The debt the ledger now files would sit there unspent. So
+// event to hang off. What the ledger keeps for it would sit there unspent. So
 // the manager books the publisher itself, and it goes back through the same
 // sayEnding — which is what makes it silent if anything else got there first.
 func TestASettleNobodyHeardIsSaidAgainWithoutAnotherPublisher(t *testing.T) {
@@ -395,10 +413,10 @@ func TestASettleNobodyHeardIsSaidAgainWithoutAnotherPublisher(t *testing.T) {
 	conn := rig.reconnect()
 
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && len(pushedTexts(t, conn)) == 0 {
+	for time.Now().Before(deadline) && len(said(t, conn)) == 0 {
 		time.Sleep(time.Millisecond)
 	}
-	got := pushedTexts(t, conn)
+	got := said(t, conn)
 	if len(got) != 1 || got[0] != streamCopyNotStarted {
 		t.Fatalf("the asker read %q after the socket came back, want [%q] — nothing else ever "+
 			"publishes this round's ending, so an attempt that failed is the last of it unless "+

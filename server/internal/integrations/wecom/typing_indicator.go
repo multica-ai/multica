@@ -492,13 +492,15 @@ func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype
 // redelivery — so a send refused during a reconnect window is one the next one
 // makes good. This one has none: exactly one of OnRunStarted and OnSettled fires
 // per batch (engine/resolvers.go), and with no task there is no lifecycle event
-// behind it either. So when both routes fail, the run is left owed its ending
-// under the batch's own name and this books the publisher that spends it.
+// behind it either. So when both routes fail, the ledger keeps the round under
+// the batch's own name — the bubble itself when the socket took nothing, a debt
+// otherwise — and this books the publisher that comes for it.
 //
 // It goes back through sayEnding rather than re-sending on its own, which is
 // what keeps it inside the ledger: if anything else closed the round in the
 // meantime the repeat finds nothing owed and says nothing, and if this attempt
-// fails too the debt goes back where it was for the next one.
+// fails too what it left goes back for the next one — the debt, or, when the
+// socket took nothing at all, the round and the bubble it was holding.
 func (m *TypingIndicatorManager) settleRound(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID, retries endingRetries) {
 	retries = retries.begin(time.Now())
 	_, err := m.streams.sayEnding(ctx, sessionID, byBatch(batch), roundOver, nil,
@@ -506,10 +508,10 @@ func (m *TypingIndicatorManager) settleRound(ctx context.Context, sessionID pgty
 			if t.HasBubble {
 				return t.Handle.address(), m.writeClosing(ctx, sessionID, t.Handle, streamCopyNotStarted, "settled")
 			}
-			// No bubble: an earlier attempt consumed it and its words never
-			// landed, so what is on the user's screen is a spinner nothing can
-			// seal any more. The chat it is in is on the note, and the same
-			// sentence goes there as an ordinary message under it.
+			// No bubble: an earlier attempt consumed it and could not account
+			// for the words, so what is on the user's screen is a spinner
+			// nothing can seal any more. The chat it is in is on the note, and
+			// the same sentence goes there as an ordinary message under it.
 			if !t.Promised || !t.Addr.known() {
 				return roundAddress{}, errNothingToSay
 			}
@@ -851,9 +853,9 @@ func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
 // This is the ending with the fewest publishers of all — one broadcast, no
 // sweeper repeat, no redelivery — so an attempt that does not reach the user is
 // the whole of it unless this comes back. What the asker is left with otherwise
-// is whatever the delivery ahead put on the screen: a spinner it consumed and
-// could not seal, or the guard's streamCopyStillWorking promise about a run the
-// user themselves stopped.
+// is whatever the delivery ahead put on the screen: a spinner nothing has
+// sealed, or the guard's streamCopyStillWorking promise about a run the user
+// themselves stopped.
 //
 // That reasoning does not distinguish between a wait this attempt lost and a
 // send the socket turned away, so neither does this: both come back, on counts
@@ -1076,7 +1078,11 @@ func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, batch engine.Ru
 		defer cancel()
 		m.fireGuard(ctx, sessionID, batch)
 	})
-	m.streams.arm(sessionID, batch, t)
+	// The deadline goes with the timer because the store may have to re-arm it:
+	// a round whose ending reached nobody goes back on the open list with the
+	// bubble it had, and the guard it gets back is the one it had left, not a
+	// fresh nine minutes past the window this whole timer exists to stay inside.
+	m.streams.arm(sessionID, batch, t, time.Now().Add(m.guardAfter))
 }
 
 // fireGuard is what the timer does, kept apart from the timer so the guard's
@@ -1086,9 +1092,12 @@ func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, batch engine.Ru
 // The promise is filed by the ledger, not here, and either way the run comes
 // out of this owed an ending. Words that landed put "还在处理，完成后我再单独
 // 回复你" on the screen and the promise is that sentence. Words that did not —
-// frame refused, fallback unsendable — still cost the round its bubble, which
-// the ledger consumed under the lock that found it, so the user is left
-// watching a spinner nothing can seal; I3 records that as owed too. The
+// frame refused, fallback unsendable, socket dead — still cost the round its
+// bubble, which the ledger consumed under the lock that found it, so the user
+// is left watching a spinner nothing can seal; I3 records that as owed too.
+// This is the one ending the ledger does not hand its round back to even when
+// the words provably went nowhere, and the paragraph below is the reason:
+// nobody would come for it. See keepsItsBubble in stream_store.go. The
 // difference is only in what the user has already been told, and the run's real
 // ending is said in the chat this round was speaking in either way, off the
 // note rather than the binding row.
@@ -1125,10 +1134,14 @@ func (m *TypingIndicatorManager) fireGuard(ctx context.Context, sessionID pgtype
 // comes off the handle, captured at ingest, because by now the binding row may
 // point at a different chat.
 //
-// Both routes failing is what the returned error is for. The ledger then
-// records nothing as SAID, so this run's ending is still owed and the next
-// publisher of it — a sweeper tick, WeCom's own redelivery — says it instead of
-// finding it filed as already said.
+// Both routes failing is what the returned error is for, and WHICH failure it
+// carries decides what the next publisher gets. The ledger records nothing as
+// SAID either way. When the error names a frame that never reached the wire, the
+// round goes back on the open list with its bubble, so the attempt this manager
+// books next writes a closing frame over the spinner the user is still watching.
+// Anything weaker leaves the run owed its ending and the next publisher — a
+// booked retry, a sweeper tick, WeCom's own redelivery — says the words as an
+// ordinary message instead.
 //
 // That error carries both attempts' verdicts, not just the last one. A closing
 // frame that went out and then lost its ack may be sealing the bubble this very

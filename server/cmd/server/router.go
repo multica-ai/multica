@@ -787,6 +787,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					slog.Warn("wecom: frame tracing ON — records message text; unset MULTICA_WECOM_TRACE when done")
 				}
 
+				// Manufactured failures, for walking a recovery path against
+				// the real platform. Not in this binary unless it was built
+				// with -tags wecomfaults, which is why the empty answer gets a
+				// line of its own: an operator who set the variable and saw
+				// nothing would otherwise be watching for a failure that can
+				// never happen.
+				if raw := strings.TrimSpace(os.Getenv("MULTICA_WECOM_FAULTS")); raw != "" {
+					if armed := wecom.SetFaults(raw); len(armed) > 0 {
+						slog.Warn("wecom: FAULT INJECTION ARMED — failures below are manufactured; unset MULTICA_WECOM_FAULTS when done",
+							"faults", strings.Join(armed, ","))
+					} else {
+						slog.Warn("wecom: MULTICA_WECOM_FAULTS is set but nothing was armed — this binary has no fault injection compiled in (build with -tags wecomfaults), or the names are unknown",
+							"value", raw)
+					}
+				}
+
 				slog.Info("wecom integration enabled (smart bot, long connection)")
 				// SINGLE-REPLICA CONSTRAINT: WeCom outbound (agent replies +
 				// inbox pushes) is delivered only by the replica holding each
