@@ -28,6 +28,24 @@ const userRef = vi.hoisted(() => ({
   current: null as { id: string; timezone?: string | null } | null,
 }));
 
+const { mentionDisplayState } = vi.hoisted(() => ({
+  mentionDisplayState: { mode: "full" as "plain" | "compact" | "full", setMode: vi.fn() },
+}));
+
+vi.mock("@multica/core/issues/stores", async () => {
+  const actual =
+    await vi.importActual<typeof import("@multica/core/issues/stores")>(
+      "@multica/core/issues/stores",
+    );
+
+  const useIssueMentionDisplayStore = (
+    selector?: (s: typeof mentionDisplayState) => unknown,
+  ) => (selector ? selector(mentionDisplayState) : mentionDisplayState);
+  useIssueMentionDisplayStore.getState = () => mentionDisplayState;
+
+  return { ...actual, useIssueMentionDisplayStore };
+});
+
 vi.mock("@multica/ui/components/common/theme-provider", () => ({
   useTheme: () => ({ theme: "light", setTheme: mockSetTheme }),
 }));
@@ -336,5 +354,27 @@ describe("PreferencesTab — Sticky comment bar", () => {
     expect(useCommentComposerStore.getState().sticky).toBe(false);
     expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PreferencesTab — Issue mention style", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userRef.current = null;
+    mentionDisplayState.mode = "full";
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("writes the chosen issue mention style to the store", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByLabelText("Issue mention style"));
+    await user.click(screen.getByRole("option", { name: "Compact" }));
+
+    expect(mentionDisplayState.setMode).toHaveBeenCalledWith("compact");
   });
 });

@@ -18,7 +18,11 @@ import {
 } from "@multica/core/i18n";
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
-import { useCommentComposerStore } from "@multica/core/issues/stores";
+import {
+  useCommentComposerStore,
+  useIssueMentionDisplayStore,
+  type IssueMentionMode,
+} from "@multica/core/issues/stores";
 import { api } from "@multica/core/api";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
 import { useT } from "../../i18n";
@@ -163,6 +167,8 @@ export function PreferencesTab() {
           <TimezoneRow />
 
           <StickyCommentBarRow />
+
+          <IssueMentionStyleRow />
         </SettingsCard>
       </SettingsSection>
     </SettingsTab>
@@ -189,6 +195,53 @@ function StickyCommentBarRow() {
         }}
         aria-label={t(($) => $.preferences.sticky_comment_bar.title)}
       />
+    </SettingsRow>
+  );
+}
+
+function IssueMentionStyleRow() {
+  const { t } = useT("settings");
+  const mode = useIssueMentionDisplayStore((s) => s.mode);
+  const setMode = useIssueMentionDisplayStore((s) => s.setMode);
+
+  // Ordered least to most information, matching how the modes differ.
+  const options: { value: IssueMentionMode; label: string }[] = [
+    { value: "plain", label: t(($) => $.preferences.issue_mention_style.plain) },
+    { value: "compact", label: t(($) => $.preferences.issue_mention_style.compact) },
+    { value: "full", label: t(($) => $.preferences.issue_mention_style.full) },
+  ];
+
+  return (
+    <SettingsRow
+      label={t(($) => $.preferences.issue_mention_style.title)}
+      description={t(($) => $.preferences.issue_mention_style.hint)}
+      size="select"
+    >
+      <Select
+        items={options}
+        value={mode}
+        onValueChange={(value) => {
+          setMode(value as IssueMentionMode);
+          toast.success(t(($) => $.auto_save.toast_saved), {
+            id: "settings-auto-save",
+          });
+        }}
+      >
+        <SelectTrigger
+          size="sm"
+          className="w-full"
+          aria-label={t(($) => $.preferences.issue_mention_style.title)}
+        >
+          <SelectValue>{options.find((o) => o.value === mode)?.label}</SelectValue>
+        </SelectTrigger>
+        <SelectContent align="end">
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </SettingsRow>
   );
 }

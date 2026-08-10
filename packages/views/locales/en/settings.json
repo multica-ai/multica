@@ -77,6 +77,13 @@
     "sticky_comment_bar": {
       "title": "Sticky comment bar",
       "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
+    },
+    "issue_mention_style": {
+      "title": "Issue mention style",
+      "hint": "How issue references render in descriptions, comments, and chat. Narrower styles reveal the title on hover.",
+      "plain": "Plain",
+      "compact": "Compact",
+      "full": "Full"
     }
   },
   "shortcuts": {
