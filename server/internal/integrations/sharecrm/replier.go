@@ -111,6 +111,18 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 	}
 }
 
+const (
+	// groupBindingAckText is posted into a group when the sender still needs to
+	// bind. It deliberately carries NO token: Redeem only checks that the
+	// redeemer is a workspace member, and the bind page redeems as whoever is
+	// signed in. A live link in a group would let any member click first and
+	// attach the sender's ShareCRM id to their own Multica account (the same
+	// identity-misbinding path WeCom/DingTalk closed). ShareCRM's send API is
+	// chat_id-only (no staff-id / open-id private address), so we cannot DM
+	// from a group event — ask the user to open a 1:1 and mint only there.
+	groupBindingAckText = "👋 Please open a 1:1 chat with me and send any message to get your account-link. Binding links are never posted in groups."
+)
+
 func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, res engine.Result) error {
 	sender := res.Sender
 	if sender == "" {
@@ -125,16 +137,22 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	if r.appURL == "" {
 		return errors.New("app url not configured")
 	}
+
+	// Group: never mint. A token is a bearer credential; the only safe room for
+	// it is the sender's 1:1. Ask them to DM the bot so the next NeedsBinding
+	// outcome lands in P2P and gets the real link.
+	if msg.Source.ChatType == channel.ChatTypeGroup {
+		return r.post(ctx, inst, msg, groupBindingAckText)
+	}
+
 	token, err := r.binding.Mint(ctx, inst.WorkspaceID, inst.ID, sender)
 	if err != nil {
 		return fmt.Errorf("mint binding token: %w", err)
 	}
 	bindURL := r.appURL + r.bindingPath + "?token=" + url.QueryEscape(token.Raw)
-	// ShareCRM is plain text — no markdown link syntax.
+	// ShareCRM is plain text — no markdown link syntax. Only delivered in 1:1.
 	text := "👋 To start chatting with me, link your ShareCRM account to Multica:\n" +
 		bindURL + "\n\n(This link expires in 15 minutes.)"
-	// Always reply into the same chat_id (direct or group). In group the link is
-	// single-use and tied to the sender's ShareCRM id; only that person can redeem.
 	return r.post(ctx, inst, msg, text)
 }
 
