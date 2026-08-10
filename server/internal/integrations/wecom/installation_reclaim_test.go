@@ -100,6 +100,8 @@ func cleanReclaim(ctx context.Context, pool *pgxpool.Pool) {
 	apps := []string{wcRclBotRevoked, wcRclBotLive, wcRclBotArchived, wcRclBotSame}
 	_, _ = pool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = ANY($1)`, apps)
 	_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wcRclWS)
+	_, _ = pool.Exec(ctx, `DELETE FROM workspace_claim_intake_action WHERE workspace_id = $1`, wcRclWS)
+	_, _ = pool.Exec(ctx, `DELETE FROM workspace_claim_intake_control WHERE workspace_id = $1`, wcRclWS)
 }
 
 func uuid(t *testing.T, s string) pgtype.UUID {

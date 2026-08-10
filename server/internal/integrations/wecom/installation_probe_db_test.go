@@ -88,8 +88,11 @@ VALUES ($1, $2, $3, 'local', $4) ON CONFLICT (id) DO NOTHING`, wcPrbAgentOth, wc
 
 func cleanProbe(ctx context.Context, pool *pgxpool.Pool) {
 	apps := []string{wcPrbBotActive, wcPrbBotArchived, wcPrbBotForeign, wcPrbBotRevoked, wcPrbBotFree}
+	workspaceIDs := []string{wcPrbWS, wcPrbOtherWS}
 	_, _ = pool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = ANY($1)`, apps)
-	_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE id = ANY($1)`, []string{wcPrbWS, wcPrbOtherWS})
+	_, _ = pool.Exec(ctx, `DELETE FROM workspace_claim_intake_action WHERE workspace_id = ANY($1)`, workspaceIDs)
+	_, _ = pool.Exec(ctx, `DELETE FROM workspace_claim_intake_control WHERE workspace_id = ANY($1)`, workspaceIDs)
+	_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE id = ANY($1)`, workspaceIDs)
 }
 
 func insertProbeInstall(t *testing.T, ctx context.Context, pool *pgxpool.Pool, ws, agent, app, status string) {

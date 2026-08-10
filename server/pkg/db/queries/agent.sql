@@ -605,13 +605,20 @@ WHERE atq.id = $1 AND a.workspace_id = $2;
 -- "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
 -- otherwise a user mashing the create button could fire concurrent quick-creates
 -- whose completion lookup would race over "most recent issue by this agent".
-UPDATE agent_task_queue
+UPDATE agent_task_queue AS claimed
 SET status = 'dispatched',
     dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
-WHERE id = (
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision),
+    claim_intake_generation = control.generation,
+    claim_intake_action_id = control.authoritative_action_id,
+    claim_consumer_id = sqlc.narg('consumer_id')::text
+FROM agent AS owning_agent
+JOIN workspace_claim_intake_control AS control
+  ON control.workspace_id = owning_agent.workspace_id
+ AND control.state = 'resumed'
+WHERE claimed.id = (
     SELECT atq.id FROM agent_task_queue atq
-    WHERE atq.agent_id = $1 AND atq.status = 'queued'
+    WHERE atq.agent_id = @agent_id AND atq.status = 'queued'
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -633,7 +640,51 @@ WHERE id = (
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING *;
+  AND owning_agent.id = claimed.agent_id
+RETURNING claimed.*;
+
+-- name: ClaimAgentTaskForRuntimes :one
+-- Runtime-scoped form used by canonical machine claims. The active runtime set is
+-- derived only after every authoritative Workspace control row has been locked.
+UPDATE agent_task_queue AS claimed
+SET status = 'dispatched',
+    dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision),
+    claim_intake_generation = control.generation,
+    claim_intake_action_id = control.authoritative_action_id,
+    claim_consumer_id = sqlc.narg('consumer_id')::text
+FROM agent AS owning_agent
+JOIN workspace_claim_intake_control AS control
+  ON control.workspace_id = owning_agent.workspace_id
+ AND control.state = 'resumed'
+WHERE claimed.id = (
+    SELECT atq.id FROM agent_task_queue atq
+    WHERE atq.agent_id = @agent_id
+      AND atq.runtime_id = ANY(@runtime_ids::uuid[])
+      AND atq.status = 'queued'
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_task_queue active
+          WHERE active.agent_id = atq.agent_id
+            AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+            AND (
+              (atq.issue_id IS NOT NULL AND active.issue_id = atq.issue_id)
+              OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
+              OR (
+                atq.issue_id IS NULL
+                AND atq.chat_session_id IS NULL
+                AND atq.autopilot_run_id IS NULL
+                AND active.issue_id IS NULL
+                AND active.chat_session_id IS NULL
+                AND active.autopilot_run_id IS NULL
+              )
+            )
+      )
+    ORDER BY atq.priority DESC, atq.created_at ASC, atq.id ASC
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+)
+  AND owning_agent.id = claimed.agent_id
+RETURNING claimed.*;
 
 -- name: SetTaskDeliveredCommentIDs :one
 -- Replace (rather than append to) the delivery receipt for this claim. A stale
@@ -670,7 +721,10 @@ UPDATE agent_task_queue
 SET status = 'queued',
     dispatched_at = NULL,
     prepare_lease_expires_at = NULL,
-    delivered_comment_ids = '{}'
+    delivered_comment_ids = '{}',
+    claim_intake_generation = NULL,
+    claim_intake_action_id = NULL,
+    claim_consumer_id = NULL
 WHERE id = @task_id
   AND runtime_id = @runtime_id
   AND status = 'dispatched'
@@ -684,12 +738,19 @@ RETURNING *;
 -- with no `started_at`, so the daemon has not acknowledged it via StartTask.
 -- Refresh dispatched_at so the server-side dispatch timeout measures from the
 -- recovered delivery attempt.
-UPDATE agent_task_queue
+UPDATE agent_task_queue AS reclaimed
 SET dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
-WHERE id = (
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision),
+    claim_intake_generation = control.generation,
+    claim_intake_action_id = control.authoritative_action_id,
+    claim_consumer_id = sqlc.narg('consumer_id')::text
+FROM agent_runtime AS runtime
+JOIN workspace_claim_intake_control AS control
+  ON control.workspace_id = runtime.workspace_id
+ AND control.state = 'resumed'
+WHERE reclaimed.id = (
     SELECT atq.id FROM agent_task_queue atq
-    WHERE atq.runtime_id = $1
+    WHERE atq.runtime_id = @runtime_id
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
@@ -698,7 +759,8 @@ WHERE id = (
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING *;
+  AND runtime.id = reclaimed.runtime_id
+RETURNING reclaimed.*;
 
 -- name: ReclaimStaleDispatchedTasksForRuntimes :many
 -- Batch variant of ReclaimStaleDispatchedTaskForRuntime (MUL-4257): re-delivers
@@ -708,10 +770,17 @@ RETURNING *;
 -- query (dispatched, never started, past the recovery window, expired/absent
 -- prepare lease) and the same dispatched_at refresh; only the runtime filter
 -- (= ANY) and the LIMIT (max_tasks instead of 1) differ.
-UPDATE agent_task_queue
+UPDATE agent_task_queue AS reclaimed
 SET dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
-WHERE id IN (
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision),
+    claim_intake_generation = control.generation,
+    claim_intake_action_id = control.authoritative_action_id,
+    claim_consumer_id = sqlc.narg('consumer_id')::text
+FROM agent_runtime AS runtime
+JOIN workspace_claim_intake_control AS control
+  ON control.workspace_id = runtime.workspace_id
+ AND control.state = 'resumed'
+WHERE reclaimed.id IN (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
       AND atq.status = 'dispatched'
@@ -722,7 +791,8 @@ WHERE id IN (
     LIMIT @max_tasks::int
     FOR UPDATE SKIP LOCKED
 )
-RETURNING *;
+  AND runtime.id = reclaimed.runtime_id
+RETURNING reclaimed.*;
 
 -- name: ExtendAgentTaskPrepareLease :one
 -- Keeps a dispatched task protected while the daemon resolves/cache/materializes

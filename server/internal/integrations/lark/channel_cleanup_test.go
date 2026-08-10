@@ -152,6 +152,8 @@ func TestDeleteChannelInstallationsBySystemRuntimeAgents(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_message_dedup WHERE message_id = 'msg_cc_dedup'`)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_audit WHERE channel_event_id = ANY($1)`, []string{ccAuditArch, ccAuditLive})
 		_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, ccWS)
+		_, _ = pool.Exec(ctx, `DELETE FROM workspace_claim_intake_action WHERE workspace_id = $1`, ccWS)
+		_, _ = pool.Exec(ctx, `DELETE FROM workspace_claim_intake_control WHERE workspace_id = $1`, ccWS)
 	}
 	clean()
 	t.Cleanup(clean)
@@ -198,6 +200,8 @@ func TestDeleteWorkspace_SweepsChannelInstallations(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_message_dedup WHERE message_id = 'msg_cc_dedup'`)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_audit WHERE channel_event_id = $1`, ccAuditWs)
 		_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, ccWSDel)
+		_, _ = pool.Exec(ctx, `DELETE FROM workspace_claim_intake_action WHERE workspace_id = $1`, ccWSDel)
+		_, _ = pool.Exec(ctx, `DELETE FROM workspace_claim_intake_control WHERE workspace_id = $1`, ccWSDel)
 	}
 	clean()
 	t.Cleanup(clean)

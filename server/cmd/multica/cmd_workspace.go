@@ -618,3 +618,337 @@ func runWorkspaceMemberInvite(cmd *cobra.Command, args []string) error {
 		strVal(inv, "invitee_email"), strVal(inv, "role"), strVal(inv, "status"))
 	return nil
 }
+
+var workspaceClaimIntakeCmd = &cobra.Command{
+	Use:   "claim-intake",
+	Short: "Control workspace task claim intake",
+}
+
+var workspaceClaimIntakeStatusCmd = &cobra.Command{
+	Use:   "status [workspace-id|slug|prefix]",
+	Short: "Show authoritative workspace claim-intake state",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runWorkspaceClaimIntakeStatus,
+}
+
+var workspaceClaimIntakePauseCmd = &cobra.Command{
+	Use:   "pause [workspace-id|slug|prefix]",
+	Short: "Pause new task ownership for a workspace",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runWorkspaceClaimIntakePause,
+}
+
+var workspaceClaimIntakeResumeCmd = &cobra.Command{
+	Use:   "resume [workspace-id|slug|prefix]",
+	Short: "Resume task ownership for a workspace",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runWorkspaceClaimIntakeResume,
+}
+
+var workspaceClaimIntakeActionsCmd = &cobra.Command{
+	Use:   "actions [workspace-id|slug|prefix]",
+	Short: "List the authoritative claim-intake action audit",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runWorkspaceClaimIntakeActions,
+}
+
+var workspaceClaimIntakeLedgerCmd = &cobra.Command{
+	Use:   "ledger [workspace-id|slug|prefix]",
+	Short: "List workspace-global work against the authoritative claim-intake fence",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runWorkspaceClaimIntakeLedger,
+}
+
+type workspaceClaimIntakeStatus struct {
+	WorkspaceID   string  `json:"workspace_id"`
+	State         string  `json:"state"`
+	Generation    int64   `json:"generation"`
+	UpdatedByType string  `json:"updated_by_type"`
+	UpdatedByID   *string `json:"updated_by_id"`
+	AuthSource    string  `json:"auth_source"`
+	ActorDisplay  string  `json:"actor_display"`
+	Reason        string  `json:"reason"`
+	LastActionID  *string `json:"last_action_id"`
+	EffectiveAt   string  `json:"effective_at"`
+	UpdatedAt     string  `json:"updated_at"`
+}
+
+type workspaceClaimIntakeAction struct {
+	ActionID           string  `json:"action_id"`
+	WorkspaceID        string  `json:"workspace_id"`
+	RequestedAction    string  `json:"requested_action"`
+	IdempotencyKey     string  `json:"idempotency_key"`
+	ExpectedGeneration *int64  `json:"expected_generation"`
+	RequestedAt        string  `json:"requested_at"`
+	EffectiveAt        string  `json:"effective_at"`
+	ActorType          string  `json:"actor_type"`
+	ActorID            string  `json:"actor_id"`
+	AuthSource         string  `json:"auth_source"`
+	ActorDisplay       string  `json:"actor_display"`
+	Reason             string  `json:"reason"`
+	PreviousState      string  `json:"previous_state"`
+	ResultingState     string  `json:"resulting_state"`
+	Generation         int64   `json:"generation"`
+	Result             string  `json:"result"`
+	ErrorClass         *string `json:"error_class"`
+	ResponseStatus     int32   `json:"response_status"`
+}
+
+type workspaceClaimIntakeMutation struct {
+	ActionID        string  `json:"action_id"`
+	LastActionID    *string `json:"last_action_id"`
+	WorkspaceID     string  `json:"workspace_id"`
+	RequestedAction string  `json:"requested_action"`
+	PreviousState   string  `json:"previous_state"`
+	State           string  `json:"state"`
+	Generation      int64   `json:"generation"`
+	ActorType       string  `json:"actor_type"`
+	ActorID         string  `json:"actor_id"`
+	IdempotencyKey  string  `json:"idempotency_key"`
+	Reason          string  `json:"reason"`
+	RequestedAt     string  `json:"requested_at"`
+	EffectiveAt     string  `json:"effective_at"`
+	Result          string  `json:"result"`
+	ErrorClass      *string `json:"error_class"`
+}
+
+func init() {
+	workspaceCmd.AddCommand(workspaceClaimIntakeCmd)
+	workspaceClaimIntakeCmd.AddCommand(workspaceClaimIntakeStatusCmd)
+	workspaceClaimIntakeCmd.AddCommand(workspaceClaimIntakePauseCmd)
+	workspaceClaimIntakeCmd.AddCommand(workspaceClaimIntakeResumeCmd)
+	workspaceClaimIntakeCmd.AddCommand(workspaceClaimIntakeActionsCmd)
+	workspaceClaimIntakeCmd.AddCommand(workspaceClaimIntakeLedgerCmd)
+
+	workspaceClaimIntakeStatusCmd.Flags().String("output", "json", "Output format: table or json")
+	workspaceClaimIntakePauseCmd.Flags().String("reason", "", "Operator reason for pausing claim intake")
+	workspaceClaimIntakePauseCmd.Flags().String("idempotency-key", "", "Stable idempotency key for exact mutation replay")
+	workspaceClaimIntakePauseCmd.Flags().String("output", "json", "Output format: table or json")
+	workspaceClaimIntakeResumeCmd.Flags().String("reason", "", "Operator reason for resuming claim intake")
+	workspaceClaimIntakeResumeCmd.Flags().String("idempotency-key", "", "Stable idempotency key for exact mutation replay")
+	workspaceClaimIntakeResumeCmd.Flags().Int64("expected-generation", -1, "Authoritative generation observed before resuming")
+	workspaceClaimIntakeResumeCmd.Flags().String("output", "json", "Output format: table or json")
+	workspaceClaimIntakeActionsCmd.Flags().Int32("limit", 50, "Maximum actions to return (1-200)")
+	workspaceClaimIntakeActionsCmd.Flags().Int32("offset", 0, "Actions to skip")
+	workspaceClaimIntakeActionsCmd.Flags().String("output", "json", "Output format: table or json")
+	workspaceClaimIntakeLedgerCmd.Flags().Int32("limit", 50, "Maximum work items to return (1-200)")
+	workspaceClaimIntakeLedgerCmd.Flags().Int32("offset", 0, "Work items to skip")
+	workspaceClaimIntakeLedgerCmd.Flags().String("output", "json", "Output format: table or json")
+}
+
+func claimIntakeWorkspaceID(cmd *cobra.Command, args []string) (string, error) {
+	workspaceID, err := resolveWorkspaceArg(cmd, args)
+	if err != nil {
+		return "", err
+	}
+	if workspaceID == "" {
+		return "", fmt.Errorf("workspace ID is required: pass an id/slug/prefix as argument or set MULTICA_WORKSPACE_ID")
+	}
+	return workspaceID, nil
+}
+
+func claimIntakeClient(cmd *cobra.Command, workspaceID string) (*cli.APIClient, error) {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return nil, err
+	}
+	client.WorkspaceID = workspaceID
+	return client, nil
+}
+
+func runWorkspaceClaimIntakeStatus(cmd *cobra.Command, args []string) error {
+	workspaceID, err := claimIntakeWorkspaceID(cmd, args)
+	if err != nil {
+		return err
+	}
+	client, err := claimIntakeClient(cmd, workspaceID)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	var status workspaceClaimIntakeStatus
+	if err := client.GetJSON(ctx, "/api/workspaces/"+workspaceID+"/claim-intake", &status); err != nil {
+		return fmt.Errorf("get workspace claim-intake status: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, status)
+	}
+	rows := [][]string{{status.WorkspaceID, status.State, fmt.Sprint(status.Generation), status.EffectiveAt, status.Reason}}
+	cli.PrintTable(os.Stdout, []string{"WORKSPACE", "STATE", "GENERATION", "EFFECTIVE AT", "REASON"}, rows)
+	return nil
+}
+
+func runWorkspaceClaimIntakePause(cmd *cobra.Command, args []string) error {
+	return runWorkspaceClaimIntakeMutation(cmd, args, "pause", nil)
+}
+
+func runWorkspaceClaimIntakeResume(cmd *cobra.Command, args []string) error {
+	expectedGeneration, _ := cmd.Flags().GetInt64("expected-generation")
+	if expectedGeneration < 0 {
+		return fmt.Errorf("--expected-generation is required and must be non-negative")
+	}
+	return runWorkspaceClaimIntakeMutation(cmd, args, "resume", &expectedGeneration)
+}
+
+func runWorkspaceClaimIntakeMutation(cmd *cobra.Command, args []string, action string, expectedGeneration *int64) error {
+	workspaceID, err := claimIntakeWorkspaceID(cmd, args)
+	if err != nil {
+		return err
+	}
+	reason, _ := cmd.Flags().GetString("reason")
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return fmt.Errorf("--reason is required")
+	}
+	idempotencyKey, _ := cmd.Flags().GetString("idempotency-key")
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if idempotencyKey == "" {
+		return fmt.Errorf("--idempotency-key is required")
+	}
+	client, err := claimIntakeClient(cmd, workspaceID)
+	if err != nil {
+		return err
+	}
+	body := map[string]any{"reason": reason}
+	if expectedGeneration != nil {
+		body["expected_generation"] = *expectedGeneration
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	var response workspaceClaimIntakeMutation
+	path := "/api/workspaces/" + workspaceID + "/claim-intake/" + action
+	if err := client.PostJSONWithHeaders(ctx, path, body, map[string]string{"Idempotency-Key": idempotencyKey}, &response); err != nil {
+		return fmt.Errorf("%s workspace claim intake: %w", action, err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, response)
+	}
+	rows := [][]string{{response.ActionID, response.PreviousState, response.State, fmt.Sprint(response.Generation), response.EffectiveAt, response.Result}}
+	cli.PrintTable(os.Stdout, []string{"ACTION ID", "PREVIOUS", "RESULTING", "GENERATION", "EFFECTIVE AT", "RESULT"}, rows)
+	return nil
+}
+
+func runWorkspaceClaimIntakeActions(cmd *cobra.Command, args []string) error {
+	workspaceID, err := claimIntakeWorkspaceID(cmd, args)
+	if err != nil {
+		return err
+	}
+	limit, _ := cmd.Flags().GetInt32("limit")
+	offset, _ := cmd.Flags().GetInt32("offset")
+	if err := validateClaimIntakePaginationFlags(limit, offset); err != nil {
+		return err
+	}
+	client, err := claimIntakeClient(cmd, workspaceID)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	var response struct {
+		Actions []workspaceClaimIntakeAction `json:"actions"`
+		Limit   int32                        `json:"limit"`
+		Offset  int32                        `json:"offset"`
+	}
+	path := fmt.Sprintf("/api/workspaces/%s/claim-intake/actions?limit=%d&offset=%d", workspaceID, limit, offset)
+	if err := client.GetJSON(ctx, path, &response); err != nil {
+		return fmt.Errorf("list workspace claim-intake actions: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, response)
+	}
+	rows := make([][]string, 0, len(response.Actions))
+	for _, action := range response.Actions {
+		rows = append(rows, []string{
+			action.ActionID,
+			action.RequestedAction,
+			action.Result,
+			fmt.Sprint(action.Generation),
+			action.ActorDisplay,
+			action.EffectiveAt,
+		})
+	}
+	cli.PrintTable(os.Stdout, []string{"ACTION ID", "ACTION", "RESULT", "GENERATION", "ACTOR", "EFFECTIVE AT"}, rows)
+	return nil
+}
+
+func runWorkspaceClaimIntakeLedger(cmd *cobra.Command, args []string) error {
+	workspaceID, err := claimIntakeWorkspaceID(cmd, args)
+	if err != nil {
+		return err
+	}
+	limit, _ := cmd.Flags().GetInt32("limit")
+	offset, _ := cmd.Flags().GetInt32("offset")
+	if err := validateClaimIntakePaginationFlags(limit, offset); err != nil {
+		return err
+	}
+	client, err := claimIntakeClient(cmd, workspaceID)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	var response struct {
+		WorkspaceID  string           `json:"workspace_id"`
+		State        string           `json:"state"`
+		Generation   int64            `json:"generation"`
+		LastActionID *string          `json:"last_action_id"`
+		EffectiveAt  string           `json:"effective_at"`
+		Counts       map[string]int64 `json:"counts"`
+		Tasks        []map[string]any `json:"tasks"`
+		Limit        int32            `json:"limit"`
+		Offset       int32            `json:"offset"`
+	}
+	path := fmt.Sprintf("/api/workspaces/%s/claim-intake/ledger?limit=%d&offset=%d", workspaceID, limit, offset)
+	if err := client.GetJSON(ctx, path, &response); err != nil {
+		return fmt.Errorf("list workspace claim-intake ledger: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, response)
+	}
+	rows := make([][]string, 0, len(response.Tasks))
+	for _, task := range response.Tasks {
+		rows = append(rows, []string{
+			strVal(task, "task_id"),
+			strVal(task, "status"),
+			strVal(task, "consumer_id"),
+			strVal(task, "fence_classification"),
+			fmt.Sprint(task["stale_reclaimable"]),
+			strVal(task, "dispatched_at"),
+			strVal(task, "prepare_lease_expires_at"),
+		})
+	}
+	fmt.Fprintf(os.Stdout, "Workspace %s: %s generation %d (action %s, effective %s)\n",
+		response.WorkspaceID, response.State, response.Generation, optionalString(response.LastActionID), response.EffectiveAt)
+	cli.PrintTable(os.Stdout, []string{"TASK ID", "STATUS", "CONSUMER", "FENCE", "STALE", "DISPATCHED AT", "PREPARE LEASE"}, rows)
+	return nil
+}
+
+func validateClaimIntakePaginationFlags(limit, offset int32) error {
+	if limit < 1 || limit > 200 {
+		return fmt.Errorf("--limit must be between 1 and 200")
+	}
+	if offset < 0 {
+		return fmt.Errorf("--offset must be non-negative")
+	}
+	return nil
+}
+
+func nestedStrVal(m map[string]any, parent, key string) string {
+	child, ok := m[parent].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return strVal(child, key)
+}
+
+func optionalString(value *string) string {
+	if value == nil {
+		return "-"
+	}
+	return *value
+}

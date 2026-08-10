@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // TestClaimTasksWSFirst_LegacyFallbackWhenBatchRouteMissing pins the MUL-4257
@@ -17,6 +20,131 @@ import (
 // route (returns 404), the daemon falls back to the legacy per-runtime
 // POST /api/daemon/runtimes/{id}/tasks/claim loop, and remembers it so later
 // polls skip the batch attempt.
+func TestClaimTasksWSFirst_LegacyFallbackPreservesPausedFence(t *testing.T) {
+	var batchCalls, legacyCalls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/claim"):
+			batchCalls.Add(1)
+			http.Error(w, "404 page not found", http.StatusNotFound)
+		case strings.HasSuffix(r.URL.Path, "/runtimes/rt-paused/tasks/claim"):
+			legacyCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"task":null,"paused":true,"workspace_id":"ws-paused","generation":12,"action_id":"action-12","effective_at":"2026-08-07T00:00:00Z"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	result, err := d.ClaimTasksWSFirstWithControl(
+		context.Background(),
+		"daemon-x",
+		[]string{"rt-paused"},
+		1,
+	)
+	if err != nil {
+		t.Fatalf("ClaimTasksWSFirstWithControl: %v", err)
+	}
+	if len(result.Tasks) != 0 {
+		t.Fatalf("legacy paused fallback returned tasks: %+v", result.Tasks)
+	}
+	if len(result.PausedWorkspaces) != 1 ||
+		result.PausedWorkspaces[0].WorkspaceID != "ws-paused" ||
+		result.PausedWorkspaces[0].Generation != 12 ||
+		result.PausedWorkspaces[0].ActionID != "action-12" {
+		t.Fatalf("paused workspaces = %+v, want ws-paused generation 12", result.PausedWorkspaces)
+	}
+	if batchCalls.Load() != 1 || legacyCalls.Load() != 1 {
+		t.Fatalf("claim calls = batch %d legacy %d, want 1/1", batchCalls.Load(), legacyCalls.Load())
+	}
+}
+
+func TestClaimTasksWSFirst_LegacyFallbackReturnsLaterRuntimeError(t *testing.T) {
+	var runtimeCalls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/claim"):
+				http.NotFound(w, r)
+			case strings.Contains(r.URL.Path, "/runtimes/rt1/"):
+				runtimeCalls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(
+					`{"task":{"id":"legacy-task",` +
+						`"runtime_id":"rt1",` +
+						`"agent":{"name":"a"}}}`,
+				))
+			case strings.Contains(r.URL.Path, "/runtimes/rt2/"):
+				runtimeCalls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte(`{"error":"claim-intake control unavailable"}`))
+			default:
+				http.NotFound(w, r)
+			}
+		},
+	))
+	defer srv.Close()
+
+	d := New(
+		Config{
+			ServerBaseURL:      srv.URL,
+			MaxConcurrentTasks: 4,
+		},
+		slog.New(slog.NewTextHandler(noopWriter{}, nil)),
+	)
+	result, err := d.ClaimTasksWSFirstWithControl(
+		context.Background(),
+		"daemon-x",
+		[]string{"rt1", "rt2"},
+		2,
+	)
+	if err == nil {
+		t.Fatalf("legacy partial result = %+v, want later runtime error", result)
+	}
+	if runtimeCalls.Load() != 2 {
+		t.Fatalf("legacy runtime calls = %d, want 2", runtimeCalls.Load())
+	}
+}
+
+func TestClaimTasksWSFirst_StructuredNotFoundDoesNotEnableLegacyFallback(t *testing.T) {
+	var batchCalls, legacyCalls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/claim"):
+			batchCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"error":"daemon not registered"}`))
+		case strings.Contains(r.URL.Path, "/runtimes/"):
+			legacyCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"task":{"id":"legacy-task","runtime_id":"rt1","agent":{"name":"a"}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	if _, err := d.ClaimTasksWSFirstWithControl(
+		context.Background(),
+		"daemon-x",
+		[]string{"rt1"},
+		1,
+	); err == nil {
+		t.Fatal("structured batch 404 succeeded; want original request error")
+	}
+	if d.batchClaimUnsupported.Load() {
+		t.Fatal("structured batch 404 permanently enabled legacy fallback")
+	}
+	if batchCalls.Load() != 1 || legacyCalls.Load() != 0 {
+		t.Fatalf("claim calls = batch %d legacy %d, want 1/0", batchCalls.Load(), legacyCalls.Load())
+	}
+}
+
 func TestClaimTasksWSFirst_LegacyFallbackWhenBatchRouteMissing(t *testing.T) {
 	var batchCalls, legacyCalls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -270,5 +398,104 @@ func TestClaimTasksWSFirst_ReconnectToOldServerSkipsWSRPC(t *testing.T) {
 	}
 	if httpClaims.Load() != 1 {
 		t.Fatalf("HTTP claims = %d, want 1", httpClaims.Load())
+	}
+}
+
+// A successful WS status means the server may already have committed task
+// ownership. If the response body is malformed, the daemon must treat the
+// result as uncertain rather than immediately claiming more work over HTTP.
+func TestClaimTasksWSFirst_MalformedSuccessfulWSResponseDoesNotFallback(t *testing.T) {
+	originalDelay := wsClaimUncertainFallbackDelay
+	wsClaimUncertainFallbackDelay = time.Minute
+	t.Cleanup(func() { wsClaimUncertainFallbackDelay = originalDelay })
+
+	var httpClaims atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/claim") {
+			httpClaims.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tasks":[{"id":"unexpected-http-task"}]}`))
+	}))
+	defer srv.Close()
+
+	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	generation := d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		var message protocol.Message
+		if err := json.Unmarshal(frame, &message); err != nil {
+			return nil, err
+		}
+		var request protocol.RPCRequestPayload
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return nil, err
+		}
+		go d.wsRPC.deliver(protocol.RPCResponsePayload{
+			RequestID: request.RequestID,
+			Status:    http.StatusOK,
+			Body:      json.RawMessage(`{"tasks":`),
+		})
+		return &wsOutbound{data: frame}, nil
+	})
+	d.wsRPC.markRPCV1Supported(generation)
+
+	result, err := d.ClaimTasksWSFirstWithControl(context.Background(), "daemon-x", []string{"rt1"}, 1)
+	if err != nil {
+		t.Fatalf("ClaimTasksWSFirstWithControl: %v", err)
+	}
+	if len(result.Tasks) != 0 {
+		t.Fatalf("tasks = %+v, want none for uncertain successful WS response", result.Tasks)
+	}
+	if httpClaims.Load() != 0 {
+		t.Fatalf("malformed successful WS response triggered %d HTTP claims", httpClaims.Load())
+	}
+	if d.wsClaimHTTPFallbackAfter.Load() == 0 {
+		t.Fatal("malformed successful WS response did not arm uncertain-outcome cooldown")
+	}
+}
+
+// A paused workspace is an authoritative successful claim result. The WS-first
+// path must not turn that result into HTTP or legacy fallback traffic.
+func TestClaimTasksWSFirst_PausedResponseDoesNotFallback(t *testing.T) {
+	var httpClaims atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/claim") {
+			httpClaims.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tasks":[{"id":"unexpected-http-task"}]}`))
+	}))
+	defer srv.Close()
+
+	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	generation := d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		var message protocol.Message
+		if err := json.Unmarshal(frame, &message); err != nil {
+			return nil, err
+		}
+		var request protocol.RPCRequestPayload
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return nil, err
+		}
+		go d.wsRPC.deliver(protocol.RPCResponsePayload{
+			RequestID: request.RequestID,
+			Status:    http.StatusOK,
+			Body:      json.RawMessage(`{"tasks":[],"paused_workspaces":[{"workspace_id":"ws-paused","state":"paused","generation":9,"action_id":"action-9","effective_at":"2026-08-07T00:00:00Z"}]}`),
+		})
+		return &wsOutbound{data: frame}, nil
+	})
+	d.wsRPC.markRPCV1Supported(generation)
+
+	result, err := d.ClaimTasksWSFirstWithControl(context.Background(), "daemon-x", []string{"rt1"}, 1)
+	if err != nil {
+		t.Fatalf("ClaimTasksWSFirstWithControl: %v", err)
+	}
+	if len(result.Tasks) != 0 {
+		t.Fatalf("tasks = %+v, want none while paused", result.Tasks)
+	}
+	if len(result.PausedWorkspaces) != 1 || result.PausedWorkspaces[0].WorkspaceID != "ws-paused" || result.PausedWorkspaces[0].Generation != 9 || result.PausedWorkspaces[0].ActionID != "action-9" {
+		t.Fatalf("paused workspaces = %+v, want authoritative ws-paused generation 9", result.PausedWorkspaces)
+	}
+	if httpClaims.Load() != 0 {
+		t.Fatalf("paused WS response triggered %d HTTP claims", httpClaims.Load())
 	}
 }

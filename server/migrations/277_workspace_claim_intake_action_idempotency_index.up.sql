@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY workspace_claim_intake_action_idempotency_uidx ON workspace_claim_intake_action (workspace_id, idempotency_key);

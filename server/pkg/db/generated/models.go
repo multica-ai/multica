@@ -161,6 +161,9 @@ type AgentTaskQueue struct {
 	RetiredSessionID          pgtype.Text `json:"retired_session_id"`
 	QuickActionsDisabled      bool        `json:"quick_actions_disabled"`
 	RegenerateQuickActionsFor pgtype.UUID `json:"regenerate_quick_actions_for"`
+	ClaimIntakeGeneration     pgtype.Int8 `json:"claim_intake_generation"`
+	ClaimIntakeActionID       pgtype.UUID `json:"claim_intake_action_id"`
+	ClaimConsumerID           pgtype.Text `json:"claim_consumer_id"`
 }
 
 type AgentToLabel struct {
@@ -1227,6 +1230,44 @@ type Workspace struct {
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	// When TRUE, an agent run that resolves to no precise accountable human (would be owner_fallback) is refused at enqueue instead of degrading to the agent owner (MUL-4302 §3.5). Default FALSE = owner_fallback. Never affects authorization (originator_user_id).
 	AttributionFailClosed bool `json:"attribution_fail_closed"`
+}
+
+type WorkspaceClaimIntakeAction struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	Action             string             `json:"action"`
+	IdempotencyKey     string             `json:"idempotency_key"`
+	ExpectedGeneration pgtype.Int8        `json:"expected_generation"`
+	RequestedAt        pgtype.Timestamptz `json:"requested_at"`
+	EffectiveAt        pgtype.Timestamptz `json:"effective_at"`
+	ActorType          string             `json:"actor_type"`
+	ActorID            pgtype.UUID        `json:"actor_id"`
+	AuthSource         string             `json:"auth_source"`
+	ActorDisplay       string             `json:"actor_display"`
+	Reason             string             `json:"reason"`
+	PreviousState      string             `json:"previous_state"`
+	ResultingState     string             `json:"resulting_state"`
+	Generation         int64              `json:"generation"`
+	Result             string             `json:"result"`
+	ErrorClass         pgtype.Text        `json:"error_class"`
+	ResponseStatus     int32              `json:"response_status"`
+	ResponseBody       []byte             `json:"response_body"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkspaceClaimIntakeControl struct {
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	State                 string             `json:"state"`
+	Generation            int64              `json:"generation"`
+	UpdatedByType         string             `json:"updated_by_type"`
+	UpdatedByID           pgtype.UUID        `json:"updated_by_id"`
+	AuthSource            string             `json:"auth_source"`
+	ActorDisplay          string             `json:"actor_display"`
+	Reason                string             `json:"reason"`
+	AuthoritativeActionID pgtype.UUID        `json:"authoritative_action_id"`
+	EffectiveAt           pgtype.Timestamptz `json:"effective_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 type WorkspaceInvitation struct {

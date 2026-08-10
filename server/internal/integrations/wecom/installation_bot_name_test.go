@@ -36,6 +36,8 @@ func setupBotName(t *testing.T) (context.Context, *pgxpool.Pool, *InstallationSe
 	clean := func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = ANY($1)`,
 			[]string{wcNameBotA, wcNameBotB})
+		_, _ = pool.Exec(ctx, `DELETE FROM workspace_claim_intake_action WHERE workspace_id = $1`, wcNameWS)
+		_, _ = pool.Exec(ctx, `DELETE FROM workspace_claim_intake_control WHERE workspace_id = $1`, wcNameWS)
 		_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wcNameWS)
 	}
 	clean()

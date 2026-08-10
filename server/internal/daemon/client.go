@@ -201,14 +201,42 @@ func (c *Client) Token() string {
 	return c.token
 }
 
-func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error) {
-	var resp struct {
-		Task *Task `json:"task"`
-	}
+type ClaimIntakeFence struct {
+	WorkspaceID string    `json:"workspace_id"`
+	State       string    `json:"state"`
+	Generation  int64     `json:"generation"`
+	ActionID    string    `json:"action_id"`
+	EffectiveAt time.Time `json:"effective_at"`
+}
+
+type ClaimTaskResult struct {
+	Task        *Task     `json:"task"`
+	Paused      bool      `json:"paused"`
+	WorkspaceID string    `json:"workspace_id"`
+	Generation  int64     `json:"generation"`
+	ActionID    string    `json:"action_id"`
+	EffectiveAt time.Time `json:"effective_at"`
+}
+
+type ClaimTasksResult struct {
+	Tasks            []*Task            `json:"tasks"`
+	PausedWorkspaces []ClaimIntakeFence `json:"paused_workspaces"`
+}
+
+func (c *Client) ClaimTaskWithControl(ctx context.Context, runtimeID string) (*ClaimTaskResult, error) {
+	var resp ClaimTaskResult
 	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/claim", runtimeID), map[string]any{}, &resp); err != nil {
 		return nil, err
 	}
-	return resp.Task, nil
+	return &resp, nil
+}
+
+func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error) {
+	result, err := c.ClaimTaskWithControl(ctx, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	return result.Task, nil
 }
 
 // batchClaimRequestTimeout is the short, request-scoped deadline for the
@@ -233,12 +261,10 @@ const batchClaimRequestTimeout = 5 * time.Second
 // (batchClaimRequestTimeout) rather than the shared 30s control-plane timeout so
 // one slow claim cannot stall the whole batch; the deadline propagates to the
 // server and cancels the in-flight query there too.
-func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+func (c *Client) ClaimTasksWithControl(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) (*ClaimTasksResult, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, batchClaimRequestTimeout)
 	defer cancel()
-	var resp struct {
-		Tasks []*Task `json:"tasks"`
-	}
+	var resp ClaimTasksResult
 	if err := c.postJSON(reqCtx, "/api/daemon/tasks/claim", map[string]any{
 		"daemon_id":   daemonID,
 		"runtime_ids": runtimeIDs,
@@ -246,49 +272,90 @@ func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []s
 	}, &resp); err != nil {
 		return nil, err
 	}
-	return resp.Tasks, nil
+	return &resp, nil
+}
+
+func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	result, err := c.ClaimTasksWithControl(ctx, daemonID, runtimeIDs, maxTasks)
+	if err != nil {
+		return nil, err
+	}
+	return result.Tasks, nil
 }
 
 // isBatchClaimUnsupported reports whether err is a 404 from the batch claim
 // endpoint — i.e. the server predates the /api/daemon/tasks/claim route and the
 // daemon must fall back to the legacy per-runtime claim (MUL-4257). The batch
-// handler itself never returns 404, so a 404 here means the route is
-// unregistered on an un-upgraded server.
+// handler itself never returns the default unmatched-route 404 body, so that
+// exact response means the route is unregistered on an un-upgraded server.
+// Structured 404s can describe a current-server resource or authorization
+// failure and must not permanently downgrade this daemon to legacy claiming.
 func isBatchClaimUnsupported(err error) bool {
 	var reqErr *requestError
 	if !errors.As(err, &reqErr) {
 		return false
 	}
-	return reqErr.StatusCode == http.StatusNotFound
+	return reqErr.StatusCode == http.StatusNotFound &&
+		strings.TrimSpace(reqErr.Body) == "404 page not found"
 }
 
 // claimTasksLegacy is the pre-batch compatibility fallback (MUL-4257): claim per
 // runtime via the legacy POST /api/daemon/runtimes/{id}/tasks/claim so a new
 // daemon still works against a server that has no batch route. Returns up to
-// maxTasks tasks. A per-runtime error is only propagated when nothing has been
-// claimed yet; otherwise the partial result is returned and the next poll
-// retries the rest.
-func (c *Client) claimTasksLegacy(ctx context.Context, runtimeIDs []string, maxTasks int) ([]*Task, error) {
-	if maxTasks <= 0 {
-		return nil, nil
+// maxTasks tasks. Any per-runtime error remains visible even after an earlier
+// claim so a fail-closed control error cannot be converted into apparent
+// success; the caller must not dispatch a partial result returned with an error.
+func (c *Client) claimTasksLegacyWithControl(
+	ctx context.Context,
+	runtimeIDs []string,
+	maxTasks int,
+) (*ClaimTasksResult, error) {
+	result := &ClaimTasksResult{
+		Tasks:            []*Task{},
+		PausedWorkspaces: []ClaimIntakeFence{},
 	}
-	out := make([]*Task, 0, maxTasks)
+	if maxTasks <= 0 {
+		return result, nil
+	}
+	pausedSeen := make(map[string]struct{})
 	for _, rid := range runtimeIDs {
-		if len(out) >= maxTasks {
+		if len(result.Tasks) >= maxTasks {
 			break
 		}
-		task, err := c.ClaimTask(ctx, rid)
+		claim, err := c.ClaimTaskWithControl(ctx, rid)
 		if err != nil {
-			if len(out) == 0 {
-				return nil, err
-			}
-			return out, nil
+			return result, err
 		}
-		if task != nil {
-			out = append(out, task)
+		if claim.Paused {
+			key := claim.WorkspaceID
+			if key == "" {
+				key = rid
+			}
+			if _, duplicate := pausedSeen[key]; !duplicate {
+				pausedSeen[key] = struct{}{}
+				result.PausedWorkspaces = append(result.PausedWorkspaces, ClaimIntakeFence{
+					WorkspaceID: claim.WorkspaceID,
+					State:       "paused",
+					Generation:  claim.Generation,
+					ActionID:    claim.ActionID,
+					EffectiveAt: claim.EffectiveAt,
+				})
+			}
+			continue
+		}
+		if claim.Task != nil {
+			result.Tasks = append(result.Tasks, claim.Task)
 		}
 	}
-	return out, nil
+	return result, nil
+}
+
+func (c *Client) claimTasksLegacy(ctx context.Context, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	result, err := c.claimTasksLegacyWithControl(ctx, runtimeIDs, maxTasks)
+	if err != nil {
+		return nil, err
+	}
+	return result.Tasks, nil
 }
 
 // ResolveSkillBundle downloads a single skill bundle. It uses bundleClient (no

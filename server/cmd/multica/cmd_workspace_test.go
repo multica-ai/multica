@@ -41,6 +41,434 @@ func newWorkspaceCreateTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newWorkspaceClaimIntakeStatusTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "status"}
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func newWorkspaceClaimIntakeMutationTestCmd(action string) *cobra.Command {
+	cmd := &cobra.Command{Use: action}
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("reason", "", "")
+	cmd.Flags().String("idempotency-key", "", "")
+	if action == "resume" {
+		cmd.Flags().Int64("expected-generation", -1, "")
+	}
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func newWorkspaceClaimIntakeLedgerTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "ledger"}
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().Int32("limit", 50, "")
+	cmd.Flags().Int32("offset", 0, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func configureWorkspaceClaimIntakeCLITest(t *testing.T, serverURL string) {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", serverURL)
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+}
+
+func TestRunWorkspaceClaimIntakeStatusUsesOperatorEndpoint(t *testing.T) {
+	const workspaceID = "33333333-3333-3333-3333-333333333333"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet ||
+			r.URL.Path != "/api/workspaces/"+workspaceID+"/claim-intake" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("X-Workspace-ID") != workspaceID {
+			t.Fatalf(
+				"X-Workspace-ID = %q, want %q",
+				r.Header.Get("X-Workspace-ID"),
+				workspaceID,
+			)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"workspace_id":   workspaceID,
+			"state":          "paused",
+			"generation":     7,
+			"reason":         "operator maintenance",
+			"last_action_id": "44444444-4444-4444-4444-444444444444",
+			"effective_at":   "2026-08-10T10:00:00Z",
+		})
+	}))
+	defer srv.Close()
+	configureWorkspaceClaimIntakeCLITest(t, srv.URL)
+
+	out, err := captureStdout(t, func() error {
+		return runWorkspaceClaimIntakeStatus(
+			newWorkspaceClaimIntakeStatusTestCmd(),
+			[]string{workspaceID},
+		)
+	})
+	if err != nil {
+		t.Fatalf("runWorkspaceClaimIntakeStatus: %v", err)
+	}
+
+	var printed map[string]any
+	if err := json.Unmarshal([]byte(out), &printed); err != nil {
+		t.Fatalf("decode stdout JSON %q: %v", out, err)
+	}
+	if printed["workspace_id"] != workspaceID ||
+		printed["state"] != "paused" ||
+		printed["generation"] != float64(7) {
+		t.Fatalf("printed status = %+v, want paused generation 7", printed)
+	}
+	if printed["last_action_id"] !=
+		"44444444-4444-4444-4444-444444444444" {
+		t.Fatalf(
+			"last_action_id = %v, want canonical action ID: %+v",
+			printed["last_action_id"],
+			printed,
+		)
+	}
+	if _, legacy := printed["authoritative_action_id"]; legacy {
+		t.Fatalf(
+			"legacy authoritative_action_id must not be printed: %+v",
+			printed,
+		)
+	}
+}
+
+func TestRunWorkspaceClaimIntakePauseUsesCanonicalRequest(t *testing.T) {
+	const workspaceID = "33333333-3333-3333-3333-333333333333"
+	const idempotencyKey = "eri-204-pause-1"
+	const reason = "operator maintenance"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost ||
+			r.URL.Path != "/api/workspaces/"+workspaceID+"/claim-intake/pause" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("X-Workspace-ID") != workspaceID {
+			t.Fatalf(
+				"X-Workspace-ID = %q, want %q",
+				r.Header.Get("X-Workspace-ID"),
+				workspaceID,
+			)
+		}
+		if r.Header.Get("Idempotency-Key") != idempotencyKey {
+			t.Fatalf(
+				"Idempotency-Key = %q, want %q",
+				r.Header.Get("Idempotency-Key"),
+				idempotencyKey,
+			)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body["reason"] != reason {
+			t.Fatalf("reason = %v, want %q", body["reason"], reason)
+		}
+		if _, ok := body["expected_generation"]; ok {
+			t.Fatalf("pause request unexpectedly includes expected_generation: %v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"action_id":        "44444444-4444-4444-4444-444444444444",
+			"last_action_id":   "44444444-4444-4444-4444-444444444444",
+			"workspace_id":     workspaceID,
+			"requested_action": "pause",
+			"previous_state":   "resumed",
+			"state":            "paused",
+			"generation":       7,
+			"actor_type":       "member",
+			"actor_id":         "55555555-5555-5555-5555-555555555555",
+			"idempotency_key":  idempotencyKey,
+			"reason":           reason,
+			"requested_at":     "2026-08-10T09:59:59Z",
+			"effective_at":     "2026-08-10T10:00:00Z",
+			"result":           "applied",
+			"error_class":      nil,
+		})
+	}))
+	defer srv.Close()
+	configureWorkspaceClaimIntakeCLITest(t, srv.URL)
+
+	cmd := newWorkspaceClaimIntakeMutationTestCmd("pause")
+	if err := cmd.Flags().Set("reason", reason); err != nil {
+		t.Fatalf("set --reason: %v", err)
+	}
+	if err := cmd.Flags().Set("idempotency-key", idempotencyKey); err != nil {
+		t.Fatalf("set --idempotency-key: %v", err)
+	}
+	out, err := captureStdout(t, func() error {
+		return runWorkspaceClaimIntakePause(cmd, []string{workspaceID})
+	})
+	if err != nil {
+		t.Fatalf("runWorkspaceClaimIntakePause: %v", err)
+	}
+
+	var printed map[string]any
+	if err := json.Unmarshal([]byte(out), &printed); err != nil {
+		t.Fatalf("decode stdout JSON %q: %v", out, err)
+	}
+	for key, want := range map[string]any{
+		"requested_action": "pause",
+		"state":            "paused",
+		"actor_type":       "member",
+		"idempotency_key":  idempotencyKey,
+		"reason":           reason,
+		"last_action_id":   "44444444-4444-4444-4444-444444444444",
+	} {
+		if got := printed[key]; got != want {
+			t.Errorf("printed[%q] = %v, want %v", key, got, want)
+		}
+	}
+	if _, legacy := printed["authoritative_action_id"]; legacy {
+		t.Fatalf(
+			"legacy authoritative_action_id must not be printed: %+v",
+			printed,
+		)
+	}
+}
+
+func TestRunWorkspaceClaimIntakeResumeSendsExpectedGeneration(t *testing.T) {
+	const workspaceID = "33333333-3333-3333-3333-333333333333"
+	const idempotencyKey = "eri-204-resume-1"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost ||
+			r.URL.Path != "/api/workspaces/"+workspaceID+"/claim-intake/resume" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Idempotency-Key") != idempotencyKey {
+			t.Fatalf(
+				"Idempotency-Key = %q, want %q",
+				r.Header.Get("Idempotency-Key"),
+				idempotencyKey,
+			)
+		}
+		var body struct {
+			Reason             string `json:"reason"`
+			ExpectedGeneration int64  `json:"expected_generation"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body.Reason != "maintenance complete" ||
+			body.ExpectedGeneration != 7 {
+			t.Fatalf("request body = %+v, want reason and generation 7", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"action_id":        "44444444-4444-4444-4444-444444444444",
+			"workspace_id":     workspaceID,
+			"requested_action": "resume",
+			"previous_state":   "paused",
+			"state":            "resumed",
+			"generation":       8,
+			"effective_at":     "2026-08-10T10:30:00Z",
+			"result":           "applied",
+		})
+	}))
+	defer srv.Close()
+	configureWorkspaceClaimIntakeCLITest(t, srv.URL)
+
+	cmd := newWorkspaceClaimIntakeMutationTestCmd("resume")
+	for name, value := range map[string]string{
+		"reason":              "maintenance complete",
+		"idempotency-key":     idempotencyKey,
+		"expected-generation": "7",
+	} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("set --%s: %v", name, err)
+		}
+	}
+	out, err := captureStdout(t, func() error {
+		return runWorkspaceClaimIntakeResume(cmd, []string{workspaceID})
+	})
+	if err != nil {
+		t.Fatalf("runWorkspaceClaimIntakeResume: %v", err)
+	}
+
+	var printed map[string]any
+	if err := json.Unmarshal([]byte(out), &printed); err != nil {
+		t.Fatalf("decode stdout JSON %q: %v", out, err)
+	}
+	if printed["requested_action"] != "resume" ||
+		printed["state"] != "resumed" ||
+		printed["generation"] != float64(8) {
+		t.Fatalf("printed response = %v, want canonical resume response", printed)
+	}
+}
+
+func TestRunWorkspaceClaimIntakeMutationValidatesRequiredFlags(t *testing.T) {
+	const workspaceID = "33333333-3333-3333-3333-333333333333"
+
+	tests := []struct {
+		name   string
+		action string
+		flags  map[string]string
+		want   string
+	}{
+		{
+			name:   "pause reason",
+			action: "pause",
+			flags:  map[string]string{"idempotency-key": "pause-1"},
+			want:   "--reason is required",
+		},
+		{
+			name:   "pause idempotency key",
+			action: "pause",
+			flags:  map[string]string{"reason": "maintenance"},
+			want:   "--idempotency-key is required",
+		},
+		{
+			name:   "resume expected generation",
+			action: "resume",
+			flags: map[string]string{
+				"reason":          "maintenance complete",
+				"idempotency-key": "resume-1",
+			},
+			want: "--expected-generation is required and must be non-negative",
+		},
+		{
+			name:   "negative resume expected generation",
+			action: "resume",
+			flags: map[string]string{
+				"reason":              "maintenance complete",
+				"idempotency-key":     "resume-2",
+				"expected-generation": "-2",
+			},
+			want: "--expected-generation is required and must be non-negative",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newWorkspaceClaimIntakeMutationTestCmd(tt.action)
+			for name, value := range tt.flags {
+				if err := cmd.Flags().Set(name, value); err != nil {
+					t.Fatalf("set --%s: %v", name, err)
+				}
+			}
+			var err error
+			if tt.action == "resume" {
+				err = runWorkspaceClaimIntakeResume(cmd, []string{workspaceID})
+			} else {
+				err = runWorkspaceClaimIntakePause(cmd, []string{workspaceID})
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunWorkspaceClaimIntakeLedgerPreservesGlobalCounts(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const workspaceID = "33333333-3333-3333-3333-333333333333"
+	wantCounts := map[string]int64{
+		"queued":                  2,
+		"deferred":                1,
+		"dispatched":              3,
+		"running":                 4,
+		"waiting_local_directory": 5,
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet ||
+			r.URL.Path != "/api/workspaces/"+workspaceID+"/claim-intake/ledger" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("limit") != "1" ||
+			r.URL.Query().Get("offset") != "2" {
+			t.Fatalf("query = %q, want limit=1&offset=2", r.URL.RawQuery)
+		}
+		if r.Header.Get("X-Workspace-ID") != workspaceID {
+			t.Fatalf(
+				"X-Workspace-ID = %q, want %q",
+				r.Header.Get("X-Workspace-ID"),
+				workspaceID,
+			)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"workspace_id":   workspaceID,
+			"state":          "paused",
+			"generation":     7,
+			"last_action_id": "44444444-4444-4444-4444-444444444444",
+			"effective_at":   "2026-08-10T10:00:00Z",
+			"counts":         wantCounts,
+			"tasks":          []any{},
+			"limit":          1,
+			"offset":         2,
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+	cmd := newWorkspaceClaimIntakeLedgerTestCmd()
+	if err := cmd.Flags().Set("limit", "1"); err != nil {
+		t.Fatalf("set --limit: %v", err)
+	}
+	if err := cmd.Flags().Set("offset", "2"); err != nil {
+		t.Fatalf("set --offset: %v", err)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return runWorkspaceClaimIntakeLedger(cmd, []string{workspaceID})
+	})
+	if err != nil {
+		t.Fatalf("runWorkspaceClaimIntakeLedger: %v", err)
+	}
+
+	var printed map[string]any
+	if err := json.Unmarshal([]byte(out), &printed); err != nil {
+		t.Fatalf("decode stdout JSON %q: %v", out, err)
+	}
+	counts, ok := printed["counts"].(map[string]any)
+	if !ok {
+		t.Fatalf("counts = %T, want object: %+v", printed["counts"], printed)
+	}
+	for status, want := range wantCounts {
+		if got := counts[status]; got != float64(want) {
+			t.Errorf("counts[%q] = %v, want %d", status, got, want)
+		}
+	}
+	if printed["last_action_id"] !=
+		"44444444-4444-4444-4444-444444444444" {
+		t.Fatalf(
+			"last_action_id = %v, want canonical action ID: %+v",
+			printed["last_action_id"],
+			printed,
+		)
+	}
+	if _, legacy := printed["authoritative_action_id"]; legacy {
+		t.Fatalf(
+			"legacy authoritative_action_id must not be printed: %+v",
+			printed,
+		)
+	}
+}
+
 // decodeWorkspaceCreateBody mirrors the real POST /api/workspaces contract:
 // it rejects a body missing name or slug with 400 (as CreateWorkspace does) so
 // a CLI regression that drops slug surfaces as a failing request instead of

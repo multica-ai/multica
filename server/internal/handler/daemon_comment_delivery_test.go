@@ -903,7 +903,8 @@ func TestFinalizeTaskClaim_ReceiptCASFailureRollsBackInsertedToken(t *testing.T)
 	}
 	ctx := context.Background()
 	fixture := createCommentDeliveryFixture(t, "Claim receipt rollback")
-	task, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(fixture.runtimeID))
+	claimResult, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(fixture.runtimeID))
+	task := claimResult.Task
 	if err != nil || task == nil {
 		t.Fatalf("claim fixture task: task=%v err=%v", task, err)
 	}
@@ -937,7 +938,8 @@ func TestFinalizeTaskClaim_TriggerDeletedAfterClaimRejectsStaleProvenance(t *tes
 	}
 	ctx := context.Background()
 	fixture := createCommentDeliveryFixture(t, "Claim trigger deletion race")
-	task, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(fixture.runtimeID))
+	claimResult, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(fixture.runtimeID))
+	task := claimResult.Task
 	if err != nil || task == nil {
 		t.Fatalf("claim fixture task: task=%v err=%v", task, err)
 	}

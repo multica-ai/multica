@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-redis/redismock/v9"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/redis/go-redis/v9"
@@ -171,10 +172,11 @@ func TestAuth_WrongSigningMethod(t *testing.T) {
 }
 
 func TestAuth_ValidToken(t *testing.T) {
-	var gotUserID, gotEmail string
+	var gotUserID, gotEmail, gotAuthSource string
 	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUserID = r.Header.Get("X-User-ID")
 		gotEmail = r.Header.Get("X-User-Email")
+		gotAuthSource = r.Header.Get("X-Auth-Source")
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -193,6 +195,30 @@ func TestAuth_ValidToken(t *testing.T) {
 	}
 	if gotEmail != "test@multica.ai" {
 		t.Fatalf("expected X-User-Email 'test@multica.ai', got '%s'", gotEmail)
+	}
+	if gotAuthSource != "jwt" {
+		t.Fatalf("expected X-Auth-Source 'jwt', got %q", gotAuthSource)
+	}
+}
+
+func TestAuth_CookieTokenStampsSessionProvenance(t *testing.T) {
+	var gotAuthSource string
+	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthSource = r.Header.Get("X-Auth-Source")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	token := generateToken(validClaims(), auth.JWTSecret())
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	req.AddCookie(&http.Cookie{Name: auth.AuthCookieName, Value: token})
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotAuthSource != "session" {
+		t.Fatalf("expected X-Auth-Source 'session', got %q", gotAuthSource)
 	}
 }
 
@@ -239,21 +265,22 @@ func TestAuth_InvalidPAT(t *testing.T) {
 // `X-Actor-Source: task_token` (or any other value) to fool a handler
 // into treating the request differently — exactly the kind of trust
 // boundary MUL-2600 introduces.
-func TestAuth_StripsClientSuppliedActorSource(t *testing.T) {
-	var gotActorSource string
+func TestAuth_StripsClientSuppliedProvenance(t *testing.T) {
+	var gotActorSource, gotAuthSource string
 	mw := Auth(nil, nil, nil)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotActorSource = r.Header.Get("X-Actor-Source")
+		gotAuthSource = r.Header.Get("X-Auth-Source")
 		w.WriteHeader(http.StatusOK)
 	}))
 
 	token := generateToken(validClaims(), auth.JWTSecret())
 	req := httptest.NewRequest("GET", "/api/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
-	// Client tries to forge the actor-source header. The middleware must
-	// discard it before the JWT branch runs (which doesn't set it again
-	// for human sessions).
+	// Client tries to forge both provenance headers. The middleware must clear
+	// them before authentication, then stamp only the validated JWT source.
 	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Auth-Source", "session")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -262,6 +289,9 @@ func TestAuth_StripsClientSuppliedActorSource(t *testing.T) {
 	}
 	if gotActorSource != "" {
 		t.Fatalf("X-Actor-Source must be cleared on non-task-token paths, got %q", gotActorSource)
+	}
+	if gotAuthSource != "jwt" {
+		t.Fatalf("X-Auth-Source = %q, want validated jwt source", gotAuthSource)
 	}
 }
 
@@ -273,7 +303,8 @@ func TestAuth_StripsClientSuppliedActorSource(t *testing.T) {
 // the nil and panic; a cache hit must not. Reaching the next handler with
 // the cached user_id therefore proves the short-circuit fired.
 func TestAuth_PATCacheHit(t *testing.T) {
-	rdb := newRedisTestClient(t)
+	rdb, mock := redismock.NewClientMock()
+	t.Cleanup(func() { _ = rdb.Close() })
 	cache := auth.NewPATCache(rdb)
 	if cache == nil {
 		t.Fatal("expected non-nil cache")
@@ -281,12 +312,13 @@ func TestAuth_PATCacheHit(t *testing.T) {
 
 	const rawToken = "mul_cache_hit_test_token"
 	hash := auth.HashToken(rawToken)
-	cache.Set(context.Background(), hash, "cached-user-id", auth.AuthCacheTTL)
+	mock.ExpectGet("mul:auth:pat:" + hash).SetVal("cached-user-id")
 
-	var gotUserID string
+	var gotUserID, gotAuthSource string
 	mw := Auth(nil, cache, nil) // nil queries — only safe on cache hit
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUserID = r.Header.Get("X-User-ID")
+		gotAuthSource = r.Header.Get("X-Auth-Source")
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -300,6 +332,12 @@ func TestAuth_PATCacheHit(t *testing.T) {
 	}
 	if gotUserID != "cached-user-id" {
 		t.Fatalf("expected cached X-User-ID, got %q", gotUserID)
+	}
+	if gotAuthSource != "pat" {
+		t.Fatalf("expected X-Auth-Source 'pat', got %q", gotAuthSource)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

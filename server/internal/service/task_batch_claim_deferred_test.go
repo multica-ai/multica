@@ -49,8 +49,8 @@ func TestClaimTasksForRuntimes_PromotesDeferredAndEmitsQueuedEvent(t *testing.T)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if len(got) != 1 || util.UUIDToString(got[0].ID) != deferredTaskID {
-		t.Fatalf("expected the promoted deferred task %s to be claimed this round, got %d tasks", deferredTaskID, len(got))
+	if len(got.Tasks) != 1 || util.UUIDToString(got.Tasks[0].ID) != deferredTaskID {
+		t.Fatalf("expected the promoted deferred task %s to be claimed this round, got %d tasks", deferredTaskID, len(got.Tasks))
 	}
 
 	mu.Lock()
