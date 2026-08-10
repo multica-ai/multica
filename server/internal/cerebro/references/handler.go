@@ -346,9 +346,19 @@ func (h *Handler) loadIssue(w http.ResponseWriter, r *http.Request) (db.Issue, b
 		return db.Issue{}, false
 	}
 	idParam := chi.URLParam(r, "id")
+	// {id} accepts an issue identifier ("FIR-4932") as well as a UUID, exactly
+	// like every other issue route. Rejecting the identifier here is not a
+	// harmless 400: the issue page is reachable by key, its references query
+	// then fails, and the panel renders as "no references" — a task looks like
+	// it lost its links when it never did.
+	if issue, ok := h.resolveByIdentifier(r.Context(), idParam, wsUUID); ok {
+		return issue, true
+	}
 	issueUUID, err := util.ParseUUID(idParam)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issue id")
+		// Neither an identifier nor a UUID. 404, not 400: the caller asked for an
+		// issue that does not exist, and 404 matches the upstream issue loader.
+		writeError(w, http.StatusNotFound, "issue not found")
 		return db.Issue{}, false
 	}
 	issue, err := h.Upstream.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
@@ -360,6 +370,51 @@ func (h *Handler) loadIssue(w http.ResponseWriter, r *http.Request) (db.Issue, b
 		return db.Issue{}, false
 	}
 	return issue, true
+}
+
+// resolveByIdentifier looks an issue up by its human identifier ("FIR-4932")
+// inside the caller's workspace. Mirrors the upstream loader's identifier path
+// (handler.resolveIssueByIdentifier); that helper is unexported in another
+// package, so the lookup is repeated here rather than reached across.
+// Anything that is not PREFIX-NUMBER returns false so the caller falls through
+// to the UUID path.
+func (h *Handler) resolveByIdentifier(ctx context.Context, id string, wsUUID pgtype.UUID) (db.Issue, bool) {
+	number, ok := issueNumberFromIdentifier(id)
+	if !ok {
+		return db.Issue{}, false
+	}
+	issue, err := h.Upstream.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
+		WorkspaceID: wsUUID,
+		Number:      number,
+	})
+	if err != nil {
+		return db.Issue{}, false
+	}
+	return issue, true
+}
+
+// issueNumberFromIdentifier parses the trailing number out of "PREFIX-NUMBER".
+// The workspace scopes the lookup, so the prefix itself is not matched — the
+// same rule the upstream loader applies.
+func issueNumberFromIdentifier(id string) (int32, bool) {
+	idx := strings.LastIndexByte(id, '-')
+	if idx <= 0 || idx >= len(id)-1 {
+		return 0, false
+	}
+	number := 0
+	for _, c := range id[idx+1:] {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		number = number*10 + int(c-'0')
+		if number > 1<<30 {
+			return 0, false
+		}
+	}
+	if number <= 0 {
+		return 0, false
+	}
+	return int32(number), true
 }
 
 // loadReference resolves and authorizes the {refId} URL param. The

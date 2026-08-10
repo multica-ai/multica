@@ -79,6 +79,22 @@ describe("IssueReferenceList", () => {
     expect(screen.queryByTestId("reference-row")).not.toBeInTheDocument();
   });
 
+  // A failed read used to fall through to the empty state, so an issue that
+  // still had its references looked unlinked. That misread cost days.
+  it("shows an error instead of the empty state when the read failed", () => {
+    mockUseIssueReferences.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+    });
+    renderWithRouting(<IssueReferenceList issueId="issue-1" />);
+
+    expect(
+      screen.getByTestId("issue-reference-list-error"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Link a GitHub PR/i)).not.toBeInTheDocument();
+  });
+
   it("renders a single github_pr reference with title and state badge", () => {
     mockUseIssueReferences.mockReturnValue({
       data: [makeRef({ metadata: { state: "open" } })],

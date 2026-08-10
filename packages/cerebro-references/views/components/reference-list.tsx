@@ -50,7 +50,7 @@ export function IssueReferenceList({
   issueId: string;
   className?: string;
 }) {
-  const { data: references = [], isLoading } = useIssueReferences(issueId);
+  const { data: references = [], isLoading, isError } = useIssueReferences(issueId);
   const deleteReference = useDeleteReference(issueId);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -68,7 +68,11 @@ export function IssueReferenceList({
 
   // Hide the whole section while the first load is in flight and there is
   // nothing cached yet — avoids a flash of the empty state.
-  const showEmpty = !isLoading && references.length === 0;
+  //
+  // A failed read must never render as "no references". An issue that silently
+  // looks unlinked is worse than a visible error: it was read as data loss and
+  // cost days of debugging before the read itself turned out to be broken.
+  const showEmpty = !isLoading && !isError && references.length === 0;
 
   return (
     <div data-testid="issue-reference-list" className={cn("mt-4", className)}>
@@ -88,7 +92,14 @@ export function IssueReferenceList({
         </Button>
       </div>
 
-      {showEmpty ? (
+      {isError && !isLoading ? (
+        <div
+          data-testid="issue-reference-list-error"
+          className="rounded-md border border-dashed border-destructive/50 px-2.5 py-2 text-xs text-destructive"
+        >
+          Could not load references. This issue may still have some — reload to try again.
+        </div>
+      ) : showEmpty ? (
         <button
           type="button"
           onClick={() => setDialogOpen(true)}

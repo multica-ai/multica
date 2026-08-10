@@ -620,3 +620,119 @@ func seedReference(t testing.TB, h *Handler, object, refType, refID string, labe
 }
 
 func ptr(s string) *string { return &s }
+
+// The issue page is reachable by identifier ("FIR-4932") as well as by UUID.
+// This route used to 400 on the identifier, so opening an issue by key
+// rendered an empty References panel — the task looked like it had lost its
+// links. See the identifier path in loadIssue.
+func TestListReferencesByIssueIdentifier(t *testing.T) {
+	cleanupReferences(t)
+	h, _ := newHandler()
+
+	body := map[string]any{"object": "finance_account", "ref_id": "20005", "label": "20005"}
+	req := requestAs(t, testMember, testWorkspace, http.MethodPost,
+		"/api/issues/"+util.UUIDToString(testIssue.ID)+"/references", body)
+	req = withChiParam(req, "id", util.UUIDToString(testIssue.ID))
+	rr := httptest.NewRecorder()
+	h.Create(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("seed: %d %s", rr.Code, rr.Body.String())
+	}
+
+	identifier := fmt.Sprintf("FIR-%d", testIssue.Number)
+	req = requestAs(t, testMember, testWorkspace, http.MethodGet,
+		"/api/issues/"+identifier+"/references", nil)
+	req = withChiParam(req, "id", identifier)
+	rr = httptest.NewRecorder()
+	h.ListByIssue(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list by identifier: %d %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		References []ReferenceResponse `json:"references"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.References) != 1 {
+		t.Fatalf("expected the same 1 reference the UUID URL returns, got %d", len(out.References))
+	}
+	if out.References[0].RefID != "20005" {
+		t.Fatalf("unexpected reference %q", out.References[0].RefID)
+	}
+}
+
+// An identifier is resolved inside the caller's own workspace: issue numbers
+// restart per workspace, so the same "FIR-1" must never reach across. And a
+// string that is neither identifier nor UUID is a missing issue, not a
+// malformed request.
+func TestIssueIdentifierScopingAndUnknownID(t *testing.T) {
+	cleanupReferences(t)
+	h, _ := newHandler()
+
+	seedReference(t, h, "finance_account", "", "mine-only", ptr("mine"), nil, nil)
+
+	identifier := fmt.Sprintf("FIR-%d", testIssue.Number)
+	req := requestAs(t, testOtherMembr, testOtherWS, http.MethodGet,
+		"/api/issues/"+identifier+"/references", nil)
+	req = withChiParam(req, "id", identifier)
+	rr := httptest.NewRecorder()
+	h.ListByIssue(rr, req)
+	if rr.Code == http.StatusOK {
+		var out struct {
+			References []ReferenceResponse `json:"references"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		for _, ref := range out.References {
+			if ref.RefID == "mine-only" {
+				t.Fatalf("identifier leaked another workspace's reference: %+v", ref)
+			}
+		}
+	} else if rr.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace identifier: expected 200 (own issue) or 404, got %d %s", rr.Code, rr.Body.String())
+	}
+
+	// A number that exists in no workspace resolves to nothing.
+	req = requestAs(t, testMember, testWorkspace, http.MethodGet,
+		"/api/issues/FIR-999999/references", nil)
+	req = withChiParam(req, "id", "FIR-999999")
+	rr = httptest.NewRecorder()
+	h.ListByIssue(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("unknown number: expected 404, got %d %s", rr.Code, rr.Body.String())
+	}
+
+	req = requestAs(t, testMember, testWorkspace, http.MethodGet,
+		"/api/issues/not-an-issue/references", nil)
+	req = withChiParam(req, "id", "not-an-issue")
+	rr = httptest.NewRecorder()
+	h.ListByIssue(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("garbage id: expected 404, got %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestIssueNumberFromIdentifier(t *testing.T) {
+	for _, tc := range []struct {
+		in     string
+		number int32
+		ok     bool
+	}{
+		{"FIR-4932", 4932, true},
+		{"MUL-1", 1, true},
+		{"MY-TEAM-42", 42, true},
+		{"FIR-0", 0, false},
+		{"FIR-", 0, false},
+		{"-42", 0, false},
+		{"FIR-4a2", 0, false},
+		{"b30bd913-317b-4e20-91a8-7214287d9690", 0, false},
+		{"", 0, false},
+	} {
+		got, ok := issueNumberFromIdentifier(tc.in)
+		if ok != tc.ok || got != tc.number {
+			t.Errorf("%q: got (%d,%v), want (%d,%v)", tc.in, got, ok, tc.number, tc.ok)
+		}
+	}
+}
