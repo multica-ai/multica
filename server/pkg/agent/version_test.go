@@ -91,6 +91,27 @@ func TestCheckMinCLIVersionForQuickCreateFields(t *testing.T) {
 	}
 }
 
+func TestReadRuntimeCLIVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata string
+		want     string
+	}{
+		{name: "reported", metadata: `{"cli_version":"0.4.3","other":true}`, want: "0.4.3"},
+		{name: "missing", metadata: `{}`},
+		{name: "wrong type", metadata: `{"cli_version":3}`},
+		{name: "malformed", metadata: `{"cli_version":`},
+		{name: "empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ReadRuntimeCLIVersion([]byte(tt.metadata)); got != tt.want {
+				t.Fatalf("ReadRuntimeCLIVersion() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractVersionLine(t *testing.T) {
 	tests := []struct {
 		name string

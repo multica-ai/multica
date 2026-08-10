@@ -6,7 +6,36 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestQuickCreateRuntimePreflightByBinding(t *testing.T) {
+	tests := []struct {
+		name         string
+		bindingMode  string
+		runtimeValid bool
+		want         bool
+	}{
+		{name: "Pool unbound uses scheduler gate", bindingMode: "pool", want: false},
+		{name: "Pool bound still uses scheduler gate", bindingMode: "pool", runtimeValid: true, want: false},
+		{name: "fixed bound keeps legacy preflight", bindingMode: "fixed", runtimeValid: true, want: true},
+		{name: "fixed unbound keeps legacy 422", bindingMode: "fixed", want: true},
+		{name: "unknown mode fails closed", bindingMode: "future", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := db.Agent{
+				RuntimeBindingMode: tt.bindingMode,
+				RuntimeID:          pgtype.UUID{Valid: tt.runtimeValid},
+			}
+			if got := quickCreateRequiresFixedRuntimePreflight(agent); got != tt.want {
+				t.Fatalf("quickCreateRequiresFixedRuntimePreflight() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 func createRuntimePoolRerunIssue(t *testing.T, ctx context.Context, agentID, title string) string {
 	t.Helper()

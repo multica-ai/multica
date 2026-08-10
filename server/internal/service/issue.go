@@ -592,7 +592,7 @@ func isAgentAssigneeReadyWithQueries(ctx context.Context, q *db.Queries, issue d
 		return false
 	}
 	agent, err := q.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || !IsAgentRoutable(agent) || agent.ArchivedAt.Valid {
 		return false
 	}
 	return true

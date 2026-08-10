@@ -497,6 +497,48 @@ VALUES (
 )
 RETURNING *;
 
+-- name: CreatePoolAgentTask :one
+-- Pool creation persists the complete routing decision before allocator work.
+-- Entry-specific data mirrors CreateAgentTask; only the routing columns are
+-- supplied by the shared Pool factory's locked snapshot.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, completed_at, priority,
+    trigger_comment_id, coalesced_comment_ids, trigger_summary,
+    force_fresh_session, is_leader_task, handoff_note, squad_id, context,
+    originator_user_id, accountable_user_id, runtime_mcp_overlay,
+    runtime_connected_apps, originator_source, delegated_from_task_id,
+    rule_version_id, rerun_of_task_id, trigger_evidence_kind,
+    trigger_evidence_ref_id, runtime_binding_mode, runtime_requirements,
+    placement_workspace_id, runtime_requester_user_id,
+    session_affinity_state, session_affinity_runtime_id,
+    explicit_fresh_session, wait_reason
+)
+VALUES (
+    sqlc.arg(agent_id), NULL, sqlc.arg(issue_id), sqlc.arg(status),
+    sqlc.narg(completed_at), sqlc.arg(priority),
+    sqlc.narg(trigger_comment_id),
+    COALESCE(sqlc.narg(coalesced_comment_ids)::uuid[], '{}'),
+    sqlc.narg(trigger_summary),
+    COALESCE(sqlc.narg(force_fresh_session)::boolean, FALSE),
+    COALESCE(sqlc.narg(is_leader_task)::boolean, FALSE),
+    sqlc.narg(handoff_note), sqlc.narg(squad_id),
+    CASE
+        WHEN COALESCE(sqlc.narg(head_sha)::text, '') <> ''
+        THEN jsonb_build_object('head_sha', sqlc.narg(head_sha)::text)
+        ELSE NULL
+    END,
+    sqlc.narg(originator_user_id), sqlc.narg(accountable_user_id),
+    sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
+    sqlc.narg(originator_source), sqlc.narg(delegated_from_task_id),
+    sqlc.narg(rule_version_id), sqlc.narg(rerun_of_task_id),
+    sqlc.narg(trigger_evidence_kind), sqlc.narg(trigger_evidence_ref_id),
+    'pool', sqlc.arg(runtime_requirements)::jsonb,
+    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id),
+    sqlc.arg(session_affinity_state), sqlc.narg(session_affinity_runtime_id),
+    sqlc.arg(explicit_fresh_session), sqlc.narg(wait_reason)
+)
+RETURNING *;
+
 -- name: CreateDeferredChannelIssueTask :one
 -- Channel /issue media resolves after issue creation. Persist the assigned
 -- issue task up front for crash safety, but keep it inert until attachment
@@ -531,6 +573,45 @@ VALUES (
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     @fire_at
+)
+RETURNING *;
+
+-- name: CreatePoolDeferredChannelIssueTask :one
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, completed_at, priority,
+    trigger_comment_id, coalesced_comment_ids, trigger_summary,
+    force_fresh_session, is_leader_task, handoff_note, squad_id, context,
+    originator_user_id, accountable_user_id, runtime_mcp_overlay,
+    runtime_connected_apps, originator_source, delegated_from_task_id,
+    rule_version_id, rerun_of_task_id, trigger_evidence_kind,
+    trigger_evidence_ref_id, fire_at, runtime_binding_mode,
+    runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+    session_affinity_state, session_affinity_runtime_id,
+    explicit_fresh_session, wait_reason
+)
+VALUES (
+    sqlc.arg(agent_id), NULL, sqlc.arg(issue_id), sqlc.arg(status),
+    sqlc.narg(completed_at), sqlc.arg(priority),
+    sqlc.narg(trigger_comment_id),
+    COALESCE(sqlc.narg(coalesced_comment_ids)::uuid[], '{}'),
+    sqlc.narg(trigger_summary),
+    COALESCE(sqlc.narg(force_fresh_session)::boolean, FALSE),
+    COALESCE(sqlc.narg(is_leader_task)::boolean, FALSE),
+    sqlc.narg(handoff_note), sqlc.narg(squad_id),
+    jsonb_strip_nulls(jsonb_build_object(
+        'head_sha', NULLIF(COALESCE(sqlc.narg(head_sha)::text, ''), ''),
+        'channel_issue_media_pending', TRUE
+    )),
+    sqlc.narg(originator_user_id), sqlc.narg(accountable_user_id),
+    sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
+    sqlc.narg(originator_source), sqlc.narg(delegated_from_task_id),
+    sqlc.narg(rule_version_id), sqlc.narg(rerun_of_task_id),
+    sqlc.narg(trigger_evidence_kind), sqlc.narg(trigger_evidence_ref_id),
+    CASE WHEN sqlc.arg(status) = 'deferred' THEN sqlc.arg(fire_at)::timestamptz ELSE NULL END,
+    'pool', sqlc.arg(runtime_requirements)::jsonb,
+    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id),
+    sqlc.arg(session_affinity_state), sqlc.narg(session_affinity_runtime_id),
+    sqlc.arg(explicit_fresh_session), sqlc.narg(wait_reason)
 )
 RETURNING *;
 
@@ -589,6 +670,30 @@ VALUES (
 )
 RETURNING *;
 
+-- name: CreatePoolQuickCreateTask :one
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, completed_at, priority, context,
+    originator_user_id, accountable_user_id, runtime_mcp_overlay,
+    runtime_connected_apps, originator_source, trigger_evidence_kind,
+    trigger_evidence_ref_id, runtime_binding_mode, runtime_requirements,
+    placement_workspace_id, runtime_requester_user_id,
+    session_affinity_state, session_affinity_runtime_id,
+    explicit_fresh_session, wait_reason
+)
+VALUES (
+    sqlc.arg(agent_id), NULL, NULL, sqlc.arg(status),
+    sqlc.narg(completed_at), sqlc.arg(priority), sqlc.arg(context),
+    sqlc.narg(originator_user_id), sqlc.narg(accountable_user_id),
+    sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
+    sqlc.narg(originator_source), sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id), 'pool',
+    sqlc.arg(runtime_requirements)::jsonb,
+    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id),
+    sqlc.arg(session_affinity_state), sqlc.narg(session_affinity_runtime_id),
+    sqlc.arg(explicit_fresh_session), sqlc.narg(wait_reason)
+)
+RETURNING *;
+
 -- name: CreateDeferredAgentTask :one
 -- Deferred tasks are inert until PromoteDueDeferredTasksForRuntime flips them
 -- to queued. Used for comment-routing escalation: a thread-owner primary task
@@ -617,6 +722,37 @@ VALUES (
     sqlc.narg(delegated_from_task_id),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id)
+)
+RETURNING *;
+
+-- name: CreatePoolDeferredAgentTask :one
+-- Pool fallbacks preserve the same escalation payload as the fixed-runtime
+-- insert, but remain inert without a Runtime until the workspace sweeper
+-- promotes them through the shared allocator.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, completed_at, priority,
+    trigger_comment_id, trigger_summary, is_leader_task, squad_id,
+    escalation_for_task_id, fire_at, originator_user_id,
+    accountable_user_id, originator_source, delegated_from_task_id,
+    trigger_evidence_kind, trigger_evidence_ref_id, runtime_binding_mode,
+    runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+    session_affinity_state, session_affinity_runtime_id,
+    explicit_fresh_session, wait_reason
+)
+VALUES (
+    sqlc.arg(agent_id), NULL, sqlc.arg(issue_id), sqlc.arg(status),
+    sqlc.narg(completed_at), sqlc.arg(priority),
+    sqlc.narg(trigger_comment_id), sqlc.narg(trigger_summary),
+    COALESCE(sqlc.narg(is_leader_task)::boolean, FALSE),
+    sqlc.narg(squad_id), sqlc.arg(escalation_for_task_id),
+    CASE WHEN sqlc.arg(status) = 'deferred' THEN sqlc.arg(fire_at)::timestamptz ELSE NULL END,
+    sqlc.narg(originator_user_id), sqlc.narg(accountable_user_id),
+    sqlc.narg(originator_source), sqlc.narg(delegated_from_task_id),
+    sqlc.narg(trigger_evidence_kind), sqlc.narg(trigger_evidence_ref_id),
+    'pool', sqlc.arg(runtime_requirements)::jsonb,
+    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id),
+    sqlc.arg(session_affinity_state), sqlc.narg(session_affinity_runtime_id),
+    sqlc.arg(explicit_fresh_session), sqlc.narg(wait_reason)
 )
 RETURNING *;
 
@@ -713,6 +849,66 @@ SELECT
     p.chat_input_task_id, sqlc.narg(fire_at)
 FROM agent_task_queue p
 WHERE p.id = $1
+RETURNING *;
+
+-- name: LockPoolRetrySourceTask :one
+-- Pool retry creation locks the exact failed source after Member/Agent locks
+-- and before placement is resolved, so lineage and affinity cannot drift
+-- between authorization and the child insert.
+SELECT *
+FROM agent_task_queue
+WHERE id = $1
+  AND runtime_binding_mode = 'pool'
+FOR UPDATE;
+
+-- name: LockPoolRerunSourceTask :one
+-- A manual rerun may target historical fixed or Pool work after the Agent was
+-- converted to Pool. Lock the exact lineage source without a mode predicate;
+-- the caller validates Issue/Agent identity under the target Agent lock.
+SELECT *
+FROM agent_task_queue
+WHERE id = $1
+FOR UPDATE;
+
+-- name: CreatePoolRetryTask :one
+-- Mirrors CreateRetryTask's complete retry payload while replacing only the
+-- routing columns with the shared Pool factory snapshot. The source row is
+-- already locked by LockPoolRetrySourceTask in the same transaction.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
+    status, completed_at, priority, trigger_comment_id,
+    coalesced_comment_ids, trigger_summary, context, session_id, work_dir,
+    attempt, max_attempts, parent_task_id, force_fresh_session,
+    is_leader_task, squad_id, originator_user_id, accountable_user_id,
+    runtime_mcp_overlay, runtime_connected_apps, originator_source,
+    delegated_from_task_id, rule_version_id, trigger_evidence_kind,
+    trigger_evidence_ref_id, retry_of_task_id, chat_input_task_id, fire_at,
+    runtime_binding_mode, runtime_requirements, placement_workspace_id,
+    runtime_requester_user_id, session_affinity_state,
+    session_affinity_runtime_id, explicit_fresh_session, wait_reason
+)
+SELECT
+    p.agent_id, NULL::uuid, p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    sqlc.arg(status), sqlc.narg(completed_at),
+    CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
+    p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
+    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
+    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
+    p.attempt + 1, COALESCE(sqlc.narg(max_attempts)::int, p.max_attempts), p.id,
+    p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
+    p.is_leader_task, p.squad_id, p.originator_user_id,
+    p.accountable_user_id, sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps), p.originator_source,
+    p.delegated_from_task_id, p.rule_version_id, p.trigger_evidence_kind,
+    p.trigger_evidence_ref_id, p.id, p.chat_input_task_id,
+    CASE WHEN sqlc.arg(status)::text = 'deferred' THEN sqlc.narg(fire_at)::timestamptz ELSE NULL END,
+    'pool', sqlc.arg(runtime_requirements)::jsonb,
+    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id),
+    sqlc.arg(session_affinity_state), sqlc.narg(session_affinity_runtime_id),
+    sqlc.arg(explicit_fresh_session), sqlc.narg(wait_reason)
+FROM agent_task_queue AS p
+WHERE p.id = sqlc.arg(id)
+  AND p.runtime_binding_mode = 'pool'
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :many

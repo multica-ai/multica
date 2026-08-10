@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/runtimepool"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
@@ -2219,34 +2220,30 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
 	}
-	if !agent.RuntimeID.Valid {
-		writeAgentUnavailable(w, "agent has no runtime", ReasonAgentRuntimeRequired)
-		return
-	}
-	if !h.isRuntimeOnline(r.Context(), agent.RuntimeID) {
-		writeAgentUnavailable(w, "agent's runtime is offline", ReasonRuntimeOffline)
-		return
-	}
+	if quickCreateRequiresFixedRuntimePreflight(agent) {
+		if !agent.RuntimeID.Valid {
+			writeAgentUnavailable(w, "agent has no runtime", ReasonAgentRuntimeRequired)
+			return
+		}
+		if !h.isRuntimeOnline(r.Context(), agent.RuntimeID) {
+			writeAgentUnavailable(w, "agent's runtime is offline", ReasonRuntimeOffline)
+			return
+		}
 
-	// Daemon CLI version gate. The agent-side prompt + create-flow rely on
-	// behaviors introduced in MinQuickCreateCLIVersion (URL attachment
-	// handling, quick-create attachment binding, no-retry on partial failure).
-	// Older daemons either double-create issues on partial CLI failures, drop
-	// attachment bindings, or mishandle pasted screenshot URLs; fail closed
-	// before enqueuing rather than surface the breakage as an inbox failure
-	// twenty seconds later. Dev-built
-	// daemons (git-describe shape) are exempted inside CheckMinCLIVersion
-	// so `make daemon` works without weakening staging or production.
-	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), agent.RuntimeID); status != 0 {
-		writeJSON(w, status, payload)
-		return
-	}
-	if priority != "" || dueDate != "" {
-		if status, payload := h.checkQuickCreateDaemonVersionAtLeast(
-			r.Context(), agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
-		); status != 0 {
+		// Fixed Agents retain the legacy eager daemon gate. Pool Agents do not
+		// have a bound Runtime here; their selected Runtime is validated by the
+		// scheduler both before and after its row lock.
+		if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), agent.RuntimeID); status != 0 {
 			writeJSON(w, status, payload)
 			return
+		}
+		if priority != "" || dueDate != "" {
+			if status, payload := h.checkQuickCreateDaemonVersionAtLeast(
+				r.Context(), agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
+			); status != 0 {
+				writeJSON(w, status, payload)
+				return
+			}
 		}
 	}
 
@@ -2322,6 +2319,10 @@ func writeAgentUnavailable(w http.ResponseWriter, reason string, reasonCode disp
 	})
 }
 
+func quickCreateRequiresFixedRuntimePreflight(agent db.Agent) bool {
+	return agent.RuntimeBindingMode != runtimepool.BindingPool
+}
+
 // isRuntimeOnline returns true when the given runtime is currently
 // reachable (status == "online"). Quick-create rejects submissions whose
 // agent's runtime is offline so the user gets immediate feedback in the
@@ -2362,7 +2363,7 @@ func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, runt
 			"reason": "agent's runtime is no longer registered",
 		}
 	}
-	current := readRuntimeCLIVersion(rt.Metadata)
+	current := agentpkg.ReadRuntimeCLIVersion(rt.Metadata)
 	switch err := agentpkg.CheckMinCLIVersionFor(current, minimum); {
 	case err == nil:
 		return 0, nil
@@ -2384,23 +2385,6 @@ func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, runt
 			"runtime_id":      uuidToString(runtimeID),
 		}
 	}
-}
-
-// readRuntimeCLIVersion pulls metadata.cli_version off a runtime row. The
-// metadata column is JSONB on the wire; the daemon stores the multica CLI
-// version under that key during registration (see DaemonRegister).
-func readRuntimeCLIVersion(metadata []byte) string {
-	if len(metadata) == 0 {
-		return ""
-	}
-	var m map[string]any
-	if err := json.Unmarshal(metadata, &m); err != nil {
-		return ""
-	}
-	if v, ok := m["cli_version"].(string); ok {
-		return v
-	}
-	return ""
 }
 
 type CreateIssueRequest struct {
@@ -3123,7 +3107,7 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 		return db.Agent{}, false, false
 	}
 	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || !service.IsAgentRoutable(agent) || agent.ArchivedAt.Valid {
 		return db.Agent{}, false, false
 	}
 	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.effectiveInvoker(), uuidToString(issue.WorkspaceID)) {
@@ -3183,7 +3167,7 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 	}
 
 	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || !service.IsAgentRoutable(agent) || agent.ArchivedAt.Valid {
 		return false
 	}
 

@@ -236,5 +236,5 @@ func (h *Handler) runtimeSupportsHandoff(ctx context.Context, agentID pgtype.UUI
 	if err != nil {
 		return false
 	}
-	return agentver.HandoffSupported(readRuntimeCLIVersion(rt.Metadata))
+	return agentver.HandoffSupported(agentver.ReadRuntimeCLIVersion(rt.Metadata))
 }

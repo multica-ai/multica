@@ -3,8 +3,23 @@ package service
 import (
 	"context"
 
+	"github.com/multica-ai/multica/server/internal/runtimepool"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// IsAgentRoutable reports whether an entry may enqueue work for an Agent.
+// Pool Agents intentionally remain routable without a bound Runtime; the
+// allocator selects one after the Task's routing snapshot is committed.
+func IsAgentRoutable(agent db.Agent) bool {
+	switch agent.RuntimeBindingMode {
+	case runtimepool.BindingPool:
+		return true
+	case runtimepool.BindingFixed:
+		return agent.RuntimeID.Valid
+	default:
+		return false
+	}
+}
 
 // AgentReadiness reports whether an agent can accept new work right now.
 // "Ready" means archived_at IS NULL, runtime_id IS NOT NULL, and the bound

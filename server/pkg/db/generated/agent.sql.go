@@ -2806,6 +2806,774 @@ func (q *Queries) CreateDeferredChannelIssueTask(ctx context.Context, arg Create
 	return i, err
 }
 
+const createPoolAgentTask = `-- name: CreatePoolAgentTask :one
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, completed_at, priority,
+    trigger_comment_id, coalesced_comment_ids, trigger_summary,
+    force_fresh_session, is_leader_task, handoff_note, squad_id, context,
+    originator_user_id, accountable_user_id, runtime_mcp_overlay,
+    runtime_connected_apps, originator_source, delegated_from_task_id,
+    rule_version_id, rerun_of_task_id, trigger_evidence_kind,
+    trigger_evidence_ref_id, runtime_binding_mode, runtime_requirements,
+    placement_workspace_id, runtime_requester_user_id,
+    session_affinity_state, session_affinity_runtime_id,
+    explicit_fresh_session, wait_reason
+)
+VALUES (
+    $1, NULL, $2, $3,
+    $4, $5,
+    $6,
+    COALESCE($7::uuid[], '{}'),
+    $8,
+    COALESCE($9::boolean, FALSE),
+    COALESCE($10::boolean, FALSE),
+    $11, $12,
+    CASE
+        WHEN COALESCE($13::text, '') <> ''
+        THEN jsonb_build_object('head_sha', $13::text)
+        ELSE NULL
+    END,
+    $14, $15,
+    $16, $17,
+    $18, $19,
+    $20, $21,
+    $22, $23,
+    'pool', $24::jsonb,
+    $25, $26,
+    $27, $28,
+    $29, $30
+)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session
+`
+
+type CreatePoolAgentTaskParams struct {
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	IssueID                  pgtype.UUID        `json:"issue_id"`
+	Status                   string             `json:"status"`
+	CompletedAt              pgtype.Timestamptz `json:"completed_at"`
+	Priority                 int32              `json:"priority"`
+	TriggerCommentID         pgtype.UUID        `json:"trigger_comment_id"`
+	CoalescedCommentIds      []pgtype.UUID      `json:"coalesced_comment_ids"`
+	TriggerSummary           pgtype.Text        `json:"trigger_summary"`
+	ForceFreshSession        pgtype.Bool        `json:"force_fresh_session"`
+	IsLeaderTask             pgtype.Bool        `json:"is_leader_task"`
+	HandoffNote              pgtype.Text        `json:"handoff_note"`
+	SquadID                  pgtype.UUID        `json:"squad_id"`
+	HeadSha                  pgtype.Text        `json:"head_sha"`
+	OriginatorUserID         pgtype.UUID        `json:"originator_user_id"`
+	AccountableUserID        pgtype.UUID        `json:"accountable_user_id"`
+	RuntimeMcpOverlay        []byte             `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps     []byte             `json:"runtime_connected_apps"`
+	OriginatorSource         pgtype.Text        `json:"originator_source"`
+	DelegatedFromTaskID      pgtype.UUID        `json:"delegated_from_task_id"`
+	RuleVersionID            pgtype.UUID        `json:"rule_version_id"`
+	RerunOfTaskID            pgtype.UUID        `json:"rerun_of_task_id"`
+	TriggerEvidenceKind      pgtype.Text        `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID     pgtype.UUID        `json:"trigger_evidence_ref_id"`
+	RuntimeRequirements      []byte             `json:"runtime_requirements"`
+	PlacementWorkspaceID     pgtype.UUID        `json:"placement_workspace_id"`
+	RuntimeRequesterUserID   pgtype.UUID        `json:"runtime_requester_user_id"`
+	SessionAffinityState     string             `json:"session_affinity_state"`
+	SessionAffinityRuntimeID pgtype.UUID        `json:"session_affinity_runtime_id"`
+	ExplicitFreshSession     bool               `json:"explicit_fresh_session"`
+	WaitReason               pgtype.Text        `json:"wait_reason"`
+}
+
+// Pool creation persists the complete routing decision before allocator work.
+// Entry-specific data mirrors CreateAgentTask; only the routing columns are
+// supplied by the shared Pool factory's locked snapshot.
+func (q *Queries) CreatePoolAgentTask(ctx context.Context, arg CreatePoolAgentTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, createPoolAgentTask,
+		arg.AgentID,
+		arg.IssueID,
+		arg.Status,
+		arg.CompletedAt,
+		arg.Priority,
+		arg.TriggerCommentID,
+		arg.CoalescedCommentIds,
+		arg.TriggerSummary,
+		arg.ForceFreshSession,
+		arg.IsLeaderTask,
+		arg.HandoffNote,
+		arg.SquadID,
+		arg.HeadSha,
+		arg.OriginatorUserID,
+		arg.AccountableUserID,
+		arg.RuntimeMcpOverlay,
+		arg.RuntimeConnectedApps,
+		arg.OriginatorSource,
+		arg.DelegatedFromTaskID,
+		arg.RuleVersionID,
+		arg.RerunOfTaskID,
+		arg.TriggerEvidenceKind,
+		arg.TriggerEvidenceRefID,
+		arg.RuntimeRequirements,
+		arg.PlacementWorkspaceID,
+		arg.RuntimeRequesterUserID,
+		arg.SessionAffinityState,
+		arg.SessionAffinityRuntimeID,
+		arg.ExplicitFreshSession,
+		arg.WaitReason,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
+const createPoolDeferredAgentTask = `-- name: CreatePoolDeferredAgentTask :one
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, completed_at, priority,
+    trigger_comment_id, trigger_summary, is_leader_task, squad_id,
+    escalation_for_task_id, fire_at, originator_user_id,
+    accountable_user_id, originator_source, delegated_from_task_id,
+    trigger_evidence_kind, trigger_evidence_ref_id, runtime_binding_mode,
+    runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+    session_affinity_state, session_affinity_runtime_id,
+    explicit_fresh_session, wait_reason
+)
+VALUES (
+    $1, NULL, $2, $3,
+    $4, $5,
+    $6, $7,
+    COALESCE($8::boolean, FALSE),
+    $9, $10,
+    CASE WHEN $3 = 'deferred' THEN $11::timestamptz ELSE NULL END,
+    $12, $13,
+    $14, $15,
+    $16, $17,
+    'pool', $18::jsonb,
+    $19, $20,
+    $21, $22,
+    $23, $24
+)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session
+`
+
+type CreatePoolDeferredAgentTaskParams struct {
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	IssueID                  pgtype.UUID        `json:"issue_id"`
+	Status                   string             `json:"status"`
+	CompletedAt              pgtype.Timestamptz `json:"completed_at"`
+	Priority                 int32              `json:"priority"`
+	TriggerCommentID         pgtype.UUID        `json:"trigger_comment_id"`
+	TriggerSummary           pgtype.Text        `json:"trigger_summary"`
+	IsLeaderTask             pgtype.Bool        `json:"is_leader_task"`
+	SquadID                  pgtype.UUID        `json:"squad_id"`
+	EscalationForTaskID      pgtype.UUID        `json:"escalation_for_task_id"`
+	FireAt                   pgtype.Timestamptz `json:"fire_at"`
+	OriginatorUserID         pgtype.UUID        `json:"originator_user_id"`
+	AccountableUserID        pgtype.UUID        `json:"accountable_user_id"`
+	OriginatorSource         pgtype.Text        `json:"originator_source"`
+	DelegatedFromTaskID      pgtype.UUID        `json:"delegated_from_task_id"`
+	TriggerEvidenceKind      pgtype.Text        `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID     pgtype.UUID        `json:"trigger_evidence_ref_id"`
+	RuntimeRequirements      []byte             `json:"runtime_requirements"`
+	PlacementWorkspaceID     pgtype.UUID        `json:"placement_workspace_id"`
+	RuntimeRequesterUserID   pgtype.UUID        `json:"runtime_requester_user_id"`
+	SessionAffinityState     string             `json:"session_affinity_state"`
+	SessionAffinityRuntimeID pgtype.UUID        `json:"session_affinity_runtime_id"`
+	ExplicitFreshSession     bool               `json:"explicit_fresh_session"`
+	WaitReason               pgtype.Text        `json:"wait_reason"`
+}
+
+// Pool fallbacks preserve the same escalation payload as the fixed-runtime
+// insert, but remain inert without a Runtime until the workspace sweeper
+// promotes them through the shared allocator.
+func (q *Queries) CreatePoolDeferredAgentTask(ctx context.Context, arg CreatePoolDeferredAgentTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, createPoolDeferredAgentTask,
+		arg.AgentID,
+		arg.IssueID,
+		arg.Status,
+		arg.CompletedAt,
+		arg.Priority,
+		arg.TriggerCommentID,
+		arg.TriggerSummary,
+		arg.IsLeaderTask,
+		arg.SquadID,
+		arg.EscalationForTaskID,
+		arg.FireAt,
+		arg.OriginatorUserID,
+		arg.AccountableUserID,
+		arg.OriginatorSource,
+		arg.DelegatedFromTaskID,
+		arg.TriggerEvidenceKind,
+		arg.TriggerEvidenceRefID,
+		arg.RuntimeRequirements,
+		arg.PlacementWorkspaceID,
+		arg.RuntimeRequesterUserID,
+		arg.SessionAffinityState,
+		arg.SessionAffinityRuntimeID,
+		arg.ExplicitFreshSession,
+		arg.WaitReason,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
+const createPoolDeferredChannelIssueTask = `-- name: CreatePoolDeferredChannelIssueTask :one
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, completed_at, priority,
+    trigger_comment_id, coalesced_comment_ids, trigger_summary,
+    force_fresh_session, is_leader_task, handoff_note, squad_id, context,
+    originator_user_id, accountable_user_id, runtime_mcp_overlay,
+    runtime_connected_apps, originator_source, delegated_from_task_id,
+    rule_version_id, rerun_of_task_id, trigger_evidence_kind,
+    trigger_evidence_ref_id, fire_at, runtime_binding_mode,
+    runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+    session_affinity_state, session_affinity_runtime_id,
+    explicit_fresh_session, wait_reason
+)
+VALUES (
+    $1, NULL, $2, $3,
+    $4, $5,
+    $6,
+    COALESCE($7::uuid[], '{}'),
+    $8,
+    COALESCE($9::boolean, FALSE),
+    COALESCE($10::boolean, FALSE),
+    $11, $12,
+    jsonb_strip_nulls(jsonb_build_object(
+        'head_sha', NULLIF(COALESCE($13::text, ''), ''),
+        'channel_issue_media_pending', TRUE
+    )),
+    $14, $15,
+    $16, $17,
+    $18, $19,
+    $20, $21,
+    $22, $23,
+    CASE WHEN $3 = 'deferred' THEN $24::timestamptz ELSE NULL END,
+    'pool', $25::jsonb,
+    $26, $27,
+    $28, $29,
+    $30, $31
+)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session
+`
+
+type CreatePoolDeferredChannelIssueTaskParams struct {
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	IssueID                  pgtype.UUID        `json:"issue_id"`
+	Status                   string             `json:"status"`
+	CompletedAt              pgtype.Timestamptz `json:"completed_at"`
+	Priority                 int32              `json:"priority"`
+	TriggerCommentID         pgtype.UUID        `json:"trigger_comment_id"`
+	CoalescedCommentIds      []pgtype.UUID      `json:"coalesced_comment_ids"`
+	TriggerSummary           pgtype.Text        `json:"trigger_summary"`
+	ForceFreshSession        pgtype.Bool        `json:"force_fresh_session"`
+	IsLeaderTask             pgtype.Bool        `json:"is_leader_task"`
+	HandoffNote              pgtype.Text        `json:"handoff_note"`
+	SquadID                  pgtype.UUID        `json:"squad_id"`
+	HeadSha                  pgtype.Text        `json:"head_sha"`
+	OriginatorUserID         pgtype.UUID        `json:"originator_user_id"`
+	AccountableUserID        pgtype.UUID        `json:"accountable_user_id"`
+	RuntimeMcpOverlay        []byte             `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps     []byte             `json:"runtime_connected_apps"`
+	OriginatorSource         pgtype.Text        `json:"originator_source"`
+	DelegatedFromTaskID      pgtype.UUID        `json:"delegated_from_task_id"`
+	RuleVersionID            pgtype.UUID        `json:"rule_version_id"`
+	RerunOfTaskID            pgtype.UUID        `json:"rerun_of_task_id"`
+	TriggerEvidenceKind      pgtype.Text        `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID     pgtype.UUID        `json:"trigger_evidence_ref_id"`
+	FireAt                   pgtype.Timestamptz `json:"fire_at"`
+	RuntimeRequirements      []byte             `json:"runtime_requirements"`
+	PlacementWorkspaceID     pgtype.UUID        `json:"placement_workspace_id"`
+	RuntimeRequesterUserID   pgtype.UUID        `json:"runtime_requester_user_id"`
+	SessionAffinityState     string             `json:"session_affinity_state"`
+	SessionAffinityRuntimeID pgtype.UUID        `json:"session_affinity_runtime_id"`
+	ExplicitFreshSession     bool               `json:"explicit_fresh_session"`
+	WaitReason               pgtype.Text        `json:"wait_reason"`
+}
+
+func (q *Queries) CreatePoolDeferredChannelIssueTask(ctx context.Context, arg CreatePoolDeferredChannelIssueTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, createPoolDeferredChannelIssueTask,
+		arg.AgentID,
+		arg.IssueID,
+		arg.Status,
+		arg.CompletedAt,
+		arg.Priority,
+		arg.TriggerCommentID,
+		arg.CoalescedCommentIds,
+		arg.TriggerSummary,
+		arg.ForceFreshSession,
+		arg.IsLeaderTask,
+		arg.HandoffNote,
+		arg.SquadID,
+		arg.HeadSha,
+		arg.OriginatorUserID,
+		arg.AccountableUserID,
+		arg.RuntimeMcpOverlay,
+		arg.RuntimeConnectedApps,
+		arg.OriginatorSource,
+		arg.DelegatedFromTaskID,
+		arg.RuleVersionID,
+		arg.RerunOfTaskID,
+		arg.TriggerEvidenceKind,
+		arg.TriggerEvidenceRefID,
+		arg.FireAt,
+		arg.RuntimeRequirements,
+		arg.PlacementWorkspaceID,
+		arg.RuntimeRequesterUserID,
+		arg.SessionAffinityState,
+		arg.SessionAffinityRuntimeID,
+		arg.ExplicitFreshSession,
+		arg.WaitReason,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
+const createPoolQuickCreateTask = `-- name: CreatePoolQuickCreateTask :one
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, completed_at, priority, context,
+    originator_user_id, accountable_user_id, runtime_mcp_overlay,
+    runtime_connected_apps, originator_source, trigger_evidence_kind,
+    trigger_evidence_ref_id, runtime_binding_mode, runtime_requirements,
+    placement_workspace_id, runtime_requester_user_id,
+    session_affinity_state, session_affinity_runtime_id,
+    explicit_fresh_session, wait_reason
+)
+VALUES (
+    $1, NULL, NULL, $2,
+    $3, $4, $5,
+    $6, $7,
+    $8, $9,
+    $10, $11,
+    $12, 'pool',
+    $13::jsonb,
+    $14, $15,
+    $16, $17,
+    $18, $19
+)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session
+`
+
+type CreatePoolQuickCreateTaskParams struct {
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	Status                   string             `json:"status"`
+	CompletedAt              pgtype.Timestamptz `json:"completed_at"`
+	Priority                 int32              `json:"priority"`
+	Context                  []byte             `json:"context"`
+	OriginatorUserID         pgtype.UUID        `json:"originator_user_id"`
+	AccountableUserID        pgtype.UUID        `json:"accountable_user_id"`
+	RuntimeMcpOverlay        []byte             `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps     []byte             `json:"runtime_connected_apps"`
+	OriginatorSource         pgtype.Text        `json:"originator_source"`
+	TriggerEvidenceKind      pgtype.Text        `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID     pgtype.UUID        `json:"trigger_evidence_ref_id"`
+	RuntimeRequirements      []byte             `json:"runtime_requirements"`
+	PlacementWorkspaceID     pgtype.UUID        `json:"placement_workspace_id"`
+	RuntimeRequesterUserID   pgtype.UUID        `json:"runtime_requester_user_id"`
+	SessionAffinityState     string             `json:"session_affinity_state"`
+	SessionAffinityRuntimeID pgtype.UUID        `json:"session_affinity_runtime_id"`
+	ExplicitFreshSession     bool               `json:"explicit_fresh_session"`
+	WaitReason               pgtype.Text        `json:"wait_reason"`
+}
+
+func (q *Queries) CreatePoolQuickCreateTask(ctx context.Context, arg CreatePoolQuickCreateTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, createPoolQuickCreateTask,
+		arg.AgentID,
+		arg.Status,
+		arg.CompletedAt,
+		arg.Priority,
+		arg.Context,
+		arg.OriginatorUserID,
+		arg.AccountableUserID,
+		arg.RuntimeMcpOverlay,
+		arg.RuntimeConnectedApps,
+		arg.OriginatorSource,
+		arg.TriggerEvidenceKind,
+		arg.TriggerEvidenceRefID,
+		arg.RuntimeRequirements,
+		arg.PlacementWorkspaceID,
+		arg.RuntimeRequesterUserID,
+		arg.SessionAffinityState,
+		arg.SessionAffinityRuntimeID,
+		arg.ExplicitFreshSession,
+		arg.WaitReason,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
+const createPoolRetryTask = `-- name: CreatePoolRetryTask :one
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
+    status, completed_at, priority, trigger_comment_id,
+    coalesced_comment_ids, trigger_summary, context, session_id, work_dir,
+    attempt, max_attempts, parent_task_id, force_fresh_session,
+    is_leader_task, squad_id, originator_user_id, accountable_user_id,
+    runtime_mcp_overlay, runtime_connected_apps, originator_source,
+    delegated_from_task_id, rule_version_id, trigger_evidence_kind,
+    trigger_evidence_ref_id, retry_of_task_id, chat_input_task_id, fire_at,
+    runtime_binding_mode, runtime_requirements, placement_workspace_id,
+    runtime_requester_user_id, session_affinity_state,
+    session_affinity_runtime_id, explicit_fresh_session, wait_reason
+)
+SELECT
+    p.agent_id, NULL::uuid, p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    $1, $2,
+    CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
+    p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
+    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
+    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
+    p.attempt + 1, COALESCE($3::int, p.max_attempts), p.id,
+    p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
+    p.is_leader_task, p.squad_id, p.originator_user_id,
+    p.accountable_user_id, $4,
+    $5, p.originator_source,
+    p.delegated_from_task_id, p.rule_version_id, p.trigger_evidence_kind,
+    p.trigger_evidence_ref_id, p.id, p.chat_input_task_id,
+    CASE WHEN $1::text = 'deferred' THEN $6::timestamptz ELSE NULL END,
+    'pool', $7::jsonb,
+    $8, $9,
+    $10, $11,
+    $12, $13
+FROM agent_task_queue AS p
+WHERE p.id = $14
+  AND p.runtime_binding_mode = 'pool'
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session
+`
+
+type CreatePoolRetryTaskParams struct {
+	Status                   string             `json:"status"`
+	CompletedAt              pgtype.Timestamptz `json:"completed_at"`
+	MaxAttempts              pgtype.Int4        `json:"max_attempts"`
+	RuntimeMcpOverlay        []byte             `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps     []byte             `json:"runtime_connected_apps"`
+	FireAt                   pgtype.Timestamptz `json:"fire_at"`
+	RuntimeRequirements      []byte             `json:"runtime_requirements"`
+	PlacementWorkspaceID     pgtype.UUID        `json:"placement_workspace_id"`
+	RuntimeRequesterUserID   pgtype.UUID        `json:"runtime_requester_user_id"`
+	SessionAffinityState     string             `json:"session_affinity_state"`
+	SessionAffinityRuntimeID pgtype.UUID        `json:"session_affinity_runtime_id"`
+	ExplicitFreshSession     bool               `json:"explicit_fresh_session"`
+	WaitReason               pgtype.Text        `json:"wait_reason"`
+	ID                       pgtype.UUID        `json:"id"`
+}
+
+// Mirrors CreateRetryTask's complete retry payload while replacing only the
+// routing columns with the shared Pool factory snapshot. The source row is
+// already locked by LockPoolRetrySourceTask in the same transaction.
+func (q *Queries) CreatePoolRetryTask(ctx context.Context, arg CreatePoolRetryTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, createPoolRetryTask,
+		arg.Status,
+		arg.CompletedAt,
+		arg.MaxAttempts,
+		arg.RuntimeMcpOverlay,
+		arg.RuntimeConnectedApps,
+		arg.FireAt,
+		arg.RuntimeRequirements,
+		arg.PlacementWorkspaceID,
+		arg.RuntimeRequesterUserID,
+		arg.SessionAffinityState,
+		arg.SessionAffinityRuntimeID,
+		arg.ExplicitFreshSession,
+		arg.WaitReason,
+		arg.ID,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
 const createQuickCreateTask = `-- name: CreateQuickCreateTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
@@ -7102,6 +7870,159 @@ func (q *Queries) LockPoolPlacementMember(ctx context.Context, arg LockPoolPlace
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const lockPoolRerunSourceTask = `-- name: LockPoolRerunSourceTask :one
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session
+FROM agent_task_queue
+WHERE id = $1
+FOR UPDATE
+`
+
+// A manual rerun may target historical fixed or Pool work after the Agent was
+// converted to Pool. Lock the exact lineage source without a mode predicate;
+// the caller validates Issue/Agent identity under the target Agent lock.
+func (q *Queries) LockPoolRerunSourceTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, lockPoolRerunSourceTask, id)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
+const lockPoolRetrySourceTask = `-- name: LockPoolRetrySourceTask :one
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, runtime_binding_mode, runtime_requirements, placement_workspace_id, runtime_requester_user_id, session_affinity_state, session_affinity_runtime_id, explicit_fresh_session
+FROM agent_task_queue
+WHERE id = $1
+  AND runtime_binding_mode = 'pool'
+FOR UPDATE
+`
+
+// Pool retry creation locks the exact failed source after Member/Agent locks
+// and before placement is resolved, so lineage and affinity cannot drift
+// between authorization and the child insert.
+func (q *Queries) LockPoolRetrySourceTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, lockPoolRetrySourceTask, id)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
 	)
 	return i, err
 }

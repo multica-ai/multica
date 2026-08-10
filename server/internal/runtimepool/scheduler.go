@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/runtimeaccess"
 	"github.com/multica-ai/multica/server/internal/util"
+	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -59,6 +60,24 @@ func runtimeIsAlive(runtime db.AgentRuntime, alive map[string]bool, authoritativ
 		return alive[util.UUIDToString(runtime.ID)]
 	}
 	return runtime.LastSeenAt.Valid && !runtime.LastSeenAt.Time.Before(now.Add(-runtimeHeartbeatWindow))
+}
+
+// runtimeSupportsPoolQuickCreate treats ordinary Tasks as version-agnostic,
+// while a recognized Quick Create marker requires the selected Runtime's CLI
+// to meet the feature floor. Malformed markers and metadata fail closed.
+func runtimeSupportsPoolQuickCreate(task db.AgentTaskQueue, runtime db.AgentRuntime) bool {
+	quickCreate, recognized, err := ParseQuickCreateContext(task.Context)
+	if err != nil {
+		return false
+	}
+	if !recognized {
+		return true
+	}
+	minimum := agentpkg.MinQuickCreateCLIVersion
+	if quickCreate.Priority != "" || quickCreate.DueDate != "" {
+		minimum = agentpkg.MinQuickCreateFieldsCLIVersion
+	}
+	return agentpkg.CheckMinCLIVersionFor(agentpkg.ReadRuntimeCLIVersion(runtime.Metadata), minimum) == nil
 }
 
 type placementPlan struct {
@@ -129,6 +148,16 @@ func (s *Scheduler) AssignWaiting(ctx context.Context, request AssignRequest) (A
 		if err != nil {
 			return result, fmt.Errorf("list Runtime candidates for Task %s: %w", util.UUIDToString(task.ID), err)
 		}
+		compatibleCandidates := plan.candidates[:0]
+		for _, candidate := range plan.candidates {
+			if runtimeSupportsPoolQuickCreate(task, candidate.AgentRuntime) {
+				compatibleCandidates = append(compatibleCandidates, candidate)
+			}
+		}
+		if task.SessionAffinityState == SessionAffinityPinned && len(plan.candidates) > 0 && len(compatibleCandidates) == 0 {
+			plan.pinnedReason = "session_runtime_capability_mismatch"
+		}
+		plan.candidates = compatibleCandidates
 		for _, candidate := range plan.candidates {
 			id := util.UUIDToString(candidate.AgentRuntime.ID)
 			if _, ok := seenRuntimeIDs[id]; ok {
@@ -288,6 +317,9 @@ func (s *Scheduler) assignCandidate(ctx context.Context, plan placementPlan, can
 	}
 	if runtime.Status != "online" || !runtimeIsAlive(runtime, alive, authoritative, s.now()) {
 		return nil, plan.task.SessionAffinityState == SessionAffinityPinned, pinnedReason(plan.task, "session_runtime_offline"), nil
+	}
+	if !runtimeSupportsPoolQuickCreate(plan.task, runtime) {
+		return nil, plan.task.SessionAffinityState == SessionAffinityPinned, pinnedReason(plan.task, "session_runtime_capability_mismatch"), nil
 	}
 	if plan.task.SessionAffinityState == SessionAffinityPinned && runtime.ID != plan.task.SessionAffinityRuntimeID {
 		return nil, true, "session_runtime_offline", nil

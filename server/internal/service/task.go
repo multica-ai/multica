@@ -1218,7 +1218,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		slog.Debug("task enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agent.ID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
-	if !agent.RuntimeID.Valid {
+	if !agent.RuntimeID.Valid && agent.RuntimeBindingMode != runtimepool.BindingPool {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
@@ -1263,33 +1263,50 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
 	}
+	if agent.RuntimeBindingMode == runtimepool.BindingPool {
+		poolInput := PoolTaskCreateInput{
+			AgentID:          agent.ID,
+			WorkspaceID:      issue.WorkspaceID,
+			OriginatorUserID: originatorUserID,
+			Deferred:         fireAt.Valid,
+			Placement: PoolPlacementRequest{
+				ForceFreshSession: forceFreshSession,
+				RerunOfTaskID:     rerunOfTaskID,
+				AgentID:           agent.ID,
+				IssueID:           issue.ID,
+			},
+		}
+		if fireAt.Valid {
+			deferredParams := deferredChannelIssueTaskParams(createParams, fireAt)
+			poolInput.Insert = func(ctx context.Context, qtx *db.Queries, routing PoolRoutingSnapshot) (db.AgentTaskQueue, error) {
+				return insertPoolDeferredChannelIssueTask(ctx, qtx, deferredParams, routing)
+			}
+		} else {
+			poolInput.Insert = func(ctx context.Context, qtx *db.Queries, routing PoolRoutingSnapshot) (db.AgentTaskQueue, error) {
+				return insertPoolAgentTask(ctx, qtx, createParams, routing)
+			}
+		}
+		var task db.AgentTaskQueue
+		var createErr error
+		if fireAt.Valid && s.TxStarter == nil {
+			task, createErr = s.createPoolTaskWithQueries(ctx, s.Queries, poolInput)
+		} else {
+			task, createErr = s.createPoolTask(ctx, poolInput)
+		}
+		if createErr != nil {
+			slog.Error("Pool task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", createErr)
+			return task, fmt.Errorf("create Pool task: %w", createErr)
+		}
+		slog.Info("Pool task enqueued",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(issue.ID),
+			"agent_id", util.UUIDToString(issue.AssigneeID),
+		)
+		return task, nil
+	}
 	var task db.AgentTaskQueue
 	if fireAt.Valid {
-		task, err = s.Queries.CreateDeferredChannelIssueTask(ctx, db.CreateDeferredChannelIssueTaskParams{
-			AgentID:              createParams.AgentID,
-			RuntimeID:            createParams.RuntimeID,
-			IssueID:              createParams.IssueID,
-			Priority:             createParams.Priority,
-			TriggerCommentID:     createParams.TriggerCommentID,
-			CoalescedCommentIds:  createParams.CoalescedCommentIds,
-			TriggerSummary:       createParams.TriggerSummary,
-			ForceFreshSession:    createParams.ForceFreshSession,
-			IsLeaderTask:         createParams.IsLeaderTask,
-			HandoffNote:          createParams.HandoffNote,
-			SquadID:              createParams.SquadID,
-			HeadSha:              createParams.HeadSha,
-			OriginatorUserID:     createParams.OriginatorUserID,
-			AccountableUserID:    createParams.AccountableUserID,
-			RuntimeMcpOverlay:    createParams.RuntimeMcpOverlay,
-			RuntimeConnectedApps: createParams.RuntimeConnectedApps,
-			OriginatorSource:     createParams.OriginatorSource,
-			DelegatedFromTaskID:  createParams.DelegatedFromTaskID,
-			RuleVersionID:        createParams.RuleVersionID,
-			RerunOfTaskID:        createParams.RerunOfTaskID,
-			TriggerEvidenceKind:  createParams.TriggerEvidenceKind,
-			TriggerEvidenceRefID: createParams.TriggerEvidenceRefID,
-			FireAt:               fireAt,
-		})
+		task, err = s.Queries.CreateDeferredChannelIssueTask(ctx, deferredChannelIssueTaskParams(createParams, fireAt))
 	} else {
 		task, err = s.Queries.CreateAgentTask(ctx, createParams)
 	}
@@ -1369,7 +1386,12 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		slog.Debug("mention task enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
-	if !agent.RuntimeID.Valid {
+	// Native Squad admission remains gated in Task 10. This lower-level Task 9
+	// entry accepts an already-authorized Leader/member mention, including its
+	// Squad and handoff payload, but leaves rerun routing to the dedicated path.
+	poolMentionEntry := agent.RuntimeBindingMode == runtimepool.BindingPool &&
+		!forceFreshSession && !rerunOfTaskID.Valid
+	if !agent.RuntimeID.Valid && !poolMentionEntry {
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
@@ -1389,7 +1411,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+	createParams := db.CreateAgentTaskParams{
 		AgentID:              agentID,
 		RuntimeID:            agent.RuntimeID,
 		IssueID:              issue.ID,
@@ -1414,7 +1436,24 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
-	})
+	}
+	var task db.AgentTaskQueue
+	if poolMentionEntry {
+		task, err = s.createPoolTask(ctx, PoolTaskCreateInput{
+			AgentID:          agent.ID,
+			WorkspaceID:      issue.WorkspaceID,
+			OriginatorUserID: originatorUserID,
+			Placement: PoolPlacementRequest{
+				AgentID: agent.ID,
+				IssueID: issue.ID,
+			},
+			Insert: func(ctx context.Context, qtx *db.Queries, routing PoolRoutingSnapshot) (db.AgentTaskQueue, error) {
+				return insertPoolAgentTask(ctx, qtx, createParams, routing)
+			},
+		})
+	} else {
+		task, err = s.Queries.CreateAgentTask(ctx, createParams)
+	}
 	if err != nil {
 		// A concurrent enqueue for the same (issue, agent) won the race and the
 		// unique index rejected this insert. That is benign — a sibling run
@@ -1430,14 +1469,18 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	}
 
 	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
+	if poolMentionEntry {
+		return task, nil
+	}
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
 }
 
-// EnqueueDeferredAssigneeFallback creates an inert task that becomes claimable
-// only after PromoteDueDeferredTasksForRuntime flips it from deferred to queued.
+// EnqueueDeferredAssigneeFallback creates an inert task. Fixed tasks become
+// claimable through the per-Runtime promotion path; Pool tasks first enter the
+// workspace allocator through the bounded Pool sweep.
 func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue db.Issue, agentID, squadID pgtype.UUID, escalationForTaskID pgtype.UUID, triggerCommentID pgtype.UUID, fireAt time.Time) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
@@ -1448,7 +1491,7 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 		slog.Debug("deferred fallback enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
-	if !agent.RuntimeID.Valid {
+	if !IsAgentRoutable(agent) {
 		slog.Error("deferred fallback enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
@@ -1470,7 +1513,7 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 	}
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	isLeader := squadID.Valid
-	task, err := s.Queries.CreateDeferredAgentTask(ctx, db.CreateDeferredAgentTaskParams{
+	params := db.CreateDeferredAgentTaskParams{
 		AgentID:              agentID,
 		RuntimeID:            agent.RuntimeID,
 		IssueID:              issue.ID,
@@ -1487,7 +1530,25 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 		DelegatedFromTaskID:  attrDelegatedFrom,
 		TriggerEvidenceKind:  attrEvidenceKind,
 		TriggerEvidenceRefID: attrEvidenceRef,
-	})
+	}
+	var task db.AgentTaskQueue
+	if agent.RuntimeBindingMode == runtimepool.BindingPool {
+		task, err = s.createPoolTask(ctx, PoolTaskCreateInput{
+			AgentID:          agentID,
+			WorkspaceID:      issue.WorkspaceID,
+			OriginatorUserID: attr.UserID,
+			Placement: PoolPlacementRequest{
+				AgentID: agentID,
+				IssueID: issue.ID,
+			},
+			Deferred: true,
+			Insert: func(ctx context.Context, qtx *db.Queries, routing PoolRoutingSnapshot) (db.AgentTaskQueue, error) {
+				return insertPoolDeferredAgentTask(ctx, qtx, params, routing)
+			},
+		})
+	} else {
+		task, err = s.Queries.CreateDeferredAgentTask(ctx, params)
+	}
 	if err != nil {
 		slog.Error("deferred fallback enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create deferred task: %w", err)
@@ -1518,27 +1579,10 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 // hint the daemon claim handler uses to layer the squad-leader briefing
 // onto the agent's Instructions, matching the behavior of issue-bound
 // tasks assigned to the squad.
-type QuickCreateContext struct {
-	Type          string   `json:"type"`
-	Prompt        string   `json:"prompt"`
-	RequesterID   string   `json:"requester_id"`
-	WorkspaceID   string   `json:"workspace_id"`
-	Priority      string   `json:"priority,omitempty"`
-	DueDate       string   `json:"due_date,omitempty"`
-	ProjectID     string   `json:"project_id,omitempty"`
-	SquadID       string   `json:"squad_id,omitempty"`
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
-	// ParentIssueID is the optional UUID of the parent issue the new issue
-	// should be filed under. Set when the user opens the modal from "Add
-	// sub issue" on an existing issue; the daemon claim handler resolves the
-	// parent's identifier and the prompt template instructs the agent to
-	// pass `--parent <uuid>` so the sub-issue relationship is preserved
-	// across the manual→agent mode flip.
-	ParentIssueID string `json:"parent_issue_id,omitempty"`
-}
+type QuickCreateContext = runtimepool.QuickCreateContext
 
 // QuickCreateContextType marks a task as a quick-create job.
-const QuickCreateContextType = "quick_create"
+const QuickCreateContextType = runtimepool.QuickCreateContextType
 
 // EnqueueQuickCreateTask creates a queued task that has no issue / chat /
 // autopilot link — the user's natural-language prompt is stored in the
@@ -1567,17 +1611,18 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if agent.ArchivedAt.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
-	if !agent.RuntimeID.Valid {
+	if !agent.RuntimeID.Valid && agent.RuntimeBindingMode != runtimepool.BindingPool {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
 	payload := QuickCreateContext{
-		Type:        QuickCreateContextType,
-		Prompt:      prompt,
-		RequesterID: util.UUIDToString(requesterID),
-		WorkspaceID: util.UUIDToString(workspaceID),
-		Priority:    priority,
-		DueDate:     dueDate,
+		Type:          QuickCreateContextType,
+		SchemaVersion: runtimepool.QuickCreateContextSchemaV1,
+		Prompt:        prompt,
+		RequesterID:   util.UUIDToString(requesterID),
+		WorkspaceID:   util.UUIDToString(workspaceID),
+		Priority:      priority,
+		DueDate:       dueDate,
 	}
 	if projectID.Valid {
 		payload.ProjectID = util.UUIDToString(projectID)
@@ -1618,7 +1663,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, requesterID, agent)
-	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+	createParams := db.CreateQuickCreateTaskParams{
 		AgentID:              agentID,
 		RuntimeID:            agent.RuntimeID,
 		Priority:             priorityToInt("high"),
@@ -1630,7 +1675,23 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		OriginatorSource:     attrSource,
 		TriggerEvidenceKind:  attrEvidenceKind,
 		TriggerEvidenceRefID: attrEvidenceRef,
-	})
+	}
+	var task db.AgentTaskQueue
+	if agent.RuntimeBindingMode == runtimepool.BindingPool {
+		task, err = s.createPoolTask(ctx, PoolTaskCreateInput{
+			AgentID:          agent.ID,
+			WorkspaceID:      workspaceID,
+			OriginatorUserID: requesterID,
+			Placement: PoolPlacementRequest{
+				AgentID: agent.ID,
+			},
+			Insert: func(ctx context.Context, qtx *db.Queries, routing PoolRoutingSnapshot) (db.AgentTaskQueue, error) {
+				return insertPoolQuickCreateTask(ctx, qtx, createParams, routing)
+			},
+		})
+	} else {
+		task, err = s.Queries.CreateQuickCreateTask(ctx, createParams)
+	}
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("create quick-create task: %w", err)
 	}
@@ -1644,6 +1705,9 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		"project_id", payload.ProjectID,
 		"parent_issue_id", payload.ParentIssueID,
 	)
+	if agent.RuntimeBindingMode == runtimepool.BindingPool {
+		return task, nil
+	}
 	// Match every other Enqueue* path: kick the daemon WS so the task
 	// gets claimed promptly instead of waiting for the next 30 s poll
 	// cycle. Without this the user perceives "quick create never
@@ -4515,6 +4579,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// common agent_error path skips this work entirely.
 	var (
 		wantRetry        bool
+		retryParent      db.AgentTaskQueue
 		retryOverlay     runtimeMCPOverlayData
 		retryFireAt      pgtype.Timestamptz
 		retryMaxAttempts pgtype.Int4
@@ -4525,6 +4590,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				"task_id", util.UUIDToString(taskID), "error", perr)
 		} else if retryEligible(failureReason, parent) {
 			wantRetry = true
+			retryParent = parent
 			// Persist the reason-aware effective budget into the child so the
 			// retry chain self-describes (e.g. provider_network → max_attempts=3),
 			// rather than leaking a contradictory attempt=N/max_attempts=2 row.
@@ -4550,8 +4616,32 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	var task db.AgentTaskQueue
 	var retried *db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		poolRetry := wantRetry && retryParent.RuntimeBindingMode == runtimepool.BindingPool
+		retryParams := db.CreateRetryTaskParams{
+			ID:                   taskID,
+			FireAt:               retryFireAt,
+			MaxAttempts:          retryMaxAttempts,
+			RuntimeMcpOverlay:    retryOverlay.Overlay,
+			RuntimeConnectedApps: retryOverlay.ConnectedApps,
+		}
+		var poolMemberLock poolTaskCreateMemberLock
+		var poolAgent db.Agent
+		if poolRetry {
+			var lockErr error
+			poolMemberLock, lockErr = s.lockPoolTaskCreateMember(ctx, qtx, newPoolRetryTaskCreateInput(retryParent, retryParams))
+			if lockErr != nil {
+				return lockErr
+			}
+		}
 		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
 			return err
+		}
+		if poolRetry {
+			var lockErr error
+			poolAgent, lockErr = s.lockPoolTaskCreateAgent(ctx, qtx, newPoolRetryTaskCreateInput(retryParent, retryParams), poolMemberLock)
+			if lockErr != nil {
+				return lockErr
+			}
 		}
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
 			ID:                    taskID,
@@ -4634,13 +4724,13 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		// the just-failed parent row (same tx), so it inherits chat_input_task_id
 		// and the bumped chat-retry priority; broadcast/notify happen after commit.
 		if wantRetry {
-			child, cerr := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
-				ID:                   taskID,
-				FireAt:               retryFireAt,
-				MaxAttempts:          retryMaxAttempts,
-				RuntimeMcpOverlay:    retryOverlay.Overlay,
-				RuntimeConnectedApps: retryOverlay.ConnectedApps,
-			})
+			var child db.AgentTaskQueue
+			var cerr error
+			if poolRetry {
+				child, cerr = s.createPoolRetryTaskLocked(ctx, qtx, newPoolRetryTaskCreateInput(t, retryParams), poolMemberLock.member, poolAgent)
+			} else {
+				child, cerr = qtx.CreateRetryTask(ctx, retryParams)
+			}
 			if cerr != nil {
 				return fmt.Errorf("create retry task: %w", cerr)
 			}
@@ -4710,7 +4800,17 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			"max_attempts", retried.MaxAttempts,
 			"status", retried.Status,
 		)
-		if retried.Status == "queued" {
+		if retried.RuntimeBindingMode == runtimepool.BindingPool {
+			if retried.Status == runtimepool.StatusWaitingRuntime {
+				if _, assignErr := s.AssignPoolWorkspace(ctx, retried.PlacementWorkspaceID, retried.ID); assignErr != nil {
+					slog.Warn("assign Pool retry after committed failure",
+						"parent_task_id", util.UUIDToString(task.ID),
+						"child_task_id", util.UUIDToString(retried.ID),
+						"error", assignErr,
+					)
+				}
+			}
+		} else if retried.Status == "queued" {
 			s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, *retried)
 			s.NotifyTaskEnqueued(ctx, *retried)
 		}
@@ -4951,13 +5051,20 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	if delay := retryDelayForAttempt(reason, parent.Attempt); delay > 0 {
 		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
 	}
-	child, err := s.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{
+	retryParams := db.CreateRetryTaskParams{
 		ID:                   parent.ID,
 		FireAt:               retryFireAt,
 		MaxAttempts:          pgtype.Int4{Int32: retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
-	})
+	}
+	var child db.AgentTaskQueue
+	var err error
+	if parent.RuntimeBindingMode == runtimepool.BindingPool {
+		child, err = s.createPoolTask(ctx, newPoolRetryTaskCreateInput(parent, retryParams))
+	} else {
+		child, err = s.Queries.CreateRetryTask(ctx, retryParams)
+	}
 	if err != nil {
 		slog.Warn("task auto-retry failed",
 			"parent_task_id", util.UUIDToString(parent.ID),
@@ -4978,7 +5085,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// queued first, then notify the daemon — see EnqueueTaskForIssue for ordering
 	// rationale. A deferred child (backoff armed) stays inert until
 	// PromoteDueDeferredTasksForRuntime fires its queued event + wakeup.
-	if child.Status == "queued" {
+	if child.RuntimeBindingMode != runtimepool.BindingPool && child.Status == "queued" {
 		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, child)
 		s.NotifyTaskEnqueued(ctx, child)
 	}
@@ -5126,6 +5233,64 @@ func (s *TaskService) rerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	if freshSession && targetAgent.RuntimeBindingMode != runtimepool.BindingPool {
 		return nil, ErrFreshSessionRequiresPool
 	}
+	if targetAgent.RuntimeBindingMode == runtimepool.BindingPool {
+		if s.TxStarter == nil {
+			return nil, errPoolTaskTransactionRequired
+		}
+		poolInput, inputErr := s.newPoolManualRerunTaskInput(
+			ctx, issue, targetAgent, triggerCommentID, coalescedCommentIDs,
+			isLeader, squadID, actorUserID, sourceTaskID, freshSession,
+		)
+		if inputErr != nil {
+			return nil, inputErr
+		}
+
+		var cancelled []db.AgentTaskQueue
+		var task db.AgentTaskQueue
+		if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+			memberLock, err := s.lockPoolTaskCreateMember(ctx, qtx, poolInput)
+			if err != nil {
+				return err
+			}
+			lockedAgent, err := s.lockPoolTaskCreateAgent(ctx, qtx, poolInput, memberLock)
+			if err != nil {
+				return err
+			}
+			cancelled, err = qtx.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
+				IssueID: issueID,
+				AgentID: agentID,
+			})
+			if err != nil {
+				return fmt.Errorf("cancel prior Pool rerun Tasks: %w", err)
+			}
+			task, err = s.createPoolTaskAfterLocks(ctx, qtx, poolInput, memberLock.member, lockedAgent)
+			if err != nil {
+				return fmt.Errorf("create Pool rerun Task: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+
+		// Cancellation and replacement are now durable. Publish the cancellation
+		// lifecycle (including old Runtime cache bumps) before the single
+		// Workspace allocator call for the replacement.
+		s.broadcastPoolRerunCancelledTasks(ctx, cancelled)
+		if task.Status == runtimepool.StatusWaitingRuntime {
+			if _, err := s.AssignPoolWorkspace(ctx, task.PlacementWorkspaceID, task.ID); err != nil {
+				return &task, err
+			}
+		}
+		slog.Info("issue Pool rerun enqueued",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(issueID),
+			"agent_id", util.UUIDToString(agentID),
+			"source_task_id", util.UUIDToString(sourceTaskID),
+			"is_leader", isLeader,
+			"cancelled_prior", len(cancelled),
+		)
+		return &task, nil
+	}
 
 	// Cancel only the target agent's active/queued tasks on this issue.
 	cancelled, err := s.Queries.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
@@ -5236,6 +5401,105 @@ func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agen
 		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, pgtype.Timestamptz{})
 	}
 	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID)
+}
+
+func poolManualRerunPlacement(sourceTaskID pgtype.UUID, freshSession bool) PoolPlacementRequest {
+	return PoolPlacementRequest{
+		RerunOfTaskID:        sourceTaskID,
+		ForceFreshSession:    true,
+		ExplicitFreshSession: freshSession,
+	}
+}
+
+func (s *TaskService) newPoolManualRerunTaskInput(
+	ctx context.Context,
+	issue db.Issue,
+	agent db.Agent,
+	triggerCommentID pgtype.UUID,
+	coalescedCommentIDs []pgtype.UUID,
+	isLeader bool,
+	squadID pgtype.UUID,
+	actorUserID pgtype.UUID,
+	rerunOfTaskID pgtype.UUID,
+	freshSession bool,
+) (PoolTaskCreateInput, error) {
+	if agent.ArchivedAt.Valid {
+		return PoolTaskCreateInput{}, errors.New("agent is archived")
+	}
+	directAssignee := issue.AssigneeType.String == "agent" && issue.AssigneeID == agent.ID
+	source := attribution.SourceDelegation
+	if directAssignee {
+		source = attribution.SourceCommentSource
+		isLeader = false
+		squadID = pgtype.UUID{}
+	}
+	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, source, actorUserID)
+	var err error
+	attr, err = s.applyAttributionFallback(ctx, attr, agent)
+	if err != nil {
+		return PoolTaskCreateInput{}, err
+	}
+	overlay := s.buildRuntimeMCPOverlay(ctx, attr.UserID, agent)
+	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+	createParams := db.CreateAgentTaskParams{
+		AgentID:              agent.ID,
+		IssueID:              issue.ID,
+		Priority:             priorityToInt(issue.Priority),
+		TriggerCommentID:     triggerCommentID,
+		CoalescedCommentIds:  coalescedCommentIDs,
+		TriggerSummary:       s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
+		ForceFreshSession:    pgtype.Bool{Bool: true, Valid: true},
+		IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
+		SquadID:              squadID,
+		OriginatorUserID:     attr.UserID,
+		AccountableUserID:    attr.AccountableUserID,
+		RuleVersionID:        attr.RuleVersionID,
+		RerunOfTaskID:        rerunOfTaskID,
+		RuntimeMcpOverlay:    overlay.Overlay,
+		RuntimeConnectedApps: overlay.ConnectedApps,
+		OriginatorSource:     attrSource,
+		DelegatedFromTaskID:  attrDelegatedFrom,
+		TriggerEvidenceKind:  attrEvidenceKind,
+		TriggerEvidenceRefID: attrEvidenceRef,
+		HeadSha:              headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
+	}
+	placement := poolManualRerunPlacement(rerunOfTaskID, freshSession)
+	placement.AgentID = agent.ID
+	placement.IssueID = issue.ID
+	input := PoolTaskCreateInput{
+		AgentID:          agent.ID,
+		WorkspaceID:      issue.WorkspaceID,
+		OriginatorUserID: attr.UserID,
+		Placement:        placement,
+		Insert: func(ctx context.Context, qtx *db.Queries, routing PoolRoutingSnapshot) (db.AgentTaskQueue, error) {
+			return insertPoolAgentTask(ctx, qtx, createParams, routing)
+		},
+	}
+	if rerunOfTaskID.Valid {
+		input.BeforePlacement = func(ctx context.Context, qtx *db.Queries, _ db.Member, lockedAgent db.Agent) error {
+			sourceTask, err := qtx.LockPoolRerunSourceTask(ctx, rerunOfTaskID)
+			if err != nil {
+				return fmt.Errorf("lock Pool rerun source Task: %w", err)
+			}
+			if sourceTask.IssueID != issue.ID || sourceTask.AgentID != lockedAgent.ID {
+				return errors.New("Pool rerun source changed before creation")
+			}
+			return nil
+		}
+	}
+	return input, nil
+}
+
+func (s *TaskService) broadcastPoolRerunCancelledTasks(ctx context.Context, cancelled []db.AgentTaskQueue) {
+	for _, task := range cancelled {
+		s.captureTaskCancelled(ctx, task)
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
+	}
+	// The replacement's AssignPoolWorkspace call is the one Workspace wake for
+	// this atomic lifecycle. Preserve old Runtime cache/daemon invalidation here
+	// without triggering a second allocator call.
+	s.notifyTaskRuntimesFinished(cancelled)
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of
@@ -5618,18 +5882,7 @@ func (s *TaskService) wakePoolWorkspaceAfterTerminal(ctx context.Context, worksp
 // Coalesce by runtime so cancelling many tasks on one machine produces one
 // cache bump and one websocket hint rather than a burst of identical work.
 func (s *TaskService) notifyTasksFinished(tasks []db.AgentTaskQueue) {
-	seen := make(map[string]struct{}, len(tasks))
-	for _, task := range tasks {
-		if !task.RuntimeID.Valid {
-			continue
-		}
-		runtimeKey := util.UUIDToString(task.RuntimeID)
-		if _, ok := seen[runtimeKey]; ok {
-			continue
-		}
-		seen[runtimeKey] = struct{}{}
-		s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
-	}
+	s.notifyTaskRuntimesFinished(tasks)
 
 	ctx := context.Background()
 	seenWorkspaces := make(map[string]struct{}, len(tasks))
@@ -5653,6 +5906,21 @@ func (s *TaskService) notifyTasksFinished(tasks []db.AgentTaskQueue) {
 		}
 		seenWorkspaces[workspaceKey] = struct{}{}
 		s.wakePoolWorkspaceAfterTerminal(ctx, workspaceID)
+	}
+}
+
+func (s *TaskService) notifyTaskRuntimesFinished(tasks []db.AgentTaskQueue) {
+	seen := make(map[string]struct{}, len(tasks))
+	for _, task := range tasks {
+		if !task.RuntimeID.Valid {
+			continue
+		}
+		runtimeKey := util.UUIDToString(task.RuntimeID)
+		if _, ok := seen[runtimeKey]; ok {
+			continue
+		}
+		seen[runtimeKey] = struct{}{}
+		s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
 	}
 }
 

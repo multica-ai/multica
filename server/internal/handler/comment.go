@@ -2713,7 +2713,7 @@ func (h *Handler) routeReplyToParentAuthor(ctx context.Context, issue db.Issue, 
 		ID:          parent.AuthorID,
 		WorkspaceID: issue.WorkspaceID,
 	})
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || !service.IsAgentRoutable(agent) || agent.ArchivedAt.Valid {
 		return commentAgentTrigger{}, false
 	}
 	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.effectiveInvoker(), uuidToString(issue.WorkspaceID)) {
@@ -2831,7 +2831,7 @@ func (h *Handler) routeConversationContinuationToAgent(ctx context.Context, issu
 		ID:          agentID,
 		WorkspaceID: issue.WorkspaceID,
 	})
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || !service.IsAgentRoutable(agent) || agent.ArchivedAt.Valid {
 		return commentAgentTrigger{}, false
 	}
 	if !h.canInvokeAgent(ctx, agent, "member", memberID, memberID, uuidToString(issue.WorkspaceID)) {
@@ -2887,7 +2887,7 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 		ID:          squad.LeaderID,
 		WorkspaceID: issue.WorkspaceID,
 	})
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || !service.IsAgentRoutable(agent) || agent.ArchivedAt.Valid {
 		return commentAgentTrigger{}, false
 	}
 	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.effectiveInvoker(), uuidToString(issue.WorkspaceID)) {
@@ -3048,7 +3048,7 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				blockTarget("squad", m.ID, ReasonTargetUnavailable)
 				continue
 			}
-			if !agent.RuntimeID.Valid {
+			if !service.IsAgentRoutable(agent) {
 				// Unbound, not offline: the leader survived its runtime's
 				// deletion and needs a new one (MUL-5559).
 				blockTarget("squad", m.ID, ReasonAgentRuntimeRequired)
@@ -3103,7 +3103,7 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			blockTarget("agent", m.ID, ReasonTargetUnavailable)
 			continue
 		}
-		if !agent.RuntimeID.Valid {
+		if !service.IsAgentRoutable(agent) {
 			// Unbound, not offline: there is no machine to bring back, so the
 			// user needs "bind a runtime", not "reconnect it" (MUL-5559).
 			blockTarget("agent", m.ID, ReasonAgentRuntimeRequired)

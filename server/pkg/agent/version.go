@@ -1,12 +1,29 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 )
+
+// ReadRuntimeCLIVersion reads the daemon-reported CLI version from a
+// Runtime's JSON metadata. Invalid, missing, or non-string values fail closed
+// as an empty version so all callers share the same capability decision.
+func ReadRuntimeCLIVersion(metadata []byte) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	var value struct {
+		CLIVersion string `json:"cli_version"`
+	}
+	if err := json.Unmarshal(metadata, &value); err != nil {
+		return ""
+	}
+	return value.CLIVersion
+}
 
 // MinVersions defines the minimum required CLI version for each agent type.
 // Versions below these will be rejected during daemon registration.
