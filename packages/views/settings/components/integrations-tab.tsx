@@ -22,8 +22,9 @@ import { IntegrationChannelIcon } from "./integration-channel-icon";
 // — currently Lark, Composio, Slack, DingTalk, WeCom, Telegram, ShareCRM, and
 // the self-hosted Git providers (Forgejo / Gitea / GitLab), with Linear etc.
 // to follow — lives in here under its own section heading so additional
-// integrations slot in without changing the IA. IntegrationsTab is just the
-// host; each integration owns its own description and install flow.
+// integrations slot in without changing the IA. Section order matches the
+// product docs channels overview. IntegrationsTab is just the host; each
+// integration owns its own description and install flow.
 export function IntegrationsTab() {
   const { t } = useT("settings");
 
