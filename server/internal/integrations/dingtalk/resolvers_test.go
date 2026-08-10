@@ -12,16 +12,23 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-type captureChatSession struct{ append engine.AppendInput }
+type captureChatSession struct {
+	append engine.AppendInput
+	media  engine.BindMediaInput
+}
 
 func (c *captureChatSession) EnsureSession(context.Context, engine.EnsureSessionInput) (pgtype.UUID, error) {
 	return pgtype.UUID{}, nil
 }
+func (c *captureChatSession) MarkPendingFresh(context.Context, pgtype.UUID) error { return nil }
 func (c *captureChatSession) AppendUserMessage(_ context.Context, in engine.AppendInput) (engine.AppendResult, error) {
 	c.append = in
 	return engine.AppendResult{}, nil
 }
-func (c *captureChatSession) BindMediaRefs(context.Context, engine.BindMediaInput) error { return nil }
+func (c *captureChatSession) BindMediaRefs(_ context.Context, in engine.BindMediaInput) error {
+	c.media = in
+	return nil
+}
 
 func TestNewDingTalkResolverSetUsesDatabaseBackedIssueOrigin(t *testing.T) {
 	set := NewDingTalkResolverSet(nil, nil, nil, nil, nil)
@@ -40,7 +47,7 @@ func TestSessionBinder_MapsCommandTextAndMediaDeadline(t *testing.T) {
 		SessionID: session, Sender: sender, InstallationID: inst, ClaimToken: claim,
 		MediaPendingSeconds: 45,
 		Message: channel.InboundMessage{
-			MessageID: "m1", Text: "[Image]\n/issue fix login", CommandText: "/issue fix login",
+			MessageID: "m1", Text: "[Image]\n/issue fix login", CommandText: "/issue fix login", ForceFresh: true,
 		},
 	})
 	if err != nil {
@@ -50,8 +57,28 @@ func TestSessionBinder_MapsCommandTextAndMediaDeadline(t *testing.T) {
 	if in.Body != "[Image]\n/issue fix login" || in.CommandText != "/issue fix login" {
 		t.Fatalf("body/command = %q/%q", in.Body, in.CommandText)
 	}
-	if in.MediaPendingSeconds != 45 || in.SessionID != session || in.Sender != sender || in.InstallationID != inst || in.ClaimToken != claim {
+	if in.MediaPendingSeconds != 45 || !in.ForceFresh || in.SessionID != session || in.Sender != sender || in.InstallationID != inst || in.ClaimToken != claim {
 		t.Fatalf("mapped append input = %+v", in)
+	}
+}
+
+func TestSessionBinder_MapsMediaBodyAndIssueTarget(t *testing.T) {
+	var message, session, workspace, sender, issue pgtype.UUID
+	message.Bytes[0], session.Bytes[0], workspace.Bytes[0], sender.Bytes[0], issue.Bytes[0] = 1, 2, 3, 4, 5
+	message.Valid, session.Valid, workspace.Valid, sender.Valid, issue.Valid = true, true, true, true, true
+	ref := channel.MediaRef{Type: channel.MsgTypeImage, InlinePlaceholder: "[Image]", InlineIndex: 0}
+	base := pgtype.Text{String: "[Image]\nfix login", Valid: true}
+	capture := &captureChatSession{}
+	binder := &sessionBinder{session: capture}
+	if err := binder.BindMedia(context.Background(), engine.BindMediaParams{
+		MessageID: message, SessionID: session, WorkspaceID: workspace, Sender: sender,
+		IssueID: issue, IssueDescriptionBase: base, IssueCommandText: "/issue fix login", Body: "[Image]\nfix login", MediaRefs: []channel.MediaRef{ref},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := capture.media
+	if got.MessageID != message || got.SessionID != session || got.WorkspaceID != workspace || got.Sender != sender || got.IssueID != issue || got.IssueDescriptionBase != base || got.IssueCommandText != "/issue fix login" || got.Body != "[Image]\nfix login" || len(got.MediaRefs) != 1 || got.MediaRefs[0] != ref {
+		t.Fatalf("mapped media input = %+v", got)
 	}
 }
 

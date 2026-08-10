@@ -25,7 +25,8 @@ import {
   useArchiveCompletedInbox,
 } from "@multica/core/inbox/mutations";
 
-import { IssueDetail } from "../../issues/components";
+import { IssueDetail, issueHighlightMementoKey } from "../../issues/components";
+import { useViewStateWriter } from "../../platform";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useNavigation } from "../../navigation";
 import { toast } from "sonner";
@@ -56,7 +57,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
@@ -202,7 +203,7 @@ export function InboxPage() {
     id: "multica_inbox_layout",
   });
 
-  const isMobile = useIsMobile();
+  const isCompact = useIsCompact();
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
@@ -252,8 +253,27 @@ export function InboxPage() {
     }
   }, [selectedId]);
 
+  const writeViewState = useViewStateWriter();
+  // Bumped when the already-open notification row is re-clicked; threaded to
+  // IssueDetail so it replays the comment-highlight landing without a
+  // remount. Selection changes don't need it — they remount the detail (key
+  // by issue) and a fresh mount with a cleared memento entry lands by itself.
+  const [highlightRequestToken, setHighlightRequestToken] = useState(0);
   const handleSelect = (item: InboxItem) => {
-    setSelectedKey(item.issue_id ?? item.id);
+    const nextKey = item.issue_id ?? item.id;
+    // Every click on a notification row is a fresh deep-link intent: clear
+    // the "highlight already landed" memento entry so the comment jump runs
+    // again even if this issue's detail was opened (and its landing
+    // consumed) before. Selection restored from the URL on a remount goes
+    // through the effects above, not through here, so a tab switch back
+    // keeps the entry and does NOT re-jump.
+    if (item.issue_id) {
+      writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
+      if (nextKey === selectedKey) {
+        setHighlightRequestToken((t) => t + 1);
+      }
+    }
+    setSelectedKey(nextKey);
   };
 
   const handleMarkRead = (id: string) => {
@@ -482,14 +502,14 @@ export function InboxPage() {
     </>
   );
 
-  // Phone only: the detail fills the screen there, so the trip back to the list
-  // has to live inside it. On desktop the list is still on screen in the left
-  // panel and needs no back control at all.
+  // Compact widths only: the detail fills the screen there, so the trip back to
+  // the list has to live inside it. On desktop the list is still on screen in
+  // the left panel and needs no back control at all.
   //
-  // The detail owns the whole phone screen in four states — loaded, loading,
+  // The detail owns the whole compact screen in four states — loaded, loading,
   // not-found and crashed — so this control is threaded into all four below.
   // Miss one and that state strands the reader with no way out.
-  const mobileBackAction = isMobile ? (
+  const compactBackAction = isCompact ? (
     <Button
       variant="ghost"
       size="sm"
@@ -503,8 +523,8 @@ export function InboxPage() {
     </Button>
   ) : undefined;
 
-  const mobileBackBar = mobileBackAction ? (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">{mobileBackAction}</div>
+  const compactBackBar = compactBackAction ? (
+    <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">{compactBackAction}</div>
   ) : null;
 
   const detailContent = selected?.issue_id ? (
@@ -517,9 +537,9 @@ export function InboxPage() {
       // The default fallback is a bare message card. On a phone it would be the
       // only thing on screen, so it has to carry the way back too — the bar is
       // the point here, the message is whatever the boundary caught.
-      fallback={mobileBackAction ? ({ error }) => (
+      fallback={compactBackAction ? ({ error }) => (
         <div className="flex flex-1 min-h-0 flex-col">
-          {mobileBackBar}
+          {compactBackBar}
           <div className="flex flex-1 min-h-0 items-center justify-center px-4 text-center text-body text-muted-foreground">
             {error.message}
           </div>
@@ -532,7 +552,8 @@ export function InboxPage() {
         defaultSidebarOpen={false}
         layoutId="multica_inbox_issue_detail_layout"
         highlightCommentId={selected.details?.comment_id ?? undefined}
-        leadingAction={mobileBackAction}
+        highlightRequestToken={highlightRequestToken}
+        leadingAction={compactBackAction}
         onDelete={() => {
           // Issue deletion CASCADE-deletes the inbox item server-side, and the
           // issue:deleted WS event prunes it from the inbox cache. Just clear
@@ -612,9 +633,9 @@ export function InboxPage() {
     </div>
   ) : null;
 
-  // -- Mobile layout: list / detail toggle -----------------------------------
+  // -- Compact layout: list / detail toggle -----------------------------------
 
-  if (isMobile) {
+  if (isCompact) {
     if (viewLoading) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
@@ -636,7 +657,7 @@ export function InboxPage() {
       );
     }
 
-    // Mobile: show detail full-screen when an item is selected. The two kinds
+    // Compact: show detail full-screen when an item is selected. The two kinds
     // of selection get their chrome from different places, so they render
     // differently — `InboxItem.issue_id` is nullable and a null one is a plain
     // notification (a failed quick-create, say), not an issue.
@@ -657,13 +678,13 @@ export function InboxPage() {
       // slot and no scroller of its own, so this branch keeps supplying both.
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          {mobileBackBar}
+          {compactBackBar}
           <div className="flex-1 min-h-0 overflow-y-auto">{detailContent}</div>
         </div>
       );
     }
 
-    // Mobile: full-screen list
+    // Compact: full-screen list
     return <div className="flex flex-1 flex-col min-h-0">{listPanel}</div>;
   }
 

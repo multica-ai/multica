@@ -1,13 +1,6 @@
-import { useState, useCallback } from "react";
 import { hashKey, useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { api } from "../api";
-import {
-  issueKeys,
-  ISSUE_PAGE_SIZE,
-  type AssigneeGroupedIssuesFilter,
-  type IssueSortParam,
-  type MyIssuesFilter,
-} from "./queries";
+import { issueKeys } from "./queries";
 import { projectKeys } from "../projects/queries";
 import { inboxKeys } from "../inbox/queries";
 import {
@@ -19,11 +12,7 @@ import {
   type IssueTableRowCache,
 } from "./cache-coordinator";
 import { issueChangedDims } from "./surface/membership";
-import {
-  addIssueToBuckets,
-  getBucket,
-  setBucket,
-} from "./cache-helpers";
+import { addIssueToBuckets } from "./cache-helpers";
 import {
   cleanupDeletedIssueCaches,
   collectDeletedIssueCacheMetadata,
@@ -36,7 +25,7 @@ import {
 import { useWorkspaceId } from "../hooks";
 import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
-import type { GroupedIssuesResponse, InboxItem, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
+import type { InboxItem, Issue, IssueReaction } from "../types";
 import type {
   CreateIssueRequest,
   ListIssuesCache,
@@ -74,125 +63,6 @@ export type UpdateIssueMutationInput = {
 // ---------------------------------------------------------------------------
 // Per-status pagination
 // ---------------------------------------------------------------------------
-
-/**
- * Paginate one status column into the cache. Works for both the workspace
- * issue list and per-scope My Issues lists (pass `myIssues` to target the
- * latter).
- *
- * `sort` must match the sort the consuming `useQuery` was called with —
- * the query key embeds it (see `listSorted` / `myListSorted`), so a load-more
- * with the wrong sort would patch a stale cache entry that nobody is
- * subscribed to. It is also threaded into the API request so the appended
- * page lines up with the server-side ordering of the existing items.
- */
-export function useLoadMoreByStatus(
-  status: IssueStatus,
-  myIssues?: { scope: string; filter: MyIssuesFilter },
-  sort?: IssueSortParam,
-) {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  const [isLoading, setIsLoading] = useState(false);
-
-  const activeKey = myIssues
-    ? issueKeys.myListSorted(wsId, myIssues.scope, myIssues.filter, sort)
-    : issueKeys.listSorted(wsId, sort);
-  const cache = qc.getQueryData<ListIssuesCache>(activeKey);
-  const bucket = cache?.byStatus[status];
-  const loaded = bucket?.issues.length ?? 0;
-  const total = bucket?.total ?? 0;
-  const hasMore = loaded < total;
-
-  const loadMore = useCallback(async () => {
-    if (isLoading || !hasMore) return;
-    setIsLoading(true);
-    try {
-      const res = await api.listIssues({
-        status,
-        limit: ISSUE_PAGE_SIZE,
-        offset: loaded,
-        ...sort,
-        ...myIssues?.filter,
-      });
-      qc.setQueryData<ListIssuesCache>(activeKey, (old) => {
-        if (!old) return old;
-        const prev = getBucket(old, status);
-        const existingIds = new Set(prev.issues.map((i) => i.id));
-        const appended = res.issues.filter((i) => !existingIds.has(i.id));
-        return setBucket(old, status, {
-          issues: [...prev.issues, ...appended],
-          total: res.total,
-        });
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [qc, activeKey, status, loaded, hasMore, isLoading, myIssues?.filter, sort]);
-
-  return { loadMore, hasMore, isLoading, total };
-}
-
-/**
- * Paginate one assignee-grouped board column into the cache. `queryKey`
- * already pins the active cache entry (it's the same object the consuming
- * `useQuery` registered), so the cache lookup and `setQueryData` target the
- * right row. `sort` is threaded into the API request so the appended page
- * lines up with the server-side ordering of the existing items.
- */
-export function useLoadMoreByAssigneeGroup(
-  group: Pick<IssueAssigneeGroup, "id" | "assignee_type" | "assignee_id">,
-  queryKey: QueryKey,
-  filter: AssigneeGroupedIssuesFilter,
-  sort?: IssueSortParam,
-) {
-  const qc = useQueryClient();
-  const [isLoading, setIsLoading] = useState(false);
-
-  const cache = qc.getQueryData<GroupedIssuesResponse>(queryKey);
-  const cachedGroup = cache?.groups.find((g) => g.id === group.id);
-  const loaded = cachedGroup?.issues.length ?? 0;
-  const total = cachedGroup?.total ?? 0;
-  const hasMore = loaded < total;
-
-  const loadMore = useCallback(async () => {
-    if (isLoading || !hasMore) return;
-    setIsLoading(true);
-    try {
-      const res = await api.listGroupedIssues({
-        group_by: "assignee",
-        limit: ISSUE_PAGE_SIZE,
-        offset: loaded,
-        ...sort,
-        ...filter,
-        group_assignee_type: group.assignee_type ?? "none",
-        group_assignee_id: group.assignee_id ?? undefined,
-      });
-      const nextGroup = res.groups[0];
-      if (!nextGroup) return;
-
-      qc.setQueryData<GroupedIssuesResponse>(queryKey, (old) => {
-        if (!old) return old;
-        return {
-          groups: old.groups.map((existing) => {
-            if (existing.id !== nextGroup.id) return existing;
-            const existingIds = new Set(existing.issues.map((issue) => issue.id));
-            const appended = nextGroup.issues.filter((issue) => !existingIds.has(issue.id));
-            return {
-              ...existing,
-              issues: [...existing.issues, ...appended],
-              total: nextGroup.total,
-            };
-          }),
-        };
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [filter, group.assignee_id, group.assignee_type, hasMore, isLoading, loaded, qc, queryKey, sort]);
-
-  return { loadMore, hasMore, isLoading, total };
-}
 
 // ---------------------------------------------------------------------------
 // Issue CRUD
@@ -239,10 +109,18 @@ export function useUpdateIssue() {
     },
     onMutate: ({ id, move_intent: _moveIntent, ...data }) => {
       // suppress_run / handoff_note are write-time control fields, not Issue
-      // columns — they steer enqueue/injection on the server and must never be
-      // written into the query cache (MUL-3375). Strip them from the patch; the
-      // mutationFn above still sends the full payload to the API.
-      const { suppress_run: _suppressRun, handoff_note: _handoffNote, ...patch } = data;
+      // columns. description_base is merge metadata, while description itself
+      // is resolved against that base on the server and therefore is not safe
+      // to predict optimistically. Keep the authoritative raw description in
+      // cache so hidden channel-media markers remain available as the base for
+      // a rapid follow-up edit. mutationFn still sends the full payload.
+      const {
+        suppress_run: _suppressRun,
+        handoff_note: _handoffNote,
+        description: _description,
+        description_base: _descriptionBase,
+        ...patch
+      } = data;
       // Fire-and-forget cancelQueries — keeps onMutate synchronous so the
       // cache update happens in the same tick as mutate(). Awaiting would
       // yield to the event loop, letting @dnd-kit reset its visual state
@@ -338,6 +216,7 @@ export function useUpdateIssue() {
       const {
         suppress_run: _suppressRun,
         handoff_note: _handoffNote,
+        description_base: _descriptionBase,
         move_intent: _moveIntent,
         id: _id,
         ...intent
@@ -510,9 +389,17 @@ export function useBatchUpdateIssues() {
       updates: UpdateIssueRequest;
     }) => api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
-      // Control fields steer the server; they are not Issue columns and must
-      // not enter the cache (MUL-3375). mutationFn still sends them.
-      const { suppress_run: _suppressRun, handoff_note: _handoffNote, ...patch } = updates;
+      // Control and description-merge fields are not safe optimistic cache
+      // patches. The server resolves description against description_base, so
+      // preserve the authoritative raw description (including media markers)
+      // until a refetch returns the committed result.
+      const {
+        suppress_run: _suppressRun,
+        handoff_note: _handoffNote,
+        description: _description,
+        description_base: _descriptionBase,
+        ...patch
+      } = updates;
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
       await qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
       await qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) });

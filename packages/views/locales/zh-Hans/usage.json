@@ -1,6 +1,10 @@
 {
-  "title": "用量",
-  "subtitle": "查看当前 Workspace 的 token 消耗和智能体运行情况。",
+  "title": "统计",
+  "tab_usage": "用量",
+  "header": {
+    "timezone_and_updated": "{{tz}} · 更新于 {{time}}",
+    "refresh": "刷新"
+  },
   "filter": {
     "project_label": "项目",
     "all_projects": "全部项目",
@@ -30,7 +34,6 @@
     "metric_tokens": "Token",
     "metric_time": "运行时长",
     "metric_tasks": "task 数",
-    "metric_errors": "错误",
     "no_data": "所选时间范围内暂无消耗。",
     "metric_label": "指标"
   },
@@ -43,6 +46,11 @@
     "partial_label": "{{range}}（未满 · 已过 {{covered}} / 7 天）"
   },
   "errors": {
+    "kpi_failed_label": "失败 task · {{days}}天",
+    "kpi_failed_hint": "共 {{total}} 次运行",
+    "kpi_rate_label": "失败率 · {{days}}天",
+    "kpi_agents_label": "受影响智能体 · {{days}}天",
+    "kpi_agents_hint": "最多 {{name}} · {{count}} 次",
     "tooltip_rate": "错误率",
     "class": {
       "auth": "认证",

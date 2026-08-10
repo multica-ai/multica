@@ -16,8 +16,7 @@ const issueCommandPrefix = "/issue"
 //   - `/issue <title>`            → Title = "<title>", Description = ""
 //   - `/issue <title>\n<rest...>` → Title = "<title>", Description = "<rest>"
 //   - `/issue` (alone, no title)  → Title = "", Description = ""
-//     (the caller falls back to the previous user message; the parser does not
-//     do that lookup itself because it has no DB access)
+//     (the Router returns a usage result; it never infers a title from history)
 //
 // Only the first non-empty line is considered: a body that begins with blank
 // lines and then `/issue ...` still qualifies. A body whose first non-empty
@@ -58,18 +57,94 @@ func ParseIssueCommand(body string) (*IssueCommand, bool) {
 	return &IssueCommand{Title: title, Description: description}, true
 }
 
-// titleFromPreviousMessage derives a title from a prior chat message, used for
-// the bare `/issue` fallback. The previous message may itself be an `/issue …`
-// invocation (two commands in a row), in which case stripping the prefix yields
-// the real intent; otherwise the first non-empty line is the title.
-func titleFromPreviousMessage(body string) string {
-	if cmd, ok := ParseIssueCommand(body); ok {
-		return cmd.Title
+// issueDescriptionFromCommandBody removes the /issue directive line from the
+// full normalized message while preserving the layout that follows it. Unlike
+// CommandText, the full body may still contain adapter-generated inline media
+// placeholders. Keeping those placeholders in the initial issue description
+// gives the detached media binder stable positions to materialize later.
+//
+// Content before the directive is deliberately excluded. Some adapters enrich
+// Body with quoted context while keeping CommandText as the user's own command;
+// copying that prefix into the issue would change the existing command contract.
+func issueDescriptionFromCommandBody(body, commandText, fallback string) string {
+	_, end, ok := issueCommandLineBounds(body, commandText)
+	if !ok {
+		return fallback
 	}
-	for _, line := range strings.Split(body, "\n") {
-		if t := strings.TrimSpace(line); t != "" {
-			return t
+	return strings.TrimSpace(body[end:])
+}
+
+type textLineBounds struct {
+	start int
+	end   int
+}
+
+// issueCommandLineBounds locates the actual user-authored /issue directive in
+// the normalized body. Adapters may prepend enriched history containing older
+// /issue lines, so matching the first token-bounded directive is insufficient.
+// CommandText is the un-enriched command source: count identical directive
+// lines there, then select the corresponding first occurrence in the body's
+// user-authored suffix. This also remains stable when the description repeats
+// the exact directive line.
+func issueCommandLineBounds(body, commandText string) (start, end int, ok bool) {
+	expected, ok := firstIssueCommandLine(commandText)
+	if !ok {
+		return 0, 0, false
+	}
+	commandOccurrences := countMatchingLines(commandText, expected)
+	candidates := matchingLineBounds(body, expected)
+	target := len(candidates) - commandOccurrences
+	if target < 0 || target >= len(candidates) {
+		return 0, 0, false
+	}
+	return candidates[target].start, candidates[target].end, true
+}
+
+func firstIssueCommandLine(commandText string) (string, bool) {
+	for _, line := range strings.Split(commandText, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, issueCommandPrefix) {
+			rest := trimmed[len(issueCommandPrefix):]
+			if rest == "" || rest[0] == ' ' || rest[0] == '\t' {
+				return trimmed, true
+			}
+		}
+		if trimmed != "" {
+			return "", false
 		}
 	}
-	return ""
+	return "", false
+}
+
+func countMatchingLines(text, expected string) int {
+	count := 0
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) == expected {
+			count++
+		}
+	}
+	return count
+}
+
+func matchingLineBounds(body, expected string) []textLineBounds {
+	bounds := make([]textLineBounds, 0, 1)
+	for offset := 0; offset <= len(body); {
+		lineEnd := strings.IndexByte(body[offset:], '\n')
+		next := len(body)
+		line := body[offset:]
+		if lineEnd >= 0 {
+			lineEnd += offset
+			line = body[offset:lineEnd]
+			next = lineEnd + 1
+		}
+
+		if strings.TrimSpace(line) == expected {
+			bounds = append(bounds, textLineBounds{start: offset, end: next})
+		}
+		if lineEnd < 0 {
+			break
+		}
+		offset = next
+	}
+	return bounds
 }

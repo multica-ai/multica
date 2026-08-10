@@ -3,6 +3,7 @@ package repocache
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -699,6 +700,132 @@ func TestCreateWorktreeMigratesLinkedWorktreeToIsolatedMetadata(t *testing.T) {
 	if strings.Contains(string(out), "worktree "+linked.Path+"\n") {
 		t.Fatalf("shared cache retained migrated worktree admin entry:\n%s", out)
 	}
+}
+
+func TestLocalCloneArgsOnlyDisablesHardlinksOnWindows(t *testing.T) {
+	t.Parallel()
+	const barePath, checkoutPath = "/cache/repo.git", "/task/repo"
+
+	for _, tt := range []struct {
+		goos          string
+		wantNoHardlnk bool
+	}{
+		{goos: "windows", wantNoHardlnk: true},
+		{goos: "linux"},
+		{goos: "darwin"},
+	} {
+		t.Run(tt.goos, func(t *testing.T) {
+			t.Parallel()
+			args := localCloneArgs(tt.goos, barePath, checkoutPath)
+			got := false
+			for _, arg := range args {
+				if arg == "--no-hardlinks" {
+					got = true
+				}
+			}
+			if got != tt.wantNoHardlnk {
+				t.Fatalf("localCloneArgs(%q) --no-hardlinks = %v, want %v (args: %v)", tt.goos, got, tt.wantNoHardlnk, args)
+			}
+			// Inserting a flag must never displace the trailing operands.
+			if src, dst := args[len(args)-2], args[len(args)-1]; src != barePath || dst != checkoutPath {
+				t.Fatalf("localCloneArgs(%q) operands = %q %q, want %q %q", tt.goos, src, dst, barePath, checkoutPath)
+			}
+		})
+	}
+}
+
+// TestIsolatedCheckoutCloneWithoutHardlinksIsIndependent runs the exact clone
+// invocation Windows Codex tasks now use (multica-ai/multica#6449) and proves
+// it still yields a usable checkout whose object files are private copies
+// rather than links back into the daemon-owned cache. Kept platform-agnostic
+// so Linux/macOS CI guards the Windows-only flag.
+func TestIsolatedCheckoutCloneWithoutHardlinksIsIndependent(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	baseCommit := gitRefCommit(t, barePath, getRemoteDefaultBranch(barePath))
+	checkoutPath := filepath.Join(t.TempDir(), "repo")
+
+	if out, err := runGitCombinedOutput(localCloneArgs("windows", barePath, checkoutPath)...); err != nil {
+		t.Fatalf("windows-shaped local clone failed: %s: %v", strings.TrimSpace(string(out)), err)
+	}
+	if out, err := runGitCombinedOutput("-C", checkoutPath, "checkout", "--detach", baseCommit); err != nil {
+		t.Fatalf("checkout base commit: %s: %v", strings.TrimSpace(string(out)), err)
+	}
+	if got := gitHead(t, checkoutPath); got != baseCommit {
+		t.Fatalf("checkout HEAD = %s, want %s", got, baseCommit)
+	}
+	if _, err := os.Stat(filepath.Join(checkoutPath, ".git", "objects", "info", "alternates")); !os.IsNotExist(err) {
+		t.Fatalf("clone must not borrow cache objects via alternates, err=%v", err)
+	}
+
+	assertObjectsAreNotHardLinked(t, barePath, checkoutPath)
+}
+
+// assertObjectsAreNotHardLinked fails if an object file present in both the
+// cache and the checkout is the same underlying file. os.SameFile compares
+// dev+inode on Unix and the volume serial + file index on Windows, either of
+// which identifies a hard link. Both "nothing in the cache" and "nothing in
+// common" are failures, so the assertion cannot pass vacuously.
+func assertObjectsAreNotHardLinked(t *testing.T, barePath, checkoutPath string) {
+	t.Helper()
+	cacheObjects := filepath.Join(barePath, "objects")
+	checkoutObjects := filepath.Join(checkoutPath, ".git", "objects")
+
+	names := objectFiles(t, cacheObjects)
+	if len(names) == 0 {
+		t.Fatal("cache has no object files; assertion would pass vacuously")
+	}
+	compared := 0
+	for _, rel := range names {
+		cloned, err := os.Stat(filepath.Join(checkoutObjects, rel))
+		if err != nil {
+			continue // repacked differently in the checkout; nothing to compare
+		}
+		cached, err := os.Stat(filepath.Join(cacheObjects, rel))
+		if err != nil {
+			t.Fatalf("stat cache object %s: %v", rel, err)
+		}
+		if os.SameFile(cached, cloned) {
+			t.Errorf("object %s is hard-linked to the shared cache", rel)
+		}
+		compared++
+	}
+	if compared == 0 {
+		t.Fatal("no cache object was found in the checkout; assertion would pass vacuously")
+	}
+}
+
+// objectFiles lists regular files under a Git objects directory, relative to
+// it, skipping the bookkeeping subdirectory that never holds object data.
+func objectFiles(t *testing.T, objectsDir string) []string {
+	t.Helper()
+	var found []string
+	err := filepath.WalkDir(objectsDir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if entry.Name() == "info" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(objectsDir, path)
+		if err != nil {
+			return err
+		}
+		found = append(found, rel)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", objectsDir, err)
+	}
+	return found
 }
 
 func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {

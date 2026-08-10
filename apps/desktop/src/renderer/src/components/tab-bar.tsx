@@ -256,6 +256,13 @@ function SortableTabItem({
       {...attributes}
       {...listeners}
       onClick={handleClick}
+      // Browser convention: middle click closes the tab. Pinned (and sole)
+      // tabs suppress the close affordance, so middle click follows suit.
+      onAuxClick={(e) => {
+        if (e.button !== 1 || !showCloseButton) return;
+        e.preventDefault();
+        handleClose(e);
+      }}
       aria-label={tab.pinned ? `${title} (pinned)` : title}
       data-tab-active={isActive ? "true" : undefined}
       data-tab-entering={isEntering ? "true" : undefined}

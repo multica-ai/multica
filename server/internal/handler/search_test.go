@@ -294,3 +294,110 @@ func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
 			fromCountMulti, scopedCountMulti)
 	}
 }
+
+// --- MUL-5824: cancelled work must not outrank live work ---
+
+// orderByClause returns everything after the final ORDER BY, so ranking-order
+// assertions cannot be satisfied by an expression that merely appears in the
+// SELECT list or the WHERE clause.
+func orderByClause(t *testing.T, query string) string {
+	t.Helper()
+	i := strings.LastIndex(query, "ORDER BY ")
+	if i == -1 {
+		t.Fatalf("query has no ORDER BY clause:\n%s", query)
+	}
+	return query[i+len("ORDER BY "):]
+}
+
+// The cancelled demotion must sort BEFORE the relevance tiers, not after.
+// As a tie-breaker it would be inert: statusRank only orders issues that
+// already landed in the same tier, so an exactly-titled cancelled issue
+// (tier 1) would still beat an in_progress title-contains match (tier 3).
+func TestBuildSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) {
+	orderBy := orderByClause(t, buildSearchQueryForTest(t, "login bug", []string{"login", "bug"}, 0, false, true))
+
+	cancelledAt := strings.Index(orderBy, "i.status = 'cancelled' AND NOT")
+	if cancelledAt == -1 {
+		t.Fatalf("ORDER BY has no cancelled demotion:\n%s", orderBy)
+	}
+
+	// "ELSE 9 END" terminates the relevance CASE (rankExpr).
+	relevanceEndsAt := strings.Index(orderBy, "ELSE 9 END")
+	if relevanceEndsAt == -1 {
+		t.Fatalf("ORDER BY has no relevance rank CASE:\n%s", orderBy)
+	}
+	if cancelledAt > relevanceEndsAt {
+		t.Errorf("cancelled demotion sorts after the relevance tiers, so a well-matching cancelled issue still outranks live work:\n%s", orderBy)
+	}
+
+	// The demotion must not replace the existing status ordering.
+	if !strings.Contains(orderBy, "WHEN 'in_progress' THEN 0") {
+		t.Errorf("statusRank was dropped from ORDER BY:\n%s", orderBy)
+	}
+	if !strings.Contains(orderBy, "i.updated_at DESC") {
+		t.Errorf("recency tie-breaker was dropped from ORDER BY:\n%s", orderBy)
+	}
+}
+
+// Searching an exact title or an exact identifier is unambiguous targeting —
+// the searcher already knows which issue they want, so demoting it would just
+// hide the row they asked for.
+func TestBuildSearchQuery_CancelledDirectHitExempt(t *testing.T) {
+	// $1 is the exact (non-wildcard) phrase param.
+	textOnly := orderByClause(t, buildSearchQueryForTest(t, "ship it", []string{"ship", "it"}, 0, false, true))
+	if !strings.Contains(textOnly, "i.status = 'cancelled' AND NOT (LOWER(i.title) = $1)") {
+		t.Errorf("exact-title hit is not exempt from the cancelled demotion:\n%s", textOnly)
+	}
+	if strings.Contains(textOnly, "i.number = ") {
+		t.Errorf("non-numeric query should not reference i.number in the demotion:\n%s", textOnly)
+	}
+
+	withNumber := orderByClause(t, buildSearchQueryForTest(t, "MUL-42", []string{"MUL-42"}, 42, true, true))
+	if !strings.Contains(withNumber, "LOWER(i.title) = $1 OR i.number = ") {
+		t.Errorf("identifier lookup is not exempt from the cancelled demotion, so MUL-42 sinks below every fuzzy match:\n%s", withNumber)
+	}
+}
+
+// 'done' is finished work worth referencing; only 'cancelled' is thrown away.
+func TestBuildSearchQuery_DoneNotDemotedAheadOfRelevance(t *testing.T) {
+	orderBy := orderByClause(t, buildSearchQueryForTest(t, "login", []string{"login"}, 0, false, true))
+
+	relevanceEndsAt := strings.Index(orderBy, "ELSE 9 END")
+	if doneAt := strings.Index(orderBy, "i.status = 'done'"); doneAt != -1 && doneAt < relevanceEndsAt {
+		t.Errorf("done issues were demoted ahead of relevance; only cancelled should be:\n%s", orderBy)
+	}
+}
+
+// Project search has no statusRank at all, and the command palette renders
+// projects above issues — an undemoted cancelled project can be the first row
+// of the entire result list.
+func TestBuildProjectSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) {
+	query, _ := buildProjectSearchQuery("platform", []string{"platform"}, true)
+	orderBy := orderByClause(t, query)
+
+	cancelledAt := strings.Index(orderBy, "p.status = 'cancelled'")
+	if cancelledAt == -1 {
+		t.Fatalf("project ORDER BY has no cancelled demotion:\n%s", orderBy)
+	}
+	relevanceEndsAt := strings.Index(orderBy, "ELSE 5 END")
+	if relevanceEndsAt == -1 {
+		t.Fatalf("project ORDER BY has no relevance rank CASE:\n%s", orderBy)
+	}
+	if cancelledAt > relevanceEndsAt {
+		t.Errorf("cancelled projects sort after the relevance tiers:\n%s", orderBy)
+	}
+	if !strings.Contains(orderBy, "LOWER(p.title) <> $1") {
+		t.Errorf("exact-title hit is not exempt from the cancelled demotion:\n%s", orderBy)
+	}
+	if !strings.Contains(orderBy, "p.updated_at DESC") {
+		t.Errorf("recency tie-breaker was dropped from project ORDER BY:\n%s", orderBy)
+	}
+}
+
+// buildSearchQuery mutates the terms slice in place (lowercasing); this wrapper
+// keeps each test's literals independent.
+func buildSearchQueryForTest(t *testing.T, phrase string, terms []string, num int, hasNum bool, includeClosed bool) string {
+	t.Helper()
+	query, _ := buildSearchQuery(phrase, append([]string(nil), terms...), num, hasNum, includeClosed)
+	return query
+}

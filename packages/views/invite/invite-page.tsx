@@ -13,7 +13,7 @@ import {
   resolvePostAuthDestination,
   useHasOnboarded,
 } from "@multica/core/paths";
-import { useNavigation } from "../navigation";
+import { AppLink, useNavigation } from "../navigation";
 import { useLogout } from "../auth";
 import { DragStrip } from "../platform";
 import { useT } from "../i18n";
@@ -136,7 +136,11 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
             <p className="text-body text-muted-foreground text-center">
               {t(($) => $.not_found.description)}
             </p>
-            <Button variant="outline" onClick={() => push(fallbackDest)}>
+            <Button
+              variant="outline"
+              render={<AppLink href={fallbackDest} />}
+              nativeButton={false}
+            >
               {t(($) => $.not_found.go_to_dashboard)}
             </Button>
           </CardContent>
@@ -172,7 +176,11 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
           <CardContent className="flex flex-col items-center gap-4 py-12">
             <h2 className="text-title font-semibold">{t(($) => $.declined.title)}</h2>
             <p className="text-body text-muted-foreground">{t(($) => $.declined.description)}</p>
-            <Button variant="outline" onClick={() => push(fallbackDest)}>
+            <Button
+              variant="outline"
+              render={<AppLink href={fallbackDest} />}
+              nativeButton={false}
+            >
               {t(($) => $.declined.go_to_dashboard)}
             </Button>
           </CardContent>

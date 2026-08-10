@@ -13,7 +13,8 @@
     "mark_read": "标为已读",
     "mark_unread": "标为未读",
     "archive": "归档",
-    "unarchive": "取消归档"
+    "unarchive": "取消归档",
+    "open_in_new_tab": "在新标签页打开"
   },
   "list": {
     "empty": "暂无通知",

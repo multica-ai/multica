@@ -626,6 +626,100 @@ describe("ApiClient schema fallback", () => {
       expect(res).toEqual({ next_runs: null });
     });
   });
+
+  describe("cloud billing", () => {
+    it("falls back to an empty balance when the response is malformed", async () => {
+      stubFetchJson({ balance_micro: "not-a-number" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getCloudBillingBalance()).resolves.toEqual({
+        owner_id: "",
+        balance_micro: 0,
+        balance_credit: 0,
+        updated_at: "",
+      });
+    });
+
+    it("falls back to an empty transactions page when items are malformed", async () => {
+      stubFetchJson({ items: "not-an-array", total: 1, page: 1, page_size: 20 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listCloudBillingTransactions()).resolves.toEqual({
+        items: [],
+        total: 0,
+        page: 1,
+        page_size: 20,
+      });
+    });
+
+    it("falls back to an empty batches page when items are malformed", async () => {
+      stubFetchJson({ items: "not-an-array", total: 1, page: 1, page_size: 20 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listCloudBillingBatches()).resolves.toEqual({
+        items: [],
+        total: 0,
+        page: 1,
+        page_size: 20,
+      });
+    });
+
+    it("falls back to an empty top-ups page when items are malformed", async () => {
+      stubFetchJson({ items: "not-an-array", total: 1, page: 1, page_size: 20 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listCloudBillingTopups()).resolves.toEqual({
+        items: [],
+        total: 0,
+        page: 1,
+        page_size: 20,
+      });
+    });
+
+    it("falls back to no price tiers when the response is not an array", async () => {
+      stubFetchJson({ tiers: [] });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listCloudBillingPriceTiers()).resolves.toEqual([]);
+    });
+
+    it("falls back to an empty checkout session when the response is malformed", async () => {
+      stubFetchJson({ order_id: 123 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.createCloudBillingCheckoutSession({ tier_id: "starter" }),
+      ).resolves.toEqual({
+        order_id: "",
+        session_id: "",
+        url: "",
+      });
+    });
+
+    it("falls back to a pending checkout status when the response is malformed", async () => {
+      stubFetchJson({ status: 123 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getCloudBillingCheckoutSession("cs_test")).resolves.toEqual({
+        order_id: "",
+        status: "pending",
+        amount_cents: 0,
+        credits: 0,
+        bonus_credits: 0,
+        currency: "usd",
+        tier_id: "",
+      });
+    });
+
+    it("falls back to an empty portal URL when the response is malformed", async () => {
+      stubFetchJson({ url: 123 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.createCloudBillingPortalSession()).resolves.toEqual({
+        url: "",
+      });
+    });
+  });
 });
 
 // Direct tests for the helper, decoupled from any specific endpoint —

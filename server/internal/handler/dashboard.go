@@ -363,18 +363,21 @@ func (h *Handler) listDashboardUsageByAgent(
 }
 
 // DashboardAgentRunTimeResponse is one agent's total terminal-task run time
-// over the window. Includes failed tasks so the dashboard can surface how
-// much execution time was spent on runs that didn't succeed.
+// over the window. Includes failed and cancelled tasks so the dashboard can
+// surface how much execution time was spent on runs that didn't succeed.
+// FailedCount and CancelledCount are disjoint subsets of TaskCount; the
+// client derives the succeeded count as the remainder.
 type DashboardAgentRunTimeResponse struct {
-	AgentID      string `json:"agent_id"`
-	TotalSeconds int64  `json:"total_seconds"`
-	TaskCount    int32  `json:"task_count"`
-	FailedCount  int32  `json:"failed_count"`
+	AgentID        string `json:"agent_id"`
+	TotalSeconds   int64  `json:"total_seconds"`
+	TaskCount      int32  `json:"task_count"`
+	FailedCount    int32  `json:"failed_count"`
+	CancelledCount int32  `json:"cancelled_count"`
 }
 
 // GetDashboardAgentRunTime returns per-agent total task run time (seconds)
 // and task counts for the workspace, optionally scoped to a project. Only
-// terminal tasks (completed or failed) with both started_at and
+// terminal tasks (completed, failed, or cancelled) with both started_at and
 // completed_at populated contribute, since queued/running tasks have no
 // finite duration.
 func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Request) {
@@ -414,10 +417,11 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	resp := make([]DashboardAgentRunTimeResponse, len(rows))
 	for i, row := range rows {
 		resp[i] = DashboardAgentRunTimeResponse{
-			AgentID:      uuidToString(row.AgentID),
-			TotalSeconds: row.TotalSeconds,
-			TaskCount:    row.TaskCount,
-			FailedCount:  row.FailedCount,
+			AgentID:        uuidToString(row.AgentID),
+			TotalSeconds:   row.TotalSeconds,
+			TaskCount:      row.TaskCount,
+			FailedCount:    row.FailedCount,
+			CancelledCount: row.CancelledCount,
 		}
 	}
 	writeJSON(w, http.StatusOK, foldRestrictedAgentRunTime(resp, restricted))
@@ -441,6 +445,7 @@ func foldRestrictedAgentRunTime(
 			dst.TotalSeconds += src.TotalSeconds
 			dst.TaskCount += src.TaskCount
 			dst.FailedCount += src.FailedCount
+			dst.CancelledCount += src.CancelledCount
 			return dst
 		},
 	)
@@ -448,19 +453,21 @@ func foldRestrictedAgentRunTime(
 
 // DashboardRunTimeDailyResponse is one (date) bucket of terminal-task run
 // time and counts. Powers the workspace dashboard's daily Time and Tasks
-// charts — same toggle as Tokens / Cost, different metric.
+// charts — same toggle as Tokens / Cost, different metric. FailedCount and
+// CancelledCount are disjoint subsets of TaskCount.
 type DashboardRunTimeDailyResponse struct {
-	Date         string `json:"date"`
-	TotalSeconds int64  `json:"total_seconds"`
-	TaskCount    int32  `json:"task_count"`
-	FailedCount  int32  `json:"failed_count"`
+	Date           string `json:"date"`
+	TotalSeconds   int64  `json:"total_seconds"`
+	TaskCount      int32  `json:"task_count"`
+	FailedCount    int32  `json:"failed_count"`
+	CancelledCount int32  `json:"cancelled_count"`
 }
 
 // GetDashboardRunTimeDaily returns per-date total task run time and task
 // counts for the workspace, optionally scoped to a project. Only terminal
-// tasks (completed or failed) with both started_at and completed_at
-// populated contribute. Bucketed by completed_at so the day boundaries
-// line up with the per-agent run-time card.
+// tasks (completed, failed, or cancelled) with both started_at and
+// completed_at populated contribute. Bucketed by completed_at so the day
+// boundaries line up with the per-agent run-time card.
 func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
@@ -489,10 +496,11 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	resp := make([]DashboardRunTimeDailyResponse, len(rows))
 	for i, row := range rows {
 		resp[i] = DashboardRunTimeDailyResponse{
-			Date:         row.Date.Time.Format("2006-01-02"),
-			TotalSeconds: row.TotalSeconds,
-			TaskCount:    row.TaskCount,
-			FailedCount:  row.FailedCount,
+			Date:           row.Date.Time.Format("2006-01-02"),
+			TotalSeconds:   row.TotalSeconds,
+			TaskCount:      row.TaskCount,
+			FailedCount:    row.FailedCount,
+			CancelledCount: row.CancelledCount,
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

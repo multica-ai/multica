@@ -336,3 +336,101 @@ func TestCLIConfig_DaemonKnobs_RoundTrip(t *testing.T) {
 		t.Errorf("AgentTimeout tri-state lost: got %v, want &\"0s\"", loaded.AgentTimeout)
 	}
 }
+
+func TestCLIConfig_TaskRootOverridesOwnerHome(t *testing.T) {
+	ownerHome := t.TempDir()
+	taskRoot := filepath.Join(t.TempDir(), "task-multica")
+	t.Setenv("HOME", ownerHome)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", taskRoot)
+
+	ownerPath := filepath.Join(ownerHome, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ownerBytes := []byte("{\n  \"server_url\": \"https://owner.invalid\",\n  \"token\": \"mul_owner_sentinel\"\n}\n")
+	if err := os.WriteFile(ownerPath, ownerBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(taskRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveCLIConfigForProfile(CLIConfig{ServerURL: "https://task.invalid"}, "dev"); err != nil {
+		t.Fatalf("SaveCLIConfigForProfile: %v", err)
+	}
+
+	path, err := CLIConfigPathForProfile("dev")
+	if err != nil {
+		t.Fatalf("CLIConfigPathForProfile: %v", err)
+	}
+	wantPath := filepath.Join(taskRoot, "profiles", "dev", "config.json")
+	if path != wantPath {
+		t.Fatalf("path = %q, want task-local path %q", path, wantPath)
+	}
+	loaded, err := LoadCLIConfigForProfile("dev")
+	if err != nil {
+		t.Fatalf("LoadCLIConfigForProfile: %v", err)
+	}
+	if loaded.ServerURL != "https://task.invalid" || loaded.Token != "" {
+		t.Fatalf("loaded task config = %#v, want task-only settings", loaded)
+	}
+	after, err := os.ReadFile(ownerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(ownerBytes) {
+		t.Fatalf("owner config was modified: got %q, want original sentinel", after)
+	}
+	for _, dir := range []string{taskRoot, filepath.Join(taskRoot, "profiles"), filepath.Join(taskRoot, "profiles", "dev")} {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("stat task config directory %q: %v", dir, err)
+		}
+		if got := info.Mode().Perm(); got != 0o700 {
+			t.Errorf("task config directory %q mode = %#o, want 0700", dir, got)
+		}
+	}
+	info, err := os.Stat(wantPath)
+	if err != nil {
+		t.Fatalf("stat task config file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("task config file mode = %#o, want 0600", got)
+	}
+}
+
+func TestCLIConfig_NoTaskRootKeepsInteractiveHomeResolution(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+
+	path, err := CLIConfigPathForProfile("dev")
+	if err != nil {
+		t.Fatalf("CLIConfigPathForProfile: %v", err)
+	}
+	want := filepath.Join(home, ".multica", "profiles", "dev", "config.json")
+	if path != want {
+		t.Fatalf("path = %q, want interactive path %q", path, want)
+	}
+}
+
+func TestCLIConfig_TaskRootRejectsProfilePathTraversal(t *testing.T) {
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	for _, profile := range []string{".", "..", "../owner", "nested/profile", filepath.Join(string(filepath.Separator), "owner")} {
+		if path, err := CLIConfigPathForProfile(profile); err == nil {
+			t.Errorf("CLIConfigPathForProfile(%q) = %q, want invalid task profile error", profile, path)
+		}
+		if dir, err := ProfileDir(profile); err == nil {
+			t.Errorf("ProfileDir(%q) = %q, want invalid task profile error", profile, dir)
+		}
+	}
+}
+
+func TestCLIConfig_TaskRootMustBeAbsolute(t *testing.T) {
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "relative/task-multica")
+
+	if _, err := CLIConfigPath(); err == nil || !strings.Contains(err.Error(), "must be an absolute path") {
+		t.Fatalf("CLIConfigPath error = %v, want absolute path validation", err)
+	}
+}

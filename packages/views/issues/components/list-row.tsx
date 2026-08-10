@@ -104,6 +104,7 @@ function ListRowContent({
         </div>
         <AppLink
           href={p.issueDetail(issue.id)}
+          newTabTitle={issue.identifier}
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
         >
           <span className="w-16 shrink-0 text-caption text-muted-foreground">

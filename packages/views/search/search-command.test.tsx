@@ -1,5 +1,5 @@
 import { act, type ReactNode } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -236,13 +236,20 @@ vi.mock("@tanstack/react-query", () => ({
   }),
 }));
 
-vi.mock("../navigation", () => ({
-  useNavigation: () => ({
+// Mock the context module, not the barrel: resolveClickIntent and
+// useIntentNavigate stay the REAL implementations and read this adapter
+// (no openInNewTab — the web shape, so tab intents go through window.open).
+vi.mock("../navigation/context", () => {
+  const adapter = () => ({
     push: mockPush,
     pathname: mockPathname.current,
     getShareableUrl: mockGetShareableUrl,
-  }),
-}));
+  });
+  return {
+    useNavigation: adapter,
+    useOptionalNavigation: adapter,
+  };
+});
 
 vi.mock("@multica/ui/components/common/theme-provider", () => ({
   useTheme: () => ({ theme: mockTheme.current, setTheme: mockSetTheme }),
@@ -343,6 +350,65 @@ describe("SearchCommand", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/settings");
     expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("cmd-click on a result opens it in a new tab instead of navigating in place", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "settings");
+
+    const settingsItem = await screen.findByText("Settings");
+    fireEvent.click(settingsItem, { metaKey: true });
+
+    expect(open).toHaveBeenCalledWith(
+      "https://app.multica//ws-test/settings",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(useSearchStore.getState().open).toBe(false);
+    open.mockRestore();
+  });
+
+  it("cmd+Enter opens the highlighted result in a new tab", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "settings");
+    await screen.findByText("Settings");
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true });
+
+    expect(open).toHaveBeenCalledWith(
+      "https://app.multica//ws-test/settings",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(mockPush).not.toHaveBeenCalled();
+    open.mockRestore();
+  });
+
+  it("a plain selection after an abandoned cmd-click does not inherit the stale intent", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    // cmd-click somewhere that selects nothing…
+    fireEvent.click(input, { metaKey: true });
+    await user.type(input, "settings");
+
+    const settingsItem = await screen.findByText("Settings");
+    // …then a plain click must navigate in place, not open a tab.
+    await user.click(settingsItem);
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/settings");
+    expect(open).not.toHaveBeenCalled();
+    open.mockRestore();
   });
 
   it("lists workspace members and navigates to the member page on selection", async () => {
@@ -829,5 +895,202 @@ describe("SearchCommand", () => {
     expect(input.selectionStart).toBe(input.value.length);
     expect(input.selectionEnd).toBe(input.value.length);
     expect(selectedValue()).toBe(first);
+  });
+
+  // MUL-5824: the two searches are ranked independently server-side and the
+  // palette renders the whole Projects group before the whole Issues group, so
+  // per-type ranking let one cancelled project be the very first row. The
+  // partition has to be cross-type and applied here, where results aggregate.
+  describe("mixed issue/project cancelled demotion", () => {
+    const fixtureIssue = (
+      over: Partial<Record<string, unknown>> & { id: string },
+    ) => ({
+      workspace_id: "ws-test",
+      number: 1,
+      identifier: "MUL-1",
+      title: "Untitled",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 0,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      match_source: "title",
+      ...over,
+    });
+
+    const fixtureProject = (
+      over: Partial<Record<string, unknown>> & { id: string },
+    ) => ({
+      workspace_id: "ws-test",
+      title: "Untitled",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      match_source: "title",
+      ...over,
+    });
+
+    /** Rendered result rows, top to bottom, by their cmdk value. */
+    const renderedValues = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>('[cmdk-item=""]'),
+      )
+        .map((el) => el.getAttribute("data-value") ?? "")
+        .filter((v) => v.startsWith("project:") || v.startsWith("issue-"));
+
+    /**
+     * Group headings, top to bottom. Queried structurally rather than by text:
+     * a cancelled project also renders "Cancelled" as its status label.
+     */
+    const renderedHeadings = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>("[cmdk-group-heading]"),
+      ).map((el) => el.textContent ?? "");
+
+    it("keeps a cancelled project below a live issue instead of first", async () => {
+      const user = userEvent.setup();
+      mockSearchIssues.mockResolvedValue({
+        issues: [
+          fixtureIssue({
+            id: "issue-live",
+            number: 10,
+            identifier: "MUL-10",
+            title: "search live issue",
+            status: "in_progress",
+          }),
+        ],
+        total: 1,
+      });
+      mockSearchProjects.mockResolvedValue({
+        projects: [
+          fixtureProject({
+            id: "proj-dead",
+            title: "search dead project",
+            status: "cancelled",
+          }),
+        ],
+        total: 1,
+      });
+
+      renderSearch();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "search",
+      );
+
+      await waitFor(
+        () => {
+          expect(renderedValues()).toEqual(["issue-live", "project:proj-dead"]);
+        },
+        { timeout: 2000 },
+      );
+      // Still discoverable, just under its own heading at the bottom.
+      expect(renderedHeadings()).toEqual(["Issues", "Cancelled"]);
+    });
+
+    it("keeps live rows of both types above every cancelled row", async () => {
+      const user = userEvent.setup();
+      mockSearchIssues.mockResolvedValue({
+        issues: [
+          fixtureIssue({
+            id: "issue-dead",
+            number: 11,
+            identifier: "MUL-11",
+            title: "search a",
+            status: "cancelled",
+          }),
+          fixtureIssue({
+            id: "issue-live",
+            number: 12,
+            identifier: "MUL-12",
+            title: "search b",
+            status: "todo",
+          }),
+          fixtureIssue({
+            id: "issue-done",
+            number: 13,
+            identifier: "MUL-13",
+            title: "search c",
+            status: "done",
+          }),
+        ],
+        total: 3,
+      });
+      mockSearchProjects.mockResolvedValue({
+        projects: [
+          fixtureProject({ id: "proj-dead", title: "search p1", status: "cancelled" }),
+          fixtureProject({ id: "proj-live", title: "search p2", status: "planned" }),
+        ],
+        total: 2,
+      });
+
+      renderSearch();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "search",
+      );
+
+      await waitFor(
+        () => {
+          expect(renderedValues()).toEqual([
+            "project:proj-live",
+            // 'done' is live — only cancelled work is demoted.
+            "issue-live",
+            "issue-done",
+            "project:proj-dead",
+            "issue-dead",
+          ]);
+        },
+        { timeout: 2000 },
+      );
+    });
+
+    it("exempts a cancelled issue the query targets by identifier", async () => {
+      const user = userEvent.setup();
+      mockSearchIssues.mockResolvedValue({
+        issues: [
+          fixtureIssue({
+            id: "issue-hit",
+            number: 7,
+            identifier: "MUL-7",
+            title: "Direct hit",
+            status: "cancelled",
+          }),
+        ],
+        total: 1,
+      });
+      mockSearchProjects.mockResolvedValue({ projects: [], total: 0 });
+
+      renderSearch();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "MUL-7",
+      );
+
+      await waitFor(
+        () => {
+          expect(renderedValues()).toEqual(["issue-hit"]);
+        },
+        { timeout: 2000 },
+      );
+      expect(renderedHeadings()).not.toContain("Cancelled");
+    });
   });
 });

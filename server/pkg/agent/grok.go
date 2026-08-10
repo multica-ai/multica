@@ -312,7 +312,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 		// Drop MCP entries whose remote transport the runtime didn't advertise.
 		// See hermes.go for why sending an unsupported transport tanks session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "grok", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "grok", b.cfg)
 
 		cwd := opts.Cwd
 		if cwd == "" {

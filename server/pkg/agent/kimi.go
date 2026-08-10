@@ -231,7 +231,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// advertise. See the matching comment in hermes.go for the why —
 		// shipping an http/sse entry to a stdio-only runtime tanks the
 		// whole session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kimi", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kimi", b.cfg)
 
 		// 2. Create or resume a session.
 		cwd := opts.Cwd
@@ -327,6 +327,44 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				return
 			}
 			b.cfg.Logger.Info("kimi session model set", "model", opts.Model)
+		}
+
+		// 3b. Apply a persisted thinking override through Kimi's native ACP
+		// config option before prompting. As with other providers, a configuration
+		// failure does not block the task: the prompt goes out either way, and the
+		// warnings below are the only record that the level shown in the UI may not
+		// be the level in effect. Which level that is depends on how the call
+		// failed. If the request itself fails, the session keeps whatever it had
+		// beforehand — the CLI's own setting on a fresh session, the previous
+		// turn's level on a resumed one. If Kimi answers but confirms a different
+		// value, the session sits at that value. If it answers without a `thinking`
+		// currentValue at all, we cannot tell which level is in effect.
+		if opts.ThinkingLevel != "" {
+			configResult, err := c.request(runCtx, "session/set_config_option", map[string]any{
+				"sessionId": sessionID,
+				"configId":  "thinking",
+				"value":     opts.ThinkingLevel,
+			})
+			if err != nil {
+				b.cfg.Logger.Warn("kimi rejected the thinking level request; sending the prompt anyway",
+					"requested_level", opts.ThinkingLevel,
+					"effective_level", "unchanged",
+					"error", err,
+				)
+			} else {
+				effectiveLevel, confirmed := acpConfigOptionCurrentValue(configResult, "thinking")
+				if !confirmed || effectiveLevel != opts.ThinkingLevel {
+					if !confirmed {
+						effectiveLevel = "unknown"
+					}
+					b.cfg.Logger.Warn("kimi did not confirm the requested thinking level; sending the prompt anyway",
+						"requested_level", opts.ThinkingLevel,
+						"effective_level", effectiveLevel,
+					)
+				} else {
+					b.cfg.Logger.Info("kimi session thinking level confirmed", "level", effectiveLevel)
+				}
+			}
 		}
 
 		// 4. Build the prompt content. If we have a system prompt, prepend it.
@@ -578,11 +616,15 @@ func scanKimiSessionUsage(scan kimiUsageScan) map[string]TokenUsage {
 	}
 
 	usage := make(map[string]TokenUsage)
+	// Some filesystems round mtimes down to whole seconds. Compare against a
+	// cutoff at the same precision so a log written during this turn is not
+	// discarded before its authoritative per-record timestamps are checked.
+	mtimeCutoff := scan.startTime.Truncate(time.Second)
 	for _, path := range kimiSessionWireLogs(root, scan.sessionID) {
-		// A wire log untouched since before the turn began belongs to an
-		// earlier run of a resumed session; billing it would re-charge
-		// tokens the previous task already reported.
-		if info, err := os.Stat(path); err != nil || info.ModTime().Before(scan.startTime) {
+		// A wire log clearly untouched since before the turn began belongs to
+		// an earlier run of a resumed session. The record-level filter below
+		// remains the authority at the turn boundary.
+		if info, err := os.Stat(path); err != nil || info.ModTime().Before(mtimeCutoff) {
 			continue
 		}
 		accumulateKimiWireUsage(usage, path, scan)

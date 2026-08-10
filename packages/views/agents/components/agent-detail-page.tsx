@@ -210,9 +210,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             </p>
           </div>
           <Button
-            type="button"
             size="sm"
-            onClick={() => navigation.push(paths.agents())}
+            render={<AppLink href={paths.agents()} />}
+            nativeButton={false}
           >
             {t(($) => $.detail.back_to_agents_full)}
           </Button>
@@ -246,9 +246,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               {t(($) => $.detail.try_again)}
             </Button>
             <Button
-              type="button"
               size="sm"
-              onClick={() => navigation.push(paths.agents())}
+              render={<AppLink href={paths.agents()} />}
+              nativeButton={false}
             >
               {t(($) => $.detail.back_to_agents_full)}
             </Button>
@@ -272,17 +272,23 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // click explains itself instead of the affordance silently missing. While
   // membership is still resolving the decision is undetermined, so the button
   // is disabled rather than toasting a false "no access" at a real member.
-  const handleDm = () => {
-    if (permissionsLoading) return;
+  //
+  // The control is a real link, so a failed gate has to cancel the navigation
+  // AppLink would otherwise perform — preventDefault is that cancel.
+  const handleDm = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (permissionsLoading) {
+      e.preventDefault();
+      return;
+    }
     if (!canAssign.allowed) {
+      e.preventDefault();
       toast.error(t(($) => $.detail.dm_no_permission_toast));
       return;
     }
     if (!runtimeBound) {
+      e.preventDefault();
       toast.error(t(($) => $.detail.runtime_required_toast));
-      return;
     }
-    navigation.push(`${paths.chat()}?agent=${agent.id}`);
   };
   const handleAssign = () => {
     if (!runtimeBound) {
@@ -304,6 +310,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         canAssign={canAssign.allowed}
         canArchive={canEdit.allowed}
         dmPending={permissionsLoading}
+        dmHref={`${paths.chat()}?agent=${agent.id}`}
         onDm={handleDm}
         onAssign={handleAssign}
         onArchive={
@@ -428,6 +435,7 @@ function DetailHeader({
   canAssign,
   canArchive,
   dmPending,
+  dmHref,
   onDm,
   onAssign,
   onArchive,
@@ -439,7 +447,10 @@ function DetailHeader({
   canAssign: boolean;
   canArchive: boolean;
   dmPending: boolean;
-  onDm: () => void;
+  dmHref: string;
+  /** Runs before the link navigates; calls preventDefault when a gate denies
+   *  the chat, which is what stops AppLink from pushing. */
+  onDm: (e: React.MouseEvent<HTMLAnchorElement>) => void;
   onAssign: () => void;
   /** Absent for Multica's built-in agents, which the server refuses to
    *  archive — the menu hides the action rather than offering a failure. */
@@ -508,11 +519,15 @@ function DetailHeader({
           <div className="flex shrink-0 items-center gap-2 self-end lg:self-start">
             {!isArchived && (
               <Button
-                type="button"
                 variant="outline"
                 size="sm"
                 disabled={dmPending}
-                onClick={onDm}
+                // An anchor never matches `:disabled`, so the base variant's
+                // `disabled:` rules never fire here — Base UI's data-disabled
+                // is what carries the dimmed, inert look.
+                className="data-disabled:pointer-events-none data-disabled:opacity-50"
+                render={<AppLink href={dmHref} onClick={onDm} />}
+                nativeButton={false}
               >
                 <MessageSquare className="h-4 w-4" aria-hidden="true" />
                 {t(($) => $.detail.dm)}

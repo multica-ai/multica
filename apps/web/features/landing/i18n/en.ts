@@ -116,7 +116,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 15 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Reasonix, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, and Trae CLI \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 21 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 15 supported coding tools (Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Reasonix, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, Trae CLI). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 21 supported coding tools (Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -192,7 +192,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 15 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Reasonix, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, and Trae CLI. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
+          "Multica supports 21 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -293,6 +293,38 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.4.21",
+        date: "2026-08-07",
+        title: "WeCom bots, a new Analytics page, and leaner agent prompts",
+        changes: [],
+        features: [
+          "Your agents can now live in WeCom — DM them or @-mention them in a group.",
+          "The new Analytics page keeps spend and errors on separate tabs, each with its own charts.",
+          "Images sent with /issue in a channel now stay in the description, right where you put them.",
+        ],
+        improvements: [
+          "Agents read leaner discussion data each run, leaving more room for your work.",
+          "Cancelled work no longer outranks live work in search and the @-mention picker.",
+          "Analytics filters close once you pick, and big numbers on charts are no longer cut off.",
+          "An agent waiting on a local folder now shows as idle instead of busy.",
+          "The docs now cover setting up WeCom and QwenPaw.",
+        ],
+        fixes: [
+          "On tablets and foldables, inbox and chat no longer squeeze into a narrow strip.",
+          "When a task fails, the channel now tells you why.",
+          "An agent with nothing to deliver no longer replies with a placeholder sentence.",
+          "Your own chat messages now show up reliably in other windows and devices.",
+          "Runs you stopped now count toward run time and task totals.",
+          "An ordinary agent is no longer mistaken for a squad leader.",
+          "CodeBuddy now starts with the MCP servers you configured.",
+          "Remote MCP servers are no longer silently ignored on some runtimes.",
+          "An OpenCode run that produced nothing no longer reports success.",
+          "OpenCode tasks with very long prompts now start on Windows.",
+          "Codex tasks on Windows can now commit code.",
+          "Kimi usage and cost no longer go missing now and then.",
+        ],
+      },
       {
         version: "0.4.20",
         date: "2026-08-06",

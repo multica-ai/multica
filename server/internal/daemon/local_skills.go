@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/skill"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 const (
@@ -125,100 +126,108 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	}
 
 	var providerRoot string
-	switch provider {
-	case "claude":
-		providerRoot = filepath.Join(home, ".claude", "skills")
-	case "codebuddy":
-		// CodeBuddy Code is a Claude Code fork but ships its own native
-		// config directory; it does NOT read ~/.claude/skills unless the
-		// user manually symlinks it in (the vendor's documented Claude
-		// Code migration path). See
-		// https://www.codebuddy.ai/docs/cli/codebuddy-dir ("Global
-		// directory ~/.codebuddy/") and
-		// https://www.codebuddy.ai/docs/cli/skills ("User-level Skills:
-		// ~/.codebuddy/skills/").
-		providerRoot = filepath.Join(home, ".codebuddy", "skills")
-	case "codex":
-		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-		if codexHome == "" {
-			codexHome = filepath.Join(home, ".codex")
-		}
-		providerRoot = filepath.Join(codexHome, "skills")
-	case "copilot":
-		providerRoot = filepath.Join(home, ".copilot", "skills")
-	case "opencode":
-		providerRoot = filepath.Join(home, ".config", "opencode", "skills")
-	case "deveco":
-		providerRoot = filepath.Join(home, ".config", "deveco", "skills")
-	case "openclaw":
-		providerRoot = filepath.Join(home, ".openclaw", "skills")
-	case "pi":
-		providerRoot = filepath.Join(home, ".pi", "agent", "skills")
-	case "cursor":
-		providerRoot = filepath.Join(home, ".cursor", "skills")
-	case "hermes":
-		providerRoot = filepath.Join(home, ".hermes", "skills")
-	case "kimi":
-		providerRoot = filepath.Join(home, ".kimi", "skills")
-	case "reasonix":
-		reasonixHome := strings.TrimSpace(os.Getenv("REASONIX_HOME"))
-		if reasonixHome == "" {
-			reasonixHome = filepath.Join(home, ".reasonix")
-		}
-		providerRoot = filepath.Join(reasonixHome, "skills")
-	case "kiro":
-		providerRoot = filepath.Join(home, ".kiro", "skills")
-	case "qoder":
-		providerRoot = filepath.Join(home, ".qoder", "skills")
-	case "qoderclicn":
-		providerRoot = filepath.Join(home, ".qoder-cn", "skills")
-	case "traecli":
-		// Official TRAE CLI global skills live in ~/.traecli/skills.
-		// See https://docs.trae.cn/cli_skills
-		providerRoot = filepath.Join(home, ".traecli", "skills")
-	case "antigravity":
-		// agy inherits Gemini CLI's global skill root; see
-		// https://antigravity.google/docs/gcli-migration ("Global skills").
-		providerRoot = filepath.Join(home, ".gemini", "antigravity-cli", "skills")
-	case "grok":
-		// GROK_HOME replaces the default ~/.grok home for settings, sessions,
-		// and user-level skills.
-		grokHome := strings.TrimSpace(os.Getenv("GROK_HOME"))
-		if grokHome == "" {
-			grokHome = filepath.Join(home, ".grok")
-		}
-		providerRoot = filepath.Join(grokHome, "skills")
-	case "qwen":
-		// QWEN_HOME replaces Qwen Code's global ~/.qwen directory. It owns
-		// settings, sessions, credentials and personal skills; project
-		// .qwen/skills remains rooted in the task workdir.
-		qwenHome := strings.TrimSpace(os.Getenv("QWEN_HOME"))
-		if qwenHome == "" {
-			qwenHome = filepath.Join(home, ".qwen")
-		}
-		providerRoot = filepath.Join(qwenHome, "skills")
-	case "qwenpaw":
-		// QWENPAW_WORKING_DIR (or legacy COPAW_WORKING_DIR) overrides
-		// QwenPaw's global ~/.qwenpaw directory, which owns settings,
-		// sessions, credentials and personal skills. The runtime
-		// resolves its root from QWENPAW_WORKING_DIR → COPAW_WORKING_DIR
-		// → ~/.copaw (legacy) → ~/.qwenpaw (default).
-		// See constant.py in the QwenPaw source.
-		qwenpawHome := strings.TrimSpace(os.Getenv("QWENPAW_WORKING_DIR"))
-		if qwenpawHome == "" {
-			qwenpawHome = strings.TrimSpace(os.Getenv("COPAW_WORKING_DIR"))
-		}
-		if qwenpawHome == "" {
-			legacyCopaw := filepath.Join(home, ".copaw")
-			if _, err := os.Stat(legacyCopaw); err == nil {
-				qwenpawHome = legacyCopaw
-			} else {
-				qwenpawHome = filepath.Join(home, ".qwenpaw")
+	// Built-in runtime identities (e.g. "omp") declare their user skills dir
+	// in the descriptor; resolve to providerRoot and fall through to the
+	// common construction below so universal roots, merging, and fallback
+	// import all still apply — same as every protocol-family provider.
+	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
+		providerRoot = filepath.Join(home, desc.UserSkillsDir)
+	} else {
+		switch provider {
+		case "claude":
+			providerRoot = filepath.Join(home, ".claude", "skills")
+		case "codebuddy":
+			// CodeBuddy Code is a Claude Code fork but ships its own native
+			// config directory; it does NOT read ~/.claude/skills unless the
+			// user manually symlinks it in (the vendor's documented Claude
+			// Code migration path). See
+			// https://www.codebuddy.ai/docs/cli/codebuddy-dir ("Global
+			// directory ~/.codebuddy/") and
+			// https://www.codebuddy.ai/docs/cli/skills ("User-level Skills:
+			// ~/.codebuddy/skills/").
+			providerRoot = filepath.Join(home, ".codebuddy", "skills")
+		case "codex":
+			codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
+			if codexHome == "" {
+				codexHome = filepath.Join(home, ".codex")
 			}
+			providerRoot = filepath.Join(codexHome, "skills")
+		case "copilot":
+			providerRoot = filepath.Join(home, ".copilot", "skills")
+		case "opencode":
+			providerRoot = filepath.Join(home, ".config", "opencode", "skills")
+		case "deveco":
+			providerRoot = filepath.Join(home, ".config", "deveco", "skills")
+		case "openclaw":
+			providerRoot = filepath.Join(home, ".openclaw", "skills")
+		case "pi":
+			providerRoot = filepath.Join(home, ".pi", "agent", "skills")
+		case "cursor":
+			providerRoot = filepath.Join(home, ".cursor", "skills")
+		case "hermes":
+			providerRoot = filepath.Join(home, ".hermes", "skills")
+		case "kimi":
+			providerRoot = filepath.Join(home, ".kimi", "skills")
+		case "reasonix":
+			reasonixHome := strings.TrimSpace(os.Getenv("REASONIX_HOME"))
+			if reasonixHome == "" {
+				reasonixHome = filepath.Join(home, ".reasonix")
+			}
+			providerRoot = filepath.Join(reasonixHome, "skills")
+		case "kiro":
+			providerRoot = filepath.Join(home, ".kiro", "skills")
+		case "qoder":
+			providerRoot = filepath.Join(home, ".qoder", "skills")
+		case "qoderclicn":
+			providerRoot = filepath.Join(home, ".qoder-cn", "skills")
+		case "traecli":
+			// Official TRAE CLI global skills live in ~/.traecli/skills.
+			// See https://docs.trae.cn/cli_skills
+			providerRoot = filepath.Join(home, ".traecli", "skills")
+		case "antigravity":
+			// agy inherits Gemini CLI's global skill root; see
+			// https://antigravity.google/docs/gcli-migration ("Global skills").
+			providerRoot = filepath.Join(home, ".gemini", "antigravity-cli", "skills")
+		case "grok":
+			// GROK_HOME replaces the default ~/.grok home for settings, sessions,
+			// and user-level skills.
+			grokHome := strings.TrimSpace(os.Getenv("GROK_HOME"))
+			if grokHome == "" {
+				grokHome = filepath.Join(home, ".grok")
+			}
+			providerRoot = filepath.Join(grokHome, "skills")
+		case "qwen":
+			// QWEN_HOME replaces Qwen Code's global ~/.qwen directory. It owns
+			// settings, sessions, credentials and personal skills; project
+			// .qwen/skills remains rooted in the task workdir.
+			qwenHome := strings.TrimSpace(os.Getenv("QWEN_HOME"))
+			if qwenHome == "" {
+				qwenHome = filepath.Join(home, ".qwen")
+			}
+			providerRoot = filepath.Join(qwenHome, "skills")
+		case "qwenpaw":
+			// QWENPAW_WORKING_DIR (or legacy COPAW_WORKING_DIR) overrides
+			// QwenPaw's global ~/.qwenpaw directory, which owns settings,
+			// sessions, credentials and personal skills. The runtime
+			// resolves its root from QWENPAW_WORKING_DIR → COPAW_WORKING_DIR
+			// → ~/.copaw (legacy) → ~/.qwenpaw (default).
+			// See constant.py in the QwenPaw source.
+			qwenpawHome := strings.TrimSpace(os.Getenv("QWENPAW_WORKING_DIR"))
+			if qwenpawHome == "" {
+				qwenpawHome = strings.TrimSpace(os.Getenv("COPAW_WORKING_DIR"))
+			}
+			if qwenpawHome == "" {
+				legacyCopaw := filepath.Join(home, ".copaw")
+				if _, err := os.Stat(legacyCopaw); err == nil {
+					qwenpawHome = legacyCopaw
+				} else {
+					qwenpawHome = filepath.Join(home, ".qwenpaw")
+				}
+			}
+			providerRoot = filepath.Join(qwenpawHome, "skill_pool")
+		default:
+			return nil, false, nil
 		}
-		providerRoot = filepath.Join(qwenpawHome, "skill_pool")
-	default:
-		return nil, false, nil
 	}
 
 	roots := []localSkillRoot{

@@ -17,6 +17,7 @@ describe("providerSupportsMcpConfig", () => {
     expect(providerSupportsMcpConfig("qoder")).toBe(true);
     expect(providerSupportsMcpConfig("qoderclicn")).toBe(true);
     expect(providerSupportsMcpConfig("qwen")).toBe(true);
+    expect(providerSupportsMcpConfig("qwenpaw")).toBe(true);
     expect(providerSupportsMcpConfig("traecli")).toBe(true);
     expect(providerSupportsMcpConfig("grok")).toBe(true);
   });

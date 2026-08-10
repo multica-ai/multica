@@ -79,12 +79,20 @@ type dingtalkRawEvent struct {
 type dingtalkMediaResource struct {
 	Ref string `json:"ref"`
 	Alt string `json:"alt,omitempty"`
+	// InlineIndex is the occurrence of the adapter-generated marker in the
+	// visible body, including identical user-authored text.
+	InlineIndex int `json:"inline_index,omitempty"`
+}
+
+func dingtalkMediaResourceAt(ref, alt string, inlineIndex int) dingtalkMediaResource {
+	return dingtalkMediaResource{Ref: ref, Alt: alt, InlineIndex: inlineIndex}
 }
 
 // conversation type discriminators DingTalk sends in conversationType.
 const (
-	convTypeP2P   = "1"
-	convTypeGroup = "2"
+	convTypeP2P              = "1"
+	convTypeGroup            = "2"
+	dingtalkImagePlaceholder = "[Image]"
 )
 
 // inboundFromCallback normalizes a DingTalk bot callback. It returns ok=false
@@ -139,9 +147,9 @@ func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMe
 			return mediaUnreadableMsg(msg, rawEvent), true
 		}
 		msg.Type = channel.MsgTypeImage
-		msg.Text = "[Image]"
+		msg.Text = dingtalkImagePlaceholder
 		msg.CommandText = msg.Text
-		rawEvent.Media = []dingtalkMediaResource{{Ref: ref, Alt: alt}}
+		rawEvent.Media = []dingtalkMediaResource{dingtalkMediaResourceAt(ref, alt, 0)}
 		return withDingTalkRaw(msg, rawEvent), true
 
 	case "richText":
@@ -152,8 +160,9 @@ func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMe
 			return mediaUnreadableMsg(msg, rawEvent), true
 		}
 		var (
-			text        strings.Builder
-			commandText strings.Builder
+			text                   strings.Builder
+			commandText            strings.Builder
+			inlinePlaceholderCount int
 		)
 		for _, item := range rc.RichText {
 			// A single item may in principle carry BOTH a text run and a picture
@@ -163,6 +172,7 @@ func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMe
 			if item.Text != "" {
 				text.WriteString(item.Text)
 				commandText.WriteString(item.Text)
+				inlinePlaceholderCount += strings.Count(item.Text, dingtalkImagePlaceholder)
 			}
 			if item.Type == "picture" || item.DownloadCode != "" || item.PictureDownloadCode != "" {
 				ref, alt := refAlt(item.DownloadCode, item.PictureDownloadCode)
@@ -170,7 +180,8 @@ func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMe
 					continue // a picture item with no usable code
 				}
 				appendImagePlaceholder(&text)
-				rawEvent.Media = append(rawEvent.Media, dingtalkMediaResource{Ref: ref, Alt: alt})
+				rawEvent.Media = append(rawEvent.Media, dingtalkMediaResourceAt(ref, alt, inlinePlaceholderCount))
+				inlinePlaceholderCount++
 			}
 		}
 		if len(rawEvent.Media) == 0 {
@@ -266,7 +277,7 @@ func appendImagePlaceholder(b *strings.Builder) {
 	if b.Len() > 0 {
 		b.WriteByte('\n')
 	}
-	b.WriteString("[Image]\n")
+	b.WriteString(dingtalkImagePlaceholder + "\n")
 }
 
 // dingtalkChatType maps DingTalk's conversationType to the normalized ChatType.

@@ -66,6 +66,8 @@ vi.mock("../../navigation", () => ({
     </a>
   ),
   useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  resolveClickIntent: () => "push",
+  useIntentNavigate: () => () => {},
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -92,20 +94,10 @@ vi.mock("@multica/core/issues/config", () => ({
   },
 }));
 
-const mockLoadMore = vi.fn();
-const loadMoreResult = {
-  total: 0,
-  loaded: 0,
-  hasMore: false,
-  isLoading: false,
-  loadMore: mockLoadMore,
-};
 vi.mock("@multica/core/issues/mutations", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/issues/mutations")>();
   return {
     ...actual,
-    useLoadMoreByStatus: () => loadMoreResult,
-    useLoadMoreByAssigneeGroup: () => loadMoreResult,
   };
 });
 

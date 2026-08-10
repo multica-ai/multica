@@ -136,6 +136,9 @@ func eventContent(e events.Event) string {
 		return p.Content
 	case map[string]any:
 		if e.Type == protocol.EventTaskFailed {
+			if retryPending, _ := p["retry_pending"].(bool); retryPending {
+				return ""
+			}
 			if s, _ := p["error"].(string); s != "" {
 				return "⚠️ " + s
 			}

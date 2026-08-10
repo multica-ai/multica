@@ -25,14 +25,19 @@ type HealthResponse struct {
 	// lifecycle CLI (`daemon start/stop`) acts on the host process namespace,
 	// so a foreign-OS daemon can't be started/stopped by the app even though
 	// /health is reachable. See #3916.
-	OS              string   `json:"os"`
-	Uptime          string   `json:"uptime"`
-	DaemonID        string   `json:"daemon_id"`
-	DeviceName      string   `json:"device_name"`
-	ServerURL       string   `json:"server_url"`
-	CLIVersion      string   `json:"cli_version"`
-	ActiveTaskCount int64    `json:"active_task_count"`
-	Agents          []string `json:"agents"`
+	OS         string `json:"os"`
+	Uptime     string `json:"uptime"`
+	DaemonID   string `json:"daemon_id"`
+	DeviceName string `json:"device_name"`
+	ServerURL  string `json:"server_url"`
+	CLIVersion string `json:"cli_version"`
+	// ActiveTaskCount remains the compatibility/safety count of every claimed
+	// handleTask lifecycle. The additive counters split actual provider
+	// execution from local-directory parking for throughput and diagnostics.
+	ActiveTaskCount       int64    `json:"active_task_count"`
+	RunningTaskCount      int64    `json:"running_task_count"`
+	ResourceWaitTaskCount int64    `json:"resource_wait_task_count"`
+	Agents                []string `json:"agents"`
 	// SkippedAgents maps a provider that WAS discovered on this machine to the
 	// reason the last registration round dropped it (version undetectable,
 	// below the minimum supported version). Purely diagnostic, and omitted when
@@ -108,17 +113,19 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 		}
 
 		resp := HealthResponse{
-			Status:          status,
-			PID:             os.Getpid(),
-			OS:              runtime.GOOS,
-			Uptime:          time.Since(startedAt).Truncate(time.Second).String(),
-			DaemonID:        d.cfg.DaemonID,
-			DeviceName:      d.cfg.DeviceName,
-			ServerURL:       d.cfg.ServerBaseURL,
-			CLIVersion:      d.cfg.CLIVersion,
-			ActiveTaskCount: d.activeTasks.Load(),
-			Agents:          agents,
-			SkippedAgents:   d.skippedAgentsSnapshot(),
+			Status:                status,
+			PID:                   os.Getpid(),
+			OS:                    runtime.GOOS,
+			Uptime:                time.Since(startedAt).Truncate(time.Second).String(),
+			DaemonID:              d.cfg.DaemonID,
+			DeviceName:            d.cfg.DeviceName,
+			ServerURL:             d.cfg.ServerBaseURL,
+			CLIVersion:            d.cfg.CLIVersion,
+			ActiveTaskCount:       d.activeTasks.Load(),
+			RunningTaskCount:      d.runningTasks.Load(),
+			ResourceWaitTaskCount: d.resourceWaitTasks.Load(),
+			Agents:                agents,
+			SkippedAgents:         d.skippedAgentsSnapshot(),
 
 			ReloadPendingReason: d.reloadPending(),
 			Workspaces:          wsList,

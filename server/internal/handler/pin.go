@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -65,8 +66,19 @@ func (h *Handler) ListPins(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capability opt-in: clients built before saved views classified every
+	// non-issue pin as a project pin, fetched its detail, got 404, and
+	// permanently auto-unpinned it. Exposing item_type=view through the old
+	// contract would let an old Desktop DESTROY the user's view pins just by
+	// opening the sidebar — so view rows only ship to clients that declare
+	// they understand them (?include=view).
+	includeViews := strings.Contains(r.URL.Query().Get("include"), "view")
+
 	resp := make([]PinnedItemResponse, 0, len(pins))
 	for _, p := range pins {
+		if p.ItemType == "view" && !includeViews {
+			continue
+		}
 		resp = append(resp, pinnedItemToResponse(p))
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -84,8 +96,8 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.ItemType != "issue" && req.ItemType != "project" {
-		writeError(w, http.StatusBadRequest, "item_type must be 'issue' or 'project'")
+	if req.ItemType != "issue" && req.ItemType != "project" && req.ItemType != "view" {
+		writeError(w, http.StatusBadRequest, "item_type must be 'issue', 'project' or 'view'")
 		return
 	}
 	if req.ItemID == "" {
@@ -116,6 +128,17 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 			ID: itemUUID, WorkspaceID: wsUUID,
 		}); err != nil {
 			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+	case "view":
+		// Same read rule as the view endpoints: your own views, or views
+		// shared to the workspace. Foreign private views 404 — a pin must
+		// never confirm their existence.
+		view, err := h.Queries.GetIssueView(r.Context(), db.GetIssueViewParams{
+			ID: itemUUID, WorkspaceID: wsUUID,
+		})
+		if err != nil || !canReadIssueView(view, parseUUID(userID)) {
+			writeError(w, http.StatusNotFound, "view not found")
 			return
 		}
 	}

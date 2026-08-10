@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { WorkspaceSlugProvider } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
+import { NavigationProvider } from "../../navigation";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enInbox from "../../locales/en/inbox.json";
 
@@ -40,10 +42,22 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
   };
 }
 
+const navigationAdapter = {
+  push: vi.fn(),
+  replace: vi.fn(),
+  back: vi.fn(),
+  pathname: "/",
+  searchParams: new URLSearchParams(),
+  getShareableUrl: (p: string) => p,
+  openInNewTab: vi.fn(),
+};
+
 function wrap(ui: ReactNode) {
   return (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      {ui}
+      <WorkspaceSlugProvider slug="acme">
+        <NavigationProvider value={navigationAdapter}>{ui}</NavigationProvider>
+      </WorkspaceSlugProvider>
     </I18nProvider>
   );
 }
@@ -138,5 +152,27 @@ describe("inbox row context menu", () => {
     row.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("offers Open in new tab as a foreground open when the row references an issue", async () => {
+    const { row } = renderRow({ entry: item({ issue_id: "issue-9" }) });
+
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByText("Open in new tab"));
+
+    expect(navigationAdapter.openInNewTab).toHaveBeenCalledWith(
+      "/acme/issues/issue-9",
+      undefined,
+      { activate: true },
+    );
+  });
+
+  it("omits Open in new tab for a row without an issue", async () => {
+    const { row } = renderRow({ entry: item({ issue_id: null }) });
+
+    fireEvent.contextMenu(row);
+    await screen.findByText("Archive");
+
+    expect(screen.queryByText("Open in new tab")).toBeNull();
   });
 });

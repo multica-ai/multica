@@ -125,6 +125,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "traecli",
   "grok",
   "qwen",
+  "qwenpaw",
 ] as const;
 
 export type RuntimeProtocolFamily =
@@ -1039,6 +1040,11 @@ export interface DashboardAgentRunTime {
   total_seconds: number;
   task_count: number;
   failed_count: number;
+  // Runs the user stopped mid-flight. Disjoint from `failed_count`, and
+  // both are subsets of `task_count` — the succeeded count is the
+  // remainder. A stopped run still occupied an agent and still spent
+  // tokens, so its seconds belong in `total_seconds`.
+  cancelled_count: number;
 }
 
 // One (date) bucket of terminal-task run-time + counts for the workspace
@@ -1050,6 +1056,8 @@ export interface DashboardRunTimeDaily {
   total_seconds: number;
   task_count: number;
   failed_count: number;
+  // See DashboardAgentRunTime.cancelled_count.
+  cancelled_count: number;
 }
 
 // One (date, failure_reason) bucket of terminal-task counts for the workspace

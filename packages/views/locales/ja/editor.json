@@ -72,7 +72,8 @@
     "no_results": "結果なし",
     "group_current": "現在のページ",
     "group_recent": "最近見た項目",
-    "group_search": "検索結果"
+    "group_search": "検索結果",
+    "group_cancelled": "キャンセル済み"
   },
   "code_block": {
     "copy_code": "コードをコピー",

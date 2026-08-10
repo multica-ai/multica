@@ -243,7 +243,7 @@ export function SquadDetailPage() {
           isArchived={isArchived}
           getEntityName={getEntityName}
           onAddMemberClick={() => setShowAddMember(true)}
-          onCreateAgentClick={canManage ? () => push(`${p.newAgent()}?squad=${encodeURIComponent(squadId)}`) : undefined}
+          createAgentHref={canManage ? `${p.newAgent()}?squad=${encodeURIComponent(squadId)}` : undefined}
           onSetLeader={(id) => setLeaderMut.mutate(id)}
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
@@ -947,7 +947,7 @@ function SquadOverviewPane({
   isArchived,
   getEntityName,
   onAddMemberClick,
-  onCreateAgentClick,
+  createAgentHref,
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
@@ -968,7 +968,7 @@ function SquadOverviewPane({
   // Optional — only passed when the current user can manage the squad
   // (workspace owner/admin or the creator). Hidden otherwise so viewers
   // don't see a button they can't action.
-  onCreateAgentClick?: () => void;
+  createAgentHref?: string;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
@@ -1025,7 +1025,7 @@ function SquadOverviewPane({
               isArchived={isArchived}
               getEntityName={getEntityName}
               onAddMemberClick={onAddMemberClick}
-              onCreateAgentClick={onCreateAgentClick}
+              createAgentHref={createAgentHref}
               onSetLeader={onSetLeader}
               onRemoveMember={onRemoveMember}
               onUpdateRole={onUpdateRole}
@@ -1090,7 +1090,7 @@ function SquadMembersTab({
   isArchived,
   getEntityName,
   onAddMemberClick,
-  onCreateAgentClick,
+  createAgentHref,
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
@@ -1106,7 +1106,7 @@ function SquadMembersTab({
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
   // Hidden for viewers who can't manage — see SquadOverviewPane.
-  onCreateAgentClick?: () => void;
+  createAgentHref?: string;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
@@ -1126,8 +1126,13 @@ function SquadMembersTab({
         </div>
         {canManage && (
           <div className="flex items-center gap-2">
-            {onCreateAgentClick && (
-              <Button size="sm" variant="outline" onClick={onCreateAgentClick}>
+            {createAgentHref && (
+              <Button
+                size="sm"
+                variant="outline"
+                render={<AppLink href={createAgentHref} />}
+                nativeButton={false}
+              >
                 <Plus className="size-3.5 mr-1.5" />
                 {t(($) => $.members_tab.create_agent_button)}
               </Button>

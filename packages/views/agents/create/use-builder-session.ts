@@ -15,6 +15,8 @@ import {
   chatMessagesOptions,
   pendingChatTaskOptions,
 } from "@multica/core/chat/queries";
+import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
+import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { ChatMessage } from "@multica/core/types";
 import { useAppForeground } from "../../common/use-app-foreground";
@@ -137,6 +139,10 @@ export function useBuilderSession(options: {
     try {
       await api.deleteChatSession(sessionId);
       qc.removeQueries({ queryKey: chatKeys.messages(sessionId) });
+      // The send seeds both caches, so both must be dropped here. Leaving the
+      // paged one behind would keep a deleted session's transcript sitting
+      // fresh forever — it is staleTime: Infinity, so no reader self-corrects.
+      qc.removeQueries({ queryKey: chatKeys.messagesPage(sessionId) });
       qc.removeQueries({ queryKey: chatKeys.pendingTask(sessionId) });
       void invalidateDraftList();
       return true;
@@ -233,22 +239,21 @@ export function useBuilderSession(options: {
       const encodedContent = options.encodeInput(text);
       const result = await api.sendChatMessage(sessionId, encodedContent);
       const createdAt = new Date().toISOString();
-      qc.setQueryData<ChatMessage[]>(
-        chatKeys.messages(sessionId),
-        (current = []) =>
-          current.some((message) => message.id === result.message_id)
-            ? current
-            : [
-                ...current,
-                {
-                  id: result.message_id,
-                  chat_session_id: sessionId,
-                  role: "user",
-                  content: encodedContent,
-                  task_id: result.task_id,
-                  created_at: createdAt,
-                },
-              ],
+      // Same door as the chat surfaces (MUL-5711). This path used to write the
+      // flat cache only, so a Builder send left the paged cache — which the
+      // chat surfaces read for the same session — without the message.
+      upsertChatMessageToCaches(
+        qc,
+        sessionId,
+        {
+          id: result.message_id,
+          chat_session_id: sessionId,
+          role: "user",
+          content: encodedContent,
+          task_id: result.task_id,
+          created_at: createdAt,
+        },
+        { seedIfMissing: true },
       );
       qc.setQueryData(chatKeys.pendingTask(sessionId), {
         task_id: result.task_id,
@@ -258,6 +263,10 @@ export function useBuilderSession(options: {
       // Accepted and rendered — release the composer before reconciling.
       commitInput?.();
       void qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+      // Both caches are seeded above, so both need the authoritative refetch —
+      // otherwise a seeded one-message page could outlive the send as the whole
+      // history a later reader sees.
+      void qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
       void qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
       // The first turn is what makes a brand-new conversation listable at
       // all, and every later one moves it to the top with a new preview.
@@ -280,14 +289,22 @@ export function useBuilderSession(options: {
     try {
       const result = await api.cancelTaskById(taskId);
       const restored = result.cancelled_chat_message;
-      if (restored?.restore_to_input) {
-        setRestoreDraft({
-          id: restored.message_id,
-          content: decodeBuilderInput(restored.content),
-        });
+      if (restored) {
+        // The server deleted this prompt on restore, so drop it from both
+        // caches before reconciling — same order as the chat surfaces'
+        // cancelChatTask. Without it the row lingers until the refetch lands,
+        // and in the paged cache it would linger for good.
+        removeChatMessageFromCaches(qc, restored.chat_session_id, restored.message_id);
+        if (restored.restore_to_input) {
+          setRestoreDraft({
+            id: restored.message_id,
+            content: decodeBuilderInput(restored.content),
+          });
+        }
       }
       await Promise.all([
         qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) }),
+        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) }),
         qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) }),
       ]);
     } catch (err) {
@@ -296,6 +313,10 @@ export function useBuilderSession(options: {
           ? err.message
           : t(($) => $.creation_studio.builder.stop_failed),
       );
+      // The cancel may still have landed server-side, so re-read the messages
+      // too rather than only the pending marker.
+      qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
     }
   };

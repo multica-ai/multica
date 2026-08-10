@@ -63,8 +63,8 @@ describe("runtimeDisplayLabel", () => {
   });
 
   it("uses the daemon's provider display name for overridden slugs", () => {
-    // Qoder CN, Trae, and Qwen use display names that differ from title-cased slugs;
-    // aliases must match the daemon's no-alias names.
+    // Qoder CN, Trae, Qwen Code, and QwenPaw use display names that differ from
+    // title-cased slugs; aliases must match the daemon's no-alias names.
     expect(
       runtimeDisplayLabel({
         name: "Qoder CN (host)",
@@ -86,6 +86,13 @@ describe("runtimeDisplayLabel", () => {
         provider: "qwen",
       }),
     ).toBe("box (Qwen Code)");
+    expect(
+      runtimeDisplayLabel({
+        name: "QwenPaw (host)",
+        custom_name: "box",
+        provider: "qwenpaw",
+      }),
+    ).toBe("box (QwenPaw)");
   });
 
   it("first-letter-capitalizes non-overridden slugs, matching the daemon", () => {

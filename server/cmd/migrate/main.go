@@ -54,10 +54,16 @@ type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 // failed build can leave an INVALID relation that IF NOT EXISTS would otherwise
 // mistake for a successful retry. The hook removes only that invalid leftover;
 // migration 257 can then rebuild it while the valid v1 index remains in place.
+//
+// MUL-5823: migration 261 replaces the terminal-task partial index the same
+// way, so it carries the same hazard — an INVALID v2 leftover recorded as
+// success would let migration 262 drop the still-valid v1, leaving all four
+// dashboard rollups on a full table scan.
 var preMigrationHooks = map[string]preMigrationHook{
 	"103_drop_legacy_daily_rollups":                         runTaskUsageHourlyHook,
 	"198_agent_task_attribution_strict_constraint_validate": runAttributionStrictHook,
 	"257_agent_task_queue_channel_media_pending_unique_v2":  cleanupInvalidConcurrentIndexHook("idx_one_pending_task_per_issue_agent_v2"),
+	"261_agent_task_queue_terminal_completed_at_v2":         cleanupInvalidConcurrentIndexHook("idx_agent_task_queue_terminal_completed_at_v2"),
 }
 
 // cleanupInvalidConcurrentIndexHook removes an INVALID index left by an

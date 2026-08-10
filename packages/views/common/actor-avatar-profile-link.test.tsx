@@ -96,7 +96,7 @@ describe("ActorAvatar profile link", () => {
     renderAvatar(makeAdapter({ push, openInNewTab }));
     fireEvent.click(screen.getByRole("link"), { metaKey: true });
 
-    expect(openInNewTab).toHaveBeenCalledWith(HREF);
+    expect(openInNewTab).toHaveBeenCalledWith(HREF, undefined);
     expect(push).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
   });

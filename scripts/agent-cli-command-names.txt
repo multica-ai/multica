@@ -9,6 +9,7 @@ grok
 hermes
 kimi
 kiro-cli
+omp
 openclaw
 opencode
 pi

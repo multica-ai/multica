@@ -6,7 +6,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import { useNavigation } from "../../navigation";
+import { useBackOrReplace, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { AgentConfigurationPanel } from "./agent-configuration-panel";
 import { CreateAgentFooter } from "./create-agent-footer";
@@ -31,6 +31,7 @@ export function ManualCreateAgentPage() {
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
+  const backOrReplace = useBackOrReplace();
   const duplicateId = navigation.searchParams.get("duplicate");
   const squadId = navigation.searchParams.get("squad");
 
@@ -106,7 +107,7 @@ export function ManualCreateAgentPage() {
       // A duplicate arrives from the agents list, not from the chooser, so it
       // returns to where it came from instead of offering a method to pick.
       onBack={() =>
-        navigation.push(duplicateId ? paths.agents() : paths.newAgent())
+        backOrReplace(duplicateId ? paths.agents() : paths.newAgent())
       }
       chips={
         <>

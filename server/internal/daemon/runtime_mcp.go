@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -77,6 +78,167 @@ func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage)
 	return raw, nil
 }
 
+// codebuddyUserMcpConfigPath returns the user-scope MCP config file CodeBuddy
+// actually reads.
+//
+// CodeBuddy is a Claude Code fork but resolves its own config, so `~/.claude.json`
+// is never consulted. Its config directory is `$CODEBUDDY_CONFIG_DIR`, defaulting
+// to `~/.codebuddy`, and the user-scope MCP file is the FIRST of these that
+// exists — the list is a fallback chain, not a merge:
+//
+//	<configDir>/.mcp.json   (what `codebuddy mcp add --scope user` writes)
+//	<configDir>/mcp.json
+//	~/.codebuddy.json
+//
+// When none exist the first candidate is returned so the caller's read fails
+// with os.ErrNotExist and is treated as "no runtime servers", matching the
+// other providers. Verified against CodeBuddy 2.x by writing each file in turn
+// and reading back `codebuddy mcp list`.
+func codebuddyUserMcpConfigPath(home string) string {
+	configDir := strings.TrimSpace(os.Getenv("CODEBUDDY_CONFIG_DIR"))
+	if configDir == "" {
+		configDir = filepath.Join(home, ".codebuddy")
+	}
+	candidates := []string{
+		filepath.Join(configDir, ".mcp.json"),
+		filepath.Join(configDir, "mcp.json"),
+		filepath.Join(home, ".codebuddy.json"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return candidates[0]
+}
+
+// unmarshalRuntimeMcpConfig decodes one runtime's config file. "jsonc" is JSON
+// with comments and trailing commas, which CodeBuddy accepts in its MCP files —
+// parsing those as strict JSON would drop every server behind a single `//`.
+func unmarshalRuntimeMcpConfig(raw []byte, format string) (map[string]any, error) {
+	var cfg map[string]any
+	switch format {
+	case "toml":
+		if err := toml.Unmarshal(raw, &cfg); err != nil {
+			return nil, fmt.Errorf("parse runtime MCP config: %w", err)
+		}
+	case "jsonc":
+		stripped, err := stripJSONC(raw)
+		if err != nil {
+			return nil, fmt.Errorf("parse runtime MCP config: %w", err)
+		}
+		if err := json.Unmarshal(stripped, &cfg); err != nil {
+			return nil, fmt.Errorf("parse runtime MCP config: %w", err)
+		}
+	default:
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return nil, fmt.Errorf("parse runtime MCP config: %w", err)
+		}
+	}
+	return cfg, nil
+}
+
+// stripJSONC rewrites JSONC into strict JSON: `//` and `/* */` comments become
+// spaces and a single trailing comma before `}` / `]` is dropped. String
+// literals are copied verbatim, so a `//` or a comma inside a command argument
+// survives.
+//
+// Output is always the same length as the input — comments and the dropped
+// comma are blanked, never deleted — so a parse-error offset still points at
+// the byte the user actually wrote.
+//
+// Only the LAST comma before a closer is blanked, so genuinely malformed input
+// stays malformed: `[1,,,]` does not silently become `[1]`. This is a
+// pragmatic subset of JSONC covering what CodeBuddy's MCP files use in
+// practice; anything it cannot repair is reported as a parse error rather than
+// guessed at.
+//
+// An unterminated `/*` is an error rather than a blank-to-EOF, so the Agent >
+// MCP tab cannot list servers out of a file CodeBuddy itself rejects. Verified:
+// the CLI reports "No MCP servers configured" for both an unterminated comment
+// and the `/*/` near-miss, where the opener's `*` must not double as the
+// closer's.
+func stripJSONC(raw []byte) ([]byte, error) {
+	out := make([]byte, 0, len(raw))
+	// Offset into out of the one comma still eligible for removal, or -1.
+	// Reset by any value token, so only a genuinely trailing comma is dropped.
+	lastComma := -1
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+
+		if inString {
+			out = append(out, c)
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+
+		switch {
+		case c == '"':
+			inString = true
+			lastComma = -1
+			out = append(out, c)
+		case c == '/' && i+1 < len(raw) && raw[i+1] == '/':
+			// Blank through end of line, preserving the newline itself.
+			for i < len(raw) && raw[i] != '\n' {
+				out = append(out, ' ')
+				i++
+			}
+			if i < len(raw) {
+				out = append(out, raw[i])
+			}
+		case c == '/' && i+1 < len(raw) && raw[i+1] == '*':
+			// Consume the opener first so `/*/` cannot reuse its own `*` as the
+			// closer's, then blank the body, newlines included, so line numbers
+			// and the total byte count both survive.
+			out = append(out, ' ', ' ')
+			i += 2
+			closed := false
+			for i < len(raw) {
+				if raw[i] == '*' && i+1 < len(raw) && raw[i+1] == '/' {
+					out = append(out, ' ', ' ')
+					i++ // consume '*'; the loop's i++ consumes '/'
+					closed = true
+					break
+				}
+				if raw[i] == '\n' {
+					out = append(out, '\n')
+				} else {
+					out = append(out, ' ')
+				}
+				i++
+			}
+			if !closed {
+				return nil, errors.New("unterminated block comment")
+			}
+		case c == ',':
+			lastComma = len(out)
+			out = append(out, c)
+		case c == '}' || c == ']':
+			if lastComma >= 0 {
+				out[lastComma] = ' '
+			}
+			lastComma = -1
+			out = append(out, c)
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+			out = append(out, c)
+		default:
+			lastComma = -1
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
 // loadRuntimeMcpServerConfigs returns full, secret-bearing runtime MCP entries
 // for task-local merging. Callers must never send the result to the server or
 // logs; the public capabilities endpoint continues to use the redacted summary
@@ -89,8 +251,14 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 
 	var path, key, format string
 	switch provider {
-	case "claude", "codebuddy":
+	case "claude":
 		path, key, format = filepath.Join(home, ".claude.json"), "mcpServers", "json"
+	// codebuddy is deliberately absent. CodeBuddy loads its own user, project
+	// and local scopes on every launch (codebuddy.go never passes
+	// --strict-mcp-config), and a managed entry already wins a same-name
+	// collision, so the daemon pre-merging them would only duplicate what the
+	// CLI does natively — while losing the scope precedence and the approval
+	// gate that protects project-scope servers.
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {
@@ -122,13 +290,9 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 	servers := map[string]any{}
 	raw, err := os.ReadFile(path)
 	if err == nil {
-		var cfg map[string]any
-		if format == "toml" {
-			if err := toml.Unmarshal(raw, &cfg); err != nil {
-				return nil, true, fmt.Errorf("parse runtime MCP config: %w", err)
-			}
-		} else if err := json.Unmarshal(raw, &cfg); err != nil {
-			return nil, true, fmt.Errorf("parse runtime MCP config: %w", err)
+		cfg, err := unmarshalRuntimeMcpConfig(raw, format)
+		if err != nil {
+			return nil, true, err
 		}
 		if configured, ok := nestedRuntimeMcpMap(cfg, key); ok {
 			for name, entry := range configured {
@@ -139,7 +303,7 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
 	}
 
-	if provider == "claude" || provider == "codebuddy" {
+	if provider == "claude" {
 		// User configuration has the same precedence Claude uses: plugin
 		// servers only fill names not already defined by the user.
 		for name, entry := range loadClaudePluginMcpServerConfigs(home) {
@@ -213,8 +377,20 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 	var path, key, source string
 	var format string
 	switch provider {
-	case "claude", "codebuddy":
+	case "claude":
 		path, key, source, format = filepath.Join(home, ".claude.json"), "mcpServers", "User config", "json"
+	case "codebuddy":
+		path, key, source, format = codebuddyUserMcpConfigPath(home), "mcpServers", "User config", "jsonc"
+	case "kimi":
+		// Inventory only — kimi is deliberately absent from
+		// loadRuntimeMcpServerConfigs. `kimi acp` merges this file with the
+		// ephemeral `mcpServers` we send in session/new, so merging it in
+		// again would spawn every user server twice.
+		kimiHome := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
+		if kimiHome == "" {
+			kimiHome = filepath.Join(home, ".kimi-code")
+		}
+		path, key, source, format = filepath.Join(kimiHome, "mcp.json"), "mcpServers", "User config", "json"
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {
@@ -246,13 +422,9 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 	out := make([]runtimeLocalMcpServerSummary, 0)
 	raw, err := os.ReadFile(path)
 	if err == nil {
-		var cfg map[string]any
-		if format == "toml" {
-			if err := toml.Unmarshal(raw, &cfg); err != nil {
-				return nil, true, fmt.Errorf("parse runtime MCP config: %w", err)
-			}
-		} else if err := json.Unmarshal(raw, &cfg); err != nil {
-			return nil, true, fmt.Errorf("parse runtime MCP config: %w", err)
+		cfg, err := unmarshalRuntimeMcpConfig(raw, format)
+		if err != nil {
+			return nil, true, err
 		}
 		if servers, ok := nestedRuntimeMcpMap(cfg, key); ok {
 			out = append(out, runtimeMcpSummaries(servers, source)...)
@@ -261,7 +433,7 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
 	}
 
-	if provider == "claude" || provider == "codebuddy" {
+	if provider == "claude" {
 		out = append(out, listClaudePluginMcpServers(home)...)
 	}
 

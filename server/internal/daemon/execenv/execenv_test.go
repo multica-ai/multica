@@ -118,11 +118,21 @@ func TestPrepareDirectoryMode(t *testing.T) {
 	defer env.Cleanup(true)
 
 	// Verify directory structure.
-	for _, sub := range []string{"workdir", "output", "logs"} {
+	for _, sub := range []string{"workdir", "output", "logs", "multica-config"} {
 		path := filepath.Join(env.RootDir, sub)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Fatalf("expected %s to exist", path)
 		}
+	}
+	if env.MulticaConfigRoot != filepath.Join(env.RootDir, "multica-config") {
+		t.Fatalf("MulticaConfigRoot = %q, want task-local config directory", env.MulticaConfigRoot)
+	}
+	info, err := os.Stat(env.MulticaConfigRoot)
+	if err != nil {
+		t.Fatalf("stat MulticaConfigRoot: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("MulticaConfigRoot mode = %o, want 700", got)
 	}
 
 	// Verify context file contains issue ID and CLI hints.
@@ -3963,6 +3973,14 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	if reused.CodexHome == "" {
 		t.Fatal("expected CodexHome to be restored after Reuse")
 	}
+	if reused.MulticaConfigRoot != filepath.Join(reused.RootDir, "multica-config") {
+		t.Fatalf("MulticaConfigRoot = %q, want restored task-local config directory", reused.MulticaConfigRoot)
+	}
+	if info, err := os.Stat(reused.MulticaConfigRoot); err != nil {
+		t.Fatalf("stat restored MulticaConfigRoot: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("restored MulticaConfigRoot mode = %o, want 700", got)
+	}
 
 	// Verify config.toml has a managed block (exact mode depends on host
 	// platform; either workspace-write or danger-full-access is valid).
@@ -5431,7 +5449,7 @@ func TestInjectRuntimeConfigBriefKeepsStaticCatchUpRead(t *testing.T) {
 	// MUL-5442 cross-channel dedup: the full command with the real issue id
 	// moved to the per-turn message (every issue variant carries it); the
 	// brief keeps the doctrine and the flag mnemonics.
-	if !strings.Contains(s, "scan every thread cheaply (`--roots-only --summary`)") {
+	if !strings.Contains(s, "scan every thread cheaply (`--roots-only --summary --compact`)") {
 		t.Errorf("brief must keep the bounded catch-up doctrine\n---\n%s", s)
 	}
 	if strings.Contains(s, issueID) {
@@ -5495,7 +5513,7 @@ func TestInjectRuntimeConfigBriefOmitsResumedThreadAnchor(t *testing.T) {
 		"No other new comments on this issue since your last run",
 		"If your reply depends on thread context",
 		"do not rely only on resumed session memory",
-		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("resumed hint missing %q\n---\n%s", want, hint)
@@ -5528,7 +5546,7 @@ func TestInjectRuntimeConfigAssignmentTriggerScansRootsFirst(t *testing.T) {
 	// Mandatory comment catch-up must stay, but the required first read is
 	// bounded to recent active threads instead of the full flat timeline.
 	for _, want := range []string{
-		"scan every thread cheaply (`--roots-only --summary`)",
+		"scan every thread cheaply (`--roots-only --summary --compact`)",
 		"this is mandatory, not optional",
 		"Skipping this step is the most common cause",
 	} {
@@ -5595,9 +5613,9 @@ func TestInjectRuntimeConfigCatchUpScansRootsFirst(t *testing.T) {
 		// The cheap scan is the first thing step 3 asks for; the full
 		// command with real ids arrives in the per-turn message (MUL-5442
 		// cross-channel dedup), so the brief pins the flag mnemonics.
-		"scan every thread cheaply (`--roots-only --summary`)",
+		"scan every thread cheaply (`--roots-only --summary --compact`)",
 		// ...followed by an explicit, bounded drill-down.
-		"expand only the threads that matter (`--thread <id> --tail 30`)",
+		"expand only the threads that matter (`--thread <id> --tail 30 --compact`)",
 		// The headline saturation warning stays in the flag reference; the
 		// deep semantics (per-thread cap, root-thread saturation) moved to the
 		// CLI's own --help (MUL-5442) and are pinned there
