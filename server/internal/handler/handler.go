@@ -289,10 +289,10 @@ type Handler struct {
 	DingTalkInstall *dingtalk.InstallService
 	// DingTalkBindingTokens mints and redeems the single-use account-link tokens.
 	DingTalkBindingTokens *dingtalk.BindingTokenService
-	// ShareCRMInstall owns the bring-your-own ShareCRM IM Gateway lifecycle. Nil
+	// ShareCRMInstall owns the bring-your-own-app ShareCRM lifecycle. It is nil
 	// unless MULTICA_SHARECRM_SECRET_KEY is configured.
 	ShareCRMInstall *sharecrm.InstallService
-	// ShareCRMBindingTokens mints and redeems ShareCRM account-link tokens.
+	// ShareCRMBindingTokens mints and redeems the single-use account-link tokens.
 	ShareCRMBindingTokens *sharecrm.BindingTokenService
 	// SlackHistory backs the agent-facing `multica chat history` command: it
 	// reads a chat session's bound Slack conversation on demand (MUL-3871). Nil

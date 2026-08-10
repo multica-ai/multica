@@ -4582,6 +4582,10 @@ export class ApiClient {
     );
   }
 
+  // registerShareCRMBYO performs a bring-your-own-app install: the admin pastes
+  // the App ID + App Secret of the ShareCRM bot they created (optional API base
+  // URL for private cloud), and the backend validates + persists it, returning
+  // the new installation. Mirrors registerDingTalkBYO / registerSlackBYO.
   async registerShareCRMBYO(
     workspaceId: string,
     agentId: string,
