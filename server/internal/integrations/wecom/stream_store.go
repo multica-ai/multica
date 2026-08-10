@@ -246,8 +246,8 @@ func (h streamHandle) address() roundAddress {
 //
 // owed / told / speaking below are one piece of bookkeeping answering one
 // question: has this run's ending been said to the user, and if not, who still
-// owes it. Five review rounds have found five different ways to get that wrong,
-// and all five were the same mistake — the ledger recorded an outcome the user
+// owes it. Six review rounds have found six different ways to get that wrong,
+// and all six were the same mistake — the ledger recorded an outcome the user
 // never got:
 //
 //	1. a promise spent by POSITION, so one round's words settled another
@@ -276,8 +276,12 @@ func (h streamHandle) address() roundAddress {
 //	    and a promise leaves owed, only after a delivery reports that the words
 //	    were accepted for sending. Nor is anything ANSWERED as said before then:
 //	    a publisher arriving while a delivery is on the wire is handed that
-//	    delivery to wait on, never a verdict of "already said" — until the
-//	    holder reports, there is no such fact to give it. And what it then reads
+//	    delivery to wait on rather than a verdict of "already said" — until the
+//	    holder reports, there is no such fact to give it. One exception, and it
+//	    records nothing: a waiter whose own budget runs out returns the verdict
+//	    it came in holding, paired with errNothingToSay, having reserved nothing
+//	    and said nothing. The verdict is not a claim about the screen there —
+//	    see roundToldAlready's own doc, which says so. And what it then reads
 //	    off the holder is the whole outcome, words and ending together: only a
 //	    delivery that ENDED the round answers the run's other publishers, and
 //	    one that landed a promise leaves them the round it just put back on owed.
