@@ -327,6 +327,19 @@ func TestSessionContinuityNoticeLivesOutsideBrief(t *testing.T) {
 		t.Errorf("issue variant must state the real loss:\n%s", SessionContinuityNoticeIssue)
 	}
 
+	// The web-chat / Feishu transcript variant points at the read-back command
+	// and must NOT order an announcement — the conversation survives in
+	// chat_message, so "the previous context was lost" would be a false alarm.
+	if !strings.Contains(SessionContinuityNoticeChatTranscript, "multica chat history") {
+		t.Error("transcript variant must point at the read-back command")
+	}
+	if strings.Contains(SessionContinuityNoticeChatTranscript, "tell the user") {
+		t.Errorf("transcript variant must not script an apology:\n%s", SessionContinuityNoticeChatTranscript)
+	}
+	if !strings.Contains(SessionContinuityNoticeChatTranscript, "your own working memory") {
+		t.Errorf("transcript variant must state the real loss:\n%s", SessionContinuityNoticeChatTranscript)
+	}
+
 	lost := TaskContextForEnv{
 		IssueID:                       "11111111-2222-3333-4444-555555555555",
 		TriggerCommentID:              "trigger-1",

@@ -755,10 +755,11 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 // TestSessionContinuityNoticeMatchesSurface locks the MUL-5722 split. The same
 // event costs each surface something different, so it cannot be reported with
 // one sentence. The dividing question is whether the conversation can still be
-// READ, not whether it is a chat: an issue's comments and a Slack channel's
-// history both can, a web chat's and a Feishu channel's cannot. Announcing a
-// loss on the first two describes something that did not happen — the user
-// hears "the discussion is gone" when every word survives.
+// READ, not whether it is a chat: an issue's comments, a Slack channel's
+// history, and a web chat's / Feishu's stored chat_message transcript all can;
+// only a channel Multica stores no transcript for cannot. Announcing a loss on
+// the readable ones describes something that did not happen — the user hears
+// "the discussion is gone" when every word survives.
 func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 	t.Parallel()
 
@@ -784,17 +785,26 @@ func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 			wantMentions: "multica chat history",
 		},
 		{
-			// Web chat history lived only in the provider session.
-			name:         "web chat is unrecoverable",
+			// Web chat history is persisted in chat_message, which `multica chat
+			// history` reads back — recoverable, just from Multica's store.
+			name:         "web chat rebuilds from the stored transcript",
 			task:         Task{ChatSessionID: "chat-1"},
-			tellUser:     true,
-			wantMentions: "not readable from anywhere",
+			tellUser:     false,
+			wantMentions: "multica chat history",
 		},
 		{
-			// Multica ships no history reader for Feishu, so despite being a
-			// channel it is in the same position as a web chat.
-			name:         "feishu has no history reader",
+			// Feishu's conversation is persisted to chat_message too, and the
+			// handler's non-Slack fallback reads it back via `multica chat history`.
+			name:         "feishu rebuilds from the stored transcript",
 			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeFeishu},
+			tellUser:     false,
+			wantMentions: "multica chat history",
+		},
+		{
+			// A channel Multica stores no transcript for (no adapter yet) has
+			// nothing to read back — the loss is real and the user must hear it.
+			name:         "unreadable channel is unrecoverable",
+			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeWecom},
 			tellUser:     true,
 			wantMentions: "not readable from anywhere",
 		},

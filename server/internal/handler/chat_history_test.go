@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -55,6 +56,26 @@ func newChatHistoryTask(t *testing.T, chatSession bool) string {
 		RETURNING id
 	`, agentID, runtimeID, sessionArg).Scan(&taskID); err != nil {
 		t.Fatalf("insert chat history task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	return taskID
+}
+
+// newChatHistoryTaskForSession inserts a chat task bound to a specific chat
+// session and returns the task id.
+func newChatHistoryTaskForSession(t *testing.T, sessionID string) string {
+	t.Helper()
+	agentID := createHandlerTestAgent(t, "ChatHistorySessionAgent", []byte("[]"))
+	runtimeID := handlerTestRuntimeID(t)
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, chat_session_id)
+		VALUES ($1, $2, 'completed', 0, $3)
+		RETURNING id
+	`, agentID, runtimeID, sessionID).Scan(&taskID); err != nil {
+		t.Fatalf("insert chat history task for session: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
@@ -156,7 +177,11 @@ func TestGetChatThread_ByID(t *testing.T) {
 	}
 }
 
-func TestGetChatHistory_NoBindingReturnsNote(t *testing.T) {
+// TestGetChatHistory_NoSlackBindingFallsBackToTranscript: a session with no
+// Slack binding (web chat / Feishu) is served from its stored chat_message
+// transcript instead of "no channel integration". A fresh session has no
+// messages, so the fallback returns an empty page with no note.
+func TestGetChatHistory_NoSlackBindingFallsBackToTranscript(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("requires test database")
 	}
@@ -171,8 +196,50 @@ func TestGetChatHistory_NoBindingReturnsNote(t *testing.T) {
 	}
 	var resp ChatChannelHistoryResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp.Note == "" || len(resp.Messages) != 0 {
-		t.Fatalf("expected empty messages + a note, got %+v", resp)
+	if resp.Note != "" || len(resp.Messages) != 0 {
+		t.Fatalf("expected empty transcript with no note, got %+v", resp)
+	}
+}
+
+// TestGetChatHistory_NoSlackBindingReadsStoredTranscript: when the session has
+// no Slack binding but DOES have stored chat_message rows, the fallback returns
+// those messages (oldest-first), so an agent can rebuild a web chat / Feishu
+// conversation instead of being told nothing is readable. Channel-command rows
+// are excluded, matching what the frontend shows.
+func TestGetChatHistory_NoSlackBindingReadsStoredTranscript(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("requires test database")
+	}
+	agentID := createHandlerTestAgent(t, "ChatHistoryTranscriptAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID := newChatHistoryTaskForSession(t, sessionID)
+	withSlackHistory(t, &fakeChatHistoryReader{err: slack.ErrNoSlackSession})
+
+	base := time.Date(2026, 8, 10, 1, 0, 0, 0, time.UTC)
+	insertChatVisibilityMessage(t, sessionID, "first user turn", "message", true, base)
+	insertChatVisibilityMessage(t, sessionID, "assistant reply", "message", true, base.Add(time.Second))
+	insertChatVisibilityMessage(t, sessionID, "/issue hidden", "channel_command", true, base.Add(2*time.Second))
+	insertChatVisibilityMessage(t, sessionID, "second user turn", "message", true, base.Add(3*time.Second))
+
+	w := httptest.NewRecorder()
+	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var resp ChatChannelHistoryResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Note != "" {
+		t.Fatalf("expected no note when a transcript is served, got %q", resp.Note)
+	}
+	if len(resp.Messages) != 3 {
+		t.Fatalf("expected 3 visible messages, got %d: %+v", len(resp.Messages), resp.Messages)
+	}
+	if resp.Messages[0].Text != "first user turn" || resp.Messages[1].Text != "assistant reply" || resp.Messages[2].Text != "second user turn" {
+		t.Fatalf("transcript not oldest-first / channel_command leaked: %+v", resp.Messages)
+	}
+	if resp.Messages[1].Role != channel.HistoryRoleAssistant {
+		t.Errorf("assistant row role = %q, want %q", resp.Messages[1].Role, channel.HistoryRoleAssistant)
 	}
 }
 

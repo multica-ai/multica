@@ -506,7 +506,7 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 
 // TestBuildChatPromptNoNarrationOnEveryChannel pins the THIRD axis of the chat
 // channel policy: the no-narration delivery rule keys off "is there a channel at
-// all", like the upload axis and unlike the Slack-only history axis.
+// all", like the upload axis and unlike the Slack/Feishu history axis.
 //
 // Regression guard for GH #6006. #4776 introduced the rule for every channel;
 // the MUL-4899 split moved it into the Slack branch along with the read commands
@@ -563,12 +563,12 @@ func TestBuildChatPromptNoNarrationOnEveryChannel(t *testing.T) {
 //
 //   - delivery: `attachment upload` guidance is injected iff there is NO channel.
 //     Any IM reply leaves Multica, where the upload has nothing to bind to.
-//   - history: the `chat history` / `chat thread` commands are injected iff the
-//     channel is Slack. Those endpoints are hardwired to h.SlackHistory
-//     (handler/chat_history.go) — on Feishu they answer "no channel
-//     integration", so teaching them there sends the agent down a dead path.
+//   - history: `multica chat history` is injected for Slack (live channel) and
+//     Feishu (stored chat_message transcript); `multica chat thread` is Slack-only.
+//     handler/chat_history.go reads the live channel for Slack and falls back to
+//     the stored transcript for every other session.
 //
-// Feishu is the case that proves the axes are separate: no upload AND no
+// Feishu is the case that proves the axes are separate: no upload AND has
 // history. A single `ChatChannelType != ""` gate cannot express it.
 func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 	// Match the IMPERATIVE, not the bare command name. An IM prompt names
@@ -600,13 +600,13 @@ func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 			wantPhrases: []string{"Slack", "delivered to Slack as text", "You cannot attach a file to it"},
 		},
 		{
-			name:        "feishu: no upload, no history",
+			name:        "feishu: no upload, has transcript history",
 			channelType: execenv.ChannelTypeFeishu,
 			wantUpload:  false,
-			wantHistory: false,
+			wantHistory: true,
 			wantPhrases: []string{
 				"Feishu/Lark",
-				"no history reader for Feishu/Lark",
+				"read it back with `multica chat history`",
 				"delivered to Feishu/Lark as text",
 				"You cannot attach a file to it",
 			},
@@ -635,9 +635,9 @@ func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 	}
 }
 
-// ChatInThread only ever selects between `chat history` and `chat thread`. With
-// no Feishu history reader there is nothing to select between, so the flag must
-// not leak either command into a Feishu prompt even if the server sets it.
+// ChatInThread only ever selects between `chat history` and `chat thread`. Feishu
+// has a transcript reader (`chat history`) but no thread expansion, so the flag
+// must not leak `chat thread` into a Feishu prompt even if the server sets it.
 func TestBuildChatPromptFeishuIgnoresChatInThread(t *testing.T) {
 	out := buildChatPrompt(Task{
 		ChatSessionID:   "sess-1",
@@ -645,10 +645,8 @@ func TestBuildChatPromptFeishuIgnoresChatInThread(t *testing.T) {
 		ChatInThread:    true,
 		ChatMessage:     "hi",
 	})
-	for _, unwanted := range []string{"multica chat thread", "multica chat history"} {
-		if strings.Contains(out, unwanted) {
-			t.Errorf("feishu prompt must not teach %q (no Feishu history reader exists)\n--- output ---\n%s", unwanted, out)
-		}
+	if strings.Contains(out, "multica chat thread") {
+		t.Errorf("feishu prompt must not teach `multica chat thread` (no thread reader)\n--- output ---\n%s", out)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -43,6 +44,12 @@ type ChatChannelHistoryResponse struct {
 // GetChatChannelHistory serves `multica chat history` — the channel overview:
 // recent top-level messages, each thread tagged with its id + reply count (no
 // thread contents). The agent drills into a thread with `multica chat thread`.
+//
+// A chat session that is NOT backed by an IM channel has no channel overview to
+// read — its history is the chat_message table itself (web chat, Feishu). For
+// those, this endpoint falls back to returning that transcript, so the agent can
+// reconstruct the conversation after a lost resume instead of being told nothing
+// is readable (see the continuity-notice split in execenv).
 func (h *Handler) GetChatChannelHistory(w http.ResponseWriter, r *http.Request) {
 	sessionID, ok := h.chatHistorySession(w, r)
 	if !ok {
@@ -53,7 +60,50 @@ func (h *Handler) GetChatChannelHistory(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	page, err := h.SlackHistory.ChannelOverview(r.Context(), sessionID, historyOptionsFrom(r))
+	if errors.Is(err, slack.ErrNoSlackSession) {
+		// Not channel-backed: read the session's own stored transcript instead.
+		page, err = h.chatMessageHistory(r, sessionID)
+	}
 	h.respondChatHistory(w, r, sessionID, page, err)
+}
+
+// chatMessageHistory reads a chat session's own stored transcript (chat_message)
+// as a channel.HistoryPage, oldest-first, honoring the shared ?limit. It backs
+// `multica chat history` for sessions with no IM channel (web chat, Feishu),
+// whose history lives only in Multica — there is no platform to read back.
+func (h *Handler) chatMessageHistory(r *http.Request, sessionID pgtype.UUID) (channel.HistoryPage, error) {
+	messages, err := h.Queries.ListChatMessages(r.Context(), sessionID)
+	if err != nil {
+		return channel.HistoryPage{}, err
+	}
+	limit := parseHistoryLimit(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		// Default to the recent window, mirroring `multica issue comment list
+		// --tail 30`: enough to rebuild the conversation without dumping a long
+		// session's whole transcript into the agent's context.
+		limit = 30
+	}
+	if limit > len(messages) {
+		limit = len(messages)
+	}
+	if n := len(messages) - limit; n > 0 {
+		messages = messages[n:]
+	}
+	out := make([]channel.HistoryMessage, 0, len(messages))
+	for _, m := range messages {
+		role := channel.HistoryRoleUser
+		if m.Role == "assistant" {
+			role = channel.HistoryRoleAssistant
+		}
+		out = append(out, channel.HistoryMessage{
+			ID:     uuidToString(m.ID),
+			Role:   role,
+			Text:   m.Content,
+			Author: string(role),
+			TS:     m.CreatedAt.Time.Format(time.RFC3339),
+		})
+	}
+	return channel.HistoryPage{Messages: out}, nil
 }
 
 // GetChatThread serves `multica chat thread [id]` — one thread's messages. With
