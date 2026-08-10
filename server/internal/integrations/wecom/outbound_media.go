@@ -485,44 +485,6 @@ func outboundMediaName(filename, contentType string) string {
 	return name
 }
 
-// cleanMediaFilename reduces a stored filename to one path segment. A stored
-// name is not guaranteed to be one — it came from an uploader — and this one
-// reaches the wire.
-func cleanMediaFilename(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
-	name = path.Base(strings.ReplaceAll(name, "\\", "/"))
-	if name == "." || name == "/" || name == ".." {
-		return ""
-	}
-	return name
-}
-
-// mediaExtension picks the extension for a content type. The listed few are
-// pinned because mime's own answer for them varies with the host's mime.types
-// — "image/jpeg" can come back as ".jfif", which is a name no recipient
-// recognizes even though the bytes are fine.
-func mediaExtension(contentType string) string {
-	switch contentType {
-	case "image/jpeg":
-		return ".jpg"
-	case "image/png":
-		return ".png"
-	case "image/gif":
-		return ".gif"
-	case "image/webp":
-		return ".webp"
-	case "video/mp4":
-		return ".mp4"
-	}
-	if exts, err := mime.ExtensionsByType(contentType); err == nil && len(exts) > 0 {
-		return exts[0]
-	}
-	return ""
-}
-
 // chatDoneMessageID pulls the assistant message id out of a chat:done payload
 // (the typed payload, or its map form after a serialization round trip). It is
 // the key every attachment on this turn is bound to.
