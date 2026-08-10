@@ -127,15 +127,9 @@
    still overflow horizontally via their own rules. */
 /* CEREBRO-PATCH(editor-mobile-table-overflow): wide tables must scroll inside the
    wrapper rather than push the page past the viewport on mobile (JEH-707). */
-/* CEREBRO-PATCH(fir-4028-padding-outline): fix comment panel visibility and text selection on right-click. */
 .rich-text-editor {
   min-width: 0;
   max-width: min(100%, 70ch);
-  user-select: auto;
-}
-
-.rich-text-editor *:not(input):not(textarea) {
-  user-select: text;
 }
 
 /* CEREBRO-PATCH(document-full-width): Documents should be full width, Notes should respect the 70ch readability constraint. */
