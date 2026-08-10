@@ -442,6 +442,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// Ensure the stderr copier has drained before consulting the
 		// provider-error sniffer; see hermes.go for the failure mode.
 		<-stderrDone
+		// Flush any partial stderr line that arrived without a trailing '\n'
+		// before the pipe closed (P1 from multica#5785 review Aug 10).
+		providerErr.Finalize()
 		streamingCurrentTurn.Store(false)
 
 		finalOutput, providerErrorOutput := deliverable.result()

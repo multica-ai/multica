@@ -2595,6 +2595,129 @@ func TestACPProviderErrorSnifferMessageLockedPreservesAPIErrorStatus(t *testing.
 	}
 }
 
+// TestACPProviderErrorSnifferMixedRetry429Then400 verifies that when a kimi
+// adapter emits a transient 429 (internally retried) followed by a terminal
+// 400 (poisoned history), messageLocked pairs the 400 status tag with the
+// 400's own detail — not with the 429's "rate limit" text. This ensures that
+// taskfailure.UnresumableHistory can see the history locator in the final
+// surfaced error string (GitHub multica#5785 P1 from Aug 10 review).
+func TestACPProviderErrorSnifferMixedRetry429Then400(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		stderrSeq []string
+		wantIn    string
+		wantNotIn string
+	}{
+		{
+			name: "single-line 400 after 429",
+			stderrSeq: []string{
+				"error: provider.api_error: 429 rate limit exceeded\n",
+				"error: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty\n",
+			},
+			wantIn:    "must not be empty",
+			wantNotIn: "rate limit",
+		},
+		{
+			name: "two-line 400 after 429",
+			stderrSeq: []string{
+				"error: provider.api_error: 429 rate limit exceeded\n",
+				"error: provider.api_error: 400\n",
+				"detail: messages[43].content: content must not be empty\n",
+			},
+			wantIn:    "must not be empty",
+			wantNotIn: "rate limit",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newACPProviderErrorSniffer("kimi")
+			for _, line := range tt.stderrSeq {
+				if _, err := s.Write([]byte(line)); err != nil {
+					t.Fatalf("Write: %v", err)
+				}
+			}
+			msg := s.terminalMessage()
+			if !strings.Contains(msg, "provider.api_error: 400") {
+				t.Errorf("expected provider.api_error: 400 in message, got %q", msg)
+			}
+			if !strings.Contains(msg, tt.wantIn) {
+				t.Errorf("expected %q in message, got %q", tt.wantIn, msg)
+			}
+			if strings.Contains(msg, tt.wantNotIn) {
+				t.Errorf("must not include %q (from 429) in message, got %q", tt.wantNotIn, msg)
+			}
+			if !s.isPoisonedHistory() {
+				t.Error("mixed 429→400 with assistant-empty detail must be classified as poisoned history")
+			}
+		})
+	}
+}
+
+// TestACPProviderErrorSnifferFinalizeFlushesPartialLine verifies that a
+// terminal error written to stderr WITHOUT a trailing newline is still detected
+// after Finalize() is called. Without Finalize(), a process that exits after
+// writing its last line without '\n' leaves the partial line in s.remains and
+// the sniffer reports no error, causing the task to land as completed/empty.
+func TestACPProviderErrorSnifferFinalizeFlushesPartialLine(t *testing.T) {
+	t.Parallel()
+
+	const line = "error: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty"
+
+	s := newACPProviderErrorSniffer("kimi")
+	// Write without trailing newline — simulates a process that exits without '\n'.
+	if _, err := s.Write([]byte(line)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if msg := s.terminalMessage(); msg != "" {
+		t.Errorf("before Finalize: expected empty terminalMessage (partial line still buffered), got %q", msg)
+	}
+
+	s.Finalize()
+
+	msg := s.terminalMessage()
+	if msg == "" {
+		t.Fatal("after Finalize: expected non-empty terminalMessage for error written without trailing newline")
+	}
+	if !strings.Contains(msg, "must not be empty") {
+		t.Errorf("after Finalize: expected 'must not be empty' in message, got %q", msg)
+	}
+	if !strings.Contains(msg, "provider.api_error: 400") {
+		t.Errorf("after Finalize: expected 'provider.api_error: 400' in message, got %q", msg)
+	}
+}
+
+// TestACPProviderErrorSnifferNonKimiIgnoresProviderApiError verifies that the
+// kimi-specific provider.api_error patterns are scoped to kimi only. Other ACP
+// backends (hermes, grok, kiro, qoder, qwenpaw, reasonix, traecli) must not
+// classify a provider.api_error line as terminal — tool output can legitimately
+// echo such lines when calling an underlying Kimi API, and a run with real
+// output must stay completed (GitHub multica#5785 P1 from Aug 10 review).
+func TestACPProviderErrorSnifferNonKimiIgnoresProviderApiError(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{"hermes", "grok", "kiro", "qoder", "qwenpaw", "reasonix", "traecli"} {
+		t.Run(provider, func(t *testing.T) {
+			s := newACPProviderErrorSniffer(provider)
+			s.Write([]byte("provider.api_error: 400 assistant must not be empty\n"))
+
+			if msg := s.terminalMessage(); msg != "" {
+				t.Errorf("provider %q: provider.api_error in tool output must not be terminal, got %q", provider, msg)
+			}
+
+			// With real output the run must stay completed even if the sniffer
+			// captured the line via a non-terminal path.
+			status, _ := promoteACPResultOnProviderError("completed", "", "successful output", s)
+			if status != "completed" {
+				t.Errorf("provider %q: run with real output must stay completed, got %q", provider, status)
+			}
+		})
+	}
+}
+
 // TestHermesBackendPromotesProviderErrorWithNonEmptyOutput pins the
 // fix for GitHub multica#1952: a hermes run that hits a 429 (or any
 // upstream provider error) must surface as Status=failed even though
@@ -2954,10 +3077,12 @@ func TestHermesBackendDoesNotPromoteOnTransientRetry(t *testing.T) {
 	}
 }
 
-// fakeKimiACPPoisonedHistoryScript mimics a kimi adapter that emits the
-// "assistant message must not be empty" 400 error when asked to resume
-// a session whose history is corrupted.
-func fakeKimiACPPoisonedHistoryScript() string {
+// fakeHermesACPPoisonedHistoryScript mimics a hermes-style adapter that emits
+// the "assistant message must not be empty" error in the Python [ERROR] log
+// format when asked to resume a session whose history is corrupted. This uses
+// the hermes-native stderr format (emoji-prefixed, after-N-retries), NOT the
+// bare kimi provider.api_error format — the kimi patterns are scoped to kimi.
+func fakeHermesACPPoisonedHistoryScript() string {
 	return `#!/bin/sh
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
@@ -2969,7 +3094,7 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_poison"}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
-      printf '%s\n' "error: failed to run prompt: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty" >&2
+      printf '%s\n' "2026-01-01 00:00:01 [ERROR] root: ❌ API call failed after 3 retries: BadRequestError the message at position 43 with role 'assistant' must not be empty" >&2
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
       exit 0
       ;;
@@ -2988,7 +3113,7 @@ func TestHermesBackendPoisonedHistorySetsResumeRejected(t *testing.T) {
 	t.Parallel()
 
 	fakePath := filepath.Join(t.TempDir(), "hermes")
-	writeTestExecutable(t, fakePath, []byte(fakeKimiACPPoisonedHistoryScript()))
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPPoisonedHistoryScript()))
 
 	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
 	if err != nil {

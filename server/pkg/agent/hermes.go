@@ -717,6 +717,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			<-readerDone
 			<-stderrDone
 		}
+		// Flush any partial stderr line that arrived without a trailing '\n'
+		// before the pipe closed (P1 from multica#5785 review Aug 10).
+		providerErr.Finalize()
 		streamingCurrentTurn.Store(false)
 
 		finalOutput, providerErrorOutput := deliverable.result()
@@ -2745,12 +2748,13 @@ func hermesToolNameFromTitle(title string, kind string) string {
 // a successful retry following an early per-attempt warning would be
 // wrongly marked as failed.
 type acpProviderErrorSniffer struct {
-	provider string
-	mu       sync.Mutex
-	remains  []byte   // buffer for a partial trailing line across writes
-	lines    []string // captured error lines, bounded
-	seen     map[string]bool
-	terminal bool // sticky: at least one line matched acpTerminalErrorRe
+	provider  string
+	kimiStyle bool // true for kimi: enables provider.api_error line detection
+	mu        sync.Mutex
+	remains   []byte   // buffer for a partial trailing line across writes
+	lines     []string // captured error lines, bounded
+	seen      map[string]bool
+	terminal  bool // sticky: at least one line matched acpTerminalErrorRe
 	// echoJSON tracks an incomplete structured payload from a Python
 	// INFO/DEBUG root-logger record. The JSON scanner state is persisted
 	// across Write calls so only actual payload continuations are skipped.
@@ -2763,21 +2767,14 @@ type acpProviderErrorSniffer struct {
 // acpErrorHeaderRe matches the first line of an API-error block.
 // ACP agents typically prefix these with ⚠️ / ❌ and include an HTTP
 // status code or a non-retryable-error tag.
-// The trailing alternative covers provider.api_error lines that kimi emits
-// without an emoji prefix, e.g.:
-//
-//	error: failed to run prompt: provider.api_error: 400 the message at position …
-var acpErrorHeaderRe = regexp.MustCompile(
-	`(?:⚠️|❌|\[ERROR\]).*(?:BadRequestError|AuthenticationError|RateLimitError|HTTP [0-9]{3}|Non-retryable|API call failed)` +
-		`|provider\.api_error`)
+var acpErrorHeaderRe = regexp.MustCompile(`(?:⚠️|❌|\[ERROR\]).*(?:BadRequestError|AuthenticationError|RateLimitError|HTTP [0-9]{3}|Non-retryable|API call failed)`)
 
 // acpErrorDetailRe pulls the most useful single-line messages out of
 // the subsequent lines of the error block (the one whose "Error:" or
 // "Details:" tag actually spells out what happened).
-// The "provider.api_error: NNN " branch lets kimi's status-prefixed detail
-// line be captured too. The existing branches keep \s* so "detail:value" (no
-// space) is captured as well as "Error: message" (with space).
-var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:|provider\.api_error: [0-9]+)\s*(.+)`)
+// Branches keep \s* so "detail:value" (no space) and "Error: message"
+// (with space) are both matched.
+var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:)\s*(.+)`)
 
 // acpTerminalErrorRe matches markers that only appear when the
 // adapter has *given up* on the upstream call — either after
@@ -2785,17 +2782,25 @@ var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:|provider\.
 // classified as non-retryable up front (Non-retryable, BadRequest /
 // Authentication errors, ❌ / [ERROR] log levels). Per-attempt
 // warnings ("(attempt 1/3)") deliberately do NOT match this pattern.
-// "provider.api_error: (?:400|401|403)" covers kimi-style client errors that
-// are never resolved by retrying the same request. 429 (rate-limit) and 408
-// (timeout) are intentionally excluded: the kimi adapter retries those
-// internally, and a run that eventually succeeds must stay status=completed.
-var acpTerminalErrorRe = regexp.MustCompile(`(?:❌|\[ERROR\]|after \d+ retr|Non-retryable|BadRequestError|AuthenticationError|provider\.api_error: (?:400|401|403))`)
+var acpTerminalErrorRe = regexp.MustCompile(`(?:❌|\[ERROR\]|after \d+ retr|Non-retryable|BadRequestError|AuthenticationError)`)
+
+// kimiProviderApiErrorRe matches kimi-specific "provider.api_error:" lines
+// that do not use the emoji-prefixed format of the shared ACP backends.
+// Scoped to kimiStyle sniffers to avoid false-positive captures when
+// other backends echo provider.api_error text in tool output.
+var kimiProviderApiErrorRe = regexp.MustCompile(`provider\.api_error`)
+
+// kimiTerminalErrorRe classifies kimi client errors (400/401/403) as
+// terminal. 429 (rate-limit) and 408 (timeout) are intentionally excluded:
+// the kimi adapter retries those internally, and a run that ultimately
+// succeeds after retries must stay status=completed.
+var kimiTerminalErrorRe = regexp.MustCompile(`provider\.api_error: (?:400|401|403)`)
 
 // providerApiErrorStatusRe extracts the numeric status code from a kimi
-// "provider.api_error: NNN" error line so messageLocked can forward it into
-// the formatted detail string, letting the backend-agnostic classifier
-// (taskfailure.UnresumableHistory) detect the 400 fingerprint even when the
-// human-readable detail text lives on a separate stderr line.
+// "provider.api_error: NNN" line so messageLocked can forward it into the
+// formatted detail string, letting taskfailure.UnresumableHistory detect the
+// 400 fingerprint even when the human-readable detail text is on a separate
+// stderr line (Kimi's two-line format).
 var providerApiErrorStatusRe = regexp.MustCompile(`provider\.api_error: (\d+)`)
 
 // acpAgentOutputTerminalRe matches the synthetic agent-text turn that
@@ -2839,7 +2844,11 @@ const acpMaxErrorLineLen = 4096
 // with the given provider name (e.g. "hermes", "kimi") so failure
 // strings make it obvious which runtime produced the error.
 func newACPProviderErrorSniffer(provider string) *acpProviderErrorSniffer {
-	return &acpProviderErrorSniffer{provider: provider, seen: map[string]bool{}}
+	return &acpProviderErrorSniffer{
+		provider:  provider,
+		kimiStyle: provider == "kimi",
+		seen:      map[string]bool{},
+	}
 }
 
 // Write implements io.Writer so the sniffer can sit behind an
@@ -2896,10 +2905,11 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 				continue
 			}
 		}
-		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line)) {
+		isKimiErr := s.kimiStyle && kimiProviderApiErrorRe.MatchString(line)
+		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line) || isKimiErr) {
 			continue
 		}
-		if acpTerminalErrorRe.MatchString(line) {
+		if acpTerminalErrorRe.MatchString(line) || (s.kimiStyle && kimiTerminalErrorRe.MatchString(line)) {
 			s.terminal = true
 		}
 		if s.seen[line] {
@@ -2912,6 +2922,23 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+// Finalize must be called once after the process stderr pipe has been fully
+// drained (io.Copy returned). It flushes any partial last line that arrived
+// without a trailing newline so it is included in the terminal-error and
+// poisoned-history decisions. Without this, a process that exits after writing
+// "provider.api_error: 400 ..." without a trailing '\n' leaves the sniffer
+// with no captured error, causing the task to land as completed/empty.
+func (s *acpProviderErrorSniffer) Finalize() {
+	s.mu.Lock()
+	remaining := strings.TrimRight(string(s.remains), "\r")
+	s.remains = s.remains[:0]
+	s.mu.Unlock()
+	if remaining == "" {
+		return
+	}
+	_, _ = s.Write([]byte(remaining + "\n"))
 }
 
 func (s *acpProviderErrorSniffer) startEchoJSON(payload string) {
@@ -3028,44 +3055,66 @@ func (s *acpProviderErrorSniffer) isPoisonedHistory() bool {
 func (s *acpProviderErrorSniffer) messageLocked() string {
 	prefix := s.provider + " provider error: "
 
-	// When the terminal failure came from a provider.api_error line, extract
-	// and forward the status code into the detail string. Without this, Kimi's
-	// two-line stderr format (status on the header line, human-readable text on
-	// the next "detail:" line) loses the "400" token after extraction, so the
-	// backend-agnostic classifier (taskfailure.UnresumableHistory) cannot see
-	// the permanently-poisoned-history fingerprint.
-	var apiErrTag string
-	apiErrLineIdx := -1
-	for i, line := range s.lines {
-		if acpTerminalErrorRe.MatchString(line) {
-			if m := providerApiErrorStatusRe.FindStringSubmatch(line); m != nil {
-				apiErrTag = "provider.api_error: " + m[1] + " "
-				apiErrLineIdx = i
-				break
+	if s.kimiStyle {
+		// Find the LAST terminal provider.api_error line. Using the last one
+		// ensures a 429 (transient, internally retried) followed by a 400
+		// (definitive failure) always yields the 400 status tag rather than the
+		// earlier 429 "rate limit" noise. The loop does not break on the first
+		// match so a later terminal line always wins.
+		var apiErrTag string
+		apiErrLineIdx := -1
+		for i, line := range s.lines {
+			if kimiTerminalErrorRe.MatchString(line) {
+				if m := providerApiErrorStatusRe.FindStringSubmatch(line); m != nil {
+					apiErrTag = "provider.api_error: " + m[1] + " "
+					apiErrLineIdx = i
+				}
 			}
+		}
+
+		if apiErrLineIdx >= 0 {
+			// Scan for the detail belonging to the terminal line: start at
+			// apiErrLineIdx, not at 0. Starting at 0 would pair a preceding
+			// 429 "rate limit exceeded" detail with the 400 status tag, hiding
+			// the history locator from taskfailure.UnresumableHistory.
+			for i := apiErrLineIdx; i < len(s.lines); i++ {
+				line := s.lines[i]
+				if m := acpErrorDetailRe.FindStringSubmatch(line); m != nil {
+					detail := strings.TrimSpace(m[1])
+					if detail == "" {
+						continue
+					}
+					return acpTruncateError(prefix + apiErrTag + detail)
+				}
+			}
+			// Single-line format: "provider.api_error: 400 <detail>" where the
+			// detail text follows the status code on the same line but is not
+			// captured by acpErrorDetailRe (which requires Error:/detail:/Details:
+			// prefixes). Extract it directly from the header line.
+			headerLine := s.lines[apiErrLineIdx]
+			if loc := providerApiErrorStatusRe.FindStringIndex(headerLine); loc != nil {
+				after := strings.TrimLeft(headerLine[loc[1]:], " ")
+				if after != "" {
+					return acpTruncateError(prefix + apiErrTag + after)
+				}
+			}
+			// Nothing extractable beyond the status; surface the raw header.
+			return acpTruncateError(prefix + headerLine)
 		}
 	}
 
-	for i, line := range s.lines {
+	// Common path: non-kimi or kimi without a terminal provider.api_error line.
+	// Return the first detail tag, then fall back to the first header line.
+	for _, line := range s.lines {
 		if m := acpErrorDetailRe.FindStringSubmatch(line); m != nil {
 			detail := strings.TrimSpace(m[1])
-			if detail == "" {
-				continue
+			if detail != "" {
+				return acpTruncateError(prefix + detail)
 			}
-			// acpErrorDetailRe's `provider\.api_error: [0-9]+` branch can
-			// backtrack one digit into `(.+)` when the status code is the last
-			// token on the line (two-line stderr format). Skip that artefact: a
-			// real detail is never pure digits. In the single-line format the
-			// status and detail text are on the same line, so `(.+)` captures
-			// the full text (non-digits) and the check passes correctly.
-			if i == apiErrLineIdx && isOnlyASCIIDigits(detail) {
-				continue
-			}
-			return acpTruncateError(prefix + apiErrTag + detail)
 		}
 	}
 	for _, line := range s.lines {
-		if acpErrorHeaderRe.MatchString(line) {
+		if acpErrorHeaderRe.MatchString(line) || (s.kimiStyle && kimiProviderApiErrorRe.MatchString(line)) {
 			return acpTruncateError(prefix + line)
 		}
 	}
@@ -3081,22 +3130,6 @@ func acpTruncateError(msg string) string {
 		return msg
 	}
 	return strings.ToValidUTF8(msg[:acpMaxErrorLineLen], "") + "…(truncated)"
-}
-
-// isOnlyASCIIDigits reports whether s is non-empty and consists entirely of
-// ASCII digit characters. Used to detect the regex backtracking artefact in
-// messageLocked where the "detail" captured is just the trailing digit(s) of a
-// status code.
-func isOnlyASCIIDigits(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		if s[i] < '0' || s[i] > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 // promoteACPResultOnProviderError flips finalStatus to "failed" if
