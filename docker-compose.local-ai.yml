@@ -1,0 +1,45 @@
+# Optional local LLM overlay.
+# Run it together with docker-compose.local.yml through `local-stack.* up-ai`.
+
+services:
+  ollama:
+    image: ollama/ollama:0.32.0
+    ports:
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: 24h
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  ollama-model:
+    image: ollama/ollama:0.32.0
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama pull "$${OLLAMA_MODEL}"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:4b}
+    restart: "no"
+
+  backend:
+    depends_on:
+      ollama-model:
+        condition: service_completed_successfully
+    environment:
+      MULTICA_LLM_API_KEY: ""
+      MULTICA_LLM_BASE_URL: http://ollama:11434/v1
+      MULTICA_LLM_DEFAULT_MODEL: ${OLLAMA_MODEL:-qwen3:4b}
+
+volumes:
+  ollama_data: {}

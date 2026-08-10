@@ -138,6 +138,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.0
 
   apps/desktop:
     dependencies:

@@ -51,6 +51,9 @@ jobs:
               - 'scripts/generate-reserved-slugs.mjs'
               - 'server/internal/handler/reserved_slugs.json'
               - 'scripts/selfhost-config.test.sh'
+              - 'scripts/local-stack-config.test.mjs'
+              - 'scripts/local-stack.sh'
+              - 'scripts/local-stack.ps1'
               - 'scripts/selfhost-wait.sh'
               # selfhost-config.test.sh asserts on the installers' side of
               # the port contract, so a change to either must run it.
@@ -60,8 +63,11 @@ jobs:
               - 'scripts/dev.sh'
               - 'scripts/local-env.sh'
               - '.env.example'
+              - '.env.local.example'
               - 'docker-compose.selfhost.yml'
               - 'docker-compose.selfhost.build.yml'
+              - 'docker-compose.local.yml'
+              - 'docker-compose.local-ai.yml'
               - 'Makefile'
 
       - name: Decide
@@ -148,6 +154,10 @@ jobs:
       - name: Test self-host env derivation
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/selfhost-config.test.sh
+
+      - name: Test fully local Docker stack
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: pnpm test:local-stack
 
       - name: Verify reserved-slugs.ts is up to date
         if: ${{ needs.changes.outputs.frontend == 'true' }}
