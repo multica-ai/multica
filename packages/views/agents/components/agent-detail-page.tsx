@@ -539,7 +539,7 @@ function DetailHeader({
                 {t(($) => $.detail.assign_work)}
               </Button>
             )}
-            {!isArchived && canArchive ? (
+            {!isArchived && canArchive && onArchive ? (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={<Button variant="ghost" size="icon-sm" />}
