@@ -33,6 +33,14 @@ SELECT * FROM agent_runtime
 WHERE id = $1
 FOR UPDATE;
 
+-- name: LockRuntimeOwnerWrites :exec
+-- Workspace-scoped transaction barrier shared by every Runtime owner upsert
+-- (including daemon-token COALESCE-preserve writes) and member revocation.
+-- It must be taken before any Profile/Runtime relation lock.
+SELECT pg_advisory_xact_lock(
+    hashtextextended((sqlc.arg(workspace_id)::uuid)::text || ':runtime-owner-writes', 0)
+);
+
 -- name: LockRuntimeForCapabilityRegistration :one
 -- Runtime capability/access mutations must hold this lock before discovering
 -- Pool dependents. The later Agent and Task locks are acquired from the

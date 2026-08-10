@@ -1807,16 +1807,67 @@ func (s *TaskService) PromoteChannelChatTasksIfMediaReady(ctx context.Context, s
 	if err != nil {
 		return fmt.Errorf("promote channel chat tasks after media: %w", err)
 	}
+	poolByWorkspace := make(map[string][]db.AgentTaskQueue)
+	workspaceOrder := make([]string, 0, 1)
 	for _, task := range tasks {
 		slog.Info("channel media-ready chat task promoted",
 			"task_id", util.UUIDToString(task.ID),
 			"chat_session_id", util.UUIDToString(sessionID),
 			"agent_id", util.UUIDToString(task.AgentID),
 		)
+		if task.RuntimeBindingMode == runtimepool.BindingPool {
+			workspaceKey := util.UUIDToString(task.PlacementWorkspaceID)
+			if _, exists := poolByWorkspace[workspaceKey]; !exists {
+				workspaceOrder = append(workspaceOrder, workspaceKey)
+			}
+			poolByWorkspace[workspaceKey] = append(poolByWorkspace[workspaceKey], task)
+			continue
+		}
 		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 		s.NotifyTaskEnqueued(ctx, task)
 	}
-	return nil
+
+	var promotionErr error
+	for _, workspaceKey := range workspaceOrder {
+		promoted := poolByWorkspace[workspaceKey]
+		if len(promoted) == 0 {
+			continue
+		}
+		if s.RuntimePool == nil {
+			for _, task := range promoted {
+				s.broadcastTaskEvent(ctx, protocol.EventTaskWaitingRuntime, task)
+			}
+			continue
+		}
+
+		result, assignErr := s.AssignPoolWorkspace(ctx, promoted[0].PlacementWorkspaceID, pgtype.UUID{})
+		published := make(map[string]struct{}, len(result.Assigned)+len(result.PromotedWaiting))
+		for _, task := range result.Assigned {
+			published[util.UUIDToString(task.ID)] = struct{}{}
+		}
+		for _, task := range result.PromotedWaiting {
+			published[util.UUIDToString(task.ID)] = struct{}{}
+		}
+		for _, task := range promoted {
+			if _, alreadyPublished := published[util.UUIDToString(task.ID)]; alreadyPublished {
+				continue
+			}
+			persisted, lookupErr := s.Queries.GetAgentTask(ctx, task.ID)
+			if lookupErr != nil {
+				promotionErr = errors.Join(promotionErr, fmt.Errorf("reload media-ready Pool Chat Task: %w", lookupErr))
+				continue
+			}
+			if persisted.RuntimeBindingMode == runtimepool.BindingPool &&
+				persisted.Status == runtimepool.StatusWaitingRuntime &&
+				persisted.PlacementWorkspaceID == task.PlacementWorkspaceID {
+				s.broadcastTaskEvent(ctx, protocol.EventTaskWaitingRuntime, persisted)
+			}
+		}
+		if assignErr != nil {
+			promotionErr = errors.Join(promotionErr, fmt.Errorf("assign media-ready Pool Chat Tasks: %w", assignErr))
+		}
+	}
+	return promotionErr
 }
 
 // PromoteDeferredChannelIssueTask makes a media-gated /issue task claimable.
@@ -1835,6 +1886,16 @@ func (s *TaskService) PromoteDeferredChannelIssueTask(ctx context.Context, taskI
 		"issue_id", util.UUIDToString(task.IssueID),
 		"agent_id", util.UUIDToString(task.AgentID),
 	)
+	if task.RuntimeBindingMode == runtimepool.BindingPool {
+		if s.RuntimePool == nil {
+			s.broadcastTaskEvent(ctx, protocol.EventTaskWaitingRuntime, task)
+			return nil
+		}
+		if _, err := s.AssignPoolWorkspace(ctx, task.PlacementWorkspaceID, task.ID); err != nil {
+			return fmt.Errorf("assign media-ready Pool Issue Task: %w", err)
+		}
+		return nil
+	}
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return nil
@@ -2142,6 +2203,14 @@ func (s *TaskService) BroadcastTaskQueued(ctx context.Context, task db.AgentTask
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 }
 
+// BroadcastTaskWaitingRuntime exposes the narrow post-commit waiting event
+// used by handlers that already performed the allocator wake. It deliberately
+// does not run placement itself, so a single committed lifecycle edge cannot
+// trigger the Workspace allocator twice.
+func (s *TaskService) BroadcastTaskWaitingRuntime(ctx context.Context, task db.AgentTaskQueue) {
+	s.broadcastTaskEvent(ctx, protocol.EventTaskWaitingRuntime, task)
+}
+
 // AssignPoolWorkspace asks the scheduler to place a bounded batch from one
 // Workspace, then publishes only the results that the scheduler has already
 // committed. FocusTaskID lets a newly-created Task become observable even when
@@ -2239,6 +2308,10 @@ func (s *TaskService) CaptureCancelledTasks(ctx context.Context, cancelled []db.
 	for _, t := range cancelled {
 		s.captureTaskCancelled(ctx, t)
 	}
+	// ArchiveAgent deliberately suppresses per-Task realtime cancellation
+	// noise, but those committed terminal transitions still release Runtime
+	// capacity for Pool placement. Reuse the shared Workspace-deduped wake path.
+	s.notifyTasksFinished(cancelled)
 }
 
 type CancelledChatMessageResult struct {
@@ -3802,6 +3875,7 @@ func (s *TaskService) cancelDeferredEscalationsForTask(ctx context.Context, task
 			"reason", "primary_acknowledged",
 		)
 	}
+	s.notifyTasksFinished(cancelled)
 }
 
 func (s *TaskService) CancelDeferredEscalationsForIssueAgent(ctx context.Context, issueID, agentID pgtype.UUID) {
@@ -3816,6 +3890,7 @@ func (s *TaskService) CancelDeferredEscalationsForIssueAgent(ctx context.Context
 			"error", err)
 		return
 	}
+	finished := make([]db.AgentTaskQueue, 0, len(cancelled))
 	for _, task := range cancelled {
 		slog.Info("deferred fallback task cancelled",
 			"task_id", util.UUIDToString(task.ID),
@@ -3823,7 +3898,13 @@ func (s *TaskService) CancelDeferredEscalationsForIssueAgent(ctx context.Context
 			"agent_id", util.UUIDToString(agentID),
 			"reason", "agent_comment_acknowledged",
 		)
+		finished = append(finished, db.AgentTaskQueue{
+			ID:                   task.ID,
+			RuntimeID:            task.RuntimeID,
+			PlacementWorkspaceID: task.PlacementWorkspaceID,
+		})
 	}
+	s.notifyTasksFinished(finished)
 }
 
 // ExtendTaskPrepareLease keeps a claimed-but-not-started task protected while
@@ -4073,6 +4154,10 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	// Broadcast
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
+	// The running -> completed CAS committed in this call. Keep the capacity
+	// wake on this edge so an idempotent terminal callback replay, which returns
+	// above with the already-finalized row, cannot wake Pool placement twice.
+	s.NotifyTaskFinished(task)
 
 	return &task, nil
 }
@@ -4534,6 +4619,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// was persisted in the chat transcript. A retry-pending attempt stays silent
 	// because its child reports the eventual terminal outcome.
 	s.broadcastTaskFailedEvent(ctx, task, errMsg, failureReason, retried != nil)
+	// The running -> failed CAS committed in this call. The ErrNoRows
+	// idempotency branch returned above, so callback replays never repeat this
+	// Pool capacity wake.
+	s.NotifyTaskFinished(task)
 
 	return &task, nil
 }
@@ -4919,6 +5008,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
+	s.notifyTasksFinished(cancelled)
 
 	// A manual rerun is a NEW direct_human trigger attributed to the rerunning
 	// member, not the original run's human (MUL-4302 §5); actorUserID carries them.
@@ -5356,6 +5446,36 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 // become claimable because an agent-capacity or serialization barrier cleared.
 func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
 	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+	ctx := context.Background()
+	if workspaceID := s.runtimePoolWorkspaceForFinishedTask(ctx, task); workspaceID.Valid {
+		s.wakePoolWorkspaceAfterTerminal(ctx, workspaceID)
+	}
+}
+
+func (s *TaskService) runtimePoolWorkspaceForFinishedTask(ctx context.Context, task db.AgentTaskQueue) pgtype.UUID {
+	if task.PlacementWorkspaceID.Valid {
+		return task.PlacementWorkspaceID
+	}
+	if s == nil || s.Queries == nil || !task.RuntimeID.Valid {
+		return pgtype.UUID{}
+	}
+	runtime, err := s.Queries.GetAgentRuntime(ctx, task.RuntimeID)
+	if err != nil {
+		slog.Warn("resolve Runtime Workspace after terminal Task failed",
+			"runtime_id", util.UUIDToString(task.RuntimeID), "error", err)
+		return pgtype.UUID{}
+	}
+	return runtime.WorkspaceID
+}
+
+func (s *TaskService) wakePoolWorkspaceAfterTerminal(ctx context.Context, workspaceID pgtype.UUID) {
+	if s == nil || s.RuntimePool == nil || !workspaceID.Valid {
+		return
+	}
+	if err := s.WakePoolWorkspace(ctx, workspaceID); err != nil {
+		slog.Warn("runtime Pool wake failed after committed terminal Task",
+			"workspace_id", util.UUIDToString(workspaceID), "error", err)
+	}
 }
 
 // notifyTasksFinished is the batch form used by bulk terminal transitions.
@@ -5373,6 +5493,30 @@ func (s *TaskService) notifyTasksFinished(tasks []db.AgentTaskQueue) {
 		}
 		seen[runtimeKey] = struct{}{}
 		s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+	}
+
+	ctx := context.Background()
+	seenWorkspaces := make(map[string]struct{}, len(tasks))
+	runtimeWorkspaces := make(map[pgtype.UUID]pgtype.UUID)
+	resolvedRuntimes := make(map[pgtype.UUID]struct{})
+	for _, task := range tasks {
+		workspaceID := task.PlacementWorkspaceID
+		if !workspaceID.Valid && task.RuntimeID.Valid {
+			if _, resolved := resolvedRuntimes[task.RuntimeID]; !resolved {
+				resolvedRuntimes[task.RuntimeID] = struct{}{}
+				runtimeWorkspaces[task.RuntimeID] = s.runtimePoolWorkspaceForFinishedTask(ctx, task)
+			}
+			workspaceID = runtimeWorkspaces[task.RuntimeID]
+		}
+		if !workspaceID.Valid {
+			continue
+		}
+		workspaceKey := util.UUIDToString(workspaceID)
+		if _, ok := seenWorkspaces[workspaceKey]; ok {
+			continue
+		}
+		seenWorkspaces[workspaceKey] = struct{}{}
+		s.wakePoolWorkspaceAfterTerminal(ctx, workspaceID)
 	}
 }
 

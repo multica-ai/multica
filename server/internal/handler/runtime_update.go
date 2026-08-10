@@ -22,10 +22,11 @@ import (
 )
 
 var (
-	errRuntimeCapabilityInUse     = errors.New("runtime capability is in use")
-	errRuntimeAccessInUse         = errors.New("runtime access is in use")
-	errRuntimeMutationForbidden   = errors.New("runtime mutation forbidden")
-	errRuntimeRegistrationChanged = errors.New("runtime registration changed concurrently")
+	errRuntimeCapabilityInUse              = errors.New("runtime capability is in use")
+	errRuntimeAccessInUse                  = errors.New("runtime access is in use")
+	errRuntimeMutationForbidden            = errors.New("runtime mutation forbidden")
+	errRuntimeRegistrationChanged          = errors.New("runtime registration changed concurrently")
+	errRuntimeRegistrationOwnerUnavailable = errors.New("runtime registration owner is no longer a member")
 )
 
 type runtimeRegistrationMutation struct {
@@ -96,6 +97,22 @@ func (h *Handler) registerRuntimeMutationAttempt(ctx context.Context, mutation r
 	}
 	defer tx.Rollback(ctx)
 	qtx := h.Queries.WithTx(tx)
+	if err := qtx.LockRuntimeOwnerWrites(ctx, mutation.WorkspaceID); err != nil {
+		return result, false, fmt.Errorf("lock Runtime owner writes: %w", err)
+	}
+	if mutation.OwnerID.Valid {
+		// PAT/JWT registration may write owner_id. Validate and lock that Member
+		// before Profile/Runtime locks. Daemon-token registration has no proposed
+		// owner and is serialized by the Workspace advisory barrier above.
+		if _, err := qtx.LockPoolPlacementMember(ctx, db.LockPoolPlacementMemberParams{
+			WorkspaceID:     mutation.WorkspaceID,
+			RequesterUserID: mutation.OwnerID,
+		}); errors.Is(err, pgx.ErrNoRows) {
+			return result, false, errRuntimeRegistrationOwnerUnavailable
+		} else if err != nil {
+			return result, false, fmt.Errorf("lock Runtime owner Member: %w", err)
+		}
+	}
 
 	provider := mutation.Provider
 	if mutation.ProfileID.Valid {
@@ -144,6 +161,20 @@ func (h *Handler) registerRuntimeMutationAttempt(ctx context.Context, mutation r
 		if err != nil {
 			return result, false, fmt.Errorf("lock registered runtime: %w", err)
 		}
+		if !mutation.OwnerID.Valid && current.OwnerID.Valid {
+			// A daemon-token request authenticated before revocation may resume
+			// only after the Workspace barrier. Re-read the preserved owner's
+			// membership now; otherwise COALESCE would revive the removed owner's
+			// offline Runtime as online.
+			if _, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+				UserID:      current.OwnerID,
+				WorkspaceID: current.WorkspaceID,
+			}); errors.Is(err, pgx.ErrNoRows) {
+				return result, false, errRuntimeRegistrationOwnerUnavailable
+			} else if err != nil {
+				return result, false, fmt.Errorf("revalidate preserved Runtime owner: %w", err)
+			}
+		}
 	}
 
 	capabilities := []string{}
@@ -171,9 +202,11 @@ func (h *Handler) registerRuntimeMutationAttempt(ctx context.Context, mutation r
 		desired.Visibility = "private"
 	}
 
-	shouldWake := !current.ID.Valid && len(capabilities) > 0
+	shouldWake := !current.ID.Valid && desired.Status == "online"
+	var requeued []db.AgentTaskQueue
 	if current.ID.Valid {
-		requeued, mutationWake, err := applyRuntimeRoutingMutation(ctx, qtx, current, desired)
+		var mutationWake bool
+		requeued, mutationWake, err = applyRuntimeRoutingMutation(ctx, qtx, current, desired)
 		if err != nil {
 			return result, false, err
 		}
@@ -242,7 +275,7 @@ func (h *Handler) registerRuntimeMutationAttempt(ctx context.Context, mutation r
 		return result, false, fmt.Errorf("commit runtime registration: %w", err)
 	}
 	if shouldWake {
-		h.wakeRuntimePoolWorkspaceBestEffort(ctx, result.Runtime.WorkspaceID)
+		h.publishRuntimeRoutingMutation(ctx, result.Runtime.WorkspaceID, requeued)
 	}
 	return result, false, nil
 }
@@ -433,9 +466,31 @@ func (h *Handler) updateRuntimeVisibilitySafely(ctx context.Context, runtimeID p
 		return db.AgentRuntime{}, err
 	}
 	if shouldWake || len(requeued) > 0 {
-		h.wakeRuntimePoolWorkspaceBestEffort(ctx, updated.WorkspaceID)
+		h.publishRuntimeRoutingMutation(ctx, updated.WorkspaceID, requeued)
 	}
 	return updated, nil
+}
+
+// publishRuntimeRoutingMutation runs the single Workspace allocator wake for a
+// committed Runtime mutation, then makes every requeued Task observable in its
+// persisted post-allocation state. Assigned Tasks were already published as
+// queued by the allocator; only rows that remain waiting need this event.
+func (h *Handler) publishRuntimeRoutingMutation(ctx context.Context, workspaceID pgtype.UUID, requeued []db.AgentTaskQueue) {
+	h.wakeRuntimePoolWorkspaceBestEffort(ctx, workspaceID)
+	if h.TaskService == nil {
+		return
+	}
+	for _, task := range requeued {
+		persisted, err := h.Queries.GetAgentTask(ctx, task.ID)
+		if err != nil {
+			slog.Warn("reload requeued Pool Task after Runtime mutation",
+				"task_id", uuidToString(task.ID), "error", err)
+			continue
+		}
+		if persisted.RuntimeBindingMode == "pool" && persisted.Status == runtimepool.StatusWaitingRuntime {
+			h.TaskService.BroadcastTaskWaitingRuntime(ctx, persisted)
+		}
+	}
 }
 
 func (h *Handler) wakeRuntimePoolWorkspaceBestEffort(ctx context.Context, workspaceID pgtype.UUID) {

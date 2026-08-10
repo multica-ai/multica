@@ -17,8 +17,9 @@ VALUES ($1, $2, $3)
 RETURNING *;
 
 -- name: UpdateMemberRole :one
-UPDATE member SET role = $2
-WHERE id = $1
+UPDATE member SET role = @role
+WHERE id = @id
+  AND role = @expected_current_role
 RETURNING *;
 
 -- name: DeleteMember :exec

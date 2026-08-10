@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +13,692 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/runtimepool"
+	"github.com/multica-ai/multica/server/internal/service"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+func createRuntimePoolMembershipTestUser(t *testing.T, fixture *runtimeCapabilityFixture) (string, string) {
+	t.Helper()
+	email := fmt.Sprintf("runtime-pool-member-%d@example.test", time.Now().UnixNano())
+	var userID string
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		INSERT INTO "user" (name, email) VALUES ('Runtime Pool Member', $1) RETURNING id
+	`, email).Scan(&userID); err != nil {
+		t.Fatalf("create membership test user: %v", err)
+	}
+	return userID, email
+}
+
+func TestRuntimePoolWakeAfterMemberAccessImprovement(t *testing.T) {
+	t.Run("member added", func(t *testing.T) {
+		fixture := newRuntimeCapabilityFixture(t)
+		_, email := createRuntimePoolMembershipTestUser(t, fixture)
+		req := newRequestAs(fixture.ownerID, http.MethodPost, "/api/workspaces/"+fixture.workspaceID+"/members", CreateMemberRequest{
+			Email: email,
+			Role:  "member",
+		})
+		req = withURLParam(req, "id", fixture.workspaceID)
+		response := httptest.NewRecorder()
+
+		fixture.handler.CreateMember(response, req)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("CreateMember status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
+		}
+		if len(fixture.wake.requests) != 1 {
+			t.Fatalf("Workspace wakes = %d, want 1", len(fixture.wake.requests))
+		}
+	})
+
+	tests := []struct {
+		name      string
+		fromRole  string
+		toRole    string
+		wantWakes int
+	}{
+		{name: "member to admin restores private Runtime access", fromRole: "member", toRole: "admin", wantWakes: 1},
+		{name: "same role", fromRole: "member", toRole: "member", wantWakes: 0},
+		{name: "admin to owner has equivalent Runtime access", fromRole: "admin", toRole: "owner", wantWakes: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newRuntimeCapabilityFixture(t)
+			userID, _ := createRuntimePoolMembershipTestUser(t, fixture)
+			var memberID string
+			if err := fixture.tx.QueryRow(fixture.ctx, `
+				INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3) RETURNING id
+			`, fixture.workspaceID, userID, test.fromRole).Scan(&memberID); err != nil {
+				t.Fatalf("create target member: %v", err)
+			}
+			req := newRequestAs(fixture.ownerID, http.MethodPatch, "/api/workspaces/"+fixture.workspaceID+"/members/"+memberID, UpdateMemberRequest{Role: test.toRole})
+			req = withURLParams(req, "id", fixture.workspaceID, "memberId", memberID)
+			response := httptest.NewRecorder()
+
+			fixture.handler.UpdateMember(response, req)
+			if response.Code != http.StatusOK {
+				t.Fatalf("UpdateMember status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+			}
+			if len(fixture.wake.requests) != test.wantWakes {
+				t.Fatalf("Workspace wakes = %d, want %d", len(fixture.wake.requests), test.wantWakes)
+			}
+		})
+	}
+}
+
+// Break caught: UpdateMember reads the target before it mutates the role. A
+// concurrent role change can therefore turn a seemingly neutral write into an
+// access reduction. The stale request must fail closed instead of bypassing
+// the Member-locked downgrade path.
+func TestRuntimeMemberRoleSnapshotDriftFailsClosed(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		initialRole    string
+		concurrentRole string
+		desiredRole    string
+		blockedQuery   string
+	}{
+		{
+			name:           "ordinary update becomes downgrade",
+			initialRole:    "member",
+			concurrentRole: "admin",
+			desiredRole:    "member",
+			blockedQuery:   "UpdateMemberRole",
+		},
+		{
+			name:           "safe downgrade snapshot changes under Member lock",
+			initialRole:    "admin",
+			concurrentRole: "owner",
+			desiredRole:    "member",
+			blockedQuery:   "LockPoolPlacementMember",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+			fixture := setupRevocationFixture(t, "handler-tests-role-drift-"+suffix, "daemon-role-drift-"+suffix)
+			ctx := context.Background()
+			if _, err := testPool.Exec(ctx, `UPDATE member SET role = $1 WHERE id = $2`, test.initialRole, fixture.MemberID); err != nil {
+				t.Fatalf("set initial role: %v", err)
+			}
+
+			blocker, err := testPool.Begin(ctx)
+			if err != nil {
+				t.Fatalf("begin concurrent role update: %v", err)
+			}
+			defer blocker.Rollback(ctx)
+			if _, err := blocker.Exec(ctx, `UPDATE member SET role = $1 WHERE id = $2`, test.concurrentRole, fixture.MemberID); err != nil {
+				t.Fatalf("stage concurrent role update: %v", err)
+			}
+			var blockerPID int32
+			if err := blocker.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
+				t.Fatalf("read concurrent updater PID: %v", err)
+			}
+
+			responseDone := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				response := httptest.NewRecorder()
+				req := newRequestAs(testUserID, http.MethodPatch,
+					"/api/workspaces/"+fixture.WorkspaceID+"/members/"+fixture.MemberID,
+					UpdateMemberRequest{Role: test.desiredRole})
+				req = withURLParams(req, "id", fixture.WorkspaceID, "memberId", fixture.MemberID)
+				testHandler.UpdateMember(response, req)
+				responseDone <- response
+			}()
+
+			deadline := time.Now().Add(5 * time.Second)
+			blocked := false
+			for time.Now().Before(deadline) {
+				if err := testPool.QueryRow(ctx, `
+					SELECT EXISTS (
+						SELECT 1 FROM pg_stat_activity AS activity
+						WHERE $1 = ANY(pg_blocking_pids(activity.pid))
+						  AND activity.wait_event_type = 'Lock'
+						  AND activity.query LIKE '%' || $2 || '%'
+					)
+				`, blockerPID, test.blockedQuery).Scan(&blocked); err != nil {
+					t.Fatalf("inspect blocked role update: %v", err)
+				}
+				if blocked {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if !blocked {
+				t.Fatalf("UpdateMember did not reach %s lock barrier", test.blockedQuery)
+			}
+			if err := blocker.Commit(ctx); err != nil {
+				t.Fatalf("commit concurrent role update: %v", err)
+			}
+
+			select {
+			case response := <-responseDone:
+				if response.Code != http.StatusConflict {
+					t.Fatalf("UpdateMember status = %d, want 409 after snapshot drift: %s", response.Code, response.Body.String())
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("UpdateMember did not finish after releasing Member lock")
+			}
+			var finalRole string
+			if err := testPool.QueryRow(ctx, `SELECT role FROM member WHERE id = $1`, fixture.MemberID).Scan(&finalRole); err != nil {
+				t.Fatalf("read final role: %v", err)
+			}
+			if finalRole != test.concurrentRole {
+				t.Fatalf("final role = %q, want concurrent role %q preserved", finalRole, test.concurrentRole)
+			}
+		})
+	}
+}
+
+func TestRuntimeMemberRevokeCancelsWithout409(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	targetUserID := fixture.createMember("member")
+	targetMember, err := fixture.handler.Queries.GetMemberByUserAndWorkspace(fixture.ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      parseUUID(targetUserID),
+		WorkspaceID: parseUUID(fixture.workspaceID),
+	})
+	if err != nil {
+		t.Fatalf("get target member: %v", err)
+	}
+	runtimeID := fixture.createRuntime("custom", "runtime-pool-member-revoke", fixture.ownerID, "public", []string{"custom/v1"}, "")
+	taskID := fixture.createPoolTask(runtimeID, targetUserID, "custom/v1", "queued", runtimepool.SessionAffinityNone)
+	nonterminalTaskIDs := map[string]string{"queued": taskID}
+	for _, status := range []string{"waiting_runtime", "deferred", "dispatched", "running", "waiting_local_directory"} {
+		var assignedRuntime any = runtimeID
+		if status == "waiting_runtime" || status == "deferred" {
+			assignedRuntime = nil
+		}
+		var dependentTaskID string
+		if err := fixture.tx.QueryRow(fixture.ctx, `
+			INSERT INTO agent_task_queue (
+				agent_id, issue_id, runtime_id, status, runtime_binding_mode,
+				runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+				session_affinity_state, session_affinity_runtime_id, wait_reason, fire_at
+			)
+			SELECT agent_id, NULL, $2, $3, 'pool', runtime_requirements, placement_workspace_id,
+			       runtime_requester_user_id, 'none', NULL,
+			       CASE WHEN $3 IN ('waiting_runtime', 'deferred') THEN 'no_eligible_runtime' END,
+			       CASE WHEN $3 = 'deferred' THEN now() + interval '1 hour' END
+			FROM agent_task_queue WHERE id = $1
+			RETURNING id
+		`, taskID, assignedRuntime, status).Scan(&dependentTaskID); err != nil {
+			t.Fatalf("create %s requester Pool task: %v", status, err)
+		}
+		nonterminalTaskIDs[status] = dependentTaskID
+	}
+
+	baseTask := fixture.getRuntimePoolTask(taskID)
+	var chatSessionID string
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
+		VALUES ($1, $2, $3, 'member revoke unresolved', $4)
+		RETURNING id
+	`, fixture.workspaceID, uuidToString(baseTask.AgentID), targetUserID, runtimeID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("create requester Chat Session: %v", err)
+	}
+	var unresolvedTaskID string
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, chat_session_id, runtime_id, status, runtime_binding_mode,
+			runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+			session_affinity_state, session_affinity_runtime_id, wait_reason
+		)
+		SELECT agent_id, $2, NULL, 'waiting_runtime', 'pool', runtime_requirements,
+		       placement_workspace_id, runtime_requester_user_id,
+		       'unresolved', NULL, 'chat_predecessor_pending'
+		FROM agent_task_queue WHERE id = $1
+		RETURNING id
+	`, taskID, chatSessionID).Scan(&unresolvedTaskID); err != nil {
+		t.Fatalf("create unresolved requester Pool task: %v", err)
+	}
+	nonterminalTaskIDs["unresolved"] = unresolvedTaskID
+
+	var completedTaskID string
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, issue_id, runtime_id, status, completed_at, runtime_binding_mode,
+			runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+			session_affinity_state, session_affinity_runtime_id
+		)
+		SELECT agent_id, NULL, runtime_id, 'completed', now(), 'pool', runtime_requirements,
+		       placement_workspace_id, runtime_requester_user_id, 'none', NULL
+		FROM agent_task_queue WHERE id = $1
+		RETURNING id
+	`, taskID).Scan(&completedTaskID); err != nil {
+		t.Fatalf("create terminal requester Pool task: %v", err)
+	}
+
+	response := httptest.NewRecorder()
+	req := newRequestAs(fixture.ownerID, http.MethodDelete, "/api/workspaces/"+fixture.workspaceID+"/members/"+uuidToString(targetMember.ID), nil)
+	req = withURLParams(req, "id", fixture.workspaceID, "memberId", uuidToString(targetMember.ID))
+	fixture.handler.DeleteMember(response, req)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("DeleteMember status = %d, want %d without 409: %s", response.Code, http.StatusNoContent, response.Body.String())
+	}
+	for status, dependentTaskID := range nonterminalTaskIDs {
+		cancelled, taskErr := fixture.handler.Queries.GetAgentTask(fixture.ctx, parseUUID(dependentTaskID))
+		if taskErr != nil {
+			t.Fatalf("get %s requester Pool task: %v", status, taskErr)
+		}
+		if cancelled.Status != "cancelled" {
+			t.Fatalf("%s requester Pool task status = %q, want cancelled", status, cancelled.Status)
+		}
+		if status == "unresolved" {
+			if cancelled.SessionAffinityState != runtimepool.SessionAffinityNone || cancelled.SessionAffinityRuntimeID.Valid || cancelled.WaitReason.Valid {
+				t.Fatalf("unresolved cancellation affinity = (%q, %v, %v), want none/NULL/NULL", cancelled.SessionAffinityState, cancelled.SessionAffinityRuntimeID, cancelled.WaitReason)
+			}
+		}
+	}
+	completed := fixture.getRuntimePoolTask(completedTaskID)
+	if completed.Status != "completed" {
+		t.Fatalf("terminal requester Pool task status = %q, want completed", completed.Status)
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace wakes = %d, want 1 after committed revocation", len(fixture.wake.requests))
+	}
+}
+
+func TestRuntimeMemberRoleDowngradeCancelsOnlyNewlyUnauthorized(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	targetUserID := fixture.createMember("admin")
+	targetMember, err := fixture.handler.Queries.GetMemberByUserAndWorkspace(fixture.ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      parseUUID(targetUserID),
+		WorkspaceID: parseUUID(fixture.workspaceID),
+	})
+	if err != nil {
+		t.Fatalf("get target member: %v", err)
+	}
+	privateOtherRuntime := fixture.createRuntime("custom", "runtime-pool-downgrade-private", fixture.ownerID, "private", []string{"custom/v1"}, "")
+	publicOtherRuntime := fixture.createRuntime("custom", "runtime-pool-downgrade-public", fixture.ownerID, "public", []string{"custom/v1"}, "")
+	ownedRuntime := fixture.createRuntime("custom", "runtime-pool-downgrade-owned", targetUserID, "private", []string{"custom/v1"}, "")
+	privateTaskID := fixture.createPoolTask(privateOtherRuntime, targetUserID, "custom/v1", "running", runtimepool.SessionAffinityNone)
+	publicTaskID := fixture.createPoolTask(publicOtherRuntime, targetUserID, "custom/v1", "queued", runtimepool.SessionAffinityNone)
+	ownedTaskID := fixture.createPoolTask(ownedRuntime, targetUserID, "custom/v1", "queued", runtimepool.SessionAffinityNone)
+
+	response := httptest.NewRecorder()
+	req := newRequestAs(fixture.ownerID, http.MethodPatch, "/api/workspaces/"+fixture.workspaceID+"/members/"+uuidToString(targetMember.ID), UpdateMemberRequest{Role: "member"})
+	req = withURLParams(req, "id", fixture.workspaceID, "memberId", uuidToString(targetMember.ID))
+	fixture.handler.UpdateMember(response, req)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("UpdateMember status = %d, want %d without 409: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	assertTaskStatus := func(taskID, want string) {
+		t.Helper()
+		task, taskErr := fixture.handler.Queries.GetAgentTask(fixture.ctx, parseUUID(taskID))
+		if taskErr != nil {
+			t.Fatalf("get Task %s: %v", taskID, taskErr)
+		}
+		if task.Status != want {
+			t.Fatalf("Task %s status = %q, want %q", taskID, task.Status, want)
+		}
+	}
+	assertTaskStatus(privateTaskID, "cancelled")
+	assertTaskStatus(publicTaskID, "queued")
+	assertTaskStatus(ownedTaskID, "queued")
+	updatedMember, err := fixture.handler.Queries.GetMember(fixture.ctx, targetMember.ID)
+	if err != nil {
+		t.Fatalf("get downgraded member: %v", err)
+	}
+	if updatedMember.Role != "member" {
+		t.Fatalf("member role = %q, want member", updatedMember.Role)
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace wakes = %d, want 1 after one committed cancellation", len(fixture.wake.requests))
+	}
+}
+
+func TestRuntimeMemberRevokeAdvancesOneAuthorizedChatTail(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	var waitingEvents []events.Event
+	fixture.handler.TaskService.Bus.Subscribe(protocol.EventTaskWaitingRuntime, func(event events.Event) {
+		waitingEvents = append(waitingEvents, event)
+	})
+	targetUserID := fixture.createMember("member")
+	otherUserID := fixture.createMember("member")
+	targetMember, err := fixture.handler.Queries.GetMemberByUserAndWorkspace(fixture.ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      parseUUID(targetUserID),
+		WorkspaceID: parseUUID(fixture.workspaceID),
+	})
+	if err != nil {
+		t.Fatalf("get target member: %v", err)
+	}
+	runtimeID := fixture.createRuntime("custom", "runtime-pool-member-revoke-chat", fixture.ownerID, "public", []string{"custom/v1"}, "")
+	headTaskID := fixture.createPoolTask(runtimeID, targetUserID, "custom/v1", "queued", runtimepool.SessionAffinityPinned)
+	headTask := fixture.getRuntimePoolTask(headTaskID)
+	var chatSessionID string
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id, session_id)
+		VALUES ($1, $2, $3, 'member revoke head', $4, 'session-before-revoke')
+		RETURNING id
+	`, fixture.workspaceID, uuidToString(headTask.AgentID), targetUserID, runtimeID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("create Chat Session: %v", err)
+	}
+	if _, err := fixture.tx.Exec(fixture.ctx, `
+		UPDATE agent_task_queue SET issue_id = NULL, chat_session_id = $2 WHERE id = $1
+	`, headTaskID, chatSessionID); err != nil {
+		t.Fatalf("bind resolved head to Chat Session: %v", err)
+	}
+
+	tailIDs := make([]string, 0, 2)
+	for _, priority := range []int{10, 20} {
+		var tailID string
+		if err := fixture.tx.QueryRow(fixture.ctx, `
+			INSERT INTO agent_task_queue (
+				agent_id, chat_session_id, runtime_id, status, priority, runtime_binding_mode,
+				runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+				session_affinity_state, session_affinity_runtime_id, wait_reason
+			)
+			SELECT agent_id, $2, NULL, 'waiting_runtime', $3, 'pool', runtime_requirements,
+			       placement_workspace_id, $4, 'unresolved', NULL, 'chat_predecessor_pending'
+			FROM agent_task_queue WHERE id = $1
+			RETURNING id
+		`, headTaskID, chatSessionID, priority, otherUserID).Scan(&tailID); err != nil {
+			t.Fatalf("create unresolved Chat tail: %v", err)
+		}
+		tailIDs = append(tailIDs, tailID)
+	}
+
+	response := httptest.NewRecorder()
+	req := newRequestAs(fixture.ownerID, http.MethodDelete, "/api/workspaces/"+fixture.workspaceID+"/members/"+uuidToString(targetMember.ID), nil)
+	req = withURLParams(req, "id", fixture.workspaceID, "memberId", uuidToString(targetMember.ID))
+	fixture.handler.DeleteMember(response, req)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("DeleteMember status = %d, want %d: %s", response.Code, http.StatusNoContent, response.Body.String())
+	}
+	if head := fixture.getRuntimePoolTask(headTaskID); head.Status != "cancelled" {
+		t.Fatalf("resolved head status = %q, want cancelled", head.Status)
+	}
+	highPriorityTail := fixture.getRuntimePoolTask(tailIDs[1])
+	if highPriorityTail.Status != "waiting_runtime" || highPriorityTail.SessionAffinityState != runtimepool.SessionAffinityPinned || uuidToString(highPriorityTail.SessionAffinityRuntimeID) != runtimeID {
+		t.Fatalf("high-priority tail = status %q affinity (%q,%q), want waiting_runtime pinned %q", highPriorityTail.Status, highPriorityTail.SessionAffinityState, uuidToString(highPriorityTail.SessionAffinityRuntimeID), runtimeID)
+	}
+	lowPriorityTail := fixture.getRuntimePoolTask(tailIDs[0])
+	if lowPriorityTail.SessionAffinityState != runtimepool.SessionAffinityUnresolved || !lowPriorityTail.WaitReason.Valid || lowPriorityTail.WaitReason.String != "chat_predecessor_pending" {
+		t.Fatalf("lower tail affinity = (%q,%v), want unresolved/chat_predecessor_pending", lowPriorityTail.SessionAffinityState, lowPriorityTail.WaitReason)
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace allocator calls = %d, want exactly 1 from committed head cancellation", len(fixture.wake.requests))
+	}
+	if len(waitingEvents) != 1 || waitingEvents[0].TaskID != tailIDs[1] {
+		t.Fatalf("waiting_runtime events = %+v, want promoted tail %s exactly once", waitingEvents, tailIDs[1])
+	}
+}
+
+func TestRuntimeMemberRevokePromotedDeferredChatTailStaysSilent(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	var waitingEvents []events.Event
+	fixture.handler.TaskService.Bus.Subscribe(protocol.EventTaskWaitingRuntime, func(event events.Event) {
+		waitingEvents = append(waitingEvents, event)
+	})
+	targetUserID := fixture.createMember("member")
+	otherUserID := fixture.createMember("member")
+	targetMember, err := fixture.handler.Queries.GetMemberByUserAndWorkspace(fixture.ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      parseUUID(targetUserID),
+		WorkspaceID: parseUUID(fixture.workspaceID),
+	})
+	if err != nil {
+		t.Fatalf("get target member: %v", err)
+	}
+	runtimeID := fixture.createRuntime("custom", "runtime-pool-member-revoke-deferred-chat", fixture.ownerID, "public", []string{"custom/v1"}, "")
+	headTaskID := fixture.createPoolTask(runtimeID, targetUserID, "custom/v1", "queued", runtimepool.SessionAffinityPinned)
+	headTask := fixture.getRuntimePoolTask(headTaskID)
+	var chatSessionID string
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id, session_id)
+		VALUES ($1, $2, $3, 'member revoke deferred head', $4, 'session-before-deferred-revoke')
+		RETURNING id
+	`, fixture.workspaceID, uuidToString(headTask.AgentID), targetUserID, runtimeID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("create Chat Session: %v", err)
+	}
+	if _, err := fixture.tx.Exec(fixture.ctx, `
+		UPDATE agent_task_queue SET issue_id = NULL, chat_session_id = $2 WHERE id = $1
+	`, headTaskID, chatSessionID); err != nil {
+		t.Fatalf("bind resolved head to Chat Session: %v", err)
+	}
+	var deferredTailID string
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, chat_session_id, runtime_id, status, fire_at, runtime_binding_mode,
+			runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+			session_affinity_state, session_affinity_runtime_id, wait_reason
+		)
+		SELECT agent_id, $2, NULL, 'deferred', now() + interval '1 hour', 'pool',
+		       runtime_requirements, placement_workspace_id, $3,
+		       'unresolved', NULL, 'chat_predecessor_pending'
+		FROM agent_task_queue WHERE id = $1
+		RETURNING id
+	`, headTaskID, chatSessionID, otherUserID).Scan(&deferredTailID); err != nil {
+		t.Fatalf("create unresolved deferred Chat tail: %v", err)
+	}
+
+	response := httptest.NewRecorder()
+	req := newRequestAs(fixture.ownerID, http.MethodDelete, "/api/workspaces/"+fixture.workspaceID+"/members/"+uuidToString(targetMember.ID), nil)
+	req = withURLParams(req, "id", fixture.workspaceID, "memberId", uuidToString(targetMember.ID))
+	fixture.handler.DeleteMember(response, req)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("DeleteMember status = %d, want %d: %s", response.Code, http.StatusNoContent, response.Body.String())
+	}
+	deferredTail := fixture.getRuntimePoolTask(deferredTailID)
+	if deferredTail.Status != "deferred" || deferredTail.SessionAffinityState != runtimepool.SessionAffinityPinned || uuidToString(deferredTail.SessionAffinityRuntimeID) != runtimeID {
+		t.Fatalf("deferred tail = status %q affinity (%q,%q), want deferred pinned %q", deferredTail.Status, deferredTail.SessionAffinityState, uuidToString(deferredTail.SessionAffinityRuntimeID), runtimeID)
+	}
+	if len(waitingEvents) != 0 {
+		t.Fatalf("deferred tail waiting_runtime events = %+v, want none", waitingEvents)
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace allocator calls = %d, want only the committed cancellation wake", len(fixture.wake.requests))
+	}
+}
+
+func TestRuntimeMemberConcurrentRevokeLeavesNoUnauthorizedChatTail(t *testing.T) {
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	fixture := setupRevocationFixture(t, "handler-tests-revoke-chat-race-"+suffix, "daemon-revoke-chat-race-"+suffix)
+	ctx := context.Background()
+
+	var otherUserID, otherMemberID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Concurrent Tail Owner', $1)
+		RETURNING id
+	`, "concurrent-tail-"+suffix+"@example.test").Scan(&otherUserID); err != nil {
+		t.Fatalf("create concurrent tail owner: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+		RETURNING id
+	`, fixture.WorkspaceID, otherUserID).Scan(&otherMemberID); err != nil {
+		t.Fatalf("create concurrent tail membership: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, fixture.WorkspaceID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, otherUserID)
+	})
+
+	var sharedRuntimeID, sharedAgentID, chatSessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, visibility, capabilities, last_seen_at
+		) VALUES ($1, $2, 'Concurrent shared Runtime', 'local', 'custom', 'online',
+		          '', '{}'::jsonb, $3, 'public', ARRAY['custom/v1'], now())
+		RETURNING id
+	`, fixture.WorkspaceID, "daemon-revoke-shared-"+suffix, testUserID).Scan(&sharedRuntimeID); err != nil {
+		t.Fatalf("create shared Runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, runtime_mode, runtime_config, runtime_id,
+			visibility, max_concurrent_tasks, owner_id
+		) VALUES ($1, 'Concurrent revoke agent', 'local', '{}'::jsonb, $2, 'workspace', 1, $3)
+		RETURNING id
+	`, fixture.WorkspaceID, sharedRuntimeID, testUserID).Scan(&sharedAgentID); err != nil {
+		t.Fatalf("create shared Agent: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id, session_id)
+		VALUES ($1, $2, $3, 'Concurrent member revoke', $4, 'session-before-concurrent-revoke')
+		RETURNING id
+	`, fixture.WorkspaceID, sharedAgentID, fixture.TargetUserID, sharedRuntimeID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("create concurrent Chat Session: %v", err)
+	}
+	var headTaskID, tailTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, chat_session_id, runtime_id, status, runtime_binding_mode,
+			runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+			session_affinity_state, session_affinity_runtime_id
+		) VALUES (
+			$1, $2, $3, 'queued', 'pool',
+			'{"schema_version":"multica.runtime-requirements/v1","capabilities_all":["custom/v1"]}'::jsonb,
+			$4, $5, 'pinned', $3
+		)
+		RETURNING id
+	`, sharedAgentID, chatSessionID, sharedRuntimeID, fixture.WorkspaceID, fixture.TargetUserID).Scan(&headTaskID); err != nil {
+		t.Fatalf("create concurrent resolved head: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, chat_session_id, runtime_id, status, runtime_binding_mode,
+			runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+			session_affinity_state, session_affinity_runtime_id, wait_reason
+		) VALUES (
+			$1, $2, NULL, 'waiting_runtime', 'pool',
+			'{"schema_version":"multica.runtime-requirements/v1","capabilities_all":["custom/v1"]}'::jsonb,
+			$3, $4, 'unresolved', NULL, 'chat_predecessor_pending'
+		)
+		RETURNING id
+	`, sharedAgentID, chatSessionID, fixture.WorkspaceID, otherUserID).Scan(&tailTaskID); err != nil {
+		t.Fatalf("create concurrent unresolved tail: %v", err)
+	}
+
+	chatBlocker, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin Chat blocker: %v", err)
+	}
+	defer chatBlocker.Rollback(ctx)
+	if _, err := chatBlocker.Exec(ctx, `SELECT id FROM chat_session WHERE id = $1 FOR UPDATE`, chatSessionID); err != nil {
+		t.Fatalf("lock Chat Session: %v", err)
+	}
+	var blockerPID int32
+	if err := chatBlocker.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
+		t.Fatalf("read Chat blocker PID: %v", err)
+	}
+
+	type revokeOutcome struct {
+		result revocationResult
+		err    error
+	}
+	targetDone := make(chan revokeOutcome, 1)
+	go func() {
+		result, revokeErr := testHandler.revokeAndRemoveMember(
+			context.Background(), parseUUID(fixture.WorkspaceID), parseUUID(fixture.TargetUserID),
+			parseUUID(fixture.MemberID), parseUUID(testUserID),
+		)
+		targetDone <- revokeOutcome{result: result, err: revokeErr}
+	}()
+
+	waitForBlockedQuery := func(t *testing.T, blocker int32, queryName string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			var waiting bool
+			if err := testPool.QueryRow(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM pg_stat_activity AS activity
+					WHERE $1 = ANY(pg_blocking_pids(activity.pid))
+					  AND activity.wait_event_type = 'Lock'
+					  AND activity.query LIKE '%' || $2 || '%'
+				)
+			`, blocker, queryName).Scan(&waiting); err != nil {
+				t.Fatalf("inspect blocked %s: %v", queryName, err)
+			}
+			if waiting {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("%s did not reach the deterministic lock barrier", queryName)
+	}
+	waitForBlockedQuery(t, blockerPID, "LockPoolChatSessionForPlacement")
+
+	otherDone := make(chan revokeOutcome, 1)
+	go func() {
+		result, revokeErr := testHandler.revokeAndRemoveMember(
+			context.Background(), parseUUID(fixture.WorkspaceID), parseUUID(otherUserID),
+			parseUUID(otherMemberID), parseUUID(testUserID),
+		)
+		otherDone <- revokeOutcome{result: result, err: revokeErr}
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	otherWaitingOnOwnerWrites := false
+	for time.Now().Before(deadline) {
+		if err := testPool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_stat_activity AS activity
+				WHERE activity.wait_event_type = 'Lock'
+				  AND activity.query LIKE '%LockRuntimeOwnerWrites%'
+			)
+		`).Scan(&otherWaitingOnOwnerWrites); err != nil {
+			t.Fatalf("inspect concurrent Runtime owner-write wait: %v", err)
+		}
+		if otherWaitingOnOwnerWrites {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !otherWaitingOnOwnerWrites {
+		t.Fatal("tail-owner revocation did not wait on the first revocation's Runtime owner-write barrier")
+	}
+
+	if err := chatBlocker.Commit(ctx); err != nil {
+		t.Fatalf("release Chat blocker: %v", err)
+	}
+	for name, done := range map[string]<-chan revokeOutcome{"head owner": targetDone, "tail owner": otherDone} {
+		select {
+		case outcome := <-done:
+			if outcome.err != nil {
+				t.Fatalf("%s revocation: %v", name, outcome.err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s revocation did not finish", name)
+		}
+	}
+
+	for name, taskID := range map[string]string{"head": headTaskID, "tail": tailTaskID} {
+		var status string
+		if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
+			t.Fatalf("read %s Task: %v", name, err)
+		}
+		if status != "cancelled" {
+			t.Fatalf("%s Task status = %q, want cancelled", name, status)
+		}
+	}
+	var unauthorizedActive int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM agent_task_queue AS task
+		WHERE task.placement_workspace_id = $1
+		  AND task.runtime_binding_mode = 'pool'
+		  AND task.status IN ('waiting_runtime', 'queued', 'deferred', 'dispatched', 'running', 'waiting_local_directory')
+		  AND NOT EXISTS (
+			SELECT 1 FROM member
+			WHERE member.workspace_id = task.placement_workspace_id
+			  AND member.user_id = task.runtime_requester_user_id
+		  )
+	`, fixture.WorkspaceID).Scan(&unauthorizedActive); err != nil {
+		t.Fatalf("count unauthorized active Pool Tasks: %v", err)
+	}
+	if unauthorizedActive != 0 {
+		t.Fatalf("unauthorized active Pool Tasks = %d, want 0", unauthorizedActive)
+	}
+}
 
 func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
 	// Drive the test off the actual reservedSlugs map so the test can never
@@ -450,6 +1136,363 @@ WHERE storage_key = $1
 	if pendingObjectState != "deleting" {
 		t.Fatalf("pending channel media object state = %q, want deleting", pendingObjectState)
 	}
+}
+
+// Break caught: PAT/JWT Runtime registration can transfer owner_id while a
+// member revocation is deriving its Runtime lock set. Both mutations must share
+// the target Member barrier so either registration commits first and is then
+// revoked, or revocation commits first and registration fails closed.
+func TestRuntimeMemberRevokeSerializesRuntimeOwnerRegistration(t *testing.T) {
+	type registrationOutcome struct {
+		result runtimeRegistrationMutationResult
+		err    error
+	}
+	type revokeOutcome struct {
+		result revocationResult
+		err    error
+	}
+	type heartbeatOutcome struct {
+		err error
+	}
+	waitForBlockedBy := func(t *testing.T, blockerPID int32, queryName string) int32 {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			var blockedPID int32
+			err := testPool.QueryRow(context.Background(), `
+				SELECT activity.pid
+				FROM pg_stat_activity AS activity
+				WHERE $1 = ANY(pg_blocking_pids(activity.pid))
+				  AND activity.wait_event_type = 'Lock'
+				  AND activity.query LIKE '%' || $2 || '%'
+				ORDER BY activity.pid
+				LIMIT 1
+			`, blockerPID, queryName).Scan(&blockedPID)
+			if err == nil {
+				return blockedPID
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				t.Fatalf("inspect blocked %s: %v", queryName, err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("%s did not reach the deterministic lock barrier", queryName)
+		return 0
+	}
+	register := func(fixture revocationFixture, ownerID string) registrationOutcome {
+		runtime, err := testHandler.Queries.GetAgentRuntime(context.Background(), parseUUID(fixture.RuntimeID))
+		if err != nil {
+			return registrationOutcome{err: err}
+		}
+		ownerUUID := pgtype.UUID{}
+		if ownerID != "" {
+			ownerUUID = parseUUID(ownerID)
+		}
+		result, err := testHandler.registerRuntimeMutation(context.Background(), runtimeRegistrationMutation{
+			WorkspaceID:          runtime.WorkspaceID,
+			DaemonID:             runtime.DaemonID,
+			Name:                 runtime.Name,
+			RuntimeMode:          runtime.RuntimeMode,
+			Provider:             runtime.Provider,
+			Status:               "online",
+			DeviceInfo:           runtime.DeviceInfo,
+			Metadata:             runtime.Metadata,
+			OwnerID:              ownerUUID,
+			PreserveCapabilities: true,
+		})
+		return registrationOutcome{result: result, err: err}
+	}
+	heartbeatHandler := func() (*Handler, *runtimeCapabilityWakeRecorder) {
+		queries := db.New(testPool)
+		wake := &runtimeCapabilityWakeRecorder{}
+		taskService := service.NewTaskService(queries, testPool, nil, events.New())
+		taskService.RuntimePool = wake
+		copy := *testHandler
+		copy.Queries = queries
+		copy.DB = testPool
+		copy.TxStarter = testPool
+		copy.TaskService = taskService
+		copy.LivenessStore = NewNoopLivenessStore()
+		copy.HeartbeatScheduler = NewPassthroughHeartbeatScheduler(queries)
+		return &copy, wake
+	}
+	beginRuntimeBlocker := func(t *testing.T, runtimeID string) (pgx.Tx, int32) {
+		t.Helper()
+		tx, err := testPool.Begin(context.Background())
+		if err != nil {
+			t.Fatalf("begin Runtime blocker: %v", err)
+		}
+		if _, err := tx.Exec(context.Background(), `SELECT id FROM agent_runtime WHERE id = $1 FOR UPDATE`, runtimeID); err != nil {
+			_ = tx.Rollback(context.Background())
+			t.Fatalf("lock Runtime: %v", err)
+		}
+		var pid int32
+		if err := tx.QueryRow(context.Background(), `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+			_ = tx.Rollback(context.Background())
+			t.Fatalf("read Runtime blocker PID: %v", err)
+		}
+		return tx, pid
+	}
+	assertRevokedRuntime := func(t *testing.T, fixture revocationFixture) {
+		t.Helper()
+		var memberExists bool
+		if err := testPool.QueryRow(context.Background(), `SELECT EXISTS (SELECT 1 FROM member WHERE id = $1)`, fixture.MemberID).Scan(&memberExists); err != nil {
+			t.Fatalf("check revoked Member: %v", err)
+		}
+		if memberExists {
+			t.Fatal("target Member survived revocation")
+		}
+		var status string
+		if err := testPool.QueryRow(context.Background(), `SELECT status FROM agent_runtime WHERE id = $1`, fixture.RuntimeID).Scan(&status); err != nil {
+			t.Fatalf("load Runtime after race: %v", err)
+		}
+		if status != "offline" {
+			t.Fatalf("Runtime status = %q, want offline after revocation", status)
+		}
+	}
+
+	t.Run("registration commits before revocation", func(t *testing.T) {
+		suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+		fixture := setupRevocationFixture(t, "handler-tests-owner-register-first-"+suffix, "daemon-owner-register-first-"+suffix)
+		if _, err := testPool.Exec(context.Background(), `UPDATE agent_runtime SET owner_id = $1 WHERE id = $2`, testUserID, fixture.RuntimeID); err != nil {
+			t.Fatalf("move Runtime away from target: %v", err)
+		}
+		blocker, blockerPID := beginRuntimeBlocker(t, fixture.RuntimeID)
+		defer blocker.Rollback(context.Background())
+
+		registrationDone := make(chan registrationOutcome, 1)
+		go func() { registrationDone <- register(fixture, fixture.TargetUserID) }()
+		registrationPID := waitForBlockedBy(t, blockerPID, "LockRuntimeForCapabilityRegistration")
+
+		revokeDone := make(chan revokeOutcome, 1)
+		go func() {
+			result, err := testHandler.revokeAndRemoveMember(
+				context.Background(), parseUUID(fixture.WorkspaceID), parseUUID(fixture.TargetUserID),
+				parseUUID(fixture.MemberID), parseUUID(testUserID),
+			)
+			revokeDone <- revokeOutcome{result: result, err: err}
+		}()
+		waitForBlockedBy(t, registrationPID, "LockRuntimeOwnerWrites")
+		if err := blocker.Commit(context.Background()); err != nil {
+			t.Fatalf("release Runtime blocker: %v", err)
+		}
+
+		select {
+		case outcome := <-registrationDone:
+			if outcome.err != nil {
+				t.Fatalf("registration-first mutation: %v", outcome.err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("registration-first mutation did not finish")
+		}
+		select {
+		case outcome := <-revokeDone:
+			if outcome.err != nil {
+				t.Fatalf("revocation after registration: %v", outcome.err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("revocation after registration did not finish")
+		}
+		assertRevokedRuntime(t, fixture)
+	})
+
+	t.Run("revocation commits before registration", func(t *testing.T) {
+		suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+		fixture := setupRevocationFixture(t, "handler-tests-owner-revoke-first-"+suffix, "daemon-owner-revoke-first-"+suffix)
+		blocker, blockerPID := beginRuntimeBlocker(t, fixture.RuntimeID)
+		defer blocker.Rollback(context.Background())
+
+		revokeDone := make(chan revokeOutcome, 1)
+		go func() {
+			result, err := testHandler.revokeAndRemoveMember(
+				context.Background(), parseUUID(fixture.WorkspaceID), parseUUID(fixture.TargetUserID),
+				parseUUID(fixture.MemberID), parseUUID(testUserID),
+			)
+			revokeDone <- revokeOutcome{result: result, err: err}
+		}()
+		revokePID := waitForBlockedBy(t, blockerPID, "LockAgentRuntime")
+
+		registrationDone := make(chan registrationOutcome, 1)
+		go func() { registrationDone <- register(fixture, fixture.TargetUserID) }()
+		waitForBlockedBy(t, revokePID, "LockRuntimeOwnerWrites")
+		if err := blocker.Commit(context.Background()); err != nil {
+			t.Fatalf("release Runtime blocker: %v", err)
+		}
+
+		select {
+		case outcome := <-revokeDone:
+			if outcome.err != nil {
+				t.Fatalf("revocation-first mutation: %v", outcome.err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("revocation-first mutation did not finish")
+		}
+		select {
+		case outcome := <-registrationDone:
+			if outcome.err == nil {
+				t.Fatal("registration unexpectedly succeeded after target Member was revoked")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("registration after revocation did not finish")
+		}
+		assertRevokedRuntime(t, fixture)
+	})
+
+	t.Run("revocation commits before daemon token owner-preserving registration", func(t *testing.T) {
+		suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+		fixture := setupRevocationFixture(t, "handler-tests-token-revoke-first-"+suffix, "daemon-token-revoke-first-"+suffix)
+		blocker, blockerPID := beginRuntimeBlocker(t, fixture.RuntimeID)
+		defer blocker.Rollback(context.Background())
+
+		revokeDone := make(chan revokeOutcome, 1)
+		go func() {
+			result, err := testHandler.revokeAndRemoveMember(
+				context.Background(), parseUUID(fixture.WorkspaceID), parseUUID(fixture.TargetUserID),
+				parseUUID(fixture.MemberID), parseUUID(testUserID),
+			)
+			revokeDone <- revokeOutcome{result: result, err: err}
+		}()
+		revokePID := waitForBlockedBy(t, blockerPID, "LockAgentRuntime")
+
+		registrationDone := make(chan registrationOutcome, 1)
+		go func() { registrationDone <- register(fixture, "") }()
+		waitForBlockedBy(t, revokePID, "LockRuntimeOwnerWrites")
+		if err := blocker.Commit(context.Background()); err != nil {
+			t.Fatalf("release Runtime blocker: %v", err)
+		}
+
+		select {
+		case outcome := <-revokeDone:
+			if outcome.err != nil {
+				t.Fatalf("revocation before daemon-token registration: %v", outcome.err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("revocation before daemon-token registration did not finish")
+		}
+		select {
+		case outcome := <-registrationDone:
+			if outcome.err == nil {
+				t.Fatal("daemon-token registration revived a removed owner's Runtime")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("daemon-token registration after revocation did not finish")
+		}
+		assertRevokedRuntime(t, fixture)
+	})
+
+	t.Run("heartbeat recovery commits before revocation", func(t *testing.T) {
+		suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+		fixture := setupRevocationFixture(t, "handler-tests-heartbeat-first-"+suffix, "daemon-heartbeat-first-"+suffix)
+		if _, err := testPool.Exec(context.Background(), `
+			UPDATE agent_runtime SET status = 'offline', last_seen_at = now() - interval '10 minutes'
+			WHERE id = $1
+		`, fixture.RuntimeID); err != nil {
+			t.Fatalf("make Runtime need synchronous heartbeat recovery: %v", err)
+		}
+		handler, wake := heartbeatHandler()
+		runtime, err := handler.Queries.GetAgentRuntime(context.Background(), parseUUID(fixture.RuntimeID))
+		if err != nil {
+			t.Fatalf("load heartbeat Runtime: %v", err)
+		}
+		blocker, blockerPID := beginRuntimeBlocker(t, fixture.RuntimeID)
+		defer blocker.Rollback(context.Background())
+
+		heartbeatDone := make(chan heartbeatOutcome, 1)
+		go func() { heartbeatDone <- heartbeatOutcome{err: handler.recordHeartbeat(context.Background(), runtime)} }()
+		heartbeatPID := waitForBlockedBy(t, blockerPID, "LockAgentRuntime")
+
+		revokeDone := make(chan revokeOutcome, 1)
+		go func() {
+			result, revokeErr := handler.revokeAndRemoveMember(
+				context.Background(), parseUUID(fixture.WorkspaceID), parseUUID(fixture.TargetUserID),
+				parseUUID(fixture.MemberID), parseUUID(testUserID),
+			)
+			revokeDone <- revokeOutcome{result: result, err: revokeErr}
+		}()
+		waitForBlockedBy(t, heartbeatPID, "LockRuntimeOwnerWrites")
+		if err := blocker.Commit(context.Background()); err != nil {
+			t.Fatalf("release Runtime blocker: %v", err)
+		}
+
+		select {
+		case outcome := <-heartbeatDone:
+			if outcome.err != nil {
+				t.Fatalf("heartbeat-first recovery: %v", outcome.err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("heartbeat-first recovery did not finish")
+		}
+		select {
+		case outcome := <-revokeDone:
+			if outcome.err != nil {
+				t.Fatalf("revocation after heartbeat: %v", outcome.err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("revocation after heartbeat did not finish")
+		}
+		assertRevokedRuntime(t, fixture)
+		if len(wake.requests) != 1 {
+			t.Fatalf("heartbeat-first Workspace wakes = %d, want 1 before the later revocation", len(wake.requests))
+		}
+	})
+
+	t.Run("revocation commits before authenticated heartbeat recovery", func(t *testing.T) {
+		suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+		fixture := setupRevocationFixture(t, "handler-tests-heartbeat-revoke-first-"+suffix, "daemon-heartbeat-revoke-first-"+suffix)
+		if _, err := testPool.Exec(context.Background(), `
+			UPDATE agent_runtime SET status = 'offline', last_seen_at = now() - interval '10 minutes'
+			WHERE id = $1
+		`, fixture.RuntimeID); err != nil {
+			t.Fatalf("make Runtime need synchronous heartbeat recovery: %v", err)
+		}
+		handler, wake := heartbeatHandler()
+		// This snapshot models an HTTP request that passed access checks, or a WS
+		// connection that loaded the Runtime, before revocation committed.
+		runtime, err := handler.Queries.GetAgentRuntime(context.Background(), parseUUID(fixture.RuntimeID))
+		if err != nil {
+			t.Fatalf("load pre-revocation heartbeat Runtime: %v", err)
+		}
+		blocker, blockerPID := beginRuntimeBlocker(t, fixture.RuntimeID)
+		defer blocker.Rollback(context.Background())
+
+		revokeDone := make(chan revokeOutcome, 1)
+		go func() {
+			result, revokeErr := handler.revokeAndRemoveMember(
+				context.Background(), parseUUID(fixture.WorkspaceID), parseUUID(fixture.TargetUserID),
+				parseUUID(fixture.MemberID), parseUUID(testUserID),
+			)
+			revokeDone <- revokeOutcome{result: result, err: revokeErr}
+		}()
+		revokePID := waitForBlockedBy(t, blockerPID, "LockAgentRuntime")
+
+		heartbeatDone := make(chan heartbeatOutcome, 1)
+		go func() { heartbeatDone <- heartbeatOutcome{err: handler.recordHeartbeat(context.Background(), runtime)} }()
+		waitForBlockedBy(t, revokePID, "LockRuntimeOwnerWrites")
+		if err := blocker.Commit(context.Background()); err != nil {
+			t.Fatalf("release Runtime blocker: %v", err)
+		}
+
+		select {
+		case outcome := <-revokeDone:
+			if outcome.err != nil {
+				t.Fatalf("revocation-first heartbeat race: %v", outcome.err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("revocation-first heartbeat race did not finish")
+		}
+		select {
+		case outcome := <-heartbeatDone:
+			if outcome.err == nil {
+				t.Fatal("authenticated in-flight heartbeat revived a removed owner's Runtime")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("authenticated heartbeat after revocation did not finish")
+		}
+		assertRevokedRuntime(t, fixture)
+		if len(wake.requests) != 0 {
+			t.Fatalf("post-revocation heartbeat Workspace wakes = %d, want 0", len(wake.requests))
+		}
+	})
 }
 
 func TestDeleteWorkspace_DirtyTriggersHaveTeardownGuard(t *testing.T) {

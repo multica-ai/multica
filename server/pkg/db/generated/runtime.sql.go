@@ -1186,6 +1186,20 @@ func (q *Queries) LockRuntimeForCapabilityRegistration(ctx context.Context, runt
 	return i, err
 }
 
+const lockRuntimeOwnerWrites = `-- name: LockRuntimeOwnerWrites :exec
+SELECT pg_advisory_xact_lock(
+    hashtextextended(($1::uuid)::text || ':runtime-owner-writes', 0)
+)
+`
+
+// Workspace-scoped transaction barrier shared by every Runtime owner upsert
+// (including daemon-token COALESCE-preserve writes) and member revocation.
+// It must be taken before any Profile/Runtime relation lock.
+func (q *Queries) LockRuntimeOwnerWrites(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockRuntimeOwnerWrites, workspaceID)
+	return err
+}
+
 const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()

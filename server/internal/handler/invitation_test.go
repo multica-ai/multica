@@ -3,12 +3,41 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
 const invitationTestEmail = "invitation-test@multica.ai"
+
+func TestRuntimePoolWakeAfterInvitationAccepted(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	inviteeID, inviteeEmail := createRuntimePoolMembershipTestUser(t, fixture)
+	var invitationID string
+	if err := fixture.tx.QueryRow(fixture.ctx, `
+		INSERT INTO workspace_invitation (
+			workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, expires_at
+		) VALUES ($1, $2, $3, $4, 'member', 'pending', now() + interval '1 day')
+		RETURNING id
+	`, fixture.workspaceID, fixture.ownerID, inviteeEmail, inviteeID).Scan(&invitationID); err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+	req := newRequestAs(inviteeID, http.MethodPost, fmt.Sprintf("/api/invitations/%s/accept", invitationID), nil)
+	req = withURLParam(req, "id", invitationID)
+	response := httptest.NewRecorder()
+
+	fixture.handler.AcceptInvitation(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("AcceptInvitation status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace wakes = %d, want 1 after committed invitation acceptance", len(fixture.wake.requests))
+	}
+	if got := uuidToString(fixture.wake.requests[0].WorkspaceID); got != fixture.workspaceID {
+		t.Fatalf("wake Workspace = %q, want %q", got, fixture.workspaceID)
+	}
+}
 
 func clearInvitationsForTestWorkspace(t *testing.T) {
 	t.Helper()

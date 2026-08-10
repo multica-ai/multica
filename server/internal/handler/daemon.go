@@ -440,6 +440,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			ProfileID:    profileUUID,
 			Capabilities: runtime.Capabilities,
 		})
+		if errors.Is(err, errRuntimeRegistrationOwnerUnavailable) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusBadRequest, "unknown runtime profile: "+runtime.ProfileID)
 			return
@@ -552,6 +556,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				return runtimeProfileRegistrationFields{Name: name, Metadata: metadata}
 			},
 		})
+		if errors.Is(err, errRuntimeRegistrationOwnerUnavailable) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
 		if writeRuntimeMutationConflict(w, err) {
 			return
 		}
@@ -805,6 +813,11 @@ const runtimeLivenessTTL = 90 * time.Second
 // independent of how the per-runtime throttle is tuned.
 const runtimeHeartbeatDBFlushInterval = 60 * time.Second
 
+// runtimeHeartbeatDBFallbackWindow is the same conservative liveness window
+// used by Runtime Pool allocation when Redis cannot answer authoritatively.
+// A recovery wake must not race ahead of refreshing a row older than this.
+const runtimeHeartbeatDBFallbackWindow = 150 * time.Second
+
 func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	authPath := middleware.DaemonAuthPathFromContext(r.Context())
@@ -966,35 +979,128 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 // heartbeat_scheduler.go for the two implementations.
 func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error {
 	now := time.Now()
+	runtimeID := uuidToString(rt.ID)
+	storeAvailable := h.LivenessStore.Available()
+	dbWasAlive := rt.Status == "online" &&
+		rt.LastSeenAt.Valid &&
+		!rt.LastSeenAt.Time.Before(now.Add(-runtimeHeartbeatDBFallbackWindow))
+	wasAlive := dbWasAlive
+	redisAuthoritative := false
+
+	// Observe the old Redis state before Touch creates/refreshes the key. A
+	// successful batch response is authoritative; errors conservatively use
+	// the same 150-second DB fallback as the allocator.
+	if storeAvailable {
+		alive, ok := h.LivenessStore.IsAliveBatch(ctx, []string{runtimeID})
+		if ok {
+			redisAuthoritative = true
+			wasAlive = rt.Status == "online" && alive[runtimeID]
+		}
+	}
 
 	// Decide whether the DB row needs a write *before* touching Redis, so a
 	// Touch failure can simply force needDBWrite=true without re-evaluating
 	// the structural reasons.
-	needDBWrite := !h.LivenessStore.Available() ||
+	needDBWrite := !storeAvailable ||
 		rt.Status != "online" ||
 		!rt.LastSeenAt.Valid ||
 		now.Sub(rt.LastSeenAt.Time) >= runtimeHeartbeatDBFlushInterval
 
-	if h.LivenessStore.Available() {
-		if err := h.LivenessStore.Touch(ctx, uuidToString(rt.ID), runtimeLivenessTTL); err != nil {
+	touchSucceeded := false
+	if storeAvailable {
+		if err := h.LivenessStore.Touch(ctx, runtimeID, runtimeLivenessTTL); err != nil {
 			// Redis hiccup: degrade transparently to the DB-only path for
 			// this beat. The sweeper falls back to its DB threshold the
 			// same way when IsAliveBatch fails, so end-to-end correctness
 			// is preserved.
 			slog.Warn("liveness touch failed; falling back to DB heartbeat",
-				"runtime_id", uuidToString(rt.ID), "error", err)
+				"runtime_id", runtimeID, "error", err)
 			needDBWrite = true
+			redisAuthoritative = false
+			wasAlive = dbWasAlive
+		} else {
+			touchSucceeded = true
 		}
 	}
 
-	if !needDBWrite {
-		return nil
+	recovered := !wasAlive
+	authoritativeRedisRecovery := redisAuthoritative && touchSucceeded && rt.Status == "online" && recovered
+	// A successful Touch is itself the committed recovery when the pre-read
+	// was authoritative and the DB row is already online. Fallback recovery
+	// (Noop/pre-read error/Touch error) and offline rows must synchronously
+	// refresh the DB before waking the allocator.
+	synchronousRecovery := recovered && (!redisAuthoritative || rt.Status != "online")
+	_, passthroughScheduler := h.HeartbeatScheduler.(*PassthroughHeartbeatScheduler)
+	dbRecovered := false
+	var scheduleErr error
+	if needDBWrite {
+		if synchronousRecovery || passthroughScheduler {
+			// Production normally batches online summary writes. Recovery is
+			// different: the allocator's DB fallback must observe the refresh
+			// before its post-commit wake runs. The default passthrough writer
+			// also uses this path so its Touch-then-Mark fallback cannot revive
+			// a Runtime after its owner has been removed concurrently.
+			var err error
+			dbRecovered, err = h.commitHeartbeatRecovery(ctx, rt)
+			if err != nil {
+				return err
+			}
+		} else {
+			scheduleErr = h.HeartbeatScheduler.Schedule(ctx, rt)
+		}
 	}
 
-	// Either bumps last_seen_at on an already-online row (Touch + race
-	// fallback) or flips status from offline to online. The scheduler
-	// chooses sync vs batched per case; see HeartbeatScheduler doc.
-	return h.HeartbeatScheduler.Schedule(ctx, rt)
+	if authoritativeRedisRecovery || dbRecovered {
+		h.wakeRuntimePoolWorkspaceBestEffort(ctx, rt.WorkspaceID)
+	}
+	return scheduleErr
+}
+
+// commitHeartbeatRecovery serializes every synchronous DB recovery with
+// Runtime ownership changes and Member revocation. The Runtime row is re-read
+// only after the Workspace owner-write barrier, so an already-authenticated
+// HTTP request or established WebSocket cannot use an old Runtime snapshot to
+// bring a removed owner's Runtime back online.
+func (h *Handler) commitHeartbeatRecovery(ctx context.Context, observed db.AgentRuntime) (bool, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin heartbeat recovery: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	if err := qtx.LockRuntimeOwnerWrites(ctx, observed.WorkspaceID); err != nil {
+		return false, fmt.Errorf("lock Runtime owner writes for heartbeat: %w", err)
+	}
+	current, err := qtx.LockAgentRuntime(ctx, observed.ID)
+	if err != nil {
+		return false, fmt.Errorf("lock Runtime for heartbeat recovery: %w", err)
+	}
+	if current.WorkspaceID != observed.WorkspaceID {
+		return false, errRuntimeRegistrationChanged
+	}
+	if current.OwnerID.Valid {
+		if _, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID:      current.OwnerID,
+			WorkspaceID: current.WorkspaceID,
+		}); errors.Is(err, pgx.ErrNoRows) {
+			return false, errRuntimeRegistrationOwnerUnavailable
+		} else if err != nil {
+			return false, fmt.Errorf("revalidate heartbeat Runtime owner: %w", err)
+		}
+	}
+
+	now := time.Now()
+	wasAlive := current.Status == "online" &&
+		current.LastSeenAt.Valid &&
+		!current.LastSeenAt.Time.Before(now.Add(-runtimeHeartbeatDBFallbackWindow))
+	if err := NewPassthroughHeartbeatScheduler(qtx).Schedule(ctx, current); err != nil {
+		return false, fmt.Errorf("persist heartbeat recovery: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit heartbeat recovery: %w", err)
+	}
+	return !wasAlive, nil
 }
 
 // heartbeatMetrics carries per-stage timings out of processHeartbeat so the
@@ -2965,11 +3071,6 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// by the existing per-(issue, agent) dedup, and terminating because the
 	// triggering comment always predates the follow-up run's started_at.
 	h.reconcileCommentsOnCompletion(r.Context(), task)
-	// The terminal transaction and completion reconciliation are committed.
-	// Wake the owning runtime now so queued work that was blocked by this
-	// task's agent capacity or serialization key is re-claimed immediately.
-	h.TaskService.NotifyTaskFinished(*task)
-
 	// Best-effort revoke of any agent task token minted at claim time.
 	// The token would naturally expire at the 24h watermark and is also
 	// cascaded on agent_task deletion, but eagerly deleting it on
@@ -3626,8 +3727,6 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.TaskService.NotifyTaskFinished(*task)
-
 	// Best-effort revoke of the mat_ task token minted at claim. Same
 	// rationale as CompleteTask — eager deletion shrinks the post-
 	// terminal window. The 24h expiry / cascade are the durable guards.

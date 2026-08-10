@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/runtimepool"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
@@ -86,6 +88,10 @@ func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
 
 func TestRuntimeAccessTighteningRequeuesQueued(t *testing.T) {
 	fixture := newRuntimeCapabilityFixture(t)
+	waitingEvents := make(map[string]int)
+	fixture.handler.TaskService.Bus.Subscribe(protocol.EventTaskWaitingRuntime, func(event events.Event) {
+		waitingEvents[event.TaskID]++
+	})
 	plainMemberID := fixture.createMember("member")
 	runtimeID := fixture.createRuntime("codex", "runtime-access-tightening", fixture.ownerID, "public", []string{"a/v1"}, "")
 	noneTask := fixture.createPoolTask(runtimeID, plainMemberID, "a/v1", "queued", runtimepool.SessionAffinityNone)
@@ -138,6 +144,9 @@ func TestRuntimeAccessTighteningRequeuesQueued(t *testing.T) {
 	}
 	if len(fixture.wake.requests) != 1 {
 		t.Fatalf("Workspace wakes = %d, want 1", len(fixture.wake.requests))
+	}
+	if waitingEvents[noneTask] != 1 || waitingEvents[pinnedTask] != 1 || waitingEvents[ownerTask] != 0 || len(waitingEvents) != 2 {
+		t.Fatalf("waiting_runtime events = %v, want requeued Tasks exactly once", waitingEvents)
 	}
 }
 

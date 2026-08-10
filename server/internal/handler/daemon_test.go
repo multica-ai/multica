@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/pooltestdb"
 	"github.com/multica-ai/multica/server/internal/runtimepool"
@@ -51,15 +53,64 @@ func TestLogClaimEndpointSlowIncludesPayloadFields(t *testing.T) {
 
 type runtimeCapabilityWakeRecorder struct {
 	requests []runtimepool.AssignRequest
+	onAssign func(context.Context, runtimepool.AssignRequest)
 }
 
-func (r *runtimeCapabilityWakeRecorder) AssignWaiting(_ context.Context, request runtimepool.AssignRequest) (runtimepool.AssignResult, error) {
+func (r *runtimeCapabilityWakeRecorder) AssignWaiting(ctx context.Context, request runtimepool.AssignRequest) (runtimepool.AssignResult, error) {
 	r.requests = append(r.requests, request)
+	if r.onAssign != nil {
+		r.onAssign(ctx, request)
+	}
 	return runtimepool.AssignResult{}, nil
 }
 
 func (*runtimeCapabilityWakeRecorder) SweepWaiting(context.Context, int) ([]runtimepool.AssignResult, error) {
 	return nil, nil
+}
+
+// runtimePoolHeartbeatLiveness makes the observation order load-bearing:
+// Touch transitions the fake key to alive, so a recovery wake is possible
+// only when recordHeartbeat reads the prior liveness state before Touch.
+type runtimePoolHeartbeatLiveness struct {
+	alive            bool
+	batchUnavailable bool
+	touchErr         error
+	events           []string
+}
+
+func (*runtimePoolHeartbeatLiveness) Available() bool { return true }
+
+func (s *runtimePoolHeartbeatLiveness) Touch(_ context.Context, _ string, _ time.Duration) error {
+	s.events = append(s.events, "touch")
+	if s.touchErr != nil {
+		return s.touchErr
+	}
+	s.alive = true
+	return nil
+}
+
+func (s *runtimePoolHeartbeatLiveness) IsAliveBatch(_ context.Context, ids []string) (map[string]bool, bool) {
+	s.events = append(s.events, "is_alive")
+	if s.batchUnavailable {
+		return nil, false
+	}
+	result := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		result[id] = s.alive
+	}
+	return result, true
+}
+
+func (*runtimePoolHeartbeatLiveness) Forget(context.Context, string) {}
+
+type runtimePoolHeartbeatSchedulerStub struct {
+	err   error
+	calls int
+}
+
+func (s *runtimePoolHeartbeatSchedulerStub) Schedule(context.Context, db.AgentRuntime) error {
+	s.calls++
+	return s.err
 }
 
 // runtimeProfileEditBeforeLockStarter simulates a profile edit landing after
@@ -177,7 +228,7 @@ func newRuntimeCapabilityFixture(t *testing.T) *runtimeCapabilityFixture {
 	handlerCopy.DB = tx
 	handlerCopy.TxStarter = tx
 	wake := &runtimeCapabilityWakeRecorder{}
-	taskService := service.NewTaskService(queries, tx, nil, nil)
+	taskService := service.NewTaskService(queries, tx, nil, events.New())
 	taskService.RuntimePool = wake
 	handlerCopy.TaskService = taskService
 
@@ -243,6 +294,37 @@ func (f *runtimeCapabilityFixture) createRuntime(provider, daemonID, ownerID, vi
 	return runtimeID
 }
 
+func (f *runtimeCapabilityFixture) setRuntimeHeartbeat(runtimeID, status string, lastSeen time.Time) {
+	f.t.Helper()
+	if _, err := f.tx.Exec(f.ctx, `
+		UPDATE agent_runtime SET status = $1, last_seen_at = $2 WHERE id = $3
+	`, status, lastSeen, runtimeID); err != nil {
+		f.t.Fatalf("set Runtime heartbeat state: %v", err)
+	}
+}
+
+func (f *runtimeCapabilityFixture) getRuntime(runtimeID string) db.AgentRuntime {
+	f.t.Helper()
+	runtimeUUID, err := pgUUID(runtimeID)
+	if err != nil {
+		f.t.Fatalf("parse Runtime ID: %v", err)
+	}
+	runtime, err := f.handler.Queries.GetAgentRuntime(f.ctx, runtimeUUID)
+	if err != nil {
+		f.t.Fatalf("get Runtime: %v", err)
+	}
+	return runtime
+}
+
+func (f *runtimeCapabilityFixture) getRuntimePoolTask(taskID string) db.AgentTaskQueue {
+	f.t.Helper()
+	task, err := f.handler.Queries.GetAgentTask(f.ctx, parseUUID(taskID))
+	if err != nil {
+		f.t.Fatalf("get Runtime Pool Task: %v", err)
+	}
+	return task
+}
+
 func (f *runtimeCapabilityFixture) createPoolTask(runtimeID, requesterID, requiredCapability, status, affinity string) string {
 	f.t.Helper()
 	f.issueNumber++
@@ -292,12 +374,16 @@ func (f *runtimeCapabilityFixture) createPoolTask(runtimeID, requesterID, requir
 }
 
 func (f *runtimeCapabilityFixture) registerRuntime(actorID, daemonID, provider string, capabilitiesPresent bool, capabilities []string, failedProfiles []map[string]any) *httptest.ResponseRecorder {
+	return f.registerRuntimeStatus(actorID, daemonID, provider, "online", capabilitiesPresent, capabilities, failedProfiles)
+}
+
+func (f *runtimeCapabilityFixture) registerRuntimeStatus(actorID, daemonID, provider, status string, capabilitiesPresent bool, capabilities []string, failedProfiles []map[string]any) *httptest.ResponseRecorder {
 	f.t.Helper()
 	runtimeRegistration := map[string]any{
 		"name":    "Registered " + provider,
 		"type":    provider,
 		"version": "9.9.9",
-		"status":  "online",
+		"status":  status,
 	}
 	if capabilitiesPresent {
 		runtimeRegistration["capabilities"] = capabilities
@@ -319,6 +405,246 @@ func (f *runtimeCapabilityFixture) registerRuntime(actorID, daemonID, provider s
 	recorder := httptest.NewRecorder()
 	f.handler.DaemonRegister(recorder, request)
 	return recorder
+}
+
+// Break caught: a newly inserted Runtime's eligibility edge is its persisted
+// status, not whether it happened to advertise any named capabilities. Empty
+// capabilities still serve Tasks with no requirements, while an offline row
+// cannot serve anything even when its capability list is non-empty.
+func TestRuntimeRegistrationWakeMatchesNewCandidateStatus(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		status       string
+		capabilities []string
+		wantWakes    int
+	}{
+		{name: "online with empty capabilities", status: "online", capabilities: []string{}, wantWakes: 1},
+		{name: "offline with nonempty capabilities", status: "offline", capabilities: []string{"custom/v1"}, wantWakes: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newRuntimeCapabilityFixture(t)
+			response := fixture.registerRuntimeStatus(
+				"", "runtime-new-status-"+uuid.NewString(), "codex", test.status,
+				true, test.capabilities, nil,
+			)
+			if response.Code != http.StatusOK {
+				t.Fatalf("DaemonRegister status = %d: %s", response.Code, response.Body.String())
+			}
+			if len(fixture.wake.requests) != test.wantWakes {
+				t.Fatalf("Workspace wakes = %d, want %d", len(fixture.wake.requests), test.wantWakes)
+			}
+		})
+	}
+}
+
+func TestRuntimePoolWakeDeadToAlive(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	runtimeID := fixture.createRuntime("custom", "runtime-pool-heartbeat", fixture.ownerID, "private", []string{"custom/v1"}, "")
+	fixture.setRuntimeHeartbeat(runtimeID, "online", time.Now())
+	runtime := fixture.getRuntime(runtimeID)
+	liveness := &runtimePoolHeartbeatLiveness{}
+	fixture.handler.LivenessStore = liveness
+	fixture.handler.HeartbeatScheduler = NewPassthroughHeartbeatScheduler(fixture.handler.Queries)
+
+	if err := fixture.handler.recordHeartbeat(fixture.ctx, runtime); err != nil {
+		t.Fatalf("record heartbeat: %v", err)
+	}
+	if got, want := liveness.events, []string{"is_alive", "touch"}; !slices.Equal(got, want) {
+		t.Fatalf("liveness calls = %v, want %v", got, want)
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace wakes = %d, want 1 after dead→alive edge", len(fixture.wake.requests))
+	}
+	if got := uuidToString(fixture.wake.requests[0].WorkspaceID); got != fixture.workspaceID {
+		t.Fatalf("wake Workspace = %q, want %q", got, fixture.workspaceID)
+	}
+}
+
+func TestRuntimePoolHeartbeatDoesNotWakeAlreadyAlive(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	runtimeID := fixture.createRuntime("custom", "runtime-pool-heartbeat-alive", fixture.ownerID, "private", []string{"custom/v1"}, "")
+	fixture.setRuntimeHeartbeat(runtimeID, "online", time.Now().Add(-90*time.Second))
+	runtime := fixture.getRuntime(runtimeID)
+	liveness := &runtimePoolHeartbeatLiveness{alive: true}
+	batched := NewBatchedHeartbeatScheduler(fixture.handler.Queries, time.Hour)
+	fixture.handler.LivenessStore = liveness
+	fixture.handler.HeartbeatScheduler = batched
+
+	if err := fixture.handler.recordHeartbeat(fixture.ctx, runtime); err != nil {
+		t.Fatalf("record heartbeat: %v", err)
+	}
+	if len(fixture.wake.requests) != 0 {
+		t.Fatalf("Workspace wakes = %d, want 0 for already-alive Runtime", len(fixture.wake.requests))
+	}
+	if batched.PendingCount() != 1 {
+		t.Fatalf("summary writes pending = %d, want 1 without recovery wake", batched.PendingCount())
+	}
+}
+
+func TestRuntimePoolHeartbeatFallbackRecoveryIsSynchronous(t *testing.T) {
+	tests := []struct {
+		name       string
+		liveness   func() LivenessStore
+		status     string
+		lastSeenAt func() time.Time
+	}{
+		{
+			name:       "noop stale DB",
+			liveness:   NewNoopLivenessStore,
+			status:     "online",
+			lastSeenAt: func() time.Time { return time.Now().Add(-3 * time.Minute) },
+		},
+		{
+			name: "Redis precheck unavailable",
+			liveness: func() LivenessStore {
+				return &runtimePoolHeartbeatLiveness{batchUnavailable: true}
+			},
+			status:     "online",
+			lastSeenAt: func() time.Time { return time.Now().Add(-3 * time.Minute) },
+		},
+		{
+			name: "Redis Touch error",
+			liveness: func() LivenessStore {
+				return &runtimePoolHeartbeatLiveness{touchErr: errors.New("Redis unavailable")}
+			},
+			status:     "online",
+			lastSeenAt: func() time.Time { return time.Now().Add(-3 * time.Minute) },
+		},
+		{
+			name: "offline row",
+			liveness: func() LivenessStore {
+				return &runtimePoolHeartbeatLiveness{alive: true}
+			},
+			status:     "offline",
+			lastSeenAt: time.Now,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newRuntimeCapabilityFixture(t)
+			runtimeID := fixture.createRuntime("custom", "runtime-pool-heartbeat-"+uuid.NewString(), fixture.ownerID, "private", []string{"custom/v1"}, "")
+			before := test.lastSeenAt()
+			fixture.setRuntimeHeartbeat(runtimeID, test.status, before)
+			runtime := fixture.getRuntime(runtimeID)
+			batched := NewBatchedHeartbeatScheduler(fixture.handler.Queries, time.Hour)
+			fixture.handler.LivenessStore = test.liveness()
+			fixture.handler.HeartbeatScheduler = batched
+			observedCommittedRecovery := false
+			fixture.wake.onAssign = func(ctx context.Context, _ runtimepool.AssignRequest) {
+				persisted := fixture.getRuntime(runtimeID)
+				lastSeenRecovered := persisted.LastSeenAt.Valid && persisted.LastSeenAt.Time.After(before)
+				// PostgreSQL now() is fixed at this fixture's outer transaction
+				// start, so the offline case proves ordering through the status
+				// transition; stale rows additionally prove the timestamp bump.
+				observedCommittedRecovery = persisted.Status == "online" && (test.status == "offline" || lastSeenRecovered)
+			}
+
+			if err := fixture.handler.recordHeartbeat(fixture.ctx, runtime); err != nil {
+				t.Fatalf("record heartbeat: %v", err)
+			}
+			if len(fixture.wake.requests) != 1 {
+				t.Fatalf("Workspace wakes = %d, want 1", len(fixture.wake.requests))
+			}
+			if !observedCommittedRecovery {
+				t.Fatal("allocator wake ran before DB recovery was visible")
+			}
+			if batched.PendingCount() != 0 {
+				t.Fatalf("batched heartbeat pending = %d, want 0 after synchronous recovery", batched.PendingCount())
+			}
+		})
+	}
+}
+
+func TestRuntimePoolHeartbeatFallbackFreshDoesNotWake(t *testing.T) {
+	tests := []struct {
+		name     string
+		liveness LivenessStore
+	}{
+		{
+			name:     "Redis precheck unavailable",
+			liveness: &runtimePoolHeartbeatLiveness{batchUnavailable: true},
+		},
+		{
+			name:     "Redis Touch error",
+			liveness: &runtimePoolHeartbeatLiveness{touchErr: errors.New("Redis unavailable")},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newRuntimeCapabilityFixture(t)
+			runtimeID := fixture.createRuntime("custom", "runtime-pool-heartbeat-"+uuid.NewString(), fixture.ownerID, "private", []string{"custom/v1"}, "")
+			fixture.setRuntimeHeartbeat(runtimeID, "online", time.Now())
+			fixture.handler.LivenessStore = test.liveness
+			fixture.handler.HeartbeatScheduler = NewBatchedHeartbeatScheduler(fixture.handler.Queries, time.Hour)
+
+			if err := fixture.handler.recordHeartbeat(fixture.ctx, fixture.getRuntime(runtimeID)); err != nil {
+				t.Fatalf("record heartbeat: %v", err)
+			}
+			if len(fixture.wake.requests) != 0 {
+				t.Fatalf("Workspace wakes = %d, want 0 while DB fallback was already alive", len(fixture.wake.requests))
+			}
+		})
+	}
+}
+
+func TestRuntimePoolHeartbeatRedisRecoveryDoesNotDependOnSummaryWrite(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	runtimeID := fixture.createRuntime("custom", "runtime-pool-heartbeat-redis-edge", fixture.ownerID, "private", []string{"custom/v1"}, "")
+	fixture.setRuntimeHeartbeat(runtimeID, "online", time.Now().Add(-3*time.Minute))
+	liveness := &runtimePoolHeartbeatLiveness{}
+	scheduleErr := errors.New("summary write failed")
+	scheduler := &runtimePoolHeartbeatSchedulerStub{err: scheduleErr}
+	fixture.handler.LivenessStore = liveness
+	fixture.handler.HeartbeatScheduler = scheduler
+
+	err := fixture.handler.recordHeartbeat(fixture.ctx, fixture.getRuntime(runtimeID))
+	if !errors.Is(err, scheduleErr) {
+		t.Fatalf("record heartbeat error = %v, want %v", err, scheduleErr)
+	}
+	if scheduler.calls != 1 {
+		t.Fatalf("summary scheduler calls = %d, want 1", scheduler.calls)
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace wakes = %d, want 1 after authoritative Redis recovery", len(fixture.wake.requests))
+	}
+}
+
+func TestRuntimePoolHeartbeatFailedDBRecoveryDoesNotWake(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	runtimeID := fixture.createRuntime("custom", "runtime-pool-heartbeat-db-failure", fixture.ownerID, "private", []string{"custom/v1"}, "")
+	fixture.setRuntimeHeartbeat(runtimeID, "online", time.Now().Add(-3*time.Minute))
+	runtime := fixture.getRuntime(runtimeID)
+	fixture.handler.LivenessStore = NewNoopLivenessStore()
+	if err := fixture.tx.Rollback(fixture.ctx); err != nil {
+		t.Fatalf("close DB transaction: %v", err)
+	}
+
+	if err := fixture.handler.recordHeartbeat(fixture.ctx, runtime); err == nil {
+		t.Fatal("record heartbeat error = nil, want DB failure")
+	}
+	if len(fixture.wake.requests) != 0 {
+		t.Fatalf("Workspace wakes = %d, want 0 after failed DB recovery", len(fixture.wake.requests))
+	}
+}
+
+func TestRuntimePoolHeartbeatRepeatDoesNotWakeTwice(t *testing.T) {
+	fixture := newRuntimeCapabilityFixture(t)
+	runtimeID := fixture.createRuntime("custom", "runtime-pool-heartbeat-repeat", fixture.ownerID, "private", []string{"custom/v1"}, "")
+	fixture.setRuntimeHeartbeat(runtimeID, "online", time.Now())
+	liveness := &runtimePoolHeartbeatLiveness{}
+	fixture.handler.LivenessStore = liveness
+	fixture.handler.HeartbeatScheduler = NewPassthroughHeartbeatScheduler(fixture.handler.Queries)
+
+	if err := fixture.handler.recordHeartbeat(fixture.ctx, fixture.getRuntime(runtimeID)); err != nil {
+		t.Fatalf("first heartbeat: %v", err)
+	}
+	if err := fixture.handler.recordHeartbeat(fixture.ctx, fixture.getRuntime(runtimeID)); err != nil {
+		t.Fatalf("second heartbeat: %v", err)
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace wakes = %d, want exactly 1 across sequential recovery heartbeats", len(fixture.wake.requests))
+	}
 }
 
 func TestRuntimeRegistrationCapabilitiesPresence(t *testing.T) {
@@ -359,6 +685,10 @@ func TestRuntimeRegistrationCapabilitiesPresence(t *testing.T) {
 
 func TestCapabilityDowngradeRequeuesQueued(t *testing.T) {
 	fixture := newRuntimeCapabilityFixture(t)
+	waitingEvents := make(map[string]int)
+	fixture.handler.TaskService.Bus.Subscribe(protocol.EventTaskWaitingRuntime, func(event events.Event) {
+		waitingEvents[event.TaskID]++
+	})
 	daemonID := "runtime-capability-downgrade-" + uuid.NewString()
 	runtimeID := fixture.createRuntime("codex", daemonID, fixture.ownerID, "private", []string{"a/v1", "b/v1"}, "")
 	noneTask := fixture.createPoolTask(runtimeID, fixture.ownerID, "b/v1", "queued", runtimepool.SessionAffinityNone)
@@ -403,6 +733,12 @@ func TestCapabilityDowngradeRequeuesQueued(t *testing.T) {
 	}
 	if got := strings.Join(capabilities, ","); got != "a/v1" {
 		t.Fatalf("stored capabilities = %q, want a/v1", got)
+	}
+	if waitingEvents[noneTask] != 1 || waitingEvents[pinnedTask] != 1 || waitingEvents[compatibleTask] != 0 || len(waitingEvents) != 2 {
+		t.Fatalf("waiting_runtime events = %v, want requeued Tasks exactly once", waitingEvents)
+	}
+	if len(fixture.wake.requests) != 1 {
+		t.Fatalf("Workspace allocator calls = %d, want 1", len(fixture.wake.requests))
 	}
 }
 

@@ -975,7 +975,7 @@ func (q *Queries) GetOldestActiveChatSessionForCreatorAgent(ctx context.Context,
 
 const getPendingChatTask = `-- name: GetPendingChatTask :one
 SELECT id, status, created_at FROM agent_task_queue
-WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE chat_session_id = $1 AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory')
   -- Background quick-actions regeneration passes are invisible to the chat UI:
   -- they own no assistant turn and must not raise the StatusPill or disable the
   -- composer (MUL-5149 refresh follow-up).
@@ -1006,7 +1006,7 @@ const hasActiveChatTaskForSession = `-- name: HasActiveChatTaskForSession :one
 SELECT EXISTS (
   SELECT 1 FROM agent_task_queue
   WHERE chat_session_id = $1
-    AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+    AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 ) AS has_active
 `
 
@@ -1038,7 +1038,7 @@ SELECT EXISTS (
   FROM agent_task_queue atq
   JOIN chat_session cs ON cs.id = atq.chat_session_id
   WHERE atq.chat_session_id IS NOT NULL
-    AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+    AND atq.status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
     -- Background quick-actions regeneration passes own no visible turn and must
     -- never light the FAB "running" indicator (MUL-5149 refresh follow-up).
     AND atq.regenerate_quick_actions_for IS NULL
@@ -1074,7 +1074,7 @@ const hasPendingChatTurnForSession = `-- name: HasPendingChatTurnForSession :one
 SELECT EXISTS (
   SELECT 1 FROM agent_task_queue
   WHERE chat_session_id = $1
-    AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+    AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
     AND regenerate_quick_actions_for IS NULL
 ) AS has_pending
 `
@@ -1475,7 +1475,7 @@ WHERE message.chat_session_id = $1
       SELECT 1
       FROM agent_task_queue AS task
       WHERE task.chat_session_id = message.chat_session_id
-        AND task.status = 'queued'
+        AND task.status IN ('waiting_runtime', 'queued')
         AND task.id = message.task_id
         -- "Queued follow-up" is positional, not the row's transient status:
         -- the first pending task is the current turn even before claim.
@@ -1483,7 +1483,7 @@ WHERE message.chat_session_id = $1
           SELECT head.id
           FROM agent_task_queue AS head
           WHERE head.chat_session_id = $1
-            AND head.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+            AND head.status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
             AND head.regenerate_quick_actions_for IS NULL
           ORDER BY
             CASE
@@ -1553,13 +1553,13 @@ WHERE message.chat_session_id = $1
       SELECT 1
       FROM agent_task_queue AS task
       WHERE task.chat_session_id = message.chat_session_id
-        AND task.status = 'queued'
+        AND task.status IN ('waiting_runtime', 'queued')
         AND task.id = message.task_id
         AND task.id <> (
           SELECT head.id
           FROM agent_task_queue AS head
           WHERE head.chat_session_id = $1
-            AND head.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+            AND head.status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
             AND head.regenerate_quick_actions_for IS NULL
           ORDER BY
             CASE
@@ -1621,13 +1621,13 @@ WHERE message.chat_session_id = $1
       SELECT 1
       FROM agent_task_queue AS task
       WHERE task.chat_session_id = message.chat_session_id
-        AND task.status = 'queued'
+        AND task.status IN ('waiting_runtime', 'queued')
         AND task.id = message.task_id
         AND task.id <> (
           SELECT head.id
           FROM agent_task_queue AS head
           WHERE head.chat_session_id = $1
-            AND head.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+            AND head.status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
             AND head.regenerate_quick_actions_for IS NULL
           ORDER BY
             CASE
@@ -1799,7 +1799,7 @@ SELECT atq.id AS task_id, atq.status, atq.chat_session_id, cs.agent_id
 FROM agent_task_queue atq
 JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE atq.chat_session_id IS NOT NULL
-  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+  AND atq.status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
   -- Exclude background quick-actions regeneration passes: they own no assistant
   -- turn and must not surface as "running" chat work (MUL-5149 refresh follow-up).
   AND atq.regenerate_quick_actions_for IS NULL
@@ -1873,7 +1873,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) AS message ON TRUE
 WHERE task.chat_session_id = $1
-  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+  AND task.status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
   AND task.regenerate_quick_actions_for IS NULL
 ORDER BY
     CASE
@@ -1917,6 +1917,52 @@ func (q *Queries) ListPendingChatTasksForSession(ctx context.Context, chatSessio
 			&i.CreatedAt,
 			&i.MessageID,
 			&i.Content,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPoolChatMemberRevocationTails = `-- name: ListPoolChatMemberRevocationTails :many
+SELECT task.id AS task_id, task.agent_id, task.chat_session_id, task.runtime_requester_user_id
+FROM agent_task_queue AS task
+WHERE task.chat_session_id = ANY($1::uuid[])
+  AND task.runtime_binding_mode = 'pool'
+  AND task.status IN ('waiting_runtime', 'deferred')
+  AND task.session_affinity_state = 'unresolved'
+ORDER BY task.id
+`
+
+type ListPoolChatMemberRevocationTailsRow struct {
+	TaskID                 pgtype.UUID `json:"task_id"`
+	AgentID                pgtype.UUID `json:"agent_id"`
+	ChatSessionID          pgtype.UUID `json:"chat_session_id"`
+	RuntimeRequesterUserID pgtype.UUID `json:"runtime_requester_user_id"`
+}
+
+// The caller already holds every listed ChatSession row. Discover all
+// unresolved tails before the Agent and Task lock phases so a member revoke
+// can lock the full session write set in canonical order, while cancelling
+// only the target requester's rows.
+func (q *Queries) ListPoolChatMemberRevocationTails(ctx context.Context, chatSessionIds []pgtype.UUID) ([]ListPoolChatMemberRevocationTailsRow, error) {
+	rows, err := q.db.Query(ctx, listPoolChatMemberRevocationTails, chatSessionIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPoolChatMemberRevocationTailsRow{}
+	for rows.Next() {
+		var i ListPoolChatMemberRevocationTailsRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.AgentID,
+			&i.ChatSessionID,
+			&i.RuntimeRequesterUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -2233,7 +2279,17 @@ func (q *Queries) PrioritizeQueuedChatTask(ctx context.Context, arg PrioritizeQu
 
 const promoteChannelChatTasksIfMediaReady = `-- name: PromoteChannelChatTasksIfMediaReady :many
 UPDATE agent_task_queue AS task
-SET status = 'queued', fire_at = NULL
+SET status = CASE
+      WHEN task.runtime_binding_mode = 'pool' THEN 'waiting_runtime'
+      ELSE 'queued'
+    END,
+    runtime_id = CASE WHEN task.runtime_binding_mode = 'pool' THEN NULL ELSE task.runtime_id END,
+    wait_reason = CASE
+      WHEN task.runtime_binding_mode = 'pool' AND task.session_affinity_state = 'unresolved' THEN task.wait_reason
+      WHEN task.runtime_binding_mode = 'pool' THEN 'no_eligible_runtime'
+      ELSE task.wait_reason
+    END,
+    fire_at = NULL
 WHERE task.chat_session_id = $1
   AND task.status = 'deferred'
   AND task.issue_id IS NULL
@@ -2335,6 +2391,129 @@ func (q *Queries) PromoteChannelChatTasksIfMediaReady(ctx context.Context, chatS
 	return items, nil
 }
 
+const promoteNextAuthorizedPoolChatTaskAfterMemberRevocation = `-- name: PromoteNextAuthorizedPoolChatTaskAfterMemberRevocation :one
+WITH next_tail AS (
+  SELECT tail.id,
+         (session.session_id IS NOT NULL OR session.work_dir IS NOT NULL) AS has_session,
+         session.runtime_id
+  FROM agent_task_queue AS tail
+  JOIN chat_session AS session ON session.id = tail.chat_session_id
+  JOIN member AS placement_member
+    ON placement_member.workspace_id = tail.placement_workspace_id
+   AND placement_member.user_id = tail.runtime_requester_user_id
+  LEFT JOIN agent_runtime AS runtime ON runtime.id = session.runtime_id
+  WHERE tail.id = ANY($1::uuid[])
+    AND tail.chat_session_id = $2::uuid
+    AND tail.runtime_binding_mode = 'pool'
+    AND tail.status IN ('waiting_runtime', 'deferred')
+    AND tail.session_affinity_state = 'unresolved'
+    AND (
+      (session.session_id IS NULL AND session.work_dir IS NULL)
+      OR (
+        session.runtime_id IS NOT NULL
+        AND runtime.id IS NOT NULL
+        AND runtime.workspace_id = tail.placement_workspace_id
+        AND (
+          placement_member.role IN ('owner', 'admin')
+          OR runtime.owner_id = tail.runtime_requester_user_id
+          OR runtime.visibility = 'public'
+        )
+      )
+    )
+  ORDER BY
+    (tail.retry_of_task_id IS NOT NULL) DESC,
+    tail.priority DESC,
+    tail.created_at ASC,
+    tail.id ASC
+  LIMIT 1
+)
+UPDATE agent_task_queue AS task
+SET session_affinity_state = CASE WHEN next_tail.has_session THEN 'pinned' ELSE 'none' END,
+    session_affinity_runtime_id = CASE WHEN next_tail.has_session THEN next_tail.runtime_id ELSE NULL END,
+    wait_reason = 'no_eligible_runtime'
+FROM next_tail
+WHERE task.id = next_tail.id
+  AND task.status IN ('waiting_runtime', 'deferred')
+  AND task.session_affinity_state = 'unresolved'
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.runtime_binding_mode, task.runtime_requirements, task.placement_workspace_id, task.runtime_requester_user_id, task.session_affinity_state, task.session_affinity_runtime_id, task.explicit_fresh_session
+`
+
+type PromoteNextAuthorizedPoolChatTaskAfterMemberRevocationParams struct {
+	CandidateTaskIds []pgtype.UUID `json:"candidate_task_ids"`
+	ChatSessionID    pgtype.UUID   `json:"chat_session_id"`
+}
+
+// Called with the ChatSession, Agent and candidate Task rows already locked.
+// A revoked resolved head may expose many unresolved tails, but exactly one
+// still-authorized tail becomes the new execution head. Offline is not an
+// authorization failure: a valid Session remains pinned and waits for its
+// Runtime to recover.
+func (q *Queries) PromoteNextAuthorizedPoolChatTaskAfterMemberRevocation(ctx context.Context, arg PromoteNextAuthorizedPoolChatTaskAfterMemberRevocationParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, promoteNextAuthorizedPoolChatTaskAfterMemberRevocation, arg.CandidateTaskIds, arg.ChatSessionID)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+		&i.PlacementWorkspaceID,
+		&i.RuntimeRequesterUserID,
+		&i.SessionAffinityState,
+		&i.SessionAffinityRuntimeID,
+		&i.ExplicitFreshSession,
+	)
+	return i, err
+}
+
 const reanchorClaimedDirectChatInput = `-- name: ReanchorClaimedDirectChatInput :exec
 WITH latest_visible AS (
     SELECT
@@ -2353,13 +2532,13 @@ WITH latest_visible AS (
               SELECT 1
               FROM agent_task_queue AS queued_task
               WHERE queued_task.chat_session_id = prior.chat_session_id
-                AND queued_task.status = 'queued'
+                AND queued_task.status IN ('waiting_runtime', 'queued')
                 AND queued_task.id = prior.task_id
                 AND queued_task.id <> (
                   SELECT head.id
                   FROM agent_task_queue AS head
                   WHERE head.chat_session_id = claimed_input.chat_session_id
-                    AND head.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+                    AND head.status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
                     AND head.regenerate_quick_actions_for IS NULL
                   ORDER BY
                     CASE
@@ -2437,14 +2616,14 @@ WHERE queued_input.chat_session_id = $1
     FROM agent_task_queue AS queued_task
     WHERE queued_task.id = queued_input.task_id
       AND queued_task.chat_session_id = queued_input.chat_session_id
-      AND queued_task.status = 'queued'
+      AND queued_task.status IN ('waiting_runtime', 'queued')
       AND queued_task.chat_input_task_id = queued_task.id
       AND queued_task.regenerate_quick_actions_for IS NULL
       AND queued_task.id = (
         SELECT head.id
         FROM agent_task_queue AS head
         WHERE head.chat_session_id = queued_input.chat_session_id
-          AND head.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+          AND head.status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
           AND head.regenerate_quick_actions_for IS NULL
         ORDER BY
           CASE

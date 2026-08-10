@@ -94,6 +94,78 @@ WHERE workspace_id = sqlc.arg(workspace_id)::uuid
   AND user_id = sqlc.arg(requester_user_id)::uuid
 FOR UPDATE;
 
+-- name: ListPoolMemberRevocationDependents :many
+-- Snapshot requester-dependent Pool work after the Member lock. The caller
+-- uses the effective Runtime/Chat/Agent IDs to acquire the remaining locks in
+-- canonical order, then locks and revalidates the exact Task IDs before any
+-- cancellation. An unresolved Chat tail inherits the locked Session Runtime
+-- only for authorization/lock discovery; its persisted affinity stays NULL.
+SELECT task.id AS task_id,
+       task.agent_id,
+       task.chat_session_id,
+       COALESCE(
+         task.runtime_id,
+         task.session_affinity_runtime_id,
+         CASE WHEN task.session_affinity_state = 'unresolved' THEN session.runtime_id END
+       )::uuid AS effective_runtime_id
+FROM agent_task_queue AS task
+LEFT JOIN chat_session AS session ON session.id = task.chat_session_id
+WHERE task.placement_workspace_id = sqlc.arg(workspace_id)::uuid
+  AND task.runtime_requester_user_id = sqlc.arg(requester_user_id)::uuid
+  AND task.runtime_binding_mode = 'pool'
+  AND task.status IN (
+    'waiting_runtime', 'queued', 'deferred', 'dispatched', 'running',
+    'waiting_local_directory'
+  )
+ORDER BY task.id;
+
+-- name: ListMemberRevocationAgentIDs :many
+-- Called only after every leaving-owned Runtime row is locked. The Runtime
+-- locks block new FK references while the returned Agent rows are locked in
+-- UUID order by LockPoolCapabilityDependentAgents.
+SELECT id FROM agent
+WHERE runtime_id = ANY(sqlc.arg(runtime_ids)::uuid[])
+  AND archived_at IS NULL
+  AND (system_key IS NULL OR system_key = '')
+ORDER BY id;
+
+-- name: ListMemberRevocationLegacyTaskIDs :many
+-- Discover the fixed/legacy side only after Runtime and Agent locks. The final
+-- UPDATE is exact-ID so it cannot cancel a row outside the proven lock set.
+SELECT id FROM agent_task_queue
+WHERE (runtime_id = ANY(sqlc.arg(runtime_ids)::uuid[])
+       OR agent_id = ANY(sqlc.arg(agent_ids)::uuid[]))
+  AND status IN (
+    'waiting_runtime', 'queued', 'deferred', 'dispatched', 'running',
+    'waiting_local_directory'
+  )
+ORDER BY id;
+
+-- name: CancelMemberRevocationTasksByIDs :many
+-- The caller holds every returned Task row FOR UPDATE. Pool unresolved tails
+-- become ordinary terminal history atomically with cancellation; keeping the
+-- predecessor-only affinity state on a terminal row violates the Pool
+-- contract and could make later head selection observe a phantom predecessor.
+UPDATE agent_task_queue
+SET status = 'cancelled',
+    completed_at = now(),
+    prepare_lease_expires_at = NULL,
+    session_affinity_state = CASE
+      WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN 'none'
+      ELSE session_affinity_state
+    END,
+    session_affinity_runtime_id = CASE
+      WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN NULL
+      ELSE session_affinity_runtime_id
+    END,
+    wait_reason = CASE WHEN runtime_binding_mode = 'pool' THEN NULL ELSE wait_reason END
+WHERE id = ANY(sqlc.arg(task_ids)::uuid[])
+  AND status IN (
+    'waiting_runtime', 'queued', 'deferred', 'dispatched', 'running',
+    'waiting_local_directory'
+  )
+RETURNING *;
+
 -- name: LockPoolAgentForPlacement :one
 SELECT * FROM agent
 WHERE id = sqlc.arg(agent_id)::uuid
@@ -431,7 +503,17 @@ RETURNING *;
 -- Early promotion is idempotent at the service layer: a task already promoted
 -- by the fire_at sweeper no longer matches and is treated as settled.
 UPDATE agent_task_queue
-SET status = 'queued', fire_at = NULL
+SET status = CASE
+      WHEN runtime_binding_mode = 'pool' THEN 'waiting_runtime'
+      ELSE 'queued'
+    END,
+    runtime_id = CASE WHEN runtime_binding_mode = 'pool' THEN NULL ELSE runtime_id END,
+    wait_reason = CASE
+      WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN wait_reason
+      WHEN runtime_binding_mode = 'pool' THEN 'no_eligible_runtime'
+      ELSE wait_reason
+    END,
+    fire_at = NULL
 WHERE id = $1 AND issue_id IS NOT NULL AND status = 'deferred'
 RETURNING *;
 
@@ -605,8 +687,11 @@ RETURNING *;
 -- status="working" with no self-correction. Only issue-deletion cleanup calls
 -- this now; a status flip to cancelled/done no longer does (MUL-4465).
 UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    session_affinity_state = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN 'none' ELSE session_affinity_state END,
+    session_affinity_runtime_id = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN NULL ELSE session_affinity_runtime_id END,
+    wait_reason = CASE WHEN runtime_binding_mode = 'pool' THEN NULL ELSE wait_reason END
+WHERE issue_id = $1 AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CancelAgentTasksByIssueAndAgent :many
@@ -615,8 +700,11 @@ RETURNING *;
 -- rerun flow so re-running the assignee doesn't collateral-cancel a
 -- still-running @-mention agent on the same issue.
 UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    session_affinity_state = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN 'none' ELSE session_affinity_state END,
+    session_affinity_runtime_id = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN NULL ELSE session_affinity_runtime_id END,
+    wait_reason = CASE WHEN runtime_binding_mode = 'pool' THEN NULL ELSE wait_reason END
+WHERE issue_id = $1 AND agent_id = $2 AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CancelAgentTasksByAgent :many
@@ -626,8 +714,11 @@ RETURNING *;
 -- (also :many + RETURNING + completed_at) so the three sibling cancel paths
 -- behave consistently.
 UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    session_affinity_state = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN 'none' ELSE session_affinity_state END,
+    session_affinity_runtime_id = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN NULL ELSE session_affinity_runtime_id END,
+    wait_reason = CASE WHEN runtime_binding_mode = 'pool' THEN NULL ELSE wait_reason END
+WHERE agent_id = $1 AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CancelAgentTasksByTriggerComment :many
@@ -636,9 +727,12 @@ RETURNING *;
 -- coalesced input; cancellation prevents an agent from acting on a stale or
 -- deleted version. Must run before deletion clears trigger_comment_id.
 UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    session_affinity_state = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN 'none' ELSE session_affinity_state END,
+    session_affinity_runtime_id = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN NULL ELSE session_affinity_runtime_id END,
+    wait_reason = CASE WHEN runtime_binding_mode = 'pool' THEN NULL ELSE wait_reason END
 WHERE (trigger_comment_id = $1 OR $1 = ANY(coalesced_comment_ids))
-  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+  AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CancelAgentTasksByChatSession :many
@@ -648,8 +742,11 @@ RETURNING *;
 -- the FK ON DELETE SET NULL would otherwise nullify chat_session_id and we
 -- could no longer reach those tasks.
 UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    session_affinity_state = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN 'none' ELSE session_affinity_state END,
+    session_affinity_runtime_id = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN NULL ELSE session_affinity_runtime_id END,
+    wait_reason = CASE WHEN runtime_binding_mode = 'pool' THEN NULL ELSE wait_reason END
+WHERE chat_session_id = $1 AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: GetAgentTask :one
@@ -1499,18 +1596,24 @@ RETURNING t.*;
 
 -- name: CancelAgentTask :one
 UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    session_affinity_state = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN 'none' ELSE session_affinity_state END,
+    session_affinity_runtime_id = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN NULL ELSE session_affinity_runtime_id END,
+    wait_reason = CASE WHEN runtime_binding_mode = 'pool' THEN NULL ELSE wait_reason END
+WHERE id = $1 AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CancelQueuedAgentTask :one
 -- Queue editing is a compare-and-set: never cancel a task that the daemon
 -- promoted between the user's click and this statement.
 UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    session_affinity_state = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN 'none' ELSE session_affinity_state END,
+    session_affinity_runtime_id = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN NULL ELSE session_affinity_runtime_id END,
+    wait_reason = CASE WHEN runtime_binding_mode = 'pool' THEN NULL ELSE wait_reason END
 WHERE id = sqlc.arg('id')
   AND chat_session_id = sqlc.arg('chat_session_id')
-  AND status = 'queued'
+  AND status IN ('waiting_runtime', 'queued')
 RETURNING *;
 
 -- name: CancelQueuedAgentTasksForSession :many
@@ -1522,7 +1625,7 @@ WITH head AS MATERIALIZED (
   SELECT candidate.id
   FROM agent_task_queue AS candidate
   WHERE candidate.chat_session_id = $1
-    AND candidate.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+    AND candidate.status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
     AND candidate.regenerate_quick_actions_for IS NULL
   ORDER BY
     CASE
@@ -1536,9 +1639,12 @@ WITH head AS MATERIALIZED (
   LIMIT 1
 )
 UPDATE agent_task_queue AS queued
-SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    session_affinity_state = CASE WHEN queued.runtime_binding_mode = 'pool' AND queued.session_affinity_state = 'unresolved' THEN 'none' ELSE queued.session_affinity_state END,
+    session_affinity_runtime_id = CASE WHEN queued.runtime_binding_mode = 'pool' AND queued.session_affinity_state = 'unresolved' THEN NULL ELSE queued.session_affinity_runtime_id END,
+    wait_reason = CASE WHEN queued.runtime_binding_mode = 'pool' THEN NULL ELSE queued.wait_reason END
 WHERE queued.chat_session_id = $1
-  AND queued.status = 'queued'
+  AND queued.status IN ('waiting_runtime', 'queued')
   AND queued.id IS DISTINCT FROM (SELECT id FROM head)
 RETURNING queued.*;
 
@@ -1585,7 +1691,7 @@ FOR UPDATE;
 -- Returns true if there is any queued, dispatched, waiting_local_directory,
 -- or running task for the issue.
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
+WHERE issue_id = $1 AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory');
 
 -- name: HasPendingTaskForIssue :one
 -- Returns true if there is a queued or dispatched (but not yet running) task for the issue.
@@ -1593,7 +1699,7 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_l
 -- the agent picks up new comments on the next cycle) but skip if a pending
 -- task already exists (natural dedup).
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
+WHERE issue_id = $1 AND status IN ('waiting_runtime', 'queued', 'dispatched');
 
 -- name: HasPendingTaskForIssueAndAgent :one
 -- Returns true if a specific agent already has a queued or dispatched task
@@ -1610,7 +1716,7 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2
   AND (
-    status IN ('queued', 'dispatched')
+    status IN ('waiting_runtime', 'queued', 'dispatched')
     OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
   )
   AND (
@@ -1627,7 +1733,7 @@ SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = @issue_id
   AND agent_id = @agent_id
   AND (
-    status IN ('queued', 'dispatched')
+    status IN ('waiting_runtime', 'queued', 'dispatched')
     OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
   )
   AND trigger_comment_id IS DISTINCT FROM @exclude_trigger_comment_id::uuid
@@ -1708,7 +1814,7 @@ WHERE id = (
     WHERE t.issue_id = @issue_id
       AND t.agent_id = @agent_id
       AND (
-          t.status = 'queued'
+          t.status IN ('waiting_runtime', 'queued')
           OR (t.status = 'deferred' AND t.context->>'channel_issue_media_pending' = 'true')
       )
       -- Head-scoped (TEN-356, #5914): never fold across HEADs. The physical
@@ -1783,7 +1889,7 @@ RETURNING id, coalesced_comment_ids;
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2
   AND (
-    status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+    status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory')
     OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
   );
 
@@ -2018,18 +2124,24 @@ RETURNING *;
 
 -- name: CancelDeferredEscalationsForTask :many
 UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    session_affinity_state = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN 'none' ELSE session_affinity_state END,
+    session_affinity_runtime_id = CASE WHEN runtime_binding_mode = 'pool' AND session_affinity_state = 'unresolved' THEN NULL ELSE session_affinity_runtime_id END,
+    wait_reason = CASE WHEN runtime_binding_mode = 'pool' THEN NULL ELSE wait_reason END
 WHERE escalation_for_task_id = $1
-  AND status IN ('deferred', 'queued', 'dispatched', 'waiting_local_directory')
+  AND status IN ('waiting_runtime', 'deferred', 'queued', 'dispatched', 'waiting_local_directory')
 RETURNING *;
 
 -- name: CancelDeferredEscalationsForIssueAgent :many
 WITH cancelled AS (
     UPDATE agent_task_queue fallback
-    SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+    SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+        session_affinity_state = CASE WHEN fallback.runtime_binding_mode = 'pool' AND fallback.session_affinity_state = 'unresolved' THEN 'none' ELSE fallback.session_affinity_state END,
+        session_affinity_runtime_id = CASE WHEN fallback.runtime_binding_mode = 'pool' AND fallback.session_affinity_state = 'unresolved' THEN NULL ELSE fallback.session_affinity_runtime_id END,
+        wait_reason = CASE WHEN fallback.runtime_binding_mode = 'pool' THEN NULL ELSE fallback.wait_reason END
     FROM agent_task_queue primary_task
     WHERE fallback.escalation_for_task_id = primary_task.id
-      AND fallback.status IN ('deferred', 'queued', 'dispatched', 'waiting_local_directory')
+      AND fallback.status IN ('waiting_runtime', 'deferred', 'queued', 'dispatched', 'waiting_local_directory')
       AND primary_task.issue_id = @issue_id
       AND primary_task.agent_id = @agent_id
     RETURNING fallback.*
@@ -2043,7 +2155,7 @@ SELECT * FROM cancelled;
 -- busy on a prior task, and a silent UI during that window looks like the
 -- platform never received the trigger.
 SELECT * FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE issue_id = $1 AND status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY created_at DESC;
 
 -- name: GetWorkspaceAgentRunCounts :many
@@ -2116,7 +2228,7 @@ ORDER BY atq.agent_id, bucket;
 SELECT atq.* FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  AND atq.status IN ('waiting_runtime', 'queued', 'dispatched', 'running', 'waiting_local_directory')
 
 UNION ALL
 

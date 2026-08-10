@@ -447,6 +447,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
 		return
 	}
+	h.wakeRuntimePoolWorkspaceBestEffort(r.Context(), accepted.WorkspaceID)
 
 	slog.Info("invitation accepted", "invitation_id", invitationID, "user_id", userID, "workspace_id", uuidToString(accepted.WorkspaceID))
 

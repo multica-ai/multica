@@ -34,6 +34,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/runtimepool"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -269,6 +270,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.WebhookIPRateLimiter = handler.NewRedisWebhookIPRateLimiter(rdb, handler.DefaultWebhookIPRateLimit())
 		h.WebhookAbsoluteIPRateLimiter = handler.NewRedisWebhookAbsoluteIPRateLimiter(rdb, handler.DefaultWebhookAbsoluteIPRateLimit())
 	}
+	// Runtime placement must share the final liveness authority selected above.
+	// Router owns the single concrete scheduler; Handler construction only
+	// exposes the TaskService seam and never creates a competing instance.
+	h.TaskService.RuntimePool = runtimepool.NewScheduler(queries, pool, h.LivenessStore)
 
 	// Channel engine (MUL-3620): the platform-agnostic inbound runtime.
 	// Built UNCONDITIONALLY — it drives any channel.Channel, not just

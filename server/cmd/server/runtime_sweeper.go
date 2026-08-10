@@ -10,6 +10,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/runtimepool"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -103,8 +104,22 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			sweepDeferredChatFinalizations(ctx, queries, taskSvc)
+			sweepRuntimePool(ctx, taskSvc)
 			gcRuntimes(ctx, queries, bus)
 		}
+	}
+}
+
+// sweepRuntimePool reuses the existing runtime-sweeper cadence to recover
+// missed in-process placement notifications. Scheduler owns the serialized
+// Workspace cursor and every database bound; TaskService publishes only the
+// committed results returned after the sweep.
+func sweepRuntimePool(ctx context.Context, taskSvc *service.TaskService) {
+	if taskSvc == nil {
+		return
+	}
+	if err := taskSvc.SweepRuntimePool(ctx, runtimepool.WorkspaceSweepLimit); err != nil {
+		slog.Warn("runtime pool sweep failed", "error", err)
 	}
 }
 

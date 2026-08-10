@@ -261,6 +261,33 @@ func (r *eventRecorder) snapshot() []events.Event {
 	return append([]events.Event(nil), r.events...)
 }
 
+func TestCaptureCancelledTasksWakesRuntimePoolAfterCommittedArchiveCancellation(t *testing.T) {
+	ctx := context.Background()
+	pool := newCancelFinalizePool(t)
+	fixture := createCancelFinalizeFixture(t, ctx, pool, "queued", false)
+	queries := db.New(pool)
+	cancelled, err := queries.CancelAgentTasksByAgent(ctx, util.MustParseUUID(fixture.agentID))
+	if err != nil {
+		t.Fatalf("commit archive-style Task cancellation: %v", err)
+	}
+	if len(cancelled) != 1 || cancelled[0].Status != "cancelled" {
+		t.Fatalf("cancelled Tasks = %+v, want one committed cancellation", cancelled)
+	}
+
+	scheduler := &runtimePoolSeamScheduler{}
+	svc := NewTaskService(queries, pool, nil, events.New())
+	svc.RuntimePool = scheduler
+	svc.CaptureCancelledTasks(ctx, cancelled)
+
+	if len(scheduler.assignCalls) != 1 {
+		t.Fatalf("Runtime Pool wakes = %d, want 1 after committed archive cancellation", len(scheduler.assignCalls))
+	}
+	request := scheduler.assignCalls[0]
+	if util.UUIDToString(request.WorkspaceID) != fixture.workspaceID || request.FocusTaskID.Valid {
+		t.Fatalf("Runtime Pool wake = %+v, want nonfocused Workspace %s", request, fixture.workspaceID)
+	}
+}
+
 // Cancelled before any daemon started the task: the transcript can never gain
 // rows, so the empty judgment is final and the draft restore stays synchronous.
 func TestCancelTask_NotStarted_RestoresDraftSynchronously(t *testing.T) {

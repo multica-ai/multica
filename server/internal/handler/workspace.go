@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -472,6 +474,14 @@ func normalizeMemberRole(role string) (string, bool) {
 	}
 }
 
+func memberRoleExpandsRuntimeAccess(previous, next string) bool {
+	return previous == "member" && (next == "admin" || next == "owner")
+}
+
+func memberRoleReducesRuntimeAccess(previous, next string) bool {
+	return (previous == "admin" || previous == "owner") && next == "member"
+}
+
 func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
 	requester, ok := h.workspaceMember(w, r, workspaceID)
@@ -533,6 +543,7 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create member")
 		return
 	}
+	h.wakeRuntimePoolWorkspaceBestEffort(r.Context(), requester.WorkspaceID)
 
 	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
 	userID := requestUserID(r)
@@ -601,16 +612,43 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updatedMember, err := h.Queries.UpdateMemberRole(r.Context(), db.UpdateMemberRoleParams{
-		ID:   target.ID,
-		Role: role,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update member")
-		return
+	var updatedMember db.Member
+	if memberRoleReducesRuntimeAccess(target.Role, role) {
+		actorID := requestUserID(r)
+		result, revokeErr := h.downgradeMemberRuntimeAccess(
+			r.Context(), target.WorkspaceID, target.UserID, target.ID, parseUUID(actorID), target.Role, role,
+		)
+		if revokeErr != nil {
+			slog.Warn("member role downgrade failed", append(logger.RequestAttrs(r), "error", revokeErr, "member_id", memberID, "workspace_id", workspaceID)...)
+			if errors.Is(revokeErr, errMemberRevocationSnapshotDrift) {
+				writeError(w, http.StatusConflict, "member role changed; retry the update")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to update member")
+			return
+		}
+		updatedMember = result.UpdatedMember
+		h.publishRevocation(r.Context(), result, uuidToString(target.WorkspaceID), "member", actorID)
+	} else {
+		updatedMember, err = h.Queries.UpdateMemberRole(r.Context(), db.UpdateMemberRoleParams{
+			ID:                  target.ID,
+			Role:                role,
+			ExpectedCurrentRole: target.Role,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusConflict, "member role changed; retry the update")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update member")
+			return
+		}
 	}
 
 	h.MembershipCache.Invalidate(r.Context(), uuidToString(target.UserID), workspaceID)
+	if memberRoleExpandsRuntimeAccess(target.Role, updatedMember.Role) {
+		h.wakeRuntimePoolWorkspaceBestEffort(r.Context(), updatedMember.WorkspaceID)
+	}
 
 	user, err := h.Queries.GetUser(r.Context(), updatedMember.UserID)
 	if err != nil {

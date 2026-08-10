@@ -168,18 +168,20 @@ func (q *Queries) ListMembersWithUser(ctx context.Context, workspaceID pgtype.UU
 }
 
 const updateMemberRole = `-- name: UpdateMemberRole :one
-UPDATE member SET role = $2
-WHERE id = $1
+UPDATE member SET role = $1
+WHERE id = $2
+  AND role = $3
 RETURNING id, workspace_id, user_id, role, created_at
 `
 
 type UpdateMemberRoleParams struct {
-	ID   pgtype.UUID `json:"id"`
-	Role string      `json:"role"`
+	Role                string      `json:"role"`
+	ID                  pgtype.UUID `json:"id"`
+	ExpectedCurrentRole string      `json:"expected_current_role"`
 }
 
 func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) (Member, error) {
-	row := q.db.QueryRow(ctx, updateMemberRole, arg.ID, arg.Role)
+	row := q.db.QueryRow(ctx, updateMemberRole, arg.Role, arg.ID, arg.ExpectedCurrentRole)
 	var i Member
 	err := row.Scan(
 		&i.ID,
