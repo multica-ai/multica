@@ -92,6 +92,24 @@ foreach ($required in @(
 # ---------------------------------------------------------------------------
 $definitions = Get-InstallerDefinitions
 
+$redirectVersion = & {
+    Invoke-Expression $definitions
+    function Invoke-RestMethod { throw "simulated GitHub API rate limit" }
+    function Invoke-WebRequest {
+        return [pscustomobject]@{
+            BaseResponse = [pscustomobject]@{
+                ResponseUri = [uri]"https://github.com/SeimoDev/multica/releases/tag/v0.4.23"
+            }
+            Links = @()
+            Content = ""
+        }
+    }
+    Get-LatestVersion
+}
+if ($redirectVersion -ne "v0.4.23") {
+    Fail-Test "Get-LatestVersion must fall back to the public release redirect when the GitHub API is rate-limited"
+}
+
 $portReaderCases = @(
     @{ Label = "loopback binding"; Output = @("127.0.0.1:9500"); Expected = "9500" }
     @{ Label = "wildcard binding"; Output = @("0.0.0.0:9600"); Expected = "9600" }

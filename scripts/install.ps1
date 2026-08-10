@@ -85,8 +85,58 @@ function Get-ComposePublishedPort {
 }
 
 function Get-LatestVersion {
+    # Prefer the public redirect because unauthenticated GitHub API requests can
+    # be rate-limited on shared networks even while release downloads work.
     try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/SeimoDev/multica/releases/latest" -ErrorAction Stop
+        $page = Invoke-WebRequest -Uri "$RepoWebUrl/releases/latest" -UseBasicParsing -ErrorAction Stop
+        $candidates = @()
+
+        $baseResponseProperty = $page.PSObject.Properties["BaseResponse"]
+        if ($baseResponseProperty -and $baseResponseProperty.Value) {
+            $baseResponse = $baseResponseProperty.Value
+            $responseUriProperty = $baseResponse.PSObject.Properties["ResponseUri"]
+            if ($responseUriProperty -and $responseUriProperty.Value) {
+                $candidates += [string]$responseUriProperty.Value
+            }
+
+            $requestMessageProperty = $baseResponse.PSObject.Properties["RequestMessage"]
+            if ($requestMessageProperty -and $requestMessageProperty.Value) {
+                $requestUriProperty = $requestMessageProperty.Value.PSObject.Properties["RequestUri"]
+                if ($requestUriProperty -and $requestUriProperty.Value) {
+                    $candidates += [string]$requestUriProperty.Value
+                }
+            }
+        }
+
+        $linksProperty = $page.PSObject.Properties["Links"]
+        if ($linksProperty) {
+            foreach ($link in @($linksProperty.Value)) {
+                $hrefProperty = $link.PSObject.Properties["href"]
+                if ($hrefProperty -and $hrefProperty.Value) {
+                    $candidates += [string]$hrefProperty.Value
+                }
+            }
+        }
+
+        $contentProperty = $page.PSObject.Properties["Content"]
+        if ($contentProperty -and $contentProperty.Value) {
+            $candidates += [string]$contentProperty.Value
+        }
+
+        foreach ($candidate in $candidates) {
+            if ($candidate -match '/releases/tag/(?<tag>v[^/?#\s"]+)') {
+                return $Matches.tag
+            }
+        }
+    } catch {
+        # Fall through to the API for hosts where the web redirect is blocked.
+    }
+
+    try {
+        $release = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/SeimoDev/multica/releases/latest" `
+            -Headers @{ "User-Agent" = "multica-connector-installer" } `
+            -ErrorAction Stop
         return $release.tag_name
     } catch {
         return $null
