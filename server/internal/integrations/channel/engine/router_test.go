@@ -37,6 +37,33 @@ func (f *fakeIdentity) ResolveSender(_ context.Context, _ ResolvedInstallation, 
 	return f.id, f.err
 }
 
+type fakeValidatedInbound struct {
+	mu     sync.Mutex
+	inst   ResolvedInstallation
+	insts  []ResolvedInstallation
+	err    error
+	callsN int
+}
+
+func (f *fakeValidatedInbound) ResolveValidatedInbound(_ context.Context, inst ResolvedInstallation, _ ResolvedIdentity, _ channel.InboundMessage) (ResolvedInstallation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.callsN++
+	if len(f.insts) >= f.callsN {
+		return f.insts[f.callsN-1], f.err
+	}
+	if f.inst.ID.Valid || f.inst.AgentID.Valid {
+		inst = f.inst
+	}
+	return inst, f.err
+}
+
+func (f *fakeValidatedInbound) calls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.callsN
+}
+
 type fakeDedup struct {
 	mu         sync.Mutex
 	token      pgtype.UUID
@@ -77,6 +104,8 @@ type fakeBinder struct {
 	appendResult AppendResult
 	parseIssue   bool
 	appendErr    error
+	appendErrs   []error
+	appendCalls  int
 	appendDelay  time.Duration
 	bindErr      error
 	lastEnsure   EnsureSessionParams
@@ -100,7 +129,12 @@ func (f *fakeBinder) AppendMessage(_ context.Context, p AppendParams) (AppendRes
 	f.mu.Lock()
 	delay := f.appendDelay
 	f.lastAppend = p
+	f.appendCalls++
 	res, err := f.appendResult, f.appendErr
+	if len(f.appendErrs) > 0 {
+		err = f.appendErrs[0]
+		f.appendErrs = f.appendErrs[1:]
+	}
 	if f.parseIssue {
 		commandSource := p.Message.CommandText
 		if commandSource == "" {
@@ -113,6 +147,12 @@ func (f *fakeBinder) AppendMessage(_ context.Context, p AppendParams) (AppendRes
 		time.Sleep(delay)
 	}
 	return res, err
+}
+
+func (f *fakeBinder) appends() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.appendCalls
 }
 func (f *fakeBinder) BindMedia(_ context.Context, p BindMediaParams) error {
 	f.mu.Lock()
@@ -366,26 +406,28 @@ func p2pMessage(t *testing.T) channel.InboundMessage {
 }
 
 type harness struct {
-	router  *Router
-	inst    *fakeInstaller
-	ident   *fakeIdentity
-	dedup   *fakeDedup
-	binder  *fakeBinder
-	audit   *fakeAuditor
-	replier *fakeReplier
-	typing  *fakeTyping
-	media   *fakeMedia
-	issues  *fakeIssues
-	tasks   *fakeTasks
-	reader  *fakeReader
+	router    *Router
+	inst      *fakeInstaller
+	ident     *fakeIdentity
+	validated *fakeValidatedInbound
+	dedup     *fakeDedup
+	binder    *fakeBinder
+	audit     *fakeAuditor
+	replier   *fakeReplier
+	typing    *fakeTyping
+	media     *fakeMedia
+	issues    *fakeIssues
+	tasks     *fakeTasks
+	reader    *fakeReader
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
-		inst:  &fakeInstaller{inst: activeResolved(t)},
-		ident: &fakeIdentity{id: ResolvedIdentity{UserID: uuidFromString(t, "44444444-4444-4444-4444-444444444444")}},
-		dedup: &fakeDedup{token: uuidFromString(t, "55555555-5555-5555-5555-555555555555")},
+		inst:      &fakeInstaller{inst: activeResolved(t)},
+		ident:     &fakeIdentity{id: ResolvedIdentity{UserID: uuidFromString(t, "44444444-4444-4444-4444-444444444444")}},
+		validated: &fakeValidatedInbound{},
+		dedup:     &fakeDedup{token: uuidFromString(t, "55555555-5555-5555-5555-555555555555")},
 		binder: &fakeBinder{
 			ensureID: uuidFromString(t, "66666666-6666-6666-6666-666666666666"),
 			appendResult: AppendResult{
@@ -405,6 +447,7 @@ func newHarness(t *testing.T) *harness {
 	h.router.Register(channel.TypeFeishu, ResolverSet{
 		Installation: h.inst,
 		Identity:     h.ident,
+		Validated:    h.validated,
 		Dedup:        h.dedup,
 		Session:      h.binder,
 		Audit:        h.audit,
@@ -484,6 +527,9 @@ func TestRouter_GroupNotAddressed_Drops(t *testing.T) {
 	if h.media.calls() != 0 {
 		t.Fatal("unaddressed group message must not resolve media")
 	}
+	if h.validated.calls() != 0 {
+		t.Fatal("unaddressed group message must not run validated discovery")
+	}
 }
 
 func TestRouter_UnboundSender_NeedsBinding(t *testing.T) {
@@ -500,6 +546,9 @@ func TestRouter_UnboundSender_NeedsBinding(t *testing.T) {
 	}
 	if h.media.calls() != 0 {
 		t.Fatal("unbound sender must not resolve media")
+	}
+	if h.validated.calls() != 0 {
+		t.Fatal("unbound sender must not run validated discovery")
 	}
 	if !waitFor(time.Second, func() bool {
 		for _, r := range h.replier.calls() {
@@ -524,6 +573,71 @@ func TestRouter_NonMember_Drops(t *testing.T) {
 	}
 	if h.media.calls() != 0 {
 		t.Fatal("non-member sender must not resolve media")
+	}
+	if h.validated.calls() != 0 {
+		t.Fatal("non-member sender must not run validated discovery")
+	}
+}
+
+func TestRouter_ArchivedValidatedRouteRepliesWithoutCreatingSession(t *testing.T) {
+	h := newHarness(t)
+	h.validated.err = ErrTargetAgentArchived
+	msg := p2pMessage(t)
+	msg.Source.ChatType = channel.ChatTypeGroup
+	msg.AddressedToBot = true
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("archived route must be a product outcome, got %v", err)
+	}
+	if h.validated.calls() != 1 {
+		t.Fatalf("validated discovery calls = %d, want 1", h.validated.calls())
+	}
+	if h.binder.lastEnsure.Installation.ID.Valid {
+		t.Fatal("archived route must not create or reuse a chat session")
+	}
+	if h.dedup.marks() != 1 {
+		t.Fatalf("archived route must finalize dedup, got %d marks", h.dedup.marks())
+	}
+	if !waitFor(time.Second, func() bool {
+		for _, result := range h.replier.calls() {
+			if result.Outcome == OutcomeAgentArchived {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("archived route did not emit the standard archived-agent reply")
+	}
+}
+
+func TestRouter_RouteFenceConflictRefreshesAndRetriesSameClaim(t *testing.T) {
+	h := newHarness(t)
+	oldRoute := activeResolved(t)
+	oldRoute.RouteRevision = 1
+	newRoute := oldRoute
+	newRoute.AgentID = uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+	newRoute.RouteRevision = 2
+	h.inst.inst = oldRoute
+	h.validated.insts = []ResolvedInstallation{oldRoute, newRoute}
+	h.binder.appendErrs = []error{ErrRouteChanged, nil}
+
+	msg := p2pMessage(t)
+	msg.Source.ChatType = channel.ChatTypeGroup
+	msg.AddressedToBot = true
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("route fence retry: %v", err)
+	}
+	if h.validated.calls() != 2 {
+		t.Fatalf("validated route resolutions = %d, want initial + refresh", h.validated.calls())
+	}
+	if h.binder.appends() != 2 {
+		t.Fatalf("append attempts = %d, want conflict + retry", h.binder.appends())
+	}
+	if h.binder.lastAppend.AgentID != newRoute.AgentID || h.binder.lastAppend.RouteRevision != 2 {
+		t.Fatalf("retry append route = agent %v revision %d, want agent %v revision 2", h.binder.lastAppend.AgentID, h.binder.lastAppend.RouteRevision, newRoute.AgentID)
+	}
+	if h.dedup.releases() != 0 {
+		t.Fatalf("route retry released already-ACKed claim %d times", h.dedup.releases())
 	}
 }
 

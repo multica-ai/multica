@@ -9,6 +9,7 @@ CREATE TABLE dingtalk_group_route (
     conversation_id      TEXT NOT NULL,
     conversation_title   TEXT NOT NULL DEFAULT '',
     agent_id             UUID NOT NULL,
+    revision             BIGINT NOT NULL DEFAULT 1,
     discovered_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );

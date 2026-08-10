@@ -338,6 +338,32 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("updateDingTalkGroupRoute", () => {
+    it("falls back safely on a malformed PATCH response and sends the scoped request", async () => {
+      stubFetchJson({ id: 42, agent_id: { wrong: "shape" } });
+      const client = new ApiClient("https://api.example.test");
+      await expect(
+        client.updateDingTalkGroupRoute("ws-1", "route-1", { agent_id: "agent-2" }),
+      ).resolves.toEqual({
+        id: "",
+        workspace_id: "",
+        installation_id: "",
+        conversation_id: "",
+        conversation_title: "",
+        agent_id: "",
+        discovered_at: "",
+        updated_at: "",
+      });
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/dingtalk/group-routes/route-1",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ agent_id: "agent-2" }),
+        }),
+      );
+    });
+  });
+
   describe("getConfig", () => {
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({

@@ -218,6 +218,7 @@ export function DingTalkTab() {
                     key={route.id}
                     route={route}
                     agents={activeAgents}
+                    selectedAgentName={agents.find((agent) => agent.id === route.agent_id)?.name}
                     canManage={canManage}
                     updating={updatingRouteId === route.id}
                     onAgentChange={(agentId) => handleRouteAgentChange(route, agentId)}
@@ -263,12 +264,14 @@ export function DingTalkTab() {
 function GroupRouteRow({
   route,
   agents,
+  selectedAgentName,
   canManage,
   updating,
   onAgentChange,
 }: {
   route: DingTalkGroupRoute;
   agents: Array<{ id: string; name: string }>;
+  selectedAgentName?: string;
   canManage: boolean;
   updating: boolean;
   onAgentChange: (agentId: string) => void;
@@ -276,6 +279,10 @@ function GroupRouteRow({
   const { t } = useT("settings");
   const title = route.conversation_title || route.conversation_id;
   const selectedAgent = agents.find((agent) => agent.id === route.agent_id);
+  const selectedLabel =
+    selectedAgentName ??
+    selectedAgent?.name ??
+    t(($) => $.dingtalk.group_routes_unknown_agent);
 
   return (
     <div className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
@@ -296,7 +303,7 @@ function GroupRouteRow({
         >
           <SelectTrigger className="w-full sm:w-56" aria-label={t(($) => $.dingtalk.group_routes_agent_label)}>
             <SelectValue>
-              {selectedAgent?.name ?? t(($) => $.dingtalk.group_routes_unknown_agent)}
+              {selectedLabel}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -309,7 +316,7 @@ function GroupRouteRow({
         </Select>
       ) : (
         <p className="text-caption text-muted-foreground">
-          {selectedAgent?.name ?? t(($) => $.dingtalk.group_routes_unknown_agent)}
+          {selectedLabel}
         </p>
       )}
     </div>

@@ -24,7 +24,7 @@ const agentsRef = vi.hoisted(() => ({
   current: [
     { id: "agent-1", name: "Agent One", archived_at: null },
     { id: "agent-2", name: "Agent Two", archived_at: null },
-  ],
+  ] as Array<{ id: string; name: string; archived_at: string | null }>,
 }));
 const groupRoutesRef = vi.hoisted(() => ({
   current: { routes: [] as unknown[] },
@@ -34,6 +34,8 @@ const mockDeleteInstallation = vi.hoisted(() => vi.fn());
 const mockUpdateGroupRoute = vi.hoisted(() => vi.fn());
 const mockOpenExternal = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
+const mockToastSuccess = vi.hoisted(() => vi.fn());
+const mockToastError = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (opts: { queryKey: unknown[]; enabled?: boolean }) => {
@@ -106,7 +108,7 @@ vi.mock("@multica/core/auth", () => {
 });
 
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() },
+  toast: { success: mockToastSuccess, error: mockToastError, message: vi.fn() },
 }));
 
 vi.mock("../../platform", () => ({ openExternal: mockOpenExternal }));
@@ -129,7 +131,28 @@ function resetFixtures() {
   vi.clearAllMocks();
   membersRef.current = [{ user_id: "user-1", role: "owner" }];
   installationsRef.current = { installations: [], configured: true, install_supported: true };
+  agentsRef.current = [
+    { id: "agent-1", name: "Agent One", archived_at: null },
+    { id: "agent-2", name: "Agent Two", archived_at: null },
+  ];
   groupRoutesRef.current = { routes: [] };
+}
+
+function setConnectedGroupRoute() {
+  installationsRef.current = {
+    installations: [{ id: "i1", agent_id: "agent-1", status: "active" }],
+    configured: true,
+    install_supported: true,
+  };
+  groupRoutesRef.current = {
+    routes: [{
+      id: "route-1",
+      installation_id: "i1",
+      conversation_id: "cid-platform",
+      conversation_title: "Platform team",
+      agent_id: "agent-2",
+    }],
+  };
 }
 
 describe("DingTalkAgentBindButton", () => {
@@ -231,23 +254,73 @@ describe("DingTalkTab", () => {
   });
 
   it("lists a discovered group with its fixed Agent", () => {
-    installationsRef.current = {
-      installations: [{ id: "i1", agent_id: "agent-1", status: "active" }],
-      configured: true,
-      install_supported: true,
-    };
-    groupRoutesRef.current = {
-      routes: [{
-        id: "route-1",
-        installation_id: "i1",
-        conversation_id: "cid-platform",
-        conversation_title: "Platform team",
-        agent_id: "agent-2",
-      }],
-    };
+    setConnectedGroupRoute();
     renderUI(<DingTalkTab />);
     expect(screen.getByText("Platform team")).toBeTruthy();
     expect(screen.getByText("cid-platform")).toBeTruthy();
     expect(screen.getByText("Agent Two")).toBeTruthy();
+  });
+
+  it("lets an owner reassign a group and invalidates the route query", async () => {
+    setConnectedGroupRoute();
+    mockUpdateGroupRoute.mockResolvedValue({ id: "route-1", agent_id: "agent-1" });
+    const user = userEvent.setup();
+    renderUI(<DingTalkTab />);
+
+    await user.click(screen.getByRole("combobox", { name: "Agent for this group" }));
+    await user.click(await screen.findByRole("option", { name: "Agent One" }));
+
+    await waitFor(() => {
+      expect(mockUpdateGroupRoute).toHaveBeenCalledWith(
+        "workspace-1",
+        "route-1",
+        { agent_id: "agent-1" },
+      );
+    });
+    expect(mockInvalidate).toHaveBeenCalledWith({
+      queryKey: ["dingtalk", "group-routes", "workspace-1"],
+    });
+    expect(mockToastSuccess).toHaveBeenCalled();
+  });
+
+  it("renders group routing read-only for a non-manager", () => {
+    setConnectedGroupRoute();
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    renderUI(<DingTalkTab />);
+
+    expect(screen.getByText("Agent Two")).toBeTruthy();
+    expect(
+      screen.queryByRole("combobox", { name: "Agent for this group" }),
+    ).toBeNull();
+  });
+
+  it("keeps the assigned agent name visible while that agent is archived", () => {
+    setConnectedGroupRoute();
+    agentsRef.current = [
+      { id: "agent-1", name: "Agent One", archived_at: null },
+      { id: "agent-2", name: "Agent Two", archived_at: "2026-08-10T00:00:00Z" },
+    ];
+    renderUI(<DingTalkTab />);
+
+    expect(
+      screen.getByRole("combobox", { name: "Agent for this group" }).textContent,
+    ).toContain("Agent Two");
+  });
+
+  it("reports reassignment failures without invalidating successful data", async () => {
+    setConnectedGroupRoute();
+    mockUpdateGroupRoute.mockRejectedValue(new Error("route update failed"));
+    const user = userEvent.setup();
+    renderUI(<DingTalkTab />);
+
+    await user.click(screen.getByRole("combobox", { name: "Agent for this group" }));
+    await user.click(await screen.findByRole("option", { name: "Agent One" }));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith("route update failed");
+    });
+    expect(mockInvalidate).not.toHaveBeenCalledWith({
+      queryKey: ["dingtalk", "group-routes", "workspace-1"],
+    });
   });
 });

@@ -1,0 +1,278 @@
+package handler
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+
+	dingtalkintegration "github.com/multica-ai/multica/server/internal/integrations/dingtalk"
+	"github.com/multica-ai/multica/server/internal/middleware"
+)
+
+type dingtalkGroupRouteHandlerFixture struct {
+	installationID string
+	routeID        string
+	defaultAgentID string
+	targetAgentID  string
+}
+
+func newDingTalkGroupRouteHandlerFixture(t *testing.T) dingtalkGroupRouteHandlerFixture {
+	t.Helper()
+	var migrated bool
+	if err := testPool.QueryRow(context.Background(), `SELECT to_regclass('public.dingtalk_group_route') IS NOT NULL`).Scan(&migrated); err != nil || !migrated {
+		t.Skip("dingtalk group route table not present (database not migrated)")
+	}
+
+	previousInstall := testHandler.DingTalkInstall
+	testHandler.DingTalkInstall = &dingtalkintegration.InstallService{}
+	t.Cleanup(func() { testHandler.DingTalkInstall = previousInstall })
+
+	defaultAgentID := createHandlerTestAgent(t, "DingTalk Route Default Agent", nil)
+	targetAgentID := createHandlerTestAgent(t, "DingTalk Route Target Agent", nil)
+	var installationID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO channel_installation (
+			workspace_id, agent_id, channel_type, config, installer_user_id
+		) VALUES ($1, $2, 'dingtalk', jsonb_build_object('app_id', $3::text), $4)
+		RETURNING id
+	`, testWorkspaceID, defaultAgentID, "handler-dingtalk-group-routes", testUserID).Scan(&installationID); err != nil {
+		t.Fatalf("create DingTalk route installation: %v", err)
+	}
+	var routeID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO dingtalk_group_route (
+			workspace_id, installation_id, conversation_id, conversation_title, agent_id
+		) VALUES ($1, $2, 'cid-handler-routes', 'Handler routes', $3)
+		RETURNING id
+	`, testWorkspaceID, installationID, defaultAgentID).Scan(&routeID); err != nil {
+		t.Fatalf("create DingTalk group route: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE installation_id = $1`, installationID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM dingtalk_group_route WHERE installation_id = $1`, installationID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installationID)
+	})
+	return dingtalkGroupRouteHandlerFixture{
+		installationID: installationID,
+		routeID:        routeID,
+		defaultAgentID: defaultAgentID,
+		targetAgentID:  targetAgentID,
+	}
+}
+
+func requestWithRouteParams(req *http.Request, workspaceID, routeID string) *http.Request {
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", workspaceID)
+	if routeID != "" {
+		rctx.URLParams.Add("routeId", routeID)
+	}
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+func TestDingTalkGroupRouteHandlersValidationAndErrors(t *testing.T) {
+	fx := newDingTalkGroupRouteHandlerFixture(t)
+
+	t.Run("GET returns workspace routes", func(t *testing.T) {
+		req := requestWithRouteParams(newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/group-routes", nil), testWorkspaceID, "")
+		rec := httptest.NewRecorder()
+		testHandler.ListDingTalkGroupRoutes(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET routes status = %d: %s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Routes []DingTalkGroupRouteResponse `json:"routes"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Routes) != 1 || body.Routes[0].ID != fx.routeID || body.Routes[0].AgentID != fx.defaultAgentID {
+			t.Fatalf("GET routes body = %+v", body)
+		}
+	})
+
+	t.Run("GET validates workspace id", func(t *testing.T) {
+		req := requestWithRouteParams(newRequest(http.MethodGet, "/api/workspaces/not-a-uuid/dingtalk/group-routes", nil), "not-a-uuid", "")
+		rec := httptest.NewRecorder()
+		testHandler.ListDingTalkGroupRoutes(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("invalid workspace status = %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("GET reports query errors", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		req := newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/group-routes", nil).WithContext(ctx)
+		req = requestWithRouteParams(req, testWorkspaceID, "")
+		rec := httptest.NewRecorder()
+		testHandler.ListDingTalkGroupRoutes(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("cancelled GET status = %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	patch := func(t *testing.T, workspaceID, routeID string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		req := requestWithRouteParams(newRequest(http.MethodPatch, "/api/workspaces/"+workspaceID+"/dingtalk/group-routes/"+routeID, body), workspaceID, routeID)
+		rec := httptest.NewRecorder()
+		testHandler.UpdateDingTalkGroupRoute(rec, req)
+		return rec
+	}
+
+	t.Run("PATCH requires a user", func(t *testing.T) {
+		raw, _ := json.Marshal(UpdateDingTalkGroupRouteRequest{AgentID: fx.targetAgentID})
+		req := requestWithRouteParams(httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+testWorkspaceID+"/dingtalk/group-routes/"+fx.routeID, bytes.NewReader(raw)), testWorkspaceID, fx.routeID)
+		rec := httptest.NewRecorder()
+		testHandler.UpdateDingTalkGroupRoute(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("anonymous PATCH status = %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	for _, tc := range []struct {
+		name        string
+		workspaceID string
+		routeID     string
+		body        any
+		want        int
+	}{
+		{name: "invalid workspace id", workspaceID: "bad-workspace", routeID: fx.routeID, body: UpdateDingTalkGroupRouteRequest{AgentID: fx.targetAgentID}, want: http.StatusBadRequest},
+		{name: "invalid route id", workspaceID: testWorkspaceID, routeID: "bad-route", body: UpdateDingTalkGroupRouteRequest{AgentID: fx.targetAgentID}, want: http.StatusBadRequest},
+		{name: "invalid agent id", workspaceID: testWorkspaceID, routeID: fx.routeID, body: UpdateDingTalkGroupRouteRequest{AgentID: "bad-agent"}, want: http.StatusBadRequest},
+		{name: "agent outside workspace", workspaceID: testWorkspaceID, routeID: fx.routeID, body: UpdateDingTalkGroupRouteRequest{AgentID: "d2770000-0000-4000-8000-000000000001"}, want: http.StatusNotFound},
+		{name: "route not found", workspaceID: testWorkspaceID, routeID: "d2770000-0000-4000-8000-000000000002", body: UpdateDingTalkGroupRouteRequest{AgentID: fx.targetAgentID}, want: http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := patch(t, tc.workspaceID, tc.routeID, tc.body)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.want, rec.Body.String())
+			}
+		})
+	}
+
+	t.Run("PATCH rejects malformed JSON", func(t *testing.T) {
+		req := requestWithRouteParams(newRequest(http.MethodPatch, "/api/workspaces/"+testWorkspaceID+"/dingtalk/group-routes/"+fx.routeID, nil), testWorkspaceID, fx.routeID)
+		req.Body = http.NoBody
+		rec := httptest.NewRecorder()
+		testHandler.UpdateDingTalkGroupRoute(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("empty PATCH status = %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("PATCH rejects archived target", func(t *testing.T) {
+		if _, err := testPool.Exec(context.Background(), `UPDATE agent SET archived_at = now() WHERE id = $1`, fx.targetAgentID); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = testPool.Exec(context.Background(), `UPDATE agent SET archived_at = NULL, archived_by = NULL WHERE id = $1`, fx.targetAgentID)
+		})
+		rec := patch(t, testWorkspaceID, fx.routeID, UpdateDingTalkGroupRouteRequest{AgentID: fx.targetAgentID})
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("archived target status = %d: %s", rec.Code, rec.Body.String())
+		}
+		if _, err := testPool.Exec(context.Background(), `UPDATE agent SET archived_at = NULL, archived_by = NULL WHERE id = $1`, fx.targetAgentID); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("PATCH reports query errors", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		req := newRequest(http.MethodPatch, "/api/workspaces/"+testWorkspaceID+"/dingtalk/group-routes/"+fx.routeID, UpdateDingTalkGroupRouteRequest{AgentID: fx.targetAgentID}).WithContext(ctx)
+		req = requestWithRouteParams(req, testWorkspaceID, fx.routeID)
+		rec := httptest.NewRecorder()
+		testHandler.UpdateDingTalkGroupRoute(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("cancelled PATCH status = %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("PATCH reassigns route", func(t *testing.T) {
+		rec := patch(t, testWorkspaceID, fx.routeID, UpdateDingTalkGroupRouteRequest{AgentID: fx.targetAgentID})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("successful PATCH status = %d: %s", rec.Code, rec.Body.String())
+		}
+		var body DingTalkGroupRouteResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.ID != fx.routeID || body.AgentID != fx.targetAgentID {
+			t.Fatalf("successful PATCH body = %+v", body)
+		}
+	})
+}
+
+func TestDingTalkGroupRouteAuthorizationWiring(t *testing.T) {
+	fx := newDingTalkGroupRouteHandlerFixture(t)
+	ctx := context.Background()
+
+	createUser := func(label string) string {
+		t.Helper()
+		var id string
+		if err := testPool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`, "DingTalk "+label, fmt.Sprintf("dingtalk-route-%s@multica.test", label)).Scan(&id); err != nil {
+			t.Fatalf("create %s user: %v", label, err)
+		}
+		return id
+	}
+	memberID := createUser("member")
+	outsiderID := createUser("outsider")
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, memberID); err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, memberID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id IN ($1, $2)`, memberID, outsiderID)
+	})
+
+	router := chi.NewRouter()
+	router.Route("/api/workspaces/{id}", func(r chi.Router) {
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireWorkspaceMemberFromURL(testHandler.Queries, "id"))
+			r.Get("/dingtalk/group-routes", testHandler.ListDingTalkGroupRoutes)
+		})
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
+			r.Patch("/dingtalk/group-routes/{routeId}", testHandler.UpdateDingTalkGroupRoute)
+		})
+	})
+
+	exercise := func(method, path, userID string, body any) *httptest.ResponseRecorder {
+		var buf bytes.Buffer
+		if body != nil {
+			_ = json.NewEncoder(&buf).Encode(body)
+		}
+		req := httptest.NewRequest(method, path, &buf)
+		if userID != "" {
+			req.Header.Set("X-User-ID", userID)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	base := "/api/workspaces/" + testWorkspaceID + "/dingtalk/group-routes"
+	if rec := exercise(http.MethodGet, base, memberID, nil); rec.Code != http.StatusOK {
+		t.Errorf("member GET status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := exercise(http.MethodGet, base, outsiderID, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("outsider GET status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := exercise(http.MethodGet, base, "", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("anonymous GET status = %d: %s", rec.Code, rec.Body.String())
+	}
+	patchBody := UpdateDingTalkGroupRouteRequest{AgentID: fx.targetAgentID}
+	if rec := exercise(http.MethodPatch, base+"/"+fx.routeID, memberID, patchBody); rec.Code != http.StatusForbidden {
+		t.Errorf("member PATCH status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := exercise(http.MethodPatch, base+"/"+fx.routeID, testUserID, patchBody); rec.Code != http.StatusOK {
+		t.Errorf("owner PATCH status = %d: %s", rec.Code, rec.Body.String())
+	}
+}

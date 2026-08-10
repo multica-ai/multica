@@ -515,6 +515,7 @@ type DingtalkGroupRoute struct {
 	ConversationID    string             `json:"conversation_id"`
 	ConversationTitle string             `json:"conversation_title"`
 	AgentID           pgtype.UUID        `json:"agent_id"`
+	Revision          int64              `json:"revision"`
 	DiscoveredAt      pgtype.Timestamptz `json:"discovered_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }

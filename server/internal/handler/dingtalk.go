@@ -135,7 +135,15 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 		ID: agentUUID, WorkspaceID: wsUUID,
 	})
 	if err != nil {
-		writeError(w, http.StatusNotFound, "agent not found in this workspace")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "agent not found in this workspace")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load agent")
+		return
+	}
+	if agent.Kind != "user" {
+		writeError(w, http.StatusBadRequest, "only user agents can handle a DingTalk group")
 		return
 	}
 	if agent.ArchivedAt.Valid {
@@ -147,7 +155,30 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "dingtalk group route not found")
+			// The query re-checks and locks the target agent so a concurrent
+			// archive cannot land an assignment from a stale active snapshot.
+			// Distinguish that lifecycle conflict from a genuinely missing route.
+			currentAgent, agentErr := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+				ID: agentUUID, WorkspaceID: wsUUID,
+			})
+			if agentErr == nil && currentAgent.ArchivedAt.Valid {
+				writeError(w, http.StatusConflict, "an archived agent cannot handle a DingTalk group")
+				return
+			}
+			if agentErr != nil && !errors.Is(agentErr, pgx.ErrNoRows) {
+				writeError(w, http.StatusInternalServerError, "failed to load agent")
+				return
+			}
+			if _, routeErr := h.Queries.GetDingTalkGroupRouteInWorkspace(r.Context(), db.GetDingTalkGroupRouteInWorkspaceParams{
+				ID: routeUUID, WorkspaceID: wsUUID,
+			}); errors.Is(routeErr, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "dingtalk group route not found")
+				return
+			} else if routeErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load dingtalk group route")
+				return
+			}
+			writeError(w, http.StatusConflict, "the selected agent is no longer available")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update dingtalk group route")
