@@ -1,0 +1,35 @@
+{
+  "name": "@multica/cerebro-agent-tabs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@multica/cerebro-agent-capabilities": "workspace:*",
+    "@multica/cerebro-agent-memory": "workspace:*",
+    "@multica/cerebro-agent-prompt": "workspace:*",
+    "@multica/cerebro-agent-quality": "workspace:*",
+    "@multica/cerebro-agent-tools": "workspace:*",
+    "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@types/react": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

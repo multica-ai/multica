@@ -6,9 +6,11 @@
 // evidence a run pins at claim time (agent.context_version /
 // agent_context_version / cerebro_run_prompt_snapshot) — never a UI-only echo.
 //
-// These screens live on the LEGACY agent detail pane. The redesign flag
-// (`cerebro_agent_page_redesign`) renders a different tab list that does not
-// contain them, so it is deliberately left off here.
+// These screens are driven here on the LEGACY agent detail pane, so `seed()`
+// pins `cerebro_agent_page_redesign` OFF explicitly — it defaults ON since
+// FIR-4840 and the two pages lay the same screens out differently. When the
+// legacy page is deleted, move these tests onto the redesigned page rather
+// than restoring the pin.
 import "./env";
 import { expect, test, type Page } from "@playwright/test";
 import pg from "pg";
@@ -46,6 +48,8 @@ async function seed(page: Page, flags: string[]): Promise<Seed> {
   for (const flag of flags) {
     await api.setWorkspaceFeatureFlag(flag, true);
   }
+  // Drive the legacy pane regardless of the registry default (see file header).
+  await api.setWorkspaceFeatureFlag(FLAG_AGENT_PAGE_REDESIGN, false);
 
   const database = new pg.Client(DATABASE_URL);
   await database.connect();

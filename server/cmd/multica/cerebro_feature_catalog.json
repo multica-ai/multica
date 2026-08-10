@@ -79,10 +79,10 @@
     },
     {
       "key": "cerebro_agent_page_redesign",
-      "label": "Agent page redesign (preview)",
-      "description": "Preview the redesigned agent detail page: a single framed card with a breadcrumb top bar, a redesigned identity rail (avatar, properties, details, skills), and a flat tab strip for Tasks, Instructions, Skills, Tools, and Capabilities. Off keeps the current agent page. All tabs reuse the existing data and permissions.",
+      "label": "Agent page redesign",
+      "description": "The redesigned agent detail page: a single framed card with a breadcrumb top bar, a redesigned identity rail (avatar, properties, details, skills), and a flat tab strip. Off falls back to the older agent page. Both pages take their tabs from the same registry, so every tab is present either way, and all tabs reuse the existing data and permissions.",
       "group": "agents",
-      "default": false
+      "default": true
     },
     {
       "key": "cerebro_agent_production_prompt",

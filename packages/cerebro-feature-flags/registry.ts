@@ -898,8 +898,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_pwa_install_banner: true,
   cerebro_interface_columns: true,
   cerebro_agent_profile_card_details: true,
-  // FIR-2670: default OFF — opt-in preview of the redesigned agent page.
-  cerebro_agent_page_redesign: false,
+  // FIR-2670 / FIR-4840: default ON — the redesigned agent page is the agent
+  // page now. Both pages read the same tab registry, so turning this off only
+  // falls back to the older layout; no tab disappears.
+  cerebro_agent_page_redesign: true,
   // FIR-3212: default OFF until QA'd on staging.
   cerebro_agent_production_prompt: false,
   cerebro_agent_quality: false,
@@ -1048,10 +1050,10 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   },
   {
     key: "cerebro_agent_page_redesign",
-    label: "Agent page redesign (preview)",
+    label: "Agent page redesign",
     group: "agents",
     description:
-      "Preview the redesigned agent detail page: a single framed card with a breadcrumb top bar, a redesigned identity rail (avatar, properties, details, skills), and a flat tab strip for Tasks, Instructions, Skills, Tools, and Capabilities. Off keeps the current agent page. All tabs reuse the existing data and permissions.",
+      "The redesigned agent detail page: a single framed card with a breadcrumb top bar, a redesigned identity rail (avatar, properties, details, skills), and a flat tab strip. Off falls back to the older agent page. Both pages take their tabs from the same registry, so every tab is present either way, and all tabs reuse the existing data and permissions.",
   },
   {
     key: "cerebro_agent_production_prompt",

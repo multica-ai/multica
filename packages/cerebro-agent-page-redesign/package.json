@@ -12,10 +12,8 @@
     "./views": "./views/index.ts"
   },
   "dependencies": {
-    "@multica/cerebro-agent-capabilities": "workspace:*",
     "@multica/cerebro-agent-context": "workspace:*",
-    "@multica/cerebro-agent-memory": "workspace:*",
-    "@multica/cerebro-agent-tools": "workspace:*",
+    "@multica/cerebro-agent-tabs": "workspace:*",
     "@multica/cerebro-access": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-runtime": "workspace:*",

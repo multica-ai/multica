@@ -1,19 +1,21 @@
 import type { ComponentType } from "react";
 import {
   BookOpenText,
-  Brain,
   Cog,
   FileText,
   KeyRound,
   KeySquare,
   ListTodo,
   Plug,
-  ShieldCheck,
   Terminal,
   Webhook,
-  Wrench,
 } from "lucide-react";
 
+/**
+ * The tabs this page owns itself. Cerebro-owned tabs (Tools, Capabilities,
+ * Memory, Production prompt, Quality) are NOT listed here — they come from
+ * `@multica/cerebro-agent-tabs`, so a new tab never has to be added twice.
+ */
 export type RedesignTab =
   | "tasks"
   | "instructions"
@@ -23,10 +25,7 @@ export type RedesignTab =
   | "infisical"
   | "custom_args"
   | "mcp_config"
-  | "integrations"
-  | "tools"
-  | "capabilities"
-  | "memory";
+  | "integrations";
 
 export interface AgentPageTab {
   id: RedesignTab;
@@ -40,9 +39,6 @@ const BASE_TABS: AgentPageTab[] = [
   { id: "skills", label: "Skills", icon: BookOpenText },
   { id: "advanced", label: "Advanced", icon: Cog },
   { id: "integrations", label: "Integrations", icon: Webhook },
-  { id: "tools", label: "Tools", icon: Wrench },
-  { id: "capabilities", label: "Capabilities", icon: ShieldCheck },
-  { id: "memory", label: "Memory", icon: Brain },
 ];
 
 const ADVANCED_TABS: AgentPageTab[] = [

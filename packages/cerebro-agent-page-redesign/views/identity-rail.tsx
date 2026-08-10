@@ -174,6 +174,12 @@ interface IdentityRailProps {
   /** When false every picker self-renders a read-only display. */
   canEdit: boolean;
   onUpdate: (data: Record<string, unknown>) => Promise<void> | void;
+  /**
+   * FIR-4840: focus a tab on the page. Used by the Runtime row to point at the
+   * Instructions tab, which owns the runtime change when
+   * `cerebro_agent_setup_capabilities` is on.
+   */
+  onOpenTab: (id: string) => void;
 }
 
 /**
@@ -197,6 +203,7 @@ export function IdentityRail({
   currentUserId,
   canEdit,
   onUpdate,
+  onOpenTab,
 }: IdentityRailProps) {
   const tone = availabilityTone(presence?.availability);
   const initial = (agent.name?.[0] ?? "?").toUpperCase();
@@ -293,6 +300,26 @@ export function IdentityRail({
                 onChange={(v) => onUpdate({ thinking_level: v })}
               />
             </>
+          )}
+          {agentConfigurationEnabled && (
+            // FIR-4840: FIR-4000 moved the runtime write into the governed
+            // change request on Instructions, and this row went blank — which
+            // reads as "switching runtime is gone". Keep the row, show the
+            // current runtime, and say where the change is made.
+            <PropRow label="Runtime" interactive={false}>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate">
+                  {runtime ? runtime.custom_name || runtime.name : "No runtime"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onOpenTab("instructions")}
+                  className="shrink-0 text-xs text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
+                >
+                  Change in Instructions
+                </button>
+              </span>
+            </PropRow>
           )}
           <PropRow label="Visibility" interactive={false}>
             <VisibilityPicker

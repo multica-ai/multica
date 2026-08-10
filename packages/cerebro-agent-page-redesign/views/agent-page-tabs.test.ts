@@ -2,16 +2,16 @@ import { describe, expect, it } from "vitest";
 import { advancedTabIds, agentPageTabIds } from "./agent-page-tabs";
 
 describe("agentPageTabIds", () => {
-  it("keeps the shipped setup tabs from the old agent detail page", () => {
+  // Tools / Capabilities / Memory / Production prompt / Quality are not
+  // asserted here — FIR-4840 moved them to @multica/cerebro-agent-tabs, which
+  // owns its own coverage.
+  it("keeps the setup tabs this page owns itself", () => {
     expect(agentPageTabIds({ mcpConfig: true, integrations: true })).toEqual([
       "tasks",
       "instructions",
       "skills",
       "advanced",
       "integrations",
-      "tools",
-      "capabilities",
-      "memory",
     ]);
   });
 
@@ -21,9 +21,6 @@ describe("agentPageTabIds", () => {
       "instructions",
       "skills",
       "advanced",
-      "tools",
-      "capabilities",
-      "memory",
     ]);
   });
 

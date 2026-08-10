@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import {
   Activity,
   AlertCircle,
@@ -42,11 +42,12 @@ import {
   memberListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
-import { CerebroCapabilitiesTab } from "@multica/cerebro-agent-capabilities/views";
 import { agentContextKeys } from "@multica/cerebro-agent-context";
 import { CerebroAgentContextTab } from "@multica/cerebro-agent-context/views";
-import { CerebroAgentMemoryTab } from "@multica/cerebro-agent-memory/views";
-import { CerebroToolsTab } from "@multica/cerebro-agent-tools/views";
+import {
+  AGENT_DETAIL_TAB_LABELS,
+  useAgentDetailTabExtensions,
+} from "@multica/cerebro-agent-tabs";
 import { PauseBanner, PauseRuntimeButton } from "@multica/cerebro-runtime/views";
 import { Button } from "@multica/ui/components/ui/button";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
@@ -98,12 +99,15 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
   const navigation = useNavigation();
   const qc = useQueryClient();
   const currentUser = useAuthStore((s) => s.user);
-  const [tab, setTab] = useState<RedesignTab>("tasks");
+  // Extension tab ids are contributed by other packages, so the active tab is
+  // a plain string rather than this page's own RedesignTab union.
+  const [tab, setTab] = useState<string>("tasks");
   const [advancedTab, setAdvancedTab] = useState<RedesignTab>("infisical");
   const [taskView, setTaskView] = useState<"activity" | "tasks">("tasks");
   const [activeDirty, setActiveDirty] = useState(false);
-  const [pendingTab, setPendingTab] = useState<RedesignTab | null>(null);
+  const [pendingTab, setPendingTab] = useState<string | null>(null);
   const [pendingAdvancedTab, setPendingAdvancedTab] = useState<RedesignTab | null>(null);
+  const extensionTabs = useAgentDetailTabExtensions();
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancelTasks, setConfirmCancelTasks] = useState(false);
 
@@ -121,6 +125,14 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const openModal = useModalStore((s) => s.open);
+
+  // FIR-4840: the governed-configuration footer and the inbox change-request
+  // rows deep-link with `?tab=<id>` (FIR-1775). The legacy page honoured it and
+  // this one didn't, so every one of those links landed on Tasks.
+  const tabParam = navigation.searchParams.get("tab");
+  useEffect(() => {
+    if (tabParam) setTab(tabParam);
+  }, [tabParam]);
 
   const agent: Agent | null = agents.find((a) => a.id === agentId) ?? null;
   const { error: detailError } = useQuery({
@@ -283,10 +295,18 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
   const canManageRuntime =
     !!runtime &&
     (runtime.owner_id === currentUser?.id || myRole === "owner" || myRole === "admin");
-  const visibleTabs = agentPageTabs({
-    mcpConfig: runtime ? providerSupportsMcpConfig(runtime.provider) : true,
-    integrations: larkListing?.configured === true,
-  });
+  // Own tabs first, then every cerebro-owned tab the registry contributes.
+  const visibleTabs: { id: string; label: string; icon: ComponentType<{ className?: string }> }[] = [
+    ...agentPageTabs({
+      mcpConfig: runtime ? providerSupportsMcpConfig(runtime.provider) : true,
+      integrations: larkListing?.configured === true,
+    }),
+    ...extensionTabs.map((item) => ({
+      id: item.id,
+      label: AGENT_DETAIL_TAB_LABELS[item.labelKey] ?? item.labelKey,
+      icon: item.icon,
+    })),
+  ];
   const visibleAdvancedTabs = advancedTabs({
     mcpConfig: runtime ? providerSupportsMcpConfig(runtime.provider) : true,
   });
@@ -294,7 +314,7 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
     ? tab
     : "tasks";
 
-  const requestTabChange = (next: RedesignTab) => {
+  const requestTabChange = (next: string) => {
     if (next === tab) return;
     if (activeDirty) {
       setPendingTab(next);
@@ -444,6 +464,7 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
               currentUserId={currentUser?.id ?? null}
               canEdit={canEdit}
               onUpdate={handleUpdate}
+              onOpenTab={requestTabChange}
             />
 
             <div className="flex min-w-0 flex-1 flex-col">
@@ -507,6 +528,7 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
                 {effectiveTab === "instructions" && (
                   <CerebroAgentContextTab
                     agent={agent}
+                    runtimes={runtimes}
                     canEdit={canEdit}
                     instructionsEditor={ContentEditor}
                   />
@@ -567,20 +589,12 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
                     <IntegrationsTab agent={agent} />
                   </TabContent>
                 )}
-                {effectiveTab === "tools" && (
-                  <div className="p-5 md:p-6">
-                    <CerebroToolsTab agent={agent} canEdit={canEdit} />
-                  </div>
-                )}
-                {effectiveTab === "capabilities" && (
-                  <div className="p-5 md:p-6">
-                    <CerebroCapabilitiesTab agent={agent} />
-                  </div>
-                )}
-                {effectiveTab === "memory" && (
-                  <TabContent>
-                    <CerebroAgentMemoryTab agent={agent} canEdit={canEdit} />
-                  </TabContent>
+                {extensionTabs.map((item) =>
+                  effectiveTab === item.id ? (
+                    <TabContent key={item.id}>
+                      {item.render({ agent, runtimes, canEdit })}
+                    </TabContent>
+                  ) : null,
                 )}
               </div>
             </div>
