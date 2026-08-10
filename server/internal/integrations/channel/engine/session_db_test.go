@@ -295,7 +295,7 @@ func TestBindMediaRefs_IssueAttachmentSurvivesChatSessionDeletion(t *testing.T) 
 	}
 }
 
-func TestBindMediaRefs_DuplicateIssueFinalizationCreatesNoAttachment(t *testing.T) {
+func TestBindMediaRefs_EmptyRefsCreateNoAttachmentAndClearPending(t *testing.T) {
 	pool := sessionPersistenceTestDB(t)
 	fixture := seedSessionPersistenceFixture(t, pool)
 	session := NewChatSession(db.New(pool), pool, channel.Type("dingtalk"), SessionTitles{})
