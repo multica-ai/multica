@@ -107,6 +107,18 @@
     "gantt": "ガント",
     "swimlane": "スイムレーン"
   },
+  "saved_views": {
+    "menu_label": "保存したビュー",
+    "menu_tooltip": "保存したビュー",
+    "empty": "保存したビューはまだありません。現在のフィルターとレイアウトを再利用可能なビューとして保存できます。",
+    "apply": "適用",
+    "rename": "名前を変更",
+    "delete": "削除",
+    "save_current": "現在のビューを保存…",
+    "name_placeholder": "ビュー名",
+    "save": "保存",
+    "cancel": "キャンセル"
+  },
   "table": {
     "select_all": "表示中のタスクをすべて選択",
     "select_issue": "{{identifier}} を選択",

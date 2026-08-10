@@ -42,6 +42,7 @@ function IssuesSurfaceHeader({
       facetCountsExact={facetCountsExact}
       tableFacetCounts={tableFacetCounts}
       onTableFacetChange={onTableFacetChange}
+      enableSavedViews
     />
   );
 }

@@ -109,6 +109,18 @@
     "gantt": "Gantt",
     "swimlane": "Swimlane"
   },
+  "saved_views": {
+    "menu_label": "Saved views",
+    "menu_tooltip": "Saved views",
+    "empty": "No saved views yet. Save the current filters and layout as a reusable view.",
+    "apply": "Apply",
+    "rename": "Rename",
+    "delete": "Delete",
+    "save_current": "Save current view…",
+    "name_placeholder": "View name",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
   "table": {
     "select_all": "Select all visible issues",
     "select_issue": "Select {{identifier}}",

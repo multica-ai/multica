@@ -97,6 +97,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
 import { TableColumnPicker } from "./table-view";
+import { SavedViewsMenu } from "./saved-views-menu";
 
 type LocalDateRange = {
   from: Date | undefined;
@@ -806,6 +807,7 @@ export function IssuesHeader({
   facetCountsExact = true,
   tableFacetCounts,
   onTableFacetChange,
+  enableSavedViews = false,
 }: {
   scopedIssues: Issue[];
   /** See IssueSurfaceController.workingAgents — the surface-scoped projection
@@ -819,6 +821,13 @@ export function IssuesHeader({
   facetCountsExact?: boolean;
   tableFacetCounts?: IssueTableFacetsResponse;
   onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
+  /**
+   * Surface the "saved views" dropdown. Only the workspace /issues surface
+   * enables it: saved presets snapshot workspace-wide filters, so enabling on
+   * scoped surfaces (project detail, actor panels) would let a preset fight
+   * the surface's fixed scope.
+   */
+  enableSavedViews?: boolean;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -907,6 +916,7 @@ export function IssuesHeader({
             onToggle={toggleAgentRunningFilter}
             agents={workingAgents}
           />
+          {enableSavedViews && <SavedViewsMenu />}
           <IssueDisplayControls
             scopedIssues={scopedIssues}
             allowGantt={allowGantt}
