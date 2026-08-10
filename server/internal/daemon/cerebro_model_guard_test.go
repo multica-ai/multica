@@ -41,6 +41,30 @@ func TestRunnableTaskModelDropsUnrunnableFallback(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(daemon-runnable-model-keep-acp-pin): Hermes must keep the Multica
+// pin when discovery cannot confirm it — blanking Model skips session/set_model.
+func TestRunnableTaskModelKeepsHermesPinWhenUncatalogued(t *testing.T) {
+	pin := "custom:firtal-gateway:deepseek/deepseek-v4-flash-0731"
+	task := Task{Agent: &AgentData{Model: pin}}
+	got := runnableTaskModel(context.Background(), "hermes", AgentEntry{}, task, pin, discardLog())
+	if got != pin {
+		t.Fatalf("hermes pin was cleared: got %q want %q", got, pin)
+	}
+}
+
+func TestIsStickyProviderModelError(t *testing.T) {
+	err := `hermes provider error: {'type': 'ModelError', 'message': 'Model deepseek/deepseek-v4-flash-0731 is not supported'}`
+	if !isStickyProviderModelError("hermes", err) {
+		t.Fatal("expected hermes ModelError to be sticky-provider retryable")
+	}
+	if isStickyProviderModelError("claude", err) {
+		t.Fatal("claude must not use hermes sticky retry")
+	}
+	if isStickyProviderModelError("hermes", "upstream_server_error tensorx") {
+		t.Fatal("tensorx 502 must not be treated as sticky provider error")
+	}
+}
+
 // A provider with no discoverable catalog cannot prove the model wrong, so the
 // pin has to survive — dropping it would break every legitimate override on a
 // runtime we cannot enumerate.

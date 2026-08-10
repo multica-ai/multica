@@ -4218,10 +4218,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Fallback: if session resume failed before establishing a session, retry
 	// with a fresh session. We check SessionID == "" to distinguish a resume
 	// failure (no session established) from a failure during actual execution.
-	if result.Status == "failed" && task.PriorSessionID != "" && result.SessionID == "" {
+	//
+	// CEREBRO-PATCH(daemon-hermes-sticky-provider-retry): also drop a resumed
+	// Hermes/ACP session when the failure is a sticky wrong provider/base_url
+	// (ModelError "not supported", OpenCode rejecting a Firtal model id). Those
+	// runs DO establish a session id, so the empty-SessionID check alone left
+	// issues permanently broken on follow-up comments.
+	if result.Status == "failed" && task.PriorSessionID != "" &&
+		(result.SessionID == "" || isStickyProviderModelError(provider, result.Error)) {
 		firstUsage := result.Usage
 		firstUsageEvents := result.UsageEvents
-		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
+		taskLog.Warn("session resume failed, retrying with fresh session",
+			"error", result.Error,
+			"sticky_provider_error", isStickyProviderModelError(provider, result.Error),
+		)
 		execOpts.ResumeSessionID = ""
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
 		if retryErr != nil {

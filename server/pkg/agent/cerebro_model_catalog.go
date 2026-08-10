@@ -1,6 +1,9 @@
 package agent
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // Provider-scoped model catalog resolved without touching a CLI (FIR-3287).
 //
@@ -84,6 +87,14 @@ func StaticCatalogSupports(providerType, model string) bool {
 // catalog all answer true, for the same reason StaticCatalogSupports is
 // permissive: absence of proof is not proof of absence, and dropping a model
 // the runtime would have accepted is the worse failure.
+//
+// CEREBRO-PATCH(agent-model-runnable-custom-prefix): Multica pins Hermes/Firtal
+// models as `custom:<name>:<model>` while Hermes ACP discovery often advertises
+// the same choice as `<name>:<model>`, `custom:<model>`, or bare `<model>`.
+// Exact-string mismatch made ModelRunnable report false, runnableTaskModel
+// cleared the pin to "", and session/set_model was skipped — resumed Hermes
+// tasks then kept a sticky OpenCode base_url with a Firtal model id
+// (ModelError: not supported). Match on the underlying model slug too.
 func ModelRunnable(ctx context.Context, providerType, executablePath, model string) bool {
 	if model == "" {
 		return true
@@ -93,11 +104,48 @@ func ModelRunnable(ctx context.Context, providerType, executablePath, model stri
 		return true
 	}
 	for _, m := range models {
-		if m.ID == model {
+		if modelCatalogIDMatch(m.ID, model) {
 			return true
 		}
 	}
 	return false
+}
+
+// modelCatalogIDMatch reports whether a discovered catalog model id refers to
+// the same underlying model as a Multica agent.model pin.
+// CEREBRO-PATCH(agent-model-runnable-custom-prefix): see ModelRunnable.
+func modelCatalogIDMatch(catalogID, requested string) bool {
+	catalogID = strings.TrimSpace(catalogID)
+	requested = strings.TrimSpace(requested)
+	if catalogID == "" || requested == "" {
+		return false
+	}
+	if catalogID == requested {
+		return true
+	}
+	return modelSlug(catalogID) == modelSlug(requested)
+}
+
+// modelSlug strips Multica/Hermes provider prefixes so catalog and pin forms
+// compare equal. `custom:firtal-gateway:deepseek/x` and `deepseek/x` → same.
+// CEREBRO-PATCH(agent-model-runnable-custom-prefix).
+func modelSlug(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	if strings.HasPrefix(id, "custom:") {
+		rest := strings.TrimPrefix(id, "custom:")
+		if i := strings.Index(rest, ":"); i >= 0 {
+			return rest[i+1:]
+		}
+		return rest
+	}
+	// provider:model (single provider segment). Leave bare ids / org/model paths alone.
+	if i := strings.Index(id, ":"); i >= 0 && !strings.Contains(id[:i], "/") {
+		return id[i+1:]
+	}
+	return id
 }
 
 // StaticCatalogIDs returns the accepted model IDs for providerType, for building

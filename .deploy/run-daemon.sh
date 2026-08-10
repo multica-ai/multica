@@ -40,4 +40,7 @@ unset CLAUDE_CONFIG_DIR
 # resolved server-side via the scoped-per-user Infisical machine identity and
 # shipped in the claim payload, so no Infisical credentials need to be present
 # in the daemon's environment.
-exec "$REPO/server/bin/multica" daemon start --profile local --foreground
+# CEREBRO-PATCH(local-daemon-no-auto-update): keep the firtal-cerebro-built
+# server/bin/multica (with local daemon fixes). Cloud auto-update was replacing
+# it with stock Multica releases and wiping e.g. Hermes set_model pin fixes.
+exec "$REPO/server/bin/multica" daemon start --profile local --foreground --no-auto-update
