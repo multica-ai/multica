@@ -7,6 +7,7 @@ package wecom
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -51,6 +52,24 @@ type bubbleConn struct {
 	// the bubble may be sealing right now, but this process will never learn
 	// whether it was. The sender gives up on it after its own ackTimeout.
 	swallowClosingAck bool
+	// socketErr is what every write fails with once breakTheSocket has been
+	// called: the transport refusing the frame, which is neither a refusal the
+	// server stated nor an ack that went missing. The frame is still recorded,
+	// because what the assertions count is what was ATTEMPTED.
+	socketErr error
+}
+
+// breakTheSocket kills the connection under the sender the way a peer reset
+// does: writes fail from here on, and no verdict ever comes back for one.
+//
+// It is the reconnect window as the writer sees it. The read loop is what
+// notices a dead socket, and it does so only when its own 90-second read
+// deadline expires (readDeadline, wecom_channel.go); until then the registry
+// still hands out this sender and every send it takes fails at the write.
+func (c *bubbleConn) breakTheSocket() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.socketErr = errors.New("write tcp 10.0.0.2:52170->10.0.0.9:443: write: broken pipe")
 }
 
 func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
@@ -62,6 +81,10 @@ func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
 	c.mu.Lock()
 	c.frames = append(c.frames, env)
 	s := c.sender
+	if dead := c.socketErr; dead != nil {
+		c.mu.Unlock()
+		return dead
+	}
 	code := 0
 	switch {
 	case c.refuseClosingCode != 0 && closing:

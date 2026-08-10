@@ -10,6 +10,7 @@ package wecom
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -87,6 +88,89 @@ func TestASettleIsNotDeliveredOnWhatTheWaitLeftOver(t *testing.T) {
 		"the settled round's closing frame ran on a budget that was already gone")
 }
 
+// TestADeliveryBudgetOutlivesACallerThatGivesUp is what the two tests above rest
+// on, stated without the coincidence they rest on it through.
+//
+// They pass today because a caller's budget and streamCloseTimeout are both ten
+// seconds (chatRunFlushTimeout, engine/router.go), which makes "cancelled" and
+// "nearly out of time" the same input. At eleven they come apart, and each of
+// them lands on a different half of what the ledger has to guarantee: a caller
+// cancelled BEFORE the delivery starts, and a caller that gives up DURING one —
+// which is where the answer's own test cancels, at the binding row. The round is
+// consumed either way and the wait did not lose, so neither has a deferral to
+// come back on and both are the same lost answer.
+//
+// An hour on the clock in both halves, to say that how much is left is not the
+// question.
+func TestADeliveryBudgetOutlivesACallerThatGivesUp(t *testing.T) {
+	t.Parallel()
+
+	t.Run("cancelled before the delivery starts", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+		cancel()
+
+		sayCtx, done := deliveryBudget(ctx)
+		defer done()
+
+		if err := sayCtx.Err(); err != nil {
+			t.Fatalf("the delivery was handed a context already %v, with an hour of the caller's "+
+				"deadline unspent — the round is consumed by the time this is called, so a send "+
+				"that cannot start is an ending nobody says", err)
+		}
+		deadline, ok := sayCtx.Deadline()
+		if !ok || time.Until(deadline) > streamCloseTimeout {
+			t.Fatalf("the delivery's deadline = %v (set: %v), want at most %v from now — a budget "+
+				"detached from its caller still has to be bounded", deadline, ok, streamCloseTimeout)
+		}
+	})
+
+	t.Run("cancelled under the delivery", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+		sayCtx, done := deliveryBudget(ctx)
+		defer done()
+
+		cancel() // the caller gives up while the send is on its way
+
+		if err := sayCtx.Err(); err != nil {
+			t.Fatalf("the delivery's budget died with its caller (%v) — the bubble is already "+
+				"gone, so the send that was under way is the only thing that could have put "+
+				"anything under it", err)
+		}
+	})
+}
+
+// TestADeliveryThatPanicsGivesItsBudgetBack is the timer nobody would ever see.
+//
+// events.Bus recovers a listener's panic and carries on with the next one, so a
+// delivery that panics mid-send unwinds through the ledger and the run continues.
+// What it leaves behind is whatever was not released on the way out: the budget
+// is a context.WithTimeout, and an uncancelled one keeps a runtime timer armed
+// for the whole streamCloseTimeout with nothing holding a reference that could
+// stop it.
+func TestADeliveryThatPanicsGivesItsBudgetBack(t *testing.T) {
+	t.Parallel()
+	s := newStreamStore()
+	var budget context.Context
+	func() {
+		defer func() { _ = recover() }()
+		_, _ = s.sayEnding(context.Background(), bubbleSessionID(t), byTask(taskUUID(t, "task-1")),
+			roundOver, nil,
+			func(ctx context.Context, _ roundTurn) (roundAddress, error) {
+				budget = ctx
+				panic("a bus listener died mid-delivery")
+			})
+	}()
+	if budget == nil {
+		t.Fatal("the delivery was never handed a budget")
+	}
+	if budget.Err() == nil {
+		t.Error("the delivery panicked and its budget was left live — the timer behind it stays " +
+			"armed for a whole streamCloseTimeout after the goroutine that was using it is gone")
+	}
+}
+
 // ---- coming back for an ending that did not land ----
 
 // TestACancellationRefusedOnTheWireIsSaidAgain is the case the previous round's
@@ -131,6 +215,54 @@ func TestAFailedRunsNoticeRefusedOnTheWireIsSaidAgain(t *testing.T) {
 	rig.waitUntilPushed(t, []string{streamCopyFailed, streamCopyFailed},
 		"the failure notice was refused on the wire and nothing came back for it — "+
 			"streamCopyFailed is the only 'that run did not go through' WeCom produces")
+}
+
+// TestASettleOnADeadSocketComesBack is the window the settle's retry was written
+// for, and the one a whitelist written over error TYPES cannot see.
+//
+// A socket that has been reset is not errNoLiveConnection. The read loop is what
+// notices a dead connection and it waits out its own 90-second read deadline
+// first (readDeadline, wecom_channel.go), so for a minute and a half the registry
+// still hands out a sender and every send it takes comes back as a write error
+// instead. That is the commonest shape of the reconnect window, not the rare one.
+//
+// A settled round is the ending with no second publisher of any kind: exactly one
+// of OnRunStarted and OnSettled fires per batch, and with no task there is no
+// lifecycle event behind it. So an attempt that books nothing here leaves the
+// asker watching a spinner with nothing behind it for as long as the chat stays
+// open.
+func TestASettleOnADeadSocketComesBack(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.typing.endingRetryAfter = 20 * time.Millisecond
+	rig.ask(t, "REQ-DEAD-SOCKET", 1) // the bubble is painted while the socket is alive
+	rig.conn.breakTheSocket()
+
+	rig.typing.OnSettled(context.Background(), bubbleSessionID(t), 1)
+
+	// The first attempt writes the closing frame, fails, and falls back to a
+	// plain message that fails the same way. Everything after the first push is
+	// an attempt that came back for the ending.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		got := pushedTexts(t, rig.conn)
+		if len(got) > 1 {
+			for _, text := range got {
+				if text != streamCopyNotStarted {
+					t.Fatalf("the messages attempted were %q, want every one of them %q",
+						got, streamCopyNotStarted)
+				}
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the settled round's ending was attempted %d time(s) (%q) on a socket that "+
+				"refused every write, want a second attempt — this ending has no other publisher, "+
+				"so an attempt that books nothing leaves the asker on a spinner nothing will "+
+				"ever seal", len(got), got)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // ---- and not coming back when the words may already be there ----
@@ -278,6 +410,31 @@ func TestAnAttemptThatOutlastsItsOwnSlotRunsNextRatherThanInThePast(t *testing.T
 		t.Fatalf("an attempt whose slot had already passed was booked %v from now, want 0 — a "+
 			"negative delay is a timer that fires immediately anyway, and a positive one here "+
 			"would be arithmetic nobody meant", wait)
+	}
+}
+
+// TestAnOutcomeNobodyCanClassifyBooksNothingUnderAnyCause is the zero value
+// doing what it says.
+//
+// endingRetryCause answers with a cause and an ok, and the caller that reads it
+// checks the ok — so the cause it returns alongside "no" is only ever as
+// dangerous as the next caller is careless. retryNone makes that reading safe
+// whichever way it is read: it is not a cause anything can be booked under.
+func TestAnOutcomeNobodyCanClassifyBooksNothingUnderAnyCause(t *testing.T) {
+	t.Parallel()
+	cause, ok := endingRetryCause(errors.Join(errWordsMayBeOnScreen, errStreamAckTimeout))
+	if ok {
+		t.Fatal("an ending that may already be on the screen was classified as repeatable")
+	}
+	if cause != retryNone {
+		t.Errorf("the cause alongside a refusal to repeat = %v, want retryNone — a caller that "+
+			"books on it would spend one of the two real causes' attempts", cause)
+	}
+	now := time.Now()
+	spent := endingRetries{}.begin(now)
+	if _, _, booked := spent.next(cause, endingRetryAfter, endingRetryAttempts, now); booked {
+		t.Error("an attempt was booked under retryNone — the schedule has to refuse it, or the " +
+			"whole guard is one caller forgetting to read an ok")
 	}
 }
 

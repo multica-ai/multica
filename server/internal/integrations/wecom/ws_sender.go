@@ -187,14 +187,35 @@ var (
 	errStreamAckTimeout = errors.New("wecom: stream frame ack timed out")
 
 	// errStreamSuperseded — a frame was overtaken by the closing frame, either
-	// while waiting for its verdict or on the way to the wire.
+	// while waiting for its verdict or on the way to the wire. Which of the two
+	// it was decides whether the frame reached the user, so deliveryCanBeRepeated
+	// takes both producers apart rather than reading this name.
 	errStreamSuperseded = errors.New("wecom: stream frame superseded by the closing frame")
 
 	// errNoLiveConnection — the installation has no socket right now.
 	errNoLiveConnection = errors.New("wecom: no live connection for installation")
 
-	// errWordsMayBeOnScreen marks a failed delivery that got at least as far as
-	// the wire, so the user may be reading the words it is reporting as
+	// errFrameNotOnTheWire — the socket would not take the frame: the write
+	// deadline the connection refused, or the write that failed under it.
+	//
+	// Nothing whole left in either case, and that is the property a caller
+	// wants. gorilla puts a frame's header and its payload on the connection in
+	// one Write (conn.go, Conn.write) and hands back what that Write said, so an
+	// error means it did not finish. Bytes from a partial one can still reach the
+	// peer's kernel, but a truncated frame is never delivered to the peer's
+	// application — a receiver has to have a whole frame before it can process
+	// anything (RFC 6455 §5.2). So the words in it are on nobody's screen, which
+	// is what separates this from an ack that never came back, where a whole
+	// frame did go out and only the verdict on it is unknown.
+	//
+	// Named at the write rather than sniffed at the consumer because the consumer
+	// cannot tell: a transport failure is whatever the OS handed back, an opaque
+	// value on no branch of any type switch. See deliveryCanBeRepeated.
+	errFrameNotOnTheWire = errors.New("wecom: the frame did not reach the wire")
+
+	// errWordsMayBeOnScreen marks a failed delivery whose words this package
+	// cannot account for — an ack that never came back, a context that expired
+	// around the write — so the user may be reading what it is reporting as
 	// undelivered. A delivery made of two sends carries it when the FIRST of
 	// them ended that way and the second was cleanly refused — the second
 	// error alone would say the whole attempt is safe to repeat, and it is not.
@@ -216,20 +237,46 @@ var (
 //
 // Hence a whitelist rather than a blacklist: true only for the failures this
 // package can name as never having reached the user — a server verdict, a frame
-// dropped before the socket, a registry holding no socket at all. Everything
-// else, including an ack that never came and a context that expired, is
-// unknown, and unknown is not repeated.
+// the socket refused, a frame dropped before the socket, a registry holding no
+// socket at all. Everything else, including an ack that never came and a context
+// that expired, is unknown, and unknown is not repeated.
+//
+// Every one of those is named where it is RAISED, and the socket's is why. A
+// transport failure is whatever the OS handed back, so it matches no name and no
+// type here; a whitelist that could not see it read the commonest reconnect
+// window as unknown, and the one ending with no second publisher of any kind — a
+// settled round's — got nothing coming for it. writeLocked marks that failure
+// instead (errFrameNotOnTheWire).
+//
+// errStreamSuperseded is the one name on the list with two producers, and only
+// one of them is a frame dropped before the socket: beginStreamFrameLocked
+// refuses a frame the seal has already closed the door on and that one never
+// reaches the wire, while respondStream raises it for a frame that DID reach the
+// wire and then had its waiter displaced. What makes the second safe to have on
+// the list is not the first — it is that it cannot be an ENDING's verdict, which
+// takes the whole chain to state. Only a closing frame displaces a waiter
+// (awaitAck takes force exactly when finish is set). A closing frame is written
+// only by whoever holds the round's handle, which the ledger hands out once
+// under its own lock (stream_store.go). A round has one handle because the store
+// paints one bubble per run and folds every later message of that run into it
+// (streamStore.open), and a redelivered callback — the one way one req_id could
+// open a second bubble — is dropped by the router's dedup before it reaches
+// either. So one req_id carries one closing frame, and the frame a displaced
+// waiter belongs to is always a frame with more of the turn behind it.
 //
 // What that costs is a retry on a delivery that did fail; what it buys is that
 // no retry in this package can duplicate a message. The endings a retry exists
 // for are the ones it still covers: a reconnect window returns
-// errNoLiveConnection, and a refusal returns the server's errcode.
+// errFrameNotOnTheWire for as long as the read loop is still inside its own read
+// deadline and errNoLiveConnection once that loop has dropped the sender, and a
+// refusal returns the server's errcode.
 func deliveryCanBeRepeated(err error) bool {
 	if err == nil || errors.Is(err, errWordsMayBeOnScreen) {
 		return false
 	}
 	switch {
 	case errors.Is(err, errNoLiveConnection),
+		errors.Is(err, errFrameNotOnTheWire),
 		errors.Is(err, errStreamBusy),
 		errors.Is(err, errStreamSuperseded):
 		return true
@@ -697,6 +744,12 @@ func (s *wsSender) writeStreamFrame(ctx context.Context, reqID string, w *ackWai
 // the writer is only correlated with it, because a goroutine can emit its line
 // and be descheduled before it gets its turn, and the log then names the wrong
 // frame as first.
+//
+// A failure comes back wrapped in errFrameNotOnTheWire, which is this function's
+// one statement about the world: the frame did not go out whole, so whatever it
+// carried is on nobody's screen. It is the only place that can say so — past
+// here the OS error is opaque — and callers that have to choose between saying
+// something again and leaving it unsaid read it rather than the error under it.
 func (s *wsSender) writeLocked(ctx context.Context, payload []byte, t *outTrace) error {
 	s.seq++
 	seq := s.seq
@@ -713,7 +766,10 @@ func (s *wsSender) writeLocked(ctx context.Context, payload []byte, t *outTrace)
 		err = s.conn.WriteMessage(websocket.TextMessage, payload)
 	}
 	traceOutResult(s.log, seq, t, stage, err)
-	return err
+	if err != nil {
+		return fmt.Errorf("%w: %w", errFrameNotOnTheWire, err)
+	}
+	return nil
 }
 
 // sendText pushes an aibot_send_msg (proactive push) with plain text to a

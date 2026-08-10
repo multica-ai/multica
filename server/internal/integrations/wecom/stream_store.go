@@ -1206,9 +1206,15 @@ func (s *streamStore) sayEnding(
 			// Said already. Nothing was reserved, so there is nothing to resolve.
 			return turn.Verdict, nil
 		}
+		// done() is deferred and endEnding is not, and the difference is what
+		// each of them costs when the delivery panics out of a bus listener: an
+		// undone budget leaves a timer armed for a whole streamCloseTimeout, and
+		// the sweep has no way to find it, while the reservation endEnding would
+		// have released is swept at inFlightMaxAge — see retireSpeakersLocked for
+		// why that one is deliberately left to the sweep.
 		sayCtx, done := deliveryBudget(ctx)
+		defer done()
 		addr, err := say(sayCtx, turn)
-		done()
 		s.endEnding(pending, addr, err == nil)
 		return turn.Verdict, err
 	}
@@ -1227,19 +1233,26 @@ func (s *streamStore) sayEnding(
 // a retry from because the wait did not lose. That is a silent drop with the
 // news still in hand.
 //
-// So a delivery that would start with less than streamCloseTimeout takes a
-// fresh one. Detached from the caller's cancellation, because the caller's
-// budget is precisely what ran out; still bounded, and bounded by the same
-// constant every closing frame written from a timer runs on.
+// So every delivery gets a fresh one, of the same length as the budget every
+// closing frame written from a timer runs on. Detached from the caller
+// altogether, and that is the part a condition cannot do: a caller runs out of
+// time BEFORE the delivery — the wait — and it also gives up DURING one, at the
+// binding row, at the installation row, at the ack. Both leave the same screen,
+// because by then the round has been consumed and the wait did not lose, so
+// neither has a deferral to come back on. Handing out the caller's remainder
+// whenever it looks generous enough only covers the first, and only while a
+// caller's budget and this constant are the same ten seconds
+// (chatRunFlushTimeout, engine/router.go) — at eleven, a delivery whose caller
+// gave up a moment later would die mid-send with the news still in hand.
 //
 // The price is the ceiling on a synchronous bus subscriber: an ending that
 // waits out another delivery and then speaks can hold the publishing goroutine
 // for the caller's budget and this one, back to back. handleEvent in
-// outbound.go states that ceiling where it is paid.
+// outbound.go states that ceiling where it is paid. It is also the ceiling on a
+// shutdown: a delivery under way when the process is stopping runs to its own
+// deadline rather than the caller's, which is bounded and is the same trade the
+// short-budget case has always made.
 func deliveryBudget(ctx context.Context) (context.Context, context.CancelFunc) {
-	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) >= streamCloseTimeout {
-		return context.WithCancel(ctx)
-	}
 	return context.WithTimeout(context.WithoutCancel(ctx), streamCloseTimeout)
 }
 

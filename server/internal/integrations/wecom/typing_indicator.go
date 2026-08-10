@@ -68,7 +68,7 @@ const (
 // streamCloseTimeout bounds a closing frame written from a timer or a bus
 // subscriber, neither of which has a caller's context to inherit.
 //
-// It is also the floor the ledger guarantees a delivery (deliveryBudget in
+// It is also the budget the ledger hands every delivery (deliveryBudget in
 // stream_store.go), which is what puts a ceiling on the bus subscribers here: a
 // subscriber that spends its whole budget waiting out another delivery for the
 // same run, and then speaks, holds the publishing goroutine for this twice over.
@@ -78,10 +78,10 @@ const streamCloseTimeout = 10 * time.Second
 
 // endingRetryAfter is how long an ending this manager could not deliver waits
 // before trying again, and endingRetryAttempts is how many times EACH of the two
-// causes below may book. The delay doubles, so a chain that meets only one cause
-// runs its three attempts 15s, 45s and 105s after the ending was first attempted
-// — long enough for a Supervisor reconnect to have happened, short enough that
-// all of them are over well inside roundMemory.
+// causes that book may do so. The delay doubles, so a chain that meets only one
+// cause runs its three attempts 15s, 45s and 105s after the ending was first
+// attempted — long enough for a Supervisor reconnect to have happened, short
+// enough that all of them are over well inside roundMemory.
 //
 // Measured from the FIRST attempt, not from the one that just failed. An attempt
 // can spend its whole streamCloseTimeout parked on another delivery before it
@@ -109,14 +109,20 @@ const (
 	endingRetryAttempts = 3
 )
 
-// retryCause is why another attempt is being booked. Each has its own count on
-// endingRetries; the delay comes off the total.
+// retryCause is why another attempt is being booked. Each bookable cause has its
+// own count on endingRetries; the delay comes off the total.
 type retryCause int
 
 const (
+	// retryNone — no attempt may be booked at all, which is the zero value on
+	// purpose: an outcome nobody has classified books nothing rather than
+	// spending whichever cause happened to be first in this list. next refuses
+	// it, so a caller that ignores the ok alongside it still cannot repeat words
+	// that may be on the screen.
+	retryNone retryCause = iota
 	// retryDeferred — the wait for another delivery of the same run outlasted
 	// this attempt's budget, so nothing was said and nothing recorded.
-	retryDeferred retryCause = iota
+	retryDeferred
 	// retryRefused — the words went out and were turned away. Only ever booked
 	// for a refusal this package can name as never having reached the user; an
 	// outcome that is merely unknown is not repeated (deliveryCanBeRepeated).
@@ -152,7 +158,8 @@ func (r endingRetries) begin(now time.Time) endingRetries {
 
 // next books one more attempt for cause and reports how long from now it should
 // run, along with the counts to carry into it. ok is false once that cause has
-// spent its attempts.
+// spent its attempts, and for retryNone, which is not a cause anything may be
+// booked under.
 //
 // The slot is cumulative over BOTH causes — base, then base*3, then base*7 —
 // so a round that keeps failing keeps backing off however it is failing. A slot
@@ -165,11 +172,13 @@ func (r endingRetries) next(cause retryCause, base time.Duration, attempts int, 
 			return r, 0, false
 		}
 		r.refused++
-	default:
+	case retryDeferred:
 		if r.deferred >= attempts {
 			return r, 0, false
 		}
 		r.deferred++
+	default:
+		return r, 0, false
 	}
 	at := r.first.Add(base * time.Duration(1<<(r.deferred+r.refused)-1))
 	if wait := at.Sub(now); wait > 0 {
@@ -193,7 +202,7 @@ func endingRetryCause(err error) (retryCause, bool) {
 	if deliveryCanBeRepeated(err) {
 		return retryRefused, true
 	}
-	return retryDeferred, false
+	return retryNone, false
 }
 
 // taskLookup resolves a task id to the chat session it belongs to. Both
@@ -1112,12 +1121,14 @@ func (m *TypingIndicatorManager) fireGuard(ctx context.Context, sessionID pgtype
 // publisher of it — a sweeper tick, WeCom's own redelivery — says it instead of
 // finding it filed as already said.
 //
-// That error carries both attempts' verdicts, not just the last one. The closing
-// frame is written on a socket that ignores the caller's context until the ack
-// (ws_sender.go), so a frame that timed out may be sealing the bubble this very
-// moment; if the fallback is then cleanly refused, the refusal alone would tell
-// a retry that nothing reached the user and the retry would put the same words
-// on the screen a second time. errWordsMayBeOnScreen is what stops it.
+// That error carries both attempts' verdicts, not just the last one. A closing
+// frame that went out and then lost its ack may be sealing the bubble this very
+// moment — the verdict is what is missing, not the frame — so if the fallback
+// behind it is then cleanly refused, the refusal alone would tell a retry that
+// nothing reached the user and the retry would put the same words on the screen
+// a second time. errWordsMayBeOnScreen is what stops it. A frame the socket
+// itself would not take is the other case and not this one: nothing whole left,
+// so the retry is exactly what that ending needs (deliveryCanBeRepeated).
 func (m *TypingIndicatorManager) writeClosing(ctx context.Context, sessionID pgtype.UUID, h streamHandle, text, why string) error {
 	err := m.senders.stream(ctx, h, text, true)
 	if err == nil {
