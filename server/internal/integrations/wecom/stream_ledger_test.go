@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -309,4 +310,137 @@ func said(t *testing.T, c *bubbleConn) []string {
 		}
 	}
 	return out
+}
+
+// ---- two publishers of one run's ending, with nothing on file ----
+
+// publishFailure is failed() without the testing handle: the two-publisher tests
+// run it on goroutines of their own, and t is not theirs to touch.
+func (r *bubbleRig) publishFailure(taskID string) {
+	r.bus.Publish(events.Event{
+		Type:          protocol.EventTaskFailed,
+		ChatSessionID: bubbleSession,
+		TaskID:        taskID,
+		Payload: map[string]any{
+			"task_id":        taskID,
+			"failure_reason": "provider_network",
+			"retry_pending":  false,
+		},
+	})
+}
+
+// waitForOriginReads blocks until the origin gate has been asked n times — the
+// last thing a publisher does before it reaches the ledger. It is what lets a
+// test say "the repeat has arrived" without watching a clock.
+func (r *bubbleRig) waitForOriginReads(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(r.q.originAsked()) >= n {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("only %d publisher(s) reached the origin gate, want %d", len(r.q.originAsked()), n)
+}
+
+// letTheRepeatSpeak is the window in which the wrong behaviour would show
+// itself: the repeat is past the origin gate, and a store that reserved nothing
+// would have it writing its own copy of the notice about now. Waiting it out
+// only lengthens the passing path.
+func letTheRepeatSpeak() { time.Sleep(200 * time.Millisecond) }
+
+// TestASecondPublisherOfOneFailureWaitsForTheFirst is the fix.
+//
+// task:failed has two publishers and the bus is synchronous, so a repeat can
+// reach the store while the first notice's words are still on the wire. For a
+// run this process holds no round for — a restart mid-run, a round whose opening
+// frame was refused — the ledger has no note to exclude it with, deliberately:
+// anything filed there would be read by knowsRound as proof the question was
+// asked in the room. Without a reservation of some other kind, both publishers
+// resolve the chat off the binding row and both speak, and the room reads
+// "⚠️ 这次没跑通" twice for one run.
+func TestASecondPublisherOfOneFailureWaitsForTheFirst(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.askedInTheRoom(t, "task-1")
+	taskID := taskUUID(t, "task-1")
+
+	// The first notice is held on the wire, unanswered, for as long as the test
+	// wants it there.
+	rig.conn.holdPush = make(chan struct{})
+	rig.conn.pushSent = make(chan struct{}, 4)
+
+	first := make(chan struct{})
+	go func() { defer close(first); rig.publishFailure(taskID) }()
+	<-rig.conn.pushSent
+
+	second := make(chan struct{})
+	go func() { defer close(second); rig.publishFailure(taskID) }()
+	rig.waitForOriginReads(t, 2)
+	letTheRepeatSpeak()
+
+	close(rig.conn.holdPush)
+	<-first
+	<-second
+
+	got := pushedTexts(t, rig.conn)
+	if len(got) != 1 || got[0] != streamCopyFailed {
+		t.Fatalf("one run's failure left the room reading %q, want [%q] — its two publishers "+
+			"raced inside the window before the first delivery reported, and both spoke",
+			got, streamCopyFailed)
+	}
+	// And the reservation that made that so is not evidence of anything: a run
+	// this store held no round for is still not proof the question was asked in
+	// the room.
+	if rig.streams.knowsRound(bubbleSessionID(t), taskID) {
+		t.Fatal("an ending this store merely tried to say is being read as proof the question " +
+			"came from the room — the origin gate would then wave a browser run's failure into " +
+			"the chat with no database check at all")
+	}
+}
+
+// TestARefusedFailureNoticeIsStillTheRepeatsToSay is the other ordering, and
+// the direction that costs more to get wrong.
+//
+// It is a guard rather than a regression: it holds on both sides of the fix, and
+// has to, because what it forbids is the shortest way to write the fix wrong.
+// The exclusion must not become "already said". Nothing has been said until a
+// delivery reports that it was, so a repeat parked on a first attempt that then
+// failed is the retry that news has left — silencing it is defect 4 in another
+// coat, a promise recorded as kept by a send nothing accepted.
+//
+// The held push is what puts the repeat on the reservation rather than behind
+// the first one in the sender's write queue: it is waiting on the outcome, and
+// the outcome it gets is a refusal.
+func TestARefusedFailureNoticeIsStillTheRepeatsToSay(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.askedInTheRoom(t, "task-1")
+	taskID := taskUUID(t, "task-1")
+
+	rig.conn.refusePushes = 1 // the first notice is refused; a later one is not
+	rig.conn.holdPush = make(chan struct{})
+	rig.conn.pushSent = make(chan struct{}, 4)
+
+	first := make(chan struct{})
+	go func() { defer close(first); rig.publishFailure(taskID) }()
+	<-rig.conn.pushSent
+
+	second := make(chan struct{})
+	go func() { defer close(second); rig.publishFailure(taskID) }()
+	rig.waitForOriginReads(t, 2)
+	letTheRepeatSpeak()
+
+	close(rig.conn.holdPush)
+	<-first
+	<-second
+
+	got := pushedTexts(t, rig.conn)
+	if len(got) != 2 || got[1] != streamCopyFailed {
+		t.Fatalf("after the first notice was refused the room ended up reading %q, want the "+
+			"repeat to have said %q — a delivery nothing accepted is not a delivery, and "+
+			"treating the repeat as told swallows the only retry this news had",
+			got, streamCopyFailed)
+	}
 }

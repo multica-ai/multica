@@ -324,7 +324,7 @@ func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype
 	if m.senders == nil || m.streams == nil || !sessionID.Valid {
 		return
 	}
-	m.streams.sayEnding(sessionID, byBatch(batch), roundOver, nil,
+	m.streams.sayEnding(ctx, sessionID, byBatch(batch), roundOver, nil,
 		func(t roundTurn) (roundAddress, error) {
 			if !t.HasBubble {
 				return roundAddress{}, errNothingToSay
@@ -778,7 +778,7 @@ func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, batch engine.Ru
 // ending is said in the chat this round was speaking in either way, off the
 // note rather than the binding row.
 func (m *TypingIndicatorManager) fireGuard(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID) {
-	m.streams.sayEnding(sessionID, byBatch(batch), roundContinues, nil,
+	m.streams.sayEnding(ctx, sessionID, byBatch(batch), roundContinues, nil,
 		func(t roundTurn) (roundAddress, error) {
 			if !t.HasBubble {
 				return roundAddress{}, errNothingToSay

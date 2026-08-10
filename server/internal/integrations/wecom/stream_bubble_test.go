@@ -30,6 +30,16 @@ type bubbleConn struct {
 	sender *wsSender
 
 	refuseClosingCode int
+
+	// holdPush parks every plain message on the wire until the test closes it,
+	// and pushSent reports each one as it arrives. Together they open the window
+	// two publishers of one run's ending race inside: the first one's words are
+	// in flight and unanswered while the second decides what to do.
+	holdPush chan struct{}
+	pushSent chan struct{}
+	// refusePushes is how many plain messages the server answers with an
+	// errcode, counted from the first.
+	refusePushes int
 }
 
 func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
@@ -41,10 +51,26 @@ func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
 	c.frames = append(c.frames, env)
 	s := c.sender
 	code := 0
-	if c.refuseClosingCode != 0 && isClosingFrame(env) {
+	switch {
+	case c.refuseClosingCode != 0 && isClosingFrame(env):
 		code = c.refuseClosingCode
+	case env.Cmd == cmdSendMsg && c.refusePushes > 0:
+		c.refusePushes--
+		code = errcodeRefusedPush
 	}
+	hold, sent := c.holdPush, c.pushSent
 	c.mu.Unlock()
+	if env.Cmd == cmdSendMsg {
+		if sent != nil {
+			select {
+			case sent <- struct{}{}:
+			default:
+			}
+		}
+		if hold != nil {
+			<-hold
+		}
+	}
 	if s != nil {
 		s.routeResponse(frameEnvelope{
 			Headers: frameHeaders{ReqID: env.Headers.ReqID},
@@ -54,6 +80,12 @@ func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
 	}
 	return nil
 }
+
+// errcodeRefusedPush is a refusal for a plain message. Any non-zero errcode
+// does: what the tests using it care about is that the words did not reach the
+// user, not which of WeCom's reasons it was.
+const errcodeRefusedPush = 45009
+
 func (c *bubbleConn) ReadMessage() (int, []byte, error) { return 0, nil, nil }
 func (c *bubbleConn) SetReadDeadline(time.Time) error   { return nil }
 func (c *bubbleConn) SetWriteDeadline(time.Time) error  { return nil }

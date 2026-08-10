@@ -353,8 +353,8 @@ func TestAnOpenRoundIsProofEnoughOfOrigin(t *testing.T) {
 		t.Fatalf("the bubble was left as %v, want it sealed with %q — a database outage left the room's "+
 			"own question spinning on a run that is already dead", frames, streamCopyFailed)
 	}
-	if rig.q.taskGets != 0 {
-		t.Errorf("the gate read %d task row(s) for a run whose own bubble is open in this process", rig.q.taskGets)
+	if rig.q.taskRowReads() != 0 {
+		t.Errorf("the gate read %d task row(s) for a run whose own bubble is open in this process", rig.q.taskRowReads())
 	}
 }
 
@@ -410,10 +410,10 @@ func TestAnotherChannelsFailureNeverReachesTheTaskRow(t *testing.T) {
 
 	rig.failed(t, "task-1", false)
 
-	if rig.q.taskGets != 0 {
+	if rig.q.taskRowReads() != 0 {
 		t.Fatalf("the task row was read %d time(s) for a failed run on a session with no WeCom "+
 			"binding — another channel's failure has to cost this adapter one lookup, not three, "+
-			"and it is paying for it on the publisher's goroutine", rig.q.taskGets)
+			"and it is paying for it on the publisher's goroutine", rig.q.taskRowReads())
 	}
 	if asked := rig.q.originAsked(); len(asked) != 0 {
 		t.Fatalf("the channel_ingested stamp was read for %v — a run on a session this adapter "+

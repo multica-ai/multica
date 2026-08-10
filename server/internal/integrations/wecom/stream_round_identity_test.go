@@ -197,18 +197,18 @@ func TestTheRetryLookupIsNotPaidForOnEveryAnswer(t *testing.T) {
 	rig := newBubbleRig(t)
 	rig.ran(t, "REQ-C1", 1, "task-1")
 
-	before := rig.q.taskGets
+	before := rig.q.taskRowReads()
 	rig.answer(t, "the agent reply", "task-1")
-	if got := rig.q.taskGets - before; got != 1 {
+	if got := rig.q.taskRowReads() - before; got != 1 {
 		t.Fatalf("an answer that matched its own round read %d task rows, want 1 (the origin gate's) — "+
 			"the retry lookup was paid for on an answer that already named its own round", got)
 	}
 	// Nothing open now, so an unmatched ending must not reach the matcher
 	// either. It never gets that far: task-3 was never filed, so the gate
 	// refuses it on the read it was always going to make.
-	before = rig.q.taskGets
+	before = rig.q.taskRowReads()
 	rig.answer(t, "a late stray", "task-3")
-	if got := rig.q.taskGets - before; got != 1 {
+	if got := rig.q.taskRowReads() - before; got != 1 {
 		t.Fatalf("an ending for a session with no open round read %d task rows, want 1 "+
 			"(the origin gate's, which finds no row and stops there)", got)
 	}

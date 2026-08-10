@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -42,8 +43,12 @@ type fakeOutboundQueries struct {
 	// that owns the input batch, and a clone reaches it through
 	// chat_input_task_id. A task with no row here reads as pgx.ErrNoRows —
 	// cancelled and reaped while its ending was in flight.
-	tasks    map[string]db.AgentTaskQueue
-	taskErr  error
+	tasks   map[string]db.AgentTaskQueue
+	taskErr error
+	// mu guards the two counters below. task:failed has two publishers and the
+	// bus is synchronous, so a test modelling both of them runs this fake on two
+	// goroutines at once.
+	mu       sync.Mutex
 	taskGets int
 	// channelIngested is the channel_ingested stamp on the input batch the
 	// task owns: askedOverWecom for a question typed in the room,
@@ -86,7 +91,9 @@ func (f *fakeOutboundQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Wor
 	return f.workspace, f.workspaceErr
 }
 func (f *fakeOutboundQueries) GetAgentTask(_ context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
+	f.mu.Lock()
 	f.taskGets++
+	f.mu.Unlock()
 	if f.taskErr != nil {
 		return db.AgentTaskQueue{}, f.taskErr
 	}
@@ -97,7 +104,9 @@ func (f *fakeOutboundQueries) GetAgentTask(_ context.Context, id pgtype.UUID) (d
 	return task, nil
 }
 func (f *fakeOutboundQueries) TaskHasChannelIngestedMessages(_ context.Context, taskID pgtype.UUID) (bool, error) {
+	f.mu.Lock()
 	f.originAskedFor = append(f.originAskedFor, util.UUIDToString(taskID))
+	f.mu.Unlock()
 	if f.originErr != nil {
 		return false, f.originErr
 	}
@@ -161,7 +170,18 @@ func mustParseTaskUUID(t testing.TB, id string) pgtype.UUID {
 }
 
 // originAsked is the ids the provenance stamp was read for, in order.
-func (f *fakeOutboundQueries) originAsked() []string { return f.originAskedFor }
+func (f *fakeOutboundQueries) originAsked() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.originAskedFor...)
+}
+
+// taskRowReads is how many times the task row was read.
+func (f *fakeOutboundQueries) taskRowReads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.taskGets
+}
 
 func newOutboundWithConn(t *testing.T, q outboundQueries) (*Outbound, pgtype.UUID, *recordingConn) {
 	t.Helper()
