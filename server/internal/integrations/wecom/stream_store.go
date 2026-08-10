@@ -81,6 +81,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -340,6 +341,27 @@ func byTask(taskID string) roundKey { return roundKey{taskID: taskID} }
 
 func byBatch(batch engine.RunBatchID) roundKey {
 	return roundKey{batch: batch, byBatch: true}
+}
+
+// batchRunID is the name a round that never became a run is filed under.
+//
+// Every list on the note is keyed by a run id, and the settled flush's round
+// has none: it is the path the Router takes when the enqueue produced no task
+// at all, so no id was ever bound to it. Its batch is the entry's identity
+// until one arrives, so that is what stands in — otherwise the one terminal
+// path with no second publisher of its own is also the one the ledger cannot
+// record anything about, and I3 holds everywhere except there.
+//
+// The prefix is what keeps the stand-in from ever being mistaken for a run. A
+// task id is a UUID, so no lookup by task id can match one of these: a debt
+// filed here is invisible to owesEnding, to wasTold, and — the one that
+// matters — to knowsRound, which must never read a task-less round's debt as
+// proof about some run that shares the session.
+func batchRunID(batch engine.RunBatchID) string {
+	if batch == 0 {
+		return ""
+	}
+	return "batch:" + strconv.FormatUint(uint64(batch), 10)
 }
 
 // pendingEnding is one ending in flight: reserved under the lock, not yet
@@ -848,17 +870,24 @@ func (s *streamStore) takeAtLocked(key string, i int, ending roundEnding) (round
 	}
 
 	pending := pendingEnding{key: key, taskID: entry.taskID, ending: ending, owedAt: -1, held: true}
+	if pending.taskID == "" {
+		// The settled flush's round: the enqueue produced no task, so the flush
+		// never named one and nothing later ever will. It is still a round of
+		// this adapter's with a bubble on somebody's screen, so its ending is
+		// filed under the only name it has.
+		pending.taskID = batchRunID(entry.batch)
+	}
 	promised := false
-	if entry.taskID != "" {
+	if pending.taskID != "" {
 		pending.live = true
 		// A round back on the open list while its own promise is outstanding is
 		// not a shape this store produces, but spending that promise twice
 		// would be — so it is claimed here exactly the way a claim claims it.
-		if at := indexOfRun(note.owed, entry.taskID); at >= 0 {
+		if at := indexOfRun(note.owed, pending.taskID); at >= 0 {
 			note.owed = withoutRun(note.owed, at)
 			pending.owedAt, promised = at, true
 		}
-		note.speaking = append(note.speaking, entry.taskID)
+		note.speaking = append(note.speaking, pending.taskID)
 	}
 	note.at = s.now()
 	s.ended[key] = note
@@ -1045,12 +1074,29 @@ func (s *streamStore) beginEndingLocked(key string, k roundKey, ending roundEndi
 		return s.forgottenLocked(key, k.taskID, ending, worthResolving)
 	}
 	taskID := k.taskID
-	if k.byBatch || taskID == "" {
-		// A batch that matched no open round has nothing left to end, and an
-		// unnamed ending claims nothing for the same reason no unnamed promise
-		// is ever filed: there is no round it could be speaking for. Not
-		// forgotten either — a caller told to go and find a chat would announce
-		// an ending it cannot attribute to any round in it.
+	if k.byBatch {
+		// A batch that matched no open round normally has nothing left to end.
+		// The exception is the round that never became a run: its ending is
+		// filed under the batch's own name (batchRunID), so a debt left by a
+		// delivery nothing accepted is here and this is the only lookup that can
+		// find it. Not forgotten in either case — a caller told to go and find a
+		// chat would announce an ending it cannot attribute to any round in it.
+		bid := batchRunID(k.batch)
+		at := indexOfRun(note.owed, bid)
+		if at < 0 {
+			return roundTurn{Addr: note.addr, Verdict: roundToldAlready}, pendingEnding{}, false
+		}
+		note.owed = withoutRun(note.owed, at)
+		note.speaking = append(note.speaking, bid)
+		note.at = s.now()
+		s.ended[key] = note
+		return roundTurn{Addr: note.addr, Promised: true, Verdict: roundOwesAnEnding},
+			pendingEnding{live: true, key: key, taskID: bid, ending: ending, owedAt: at, held: true},
+			false
+	}
+	if taskID == "" {
+		// An unnamed ending claims nothing for the same reason no unnamed
+		// promise is ever filed: there is no round it could be speaking for.
 		return roundTurn{Addr: note.addr, Verdict: roundToldAlready}, pendingEnding{}, false
 	}
 	if note.isTold(taskID) || note.isSpeaking(taskID) {

@@ -69,6 +69,17 @@ const (
 // subscriber, neither of which has a caller's context to inherit.
 const streamCloseTimeout = 10 * time.Second
 
+// settleRetryAfter is how long the settled flush's ending waits before trying
+// again, and settleRetryAttempts is how many times. The delay doubles, so the
+// three attempts fall at 15s, 45s and 105s after the first refusal — long
+// enough for a Supervisor reconnect to have happened, short enough that all of
+// them are over well inside roundMemory. See settleRound for why this path is
+// the one that needs them.
+const (
+	settleRetryAfter    = 15 * time.Second
+	settleRetryAttempts = 3
+)
+
 // taskLookup resolves a task id to the chat session it belongs to. Both
 // publishers of task:failed stamp the session whenever the task row has one,
 // so this is the fallback for a payload that does not, and the row the round
@@ -111,6 +122,10 @@ type TypingIndicatorManager struct {
 	// guardAfter is when the manager closes a bubble nobody else has. Zero
 	// disables the guard (tests that drive the clock themselves).
 	guardAfter time.Duration
+
+	// settleRetryAfter is the first delay before a settled round's ending is
+	// tried again. Negative disables the retry.
+	settleRetryAfter time.Duration
 }
 
 // TypingIndicatorConfig wires the manager. Senders and Streams are the same
@@ -136,6 +151,9 @@ type TypingIndicatorConfig struct {
 
 	// GuardAfter overrides streamGuardAfter. Test-only.
 	GuardAfter time.Duration
+
+	// SettleRetryAfter overrides settleRetryAfter. Test-only.
+	SettleRetryAfter time.Duration
 }
 
 var _ engine.TypingNotifier = (*TypingIndicatorManager)(nil)
@@ -150,13 +168,18 @@ func NewTypingIndicator(cfg TypingIndicatorConfig) *TypingIndicatorManager {
 	if guard == 0 {
 		guard = streamGuardAfter
 	}
+	retry := cfg.SettleRetryAfter
+	if retry == 0 {
+		retry = settleRetryAfter
+	}
 	return &TypingIndicatorManager{
-		senders:    cfg.Senders,
-		streams:    cfg.Streams,
-		tasks:      cfg.Tasks,
-		bindings:   cfg.Bindings,
-		log:        logger,
-		guardAfter: guard,
+		senders:          cfg.Senders,
+		streams:          cfg.Streams,
+		tasks:            cfg.Tasks,
+		bindings:         cfg.Bindings,
+		log:              logger,
+		guardAfter:       guard,
+		settleRetryAfter: retry,
 	}
 }
 
@@ -324,13 +347,61 @@ func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype
 	if m.senders == nil || m.streams == nil || !sessionID.Valid {
 		return
 	}
-	m.streams.sayEnding(ctx, sessionID, byBatch(batch), roundOver, nil,
+	m.settleRound(ctx, sessionID, batch, 0)
+}
+
+// settleRound says the settled flush's ending, and books itself again when
+// nothing reached the user.
+//
+// The retry is the part this path cannot do without. Every other ending has a
+// second publisher — a sweeper tick, a repeat on the bus, WeCom's own
+// redelivery — so a send refused during a reconnect window is one the next one
+// makes good. This one has none: exactly one of OnRunStarted and OnSettled fires
+// per batch (engine/resolvers.go), and with no task there is no lifecycle event
+// behind it either. So when both routes fail, the run is left owed its ending
+// under the batch's own name and this books the publisher that spends it.
+//
+// It goes back through sayEnding rather than re-sending on its own, which is
+// what keeps it inside the ledger: if anything else closed the round in the
+// meantime the repeat finds nothing owed and says nothing, and if this attempt
+// fails too the debt goes back where it was for the next one.
+func (m *TypingIndicatorManager) settleRound(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID, attempt int) {
+	_, err := m.streams.sayEnding(ctx, sessionID, byBatch(batch), roundOver, nil,
 		func(t roundTurn) (roundAddress, error) {
-			if !t.HasBubble {
+			if t.HasBubble {
+				return t.Handle.address(), m.writeClosing(ctx, sessionID, t.Handle, streamCopyNotStarted, "settled")
+			}
+			// No bubble: an earlier attempt consumed it and its words never
+			// landed, so what is on the user's screen is a spinner nothing can
+			// seal any more. The chat it is in is on the note, and the same
+			// sentence goes there as an ordinary message under it.
+			if !t.Promised || !t.Addr.known() {
 				return roundAddress{}, errNothingToSay
 			}
-			return t.Handle.address(), m.writeClosing(ctx, sessionID, t.Handle, streamCopyNotStarted, "settled")
+			return t.Addr, m.sayAsPlainMessage(ctx, sessionID, t.Addr, streamCopyNotStarted)
 		})
+	if err == nil || errors.Is(err, errNothingToSay) {
+		return
+	}
+	m.bookSettleRetry(sessionID, batch, attempt+1)
+}
+
+// bookSettleRetry schedules the next attempt at a settled round's ending.
+//
+// Bounded twice over: settleRetryAttempts caps how many there are, and the delay
+// doubles, so the last one lands inside three minutes of the first. That is the
+// shape of what it is waiting out — a Supervisor reconnect takes seconds — and
+// it stays far inside roundMemory, past which the note holding the debt is gone
+// and there is nothing left to say it against.
+func (m *TypingIndicatorManager) bookSettleRetry(sessionID pgtype.UUID, batch engine.RunBatchID, attempt int) {
+	if m.settleRetryAfter <= 0 || attempt > settleRetryAttempts {
+		return
+	}
+	time.AfterFunc(m.settleRetryAfter<<(attempt-1), func() {
+		ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
+		defer cancel()
+		m.settleRound(ctx, sessionID, batch, attempt)
+	})
 }
 
 // Register subscribes the manager to the two ways a run ends without an

@@ -312,6 +312,87 @@ func said(t *testing.T, c *bubbleConn) []string {
 	return out
 }
 
+// ---- the terminal path with no second publisher of its own ----
+
+// TestASettledRoundThatCouldNotBeToldIsStillOwedItsWords is the reconnect
+// window on the one path that has no natural second chance.
+//
+// A flush that started no run — agent offline, archived, an enqueue that failed
+// — is closed by OnSettled and by nothing else: with no task there is no task
+// lifecycle event, so neither the chat-done subscriber nor the failure
+// subscriber will ever fire for it. If the closing frame and the plain message
+// both fail in a reconnect window, the round has already left the open list and
+// its bubble has gone with the attempt. A ledger that recorded nothing for it
+// leaves the asker a spinner that nothing can ever seal and no words at all —
+// the one loss I3 exists to make impossible, on the one path where nothing else
+// can recover from it.
+//
+// The retry is switched off here on purpose: what this pins is that the ROUND
+// is still owed its ending afterwards, so whoever says it next says it, rather
+// than that a timer happens to be the one who does.
+func TestASettledRoundThatCouldNotBeToldIsStillOwedItsWords(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.typing.settleRetryAfter = -1
+	sessionID := bubbleSessionID(t)
+	rig.ask(t, "REQ-SETTLE", 1) // a bubble, and a flush that never named a run
+
+	// The socket drops, and the flush settles into it: the closing frame is
+	// refused and so is the plain message it falls back to.
+	rig.senders.clear(rig.instID, rig.conn.sender)
+	rig.typing.OnSettled(context.Background(), sessionID, 1)
+
+	// The Supervisor reconnects and the same settle is published again.
+	conn := rig.reconnect()
+	rig.typing.OnSettled(context.Background(), sessionID, 1)
+
+	got := pushedTexts(t, conn)
+	if len(got) != 1 || got[0] != streamCopyNotStarted {
+		t.Fatalf("after a settle nothing accepted, the asker ended up reading %q, want [%q] — "+
+			"a round that never became a run has no later lifecycle event to rescue it, so a "+
+			"replay that finds nothing owed leaves them watching a spinner for good",
+			got, streamCopyNotStarted)
+	}
+
+	// And having been said, it is said once: a third publisher adds nothing.
+	rig.typing.OnSettled(context.Background(), sessionID, 1)
+	if got := pushedTexts(t, conn); len(got) != 1 {
+		t.Fatalf("a repeated settle brought the asker to %q, want one message", got)
+	}
+}
+
+// TestASettleNobodyHeardIsSaidAgainWithoutAnotherPublisher is the other half of
+// the same fix, and the reason the ledger entry is worth having.
+//
+// Exactly one of OnRunStarted and OnSettled fires per batch, so unlike every
+// other ending this one has no second publisher in production: no sweeper tick
+// repeats it, no redelivery reaches it, and there is no task for a lifecycle
+// event to hang off. The debt the ledger now files would sit there unspent. So
+// the manager books the publisher itself, and it goes back through the same
+// sayEnding — which is what makes it silent if anything else got there first.
+func TestASettleNobodyHeardIsSaidAgainWithoutAnotherPublisher(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.typing.settleRetryAfter = 20 * time.Millisecond
+	sessionID := bubbleSessionID(t)
+	rig.ask(t, "REQ-SETTLE-RETRY", 1)
+
+	rig.senders.clear(rig.instID, rig.conn.sender)
+	rig.typing.OnSettled(context.Background(), sessionID, 1)
+	conn := rig.reconnect()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(pushedTexts(t, conn)) == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	got := pushedTexts(t, conn)
+	if len(got) != 1 || got[0] != streamCopyNotStarted {
+		t.Fatalf("the asker read %q after the socket came back, want [%q] — nothing else ever "+
+			"publishes this round's ending, so an attempt that failed is the last of it unless "+
+			"this path books its own", got, streamCopyNotStarted)
+	}
+}
+
 // ---- two publishers of one run's ending, with nothing on file ----
 
 // publishFailure is failed() without the testing handle: the two-publisher tests
