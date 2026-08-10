@@ -44,15 +44,27 @@ const mediaDownloadTimeout = 30 * time.Second
 // the user the file was too big rather than that something went wrong.
 var errMediaTooLarge = fmt.Errorf("wecom: media exceeds the %d byte limit", maxMediaBytes)
 
+// mediaHeaders is what the response said about the file. Both fetch paths
+// return it, so the buffered and the streaming ingest learn the same things.
+type mediaHeaders struct {
+	// Filename is the display name parsed out of Content-Disposition, or
+	// empty. The callback body carries no name, size or MIME type of its
+	// own, so this header is the only place the original name exists.
+	Filename string
+	// Disposition is the Content-Disposition value exactly as it arrived,
+	// kept for the trace and for nothing else. What COS puts in that header
+	// is the one thing this package cannot check locally — the URL it came
+	// from lapses after five minutes, so a name that looks wrong cannot be
+	// re-fetched and must have been recorded at the time.
+	Disposition string
+}
+
 // downloadedMedia is one fetched body plus what the response said about it.
 type downloadedMedia struct {
 	// Body is the raw response — still encrypted. decryptMedia turns it into
 	// the file.
 	Body []byte
-	// Filename is the display name parsed out of Content-Disposition, or
-	// empty. The callback body carries no name, size or MIME type of its
-	// own, so this header is the only place the original name exists.
-	Filename string
+	mediaHeaders
 }
 
 // downloadMedia GETs one media URL. Errors carry the reason (expired link,
@@ -104,9 +116,15 @@ func downloadMedia(ctx context.Context, hc *http.Client, rawURL string) (downloa
 		return downloadedMedia{}, errMediaTooLarge
 	}
 	return downloadedMedia{
-		Body:     body,
-		Filename: mediaFilenameFromDisposition(resp.Header.Get("Content-Disposition")),
+		Body:         body,
+		mediaHeaders: mediaHeadersOf(resp),
 	}, nil
+}
+
+// mediaHeadersOf reads the one response header that describes the file.
+func mediaHeadersOf(resp *http.Response) mediaHeaders {
+	raw := resp.Header.Get("Content-Disposition")
+	return mediaHeaders{Filename: mediaFilenameFromDisposition(raw), Disposition: raw}
 }
 
 // stripURL removes the request URL from a transport error before it can be
@@ -159,6 +177,17 @@ func checkMediaURL(rawURL string) error {
 // regardless of the order the two appear in; the tests pin it because it is a
 // property we depend on, not one we implement.
 //
+// A plain `filename=` from COS arrives form-urlencoded, and ParseMediaType
+// does not undo that (it percent-decodes only the extended form), so the
+// value needs decodeFormEncodedFilename before it is fit to show anyone. The
+// extended form is skipped there, because a server that sent `filename*`
+// declared its own encoding and ParseMediaType has already applied it —
+// decoding a second time would be guessing on top of a declaration.
+//
+// The decode runs BEFORE the base-name reduction, not after: an escaped
+// separator (`..%2F..%2Fetc%2Fpasswd`) is a path only once it is decoded, and
+// a cleaner that ran first would hand a traversal straight through.
+//
 // The result is reduced to a base name: the header is remote input and a
 // filename with path separators in it has no business reaching a storage key
 // or a download header.
@@ -170,7 +199,108 @@ func mediaFilenameFromDisposition(raw string) string {
 	if err != nil {
 		return ""
 	}
-	return cleanMediaFilename(params["filename"])
+	name := params["filename"]
+	if !hasExtendedFilename(raw) {
+		name = decodeFormEncodedFilename(name)
+	}
+	return cleanMediaFilename(name)
+}
+
+// hasExtendedFilename reports whether the header offered an RFC 5987
+// `filename*` at all. mime.ParseMediaType folds the extended parameter into
+// params["filename"] and does not say which form it came from, so the raw
+// header is the only place left to ask.
+//
+// A plain filename whose VALUE contains the text "filename*" reads as a false
+// positive here. That costs nothing: the only consequence is that the value
+// is left exactly as it arrived.
+func hasExtendedFilename(raw string) bool {
+	return strings.Contains(strings.ToLower(raw), "filename*")
+}
+
+// decodeFormEncodedFilename undoes application/x-www-form-urlencoding on a
+// filename that provably carries it, and leaves every other name byte for
+// byte.
+//
+// Why this is needed: a live tenant sent "PC D&T Strategy 2026.docx" and it
+// was stored as "PC+D%26T+Strategy+2026.docx" — space as '+', '&' as %26,
+// which is exactly url.QueryEscape of the original. COS form-encodes the
+// plain filename parameter because that parameter is ASCII-only by
+// specification, and Chinese names take the same route: a non-ASCII name
+// cannot legally sit there, so it arrives as a run of percent escapes, and
+// without this the user is shown the escapes.
+//
+// Why it is conditional: url.QueryUnescape on its own reads '+' as a space,
+// so it would rewrite "C++ notes.docx" to "C   notes.docx". Both readings of
+// a bare '+' are legitimate and no header field distinguishes them. What does
+// distinguish them is self-consistency — a genuine form-encoding survives a
+// round trip through the encoder, and an accidental one usually does not:
+// "C++ notes.docx" re-encodes to "C+++notes.docx" (the literal space would
+// have been a '+' too) and is therefore left alone. So the rule is: decode
+// only when re-encoding the result reproduces the header value.
+//
+// What this does NOT handle, and why:
+//
+//   - A name that contains a '+' and nothing else an encoder would touch —
+//     "C++.docx", "A+B.docx" — IS a canonical encoding of "C  .docx" and
+//     "A B.docx", so the round trip cannot rule it out and this decodes it,
+//     losing the pluses. That ambiguity is irreducible from the header alone.
+//     It is the side chosen deliberately: a name with a space in it is far
+//     more common than one with a '+' and no space, and a name with both is
+//     already safe by the round trip above.
+//   - A name percent-encoded in the RFC 3986 style, with %20 for space rather
+//     than '+' ("PC%20D&T.docx"), re-encodes to "PC+D%26T.docx", fails the
+//     check, and keeps its escapes. Handling it would mean a second guess at
+//     which scheme a server used, and no observed header calls for one.
+//
+// Both gaps stay open because one stored filename is all the evidence there
+// is, and the URL that produced it is long expired. traceMediaHeaders records
+// the header as it arrives, so the next live run settles what COS really
+// sends with bytes rather than with another inference from one sample.
+func decodeFormEncodedFilename(name string) string {
+	// Nothing an encoder produces looks like this, so there is nothing to
+	// undo and no round trip worth running.
+	if !strings.ContainsAny(name, "+%") {
+		return name
+	}
+	decoded, err := url.QueryUnescape(name)
+	if err != nil {
+		// A stray '%' that begins no valid escape ("100%.docx") means this is
+		// not an encoding at all, so there is nothing to undo.
+		return name
+	}
+	if decoded == name || !sameFormEncoding(url.QueryEscape(decoded), name) {
+		return name
+	}
+	return decoded
+}
+
+// sameFormEncoding reports whether two form-encodings of the same value agree,
+// allowing only for the case of the hex digits inside percent escapes.
+//
+// The tolerance is not cosmetic. url.QueryEscape writes upper-case hex and
+// plenty of servers write lower-case, so a byte comparison would reject
+// "%e5%ad%a3%e6%8a%a5.png" — a Chinese filename, the case this decode matters
+// most for, since a non-ASCII name is nothing but escapes — and quietly do
+// nothing.
+func sameFormEncoding(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); {
+		if a[i] == '%' && b[i] == '%' && i+2 < len(a) {
+			if !strings.EqualFold(a[i+1:i+3], b[i+1:i+3]) {
+				return false
+			}
+			i += 3
+			continue
+		}
+		if a[i] != b[i] {
+			return false
+		}
+		i++
+	}
+	return true
 }
 
 // cleanMediaFilename reduces a name from anywhere to a single path segment,
@@ -188,19 +318,20 @@ func cleanMediaFilename(name string) string {
 }
 
 // openMedia is downloadMedia without the buffer: it returns the body as a
-// stream so the caller can decrypt it as it arrives. Same guard, same status
-// handling, same ceiling — the ceiling is enforced by the LimitReader the
-// caller reads through, so a body that lies about its length still cannot
-// run away with the process.
+// stream so the caller can decrypt it as it arrives, plus the same
+// mediaHeaders the buffered path reads. Same guard, same status handling,
+// same ceiling — the ceiling is enforced by the LimitReader the caller reads
+// through, so a body that lies about its length still cannot run away with
+// the process.
 //
 // The caller closes the reader. It owns the underlying response, so an early
 // return without a Close leaks a connection.
-func openMedia(ctx context.Context, hc *http.Client, rawURL string) (io.ReadCloser, string, error) {
+func openMedia(ctx context.Context, hc *http.Client, rawURL string) (io.ReadCloser, mediaHeaders, error) {
 	if err := checkMediaURL(rawURL); err != nil {
-		return nil, "", err
+		return nil, mediaHeaders{}, err
 	}
 	if hc == nil {
-		return nil, "", errors.New("wecom: media download: no guarded http client configured")
+		return nil, mediaHeaders{}, errors.New("wecom: media download: no guarded http client configured")
 	}
 
 	// No context timeout here the way downloadMedia has one: the caller reads
@@ -209,26 +340,26 @@ func openMedia(ctx context.Context, hc *http.Client, rawURL string) (io.ReadClos
 	// bounds the whole operation.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("wecom: media request: %w", stripURL(err))
+		return nil, mediaHeaders{}, fmt.Errorf("wecom: media request: %w", stripURL(err))
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("wecom: media download: %w", stripURL(err))
+		return nil, mediaHeaders{}, fmt.Errorf("wecom: media download: %w", stripURL(err))
 	}
 	if resp.ContentLength > maxMediaBytes {
 		resp.Body.Close()
-		return nil, "", errMediaTooLarge
+		return nil, mediaHeaders{}, errMediaTooLarge
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		resp.Body.Close()
-		return nil, "", fmt.Errorf("wecom: media download: http %d %s: %s",
+		return nil, mediaHeaders{}, fmt.Errorf("wecom: media download: http %d %s: %s",
 			resp.StatusCode, http.StatusText(resp.StatusCode), strings.TrimSpace(string(snippet)))
 	}
 	return &cappedBody{
 		ReadCloser: resp.Body,
 		remaining:  maxMediaBytes + 1, // one byte of headroom, as downloadMedia has
-	}, mediaFilenameFromDisposition(resp.Header.Get("Content-Disposition")), nil
+	}, mediaHeadersOf(resp), nil
 }
 
 // cappedBody stops a response that keeps going past the ceiling, so an

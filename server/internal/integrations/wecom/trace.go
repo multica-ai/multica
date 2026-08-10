@@ -13,6 +13,9 @@ package wecom
 // With MULTICA_WECOM_TRACE=1 the server records enough to check a real-device
 // session afterwards: which way the frame went, what chat it was addressed
 // to, whether that chat is a room or a person, and what the server said back.
+// The switch also covers the one thing a frame does not carry — what an
+// attachment's own response said its name was (traceMediaHeaders), which no
+// later inspection can recover once the five-minute media URL has lapsed.
 //
 // Why not slog.Debug, which the siblings use for their per-frame lines
 // (slack_channel.go:162, lark/ws_connector.go:339): logger.parseLevel
@@ -75,7 +78,13 @@ const tracePreviewRunes = 120
 // (OutboundReplier owns it, and BindingPath is configurable). A "token=" in a
 // URL is the shape worth hiding wherever it appears.
 func tracePreview(s string) string {
-	s = redactBearerTokens(s)
+	return traceBound(redactBearerTokens(s))
+}
+
+// traceBound is tracePreview's second half on its own: the cap and the
+// single-line flattening, without the redaction. Only traceMediaHeaders uses
+// it directly, and it says there why.
+func traceBound(s string) string {
 	out := make([]rune, 0, tracePreviewRunes)
 	cut := false
 	for _, r := range s {
@@ -244,6 +253,37 @@ func traceInbound(log *slog.Logger, mc aibotMsgCallback, text string) {
 		"msgtype", mc.MsgType,
 		"len", len(text),
 		"text", tracePreview(text),
+	)
+}
+
+// traceMediaHeaders records what an attachment's response said about itself:
+// the Content-Disposition exactly as it arrived, and the name this package
+// parsed out of it. Those two side by side are the whole diagnosis for a
+// filename that comes out looking wrong, and they cannot be recovered later —
+// the URL they came from is good for five minutes, so an attachment whose
+// name is questioned tomorrow can never be re-fetched to settle it.
+//
+// The disposition is bounded and flattened to one line but NOT run through
+// redactBearerTokens the way every other traced string is. The redactor
+// rewrites anything shaped like "token=…", and a file may legitimately be
+// called that; the point of this line is the exact bytes, so a filename must
+// reach the log as the bytes it was. Nothing here is a credential: the header
+// carries a name, and the pre-signed URL that does carry one is deliberately
+// absent from this line and from everything else media_download.go emits.
+//
+// It fires even when the header was absent, recording an empty value. A run
+// that produced no line at all would leave the reader unable to tell "the
+// server sent no Content-Disposition" from "the switch was off".
+func traceMediaHeaders(log *slog.Logger, msgID string, index int, h mediaHeaders) {
+	if !tracingOn() || log == nil {
+		return
+	}
+	log.Info("wecom trace",
+		"dir", "in.media",
+		"msg_id", msgID,
+		"index", index,
+		"content_disposition", traceBound(h.Disposition),
+		"filename", traceBound(h.Filename),
 	)
 }
 

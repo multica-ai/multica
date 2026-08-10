@@ -622,3 +622,89 @@ func TestResolveMediaSurvivesAConnectionThatWentAway(t *testing.T) {
 		t.Fatal("produced a ref for an attachment that never downloaded")
 	}
 }
+
+// TestTheTraceRecordsTheDispositionThatArrived: media_download.go logs
+// nothing on its own, and the one thing it learns that cannot be recovered
+// later is what Content-Disposition the object came with — the URL it came
+// from lapses in five minutes, so a filename questioned tomorrow can never be
+// checked against the header that produced it. Under MULTICA_WECOM_TRACE the
+// raw value goes to the log beside the name parsed out of it, on both ingest
+// paths, and the pre-signed URL does not.
+//
+// No t.Parallel, for the reason trace_test.go gives: `tracing` is a
+// package-level atomic and these assertions are about whether a line exists.
+func TestTheTraceRecordsTheDispositionThatArrived(t *testing.T) {
+	const (
+		disposition = `attachment; filename="PC+D%26T+Strategy+2026.docx"`
+		encoded     = "PC+D%26T+Strategy+2026.docx"
+		decoded     = "PC D&T Strategy 2026.docx"
+		signature   = "sig=AKIDSUPERSECRETSIGNATURE"
+	)
+	plaintext := []byte("\x89PNG\r\n\x1a\n" + strings.Repeat("pixels", 200))
+	srv := cosServer(t, plaintext, disposition)
+	defer srv.Close()
+	mediaURL := srv.URL + "/object?" + signature
+
+	// Both backends: the streaming path is the one production takes, and it
+	// reads the headers through a different call than the buffered one.
+	backends := map[string]func() mediaStorage{
+		"buffered":  func() mediaStorage { return &fakeMediaStorage{} },
+		"streaming": func() mediaStorage { return &fakeStreamStorage{} },
+	}
+	for name, build := range backends {
+		t.Run(name, func(t *testing.T) {
+			t.Run("off, and there is no line at all", func(t *testing.T) {
+				withTrace(t, false)
+				logged := resolveOneAttachment(t, build(), mediaURL)
+				if strings.Contains(logged, "in.media") {
+					t.Fatalf("the switch is off and the trace still wrote: %s", logged)
+				}
+			})
+
+			t.Run("on, and the line carries the bytes", func(t *testing.T) {
+				withTrace(t, true)
+				logged := resolveOneAttachment(t, build(), mediaURL)
+				if !strings.Contains(logged, "dir=in.media") {
+					t.Fatalf("no in.media line was written: %s", logged)
+				}
+				if !strings.Contains(logged, encoded) {
+					t.Fatalf("the header did not reach the log as it arrived; want %q in: %s", encoded, logged)
+				}
+				if !strings.Contains(logged, decoded) {
+					t.Fatalf("the parsed name is not beside it; want %q in: %s", decoded, logged)
+				}
+				if !strings.Contains(logged, "msg_id=MSGID-MEDIA") {
+					t.Fatalf("the line does not say which message it belongs to: %s", logged)
+				}
+				if strings.Contains(logged, signature) || strings.Contains(logged, srv.URL) {
+					t.Fatalf("the pre-signed url reached the log: %s", logged)
+				}
+			})
+		})
+	}
+}
+
+// resolveOneAttachment runs one image through the resolver with a capturing
+// logger and returns everything that was logged.
+func resolveOneAttachment(t *testing.T, storage mediaStorage, url string) string {
+	t.Helper()
+	logger, buf := capturingLogger()
+	inspect, _ := storage.(*fakeMediaStorage)
+	if s, ok := storage.(*fakeStreamStorage); ok {
+		inspect = &s.fakeMediaStorage
+	}
+	r := NewMediaResolver(storage, newFakeMediaLedger(inspect), nil, logger).(*wecomMediaResolver)
+	r.http = testMediaClient()
+
+	msg := mediaMessage(t, "image", map[string]any{
+		"image": map[string]any{"url": url, "aeskey": testAESKey},
+	})
+	got := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+	if len(got.MediaRefs) != 1 {
+		t.Fatalf("MediaRefs = %d, want the attachment to have landed", len(got.MediaRefs))
+	}
+	if got.MediaRefs[0].Filename != "PC D&T Strategy 2026.docx" {
+		t.Fatalf("stored filename = %q, want the decoded name", got.MediaRefs[0].Filename)
+	}
+	return buf.String()
+}

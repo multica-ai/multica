@@ -77,6 +77,74 @@ func TestDownloadMediaReadsTheFilename(t *testing.T) {
 			if got.Filename != tc.want {
 				t.Fatalf("filename = %q, want %q", got.Filename, tc.want)
 			}
+			if got.Disposition != tc.disposition {
+				t.Errorf("raw disposition = %q, want it kept verbatim for the trace", got.Disposition)
+			}
+		})
+	}
+}
+
+// TestTheDispositionFilenameIsFormDecoded pins the encoding COS actually puts
+// in the plain filename parameter, and the exact line drawn around undoing
+// it. A live tenant sent "PC D&T Strategy 2026.docx" and the object was
+// stored as "PC+D%26T+Strategy+2026.docx": the header arrives
+// form-urlencoded, mime.ParseMediaType percent-decodes only the extended
+// filename* form, and nothing was undoing the rest.
+//
+// The three groups matter as much as the individual rows. The first is what
+// the fix buys. The second is what a bare url.QueryUnescape would have cost —
+// those rows fail on the obvious implementation, not on the absent one. The
+// third is what this choice knowingly gives up, written down as expected
+// values so the trade is on the record instead of in a reviewer's memory.
+func TestTheDispositionFilenameIsFormDecoded(t *testing.T) {
+	cases := []struct {
+		name        string
+		disposition string
+		want        string
+	}{
+		// -- decoded, because re-encoding reproduces the header exactly --
+		{"the reported case", `attachment; filename="PC+D%26T+Strategy+2026.docx"`, "PC D&T Strategy 2026.docx"},
+		{"spaces on their own", `attachment; filename="Meeting+notes+2026.docx"`, "Meeting notes 2026.docx"},
+		{"non-ascii, upper-case hex", `attachment; filename="%E5%AD%A3%E6%8A%A5.png"`, "季报.png"},
+		{"non-ascii, lower-case hex", `attachment; filename="%e5%ad%a3%e6%8a%a5.png"`, "季报.png"},
+		{"an escaped plus survives the decode", `attachment; filename="C%2B%2B+notes.docx"`, "C++ notes.docx"},
+		{"escaped separators are decoded, then reduced", `attachment; filename="..%2F..%2Fetc%2Fpasswd"`, "passwd"},
+
+		// -- left alone, because the value cannot have been form-encoded --
+		{"a plus beside a real space is a real plus", `attachment; filename="C++ notes.docx"`, "C++ notes.docx"},
+		{"a percent that begins no escape", `attachment; filename="100%.docx"`, "100%.docx"},
+		{"filename* is already decoded and is not decoded twice", `attachment; filename*=UTF-8''A%2BB.docx`, "A+B.docx"},
+
+		// -- the sacrifices, named --
+		{
+			// "C++.docx" is byte-identical to a form-encoding of "C  .docx",
+			// so no rule reading only this header can tell them apart. We
+			// decode, and this name loses its pluses.
+			"a plus with no space anywhere is decoded as a space",
+			`attachment; filename="C++.docx"`, "C  .docx",
+		},
+		{
+			// RFC 3986 spelling rather than the form one. Re-encoding gives
+			// "Meeting+notes.docx", the check fails, and the escapes stay.
+			"a %20-encoded name keeps its escapes",
+			`attachment; filename="Meeting%20notes.docx"`, "Meeting%20notes.docx",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Disposition", tc.disposition)
+				_, _ = w.Write([]byte("bytes"))
+			}))
+			defer srv.Close()
+
+			got, err := downloadMedia(context.Background(), srv.Client(), srv.URL)
+			if err != nil {
+				t.Fatalf("downloadMedia: %v", err)
+			}
+			if got.Filename != tc.want {
+				t.Fatalf("filename = %q, want %q", got.Filename, tc.want)
+			}
 		})
 	}
 }
