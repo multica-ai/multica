@@ -119,8 +119,8 @@ This pulls the official images from GHCR and requires Docker. See the
 [Self-Hosting Guide](SELF_HOSTING.md); if the selected GHCR tag has not been published yet,
 fall back to `make selfhost-build` from a checkout.
 
-This fork also includes a source-built, no-SaaS local stack with PostgreSQL,
-Redis, Mailpit, persistent uploads, and an optional Ollama overlay. See
+This fork also includes a source-built local stack with PostgreSQL, Redis,
+Mailpit, persistent uploads, optional Resend delivery, and an optional Ollama overlay. See
 [Fully Local Docker Deployment](LOCAL_DEPLOYMENT.md), or run
 `./scripts/local-stack.sh up` (`.\scripts\local-stack.ps1 up` on Windows).
 

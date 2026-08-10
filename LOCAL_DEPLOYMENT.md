@@ -1,6 +1,6 @@
 # 完全本地 Docker 部署
 
-这套配置从当前仓库构建 Multica 前端和后端，并把 PostgreSQL、Redis、登录邮件和上传文件全部保存在本机。默认不配置 Resend、PostHog、S3、Google OAuth 或任何远程 LLM API。
+这套配置从当前仓库构建 Multica 前端和后端，并把 PostgreSQL、Redis、登录邮件和上传文件全部保存在本机。默认使用 Mailpit 捕获邮件，不配置 PostHog、S3、Google OAuth 或任何远程 LLM API；需要真实发信时可以切换到 Resend。
 
 ## 本地组件
 
@@ -41,6 +41,40 @@
 5. 等待所有服务通过健康检查。
 
 打开 `http://localhost:3000`，输入邮箱登录。验证码邮件会进入 `http://localhost:8025`，无需外部邮件服务。
+
+## 使用 Resend 发信
+
+先在 Resend 中验证发信域名或发件地址，然后修改不会提交到 Git 的 `.env.local`：
+
+```dotenv
+RESEND_API_KEY=re_your_api_key
+RESEND_FROM_EMAIL=Multica <noreply@example.com>
+SMTP_HOST=
+```
+
+`SMTP_HOST` 必须为空，因为 SMTP 配置存在时会优先使用 SMTP。保存后重建后端：
+
+```powershell
+.\scripts\local-stack.ps1 restart
+```
+
+```bash
+./scripts/local-stack.sh restart
+```
+
+检查后端日志，启动信息应包含 `EmailService: Resend API`：
+
+```powershell
+.\scripts\local-stack.ps1 logs
+```
+
+切回完全本地的 Mailpit：
+
+```dotenv
+RESEND_API_KEY=
+RESEND_FROM_EMAIL=noreply@multica.local
+SMTP_HOST=mailpit
+```
 
 ## 启用本地 LLM
 

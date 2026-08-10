@@ -88,17 +88,18 @@ services:
       MULTICA_PUBLIC_URL: http://localhost:${BACKEND_PORT:-8080}
       CORS_ALLOWED_ORIGINS: http://localhost:${FRONTEND_PORT:-3000}
 
-      # Local SMTP capture. Login codes are visible in the Mailpit UI.
-      RESEND_API_KEY: ""
-      RESEND_FROM_EMAIL: noreply@multica.local
-      SMTP_HOST: mailpit
-      SMTP_PORT: "1025"
-      SMTP_USERNAME: ""
-      SMTP_PASSWORD: ""
-      SMTP_FROM_EMAIL: noreply@multica.local
-      SMTP_TLS: ""
-      SMTP_TLS_INSECURE: "false"
-      SMTP_EHLO_NAME: multica.local
+      # Mailpit is the default. Setting SMTP_HOST to an empty value switches
+      # delivery to Resend when RESEND_API_KEY is configured.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@multica.local}
+      SMTP_HOST: ${SMTP_HOST-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-noreply@multica.local}
+      SMTP_TLS: ${SMTP_TLS:-}
+      SMTP_TLS_INSECURE: ${SMTP_TLS_INSECURE:-false}
+      SMTP_EHLO_NAME: ${SMTP_EHLO_NAME:-multica.local}
 
       # Local persistent upload storage; no S3 service is required.
       S3_BUCKET: ""

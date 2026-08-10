@@ -66,8 +66,13 @@ assert.equal(services.frontend.image, "multica-web:local");
 const backendEnv = envMap(services.backend);
 assert.match(backendEnv.DATABASE_URL, /@postgres:5432\//);
 assert.equal(backendEnv.REDIS_URL, "redis://redis:6379/0");
-assert.equal(backendEnv.SMTP_HOST, "mailpit");
-assert.equal(backendEnv.SMTP_PORT, "1025");
+assert.equal(backendEnv.RESEND_API_KEY, "${RESEND_API_KEY:-}");
+assert.equal(
+  backendEnv.RESEND_FROM_EMAIL,
+  "${RESEND_FROM_EMAIL:-noreply@multica.local}",
+);
+assert.equal(backendEnv.SMTP_HOST, "${SMTP_HOST-mailpit}");
+assert.equal(backendEnv.SMTP_PORT, "${SMTP_PORT:-1025}");
 assert.equal(backendEnv.LOCAL_UPLOAD_DIR, "/app/data/uploads");
 assert.equal(backendEnv.ATTACHMENT_DOWNLOAD_MODE, "proxy");
 assert.equal(backendEnv.ANALYTICS_DISABLED, "true");
@@ -119,6 +124,9 @@ for (const variable of [
   "FRONTEND_PORT",
   "BACKEND_PORT",
   "MAILPIT_UI_PORT",
+  "RESEND_API_KEY",
+  "RESEND_FROM_EMAIL",
+  "SMTP_HOST",
   "OLLAMA_MODEL",
 ]) {
   assert.match(envExample, new RegExp(`^${variable}=`, "m"), `${variable} missing`);
@@ -129,6 +137,8 @@ assert.match(docs, /scripts\/local-stack\.sh up/);
 assert.match(docs, /scripts\\local-stack\.ps1 up/);
 assert.match(docs, /docker-compose\.local-ai\.yml/);
 assert.match(docs, /http:\/\/localhost:8025/);
+assert.match(docs, /RESEND_API_KEY=re_/);
+assert.match(docs, /SMTP_HOST=/);
 
 const gitignore = read(".gitignore");
 assert.match(gitignore, /^!\.env\.local\.example$/m);
