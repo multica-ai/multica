@@ -130,3 +130,42 @@ describe("countUnreadInboxConversations Round exclusion (FIR-3340)", () => {
     ).toBe(1);
   });
 });
+
+describe("countUnreadInboxConversations mute exclusion (FIR-4935)", () => {
+  const future = "2099-01-01T00:00:00Z";
+  const past = "2020-01-01T00:00:00Z";
+
+  it("does not count an unread conversation that is muted into the future", () => {
+    const items = [inboxItem({ id: "a", issue_id: "iss1", read: false, muted_until: future })];
+    expect(countUnreadInboxConversations(items, { excludeThreadReplies: true })).toBe(0);
+  });
+
+  it("counts an unread conversation again once its mute has expired", () => {
+    const items = [inboxItem({ id: "a", issue_id: "iss1", read: false, muted_until: past })];
+    expect(countUnreadInboxConversations(items, { excludeThreadReplies: true })).toBe(1);
+  });
+
+  it("keeps a muted conversation out even when an older unread sibling exists", () => {
+    // The newest item wins deduplication and is muted, so the whole row is
+    // hidden in the list — the older sibling must not resurrect the badge.
+    const items = [
+      inboxItem({ id: "old", issue_id: "iss1", read: false, created_at: "2026-06-22T10:00:00Z" }),
+      inboxItem({
+        id: "new",
+        issue_id: "iss1",
+        read: false,
+        created_at: "2026-06-22T11:00:00Z",
+        muted_until: future,
+      }),
+    ];
+    expect(countUnreadInboxConversations(items, { excludeThreadReplies: true })).toBe(0);
+  });
+
+  it("still counts other unread conversations alongside a muted one", () => {
+    const items = [
+      inboxItem({ id: "a", issue_id: "iss1", read: false, muted_until: future }),
+      inboxItem({ id: "b", issue_id: "iss2", read: false }),
+    ];
+    expect(countUnreadInboxConversations(items, { excludeThreadReplies: true })).toBe(1);
+  });
+});

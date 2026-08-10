@@ -50,7 +50,20 @@ export function countUnreadInboxConversations(
   if (excludedIssueIds && excludedIssueIds.size > 0) {
     base = base.filter((item) => !item.issue_id || !excludedIssueIds.has(item.issue_id));
   }
-  return deduplicateInboxItems(base).filter((i) => !i.read).length;
+  // FIR-4935 — a muted (snoozed) conversation is hidden from every inbox box
+  // until its mute expires (matchesViewFilter drops it from every view except
+  // "Muted"), and the server's own badge query already excludes it
+  // (CountUnreadInboxItems: `muted_until IS NULL OR muted_until <= NOW()`).
+  // Filtered AFTER deduplication, exactly like that query: the row's visibility
+  // is decided by the representative item, so an older unread sibling behind a
+  // muted representative must not resurrect the count.
+  return deduplicateInboxItems(base).filter((i) => !i.read && !isMutedNow(i)).length;
+}
+
+function isMutedNow(item: InboxItem): boolean {
+  if (!item.muted_until) return false;
+  const until = Date.parse(item.muted_until);
+  return Number.isFinite(until) && until > Date.now();
 }
 
 /**
