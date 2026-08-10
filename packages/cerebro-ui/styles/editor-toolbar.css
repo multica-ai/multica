@@ -12,3 +12,21 @@
     --toolbar-active: oklch(0.336 0.006 286.033);
     --toolbar-active-border: oklch(0.394 0.007 286.033);
 }
+
+/* CEREBRO-PATCH(fir-4028-toolbar-spacing): fix padding/outline visibility across toolbar, find-replace, and list styling. */
+@container (min-width: 640px) {
+  .@container {
+    margin: 0;
+    padding: 0;
+  }
+}
+
+.rich-text-editor:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+ul:not([data-type]),
+ol:not([data-type]) {
+  border: none;
+}
