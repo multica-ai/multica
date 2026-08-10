@@ -709,14 +709,15 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 		// Two-layer channel policy (MUL-4899). This is the DELIVERY layer, and
 		// it has three answers. `attachment upload` binds a file to the Multica
 		// chat reply whatever the surface; the question is whether anything
-		// carries it the last hop. Web/mobile renders it as a card. WeCom's
-		// adapter fetches it and sends it into the room as a separate message.
-		// Slack and Lark do neither, so there the upload reaches nobody and the
-		// agent is told to describe the file instead. ChannelCarriesFiles owns
-		// that per-adapter answer. The orthogonal HISTORY layer (which read
-		// commands exist) is Slack-only and lives in the per-turn chat prompt —
-		// do not collapse the two.
-		if ChannelCarriesFiles(ctx.ChatChannelType) {
+		// carries it the last hop. Web/mobile renders it as a card. A channel
+		// gets the upload guidance only where the SERVER reported, for this
+		// turn, that it performs the hop — the adapter fetches the bound file
+		// and this deployment has the storage to fetch it from. Everywhere else
+		// the upload reaches nobody and the agent is told to describe the file
+		// instead. The orthogonal HISTORY layer (which read commands exist) is
+		// Slack-only and lives in the per-turn chat prompt — do not collapse
+		// the two.
+		if ChannelCarriesFiles(ctx.ChatChannelType, ctx.ChatChannelDeliversFiles) {
 			// The "separate message" is worth stating: an agent told only that
 			// files work here writes "see the chart below" and then nothing
 			// appears below, because a picture cannot be embedded in an IM

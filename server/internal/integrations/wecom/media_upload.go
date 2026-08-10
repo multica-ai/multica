@@ -54,14 +54,33 @@ const (
 )
 
 // mediaChunkBytes is the cap on one chunk BEFORE base64, so a frame on the
-// wire is about a third larger again. maxMediaChunks is the cap on how many
-// there may be, and the two together are the largest file this transport can
-// carry — 50 MB.
+// wire is about a third larger again. maxMediaChunks is the protocol's own
+// ceiling on how many there may be, and the two together are the largest file
+// this TRANSPORT could express — 50 MB. Both are WeCom's own SDK numbers
+// (WecomTeam/aibot-node-sdk src/client.ts, uploadMedia: `CHUNK_SIZE = 512 *
+// 1024`, and `totalChunks > 100` throws "max ~50MB").
 const (
-	mediaChunkBytes     = 512 * 1024
-	maxMediaChunks      = 100
-	maxMediaUploadBytes = mediaChunkBytes * maxMediaChunks
+	mediaChunkBytes        = 512 * 1024
+	maxMediaChunks         = 100
+	maxMediaTransportBytes = mediaChunkBytes * maxMediaChunks
 )
+
+// maxMediaUploadBytes is the largest file we will actually send, and it is a
+// third of what the transport could express.
+//
+// The 50 MB the chunk arithmetic allows is the size the FRAMING can describe,
+// not a size the platform accepts. WeCom's own OpenClaw plugin
+// (WecomTeam/wecom-openclaw-plugin src/const.ts) carries the numbers the
+// product enforces: 20 MiB for a file, and ABSOLUTE_MAX_BYTES — the value it
+// documents as "beyond this it cannot be sent" — is that same 20 MiB. Its
+// per-kind ceilings are lower still (10 MiB image, 10 MiB video, 2 MiB voice),
+// and those are already applied a layer up in wecomMediaKind, which demotes an
+// oversize image to a file rather than offering the server something it will
+// refuse. 20 MiB is therefore the widest any kind can be.
+//
+// Chunking a 40 MB file to be refused at the end costs eighty round trips, the
+// whole thing resident in memory, and a user who waits minutes to be told no.
+const maxMediaUploadBytes = 20 << 20
 
 // The byte caps on a video message's two required fields.
 const (
@@ -69,11 +88,35 @@ const (
 	videoDescriptionBytes = 512
 )
 
-// mediaChunkParallelism is how many chunks are in flight at once. The protocol
-// allows any number; this is a courtesy to the socket, which every other frame
-// on this connection shares — a 50 MB file at full tilt would stall the
-// replies of every other chat the bot is in.
-const mediaChunkParallelism = 4
+// mediaChunkParallelism is how many chunks may be in flight at once, and it
+// falls as the file grows.
+//
+// The ladder is WeCom's own, from the SDK's uploadMedia
+// (WecomTeam/aibot-node-sdk src/client.ts): `totalChunks <= 4 ? totalChunks :
+// totalChunks <= 10 ? 3 : 2`. The reason it steps down is in the comment beside
+// it — past ten chunks the WeCom backend answers a burst of concurrent chunks
+// with a system error. That is a server-side limit, so no amount of retrying
+// gets around it and a fixed 4 simply fails on exactly the large uploads that
+// most need to succeed.
+//
+// The small end matters too, and in the other direction: at four chunks or
+// fewer every chunk goes at once, so a 2 MB file is not serialized for a
+// caution that only applies to big ones.
+//
+// A second reason to stay low: the socket is shared with every other chat the
+// bot is in, and a file at full tilt stalls their replies.
+func mediaChunkParallelism(chunks int) int {
+	switch {
+	case chunks < 1:
+		return 1
+	case chunks <= 4:
+		return chunks
+	case chunks <= 10:
+		return 3
+	default:
+		return 2
+	}
+}
 
 // mediaChunkAttempts is how many times one chunk is offered. The second try
 // exists for a lost ack and nothing else: a chunk the server refuses is
@@ -81,8 +124,8 @@ const mediaChunkParallelism = 4
 const mediaChunkAttempts = 2
 
 var (
-	// errMediaUploadTooLarge — past what the chunk protocol can express. The
-	// caller says so in words rather than starting an upload that cannot end.
+	// errMediaUploadTooLarge — past the size WeCom accepts. Refused before the
+	// first byte is read rather than after eighty round trips.
 	errMediaUploadTooLarge = fmt.Errorf("wecom: media exceeds the %d byte upload limit", maxMediaUploadBytes)
 
 	// errMediaUploadEmpty — a zero-byte file. WeCom has nothing to store and
@@ -200,7 +243,7 @@ func (s *wsSender) uploadMediaInit(ctx context.Context, m outboundMedia, chunks 
 // cancels the rest: there is no partial upload worth finishing.
 func (s *wsSender) uploadMediaChunks(ctx context.Context, uploadID string, chunks [][]byte) error {
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(mediaChunkParallelism)
+	g.SetLimit(mediaChunkParallelism(len(chunks)))
 	for i, chunk := range chunks {
 		g.Go(func() error { return s.uploadMediaChunk(gctx, uploadID, i, chunk) })
 	}

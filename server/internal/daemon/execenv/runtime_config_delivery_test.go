@@ -14,11 +14,17 @@ import (
 //     true.
 //   - The surface policy ("here is how a file actually gets delivered HERE") is
 //     PER-KIND, and the chat kind alone splits three ways: web/mobile renders a
-//     card, WeCom pushes the file into the room as its own message, and Slack
-//     and Lark cannot deliver one at all.
+//     card, a channel whose deployment performs the last hop pushes the file
+//     into the room as its own message, and everything else cannot deliver one
+//     at all.
+//
+// The third of those is a DEPLOYMENT fact, not a channel-type fact, which is
+// why the same channel appears below with both answers. It arrives on the claim
+// as ChatChannelDeliversFiles and is used as given.
 
-// deliveryInvariantFixtures covers every task kind. The chat kind appears four
-// times because ChatChannelType splits it into separate surfaces.
+// deliveryInvariantFixtures covers every task kind. The chat kind appears six
+// times because the surface splits on channel type and, within one channel
+// type, on whether this deployment can actually carry a file.
 func deliveryInvariantFixtures() map[string]TaskContextForEnv {
 	return map[string]TaskContextForEnv{
 		"comment":     {IssueID: "i-1", TriggerCommentID: "tc-1", AgentName: "Eve", AgentID: "eve-1"},
@@ -28,7 +34,16 @@ func deliveryInvariantFixtures() map[string]TaskContextForEnv {
 		"chat_direct": {ChatSessionID: "c-1", AgentName: "Eve", AgentID: "eve-1"},
 		"chat_slack":  {ChatSessionID: "c-1", ChatChannelType: ChannelTypeSlack, AgentName: "Eve", AgentID: "eve-1"},
 		"chat_feishu": {ChatSessionID: "c-1", ChatChannelType: ChannelTypeFeishu, AgentName: "Eve", AgentID: "eve-1"},
-		"chat_wecom":  {ChatSessionID: "c-1", ChatChannelType: ChannelTypeWecom, AgentName: "Eve", AgentID: "eve-1"},
+		"chat_wecom":  {ChatSessionID: "c-1", ChatChannelType: ChannelTypeWecom, ChatChannelDeliversFiles: true, AgentName: "Eve", AgentID: "eve-1"},
+		// The same adapter on a deployment with no object storage: there is
+		// nothing to read the bound attachment out of, so the server reports no
+		// delivery and the brief must say so.
+		"chat_wecom_no_store": {ChatSessionID: "c-1", ChatChannelType: ChannelTypeWecom, AgentName: "Eve", AgentID: "eve-1"},
+		// A daemon that knows about file delivery against a server that does
+		// not send the field. Identical shape to the row above by construction —
+		// an absent field decodes as false — and listed separately because it
+		// is a separate way to reach the same wrong answer.
+		"chat_wecom_old_server": {ChatSessionID: "c-1", ChatChannelType: ChannelTypeWecom, AgentName: "Eve", AgentID: "eve-1"},
 	}
 }
 
@@ -74,9 +89,10 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 			mustHave: []string{"`multica attachment upload <local-path>`"},
 			mustNot:  []string{"text-only", "separate message"},
 		},
-		// WeCom: the upload works, but the adapter delivers the file as its own
-		// message. Saying only "files work here" would have the agent write
-		// "see the chart below" with nothing below it.
+		// WeCom on a deployment that can deliver: the upload works, but the
+		// adapter delivers the file as its own message. Saying only "files work
+		// here" would have the agent write "see the chart below" with nothing
+		// below it.
 		"chat_wecom": {
 			mustHave: []string{
 				"`multica attachment upload <local-path>`",
@@ -84,6 +100,19 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 				"not inline",
 			},
 			mustNot: []string{"text-only", "does NOT apply"},
+		},
+		// The same channel where the server reported no delivery. This is the
+		// row that fails if the capability is ever re-derived from the channel
+		// type: the brief would promise a hop the deployment has not got, and
+		// the agent would write "the file is attached" into a room where
+		// nothing is.
+		"chat_wecom_no_store": {
+			mustHave: []string{"WeCom conversation is text-only", "does NOT apply"},
+			mustNot:  []string{"run `multica attachment upload", "separate message"},
+		},
+		"chat_wecom_old_server": {
+			mustHave: []string{"WeCom conversation is text-only", "does NOT apply"},
+			mustNot:  []string{"run `multica attachment upload", "separate message"},
 		},
 		// Slack and Lark are text-only. The upload command must not appear as an
 		// instruction: it binds to a Multica chat reply, which an IM reply on

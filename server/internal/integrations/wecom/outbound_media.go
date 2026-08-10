@@ -27,6 +27,7 @@ package wecom
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -50,15 +51,78 @@ type mediaObjectStore interface {
 	GetReader(ctx context.Context, key string) (io.ReadCloser, error)
 }
 
-// mediaSendFailedText is what the user is told when a file did not make it.
+// What the user is told, and there are three of these because there are three
+// things that can be true — telling them apart is the point (see deliveryState).
 // Hardcoded Chinese, like every other user-facing string this adapter sends
 // (replier.go) — WeCom deployments are China-only.
-const mediaSendFailedText = "⚠️ 有文件没能发出来，我这边保留着，需要的话我再试一次。"
+const (
+	// mediaSendFailedText — we know it did not arrive. Definite, because
+	// claiming a definite failure that later turns out to be a delivery is how
+	// a user ends up ignoring the notice.
+	mediaSendFailedText = "⚠️ 有文件没能发出来，我这边保留着，需要的话我再试一次。"
+
+	// mediaSendUnknownText — the frame went out and no verdict came back, so
+	// the file may be in the chat already. The wording has to survive both
+	// endings: it must not say "failed" to someone looking at the file, and it
+	// must not say "sent" to someone who never got it. It also explains why
+	// nothing is resent automatically, since that is the obvious next question
+	// and the answer is that a duplicate cannot be taken back.
+	mediaSendUnknownText = "⚠️ 有文件我没收到企业微信的送达回执，可能已经发到了、也可能没有。我不会自动重发，免得发重了；你那边没看到的话说一声，我再发一次。"
+
+	// mediaLookupFailedText — the failure is on our side and before the
+	// question was even answered: we could not read what was attached to this
+	// reply, so we do not know whether there was a file. Saying nothing here is
+	// what leaves a user waiting for something that was never attempted.
+	mediaLookupFailedText = "⚠️ 我这边没查到这条回答带没带文件，所以要是有，这次没发出来。需要的话我再试一次。"
+)
 
 // attachmentBudget bounds one answer's whole attachment delivery — reading
-// every object, uploading it, and sending it. Generous because a 50MB file over
-// a hundred acked chunks is not fast, and nothing is waiting on it.
+// every object, uploading it, and sending it. Generous because a 20 MiB file
+// over forty acked chunks, two at a time, is not fast, and nothing is waiting
+// on it.
 const attachmentBudget = 5 * time.Minute
+
+// deliveryState is what we actually know about one file after trying to send
+// it. Three values, because the two-valued version of this was wrong in both
+// directions at once: a send whose ack never came was reported to the user as a
+// definite failure even though the file may well be sitting in the chat, and
+// the local failures that never reached the socket at all were reported to
+// nobody.
+type deliveryState int
+
+const (
+	// deliveryDelivered — WeCom acknowledged the send. The only state that
+	// needs no message to the user; the file is what they see.
+	deliveryDelivered deliveryState = iota
+
+	// deliveryDefinitelyFailed — nothing arrived and nothing can have. Either
+	// the file never became a media_id (the upload was refused, or the object
+	// could not be read), or the send itself came back refused. Safe to retry
+	// in principle, and safe to describe as a failure.
+	deliveryDefinitelyFailed
+
+	// deliveryUnknown — the send frame went out and no verdict came back. The
+	// message may be in the chat. This state must never be retried: the same
+	// media_id sent twice shows the person the file twice and there is nothing
+	// to undo it with.
+	deliveryUnknown
+)
+
+// String names the states for the log, in the vocabulary the code reasons in,
+// so an operator reading a line can tell an unconfirmed send from a refused one
+// without knowing which errcode meant which.
+func (d deliveryState) String() string {
+	switch d {
+	case deliveryDelivered:
+		return "delivered"
+	case deliveryDefinitelyFailed:
+		return "definitely_failed"
+	case deliveryUnknown:
+		return "unknown"
+	default:
+		return "invalid"
+	}
+}
 
 // The per-kind ceilings WeCom applies to uploaded material: 10MB for a photo,
 // 10MB for a video, 2MB for a voice note. Bytes past a kind's ceiling still
@@ -113,41 +177,26 @@ func (o *Outbound) deliverAttachments(e events.Event, to attachmentTarget) {
 	if !to.InstallationID.Valid || to.ChatID == "" {
 		return
 	}
-	// Shed before spawning when too many deliveries are already outstanding.
-	// The semaphore below bounds how many RUN at once; without this,
-	// goroutines still accumulate without limit while they wait for it, and a
-	// workspace whose agents emit artifacts steadily would grow them forever.
-	if !o.claimAttachmentSlot() {
-		o.logger.Warn("wecom outbound: attachment delivery shed, too many already pending",
-			"installation_id", uuidStringPub(to.InstallationID),
-			"pending", maxPendingAttachmentDeliveries)
-		return
-	}
 	o.spawn(func() {
-		defer o.releaseAttachmentSlot()
-
 		ctx, cancel := context.WithTimeout(context.Background(), attachmentBudget)
 		defer cancel()
-
-		// Acquire INSIDE the goroutine, never before the spawn. Bus.Publish is
-		// synchronous on the task-completion goroutine, so blocking out there
-		// would wedge the completion path for up to the attachment budget —
-		// which is the very thing the spawn exists to prevent.
-		select {
-		case attachmentSlots <- struct{}{}:
-			defer func() { <-attachmentSlots }()
-		case <-ctx.Done():
-			o.logger.Warn("wecom outbound: attachment delivery gave up waiting for a slot",
-				"installation_id", uuidStringPub(to.InstallationID))
-			return
-		}
 		o.sendAttachments(ctx, messageID, workspaceID, to)
 	})
 }
 
 // sendAttachments delivers every file bound to one answer. Files are
-// independent: one that fails does not stop the rest, and whatever did not make
-// it is said once at the end rather than once each.
+// independent: one that fails does not stop the rest, and what is known about
+// the ones that did not plainly arrive is said once at the end rather than once
+// each.
+//
+// The lookup comes first and the rationing after it, which is the opposite of
+// the obvious order and is deliberate. A turn with no file bound to it must not
+// consume a slot, and — the reason this matters to the user rather than to the
+// scheduler — a delivery refused for want of a slot can only be reported
+// honestly by something that already knows a file was waiting. Rationing ahead
+// of the lookup can either stay silent about a file that was dropped or warn
+// about a file that never existed, and both of those are worse than one indexed
+// read on a turn that turns out to have nothing attached.
 func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID pgtype.UUID, to attachmentTarget) {
 	rows, err := o.q.ListAttachmentsByChatMessage(ctx, db.ListAttachmentsByChatMessageParams{
 		ChatMessageID: messageID,
@@ -156,50 +205,126 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 	if err != nil {
 		o.logger.WarnContext(ctx, "wecom outbound: attachment lookup failed",
 			"error", err, "chat_message_id", uuidStringPub(messageID))
+		o.tellUser(ctx, to, mediaLookupFailedText)
 		return
 	}
 	if len(rows) == 0 {
 		return
 	}
+	// Past here a file is known to be waiting, so every way out of this
+	// function has to end in either a delivery or a sentence to the user.
+
+	// Shed when too many deliveries are already outstanding. The semaphore
+	// below bounds how many RUN at once; without this, goroutines still
+	// accumulate without limit while they wait for it, and a workspace whose
+	// agents emit artifacts steadily would grow them forever.
+	if !o.claimAttachmentSlot() {
+		o.logger.WarnContext(ctx, "wecom outbound: attachment delivery shed, too many already pending",
+			"installation_id", uuidStringPub(to.InstallationID),
+			"attachments", len(rows),
+			"pending", maxPendingAttachmentDeliveries)
+		o.tellUser(ctx, to, mediaSendFailedText)
+		return
+	}
+	defer o.releaseAttachmentSlot()
+
+	// Acquired here and never before the spawn. Bus.Publish is synchronous on
+	// the task-completion goroutine, so blocking out there would wedge the
+	// completion path for up to the attachment budget — which is the very thing
+	// the spawn exists to prevent.
+	select {
+	case attachmentSlots <- struct{}{}:
+		defer func() { <-attachmentSlots }()
+	case <-ctx.Done():
+		o.logger.WarnContext(ctx, "wecom outbound: attachment delivery gave up waiting for a slot",
+			"installation_id", uuidStringPub(to.InstallationID), "attachments", len(rows))
+		// Deliberately on a fresh context: the one that expired is the reason
+		// we are here, and reusing it would drop the sentence too.
+		o.tellUser(context.WithoutCancel(ctx), to, mediaSendFailedText)
+		return
+	}
+
 	// Resolved here rather than carried in from the caller: the send that
 	// delivered the words may have been minutes ago on a socket since replaced,
 	// and the registry always holds the live one.
 	sender := o.senders.get(to.InstallationID)
 	if sender == nil {
+		// Nothing to say it with — the socket that would carry the apology is
+		// the socket that is missing. The log is the only place this can go.
 		o.logger.WarnContext(ctx, "wecom outbound: no live connection for attachment delivery",
 			"installation_id", uuidStringPub(to.InstallationID), "attachments", len(rows))
 		return
 	}
-	failed := 0
+	failed, unknown := 0, 0
 	for _, row := range rows {
-		if err := o.sendAttachment(ctx, sender, row, to); err != nil {
+		state, err := o.sendAttachment(ctx, sender, row, to)
+		switch state {
+		case deliveryDefinitelyFailed:
 			failed++
+		case deliveryUnknown:
+			unknown++
+		}
+		if err != nil {
 			// The object's URL stays out of the log: it is an address that
 			// serves the file to whoever holds it.
-			o.logger.WarnContext(ctx, "wecom outbound: attachment not delivered",
+			o.logger.WarnContext(ctx, "wecom outbound: attachment not confirmed delivered",
 				"error", err,
+				"delivery", state.String(),
 				"installation_id", uuidStringPub(to.InstallationID),
 				"attachment_id", uuidStringPub(row.ID),
 				"content_type", row.ContentType,
 				"size_bytes", row.SizeBytes)
 		}
 	}
-	if failed == 0 {
+	// The answer is already on the user's screen and it may well refer to a
+	// file. Saying nothing would leave them looking for one that never comes —
+	// but saying "it failed" about a file that did arrive is its own harm, so
+	// each group speaks for itself and an unconfirmed send never borrows the
+	// definite wording.
+	var lines []string
+	if failed > 0 {
+		lines = append(lines, mediaSendFailedText)
+	}
+	if unknown > 0 {
+		lines = append(lines, mediaSendUnknownText)
+	}
+	if len(lines) > 0 {
+		o.tellUser(ctx, to, strings.Join(lines, "\n"))
+	}
+}
+
+// tellUser puts one sentence into the conversation, best effort. Every caller
+// is already on a path where something went wrong, so a failure here is logged
+// and dropped rather than propagated — there is nothing further to try.
+func (o *Outbound) tellUser(ctx context.Context, to attachmentTarget, text string) {
+	if o.senders == nil {
 		return
 	}
-	// The answer is already on the user's screen and it may well refer to a
-	// file. Saying nothing would leave them looking for one that never comes.
-	if err := sender.sendTextCtx(ctx, to.ChatID, to.ChatType, mediaSendFailedText); err != nil {
-		o.logger.WarnContext(ctx, "wecom outbound: could not say the file failed",
+	sender := o.senders.get(to.InstallationID)
+	if sender == nil {
+		return
+	}
+	if err := sender.sendTextCtx(ctx, to.ChatID, to.ChatType, text); err != nil {
+		o.logger.WarnContext(ctx, "wecom outbound: could not tell the user about the file",
 			"error", err, "installation_id", uuidStringPub(to.InstallationID))
 	}
 }
 
-// sendAttachment carries one file from object storage into the chat.
-func (o *Outbound) sendAttachment(ctx context.Context, sender *wsSender, row db.Attachment, to attachmentTarget) error {
+// sendAttachment carries one file from object storage into the chat, and
+// reports what is known about where it ended up. The error is for the log; the
+// state is what the user is told.
+func (o *Outbound) sendAttachment(ctx context.Context, sender *wsSender, row db.Attachment, to attachmentTarget) (deliveryState, error) {
+	// The recorded size is checked before a single byte is fetched. An
+	// oversize attachment is refused either way — readObject re-checks what it
+	// actually read, because the column is metadata and the object is the
+	// truth — but reading 40 MB out of storage to then refuse it is work
+	// nobody benefits from.
+	if row.SizeBytes > maxMediaUploadBytes {
+		return deliveryDefinitelyFailed, fmt.Errorf("attachment is %d bytes: %w", row.SizeBytes, errMediaUploadTooLarge)
+	}
 	data, err := o.readObject(ctx, row.Url)
 	if err != nil {
-		return err
+		return deliveryDefinitelyFailed, err
 	}
 	kind := wecomMediaKind(row.ContentType, row.Filename, len(data))
 	name := outboundMediaName(row.Filename, row.ContentType)
@@ -210,18 +335,48 @@ func (o *Outbound) sendAttachment(ctx context.Context, sender *wsSender, row db.
 		Data:     data,
 	})
 	if err != nil {
-		return fmt.Errorf("upload %s: %w", kind, err)
+		// A failed upload never produced a media_id, so no message was ever
+		// addressed to the chat — including when the failure was the finish
+		// step's own lost ack. The file is definitely not there.
+		return deliveryDefinitelyFailed, fmt.Errorf("upload %s: %w", kind, err)
 	}
 	// Video is the only kind with fields beyond the media_id, and both are
 	// required. The file's own name is what there is to say about it — the
 	// attachment row carries no caption and the agent's words are already in
 	// the message above.
-	return sender.sendMedia(ctx, to.ChatID, to.ChatType, mediaSend{
+	err = sender.sendMedia(ctx, to.ChatID, to.ChatType, mediaSend{
 		Kind:        kind,
 		MediaID:     mediaID,
 		Title:       strings.TrimSuffix(name, path.Ext(name)),
 		Description: name,
 	})
+	return sendOutcome(err), err
+}
+
+// sendOutcome reads a media push's error for what it says about the message.
+//
+// The one distinction that matters: a refusal is WeCom answering, and a missing
+// answer is not an answer. errAckTimeout means the frame reached the socket and
+// the verdict never came, which leaves the message possibly delivered.
+//
+// A context error lands on the same side, and less precisely than one would
+// like. wsSender.request returns the same ctx.Err() whether the context ended
+// before the frame was written or while waiting for its verdict, so from out
+// here the two cannot be told apart. Reading both as unknown is the direction
+// that costs least: an unknown is never resent and is described in words that
+// hold either way, so a send that never happened is under-claimed rather than a
+// send that did happen being denied.
+func sendOutcome(err error) deliveryState {
+	switch {
+	case err == nil:
+		return deliveryDelivered
+	case errors.Is(err, errAckTimeout),
+		errors.Is(err, context.Canceled),
+		errors.Is(err, context.DeadlineExceeded):
+		return deliveryUnknown
+	default:
+		return deliveryDefinitelyFailed
+	}
 }
 
 // readObject pulls the whole file into memory. It has to be whole: the upload
@@ -238,7 +393,10 @@ func (o *Outbound) readObject(ctx context.Context, rawURL string) ([]byte, error
 	}
 	defer rc.Close()
 	// One byte of headroom, so reading exactly the cap can be told from a file
-	// that has more to come.
+	// that has more to come. The cap is the platform's, not the framing's, so
+	// the read stops there rather than at the 50 MB the chunk protocol could
+	// have expressed — the extra 30 MB would only ever be resident long enough
+	// to be refused.
 	data, err := io.ReadAll(io.LimitReader(rc, maxMediaUploadBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read attachment: %w", err)

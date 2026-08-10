@@ -2187,6 +2187,15 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			if binding, berr := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), cs.ID); berr == nil {
 				resp.ChatChannelType = binding.ChannelType
 				resp.ChatType = binding.ChatType
+				// Whether a file the agent produces reaches this
+				// conversation is the server's question, not the daemon's.
+				// It takes an adapter that goes back for the bound
+				// attachment AND storage for it to go back to, and only
+				// this process knows both. Answered here so the daemon
+				// never has to infer it from the channel type — an
+				// inference that promises delivery on any deployment
+				// running WeCom without object storage.
+				resp.ChatChannelDeliversFiles = h.channelDeliversFiles(binding.ChannelType)
 				if binding.ChannelType == string(slack.TypeSlack) {
 					// The latest trigger was a thread reply iff its reply-target
 					// thread (last_thread_id) differs from its own message id (a

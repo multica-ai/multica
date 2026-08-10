@@ -63,36 +63,32 @@ func AudienceOf(channelType, chatType string) ChatAudience {
 	}
 }
 
-// ChannelCarriesFiles reports whether an adapter can put a file the agent
-// produced into the conversation. It is the delivery half of the two-layer
-// channel policy (MUL-4899), and it is a per-adapter capability rather than a
-// property of having a channel: `multica attachment upload` binds the file to
-// the Multica chat reply on every surface, and whether that reaches the reader
-// depends on whether the adapter goes back for it. WeCom does — it reads the
-// bound attachment out of object storage and sends it into the chat behind the
-// answer (integrations/wecom/outbound_media.go). Slack and Lark do not, so
-// their briefs still say to describe the file in words.
+// ChannelCarriesFiles reports whether a file the agent produces will actually
+// reach this conversation. It is the delivery half of the two-layer channel
+// policy (MUL-4899).
 //
-// Every channel type this package knows is named below rather than left to the
-// default, so adding a fourth adapter surfaces here as a decision to make. An
-// unrecognized type — a channel the server added that this daemon build has no
-// constant for — answers false, which is the safe direction: the agent is told
-// to describe its file in words, and the worst case is a file that could have
-// been delivered was not. False the other way would have the agent write "see
-// the attached chart" into a conversation that never receives one.
+// serverSaysDelivers is the claim's chat_channel_delivers_files, and it is the
+// ONLY thing consulted for a channel-backed chat. The channel type is not, and
+// the temptation to answer from it is the defect this signature exists to
+// prevent: whether the last hop happens takes an adapter that goes back for the
+// bound attachment AND object storage for it to go back to, and the second half
+// is a deployment fact no daemon can observe. `case ChannelTypeWecom: return
+// true` reads as a statement about the adapter but functions as a statement
+// about every deployment running it, including the ones with no storage
+// configured, where it promises the agent a delivery the server cannot make.
+// Mixed versions land in the same place from the other direction: a daemon new
+// enough to know WeCom delivers files, talking to a server too old to perform
+// the hop, infers a capability that is not there. Both cases arrive as false
+// here, which is the brief that says to describe the file in words.
 //
 // Web / mobile chat is not answered here. It has no channel type at all and is
 // handled by its own branch, which points at the attachment card the browser
 // renders rather than at an IM message.
-func ChannelCarriesFiles(channelType string) bool {
-	switch channelType {
-	case ChannelTypeWecom:
-		return true
-	case ChannelTypeSlack, ChannelTypeFeishu:
-		return false
-	default:
+func ChannelCarriesFiles(channelType string, serverSaysDelivers bool) bool {
+	if channelType == "" {
 		return false
 	}
+	return serverSaysDelivers
 }
 
 // ChannelDisplayName renders a chat_channel_type for prompt / brief copy.

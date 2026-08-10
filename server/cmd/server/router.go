@@ -732,9 +732,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// deployment configured storage — with none there is nothing
 				// to read an attachment out of, and the option is what the
 				// delivery path checks for.
+				//
+				// DeclareChannelFileDelivery is the same condition said to the
+				// agent: a run only gets told it can send a file where this
+				// branch actually built the hop that sends it. The two lines
+				// sit together on purpose — a deployment that has the storage
+				// and a deployment whose agents are promised delivery must be
+				// the same deployment, and the only way to keep that true is
+				// for one `if` to decide both.
 				wecomOutboundOpts := []wecom.OutboundOption{}
 				if store != nil {
 					wecomOutboundOpts = append(wecomOutboundOpts, wecom.WithAttachments(store))
+					h.DeclareChannelFileDelivery(string(wecom.TypeWecom))
 				}
 				wecom.NewOutbound(queries, wecomSenders, slog.Default(), wecomOutboundOpts...).Register(bus)
 

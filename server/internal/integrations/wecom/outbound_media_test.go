@@ -13,8 +13,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,15 +34,20 @@ const (
 	testTaskID      = "55555555-5555-5555-5555-555555555555"
 )
 
-// fakeObjectStore stands in for the deployment's object storage.
+// fakeObjectStore stands in for the deployment's object storage. reads counts
+// the fetches, which is how "refused before a byte was read" is asserted. No
+// lock: every test here runs the delivery inline (newOutboundWithMedia replaces
+// spawn), so the counter and its assertion share one goroutine.
 type fakeObjectStore struct {
-	key  string
-	data []byte
-	err  error
+	key   string
+	data  []byte
+	err   error
+	reads int
 }
 
 func (f *fakeObjectStore) KeyFromURL(string) string { return f.key }
 func (f *fakeObjectStore) GetReader(context.Context, string) (io.ReadCloser, error) {
+	f.reads++
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -290,9 +297,48 @@ func TestProcessEvent_WithoutObjectStorageDeliversTextOnly(t *testing.T) {
 	}
 }
 
-// The answer is already on screen and may well refer to the file. Silence
-// leaves the user looking for something that never arrives.
-func TestSendAttachments_TellsTheUserWhenAFileFailed(t *testing.T) {
+// ---- the three delivery states ----
+//
+// A file that was sent has three possible fates and the code used to have words
+// for two of them. Each test below owns one state and asserts the wording of
+// that state alone, so folding any pair back together fails at least one of
+// them: the definite notice appearing on an unconfirmed send fails the unknown
+// test, the hedged notice appearing on a refusal fails the definite test, and
+// either appearing on a success fails the delivered test.
+
+// delivered — WeCom took the file. The user gets the file and nothing else;
+// a notice here would be the system talking about itself.
+func TestSendAttachments_ADeliveredFileIsNotAnnounced(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{
+		ID: mustTestUUID(t), Filename: "ok.pdf", Url: "https://cdn.example/obj/ok",
+		ContentType: "application/pdf", SizeBytes: 4,
+	})
+	o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "obj/ok", data: []byte("DATA")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("Here it is.")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if n := len(mediaSends(t, conn)); n != 1 {
+		t.Fatalf("media sends = %d, want 1", n)
+	}
+	got := markdownSends(t, conn)
+	if len(got) != 1 || got[0] != "Here it is." {
+		t.Errorf("text sends = %v, want the answer alone — a delivered file needs no commentary", got)
+	}
+	for _, notice := range []string{mediaSendFailedText, mediaSendUnknownText, mediaLookupFailedText} {
+		if slices.Contains(got, notice) {
+			t.Errorf("a delivered file was reported to the user as %q", notice)
+		}
+	}
+}
+
+// definitely_failed — the server refused the upload, so nothing was ever
+// addressed to the chat. The answer is already on screen and may well refer to
+// the file; silence leaves the user looking for something that never arrives.
+func TestSendAttachments_ARefusedFileIsReportedAsDefinitelyFailed(t *testing.T) {
 	t.Parallel()
 	q := oneAttachmentQueries(t, db.Attachment{
 		ID: mustTestUUID(t), Filename: "big.bin", Url: "https://cdn.example/obj/bin",
@@ -310,10 +356,231 @@ func TestSendAttachments_TellsTheUserWhenAFileFailed(t *testing.T) {
 		t.Fatalf("text sends = %v, want the answer and a note that the file failed", got)
 	}
 	if got[1] != mediaSendFailedText {
-		t.Errorf("second message = %q, want the failure notice", got[1])
+		t.Errorf("second message = %q, want the definite failure notice — the server refused it, so there is no doubt to hedge", got[1])
+	}
+	if strings.Contains(got[1], mediaSendUnknownText) {
+		t.Error("a refusal was reported with the hedged wording; a definite failure the user is invited to doubt is a failure they will not act on")
 	}
 	if n := len(mediaSends(t, conn)); n != 0 {
 		t.Errorf("media sends = %d, want 0 — nothing was uploaded", n)
+	}
+}
+
+// unknown — the push went out and no verdict came back. WeCom may have
+// delivered it. This is the state the old code folded into the one above, and
+// it is the folding that costs: a user looking at the file is told it failed,
+// and stops believing the notice.
+//
+// Two things are pinned. The wording must be the hedged one, and the send must
+// NOT be repeated: the same media_id twice puts the file in the chat twice and
+// there is nothing to take it back with.
+func TestSendAttachments_AnUnconfirmedSendIsNotCalledAFailureAndIsNotRetried(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{
+		ID: mustTestUUID(t), Filename: "chart.png", Url: "https://cdn.example/obj/png",
+		ContentType: "image/png", SizeBytes: 7,
+	})
+	o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "obj/png", data: []byte("PNGDATA")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	// An empty completion, so the first aibot_send_msg on the wire is the media
+	// push itself and the dropped ack is unambiguously its own.
+	conn.dropAcks[cmdSendMsg] = 1
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if n := len(mediaSends(t, conn)); n != 1 {
+		t.Errorf("media sends = %d, want exactly 1 — an unconfirmed push must never be repeated, a duplicate file cannot be undone", n)
+	}
+	got := markdownSends(t, conn)
+	if len(got) != 1 {
+		t.Fatalf("text sends = %v, want one notice about the unconfirmed file", got)
+	}
+	if got[0] == mediaSendFailedText {
+		t.Error("an unconfirmed send was reported as a definite failure; the file may be in the chat the user is reading")
+	}
+	if got[0] != mediaSendUnknownText {
+		t.Errorf("notice = %q, want the non-definitive wording", got[0])
+	}
+}
+
+// Both at once, on two files. Each group speaks for itself: neither borrows the
+// other's wording, and neither swallows the other.
+func TestSendAttachments_ADefiniteFailureAndAnUnknownAreBothReported(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{
+		ID: mustTestUUID(t), Filename: "first.png", Url: "https://cdn.example/obj/a",
+		ContentType: "image/png", SizeBytes: 7,
+	})
+	// The second file is past the cap, which is refused locally and definitely.
+	q.attachments = append(q.attachments, db.Attachment{
+		ID: mustTestUUID(t), Filename: "huge.bin", Url: "https://cdn.example/obj/b",
+		ContentType: "application/octet-stream", SizeBytes: maxMediaUploadBytes + 1,
+	})
+	o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "obj/a", data: []byte("PNGDATA")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	conn.dropAcks[cmdSendMsg] = 1 // the first file's push is never acknowledged
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	got := markdownSends(t, conn)
+	if len(got) != 1 {
+		t.Fatalf("text sends = %v, want one notice covering both files", got)
+	}
+	if !strings.Contains(got[0], mediaSendFailedText) {
+		t.Errorf("notice = %q, missing the definite failure for the oversize file", got[0])
+	}
+	if !strings.Contains(got[0], mediaSendUnknownText) {
+		t.Errorf("notice = %q, missing the unconfirmed send — folded into the definite one", got[0])
+	}
+}
+
+// The classifier itself, stated as a table so the mapping is legible in one
+// place. It is the only thing standing between an errcode and what a person
+// reads.
+func TestSendOutcome_TellsARefusalFromAMissingAnswer(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		err  error
+		want deliveryState
+		why  string
+	}{
+		{"acknowledged", nil, deliveryDelivered, "WeCom answered and took it"},
+		{"refused", &wecomAPIError{Cmd: cmdSendMsg, Code: 40058}, deliveryDefinitelyFailed, "an errcode is an answer, and the answer is no"},
+		{"no verdict", errAckTimeout, deliveryUnknown, "the frame went out; the read loop can simply have been busy"},
+		{"wrapped no verdict", fmt.Errorf("send: %w", errAckTimeout), deliveryUnknown, "the classification must survive being wrapped on the way up"},
+		{"deadline", context.DeadlineExceeded, deliveryUnknown, "request returns the same ctx error before and after the write, so this cannot be told from a send that went out"},
+		{"cancelled", context.Canceled, deliveryUnknown, "same reason"},
+		{"transport", errors.New("write: broken pipe"), deliveryDefinitelyFailed, "the frame did not reach the socket"},
+	}
+	for _, tc := range cases {
+		if got := sendOutcome(tc.err); got != tc.want {
+			t.Errorf("sendOutcome(%s) = %s, want %s — %s", tc.name, got, tc.want, tc.why)
+		}
+	}
+	// The names are what an operator greps for in the log, so they are pinned.
+	for state, want := range map[deliveryState]string{
+		deliveryDelivered:        "delivered",
+		deliveryDefinitelyFailed: "definitely_failed",
+		deliveryUnknown:          "unknown",
+	} {
+		if got := state.String(); got != want {
+			t.Errorf("deliveryState.String() = %q, want %q", got, want)
+		}
+	}
+}
+
+// ---- the local failures, which used to reach nobody ----
+//
+// Three ways a promised file is dropped before it ever reaches the socket. Each
+// was a log line and nothing more, so the user watched an answer that mentions
+// a file and no file.
+
+// The lookup is how we find out whether anything was attached at all, so its
+// failure leaves the question open. The notice says exactly that rather than
+// asserting a file existed.
+func TestSendAttachments_ALookupFailureIsSaidOutLoud(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{ID: mustTestUUID(t), Filename: "a.pdf", Url: "u"})
+	q.attachmentsErr = errors.New("connection reset")
+	o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "k", data: []byte("x")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("The report is attached.")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	got := markdownSends(t, conn)
+	if len(got) != 2 {
+		t.Fatalf("text sends = %v, want the answer and a note that the lookup failed", got)
+	}
+	if got[1] != mediaLookupFailedText {
+		t.Errorf("second message = %q, want the lookup-failure notice", got[1])
+	}
+}
+
+// Shedding is a local scheduling decision, and the file is definitely still in
+// object storage rather than in the chat — so the definite wording is right,
+// and saying nothing is not.
+func TestSendAttachments_ADeliveryShedForBacklogIsSaidOutLoud(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{
+		ID: mustTestUUID(t), Filename: "a.pdf", Url: "https://cdn.example/obj/a", SizeBytes: 1,
+	})
+	o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "obj/a", data: []byte("x")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	// Fill the backlog so this delivery is refused a slot.
+	for i := 0; i < maxPendingAttachmentDeliveries; i++ {
+		if !o.claimAttachmentSlot() {
+			t.Fatalf("slot %d refused before the cap", i)
+		}
+	}
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("Attached.")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if n := len(conn.cmdFrames(cmdUploadMediaInit)); n != 0 {
+		t.Fatalf("upload init frames = %d, want 0 — the delivery was supposed to be shed", n)
+	}
+	got := markdownSends(t, conn)
+	if len(got) != 2 || got[1] != mediaSendFailedText {
+		t.Errorf("text sends = %v, want the answer and the failure notice — a shed delivery the user is never told about is a file that silently vanishes", got)
+	}
+}
+
+// A turn with nothing attached must stay silent even under a full backlog. This
+// is why the lookup runs before the slot is claimed: rationing first can only
+// warn about files that may not exist.
+func TestSendAttachments_ATurnWithNoFilesSaysNothingEvenWhenShedding(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{ID: mustTestUUID(t), Filename: "a.pdf", Url: "u"})
+	q.attachments = nil // nothing was bound to this answer
+	o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "k", data: []byte("x")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	for i := 0; i < maxPendingAttachmentDeliveries; i++ {
+		o.claimAttachmentSlot()
+	}
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("Just words.")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if got := markdownSends(t, conn); len(got) != 1 || got[0] != "Just words." {
+		t.Errorf("text sends = %v, want the answer alone — warning about a file nobody produced trains the user to ignore the warning", got)
+	}
+}
+
+// The recorded size is checked before a byte is fetched: reading tens of
+// megabytes out of storage only to refuse them is work that helps nobody, and
+// on a large file it is minutes of it.
+func TestSendAttachment_RefusesAnOversizeAttachmentWithoutReadingIt(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{
+		ID: mustTestUUID(t), Filename: "huge.zip", Url: "https://cdn.example/obj/huge",
+		ContentType: "application/zip", SizeBytes: maxMediaUploadBytes + 1,
+	})
+	store := &fakeObjectStore{key: "obj/huge", data: []byte("never read")}
+	o, instID, conn := newOutboundWithMedia(t, q, store)
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("Attached.")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if store.reads != 0 {
+		t.Errorf("object reads = %d, want 0 — a file past the cap is refused on its recorded size, before the bytes are fetched", store.reads)
+	}
+	if n := len(conn.cmdFrames(cmdUploadMediaInit)); n != 0 {
+		t.Errorf("upload init frames = %d, want 0", n)
+	}
+	got := markdownSends(t, conn)
+	if len(got) != 2 || got[1] != mediaSendFailedText {
+		t.Errorf("text sends = %v, want the answer and the definite failure notice", got)
 	}
 }
 

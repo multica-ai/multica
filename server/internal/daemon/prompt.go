@@ -546,18 +546,18 @@ func buildChatPrompt(task Task) string {
 	// This is the DELIVERY layer of the channel policy, and it has three
 	// answers, not two (MUL-4899). `attachment upload` binds a file to the
 	// Multica chat reply on every surface; what differs is whether anything
-	// goes back for it. Web/mobile renders it as a card in the browser. WeCom's
-	// adapter reads it out of object storage and sends it into the room as its
-	// own message. Slack and Lark do neither, so for them the upload has
-	// nothing that reaches the reader and the agent must say so in words.
-	// ChannelCarriesFiles is where that per-adapter answer lives; do not
-	// collapse it back into "is there a channel at all", and do not collapse it
-	// into the HISTORY layer above, which is Slack-only and asks a different
-	// question. The brief's `## Output` section states the same policy.
+	// goes back for it. Web/mobile renders it as a card in the browser. A
+	// channel-backed chat gets the upload guidance only where the server said
+	// this deployment performs the last hop, and otherwise the upload reaches
+	// nobody and the agent must say so in words. The answer arrives on the
+	// claim; do not re-derive it from the channel type, do not collapse it back
+	// into "is there a channel at all", and do not collapse it into the HISTORY
+	// layer above, which is Slack-only and asks a different question. The
+	// brief's `## Output` section states the same policy.
 	switch {
 	case task.ChatChannelType == "":
 		b.WriteString("\nTo include a file or image you produced in your reply, run `multica attachment upload <local-path>`. The file binds to your reply automatically and appears as an attachment card below it even if you paste nothing. The command also returns a `markdown` snippet you may paste on its own line to place the item where you want it (files render as a card, images inline).\n")
-	case execenv.ChannelCarriesFiles(task.ChatChannelType):
+	case execenv.ChannelCarriesFiles(task.ChatChannelType, task.ChatChannelDeliversFiles):
 		fmt.Fprintf(&b, "\nTo include a file or image you produced in your reply, run `multica attachment upload <local-path>`. It binds to your reply and Multica sends it into the %s conversation as a separate message right after your text — there is no way to place it inline, so write your reply to read correctly with the file arriving after it.\n", channelDisplayName(task.ChatChannelType))
 	default:
 		fmt.Fprintf(&b, "\nThis reply is delivered to %s as text. You cannot attach a file to it: `multica attachment upload` binds to a Multica chat reply, which this is not. If you produce a file, describe it in words — never write its local path as a link, and never upload it and then write as though it arrived.\n", channelDisplayName(task.ChatChannelType))
