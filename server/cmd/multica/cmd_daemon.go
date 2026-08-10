@@ -1086,6 +1086,32 @@ func requestDaemonShutdown(healthPort int) error {
 
 // --- daemon status ---
 
+// findDesktopDaemonHealth scans ~/.multica/profiles/desktop-* for a running
+// daemon started by the desktop app. Returns its health map and true when found.
+func findDesktopDaemonHealth(ctx context.Context) (map[string]any, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, false
+	}
+	profilesDir := filepath.Join(home, ".multica", "profiles")
+	entries, err := os.ReadDir(profilesDir)
+	if err != nil {
+		return nil, false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "desktop-") {
+			continue
+		}
+		port := healthPortForProfile(entry.Name())
+		health := checkDaemonHealthOnPort(ctx, port)
+		if health["status"] == "running" {
+			health["profile"] = entry.Name()
+			return health, true
+		}
+	}
+	return nil, false
+}
+
 func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	profile := resolveProfile(cmd)
 	healthPort, err := daemonStatusHealthPort(cmd)
@@ -1097,6 +1123,14 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
+
+	// When the default profile daemon is stopped, check for a desktop-app-managed
+	// daemon that may be running under ~/.multica/profiles/desktop-*/.
+	if health["status"] == "stopped" && profile == "" {
+		if dHealth, ok := findDesktopDaemonHealth(ctx); ok {
+			health = dHealth
+		}
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
