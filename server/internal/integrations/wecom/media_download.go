@@ -327,10 +327,11 @@ func sameFormEncoding(a, b string) bool {
 // with no control characters in it, or empty when nothing usable is left.
 //
 // The control-character strip is here because decodeFormEncodedFilename
-// widened what can reach this function. Of the control characters, exactly one
-// used to get this far: measured against net/http, a raw TAB in a header value
-// is passed through and every other control byte — NUL, CR, LF, ESC, DEL —
-// makes the transport reject the whole response. Since ParseMediaType never
+// widened what can reach this function. Almost none of them used to get this
+// far: measured against net/http, a raw TAB is passed through in a header
+// value, as is U+0085 (NEL, which is a control character to unicode.IsControl
+// and two ordinary bytes to the transport), while NUL, CR, LF, ESC and DEL all
+// make the transport reject the whole response. Since ParseMediaType never
 // percent-decodes the plain filename= form, `filename="a%00b.docx"` stayed the
 // printable string it looks like. Undoing the escapes turns all of them into
 // the bytes they name: %00 into a real NUL, %0D%0A into a real CRLF.
@@ -363,9 +364,15 @@ func cleanMediaFilename(name string) string {
 // stripControlRunes drops every control character, dropping rather than
 // substituting: a placeholder would put a character in the name that the
 // sender did not type, and an attachment called "a_b.docx" that was really
-// called "ab.docx" is its own small lie. Runes that decoded to invalid UTF-8
-// are left as they are — RuneError is not a control character, and mangling a
-// name further is not an improvement.
+// called "ab.docx" is its own small lie.
+//
+// Bytes that decoded to invalid UTF-8 are a separate matter and are NOT
+// dropped: strings.Map replaces each of them with U+FFFD, which is what its
+// range loop yields for them. That is the useful answer rather than an
+// accident — Postgres TEXT will not take an invalid UTF-8 sequence either, so
+// a name that kept its raw bytes would fail the insert the same way a NUL
+// does, and U+FFFD is the standard way to say "a character was here and it did
+// not survive".
 func stripControlRunes(s string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {

@@ -33,10 +33,11 @@ package wecom
 // rides in the aibot_subscribe body, which traceOutFields never descends
 // into.
 //
-// One string skips the redactor: an attachment's Content-Disposition, which
-// traceMediaHeaders writes verbatim under a cap of its own. That function
-// says why the redactor would destroy the only thing the line is for, and why
-// nothing in that header is a credential.
+// Two strings skip the redactor, both from an attachment's Content-Disposition:
+// the header itself and the filename read out of it. traceMediaHeaders writes
+// them verbatim under a cap of its own, and says why the redactor would destroy
+// the only thing the line is for, and why nothing in that header is a
+// credential.
 
 import (
 	"log/slog"
@@ -77,12 +78,16 @@ const tracePreviewRunes = 120
 // even answer the question it was written to answer.
 //
 // 2048 is sized against the largest thing this can legitimately be rather
-// than picked round. Common filesystems stop a name at 255 bytes;
-// percent-escaping every one of those triples it to 765, and a header
-// carrying BOTH parameter forms of such a name — filename= and filename*= —
-// comes to about 1570 runes with its scaffolding. Anything past this is not a
-// filename, and a log line is not where an unbounded remote string should
-// land.
+// than picked round. POSIX filesystems stop a name at 255 BYTES;
+// percent-escaping every one of those triples it to 765, and a header carrying
+// BOTH parameter forms of such a name — filename= and filename*= — comes to
+// about 1570 runes with its scaffolding.
+//
+// NTFS counts 255 UTF-16 code units instead, so a name of 255 CJK characters is
+// 765 bytes before escaping and can exceed this cap in the both-parameter form.
+// That is a name no interface offers to type and no user has; the cap is chosen
+// against what arrives, not against what the longest filesystem would accept,
+// and a log line is not where an unbounded remote string should land.
 const traceHeaderRunes = 2048
 
 // tracePreview returns a bounded, single-line prefix of s with any bearer
@@ -230,8 +235,9 @@ func traceOutAttempt(log *slog.Logger, seq uint64, t *outTrace) {
 //
 // The error text goes through tracePreview: it is the socket's words, not
 // ours, so it is bounded and redacted like every other message string here.
-// The one string in this file that is bounded but NOT redacted is an
-// attachment's Content-Disposition, and traceMediaHeaders says why.
+// The strings in this file that are bounded but NOT redacted are an
+// attachment's Content-Disposition and the filename read out of it, and
+// traceMediaHeaders says why.
 func traceOutResult(log *slog.Logger, seq uint64, t *outTrace, stage string, err error) {
 	if t == nil {
 		return
