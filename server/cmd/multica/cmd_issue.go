@@ -328,6 +328,8 @@ func init() {
 	issueCreateCmd.Flags().String("workflow", "", "Issue workflow recipe ID to start the new issue on (runs the plan→build→gate loop; find IDs with `multica workflow list`)")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
+	// CEREBRO-PATCH(cli-issue-on-behalf-of): FIR-4930 — attribute the issue to the human who owns the work, not the automation's creator.
+	registerOnBehalfOfFlag(issueCreateCmd, "Workspace member name or UUID this issue is created on behalf of (sets the issue's human origin and inbox owner; defaults to the human who triggered the run)")
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
@@ -342,6 +344,8 @@ func init() {
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
+	// CEREBRO-PATCH(cli-issue-on-behalf-of): FIR-4930 — correct an issue stamped with the wrong human.
+	registerOnBehalfOfFlag(issueUpdateCmd, "Workspace member name or UUID this issue is on behalf of (use --on-behalf-of \"\" to clear and fall back to the triggering human)")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
@@ -742,6 +746,10 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["assignee_type"] = aType
 		body["assignee_id"] = aID
 	}
+	// CEREBRO-PATCH(cli-issue-on-behalf-of): FIR-4930 — resolved before create so a bad name never half-creates an issue.
+	if err := applyOnBehalfOfFlag(ctx, client, cmd, body); err != nil {
+		return err
+	}
 
 	// Quick-create stamp: when the daemon sets MULTICA_QUICK_CREATE_TASK_ID
 	// before invoking the agent, the agent's `multica issue create` call
@@ -974,6 +982,10 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			}
 			body["parent_issue_id"] = parent.ID
 		}
+	}
+	// CEREBRO-PATCH(cli-issue-on-behalf-of): FIR-4930 — correct the human this issue is attributed to.
+	if err := applyOnBehalfOfFlag(ctx, client, cmd, body); err != nil {
+		return err
 	}
 
 	if len(body) == 0 {

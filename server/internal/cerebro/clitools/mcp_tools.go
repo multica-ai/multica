@@ -284,6 +284,8 @@ WRITING GUIDELINES — issues are read by both humans and AI agents:
 				"parent_issue_id": map[string]any{"type": "string", "description": "Parent issue ID for sub-issues"},
 				"assignee_type":   map[string]any{"type": "string", "description": "Assignee type: member or agent"},
 				"assignee_id":     map[string]any{"type": "string", "description": "Assignee ID"},
+				// FIR-4930 — without this an autopilot's issues are all attributed to the autopilot's creator.
+				"on_behalf_of_user_id": map[string]any{"type": "string", "description": "User ID of the workspace member this issue is created for. Set it when the work belongs to someone other than whoever triggered your run — it decides the issue's human origin and who is notified. Must be an active member of this workspace. Omit to attribute the issue to the human who triggered you."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -321,6 +323,9 @@ WRITING GUIDELINES — issues are read by both humans and AI agents:
 		if v := optString(args, "assignee_id"); v != "" {
 			body["assignee_id"] = v
 		}
+		if v := optString(args, "on_behalf_of_user_id"); v != "" {
+			body["on_behalf_of_user_id"] = v
+		}
 
 		var issue any
 		if err := client.PostJSON(ctx, "/api/issues", body, &issue); err != nil {
@@ -348,6 +353,8 @@ WRITING GUIDELINES — issues are read by both humans and AI agents:
 				"parent_issue_id": map[string]any{"type": "string", "description": "Set, change, or remove the parent issue. Pass an issue ID to set/change, or empty string to remove."},
 				"assignee_type":   map[string]any{"type": "string", "description": "Assignee type: member or agent"},
 				"assignee_id":     map[string]any{"type": "string", "description": "Assignee ID"},
+				// FIR-4930 — correct an issue that was stamped with the wrong human.
+				"on_behalf_of_user_id": map[string]any{"type": "string", "description": "User ID of the workspace member this issue is on behalf of. Pass an empty string to clear it and fall back to the human who triggered the run. Correcting it also moves the auto-added subscription off the previously attributed human."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -357,7 +364,7 @@ WRITING GUIDELINES — issues are read by both humans and AI agents:
 		}
 
 		body := map[string]any{}
-		for _, key := range []string{"title", "description", "status", "priority", "project_id", "parent_issue_id", "assignee_type", "assignee_id"} {
+		for _, key := range []string{"title", "description", "status", "priority", "project_id", "parent_issue_id", "assignee_type", "assignee_id", "on_behalf_of_user_id"} {
 			if v, ok := args[key]; ok {
 				body[key] = v
 			}

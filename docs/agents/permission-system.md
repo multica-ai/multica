@@ -199,6 +199,32 @@ A missing/expired mandate or absent capability returns `task_mandate_denied`;
 a Permissions Deny returns `platform_action_denied`. Human member calls are
 unchanged.
 
+#### `on_behalf_of_user_id` — who an agent may act for (FIR-4930)
+
+`create_issue` and `update_issue` accept an explicit human origin. It is a
+separate, narrower gate that runs **after** the `create_issue` platform action
+above and does not replace it.
+
+The rule is one line: the target must be an **active `member` of the issue's own
+workspace**. Anything else — an agent id, a member of another workspace, a
+deleted user, a non-UUID — is refused. On create the refusal happens before the
+issue is written, so a rejected stamp leaves nothing behind.
+
+It is deliberately not narrower than that. An agent may stamp any member of its
+own workspace, not only the human who triggered its current run: an autopilot is
+triggered by whoever created it and must be able to file work for the person who
+actually owns it. Restricting the flag to the trigger would reproduce the bug it
+exists to fix.
+
+Enforced independently on each write surface, because they do not share a code
+path: `validateOnBehalfOfUserID` in
+`server/internal/handler/issue_on_behalf_of_cerebro.go` covers REST/CLI and the
+workspace MCP tools (which post to the same endpoint); `FirtalCreateIssueTool` in
+`server/internal/cerebro/runtime/firtal_gateway_tools_extended.go` repeats the
+same membership check because it writes through sqlc rather than the handler.
+Omitting the field changes nothing — the column stays NULL and the human origin
+is derived from the task chain exactly as before.
+
 `cerebro_task_scope_enforcement` is a default-on workspace circuit breaker for
 only the resource matching performed by `AllowTaskScopeForIssue`,
 `AllowTaskScopeForAgent`, and `AllowTaskScopeForWorkspace`. Turning it off lets

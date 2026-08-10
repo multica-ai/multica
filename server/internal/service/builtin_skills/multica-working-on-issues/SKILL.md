@@ -207,6 +207,38 @@ request with the returned approval id; Workspace MCP and Gateway wait in place.
 Do not bypass a deny, change the request, or start a second create. Approval is
 single-use: rejection, expiry, mismatch, or replay creates no issue.
 
+<!-- CEREBRO-PATCH(create-issue-on-behalf-of-skill): FIR-4930 — document attributing a created issue to the human who owns the work. -->
+
+## Create an issue for someone else (`--on-behalf-of`)
+
+By default the platform attributes an agent-created issue to the human at the
+root of the run's task chain. Under an **autopilot** that is always the person
+who created the autopilot — so an autopilot that files work for many different
+owners stamps the same wrong human on all of it, and fills their inbox.
+
+Pass `--on-behalf-of` when the work belongs to someone other than whoever
+triggered the run:
+
+```bash
+multica issue create --title "Deploy review: invoice-warnings" \
+  --assignee "Nikolaj" --on-behalf-of "Nikolaj"
+```
+
+The value is a workspace member's name or UUID — the same resolution as
+`--assignee`, but members only. Setting it makes that member the issue's
+`on_behalf_of`, gives them the auto-subscription, and keeps the person who
+triggered the run out of it.
+
+Correct a wrong stamp afterwards (this also moves the subscription):
+
+```bash
+multica issue update <issue-id> --on-behalf-of "Nikolaj"
+multica issue update <issue-id> --on-behalf-of ""   # clear, fall back to the trigger
+```
+
+Omit the flag and nothing changes — the derived human still applies. A target
+who is not an active member of the workspace is refused and no issue is created.
+
 <!-- CEREBRO-PATCH(create-issue-workflow-skill): FIR-2283 followup — document starting a new issue on an Issue workflow from the CLI/API. -->
 
 ## Start a new issue on an Issue workflow (`--workflow`)

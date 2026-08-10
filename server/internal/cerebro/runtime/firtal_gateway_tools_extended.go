@@ -130,6 +130,11 @@ func (t *FirtalCreateIssueTool) InputSchema() map[string]any {
 				"type":        "string",
 				"description": "UUID of the parent issue (optional)",
 			},
+			// FIR-4930 — parity with the CLI's --on-behalf-of and the workspace MCP tool.
+			"on_behalf_of_user_id": map[string]any{
+				"type":        "string",
+				"description": "User ID of the workspace member this issue is created for. Set it when the work belongs to someone other than whoever triggered your run — it decides the issue's human origin and who is notified. Must be an active member of this workspace.",
+			},
 		},
 	}
 }
@@ -183,9 +188,38 @@ func (t *FirtalCreateIssueTool) Call(ctx context.Context, args map[string]any) (
 		}
 	}
 
+	// FIR-4930 — resolved before the issue is created so a target who is not a
+	// member of this workspace produces no issue at all (fail closed).
+	var onBehalfOf pgtype.UUID
+	if ref, ok := args["on_behalf_of_user_id"].(string); ok && strings.TrimSpace(ref) != "" {
+		parsed, perr := util.ParseUUID(strings.TrimSpace(ref))
+		if perr != nil {
+			return "", fmt.Errorf("create_issue: on_behalf_of_user_id must be a user id")
+		}
+		if _, merr := t.queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID:      parsed,
+			WorkspaceID: t.tctx.WorkspaceID,
+		}); merr != nil {
+			return "", fmt.Errorf("create_issue: on_behalf_of_user_id must be an active member of this workspace")
+		}
+		onBehalfOf = parsed
+	}
+
 	issue, err := t.queries.CreateIssue(ctx, params)
 	if err != nil {
 		return "", fmt.Errorf("create_issue: %w", err)
+	}
+
+	if onBehalfOf.Valid {
+		stamped, serr := t.queries.SetIssueOnBehalfOf(ctx, db.SetIssueOnBehalfOfParams{
+			OnBehalfOfUserID: onBehalfOf,
+			ID:               issue.ID,
+			WorkspaceID:      issue.WorkspaceID,
+		})
+		if serr != nil {
+			return "", fmt.Errorf("create_issue: stamp on_behalf_of: %w", serr)
+		}
+		issue = stamped
 	}
 
 	raw, err := json.Marshal(map[string]any{

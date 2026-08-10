@@ -3,6 +3,46 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-4930 — Explicit "on behalf of" on an issue
+
+- `issue-on-behalf-of-column` adds `issue.on_behalf_of_user_id`
+  (migration `server/migrations/9177_cerebro_issue_on_behalf_of.up.sql`, queries in
+  the fork file `server/pkg/db/queries/cerebro_issue_on_behalf_of.sql`).
+- `issue-on-behalf-of-explicit` wires it into `server/internal/handler/issue.go`
+  (request field on create + update, validation before the write, the stamp itself,
+  and the event payload) and into
+  `server/cmd/server/subscriber_listeners.go` (auto-subscribe the stamped human
+  instead of the derived one). All real logic lives in the fork files
+  `server/internal/handler/issue_on_behalf_of_cerebro.go` and
+  `server/cmd/server/subscriber_on_behalf_of_cerebro.go`.
+- `cli-issue-on-behalf-of` adds `--on-behalf-of` to `multica issue create` and
+  `multica issue update` in `server/cmd/multica/cmd_issue.go`; resolution lives in
+  the fork file `server/cmd/multica/cmd_issue_on_behalf_of_cerebro.go`.
+- Agent-tool parity (no marker needed, both files are in the cerebro zone):
+  `on_behalf_of_user_id` on `create_issue` / `update_issue` in
+  `server/internal/cerebro/clitools/mcp_tools.go` (workspace MCP) and on
+  `create_issue` in `server/internal/cerebro/runtime/firtal_gateway_tools_extended.go`
+  (Firtal Gateway registry, which writes through sqlc rather than the HTTP handler
+  and therefore repeats the membership check).
+- **Why:** MUL-2553 derives the human from the task chain
+  (`origin_type='agent_task'` → `agent_task_queue.original_user_id`). Every task an
+  autopilot starts carries the AUTOPILOT CREATOR as `original_user_id`, so an
+  autopilot that files work for many different owners attributed all of it to one
+  person and filled their inbox with work they do not own (FIR-4921, Deploy reviews).
+  Patching subscribers after the fact — the previous workaround — left the durable
+  field, the `?on_behalf_of_ids=` filter and the sidebar row still wrong.
+- **Precedence, and why it is not an OR:** explicit stamp wins; the derived chain
+  applies only when the column IS NULL. This guard is repeated in all three
+  consumers (resolve, list filter, auto-subscribe). Merely OR-ing the new branch into
+  the filter would still match the autopilot creator on an issue deliberately
+  stamped for someone else.
+- **AuthZ:** fail-closed to "an active `member` of this issue's workspace". Not
+  tighter: an agent must be able to stamp a human other than the one who triggered
+  its run — that is the whole point.
+- **No feature flag** (rule 4): with the flag omitted the column is NULL and every
+  code path takes the pre-existing branch, so current behavior is unchanged
+  byte-for-byte without one.
+
 ## FIR-4918 — Inbox issue detail matches the issue page
 
 - `inbox-issue-detail-parity` makes `packages/views/inbox/components/inbox-page.tsx`

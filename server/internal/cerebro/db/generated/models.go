@@ -2663,6 +2663,7 @@ type Issue struct {
 	Properties         []byte             `json:"properties"`
 	IsPrivate          bool               `json:"is_private"`
 	Classification     string             `json:"classification"`
+	OnBehalfOfUserID   pgtype.UUID        `json:"on_behalf_of_user_id"`
 }
 
 type IssueDependency struct {

@@ -74,7 +74,10 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 		// triggering_task_id on the event payload) and auto-subscribe them so
 		// the issue lands in their inbox instead of vanishing under
 		// creator_type='agent'.
-		if issue.CreatorType == "agent" {
+		// CEREBRO-PATCH(issue-on-behalf-of-explicit): FIR-4930 — an explicit stamp replaces the derived human entirely.
+		if explicit, _ := payload["on_behalf_of_user_id"].(string); explicit != "" {
+			maybeAddSubscriber(bus, queries, e.WorkspaceID, issue.ID, "member", explicit, "triggered_agent")
+		} else if issue.CreatorType == "agent" {
 			if taskIDStr, _ := payload["triggering_task_id"].(string); taskIDStr != "" {
 				if memberID := lookupTriggeringMember(queries, taskIDStr); memberID != "" && memberID != issue.CreatorID {
 					maybeAddSubscriber(bus, queries, e.WorkspaceID, issue.ID, "member", memberID, "triggered_agent")
@@ -117,6 +120,12 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 					}
 				}
 			}
+		}
+
+		// CEREBRO-PATCH(issue-on-behalf-of-explicit): FIR-4930 — a corrected human takes the inbox from the previously stamped one.
+		if changed, _ := payload["on_behalf_of_changed"].(bool); changed {
+			stamped, _ := payload["on_behalf_of_user_id"].(string)
+			swapTriggeredAgentSubscriber(bus, queries, e.WorkspaceID, issue.ID, stamped)
 		}
 	})
 

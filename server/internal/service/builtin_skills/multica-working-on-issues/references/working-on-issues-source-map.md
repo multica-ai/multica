@@ -204,4 +204,10 @@ grep -n 'func issuePullRequestRowToResponse\|type GitHubPullRequestResponse stru
 grep -n 'extractIdentifiers(\|extractClosingIdentifiers(\|derivePRState(' internal/handler/github.go
 grep -n 'prevIssue.Status == "backlog"\|func (h \*Handler) shouldEnqueueAgentTask' internal/handler/issue.go
 grep -n 'func notifyParentOfChildDone'       internal/handler/issue_child_done.go
+<!-- CEREBRO-PATCH(create-issue-on-behalf-of-source-map): FIR-4930 — explicit on_behalf_of stamp. -->
+grep -n 'onBehalfOfFlag\|applyOnBehalfOfFlag' cmd/multica/cmd_issue_on_behalf_of_cerebro.go cmd/multica/cmd_issue.go
+grep -n 'OnBehalfOfUserID \*string'           internal/handler/issue.go
+grep -n 'validateOnBehalfOfUserID\|onBehalfOfWherePredicate\|resolveExplicitOnBehalfOf' internal/handler/issue_on_behalf_of_cerebro.go
+grep -n 'swapTriggeredAgentSubscriber\|on_behalf_of_user_id' cmd/server/subscriber_listeners.go cmd/server/subscriber_on_behalf_of_cerebro.go
+grep -n 'on_behalf_of_user_id'                migrations/9177_cerebro_issue_on_behalf_of.up.sql
 ```

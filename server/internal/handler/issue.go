@@ -105,6 +105,10 @@ type OnBehalfOfRef struct {
 // resolveOnBehalfOf returns the human an agent acted for, or nil when the issue
 // has no agent_task origin / the chain can't be resolved.
 func (h *Handler) resolveOnBehalfOf(ctx context.Context, issue db.Issue) *OnBehalfOfRef {
+	// CEREBRO-PATCH(issue-on-behalf-of-explicit): FIR-4930 — an explicit stamp wins over the derived agent_task chain.
+	if explicit := h.resolveExplicitOnBehalfOf(ctx, issue); explicit != nil {
+		return explicit
+	}
 	if !issue.OriginType.Valid || issue.OriginType.String != "agent_task" || !issue.OriginID.Valid {
 		return nil
 	}
@@ -149,11 +153,8 @@ func parseOnBehalfOfIDs(w http.ResponseWriter, r *http.Request) ([]pgtype.UUID, 
 // whose agent_task origin was started on behalf of one of the given users.
 // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 shared SQL for both list handlers.
 func onBehalfOfWhere(ids []pgtype.UUID, addArg func(any) string) string {
-	return fmt.Sprintf(`i.origin_type = 'agent_task' AND EXISTS (
-    SELECT 1 FROM agent_task_queue atq
-     WHERE atq.id = i.origin_id
-       AND atq.original_user_id = ANY(%s::uuid[])
-)`, addArg(ids))
+	// CEREBRO-PATCH(issue-on-behalf-of-explicit): FIR-4930 — explicit stamp wins, derived chain only when it is NULL.
+	return onBehalfOfWherePredicate(ids, addArg)
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -2518,6 +2519,9 @@ type CreateIssueRequest struct {
 	// as `multica issue create --workflow <id>`). Activation is best-effort:
 	// a failure is reported in the response but does not roll back the issue.
 	WorkflowID *string `json:"workflow_id,omitempty"`
+
+	// CEREBRO-PATCH(issue-on-behalf-of-explicit): FIR-4930 — stamp the human this issue is really for.
+	OnBehalfOfUserID *string `json:"on_behalf_of_user_id,omitempty"`
 }
 
 func duplicateIssueMessage(issue IssueResponse) string {
@@ -2540,6 +2544,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
 		return
+	}
+
+	// CEREBRO-PATCH(issue-on-behalf-of-explicit): FIR-4930 — validated before the issue exists, so a bad target creates nothing.
+	var onBehalfOfUserID pgtype.UUID
+	if req.OnBehalfOfUserID != nil {
+		if onBehalfOfUserID, ok = h.validateOnBehalfOfUserID(r.Context(), w, wsUUID, *req.OnBehalfOfUserID); !ok {
+			return
+		}
 	}
 
 	// Get creator from context (set by auth middleware)
@@ -2747,6 +2759,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issue := res.Issue
+	// CEREBRO-PATCH(issue-on-behalf-of-explicit): FIR-4930 — stamp before the created event, so subscribers see the right human.
+	if onBehalfOfUserID.Valid {
+		if stamped, serr := h.stampIssueOnBehalfOf(r.Context(), issue, onBehalfOfUserID); serr != nil {
+			slog.Warn("stamp issue on_behalf_of failed", append(logger.RequestAttrs(r), "error", serr, "issue_id", uuidToString(issue.ID))...)
+		} else {
+			issue = stamped
+		}
+	}
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
 	// CEREBRO-PATCH(issue-created-triggering-task): MUL-2553 — include the triggering task_id
@@ -2756,6 +2776,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	createdPayload := map[string]any{"issue": issueResp}
 	if originType.Valid && originType.String == "agent_task" {
 		createdPayload["triggering_task_id"] = uuidToString(originID)
+	}
+	// CEREBRO-PATCH(issue-on-behalf-of-explicit): FIR-4930 — carried top-level; extractIssueFields drops unknown issue keys.
+	if v := onBehalfOfEventValue(issue); v != "" {
+		createdPayload["on_behalf_of_user_id"] = v
 	}
 	h.publishToAudience(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, createdPayload, h.audienceForIssue(r.Context(), issue))
 	analyticsActorID := actualCreatorID
@@ -2861,6 +2885,8 @@ type UpdateIssueRequest struct {
 	AttachmentIDs []string `json:"attachment_ids"`
 	// CEREBRO-PATCH(update-issue-custom-status-key): FIR-1550 v2b — status-picker pin.
 	CustomStatusKey *string `json:"custom_status_key,omitempty"`
+	// CEREBRO-PATCH(issue-on-behalf-of-explicit): FIR-4930 — correct a wrong human stamp; "" clears it.
+	OnBehalfOfUserID *string `json:"on_behalf_of_user_id,omitempty"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -2888,6 +2914,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Track which fields were explicitly present in JSON (even if null)
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
+
+	// CEREBRO-PATCH(issue-on-behalf-of-explicit): FIR-4930 — validate the corrected human before anything is written.
+	var onBehalfOfUserID pgtype.UUID
+	if req.OnBehalfOfUserID != nil {
+		if onBehalfOfUserID, ok = h.validateOnBehalfOfUserID(r.Context(), w, prevIssue.WorkspaceID, *req.OnBehalfOfUserID); !ok {
+			return
+		}
+	}
 
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
@@ -3086,6 +3120,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(issue-on-behalf-of-explicit): FIR-4930 — correct the human stamp inside the same transaction.
+	if req.OnBehalfOfUserID != nil {
+		if issue, err = qtx.SetIssueOnBehalfOf(r.Context(), db.SetIssueOnBehalfOfParams{OnBehalfOfUserID: onBehalfOfUserID, ID: issue.ID, WorkspaceID: issue.WorkspaceID}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update issue on_behalf_of: "+err.Error())
+			return
+		}
+	}
+
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
 
@@ -3146,6 +3188,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"prev_description":    textToPtr(prevIssue.Description),
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
+		// CEREBRO-PATCH(issue-on-behalf-of-explicit): FIR-4930 — lets the subscriber listener move the inbox to the corrected human.
+		"on_behalf_of_user_id": onBehalfOfEventValue(issue),
+		"on_behalf_of_changed": req.OnBehalfOfUserID != nil && uuidToString(prevIssue.OnBehalfOfUserID) != uuidToString(issue.OnBehalfOfUserID),
 	}, h.audienceForIssue(r.Context(), prevIssue))
 
 	// Reconcile task queue when assignee changes.
