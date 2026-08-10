@@ -1403,11 +1403,11 @@ export function InboxPage() {
         key={selected.issue_id}
         issueId={selected.issue_id}
         seedFromIssueList={false} // CEREBRO-PATCH(issue-detail-seed-from-list): FIR-2684 — opening a message must not cold-load the board issue-list
-        // CEREBRO-PATCH(inbox-issue-detail-parity): FIR-4918 — open the sidebar by
-        // default, so Properties, Subscribers and Sub-issues are visible here as on
-        // the issue page. The layout id is versioned because useDefaultLayout keys
-        // its persisted layout on it, so an existing reader has "sidebar collapsed"
-        // saved and would never see the new default. References is NOT mounted here:
+        // CEREBRO-PATCH(inbox-issue-detail-parity): FIR-4918 — open the sidebar
+        // by default, so Properties, Subscribers and Sub-issues are visible here
+        // as on the issue page. The layout id is NOT versioned: a reader's saved pane
+        // width stays theirs, at the cost of an existing reader keeping the
+        // collapsed sidebar until they drag it open once. References is NOT mounted here:
         // its slot lives in @multica/cerebro-references, which depends on
         // @multica/views, so this file cannot import it without a package cycle. The
         // dynamic inbox (the default surface) mounts it via InboxIssueDetailExtensions.

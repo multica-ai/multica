@@ -862,11 +862,12 @@ export function DynamicInbox() {
             // page. Two things were missing, both in the sidebar: it was
             // collapsed by default, and the extensions slot mounted Rounds but
             // never References, so References was absent even with the panel
-            // open. The layout id is versioned because useDefaultLayout persists
-            // the computed layout to localStorage keyed by that id, so anyone who
-            // already opened a message has "sidebar collapsed" saved under the
-            // old key and would never see the new default.
-            layoutId="multica_inbox_dynamic_issue_detail_layout_v2"
+            // open. layoutId is deliberately NOT versioned: a reader's saved
+            // pane layout is theirs. useDefaultLayout persists the layout on
+            // mount and restores it over defaultSize, so a reader who already
+            // opened a message keeps the collapsed sidebar until they drag it
+            // open once. A new browser gets IssueDetail's default (open).
+            layoutId="multica_inbox_dynamic_issue_detail_layout"
             // TECH-3598 #1 — scroll to + highlight the comment that triggered
             // the notification instead of landing at the top, classic parity.
             highlightCommentId={selected.item.details?.comment_id ?? undefined}

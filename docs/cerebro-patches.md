@@ -7,15 +7,22 @@ documents one named patch + its rationale + the file location(s).
 
 - `inbox-issue-detail-parity` makes `packages/views/inbox/components/inbox-page.tsx`
   render `IssueDetail` with the defaults from `inbox-issue-detail-parity.ts`
-  (`defaultSidebarOpen=true`, `layoutId=multica_inbox_issue_detail_layout_v2`).
+  (`defaultSidebarOpen=true`, `layoutId=multica_inbox_issue_detail_layout`).
 - **Why:** the sidebar is where `Properties`, `Subscribers`, `Sub-issues`,
   `Rounds` and `References` live. Collapsing it by default meant an issue opened
   from `Inbox` showed strictly less than the same issue opened on its own page.
-  The `layoutId` bump is not cosmetic: `useDefaultLayout` keys its persisted
-  layout on that id and restores it from `localStorage`, so every existing reader
-  has "sidebar collapsed" saved under the old key and would never see the new
-  default. Collapsing the panel by hand still sticks — this changes the default,
-  not the ability to close it.
+  Collapsing the panel by hand still sticks — this changes the default, not the
+  ability to close it.
+- **Deliberately NOT versioned (2026-08-10):** an earlier cut bumped the
+  `layoutId` to `..._v2` on both classic and dynamic inbox. That was rolled back
+  on the product owner's explicit instruction — a reader's saved pane width is
+  theirs and must not be discarded. The accepted cost: `useDefaultLayout`
+  persists the layout to `localStorage` on mount and restores it over the
+  per-panel `defaultSize`, so a reader who has already opened a message keeps
+  the collapsed sidebar until they drag it open once. New browsers get the new
+  default immediately. Classic is locked by `inbox-issue-detail-parity.test.ts`;
+  dynamic (`layoutId=multica_inbox_dynamic_issue_detail_layout`, no `_vN`) is
+  locked by `packages/cerebro-inbox-dynamic/issue-detail-extensions.test.tsx`.
 - **Scope limit:** this file does NOT mount `References`. That section is
   `IssueReferenceList` from `@multica/cerebro-references`, which depends on
   `@multica/views`, so importing it here would create a package cycle. The

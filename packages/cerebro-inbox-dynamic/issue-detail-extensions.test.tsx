@@ -88,4 +88,16 @@ describe("dynamic inbox IssueDetail", () => {
       "extensions={<InboxIssueDetailExtensions issueId=",
     );
   });
+
+  // Deliberate product decision (2026-08-10): a reader's saved pane width is
+  // theirs. Same lock as classic inbox-issue-detail-parity.test.ts — the
+  // layoutId must stay unversioned so a deploy does not discard localStorage.
+  it("keeps the original layoutId so no saved pane layout is discarded", () => {
+    expect(dynamicInbox).toContain(
+      'layoutId="multica_inbox_dynamic_issue_detail_layout"',
+    );
+    expect(dynamicInbox).not.toMatch(
+      /layoutId="multica_inbox_dynamic_issue_detail_layout_v\d+"/,
+    );
+  });
 });

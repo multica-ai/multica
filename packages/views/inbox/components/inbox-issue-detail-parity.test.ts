@@ -17,13 +17,15 @@ describe("inbox issue-detail parity (FIR-4918)", () => {
     expect(INBOX_ISSUE_DETAIL_DEFAULT_SIDEBAR_OPEN).toBe(true);
   });
 
-  it("uses a versioned layoutId so a prior collapsed localStorage layout is not reused", () => {
+  // Deliberate product decision (2026-08-10): a reader's saved pane width is
+  // theirs, so the layoutId is NOT versioned. The cost is that an existing
+  // reader keeps the collapsed sidebar until they drag it open once. This
+  // asserts the unversioned id so the bump cannot come back by accident.
+  it("keeps the original layoutId so no saved pane layout is discarded", () => {
     expect(INBOX_ISSUE_DETAIL_LAYOUT_ID).toBe(
-      "multica_inbox_issue_detail_layout_v2",
-    );
-    expect(INBOX_ISSUE_DETAIL_LAYOUT_ID).not.toBe(
       "multica_inbox_issue_detail_layout",
     );
+    expect(INBOX_ISSUE_DETAIL_LAYOUT_ID).not.toMatch(/_v\d+$/);
   });
 
   // Asserting the constants alone proves nothing: inbox-page.tsx could stop
