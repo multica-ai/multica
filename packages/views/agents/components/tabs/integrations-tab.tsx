@@ -103,7 +103,9 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   const canManageSlack = isWorkspaceAdmin;
   const canManageWecom = isWorkspaceAdmin;
   const canManageTelegram = isWorkspaceAdmin;
-  const canManageShareCRM = isWorkspaceAdmin;
+  // ShareCRM BYO install/revoke are workspace owner/admin-only at the router,
+  // matching Slack/DingTalk/WeCom rather than Lark's owner-or-admin rule.
+  const canManageSharecrm = isWorkspaceAdmin;
   const hasActiveInstall =
     listing?.installations.some(
       (inst) => inst.agent_id === agent.id && inst.status === "active",
@@ -171,7 +173,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     !canManageDingtalk &&
     !canManageWecom &&
     !canManageTelegram &&
-    !canManageShareCRM
+    !canManageSharecrm
   ) {
     return (
       <div className="space-y-6">
@@ -469,7 +471,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
           </div>
         </div>
         <div className="border-t px-4 py-3">
-          {!canManageShareCRM ? (
+          {!canManageSharecrm ? (
             <p className="text-caption text-muted-foreground">
               {t(($) => $.tab_body.integrations.members_note)}
             </p>

@@ -1,7 +1,7 @@
-// Package sharecrm is the ShareCRM (纷享销客企信) integration for Multica's
+// Package sharecrm is the ShareCRM (纷享销客) bot integration for Multica's
 // channel-agnostic engine. It uses the bring-your-own-app (BYO) model: a
-// workspace admin pastes an IM Gateway appId + appSecret (and optional
-// gatewayBaseUrl for private clouds). Each channel_installation gets its OWN
+// workspace admin pastes an open-platform App ID + App Secret (and optional
+// API base URL for private clouds). Each channel_installation gets its OWN
 // SSE long connection, supervised per-installation like DingTalk Stream and
 // Slack Socket Mode.
 //

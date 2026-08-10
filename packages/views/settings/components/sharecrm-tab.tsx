@@ -247,8 +247,8 @@ function sharecrmDocsUrl(lang: string | undefined): string {
 
 // ShareCRMAgentBindButton is the per-agent CTA exposed from the agent detail
 // page. ShareCRM uses the bring-your-own-app model: the button opens a dialog
-// where the admin pastes the AppKey (client id) + AppSecret (client secret) of
-// the ShareCRM robot they created (the backend validates both). Visibility:
+// where the admin pastes the App ID + App Secret of the ShareCRM bot they
+// created (the backend validates both, matching DingTalk/Slack BYO). Visibility:
 //   1. Non-owner/admin viewers see nothing (the backend gates install/revoke).
 //   2. If this agent already has an active installation, show the connected
 //      badge (already-installed robots stay manageable).
@@ -408,7 +408,7 @@ export function ShareCRMAgentBindButton({
               <Input
                 id="sharecrm-byo-app-id"
                 data-testid="sharecrm-byo-app-id"
-                type="text"
+                type="password"
                 value={appId}
                 onChange={(e) => setAppId(e.target.value)}
                 autoComplete="off"
