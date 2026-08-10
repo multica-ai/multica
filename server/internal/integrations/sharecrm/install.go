@@ -29,6 +29,9 @@ type installQueries interface {
 	UpsertChannelInstallation(ctx context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error)
 	ReclaimDeadChannelInstallationByAppID(ctx context.Context, arg db.ReclaimDeadChannelInstallationByAppIDParams) (pgtype.UUID, error)
 	GetChannelInstallationOwnerByAppID(ctx context.Context, arg db.GetChannelInstallationOwnerByAppIDParams) (db.GetChannelInstallationOwnerByAppIDRow, error)
+	LockShareCRMInstallationOwner(ctx context.Context, arg db.LockShareCRMInstallationOwnerParams) error
+	GetShareCRMInstallationOwnerForUpdate(ctx context.Context, arg db.GetShareCRMInstallationOwnerForUpdateParams) (db.GetShareCRMInstallationOwnerForUpdateRow, error)
+	DeleteShareCRMInstallationForReplacement(ctx context.Context, arg db.DeleteShareCRMInstallationForReplacementParams) (pgtype.UUID, error)
 	ListChannelInstallationsByWorkspace(ctx context.Context, arg db.ListChannelInstallationsByWorkspaceParams) ([]db.ChannelInstallation, error)
 	GetChannelInstallationInWorkspace(ctx context.Context, arg db.GetChannelInstallationInWorkspaceParams) (db.ChannelInstallation, error)
 	SetChannelInstallationStatus(ctx context.Context, arg db.SetChannelInstallationStatusParams) error
@@ -90,6 +93,18 @@ type installPersist struct {
 
 const pgUniqueViolation = "23505"
 
+// persistInstall stores one ShareCRM bot per (workspace, agent). Reconnecting
+// the SAME App ID updates the row in place and preserves its installation-scoped
+// state. Connecting a DIFFERENT App ID retires that state and inserts a fresh
+// installation id: ShareCRM user ids are only meaningful within one bot/app, so
+// user and session bindings must never cross from one robot identity to another.
+//
+// The (channel_type, app_id) routing index is the only OTHER unique constraint.
+// It is NOT this upsert's conflict target, so binding the robot to a DIFFERENT
+// agent would trip it. Before upserting we therefore reclaim a DEAD prior owner
+// of the App ID (a revoked placeholder, or an orphan whose workspace/agent was
+// deleted) so the robot can move to the new agent; a LIVE owner trips the unique
+// index and is refused with an accurate conflict sentinel.
 func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (db.ChannelInstallation, error) {
 	tx, err := s.tx.Begin(ctx)
 	if err != nil {
@@ -98,6 +113,19 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
+	// Serialize the logical (workspace, agent, sharecrm) slot across a possible
+	// delete+insert gap so concurrent replacements cannot update a just-created
+	// identity in place and re-attach old bindings.
+	if err := qtx.LockShareCRMInstallationOwner(ctx, db.LockShareCRMInstallationOwnerParams{
+		WorkspaceID: p.wsID,
+		AgentID:     p.agentID,
+	}); err != nil {
+		return db.ChannelInstallation{}, fmt.Errorf("lock sharecrm installation owner: %w", err)
+	}
+
+	// Free the (sharecrm, app_id) routing slot from any DEAD prior owner before
+	// the upsert so a robot whose old owner is gone can be rebound. A live
+	// owner is left in place and trips the unique index below.
 	if _, err := qtx.ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{
 		ChannelType: string(TypeShareCRM),
 		AppID:       p.appIDKey,
@@ -105,6 +133,23 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 		AgentID:     p.agentID,
 	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return db.ChannelInstallation{}, fmt.Errorf("reclaim dead sharecrm installation: %w", err)
+	}
+
+	current, err := qtx.GetShareCRMInstallationOwnerForUpdate(ctx, db.GetShareCRMInstallationOwnerForUpdateParams{
+		WorkspaceID: p.wsID,
+		AgentID:     p.agentID,
+	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return db.ChannelInstallation{}, fmt.Errorf("load current sharecrm installation: %w", err)
+	}
+	if err == nil && current.AppID != p.appIDKey {
+		if _, err := qtx.DeleteShareCRMInstallationForReplacement(ctx, db.DeleteShareCRMInstallationForReplacementParams{
+			InstallationID: current.ID,
+			WorkspaceID:    p.wsID,
+			AgentID:        p.agentID,
+		}); err != nil {
+			return db.ChannelInstallation{}, fmt.Errorf("retire replaced sharecrm installation: %w", err)
+		}
 	}
 
 	inst, err := qtx.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
