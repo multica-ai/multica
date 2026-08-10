@@ -109,6 +109,14 @@
       "description": "Offline 6+ days. Auto-deleted at 7 days unless it reconnects."
     }
   },
+  "drainAction": "Safe shutdown",
+  "drainCancel": "Cancel shutdown",
+  "drainForceStop": "Shut down now",
+  "stateDraining": "Draining",
+  "drainInlineHint": "{{inflight}} running · {{queued}} queued",
+  "drainConfirmTitle": "This will interrupt {{count}} running task(s).",
+  "drainQueuedHint": "{{count}} queued task(s) will remain until they time out.",
+  "drainDescription": "No new tasks will be accepted; the daemon shuts down once running tasks finish.",
   "detail": {
     "all_runtimes": "All runtimes",
     "read_only": "Read-only",

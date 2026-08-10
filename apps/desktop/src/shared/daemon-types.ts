@@ -1,5 +1,8 @@
 export type DaemonState =
   | "running"
+  // Safe shutdown in progress: no new tasks are accepted, but already-running
+  // tasks are allowed to finish before the daemon stops (NEX-38 drain).
+  | "draining"
   | "stopped"
   | "starting"
   | "stopping"
@@ -9,6 +12,16 @@ export type DaemonState =
   // cached PAT expired / was revoked, or the session token is dead). Without
   // this, an auth failure silently sticks at "starting" forever — see #3512.
   | "auth_expired";
+
+/**
+ * Actions the local daemon's `/drain` endpoint accepts. `drain` enters safe
+ * shutdown; `abort` cancels it back to running; `finish_then_stop` shuts the
+ * daemon down once in-flight tasks complete.
+ */
+export type DaemonDrainAction =
+  | "drain"
+  | "abort"
+  | "finish_then_stop";
 
 export interface DaemonStatus {
   state: DaemonState;
@@ -51,6 +64,7 @@ export type LocalRuntimeProbe =
 
 export const DAEMON_STATE_COLORS: Record<DaemonState, string> = {
   running: "bg-emerald-500",
+  draining: "bg-amber-500",
   stopped: "bg-muted-foreground/40",
   starting: "bg-amber-500 animate-pulse",
   stopping: "bg-amber-500 animate-pulse",
@@ -61,6 +75,7 @@ export const DAEMON_STATE_COLORS: Record<DaemonState, string> = {
 
 export const DAEMON_STATE_LABELS: Record<DaemonState, string> = {
   running: "Running",
+  draining: "Draining",
   stopped: "Stopped",
   starting: "Starting…",
   stopping: "Stopping…",
@@ -88,7 +103,12 @@ export function formatUptime(uptime?: string): string {
  * version-restart decisions still gate on the stricter "running".
  */
 export function daemonStatusAlive(status: string | undefined): boolean {
-  return status === "running" || status === "starting";
+  return (
+    status === "running" ||
+    status === "starting" ||
+    // A draining daemon is still alive — it just stopped claiming new tasks.
+    status === "draining"
+  );
 }
 
 /**
@@ -110,6 +130,8 @@ export function daemonStateDescription(state: DaemonState, runtimeCount: number)
         return "Running here · 1 runtime available for tasks.";
       }
       return `Running here · ${runtimeCount} runtimes available for tasks.`;
+    case "draining":
+      return "Draining · no new tasks are accepted; running tasks finish before shutdown.";
     case "stopped":
       return "Not running · this device can't take new tasks.";
     case "starting":

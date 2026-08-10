@@ -328,7 +328,9 @@ export function DaemonPanel({
             <EmptyState
               hasLogs={logs.length > 0}
               hasFilter={hasActiveFilter}
-              isRunning={status.state === "running"}
+              isRunning={
+                status.state === "running" || status.state === "draining"
+              }
             />
           ) : (
             <div className="flex flex-col">
@@ -396,7 +398,8 @@ function ContextBadge({
   status: DaemonStatus;
   runtimeCount: number;
 }) {
-  const isRunning = status.state === "running";
+  const isRunning =
+    status.state === "running" || status.state === "draining";
   return (
     <span className="inline-flex items-center gap-1.5 rounded-md border bg-background px-1.5 py-0.5 text-caption font-normal">
       <span

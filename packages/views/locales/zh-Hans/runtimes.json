@@ -105,6 +105,14 @@
       "description": "离线 6 天以上。如不重连，将在 7 天时自动删除。"
     }
   },
+  "drainAction": "安全关闭",
+  "drainCancel": "取消安全关闭",
+  "drainForceStop": "立即关闭",
+  "stateDraining": "安全关闭中",
+  "drainInlineHint": "在跑任务 {{inflight}} · 排队任务 {{queued}}",
+  "drainConfirmTitle": "将打断 {{count}} 个在跑任务。",
+  "drainQueuedHint": "另有 {{count}} 个排队任务将保留至超时失败。",
+  "drainDescription": "不再接收新任务，在跑任务完成后自动关闭。",
   "detail": {
     "all_runtimes": "全部运行时",
     "read_only": "只读",

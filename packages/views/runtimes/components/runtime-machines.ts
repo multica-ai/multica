@@ -390,7 +390,12 @@ function currentMachineMetadata(
   runtimes: AgentRuntime[],
   key: "cli_version" | "launched_by",
 ): string | null {
-  const online = runtimes.filter((runtime) => runtime.status === "online");
+  // A draining runtime is still alive (heartbeats flow), so its metadata is
+  // as trustworthy as an online one's.
+  const online = runtimes.filter(
+    (runtime) =>
+      runtime.status === "online" || runtime.status === "draining",
+  );
   const candidates = online.length > 0 ? online : runtimes;
 
   for (const runtime of candidates.toSorted(compareRuntimeReports)) {
