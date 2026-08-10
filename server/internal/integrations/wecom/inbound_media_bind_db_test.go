@@ -447,8 +447,15 @@ func (r *recordingIssues) filed() []service.IssueCreateParams {
 // filed nothing. It goes through the real frame decoder and the real
 // normalization, including the group mention strip, so nothing about the
 // command source is decided by the fixture.
-func wecomMixedCallback(t *testing.T, botID, botDisplayName, senderID, msgID, chatType, chatID, imageURL, typed string) channel.InboundMessage {
+// spoken picks which kind of run carries the sender's words. Both are the
+// sender's own words — WeCom recognises a voice run on its side and delivers
+// the transcript — and the command source has to read them the same way.
+func wecomMixedCallback(t *testing.T, botID, botDisplayName, senderID, msgID, chatType, chatID, imageURL, words string, spoken bool) channel.InboundMessage {
 	t.Helper()
+	wordRun := map[string]any{"msgtype": "text", "text": map[string]any{"content": words}}
+	if spoken {
+		wordRun = map[string]any{"msgtype": "voice", "voice": map[string]any{"content": words}}
+	}
 	raw, err := json.Marshal(map[string]any{
 		"msgid":    msgID,
 		"aibotid":  botID,
@@ -458,7 +465,7 @@ func wecomMixedCallback(t *testing.T, botID, botDisplayName, senderID, msgID, ch
 		"msgtype":  "mixed",
 		"mixed": map[string]any{"msg_item": []map[string]any{
 			{"msgtype": "image", "image": map[string]any{"url": imageURL, "aeskey": testAESKey}},
-			{"msgtype": "text", "text": map[string]any{"content": typed}},
+			wordRun,
 		}},
 	})
 	if err != nil {
@@ -478,7 +485,7 @@ func wecomMixedCallback(t *testing.T, botID, botDisplayName, senderID, msgID, ch
 // runMixedIssueThroughTheRouter drives one 图文混排 through the real Router,
 // the real ChatSession and a real Postgres, and reports what got filed and
 // what the durable message says.
-func runMixedIssueThroughTheRouter(t *testing.T, botDisplayName, chatType, chatID, typed string) (*recordingIssues, string) {
+func runMixedIssueThroughTheRouter(t *testing.T, botDisplayName, chatType, chatID, words string, spoken bool) (*recordingIssues, string) {
 	t.Helper()
 	pool := mediaBindTestDB(t)
 	fixture := seedMediaBindFixture(t, pool)
@@ -504,7 +511,7 @@ func runMixedIssueThroughTheRouter(t *testing.T, botDisplayName, chatType, chatI
 		chatID = fixture.senderID
 	}
 	msgID := fmt.Sprintf("MSGID-MIXED-%d", time.Now().UnixNano())
-	msg := wecomMixedCallback(t, fixture.botID, botDisplayName, fixture.senderID, msgID, chatType, chatID, srv.URL, typed)
+	msg := wecomMixedCallback(t, fixture.botID, botDisplayName, fixture.senderID, msgID, chatType, chatID, srv.URL, words, spoken)
 	if err := router.Handle(ctx, msg); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
@@ -539,7 +546,7 @@ func runMixedIssueThroughTheRouter(t *testing.T, botDisplayName, chatType, chatI
 // the same two things the other way round worked, which is the part that makes
 // it impossible to report.
 func TestIssueAfterAnImageIsStillFiled(t *testing.T) {
-	issues, body := runMixedIssueThroughTheRouter(t, "", "single", "", "/issue 登录坏了")
+	issues, body := runMixedIssueThroughTheRouter(t, "", "single", "", "/issue 登录坏了", false)
 
 	filed := issues.filed()
 	if len(filed) != 1 {
@@ -561,14 +568,14 @@ func TestIssueAfterAnImageIsStillFiled(t *testing.T) {
 //
 // In a group the @-mention is how the bot is reached, so it arrives glued to
 // the front of the text run: "@Multica Bot /issue 登录坏了". main strips that
-// (stripLeadingMentions, #6603) and this PR keeps the placeholders out of the
+// (stripLeadingMentions) and this PR keeps the placeholders out of the
 // command source, and the parser needs both to see "/issue" on the line it
 // reads. Take main's version of ws_frame.go wholesale and the strip goes and
 // the parser sees "@Multica Bot"; derive the command from the resolved body
 // and it sees "[Image]". Either way no issue is filed, and this is the
 // assertion that says so.
 func TestGroupMentionedIssueAfterAnImageIsStillFiled(t *testing.T) {
-	issues, body := runMixedIssueThroughTheRouter(t, "Multica Bot", "group", "GROUP-BIND-1", "@Multica Bot /issue 登录坏了")
+	issues, body := runMixedIssueThroughTheRouter(t, "Multica Bot", "group", "GROUP-BIND-1", "@Multica Bot /issue 登录坏了", false)
 
 	filed := issues.filed()
 	if len(filed) != 1 {
@@ -579,5 +586,29 @@ func TestGroupMentionedIssueAfterAnImageIsStillFiled(t *testing.T) {
 	}
 	if want := "[Image]\n@Multica Bot /issue 登录坏了"; body != want {
 		t.Errorf("durable body = %q, want %q — the transcript keeps who was addressed", body, want)
+	}
+}
+
+// TestGroupMentionedSpokenIssueAfterAnImageIsStillFiled is the same question
+// with the words spoken instead of typed, which is the third change meeting
+// the other two: WeCom recognises a voice run on its side and hands over the
+// transcript, so those are the sender's own words and a spoken "/issue" is a
+// command. Read the command off the typed field and it is empty; read it off
+// the resolved body and it starts with "[Image]"; skip the mention strip and
+// it starts with the bot's own name. All three have to hold at once, and
+// unlike the dispatch-level test this one asks the database whether an issue
+// exists.
+func TestGroupMentionedSpokenIssueAfterAnImageIsStillFiled(t *testing.T) {
+	issues, body := runMixedIssueThroughTheRouter(t, "Multica Bot", "group", "GROUP-BIND-2", "@Multica Bot /issue 登录坏了", true)
+
+	filed := issues.filed()
+	if len(filed) != 1 {
+		t.Fatalf("issues created = %d, want 1 — an @-mentioned /issue said out loud with a screenshot filed nothing", len(filed))
+	}
+	if filed[0].Title != "登录坏了" {
+		t.Errorf("issue title = %q, want 登录坏了", filed[0].Title)
+	}
+	if want := "[Image]\n@Multica Bot /issue 登录坏了"; body != want {
+		t.Errorf("durable body = %q, want %q — a spoken run reads into the body like a typed one", body, want)
 	}
 }
