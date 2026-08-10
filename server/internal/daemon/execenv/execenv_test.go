@@ -5431,7 +5431,7 @@ func TestInjectRuntimeConfigBriefKeepsStaticCatchUpRead(t *testing.T) {
 	// MUL-5442 cross-channel dedup: the full command with the real issue id
 	// moved to the per-turn message (every issue variant carries it); the
 	// brief keeps the doctrine and the flag mnemonics.
-	if !strings.Contains(s, "scan every thread cheaply (`--roots-only --summary`)") {
+	if !strings.Contains(s, "scan every thread cheaply (`--roots-only --summary --compact`)") {
 		t.Errorf("brief must keep the bounded catch-up doctrine\n---\n%s", s)
 	}
 	if strings.Contains(s, issueID) {
@@ -5495,7 +5495,7 @@ func TestInjectRuntimeConfigBriefOmitsResumedThreadAnchor(t *testing.T) {
 		"No other new comments on this issue since your last run",
 		"If your reply depends on thread context",
 		"do not rely only on resumed session memory",
-		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("resumed hint missing %q\n---\n%s", want, hint)
@@ -5528,7 +5528,7 @@ func TestInjectRuntimeConfigAssignmentTriggerScansRootsFirst(t *testing.T) {
 	// Mandatory comment catch-up must stay, but the required first read is
 	// bounded to recent active threads instead of the full flat timeline.
 	for _, want := range []string{
-		"scan every thread cheaply (`--roots-only --summary`)",
+		"scan every thread cheaply (`--roots-only --summary --compact`)",
 		"this is mandatory, not optional",
 		"Skipping this step is the most common cause",
 	} {
@@ -5595,9 +5595,9 @@ func TestInjectRuntimeConfigCatchUpScansRootsFirst(t *testing.T) {
 		// The cheap scan is the first thing step 3 asks for; the full
 		// command with real ids arrives in the per-turn message (MUL-5442
 		// cross-channel dedup), so the brief pins the flag mnemonics.
-		"scan every thread cheaply (`--roots-only --summary`)",
+		"scan every thread cheaply (`--roots-only --summary --compact`)",
 		// ...followed by an explicit, bounded drill-down.
-		"expand only the threads that matter (`--thread <id> --tail 30`)",
+		"expand only the threads that matter (`--thread <id> --tail 30 --compact`)",
 		// The headline saturation warning stays in the flag reference; the
 		// deep semantics (per-thread cap, root-thread saturation) moved to the
 		// CLI's own --help (MUL-5442) and are pinned there

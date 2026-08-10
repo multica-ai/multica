@@ -1234,6 +1234,10 @@ ORDER BY chat_finalize_deferred_at
 LIMIT @max_per_tick::int;
 
 -- name: CountRunningTasks :one
+-- waiting_local_directory remains capacity-bearing until resume admission has
+-- an atomic reservation/CAS gate. Consequently a waiter-only agent is reported
+-- idle by RefreshAgentStatusFromTasks but still cannot claim additional work;
+-- removing it here alone could exceed max_concurrent_tasks when it resumes.
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory');
 
@@ -1762,14 +1766,23 @@ WHERE id = $1
 RETURNING *;
 
 -- name: RefreshAgentStatusFromTasks :one
+-- Persisted agent.status has no queued/resource-wait bucket. Keep dispatched
+-- as working because the daemon is actively preparing that task, but do not
+-- let a task parked on a local_directory mutex masquerade as executing work.
+-- The status guard makes a correct status a no-op: :one returns no rows, so
+-- callers neither rewrite updated_at nor publish a redundant status event.
+WITH desired AS (
+    SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM agent_task_queue q
+        WHERE q.agent_id = $1 AND q.status IN ('dispatched', 'running')
+    ) THEN 'working' ELSE 'idle' END AS status
+)
 UPDATE agent AS a
-SET status = CASE WHEN EXISTS (
-    SELECT 1 FROM agent_task_queue q
-    WHERE q.agent_id = a.id AND q.status IN ('dispatched', 'running', 'waiting_local_directory')
-) THEN 'working' ELSE 'idle' END,
+SET status = desired.status,
     updated_at = now()
-WHERE a.id = $1
-RETURNING *;
+FROM desired
+WHERE a.id = $1 AND a.status IS DISTINCT FROM desired.status
+RETURNING a.*;
 
 -- name: GetAgentBySystemKey :one
 -- Resolves a workspace's built-in agent by its stable system_key. This is the

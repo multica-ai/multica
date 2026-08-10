@@ -266,7 +266,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		// advertise. See the matching comment in hermes.go for the why —
 		// shipping an http/sse entry to a stdio-only runtime tanks the
 		// whole session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "reasonix", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "reasonix", b.cfg)
 
 		// 2. Create or resume a session.
 		cwd := opts.Cwd

@@ -386,7 +386,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// agentCapabilities.mcpCapabilities; sending an http/sse entry to
 		// a runtime that says it only supports stdio reliably rejects the
 		// whole session/new request.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "hermes", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "hermes", b.cfg)
 
 		// 2. Create or resume a session.
 		cwd := opts.Cwd
@@ -1891,6 +1891,7 @@ func buildACPMcpServers(raw json.RawMessage, logger *slog.Logger) ([]any, error)
 		return nil, fmt.Errorf("parse mcp_config json: %w", err)
 	}
 	if len(parsed.McpServers) == 0 {
+		warnNonCanonicalMcpConfigKey(trimmed, logger)
 		return []any{}, nil
 	}
 
@@ -1912,6 +1913,50 @@ func buildACPMcpServers(raw json.RawMessage, logger *slog.Logger) ([]any, error)
 		out = append(out, entry)
 	}
 	return out, nil
+}
+
+// acpAltMcpConfigKeys are top-level keys that runtime-native MCP config
+// files use instead of Multica's canonical `mcpServers`: jcode and Kiro
+// nest under `servers`, OpenCode under `mcp`, Codex's TOML under
+// `mcp_servers`.
+var acpAltMcpConfigKeys = []string{"servers", "mcp", "mcp_servers"}
+
+// warnNonCanonicalMcpConfigKey logs when an mcp_config carries no
+// `mcpServers` key but does hold servers under a runtime-native one.
+//
+// mcp_config is stored as opaque JSON, so pasting a runtime's own config
+// file in is both easy and — until this warning — completely silent: the
+// config saves, the daemon forwards an empty array, and the agent runs
+// with no MCP tools and nothing logged anywhere (#6540). We only warn
+// rather than adopt the entries, because the surrounding entry shapes are
+// not guaranteed to match ACP's and guessing risks forwarding a
+// half-understood config.
+func warnNonCanonicalMcpConfigKey(raw json.RawMessage, logger *slog.Logger) {
+	if logger == nil {
+		return
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return
+	}
+	if _, ok := top["mcpServers"]; ok {
+		return
+	}
+	for _, key := range acpAltMcpConfigKeys {
+		nested, ok := top[key]
+		if !ok {
+			continue
+		}
+		var entries map[string]json.RawMessage
+		if err := json.Unmarshal(nested, &entries); err != nil || len(entries) == 0 {
+			continue
+		}
+		logger.Warn("mcp_config has no \"mcpServers\" key, so no MCP servers will be sent to the runtime",
+			"found_key", key,
+			"server_count", len(entries),
+			"hint", `mcp_config must be shaped {"mcpServers": {"<name>": {...}}}; a runtime's own config file is not accepted verbatim`)
+		return
+	}
 }
 
 // convertACPMcpServer converts a single Claude-style entry into the ACP
@@ -1997,55 +2042,161 @@ func sortedStringMapKeys(m map[string]string) []string {
 // runtime advertised in its `initialize` response. Stdio is always
 // supported (it's the baseline transport and the spec does not gate it),
 // so it's not represented here.
+// acpMcpCapabilityDeclaration classifies what an ACP `initialize` response
+// told us about remote MCP transports. All three states filter identically
+// under ACP v1 — an undeclared transport is unsupported — but the
+// omitted-capabilities exception may only key off genuine silence, so
+// "the runtime said nothing" has to stay distinguishable from "we could not
+// read what the runtime said".
+type acpMcpCapabilityDeclaration int
+
+const (
+	// acpMcpCapabilitiesInvalid is the zero value on purpose: a response we
+	// could not parse, a non-object block, or one whose fields have the
+	// wrong types. Anything that reaches this state fails closed, so an
+	// accidental zero value can never widen access.
+	acpMcpCapabilitiesInvalid acpMcpCapabilityDeclaration = iota
+	// acpMcpCapabilitiesOmitted is a well-formed response that carries no
+	// mcpCapabilities block at all — the only state the exception accepts.
+	acpMcpCapabilitiesOmitted
+	// acpMcpCapabilitiesDeclared is a usable block, whose HTTP/SSE fields
+	// are authoritative (including when both are false).
+	acpMcpCapabilitiesDeclared
+)
+
 type acpMcpTransportCapabilities struct {
-	HTTP bool
-	SSE  bool
+	Declaration acpMcpCapabilityDeclaration
+	HTTP        bool
+	SSE         bool
 }
 
 // extractACPMcpCapabilities reads `agentCapabilities.mcpCapabilities.http`
-// and `.sse` out of an ACP `initialize` response. Missing or false fields
-// stay false, matching the spec default: the runtime must opt-in to
-// remote MCP transports. Unparseable responses degrade to "neither
-// supported" so we fail closed on remote entries.
+// and `.sse` out of an ACP `initialize` response.
 //
-// See https://agentclientprotocol.com/protocol/initialization — clients
-// MUST NOT send `mcpServers` entries with a type the agent did not
-// advertise support for.
+// Per ACP v1 capability negotiation, "Clients and Agents MUST treat all
+// capabilities omitted in the initialize request as UNSUPPORTED", and
+// `http` / `sse` have no default beyond false. Every state therefore
+// resolves to "neither transport supported"; the classification only
+// decides whether the omitted-capabilities exception may apply.
+//
+// Each level is decoded as raw JSON rather than straight into the target
+// struct, because encoding/json leaves a non-pointer destination untouched
+// and reports no error when it decodes `null`. A single Unmarshal would
+// therefore read `null`, `{"agentCapabilities":null}` and a genuinely
+// silent response as the same thing, letting an unreadable response take
+// the exception. ACP's InitializeResponse is an object and
+// `agentCapabilities` is not nullable, so those two are malformed, not
+// silent.
+//
+// See https://agentclientprotocol.com/protocol/v1/initialization#capabilities
+// and https://pkg.go.dev/encoding/json#Unmarshal for the null rule.
 func extractACPMcpCapabilities(result json.RawMessage) acpMcpTransportCapabilities {
-	var r struct {
-		AgentCapabilities struct {
-			McpCapabilities struct {
-				HTTP bool `json:"http"`
-				SSE  bool `json:"sse"`
-			} `json:"mcpCapabilities"`
-		} `json:"agentCapabilities"`
+	invalid := acpMcpTransportCapabilities{Declaration: acpMcpCapabilitiesInvalid}
+	omitted := acpMcpTransportCapabilities{Declaration: acpMcpCapabilitiesOmitted}
+
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(result, &top); err != nil || top == nil {
+		return invalid
 	}
-	if err := json.Unmarshal(result, &r); err != nil {
-		return acpMcpTransportCapabilities{}
+	rawAgentCaps, ok := top["agentCapabilities"]
+	if !ok {
+		// A well-formed response that declares no capabilities at all.
+		return omitted
+	}
+	var agentCaps map[string]json.RawMessage
+	if err := json.Unmarshal(rawAgentCaps, &agentCaps); err != nil || agentCaps == nil {
+		return invalid
+	}
+	rawMcp, ok := agentCaps["mcpCapabilities"]
+	if !ok {
+		// The real hermes 0.18.2 shape: capabilities declared, this block
+		// genuinely absent. Only this state can reach the exception.
+		return omitted
+	}
+	rawMcp = bytes.TrimSpace(rawMcp)
+	if bytes.Equal(rawMcp, []byte("null")) {
+		return invalid
+	}
+	var caps struct {
+		HTTP bool `json:"http"`
+		SSE  bool `json:"sse"`
+	}
+	// A malformed block (wrong field types, non-object) is unusable. An
+	// unusable declaration is not silence, so it must not reach the
+	// omitted-capabilities exception — it fails closed instead.
+	if err := json.Unmarshal(rawMcp, &caps); err != nil {
+		return invalid
 	}
 	return acpMcpTransportCapabilities{
-		HTTP: r.AgentCapabilities.McpCapabilities.HTTP,
-		SSE:  r.AgentCapabilities.McpCapabilities.SSE,
+		Declaration: acpMcpCapabilitiesDeclared,
+		HTTP:        caps.HTTP,
+		SSE:         caps.SSE,
 	}
 }
 
+// acpRuntimesToleratingOmittedMcpCapabilities lists the ACP providers whose
+// own shipped binary was verified to accept http/sse McpServer entries on
+// session/new even though its initialize response carries no
+// mcpCapabilities block.
+//
+// ACP v1 requires an omitted capability to be read as unsupported, so this
+// is a deliberate, narrow exception to the spec default rather than a
+// replacement for it. hermes 0.18.2 declares no mcpCapabilities yet accepts
+// both remote transports, so applying the default there silently discarded
+// every remote MCP server its users configured, with the drop visible only
+// in the daemon log (#6540).
+//
+// Only add a provider here with evidence from its real binary — an ACP
+// implementation that omits capabilities *and* rejects remote entries would
+// turn a missing tool into a failed session, so the fail-closed default has
+// to stay the rule for everything unverified.
+var acpRuntimesToleratingOmittedMcpCapabilities = map[string]bool{
+	"hermes": true,
+}
+
+// acpToleratesOmittedMcpCapabilities reports whether this launch may fall
+// back to the omitted-capabilities exception.
+//
+// The provider name alone is not enough to answer that. A custom runtime
+// profile keeps its protocol family as the provider and only swaps in its
+// own command, so `protocol_family: hermes` with `command_name: jcode`
+// reaches this backend as "hermes" while being a binary nobody verified —
+// exactly the unverified implementation the allowlist exists to exclude.
+// Config.BuiltinRuntime is the daemon's report of which case this is, and
+// it defaults to false so any caller that doesn't set it fails closed.
+func acpToleratesOmittedMcpCapabilities(backend string, cfg Config) bool {
+	return cfg.BuiltinRuntime && acpRuntimesToleratingOmittedMcpCapabilities[backend]
+}
+
 // filterACPMcpServersByCapability drops remote MCP entries whose transport
-// the runtime didn't advertise in its initialize response. Stdio entries
+// the runtime did not advertise in its initialize response. Stdio entries
 // (no `type` field) always pass through.
 //
 // Sending an http/sse entry to a runtime that doesn't support it is a
-// protocol violation per the ACP spec, and Hermes / Kimi observed in
-// practice reject the whole session/new request with a JSON-RPC error.
-// Dropping the offending entries with a warning lets the rest of the
-// session start and surfaces the problem in the daemon log instead of
-// tanking every task on that agent.
+// protocol violation per the ACP spec and can reject the whole session/new
+// request with a JSON-RPC error. Dropping the offending entries lets the
+// rest of the session start instead of tanking every task on that agent.
+//
+// The single exception is a launch that acpToleratesOmittedMcpCapabilities
+// accepts whose response declared no capabilities at all; see there and
+// acpRuntimesToleratingOmittedMcpCapabilities for why that case is carved
+// out and why it stays narrow. A response we could not read is not silence
+// and never qualifies.
 func filterACPMcpServersByCapability(
 	servers []any,
 	caps acpMcpTransportCapabilities,
 	backend string,
-	logger *slog.Logger,
+	cfg Config,
 ) []any {
+	logger := cfg.Logger
 	if len(servers) == 0 {
+		return servers
+	}
+	if caps.Declaration == acpMcpCapabilitiesOmitted && acpToleratesOmittedMcpCapabilities(backend, cfg) {
+		if logger != nil && acpHasRemoteMcpEntry(servers) {
+			logger.Info("runtime declared no mcpCapabilities; forwarding remote MCP servers under this runtime's verified exception",
+				"backend", backend)
+		}
 		return servers
 	}
 	filtered := make([]any, 0, len(servers))
@@ -2077,6 +2228,21 @@ func filterACPMcpServersByCapability(
 		filtered = append(filtered, entry)
 	}
 	return filtered
+}
+
+// acpHasRemoteMcpEntry reports whether any entry uses a remote transport,
+// i.e. whether the capability question is relevant at all for this config.
+func acpHasRemoteMcpEntry(servers []any) bool {
+	for _, raw := range servers {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if transport, _ := entry["type"].(string); transport == "http" || transport == "sse" {
+			return true
+		}
+	}
+	return false
 }
 
 // hermesToolNameFromTitle extracts a tool name from the ACP tool call title.

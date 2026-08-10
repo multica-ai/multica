@@ -165,6 +165,10 @@ import type {
   ListDingTalkInstallationsResponse,
   RegisterDingTalkBYORequest,
   RedeemDingTalkBindingTokenResponse,
+  WecomInstallation,
+  ListWecomInstallationsResponse,
+  RegisterWecomBYORequest,
+  RedeemWecomBindingTokenResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -286,6 +290,12 @@ import {
   EMPTY_DINGTALK_INSTALLATION,
   EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE,
+  WecomInstallationSchema,
+  ListWecomInstallationsResponseSchema,
+  RedeemWecomBindingTokenResponseSchema,
+  EMPTY_WECOM_INSTALLATION,
+  EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
   EMPTY_BILLING_BALANCE,
   EMPTY_BILLING_TRANSACTIONS_PAGE,
   EMPTY_BILLING_BATCHES_PAGE,
@@ -3520,6 +3530,68 @@ export class ApiClient {
       RedeemDingTalkBindingTokenResponseSchema,
       EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/dingtalk/binding/redeem" },
+    );
+  }
+  // WeCom smart-bot ("智能机器人" / aibot) integration. The bot dials a
+  // WebSocket long connection to wss://openws.work.weixin.qq.com and stays
+  // authenticated with (bot_id, secret); no public callback URL is required.
+  // These three methods drive the Settings-page BYO Connect dialog + list +
+  // disconnect only — the inbound WebSocket loop runs entirely server-side.
+  async listWecomInstallations(workspaceId: string): Promise<ListWecomInstallationsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/wecom/installations`);
+    return parseWithFallback(
+      raw,
+      ListWecomInstallationsResponseSchema,
+      EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/wecom/installations" },
+    );
+  }
+
+  // registerWecomBYO performs a bring-your-own-app install: the admin pastes
+  // the bot id and long-connection secret from the WeCom admin console,
+  // and the backend seals the secret with MULTICA_WECOM_SECRET_KEY before
+  // persisting, returning the new installation.
+  async registerWecomBYO(
+    workspaceId: string,
+    agentId: string,
+    body: RegisterWecomBYORequest,
+  ): Promise<WecomInstallation> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/wecom/install/byo?${search.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    return parseWithFallback(raw, WecomInstallationSchema, EMPTY_WECOM_INSTALLATION, {
+      endpoint: "POST /api/workspaces/:id/wecom/install/byo",
+    });
+  }
+
+  async deleteWecomInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/wecom/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // redeemWecomBindingToken binds the WeCom aibot userid carried by the
+  // token to the logged-in Multica user. Called by the /wecom/bind redeem
+  // page after the user clicks through the "link your Multica account"
+  // prompt the bot sent in WeCom. Status codes:
+  //   410 Gone      → invalid / expired / already consumed
+  //   409 Conflict  → the WeCom user is already bound to a different user
+  //   403 Forbidden → the logged-in user is not a workspace member
+  async redeemWecomBindingToken(token: string): Promise<RedeemWecomBindingTokenResponse> {
+    const raw = await this.fetch<unknown>(`/api/wecom/binding/redeem`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    return parseWithFallback(
+      raw,
+      RedeemWecomBindingTokenResponseSchema,
+      EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
+      { endpoint: "POST /api/wecom/binding/redeem" },
     );
   }
 }

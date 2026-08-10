@@ -8,10 +8,12 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
 import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
+import { wecomInstallationsOptions } from "@multica/core/wecom";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { LarkAgentBindButton } from "../../../settings/components/lark-tab";
 import { SlackAgentBindButton } from "../../../settings/components/slack-tab";
 import { DingTalkAgentBindButton } from "../../../settings/components/dingtalk-tab";
+import { WecomAgentBindButton } from "../../../settings/components/wecom-tab";
 import { useT } from "../../../i18n";
 
 /**
@@ -48,6 +50,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   const { data: dingtalkListing } = useQuery({
     ...dingtalkInstallationsOptions(wsId),
   });
+  const { data: wecomListing } = useQuery({
+    ...wecomInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
     enabled: !!wsId,
@@ -67,6 +73,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   // backend would 403.
   const canManageLark = isWorkspaceAdmin || isAgentOwner;
   const canManageSlack = isWorkspaceAdmin;
+  const canManageWecom = isWorkspaceAdmin;
   const hasActiveInstall =
     listing?.installations.some(
       (inst) => inst.agent_id === agent.id && inst.status === "active",
@@ -84,11 +91,18 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   // matching Slack rather than Lark's owner-or-admin rule.
   const canManageDingtalk = isWorkspaceAdmin;
 
+  const wecomConfigured = wecomListing?.configured === true;
+  const wecomInstallSupported = wecomListing?.install_supported === true;
+  const wecomHasActiveInstall =
+    wecomListing?.installations.some(
+      (inst) => inst.agent_id === agent.id && inst.status === "active",
+    ) ?? false;
+
   // A member who can manage no platform (not a workspace admin and not this
   // agent's owner) gets the read-only note instead of the sections.
   // Members can still view connected bots in the (member-visible)
   // Settings → Integrations listing.
-  if (!canManageLark && !canManageSlack && !canManageDingtalk) {
+  if (!canManageLark && !canManageSlack && !canManageDingtalk && !canManageWecom) {
     return (
       <div className="space-y-6">
         <p className="text-caption text-muted-foreground">
@@ -220,6 +234,40 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             </p>
           ) : (
             <DingTalkAgentBindButton agentId={agent.id} agentName={agent.name} />
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border">
+        <div className="flex items-start gap-3 p-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+            <MessagesSquare className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="text-body font-medium">{ts(($) => $.wecom.section_title)}</h3>
+            <p className="text-caption leading-relaxed text-muted-foreground">
+              {ts(($) => $.wecom.page_description)}
+            </p>
+          </div>
+        </div>
+        <div className="border-t px-4 py-3">
+          {!canManageWecom ? (
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.tab_body.integrations.members_note)}
+            </p>
+          ) : !wecomConfigured ? (
+            <p className="text-caption text-muted-foreground">
+              {ts(($) => $.wecom.not_enabled_title)}
+            </p>
+          ) : !wecomInstallSupported && !wecomHasActiveInstall ? (
+            <div className="space-y-1">
+              <p className="text-caption font-medium">{ts(($) => $.wecom.preview_title)}</p>
+              <p className="text-caption text-muted-foreground">
+                {ts(($) => $.wecom.preview_description)}
+              </p>
+            </div>
+          ) : (
+            <WecomAgentBindButton agentId={agent.id} agentName={agent.name} />
           )}
         </div>
       </section>

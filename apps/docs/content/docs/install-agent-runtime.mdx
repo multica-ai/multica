@@ -25,7 +25,6 @@ Multica currently detects these commands:
 | Grok Build | `grok` | [Grok Build quickstart](https://docs.x.ai/build/overview) |
 | Hermes Agent | `hermes` | [Hermes quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
-| Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | Kiro CLI | `kiro-cli` | [Install Kiro CLI](https://kiro.dev/docs/cli/installation/) |
 | OpenClaw | `openclaw` | [Install OpenClaw](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode quickstart](https://opencode.ai/en/docs) |
@@ -33,6 +32,8 @@ Multica currently detects these commands:
 | Qoder CLI | `qodercli` | [Qoder CLI quickstart](https://docs.qoder.com/en/cli/quick-start) |
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI quickstart](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
+| QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE official site](https://www.trae.cn/) |
 
 "Supported" means Multica can invoke that CLI. It does not mean Multica provides the tool's account, subscription, or model quota for you.
@@ -42,6 +43,8 @@ Multica currently detects these commands:
 After installing, launch the tool once in a terminal on its own and complete its sign-in or model provider setup. If the tool cannot complete requests in the terminal, the daemon's invocations fail the same way.
 
 For Reasonix, run `reasonix setup` and configure a default provider and model before starting the daemon.
+
+For QwenPaw, choose the provider and model in QwenPaw's own configuration. Multica cannot override a QwenPaw model at run time.
 
 Those login credentials are stored locally by the tool itself. Multica never receives login tokens from Claude, Codex, Cursor, or any other CLI.
 

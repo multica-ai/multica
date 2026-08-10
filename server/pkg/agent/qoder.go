@@ -244,7 +244,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		// advertise. See the matching comment in hermes.go for why
 		// unconditionally sending http/sse to a stdio-only ACP runtime
 		// tanks the whole session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "qoder", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "qoder", b.cfg)
 
 		cwd := opts.Cwd
 		if cwd == "" {

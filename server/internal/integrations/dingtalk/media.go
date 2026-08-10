@@ -270,12 +270,14 @@ func (m *mediaResolver) ResolveMedia(ctx context.Context, inst engine.ResolvedIn
 				return nil
 			}
 			refs[i] = channel.MediaRef{
-				Type:       channel.MsgTypeImage,
-				StorageKey: key,
-				StorageURL: link,
-				Filename:   filename,
-				MimeType:   contentType,
-				SizeBytes:  int64(len(data)),
+				Type:              channel.MsgTypeImage,
+				StorageKey:        key,
+				StorageURL:        link,
+				Filename:          filename,
+				MimeType:          contentType,
+				SizeBytes:         int64(len(data)),
+				InlinePlaceholder: dingtalkImagePlaceholder,
+				InlineIndex:       resource.InlineIndex,
 			}
 			valid[i] = true
 			return nil

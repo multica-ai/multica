@@ -105,8 +105,8 @@ function useNativeNavigationGestures() {
 // is not occupying main-flow width, leave room for the fixed window toolbar
 // so tabs do not land beneath the traffic lights / navigation controls.
 function MainTopBar() {
-  const { state, isMobile } = useSidebar();
-  const sidebarHidden = state === "collapsed" || isMobile;
+  const { state, isCompact } = useSidebar();
+  const sidebarHidden = state === "collapsed" || isCompact;
 
   return (
     <motion.header
@@ -134,8 +134,8 @@ function MainTopBar() {
 // leaves the main flow, the left margin must grow to mirror the fixed mr-2 so
 // the floating canvas sits symmetrically inside the window frame.
 function MainCanvas({ children }: { children: React.ReactNode }) {
-  const { state, isMobile } = useSidebar();
-  const sidebarHidden = state === "collapsed" || isMobile;
+  const { state, isCompact } = useSidebar();
+  const sidebarHidden = state === "collapsed" || isCompact;
 
   return (
     <motion.div

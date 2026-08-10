@@ -252,7 +252,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		// Drop MCP entries whose remote transport the runtime didn't advertise
 		// (traecli advertises mcpCapabilities {http, sse}). See hermes.go for
 		// why sending an unsupported transport tanks the whole session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "traecli", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "traecli", b.cfg)
 
 		cwd := opts.Cwd
 		if cwd == "" {

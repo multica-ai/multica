@@ -228,8 +228,11 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 		agents["qwen"] = e
 	}
 	// QwenPaw (`qwenpaw`) is the QwenPaw CLI agent, driven over ACP via
-	// `qwenpaw acp serve`. MULTICA_QWENPAW_MODEL seeds the daemon-wide default.
-	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", "MULTICA_QWENPAW_MODEL"); ok {
+	// `qwenpaw acp`. It takes no model env var: the backend never calls
+	// session/set_model (it would rewrite QwenPaw's shared agent config), so
+	// ExecOptions.Model is ignored — see ModelSelectionSupported. Reading one
+	// here would only advertise a knob that silently does nothing.
+	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
 		agents["qwenpaw"] = e
 	}
 	return agents

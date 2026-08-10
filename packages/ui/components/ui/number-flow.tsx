@@ -70,6 +70,14 @@ type CompactNumberFlowProps = Omit<
   suffixCase?: "lower" | "upper"
 }
 
+const COMPACT_UNITS = [
+  { divisor: 1, upperSuffix: undefined, lowerSuffix: undefined },
+  { divisor: 1_000, upperSuffix: "K", lowerSuffix: "k" },
+  { divisor: 1_000_000, upperSuffix: "M", lowerSuffix: "m" },
+  { divisor: 1_000_000_000, upperSuffix: "B", lowerSuffix: "b" },
+  { divisor: 1_000_000_000_000, upperSuffix: "T", lowerSuffix: "t" },
+] as const
+
 function CompactNumberFlow({
   value,
   suffixCase = "upper",
@@ -78,25 +86,31 @@ function CompactNumberFlow({
   ...props
 }: CompactNumberFlowProps) {
   const magnitude = Math.abs(value)
-  const divisor =
-    magnitude >= 1_000_000 ? 1_000_000 : magnitude >= 1_000 ? 1_000 : 1
-  const scaledValue = value / divisor
+  let unitIndex = COMPACT_UNITS.findLastIndex(
+    ({ divisor }) => magnitude >= divisor,
+  )
+  unitIndex = Math.max(unitIndex, 0)
+
+  let unit = COMPACT_UNITS[unitIndex]!
+  let scaledValue = value / unit.divisor
+
+  if (
+    Math.abs(Number(scaledValue.toFixed(1))) >= 1_000 &&
+    unitIndex < COMPACT_UNITS.length - 1
+  ) {
+    unit = COMPACT_UNITS[unitIndex + 1]!
+    scaledValue = value / unit.divisor
+  }
+
+  const roundedValue = Number(scaledValue.toFixed(1))
   const fractionDigits =
-    divisor > 1 && Math.abs(scaledValue % 1) >= 0.05 ? 1 : 0
+    unit.divisor > 1 && !Number.isInteger(roundedValue) ? 1 : 0
   const suffix =
-    divisor === 1_000_000
-      ? suffixCase === "upper"
-        ? "M"
-        : "m"
-      : divisor === 1_000
-        ? suffixCase === "upper"
-          ? "K"
-          : "k"
-        : undefined
+    suffixCase === "upper" ? unit.upperSuffix : unit.lowerSuffix
   const format: NumberFlowFormat = {
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits,
-    useGrouping: divisor === 1,
+    useGrouping: unit.divisor === 1,
   }
   const formatted = new Intl.NumberFormat(locales, format).format(scaledValue)
 

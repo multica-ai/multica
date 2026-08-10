@@ -23,6 +23,14 @@
 
 const DOWNLOAD_PREFIX = "/api/attachments/";
 const DOWNLOAD_SUFFIX = "/download";
+const CHANNEL_MEDIA_MARKER_RE =
+  /<!-- multica:channel-media:[0-9a-fA-F-]{36} -->/g;
+
+/** Remove server-owned channel-media merge metadata from editable or rendered
+ * Markdown while leaving the visible attachment link untouched. */
+export function stripChannelMediaMarkers(content: string): string {
+  return content.replace(CHANNEL_MEDIA_MARKER_RE, "");
+}
 
 /**
  * UUID literal regex (RFC 4122 form). Used to extract an attachment id

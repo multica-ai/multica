@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
@@ -54,6 +54,7 @@ import {
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
 import { useQuickActionsFailureToast } from "./use-quick-actions-failure-toast";
@@ -78,44 +79,13 @@ import {
 } from "./use-chat-controller";
 import { useChatProjectContextSupport } from "./use-chat-project-context-support";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, Attachment, ChatMessage, ChatMessagesPage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import type { Agent, Attachment, ChatMessage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
 const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
 
-function appendChatMessageToLatestPageCache(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  message: ChatMessage,
-) {
-  qc.setQueryData<InfiniteData<ChatMessagesPage>>(
-    chatKeys.messagesPage(sessionId),
-    (old) => {
-      if (!old) {
-        return {
-          pages: [{
-            messages: [message],
-            limit: 50,
-            has_more: false,
-            next_cursor: null,
-          }],
-          pageParams: [null],
-        };
-      }
-      if (old.pages.some((page) => page.messages.some((m) => m.id === message.id))) {
-        return old;
-      }
-      return {
-        ...old,
-        pages: old.pages.map((page, index) =>
-          index === 0 ? { ...page, messages: [...page.messages, message] } : page,
-        ),
-      };
-    },
-  );
-}
 
 export function ChatWindow() {
   const { t } = useT("chat");
@@ -525,11 +495,11 @@ export function ChatWindow() {
         created_at: result.created_at,
         attachments: draftAttachments,
       };
-      appendChatMessageToLatestPageCache(qc, sessionId, sent);
-      qc.setQueryData<ChatMessage[]>(
-        chatKeys.messages(sessionId),
-        (old) => (old ? [...old, sent] : [sent]),
-      );
+      // Single door into the message caches (MUL-5711): idempotent by id, so
+      // this row and the chat:message echo of the same send converge in either
+      // arrival order, and this richer row (it carries the draft attachments)
+      // is never downgraded by the echo, which has no attachments field.
+      upsertChatMessageToCaches(qc, sessionId, sent, { seedIfMissing: true });
       seedAcceptedPendingTask(qc, sessionId, {
         task_id: result.task_id,
         created_at: result.created_at,

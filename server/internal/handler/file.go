@@ -480,10 +480,10 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			params.CommentID = comment.ID
 		}
 		if chatSessionID := r.FormValue("chat_session_id"); chatSessionID != "" {
-			// Re-use the existing private-agent gate so the user can still
-			// reach this session — covers role downgrade and agent
-			// visibility flips. The gate writes 4xx on failure.
-			session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, chatSessionID)
+			// Require the member-visible Chat projection as well as private-agent
+			// access. A cached command-only session id must not accept uploads that
+			// could later be attached by an old client and resurrect the session.
+			session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, chatSessionID)
 			if !ok {
 				return
 			}

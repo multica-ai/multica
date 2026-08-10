@@ -72,7 +72,8 @@
     "no_results": "无结果",
     "group_current": "当前页面",
     "group_recent": "最近浏览",
-    "group_search": "搜索结果"
+    "group_search": "搜索结果",
+    "group_cancelled": "已取消"
   },
   "slash_command": {
     "no_skills_configured": "暂无配置的技能",

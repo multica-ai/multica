@@ -830,4 +830,201 @@ describe("SearchCommand", () => {
     expect(input.selectionEnd).toBe(input.value.length);
     expect(selectedValue()).toBe(first);
   });
+
+  // MUL-5824: the two searches are ranked independently server-side and the
+  // palette renders the whole Projects group before the whole Issues group, so
+  // per-type ranking let one cancelled project be the very first row. The
+  // partition has to be cross-type and applied here, where results aggregate.
+  describe("mixed issue/project cancelled demotion", () => {
+    const fixtureIssue = (
+      over: Partial<Record<string, unknown>> & { id: string },
+    ) => ({
+      workspace_id: "ws-test",
+      number: 1,
+      identifier: "MUL-1",
+      title: "Untitled",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 0,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      match_source: "title",
+      ...over,
+    });
+
+    const fixtureProject = (
+      over: Partial<Record<string, unknown>> & { id: string },
+    ) => ({
+      workspace_id: "ws-test",
+      title: "Untitled",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      match_source: "title",
+      ...over,
+    });
+
+    /** Rendered result rows, top to bottom, by their cmdk value. */
+    const renderedValues = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>('[cmdk-item=""]'),
+      )
+        .map((el) => el.getAttribute("data-value") ?? "")
+        .filter((v) => v.startsWith("project:") || v.startsWith("issue-"));
+
+    /**
+     * Group headings, top to bottom. Queried structurally rather than by text:
+     * a cancelled project also renders "Cancelled" as its status label.
+     */
+    const renderedHeadings = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>("[cmdk-group-heading]"),
+      ).map((el) => el.textContent ?? "");
+
+    it("keeps a cancelled project below a live issue instead of first", async () => {
+      const user = userEvent.setup();
+      mockSearchIssues.mockResolvedValue({
+        issues: [
+          fixtureIssue({
+            id: "issue-live",
+            number: 10,
+            identifier: "MUL-10",
+            title: "search live issue",
+            status: "in_progress",
+          }),
+        ],
+        total: 1,
+      });
+      mockSearchProjects.mockResolvedValue({
+        projects: [
+          fixtureProject({
+            id: "proj-dead",
+            title: "search dead project",
+            status: "cancelled",
+          }),
+        ],
+        total: 1,
+      });
+
+      renderSearch();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "search",
+      );
+
+      await waitFor(
+        () => {
+          expect(renderedValues()).toEqual(["issue-live", "project:proj-dead"]);
+        },
+        { timeout: 2000 },
+      );
+      // Still discoverable, just under its own heading at the bottom.
+      expect(renderedHeadings()).toEqual(["Issues", "Cancelled"]);
+    });
+
+    it("keeps live rows of both types above every cancelled row", async () => {
+      const user = userEvent.setup();
+      mockSearchIssues.mockResolvedValue({
+        issues: [
+          fixtureIssue({
+            id: "issue-dead",
+            number: 11,
+            identifier: "MUL-11",
+            title: "search a",
+            status: "cancelled",
+          }),
+          fixtureIssue({
+            id: "issue-live",
+            number: 12,
+            identifier: "MUL-12",
+            title: "search b",
+            status: "todo",
+          }),
+          fixtureIssue({
+            id: "issue-done",
+            number: 13,
+            identifier: "MUL-13",
+            title: "search c",
+            status: "done",
+          }),
+        ],
+        total: 3,
+      });
+      mockSearchProjects.mockResolvedValue({
+        projects: [
+          fixtureProject({ id: "proj-dead", title: "search p1", status: "cancelled" }),
+          fixtureProject({ id: "proj-live", title: "search p2", status: "planned" }),
+        ],
+        total: 2,
+      });
+
+      renderSearch();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "search",
+      );
+
+      await waitFor(
+        () => {
+          expect(renderedValues()).toEqual([
+            "project:proj-live",
+            // 'done' is live — only cancelled work is demoted.
+            "issue-live",
+            "issue-done",
+            "project:proj-dead",
+            "issue-dead",
+          ]);
+        },
+        { timeout: 2000 },
+      );
+    });
+
+    it("exempts a cancelled issue the query targets by identifier", async () => {
+      const user = userEvent.setup();
+      mockSearchIssues.mockResolvedValue({
+        issues: [
+          fixtureIssue({
+            id: "issue-hit",
+            number: 7,
+            identifier: "MUL-7",
+            title: "Direct hit",
+            status: "cancelled",
+          }),
+        ],
+        total: 1,
+      });
+      mockSearchProjects.mockResolvedValue({ projects: [], total: 0 });
+
+      renderSearch();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "MUL-7",
+      );
+
+      await waitFor(
+        () => {
+          expect(renderedValues()).toEqual(["issue-hit"]);
+        },
+        { timeout: 2000 },
+      );
+      expect(renderedHeadings()).not.toContain("Cancelled");
+    });
+  });
 });

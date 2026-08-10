@@ -759,6 +759,9 @@ func TestQoderForwardsMcpAuthHeaderToSessionNew(t *testing.T) {
 	}
 }
 
+// Qoder is not on the omitted-capabilities exception list, so it keeps the
+// ACP v1 default: capabilities the runtime never advertised are unsupported
+// and remote entries are filtered out of session/new.
 func TestQoderFiltersRemoteMcpWhenInitializeDoesNotAdvertiseCapability(t *testing.T) {
 	t.Parallel()
 

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -36,21 +37,26 @@ func (fakeTxStarter) Begin(context.Context) (pgx.Tx, error) { return fakeTx{}, n
 
 // fakeSessionQueries is an in-memory SessionQueries for unit tests.
 type fakeSessionQueries struct {
-	bindings            map[string]pgtype.UUID
-	nextSession         byte
-	createdSessions     int
-	messages            []string
-	messageID           pgtype.UUID
-	lastCreate          db.CreateChatMessageParams
-	touched             int
-	replyTargets        int
-	lockedWorkspace     int    // count of LockWorkspaceForChatSessionCreate calls
-	lastConfig          []byte // config of the most recent CreateChannelChatSessionBinding
-	attachments         []db.CreateAttachmentParams
-	linked              db.LinkAttachmentsToChatMessageParams
-	mediaCleared        int
-	reconcilerOwnedKeys map[string]bool
-	issueLookupErr      error
+	bindings              map[string]pgtype.UUID
+	nextSession           byte
+	createdSessions       int
+	messages              []string
+	messageID             pgtype.UUID
+	lastCreate            db.CreateChatMessageParams
+	touched               int
+	replyTargets          int
+	lockedWorkspace       int    // count of LockWorkspaceForChatSessionCreate calls
+	lastConfig            []byte // config of the most recent CreateChannelChatSessionBinding
+	attachments           []db.CreateAttachmentParams
+	linked                db.LinkAttachmentsToChatMessageParams
+	mediaCleared          int
+	updatedMediaContent   string
+	updateMediaRows       int64
+	issueMediaMarkdown    string
+	issueMediaBase        pgtype.Text
+	issueMediaDescription string
+	reconcilerOwnedKeys   map[string]bool
+	issueLookupErr        error
 
 	prevMessage      *string // GetMostRecentUserChatMessage result; nil → ErrNoRows
 	markRows         int64   // MarkChannelInboundDedupProcessed result
@@ -59,7 +65,7 @@ type fakeSessionQueries struct {
 }
 
 func newFake() *fakeSessionQueries {
-	return &fakeSessionQueries{bindings: map[string]pgtype.UUID{}, markRows: 1, messageID: uid(42)}
+	return &fakeSessionQueries{bindings: map[string]pgtype.UUID{}, markRows: 1, messageID: uid(42), updateMediaRows: 1}
 }
 
 func bindKey(inst pgtype.UUID, chat string) string { return fmt.Sprintf("%x|%s", inst.Bytes, chat) }
@@ -111,6 +117,18 @@ func (f *fakeSessionQueries) LockIssueForChannelMediaBind(_ context.Context, arg
 		return pgtype.UUID{}, f.issueLookupErr
 	}
 	return arg.ID, nil
+}
+
+func (f *fakeSessionQueries) UpdateChatMessageContentForChannelMedia(_ context.Context, arg db.UpdateChatMessageContentForChannelMediaParams) (int64, error) {
+	f.updatedMediaContent = arg.Content
+	return f.updateMediaRows, nil
+}
+
+func (f *fakeSessionQueries) MaterializeIssueChannelMediaMarkdown(_ context.Context, arg db.MaterializeIssueChannelMediaMarkdownParams) (db.Issue, error) {
+	f.issueMediaMarkdown = arg.Markdown.String
+	f.issueMediaBase = arg.BaseDescription
+	f.issueMediaDescription = arg.Description
+	return db.Issue{ID: arg.ID, WorkspaceID: arg.WorkspaceID}, nil
 }
 
 func (f *fakeSessionQueries) CreateAttachment(_ context.Context, arg db.CreateAttachmentParams) (db.Attachment, error) {
@@ -349,10 +367,11 @@ func TestAppendUserMessage_OrdinaryTurnKeepsDefaultMessageKind(t *testing.T) {
 func TestBindMediaRefs_CreatesAndLinksChatAttachments(t *testing.T) {
 	f := newFake()
 	s := newTestSession(f)
+	body := "Use [Image] literally\n[Image]"
 	res, err := s.AppendUserMessage(context.Background(), AppendInput{
 		SessionID: uid(1),
 		Sender:    uid(7),
-		Body:      "[Image]",
+		Body:      body,
 		MessageID: "om_image",
 	})
 	if err != nil {
@@ -367,21 +386,23 @@ func TestBindMediaRefs_CreatesAndLinksChatAttachments(t *testing.T) {
 	if !f.lastCreate.ChannelIngested.Valid || !f.lastCreate.ChannelIngested.Bool {
 		t.Fatalf("channel append must stamp channel_ingested, got %+v", f.lastCreate.ChannelIngested)
 	}
+	ref := channel.MediaRef{
+		Type:              channel.MsgTypeImage,
+		StorageKey:        "lark/cli/img.png",
+		StorageURL:        "https://cdn.example.test/lark/cli/img.png",
+		Filename:          "screenshot.png",
+		MimeType:          "image/png",
+		SizeBytes:         3,
+		InlinePlaceholder: "[Image]",
+		InlineIndex:       1,
+	}
 	err = s.BindMediaRefs(context.Background(), BindMediaInput{
 		MessageID:   res.MessageID,
 		SessionID:   uid(1),
 		WorkspaceID: uid(9),
 		Sender:      uid(7),
-		MediaRefs: []channel.MediaRef{
-			{
-				Type:       channel.MsgTypeImage,
-				StorageKey: "lark/cli/img.png",
-				StorageURL: "https://cdn.example.test/lark/cli/img.png",
-				Filename:   "screenshot.png",
-				MimeType:   "image/png",
-				SizeBytes:  3,
-			},
-		},
+		Body:        body,
+		MediaRefs:   []channel.MediaRef{ref},
 	})
 	if err != nil {
 		t.Fatalf("BindMediaRefs: %v", err)
@@ -406,6 +427,134 @@ func TestBindMediaRefs_CreatesAndLinksChatAttachments(t *testing.T) {
 	if len(f.linked.AttachmentIds) != 1 || f.linked.AttachmentIds[0] != att.ID {
 		t.Fatalf("linked ids = %+v, want attachment id %v", f.linked.AttachmentIds, att.ID)
 	}
+	if want := "Use [Image] literally\n" + inlineAttachmentMarkdown(ref, att.ID); f.updatedMediaContent != want {
+		t.Fatalf("updated content = %q, want %q", f.updatedMediaContent, want)
+	}
+}
+
+func TestComposeInlineMediaBody_PartialResolutionKeepsFailedPlaceholderInPlace(t *testing.T) {
+	body := "[Image]\n这是啥?\n[Image]\n这又是啥?"
+	got, changed := composeInlineMediaBody(body, []inlineMediaReplacement{{
+		placeholder: "[Image]",
+		index:       1,
+		markdown:    "![](/api/attachments/second/download)",
+	}})
+	if !changed {
+		t.Fatal("expected the successful second image to update the body")
+	}
+	want := "[Image]\n这是啥?\n![](/api/attachments/second/download)\n这又是啥?"
+	if got != want {
+		t.Fatalf("composed body = %q, want %q", got, want)
+	}
+}
+
+func TestComposeInlineMediaBody_ReplacesMarkersWithoutAddingWhitespace(t *testing.T) {
+	body := "前[Image]中\n[Image]后"
+	got, changed := composeInlineMediaBody(body, []inlineMediaReplacement{
+		{placeholder: "[Image]", index: 0, markdown: "![](/api/attachments/first/download)"},
+		{placeholder: "[Image]", index: 1, markdown: "![](/api/attachments/second/download)"},
+	})
+	if !changed {
+		t.Fatal("expected both inline image markers to be replaced")
+	}
+	want := "前![](/api/attachments/first/download)中\n![](/api/attachments/second/download)后"
+	if got != want {
+		t.Fatalf("replacement changed surrounding whitespace: got %q, want %q", got, want)
+	}
+}
+
+func TestComposeIssueCommandMediaDescriptionPreservesRichTextOrder(t *testing.T) {
+	body := "/issue explain below questions\nWhat is this?\n[Image]\nAnd what is this?\n[Image]"
+	got, changed := composeIssueCommandMediaDescription(body, "/issue explain below questions\nWhat is this?And what is this?", []inlineMediaReplacement{
+		{placeholder: "[Image]", index: 0, markdown: "![](first)\n\n<!-- first -->"},
+		{placeholder: "[Image]", index: 1, markdown: "![](second)\n\n<!-- second -->"},
+	}, "flattened fallback")
+	if !changed {
+		t.Fatal("expected issue description media to be materialized")
+	}
+	want := "What is this?\n![](first)\n\n<!-- first -->\nAnd what is this?\n![](second)\n\n<!-- second -->"
+	if got != want {
+		t.Fatalf("description = %q, want %q", got, want)
+	}
+}
+
+func TestComposeIssueCommandMediaDescriptionKeepsOnlyMediaBeforeCommand(t *testing.T) {
+	body := "> quoted context\n[Image]\n/issue explain\nDetails"
+	got, changed := composeIssueCommandMediaDescription(body, "/issue explain\nDetails", []inlineMediaReplacement{
+		{placeholder: "[Image]", index: 0, markdown: "![](first)\n\n<!-- first -->"},
+	}, "Details")
+	if !changed {
+		t.Fatal("expected leading media to be materialized")
+	}
+	want := "![](first)\n\n<!-- first -->\n\nDetails"
+	if got != want {
+		t.Fatalf("description = %q, want %q", got, want)
+	}
+}
+
+func TestComposeIssueCommandMediaDescriptionFallsBackWhenMarkerIsInsideDirective(t *testing.T) {
+	got, changed := composeIssueCommandMediaDescription(
+		"/issue explain [Image]\nDetails",
+		"/issue explain [Image]\nDetails",
+		[]inlineMediaReplacement{{placeholder: "[Image]", index: 0, markdown: "![](first)"}},
+		"Details",
+	)
+	if changed || got != "Details" {
+		t.Fatalf("compose = %q, changed=%v; want fallback", got, changed)
+	}
+}
+
+func TestComposeIssueCommandMediaDescriptionIgnoresEnrichedIssueLine(t *testing.T) {
+	body := "<quoted_message>\n/issue Old intent\n</quoted_message>\n/issue Real intent\nDetails\n[Image]"
+	got, changed := composeIssueCommandMediaDescription(
+		body,
+		"/issue Real intent\nDetails",
+		[]inlineMediaReplacement{{placeholder: "[Image]", index: 0, markdown: "![](first)"}},
+		"Details\n[Image]",
+	)
+	if !changed || got != "Details\n![](first)" {
+		t.Fatalf("compose = %q, changed=%v; want real command suffix", got, changed)
+	}
+}
+
+func TestBindMediaRefs_MaterializesIssueImagesInOriginalOrder(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	body := "/issue explain below questions\nWhat is this?\n[Image]\nAnd what is this?\n[Image]"
+	commandText := "/issue explain below questions\nWhat is this?And what is this?"
+	base := issueDescriptionFromCommandBody(body, commandText, "")
+	err := s.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID:            uid(42),
+		SessionID:            uid(1),
+		WorkspaceID:          uid(9),
+		Sender:               uid(7),
+		IssueID:              uid(8),
+		IssueDescriptionBase: pgtype.Text{String: base, Valid: true},
+		IssueCommandText:     commandText,
+		Body:                 body,
+		MediaRefs: []channel.MediaRef{
+			{
+				Type: channel.MsgTypeImage, StorageKey: "dingtalk/first", StorageURL: "https://cdn.test/first",
+				Filename: "first.png", MimeType: "image/png", InlinePlaceholder: "[Image]", InlineIndex: 0,
+			},
+			{
+				Type: channel.MsgTypeImage, StorageKey: "dingtalk/second", StorageURL: "https://cdn.test/second",
+				Filename: "second.png", MimeType: "image/png", InlinePlaceholder: "[Image]", InlineIndex: 1,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+	if f.issueMediaBase != (pgtype.Text{String: base, Valid: true}) {
+		t.Fatalf("issue media base = %#v, want %q", f.issueMediaBase, base)
+	}
+	first := channelmedia.Block(uuidString(f.attachments[0].ID), "first.png", true)
+	second := channelmedia.Block(uuidString(f.attachments[1].ID), "second.png", true)
+	want := "What is this?\n" + first + "\nAnd what is this?\n" + second
+	if f.issueMediaDescription != want {
+		t.Fatalf("issue media description = %q, want %q", f.issueMediaDescription, want)
+	}
 }
 
 func TestBindMediaRefs_CreatesIssueOwnedAttachments(t *testing.T) {
@@ -417,13 +566,15 @@ func TestBindMediaRefs_CreatesIssueOwnedAttachments(t *testing.T) {
 		WorkspaceID: uid(9),
 		Sender:      uid(7),
 		IssueID:     uid(8),
+		Body:        "[Image]",
 		MediaRefs: []channel.MediaRef{{
-			Type:       channel.MsgTypeImage,
-			StorageKey: "lark/cli/issue.png",
-			StorageURL: "https://cdn.example.test/lark/cli/issue.png",
-			Filename:   "issue.png",
-			MimeType:   "image/png",
-			SizeBytes:  3,
+			Type:              channel.MsgTypeImage,
+			StorageKey:        "lark/cli/issue.png",
+			StorageURL:        "https://cdn.example.test/lark/cli/issue.png",
+			Filename:          "issue.png",
+			MimeType:          "image/png",
+			SizeBytes:         3,
+			InlinePlaceholder: "[Image]",
 		}},
 	})
 	if err != nil {
@@ -442,8 +593,45 @@ func TestBindMediaRefs_CreatesIssueOwnedAttachments(t *testing.T) {
 	if f.linked.ChatMessageID.Valid || len(f.linked.AttachmentIds) != 0 {
 		t.Fatalf("issue attachment must not also bind to chat message: %+v", f.linked)
 	}
+	if f.updatedMediaContent != "" {
+		t.Fatalf("issue-owned media must not rewrite the chat command body: %q", f.updatedMediaContent)
+	}
+	wantMarkdown := channelmedia.Block(uuidString(att.ID), "issue.png", true)
+	if f.issueMediaMarkdown != wantMarkdown {
+		t.Fatalf("issue media markdown = %q, want %q", f.issueMediaMarkdown, wantMarkdown)
+	}
 	if f.mediaCleared != 1 {
 		t.Fatalf("media pending marker clears = %d, want 1", f.mediaCleared)
+	}
+}
+
+func TestBindMediaRefs_UsesGeneratedFilenameInIssueMarkdown(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	err := s.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID:   uid(42),
+		SessionID:   uid(1),
+		WorkspaceID: uid(9),
+		Sender:      uid(7),
+		IssueID:     uid(8),
+		MediaRefs: []channel.MediaRef{{
+			Type:       channel.MsgTypeFile,
+			StorageKey: "dingtalk/file",
+			StorageURL: "https://cdn.example.test/dingtalk/file",
+			MimeType:   "application/pdf",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+	att := f.attachments[0]
+	wantFilename := defaultMediaFilename(channel.MsgTypeFile, uuidString(att.ID), "application/pdf")
+	if att.Filename != wantFilename {
+		t.Fatalf("attachment filename = %q, want %q", att.Filename, wantFilename)
+	}
+	wantMarkdown := channelmedia.Block(uuidString(att.ID), wantFilename, false)
+	if f.issueMediaMarkdown != wantMarkdown {
+		t.Fatalf("issue media markdown = %q, want %q", f.issueMediaMarkdown, wantMarkdown)
 	}
 }
 
