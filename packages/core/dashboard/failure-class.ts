@@ -56,6 +56,10 @@ const REASON_CLASS: Record<string, FailureClass> = {
   // Multica-side execution substrate: daemon offline / restarted, task never
   // got picked up, runner binary missing or too old.
   runtime_offline: "runtime",
+  // NEX-38 decision one: a queued task stranded by a drained (safe-shutdown)
+  // runtime. Same operator response as runtime_offline — the runtime is not
+  // accepting work.
+  runtime_drained: "runtime",
   runtime_recovery: "runtime",
   queued_expired: "runtime",
   "agent_error.runtime_missing_executable": "runtime",

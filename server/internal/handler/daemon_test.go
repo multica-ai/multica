@@ -929,6 +929,55 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
 }
 
+// TestDaemonRegister_KeepsDrainingStatus pins AC-14: a daemon that registers
+// while in safe-shutdown must keep its 'draining' status on the server row
+// instead of being flattened to 'online' — the old code collapsed every
+// non-offline value to online, which would silently make a draining runtime
+// claimable again.
+func TestDaemonRegister_KeepsDrainingStatus(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-daemon-draining",
+		"device_name":  "test-device",
+		"runtimes": []map[string]any{
+			{"name": "test-runtime-draining", "type": "claude", "version": "1.0.0", "status": "draining"},
+		},
+	}, testWorkspaceID, "test-daemon-draining")
+
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	runtimes, ok := resp["runtimes"].([]any)
+	if !ok || len(runtimes) == 0 {
+		t.Fatalf("DaemonRegister: expected runtimes in response, got %v", resp)
+	}
+	rt := runtimes[0].(map[string]any)
+	if status := rt["status"].(string); status != "draining" {
+		t.Fatalf("response runtime status = %q, want draining", status)
+	}
+
+	runtimeID := rt["id"].(string)
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+
+	var dbStatus string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT status FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&dbStatus); err != nil {
+		t.Fatalf("read runtime status: %v", err)
+	}
+	if dbStatus != "draining" {
+		t.Fatalf("DB runtime status = %q, want draining", dbStatus)
+	}
+}
+
 func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -1115,6 +1164,57 @@ func TestHandleDaemonWSHeartbeat_AllowsAnyAuthorizedWorkspace(t *testing.T) {
 	}
 	if ack == nil || ack.RuntimeID != runtimeID {
 		t.Fatalf("ack = %+v, want runtime_id %q", ack, runtimeID)
+	}
+}
+
+// TestHandleDaemonWSHeartbeat_DrainingRuntimeReportsQueuedTasks pins AC-8:
+// while a runtime is draining, the heartbeat ack carries the count of queued
+// tasks so `daemon status` can show "排队任务 M". A non-draining runtime omits
+// the field so the hot heartbeat ack stays tiny.
+func TestHandleDaemonWSHeartbeat_DrainingRuntimeReportsQueuedTasks(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	agentID := insertAgent(t, ctx, testWorkspaceID, runtimeID, testUserID, "draining-queued-agent")
+
+	// Two queued tasks pinned to the draining runtime.
+	for i := 0; i < 2; i++ {
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
+			VALUES ($1, $2, 'queued', 0, '{}'::jsonb)
+		`, agentID, runtimeID); err != nil {
+			t.Fatalf("insert queued task: %v", err)
+		}
+	}
+
+	// Non-draining control: online runtime → queued_tasks omitted from the ack.
+	onlineRuntimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	onlineAck, err := testHandler.HandleDaemonWSHeartbeat(ctx,
+		daemonws.ClientIdentity{WorkspaceIDs: []string{testWorkspaceID}},
+		onlineRuntimeID, false)
+	if err != nil {
+		t.Fatalf("online heartbeat: %v", err)
+	}
+	if onlineAck.QueuedTasks != nil {
+		t.Fatalf("online runtime: queued_tasks = %d, want omitted", *onlineAck.QueuedTasks)
+	}
+
+	// Draining runtime → ack carries the queued count.
+	setRuntimeStatus(t, runtimeID, "draining")
+	ack, err := testHandler.HandleDaemonWSHeartbeat(ctx,
+		daemonws.ClientIdentity{WorkspaceIDs: []string{testWorkspaceID}},
+		runtimeID, false)
+	if err != nil {
+		t.Fatalf("draining heartbeat: %v", err)
+	}
+	if ack.QueuedTasks == nil {
+		t.Fatal("draining runtime: queued_tasks omitted, want 2")
+	}
+	if got := *ack.QueuedTasks; got != 2 {
+		t.Fatalf("draining runtime: queued_tasks = %d, want 2", got)
 	}
 }
 

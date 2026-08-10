@@ -336,6 +336,14 @@ type DaemonHeartbeatAckPayload struct {
 	// that don't know this field silently ignore it (standard JSON behavior)
 	// and fall back to the singular PendingLocalSkillImport above.
 	PendingLocalSkillImports []DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_imports,omitempty"`
+	// QueuedTasks is the count of tasks currently sitting in 'queued' for
+	// this runtime (NEX-38 AC-8). Present only while the runtime is draining
+	// — the daemon shows it as "排队任务 M" during safe shutdown, so the user
+	// knows how many queued tasks will be stranded until queued_expired after
+	// the runtime shuts down. Computed server-side because the daemon cannot
+	// know the server's queue depth. Omitted (nil) for non-draining runtimes
+	// so the hot heartbeat ack stays tiny; older daemons ignore the field.
+	QueuedTasks *int `json:"queued_tasks,omitempty"`
 }
 
 // HeartbeatStatusRuntimeGone is the ack Status used when the runtime row no

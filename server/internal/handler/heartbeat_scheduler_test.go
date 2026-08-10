@@ -269,6 +269,72 @@ func TestPassthroughHeartbeatScheduler_TouchAndRaceRecovery(t *testing.T) {
 	}
 }
 
+// TestPassthroughHeartbeatScheduler_DrainingBumpsLastSeenKeepsDraining pins
+// AC-14/AC-16: a draining runtime's heartbeat must bump last_seen_at (so the
+// stale sweeper never misjudges an in-flight drain as a dead runtime) without
+// flipping the row back to online.
+func TestPassthroughHeartbeatScheduler_DrainingBumpsLastSeenKeepsDraining(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	setRuntimeStatus(t, runtimeID, "draining")
+	stale := time.Now().Add(-time.Hour)
+	setRuntimeLastSeenAt(t, runtimeID, stale)
+	rt := loadRuntime(t, runtimeID)
+	if rt.Status != "draining" {
+		t.Fatalf("setup: status=%q want draining", rt.Status)
+	}
+
+	sched := NewPassthroughHeartbeatScheduler(testHandler.Queries)
+	if err := sched.Schedule(context.Background(), rt); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+
+	status, lastSeen, _ := readRuntimeRow(t, runtimeID)
+	if status != "draining" {
+		t.Fatalf("status = %q, want draining (must not flip back online)", status)
+	}
+	if !lastSeen.After(stale.Add(time.Minute)) {
+		t.Fatalf("passthrough did not bump last_seen_at: stale=%s after=%s", stale, lastSeen)
+	}
+}
+
+// TestBatchedHeartbeatScheduler_DrainingBatchedKeepsDraining pins AC-14 for the
+// batched path: a draining runtime's heartbeat is coalesced into the bulk touch
+// (bumping last_seen_at) rather than falling back to MarkAgentRuntimeOnline.
+func TestBatchedHeartbeatScheduler_DrainingBatchedKeepsDraining(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	setRuntimeStatus(t, runtimeID, "draining")
+	stale := time.Now().Add(-2 * time.Hour)
+	setRuntimeLastSeenAt(t, runtimeID, stale)
+	rt := loadRuntime(t, runtimeID)
+	if rt.Status != "draining" {
+		t.Fatalf("setup: status=%q want draining", rt.Status)
+	}
+
+	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0)
+	if err := sched.Schedule(context.Background(), rt); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+	if got := sched.PendingCount(); got != 1 {
+		t.Fatalf("draining row should be queued for the batch touch, pending=%d", got)
+	}
+
+	sched.FlushNow(context.Background())
+
+	status, lastSeen, _ := readRuntimeRow(t, runtimeID)
+	if status != "draining" {
+		t.Fatalf("status = %q, want draining (must not flip back online)", status)
+	}
+	if !lastSeen.After(stale.Add(time.Hour)) {
+		t.Fatalf("batch did not bump last_seen_at: stale=%s after=%s", stale, lastSeen)
+	}
+}
+
 // silenceUnusedPgUUID ensures the package compiles even if no other test
 // happens to reference pgtype after future edits trim imports.
 var _ = pgtype.UUID{}

@@ -908,6 +908,100 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 	}
 }
 
+// TestExpireStaleQueuedTasks_RuntimeDrained pins NEX-38 decision one: a queued
+// task that expires while its runtime is in 'draining' (safe shutdown in
+// progress) is failed with 'runtime_drained' rather than 'queued_expired', so
+// the failure monitor and the user can tell "stranded by an intentional safe
+// shutdown" from generic queue expiry.
+func TestExpireStaleQueuedTasks_RuntimeDrained(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+
+	// Dedicated runtime + agent so we don't flip the shared integration
+	// agent's runtime into draining mid-test.
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		VALUES ($1, $2, 'draining-sweeper-runtime', 'local', 'claude', 'draining', '', '{}'::jsonb, NULL, now())
+		RETURNING id
+	`, testWorkspaceID, "draining-sweeper-daemon").Scan(&runtimeID); err != nil {
+		t.Fatalf("create draining runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE runtime_id = $1`, runtimeID)
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id)
+		SELECT $1, 'draining-sweeper-agent', '', 'cloud', '{}'::jsonb, $2, 'workspace', 1, m.user_id
+		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		RETURNING id
+	`, testWorkspaceID, runtimeID).Scan(&agentID); err != nil {
+		t.Fatalf("create draining agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
+		SELECT $1, 'Runtime drained sweeper test', 'todo', 'none', 'member', m.user_id, 'agent', $2
+		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		RETURNING id
+	`, testWorkspaceID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("create draining issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		VALUES ($1, $2, $3, 'queued', 0, now() - interval '5 hours')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("insert draining queued task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	failed, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+		TtlSecs:    3600.0, // 1h TTL — the task is 5h old
+		MaxPerTick: 100,
+	})
+	if err != nil {
+		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("expected exactly 1 expired task, got %d", len(failed))
+	}
+	if failed[0].ID.Bytes != parseUUIDBytes(taskID) {
+		t.Fatalf("expired the wrong task: got %x", failed[0].ID.Bytes)
+	}
+
+	var status, reason, errText string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, COALESCE(failure_reason, ''), COALESCE(error, '')
+		FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&status, &reason, &errText); err != nil {
+		t.Fatalf("read drained task: %v", err)
+	}
+	if status != "failed" {
+		t.Fatalf("task: expected status=failed, got %q", status)
+	}
+	if reason != "runtime_drained" {
+		t.Fatalf("task: expected failure_reason=runtime_drained, got %q", reason)
+	}
+	if !strings.Contains(errText, "draining") {
+		t.Fatalf("task: expected error to mention draining, got %q", errText)
+	}
+}
+
 // parseUUIDBytes converts a UUID string to the 16-byte array used by pgtype.UUID.
 func parseUUIDBytes(s string) [16]byte {
 	s = strings.ReplaceAll(s, "-", "")

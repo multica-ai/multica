@@ -451,9 +451,15 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		} else if runtime.Version != "" {
 			deviceInfo = runtime.Version
 		}
-		status := "online"
-		if runtime.Status == "offline" {
-			status = "offline"
+		// Pass the daemon-reported status through (NEX-38). Previously any
+		// non-"offline" value was flattened to "online", which would clobber a
+		// runtime that re-registers while draining — the row would silently
+		// become claimable again despite the daemon refusing new work. The
+		// status CHECK now admits 'draining', so a draining daemon keeps its
+		// state across reconnects and restarts (AC-13/AC-14).
+		status := runtime.Status
+		if status != "online" && status != "draining" && status != "offline" {
+			status = "online"
 		}
 		metadata, _ := json.Marshal(map[string]any{
 			"version":     runtime.Version,
@@ -1151,6 +1157,20 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 		RuntimeID:          runtimeID,
 		Status:             "ok",
 		ServerCapabilities: []string{protocol.DaemonCapabilityRPCV1},
+	}
+
+	// NEX-38 AC-8: while the runtime is draining, tell the daemon how many
+	// queued tasks will be stranded until queued_expired after shutdown, so
+	// `daemon status` can show "排队任务 M". Gated on draining so the hot
+	// online heartbeat path pays no extra query.
+	if rt.Status == "draining" {
+		if n, err := h.Queries.CountQueuedTasksByRuntime(ctx, rt.ID); err != nil {
+			slog.Warn("heartbeat: count queued tasks for draining runtime failed",
+				"runtime_id", runtimeID, "error", err)
+		} else {
+			queued := int(n)
+			ack.QueuedTasks = &queued
+		}
 	}
 
 	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)

@@ -70,7 +70,14 @@ export interface RuntimeDevice {
   runtime_mode: AgentRuntimeMode;
   provider: string;
   launch_header: string;
-  status: "online" | "offline";
+  /**
+   * NEX-38: 'draining' (safe shutdown in progress) was added as a first-class
+   * server state. A draining runtime is alive and heartbeating but refuses new
+   * work. Presence/health derivation treats it as not-online (the UI-level
+   * draining badge/copy lands with the NEX-38 UI task); this union exists so
+   * a server returning 'draining' never fails a parse/typecheck.
+   */
+  status: "online" | "draining" | "offline";
   device_info: string;
   metadata: Record<string, unknown>;
   owner_id: string | null;

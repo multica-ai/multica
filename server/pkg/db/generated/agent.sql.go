@@ -1542,6 +1542,24 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 	return i, err
 }
 
+const countQueuedTasksByRuntime = `-- name: CountQueuedTasksByRuntime :one
+SELECT count(*) FROM agent_task_queue
+WHERE runtime_id = $1 AND status = 'queued'
+`
+
+// How many tasks are sitting in 'queued' for a single runtime. The daemon
+// needs this while draining to tell the user how many queued tasks will stay
+// queued until queued_expired after the runtime shuts down (NEX-38 AC-8).
+// The heartbeat handler only runs it for draining runtimes, so the hot
+// online heartbeat path is untouched. Served by the partial index
+// idx_agent_task_queue_claim_candidates.
+func (q *Queries) CountQueuedTasksByRuntime(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countQueuedTasksByRuntime, runtimeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRunningTasks = `-- name: CountRunningTasks :one
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
@@ -2522,18 +2540,20 @@ func (q *Queries) DeleteSystemAgentByID(ctx context.Context, id pgtype.UUID) err
 
 const expireStaleQueuedTasks = `-- name: ExpireStaleQueuedTasks :many
 WITH victims AS (
-    SELECT id FROM agent_task_queue
-    WHERE status = 'queued'
-      AND created_at < now() - make_interval(secs => $1::double precision)
-    ORDER BY created_at ASC
+    SELECT t.id, ar.status AS runtime_status
+    FROM agent_task_queue t
+    LEFT JOIN agent_runtime ar ON ar.id = t.runtime_id
+    WHERE t.status = 'queued'
+      AND t.created_at < now() - make_interval(secs => $1::double precision)
+    ORDER BY t.created_at ASC
     LIMIT $2::int
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE OF t SKIP LOCKED
 )
 UPDATE agent_task_queue t
 SET status = 'failed',
     completed_at = now(),
-    error = 'task expired in queue',
-    failure_reason = 'queued_expired',
+    error = CASE WHEN v.runtime_status = 'draining' THEN 'task expired in queue: runtime draining' ELSE 'task expired in queue' END,
+    failure_reason = CASE WHEN v.runtime_status = 'draining' THEN 'runtime_drained' ELSE 'queued_expired' END,
     prepare_lease_expires_at = NULL
 FROM victims v
 WHERE t.id = v.id

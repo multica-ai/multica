@@ -1128,12 +1128,21 @@ RETURNING *;
 -- queued (the admission check protects new enqueues, not in-flight queue
 -- depth).
 --
+-- NEX-38 (decision one): when the owning runtime is still in 'draining' at
+-- expiry time, the failure is attributed 'runtime_drained' instead of
+-- 'queued_expired' — the task was stranded by an intentional safe shutdown
+-- ("this runtime is draining; queued work will not be picked up"), which is a
+-- different user story from generic queue expiry. A runtime that has fully
+-- shut down is indistinguishable from a normally-offline runtime at expiry
+-- time (both are 'offline'), so those rows keep 'queued_expired'.
+--
 -- Concurrency safety: the daemon's claim path may race with this sweeper to
 -- transition the same row out of 'queued'. We protect against that two
 -- ways:
---   1. The CTE selects victims with FOR UPDATE SKIP LOCKED so a row that is
---      currently being claimed (or otherwise locked) is skipped — no lock
+--   1. The CTE selects victims with FOR UPDATE OF t SKIP LOCKED so a row that
+--      is currently being claimed (or otherwise locked) is skipped — no lock
 --      contention with the dispatch path, and we won't queue up behind it.
+--      FOR UPDATE OF t locks only the task row, not the joined runtime row.
 --   2. The outer UPDATE re-checks status='queued' AND the TTL predicate at
 --      apply time. If a daemon claimed the row between selection and update
 --      (e.g. lock released after the claim transaction commits), the row is
@@ -1143,18 +1152,20 @@ RETURNING *;
 -- the DB when the backlog is large — the sweeper drains the rest on
 -- subsequent ticks.
 WITH victims AS (
-    SELECT id FROM agent_task_queue
-    WHERE status = 'queued'
-      AND created_at < now() - make_interval(secs => @ttl_secs::double precision)
-    ORDER BY created_at ASC
+    SELECT t.id, ar.status AS runtime_status
+    FROM agent_task_queue t
+    LEFT JOIN agent_runtime ar ON ar.id = t.runtime_id
+    WHERE t.status = 'queued'
+      AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision)
+    ORDER BY t.created_at ASC
     LIMIT @max_per_tick::int
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE OF t SKIP LOCKED
 )
 UPDATE agent_task_queue t
 SET status = 'failed',
     completed_at = now(),
-    error = 'task expired in queue',
-    failure_reason = 'queued_expired',
+    error = CASE WHEN v.runtime_status = 'draining' THEN 'task expired in queue: runtime draining' ELSE 'task expired in queue' END,
+    failure_reason = CASE WHEN v.runtime_status = 'draining' THEN 'runtime_drained' ELSE 'queued_expired' END,
     prepare_lease_expires_at = NULL
 FROM victims v
 WHERE t.id = v.id
@@ -1479,6 +1490,16 @@ ORDER BY priority DESC, created_at ASC;
 SELECT * FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
 ORDER BY priority DESC, created_at ASC;
+
+-- name: CountQueuedTasksByRuntime :one
+-- How many tasks are sitting in 'queued' for a single runtime. The daemon
+-- needs this while draining to tell the user how many queued tasks will stay
+-- queued until queued_expired after the runtime shuts down (NEX-38 AC-8).
+-- The heartbeat handler only runs it for draining runtimes, so the hot
+-- online heartbeat path is untouched. Served by the partial index
+-- idx_agent_task_queue_claim_candidates.
+SELECT count(*) FROM agent_task_queue
+WHERE runtime_id = $1 AND status = 'queued';
 
 -- name: PromoteDueDeferredTasksForRuntime :many
 UPDATE agent_task_queue
