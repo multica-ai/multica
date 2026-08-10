@@ -95,6 +95,22 @@ describe("openLink", () => {
     );
   });
 
+  it.each([
+    ["protocol-relative", "//evil.example/acme/issues/MUL-1"],
+    ["slash-backslash", "/\\evil.example/acme/issues/MUL-1"],
+    ["UNC-style", "\\\\evil.example/acme/issues/MUL-1"],
+    ["absolute", "https://evil.example/acme/issues/MUL-1"],
+  ])("opens a %s external href in a new window", (_kind, href) => {
+    openLink(href, "acme", APP_ORIGIN);
+
+    expect(dispatched).toHaveLength(0);
+    expect(openSpy).toHaveBeenCalledWith(
+      href,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
   it("still opens an app URL externally when no app origin is known", () => {
     openLink(`${APP_ORIGIN}/acme/issues/MUL-1`, "acme");
     expect(dispatched).toHaveLength(0);
