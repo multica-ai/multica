@@ -108,7 +108,11 @@ import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 import { NotesInboxBox, NoteInboxBox, NoteInboxDetail } from "@multica/cerebro-notes/views";
 import { SkillChangeInboxDetail } from "@multica/cerebro-skill-ownership/views";
 import { opensInDynamicInboxPane } from "../notification-routing";
-import { IssueRoundsSection, ConnectedRoundManager, RoundsBlock, roundExcludedIssueIds, usePauseRound, useReorderRounds, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
+import { ConnectedRoundManager, RoundsBlock, roundExcludedIssueIds, usePauseRound, useReorderRounds, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
+// FIR-4918 — the issue page mounts Rounds AND References in the sidebar
+// extensions slot; the inbox must mount the same set so both surfaces show the
+// same fields.
+import { InboxIssueDetailExtensions } from "../issue-detail-extensions";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -854,12 +858,19 @@ export function DynamicInbox() {
             key={selected.item.issue_id}
             issueId={selected.item.issue_id}
             seedFromIssueList={false}
-            defaultSidebarOpen={false}
-            layoutId="multica_inbox_dynamic_issue_detail_layout"
+            // FIR-4918 — an issue opened here shows the same fields as the issue
+            // page. Two things were missing, both in the sidebar: it was
+            // collapsed by default, and the extensions slot mounted Rounds but
+            // never References, so References was absent even with the panel
+            // open. The layout id is versioned because useDefaultLayout persists
+            // the computed layout to localStorage keyed by that id, so anyone who
+            // already opened a message has "sidebar collapsed" saved under the
+            // old key and would never see the new default.
+            layoutId="multica_inbox_dynamic_issue_detail_layout_v2"
             // TECH-3598 #1 — scroll to + highlight the comment that triggered
             // the notification instead of landing at the top, classic parity.
             highlightCommentId={selected.item.details?.comment_id ?? undefined}
-            extensions={roundsEnabled ? <IssueRoundsSection issueId={selected.item.issue_id} /> : undefined}
+            extensions={<InboxIssueDetailExtensions issueId={selected.item.issue_id} />}
             linkSelfInBreadcrumb
             onDelete={clearSelection}
             // TECH-3549 — reuse the classic inbox's mark-done/archive toolbar

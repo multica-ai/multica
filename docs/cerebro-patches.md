@@ -3,6 +3,26 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-4918 — Inbox issue detail matches the issue page
+
+- `inbox-issue-detail-parity` makes `packages/views/inbox/components/inbox-page.tsx`
+  render `IssueDetail` with the defaults from `inbox-issue-detail-parity.ts`
+  (`defaultSidebarOpen=true`, `layoutId=multica_inbox_issue_detail_layout_v2`).
+- **Why:** the sidebar is where `Properties`, `Subscribers`, `Sub-issues`,
+  `Rounds` and `References` live. Collapsing it by default meant an issue opened
+  from `Inbox` showed strictly less than the same issue opened on its own page.
+  The `layoutId` bump is not cosmetic: `useDefaultLayout` keys its persisted
+  layout on that id and restores it from `localStorage`, so every existing reader
+  has "sidebar collapsed" saved under the old key and would never see the new
+  default. Collapsing the panel by hand still sticks — this changes the default,
+  not the ability to close it.
+- **Scope limit:** this file does NOT mount `References`. That section is
+  `IssueReferenceList` from `@multica/cerebro-references`, which depends on
+  `@multica/views`, so importing it here would create a package cycle. The
+  dynamic inbox (`packages/cerebro-inbox-dynamic`, the default inbox surface)
+  mounts it through `InboxIssueDetailExtensions`; the classic inbox still shows
+  no `References`. Closing that gap needs a package-structure change, not a patch.
+
 ## FIR-4699 — Document image attachments
 
 - `document-image-attachments` gives a document (artifact) image an owner row.

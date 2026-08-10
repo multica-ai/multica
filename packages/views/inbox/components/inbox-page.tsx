@@ -132,6 +132,8 @@ import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useT } from "../../i18n";
 import { InboxChatPanel } from "./inbox-chat-panel";
+// CEREBRO-PATCH(inbox-issue-detail-parity): FIR-4918 — Inbox IssueDetail defaults.
+import { INBOX_ISSUE_DETAIL_DEFAULT_SIDEBAR_OPEN, INBOX_ISSUE_DETAIL_LAYOUT_ID } from "./inbox-issue-detail-parity";
 
 type ViewMode = { kind: "inbox" } | { kind: "archived" };
 
@@ -1401,8 +1403,16 @@ export function InboxPage() {
         key={selected.issue_id}
         issueId={selected.issue_id}
         seedFromIssueList={false} // CEREBRO-PATCH(issue-detail-seed-from-list): FIR-2684 — opening a message must not cold-load the board issue-list
-        defaultSidebarOpen={false}
-        layoutId="multica_inbox_issue_detail_layout"
+        // CEREBRO-PATCH(inbox-issue-detail-parity): FIR-4918 — open the sidebar by
+        // default, so Properties, Subscribers and Sub-issues are visible here as on
+        // the issue page. The layout id is versioned because useDefaultLayout keys
+        // its persisted layout on it, so an existing reader has "sidebar collapsed"
+        // saved and would never see the new default. References is NOT mounted here:
+        // its slot lives in @multica/cerebro-references, which depends on
+        // @multica/views, so this file cannot import it without a package cycle. The
+        // dynamic inbox (the default surface) mounts it via InboxIssueDetailExtensions.
+        defaultSidebarOpen={INBOX_ISSUE_DETAIL_DEFAULT_SIDEBAR_OPEN}
+        layoutId={INBOX_ISSUE_DETAIL_LAYOUT_ID}
         highlightCommentId={selected.details?.comment_id ?? undefined}
         linkSelfInBreadcrumb
         onDelete={() => {

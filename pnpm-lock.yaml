@@ -3208,6 +3208,9 @@ importers:
       '@multica/cerebro-notes':
         specifier: workspace:*
         version: link:../cerebro-notes
+      '@multica/cerebro-references':
+        specifier: workspace:*
+        version: link:../cerebro-references
       '@multica/cerebro-rounds':
         specifier: workspace:*
         version: link:../cerebro-rounds
