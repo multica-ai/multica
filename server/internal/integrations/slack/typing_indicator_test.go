@@ -180,7 +180,7 @@ func TestTypingIndicator_ClearsOnTaskCancelled(t *testing.T) {
 	ts := freshTS()
 	m.Add(context.Background(), db.ChannelInstallation{ID: uid(1), Config: slackInstallConfigJSON()}, sessionID, "C1", ts)
 
-	// The shape broadcastTaskEvent publishes for a cancel: ids on the envelope
+	// The shape a cancel is published with: ids on the envelope
 	// and in the payload map, status "cancelled", and no content of any kind.
 	bus.Publish(events.Event{
 		Type:          protocol.EventTaskCancelled,

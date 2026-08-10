@@ -239,7 +239,7 @@ func (m *TypingIndicatorManager) handleEvent(e events.Event) {
 // chatSessionIDFromEvent recovers the chat session id from a task-lifecycle
 // event. EventChatDone sets it on the envelope; EventTaskFailed carries it only
 // in the broadcast payload map (chat tasks only), so both are checked.
-// EventTaskCancelled goes through broadcastTaskEvent, which sets both.
+// Every EventTaskCancelled publisher sets both.
 func chatSessionIDFromEvent(e events.Event) (pgtype.UUID, bool) {
 	if e.ChatSessionID != "" {
 		if id, err := util.ParseUUID(e.ChatSessionID); err == nil && id.Valid {

@@ -809,7 +809,7 @@ func TestPatcherClearsTypingOnTaskCancelled(t *testing.T) {
 	q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
 	q.taskChannelIngested = false
 
-	// The shape broadcastTaskEvent publishes for a cancel: ids on the envelope
+	// The shape a cancel is published with: ids on the envelope
 	// and in the payload map, status "cancelled", and no content of any kind.
 	bus.Publish(events.Event{
 		Type:          protocol.EventTaskCancelled,

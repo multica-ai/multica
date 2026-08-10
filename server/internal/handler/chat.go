@@ -632,7 +632,7 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 	// clients drop the row instead of showing it queued until the next
 	// refresh, and wakes the runtime so a queued successor is claimed now
 	// rather than at the daemon's next poll.
-	h.TaskService.BroadcastCancelledTasks(r.Context(), cancelled)
+	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, cancelled)
 
 	resolvedSessionID := uuidToString(updated.ID)
 	status := updated.Status

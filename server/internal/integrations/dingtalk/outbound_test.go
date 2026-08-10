@@ -176,7 +176,7 @@ func postProcessingAck(t *testing.T, ack *ackNotifier) {
 }
 
 func cancelledEvent(taskID string) events.Event {
-	// The shape broadcastTaskEvent publishes for a cancel: ids on the envelope
+	// The shape a cancel is published with: ids on the envelope
 	// and in the payload map, status "cancelled", and no content of any kind.
 	return events.Event{
 		Type:          protocol.EventTaskCancelled,
@@ -402,6 +402,36 @@ func TestOutbound_ChannelTurnCancelStillSpeaksAfterAWebRunWasCancelled(t *testin
 	if n := atomic.LoadInt32(&d.sendCalls); n != 1 {
 		t.Fatalf("the channel turn was cancelled and the room still holds %q — an "+
 			"earlier cancel on an unrelated run consumed its promise (sends: %d)",
+			ackProcessingText, n)
+	}
+}
+
+// Archiving a session removes its channel binding without cancelling what is
+// running, so the run's ending arrives with nowhere to deliver it. That is still
+// an ending, and the promise has to go with it — otherwise it waits on record
+// for the next cancel in that conversation, which then posts "no reply is
+// coming" about a run that finished.
+func TestOutbound_AnEndingWithNoBindingLeftStillDischargesTheAck(t *testing.T) {
+	d := newDingtalkSendServer(t)
+	o, ack, q := newCancelTestOutbound(t, d)
+	postProcessingAck(t, ack)
+	bus := events.New()
+	o.Register(bus)
+
+	// The session was archived while the run was going: the binding is gone.
+	q.bindingErr = pgx.ErrNoRows
+	bus.Publish(chatDoneEvent(cancelTestTaskID, "the answer nobody can be sent"))
+	if n := atomic.LoadInt32(&d.sendCalls); n != 0 {
+		t.Fatalf("setup: there is no binding to deliver through, sends = %d", n)
+	}
+
+	// Any later cancel in this conversation must now find nothing owed.
+	q.bindingErr = nil
+	bus.Publish(cancelledEvent("44444444-4444-4444-4444-444444444444"))
+
+	if n := atomic.LoadInt32(&d.sendCalls); n != 0 {
+		t.Errorf("a later cancel posted %q for a run that had already ended — the "+
+			"archived session's promise was never discharged (sends: %d)",
 			ackProcessingText, n)
 	}
 }

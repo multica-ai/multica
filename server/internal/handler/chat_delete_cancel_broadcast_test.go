@@ -89,7 +89,7 @@ func TestDeleteChatSession_BroadcastsTaskCancelled(t *testing.T) {
 	// stored row's own chat_session_id is NULL by now (ON DELETE SET NULL).
 	payload, ok := e.Payload.(map[string]any)
 	if !ok {
-		t.Fatalf("payload is %T, want the map broadcastTaskEvent publishes", e.Payload)
+		t.Fatalf("payload is %T, want the map a cancel is published with", e.Payload)
 	}
 	if payload["chat_session_id"] != sessionID {
 		t.Errorf("payload chat_session_id = %v, want %q", payload["chat_session_id"], sessionID)

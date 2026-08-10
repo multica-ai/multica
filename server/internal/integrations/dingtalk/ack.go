@@ -97,11 +97,14 @@ type ackNotifier struct {
 	// Both maps need sweeping for the same reason, at different scales. Entries
 	// are removed on the paths that answer them — OnSettled for a turn that
 	// enqueued no task, releaseOutstandingAck when the run ends, and
-	// takeOutstandingAck when a cancel withdraws it — but a run that never
-	// reports any ending leaves its promise behind, and nothing else would ever
-	// collect it. So recording a promise first drops every entry older than
-	// ackPromiseMaxAge, which bounds the map by the sessions acked within one
-	// day rather than by the process's whole lifetime.
+	// takeOutstandingAck when a cancel withdraws it — but those paths do not
+	// cover everything, and the sweep is what stands behind the ones they miss
+	// rather than a list anybody has to keep complete. A run that never reports
+	// an ending is the plain case; a run whose ending arrives after something
+	// removed the session's binding is the one that has actually bitten. So
+	// recording a promise first drops every entry older than ackPromiseMaxAge,
+	// which bounds the map by the sessions acked within one day rather than by
+	// the process's whole lifetime.
 	outstanding map[string]ackPromise
 
 	// sendText delivers text into the installation's conversation. Nil uses the

@@ -115,7 +115,19 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil // not a DingTalk session (Feishu / Slack / web-only)
+			// Either this was never a DingTalk session, or its binding is gone:
+			// archiving removes the binding without cancelling what is running
+			// (handler/chat.go). The second case still has to discharge the
+			// promise. The run has ended, and a promise left on record is spent
+			// by the next unrelated cancel in that conversation — which is the
+			// false "no reply is coming" this whole path exists to avoid.
+			//
+			// The in-memory check comes first so a Feishu, Slack or web-only
+			// session still costs one query rather than three.
+			if o.ack != nil && o.ack.hasOutstandingAck(sessionID) {
+				o.releaseIfThisRunWasAcked(ctx, taskID, sessionID)
+			}
+			return nil
 		}
 		return fmt.Errorf("lookup dingtalk chat binding: %w", err)
 	}
@@ -164,6 +176,31 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	return nil
 }
 
+// releaseIfThisRunWasAcked discharges the session's promise when the run that
+// just ended is the one the promise was made for. It asks the same question the
+// delivery path asks below, asked again here because the binding that path
+// needs is gone and it returned early.
+//
+// Failures leave the promise alone. It expires on ackPromiseMaxAge either way,
+// and guessing on an unreadable origin is how a web run comes to discharge a
+// channel run's promise.
+func (o *Outbound) releaseIfThisRunWasAcked(ctx context.Context, taskID, sessionID pgtype.UUID) {
+	task, err := o.q.GetAgentTask(ctx, taskID)
+	if err != nil {
+		o.logger.WarnContext(ctx, "dingtalk: could not load the task behind an unbound ending", "error", err)
+		return
+	}
+	acked, err := engine.TaskInputIsChannelIngested(ctx, o.q, task)
+	if err != nil {
+		o.logger.WarnContext(ctx, "dingtalk: could not classify the origin of an unbound ending", "error", err)
+		return
+	}
+	if !acked {
+		return
+	}
+	o.ack.releaseOutstandingAck(sessionID)
+}
+
 // withdrawProcessingAck closes the processing ack for a cancelled run.
 //
 // Two questions have to agree before anything is posted, and neither one can be
@@ -188,12 +225,17 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 // promise and all.
 //
 // taskMayOwnProcessingAck covers the case between those two: a batch with no
-// user messages in it is not a verdict either way, and both ways of reaching it
-// mean the notice is owed. A channel task can own an empty batch — that is the
-// #6611 shape, and the run the claim guard cancels — and deleting a session
-// cascades its messages away before the cancels are broadcast. So a task that
-// cannot be classified defers to the promise, which is the more direct evidence
-// anyway.
+// user messages in it is not a verdict either way, so a task that cannot be
+// classified defers to the promise, which is the more direct evidence anyway.
+// The known ways to arrive empty mostly do mean the notice is owed — a channel
+// task can own an empty batch (the #6611 shape), and deleting a session
+// cascades its messages away before the cancels are broadcast — but the list is
+// not closed, and one member of it cuts the other way: the claim guard
+// (handler/daemon.go) cancels a task whose user text cannot be read, and that
+// task may be a web run. Deferring to the promise then posts the notice for a
+// run the room never asked about. The guard fires only on genuinely corrupt
+// state by its own account, so this is a narrow, deliberate residue rather than
+// a case the classifier handles.
 //
 // The installation comes from the promise instead of the session's binding for
 // the same session-delete reason: the binding is dropped in the transaction
@@ -292,7 +334,7 @@ func retryPendingFailure(e events.Event) bool {
 // outcome), so error-present means deliverable.
 //
 // EventTaskCancelled never reaches here: it carries no text of its own —
-// broadcastTaskEvent publishes the task row's ids and status and nothing else —
+// A cancel is published with the task row's ids and status and nothing else —
 // and its message is the fixed withdrawal in withdrawProcessingAck.
 func eventContent(e events.Event) string {
 	switch p := e.Payload.(type) {
