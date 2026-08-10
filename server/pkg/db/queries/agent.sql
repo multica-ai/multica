@@ -66,7 +66,7 @@ INSERT INTO agent (
     $17,
     sqlc.narg('composio_toolkit_allowlist')::text[],
     COALESCE(sqlc.narg('permission_mode'), 'private'),
-    COALESCE(sqlc.narg('a2a_invocation_mode'), '')
+    COALESCE(sqlc.narg('a2a_invocation_mode'), 'default')
 )
 RETURNING *;
 

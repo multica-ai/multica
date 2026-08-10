@@ -487,20 +487,22 @@ func (h *Handler) canEnqueueSquadLeader(ctx context.Context, leaderID pgtype.UUI
 // top-of-chain human originator. system actors are deliberately OUT OF SCOPE
 // for this axis (CEO ruling): they never enter this branch in canInvokeAgent
 // and keep their pre-existing judgment (public_to workspace via workspaceBroad;
-// everything else fail-closed). The empty value (the default for every
-// pre-existing agent) fails closed, so nothing widens unless the owner
-// explicitly opts in. Any lookup error also fails closed.
+// everything else fail-closed). The default value fails closed, so nothing
+// widens unless the owner explicitly opts in. Any lookup error also fails
+// closed.
 //
 // Mode semantics:
-//   - ""               -> false (unset = status quo fail-closed; canInvokeAgent
-//     falls through to the permission_mode judgment, preserving the historical
+//   - "default"          -> false (status-quo fail-closed; canInvokeAgent falls
+//     through to the permission_mode judgment, preserving the historical
 //     "no human originator -> deny" behavior)
-//   - "any_agent"      -> true for agent actors only (NEVER system)
-//   - "squad_leaders"  -> true only for agent actors that lead a (non-archived)
+//   - "any_agent"        -> true for agent actors only (NEVER system)
+//   - "squad_leaders"    -> true only for agent actors that lead a (non-archived)
 //     squad in the agent's workspace; system actors carry no agent identity and
 //     never match
-//   - "specific_agents"-> true only for agent actors on the owner's whitelist
+//   - "specific_agents"  -> true only for agent actors on the owner's whitelist
 //     (agent_invocation_grant); system actors never match
+//   - any UNKNOWN/invalid stored value is treated as "default" (forward
+//     compatibility: old clients / bad rows degrade to fail-closed, never widen)
 //
 // The two DB-backed lookups are injected as functions so every mode + edge
 // case can be unit-tested without a database. Production wiring lives in the
@@ -513,6 +515,10 @@ func a2aInvocationAllowed(
 	isAgentInvocationGranted func(ctx context.Context, agentID, granteeAgentID pgtype.UUID) (bool, error),
 ) bool {
 	switch agent.A2aInvocationMode {
+	case a2aModeDefault:
+		// Status-quo fail-closed: the load-bearing default. Keeps the
+		// pre-NEX-24 behavior identical for every existing agent.
+		return false
 	case a2aModeAnyAgent:
 		// Broadest grant: every agent principal may invoke, human originator
 		// or not. Deliberately NOT system — the A2A axis only governs agent
@@ -544,9 +550,8 @@ func a2aInvocationAllowed(
 		ok, err := isAgentInvocationGranted(ctx, agent.ID, actorUUID)
 		return err == nil && ok
 	default:
-		// Empty (unset) or unknown mode: fail closed. This is the load-bearing
-		// default — it keeps the pre-NEX-24 behavior identical for every
-		// existing agent.
+		// Defensive forward-compatibility: any unknown/invalid stored value is
+		// treated as 'default' — fail closed, never widen, no panic.
 		return false
 	}
 }

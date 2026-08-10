@@ -247,7 +247,13 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 
 	// A2A invocation axis (NEX-24), mirroring CreateAgent. On create the
 	// caller is always the owner, so the fields are accepted unconditionally.
-	a2a, _, a2aErr := parseA2AInvocationInput(req.A2aInvocationMode, true, req.A2aInvocationGrants, req.A2aInvocationMode)
+	// An ABSENT field falls back to the DB default ('default'); a
+	// present-but-invalid value is a strict 400.
+	a2aMode := req.A2aInvocationMode
+	if _, ok := rawFields["a2a_invocation_mode"]; !ok {
+		a2aMode = a2aModeDefault
+	}
+	a2a, _, a2aErr := parseA2AInvocationInput(a2aMode, true, req.A2aInvocationGrants, a2aMode)
 	if a2aErr != nil {
 		writeError(w, http.StatusBadRequest, a2aErr.Error())
 		return

@@ -52,7 +52,7 @@ type Agent struct {
 	SystemKey             pgtype.Text `json:"system_key"`
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 	ServiceTier           pgtype.Text `json:"service_tier"`
-	// A2A invocation mode (NEX-24). Independent of permission_mode; only governs AGENT callers (system is unaffected). Empty = unset = status-quo fail-closed (A2A judged by the top-of-chain human originator); any_agent = any agent principal may invoke; squad_leaders = only agent principals leading a squad; specific_agents = only agents on agent_invocation_grant.
+	// A2A invocation mode (NEX-24). Independent of permission_mode; only governs AGENT callers (system is unaffected). default = unset = status-quo fail-closed (A2A judged by the top-of-chain human originator); any_agent = any agent principal may invoke; squad_leaders = only agent principals leading a squad; specific_agents = only agents on agent_invocation_grant. Unknown values are treated as default (forward-compatible).
 	A2aInvocationMode string `json:"a2a_invocation_mode"`
 }
 

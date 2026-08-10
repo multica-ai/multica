@@ -1122,10 +1122,14 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A2A invocation axis (NEX-24). On create the caller is always the owner,
-	// so the fields are accepted unconditionally. hasA2aMode is always true
-	// here (create writes the axis explicitly; "" = unset = status quo), which
-	// also validates that any submitted mode is a legal value.
-	a2a, _, a2aErr := parseA2AInvocationInput(req.A2aInvocationMode, true, req.A2aInvocationGrants, req.A2aInvocationMode)
+	// so the fields are accepted unconditionally. An ABSENT field falls back to
+	// the DB default ('default' = status-quo fail-closed); a present-but-invalid
+	// value is a strict 400 (mirroring parsePermissionInput).
+	a2aMode := req.A2aInvocationMode
+	if _, ok := rawFields["a2a_invocation_mode"]; !ok {
+		a2aMode = a2aModeDefault
+	}
+	a2a, _, a2aErr := parseA2AInvocationInput(a2aMode, true, req.A2aInvocationGrants, a2aMode)
 	if a2aErr != nil {
 		writeError(w, http.StatusBadRequest, a2aErr.Error())
 		return
@@ -1746,10 +1750,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			if req.A2aInvocationGrants != nil {
 				grantList = *req.A2aInvocationGrants
 			}
-			// A JSON null under the key decodes to a nil pointer; treat it like
-			// an explicit "" (clear back to status-quo fail-closed) rather than
-			// dereferencing a nil pointer.
-			modeVal := ""
+			// A JSON null under the key decodes to a nil pointer; fall back to
+			// 'default' (reset to status-quo fail-closed) rather than
+			// dereferencing a nil pointer. A present-but-invalid value is a
+			// strict 400 from parseA2AInvocationInput.
+			modeVal := a2aModeDefault
 			if req.A2aInvocationMode != nil {
 				modeVal = *req.A2aInvocationMode
 			}

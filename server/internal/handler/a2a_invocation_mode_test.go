@@ -15,10 +15,11 @@ import (
 // TestA2aInvocationAllowed_Pure exercises the pure A2A invoke-gate predicate
 // (NEX-24) with injected stub lookups and NO database. It locks the four-mode
 // semantics plus the fail-closed edges:
-//   - empty mode  -> false for every actor (status-quo fail-closed)
+//   - default mode -> false for every actor (status-quo fail-closed)
 //   - any_agent   -> agent actors admitted; system NEVER admitted
 //   - squad_leaders -> only agent actors that lead a squad; system never matches
 //   - specific_agents -> only whitelisted agent actors; system never matches
+//   - unknown/invalid stored values degrade to default (fail-closed)
 //   - lookup errors and malformed actor ids -> false
 func TestA2aInvocationAllowed_Pure(t *testing.T) {
 	ctx := context.Background()
@@ -45,10 +46,13 @@ func TestA2aInvocationAllowed_Pure(t *testing.T) {
 		hasGrant  func(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
 		want      bool
 	}{
-		// Empty (unset) = status-quo fail-closed: never widens.
-		{"empty mode: agent actor denied", agentWithMode(""), "agent", leaderID, squadStub(false, nil), grantStub(false, nil), false},
-		{"empty mode: system actor denied", agentWithMode(""), "system", "", squadStub(false, nil), grantStub(false, nil), false},
+		// default (unset) = status-quo fail-closed: never widens.
+		{"default mode: agent actor denied", agentWithMode(a2aModeDefault), "agent", leaderID, squadStub(false, nil), grantStub(false, nil), false},
+		{"default mode: system actor denied", agentWithMode(a2aModeDefault), "system", "", squadStub(false, nil), grantStub(false, nil), false},
+		// Forward compatibility: unknown/invalid stored values degrade to default.
 		{"unknown mode: agent actor denied", agentWithMode("bogus"), "agent", leaderID, squadStub(false, nil), grantStub(false, nil), false},
+		{"unknown mode: system actor denied", agentWithMode("bogus"), "system", "", squadStub(false, nil), grantStub(false, nil), false},
+		{"empty string mode: agent actor denied", agentWithMode(""), "agent", leaderID, squadStub(false, nil), grantStub(false, nil), false},
 
 		// any_agent admits agent actors only — NEVER system (CEO ruling).
 		{"any_agent: agent actor allowed", agentWithMode(a2aModeAnyAgent), "agent", leaderID, squadStub(false, nil), grantStub(false, nil), true},
@@ -150,7 +154,8 @@ func canAgentActorInvokeWithoutOriginator(t *testing.T, agentID, actorID string)
 // TestCanInvokeAgent_A2AInvocationModes is the integration test for the A2A
 // invocation axis (NEX-24): a private target + an agent/system caller with no
 // human originator, exercised across all four modes. It locks:
-//   - empty mode = status-quo fail-closed (the NEX-23 scenario stays denied)
+//   - default mode = status-quo fail-closed (the NEX-23 scenario stays denied)
+//   - unknown/invalid stored mode degrades to default (fail-closed)
 //   - any_agent admits AGENT callers only; system stays fail-closed
 //   - squad_leaders admits only an actual squad leader
 //   - specific_agents admits only a whitelisted agent
@@ -161,15 +166,24 @@ func TestCanInvokeAgent_A2AInvocationModes(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	leaderAgentID := createA2ATestAgent(t, "a2a-leader", "private", "")
+	leaderAgentID := createA2ATestAgent(t, "a2a-leader", "private", a2aModeDefault)
 	createA2ATestSquad(t, leaderAgentID)
-	otherAgentID := createA2ATestAgent(t, "a2a-other", "private", "")
+	otherAgentID := createA2ATestAgent(t, "a2a-other", "private", a2aModeDefault)
 
-	// 1. Empty mode on a private target: agent-to-agent with no originator is
+	// 1. default mode on a private target: agent-to-agent with no originator is
 	//    DENIED — the pre-NEX-24 behavior, unchanged (regression lock).
-	emptyModeAgent := createA2ATestAgent(t, "a2a-empty-mode", "private", "")
-	if canAgentActorInvokeWithoutOriginator(t, emptyModeAgent, otherAgentID) {
-		t.Error("empty mode private agent must FAIL CLOSED for an unattributed agent caller")
+	defaultModeAgent := createA2ATestAgent(t, "a2a-default-mode", "private", a2aModeDefault)
+	if canAgentActorInvokeWithoutOriginator(t, defaultModeAgent, otherAgentID) {
+		t.Error("default mode private agent must FAIL CLOSED for an unattributed agent caller")
+	}
+
+	// 1b. Forward compatibility: an unknown/invalid stored value is treated as
+	//     default — fail-closed, never widens. The DB CHECK constraint blocks
+	//     storing a bogus mode, so this exercises the defensive gate fallback
+	//     with an in-memory agent (no DB lookups are hit on the default path).
+	bogusRow := db.Agent{ID: util.MustParseUUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), A2aInvocationMode: "bogus"}
+	if testHandler.a2aInvocationAllowed(ctx, bogusRow, "agent", otherAgentID, testWorkspaceID) {
+		t.Error("unknown stored mode must degrade to default and FAIL CLOSED")
 	}
 
 	// 2. any_agent: agent actors are admitted; system is NOT (A2A axis only
@@ -220,7 +234,7 @@ func TestCanInvokeAgent_A2AInvocationModes(t *testing.T) {
 	}
 
 	// 5. The owner may always invoke their own agent, whatever the mode.
-	for _, agentID := range []string{emptyModeAgent, anyAgent, squadLeadersAgent, specificAgent} {
+	for _, agentID := range []string{defaultModeAgent, anyAgent, squadLeadersAgent, specificAgent} {
 		row, err := testHandler.Queries.GetAgent(ctx, util.MustParseUUID(agentID))
 		if err != nil {
 			t.Fatalf("load agent %s: %v", agentID, err)
@@ -231,20 +245,20 @@ func TestCanInvokeAgent_A2AInvocationModes(t *testing.T) {
 	}
 }
 
-// TestCanInvokeAgent_A2AEmptyModePreservesWorkspaceBroad is the regression lock
+// TestCanInvokeAgent_A2ADefaultModePreservesWorkspaceBroad is the regression lock
 // that the NEW A2A axis does not disturb the pre-existing MUL-3963
 // workspaceBroad exception: a `public_to workspace` agent stays invocable by
-// unattributed agent/system callers even with the A2A mode unset — and system
-// stays on that path even when an A2A mode IS set (the axis never touches
-// system, CEO ruling).
-func TestCanInvokeAgent_A2AEmptyModePreservesWorkspaceBroad(t *testing.T) {
+// unattributed agent/system callers even with the A2A mode at its default — and
+// system stays on that path even when an A2A mode IS set (the axis never
+// touches system, CEO ruling).
+func TestCanInvokeAgent_A2ADefaultModePreservesWorkspaceBroad(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
 
-	// A public_to workspace agent with EMPTY A2A mode.
-	wsAgentID := createA2ATestAgent(t, "a2a-ws-broad", "public_to", "")
+	// A public_to workspace agent with the DEFAULT A2A mode.
+	wsAgentID := createA2ATestAgent(t, "a2a-ws-broad", "public_to", a2aModeDefault)
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO agent_invocation_target (agent_id, target_type, target_id)
 		VALUES ($1, 'workspace', $2)
@@ -261,10 +275,10 @@ func TestCanInvokeAgent_A2AEmptyModePreservesWorkspaceBroad(t *testing.T) {
 		t.Fatalf("load agent: %v", err)
 	}
 	if !testHandler.canInvokeAgent(ctx, row, "agent", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "", testWorkspaceID) {
-		t.Error("empty A2A mode must NOT remove the workspaceBroad exception for an agent caller")
+		t.Error("default A2A mode must NOT remove the workspaceBroad exception for an agent caller")
 	}
 	if !testHandler.canInvokeAgent(ctx, row, "system", "", "", testWorkspaceID) {
-		t.Error("empty A2A mode must NOT remove the workspaceBroad exception for a system caller")
+		t.Error("default A2A mode must NOT remove the workspaceBroad exception for a system caller")
 	}
 
 	// The same public_to workspace agent WITH an A2A mode set: system must STILL
@@ -296,8 +310,7 @@ func TestCanInvokeAgent_A2AEmptyModePreservesWorkspaceBroad(t *testing.T) {
 // TestEnqueueMentionedAgentTasks_A2AAnyAgentAllowsUnattributedMention is the
 // NEX-24 headline scenario: a run_only (no human originator) agent @mentions a
 // PRIVATE agent that opted into `any_agent` — the mention must now enqueue.
-// The default (empty mode) twin stays denied, locking the fail-closed
-// regression.
+// The default-mode twin stays denied, locking the fail-closed regression.
 func TestEnqueueMentionedAgentTasks_A2AAnyAgentAllowsUnattributedMention(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -305,9 +318,9 @@ func TestEnqueueMentionedAgentTasks_A2AAnyAgentAllowsUnattributedMention(t *test
 	ctx := context.Background()
 
 	// Author agent (the one doing the @mention) and the two private targets.
-	authorAgentID := createA2ATestAgent(t, "a2a-mention-author", "private", "")
+	authorAgentID := createA2ATestAgent(t, "a2a-mention-author", "private", a2aModeDefault)
 	openAgentID := createA2ATestAgent(t, "a2a-mention-open", "private", a2aModeAnyAgent)
-	closedAgentID := createA2ATestAgent(t, "a2a-mention-closed", "private", "")
+	closedAgentID := createA2ATestAgent(t, "a2a-mention-closed", "private", a2aModeDefault)
 
 	// Create an issue (no assignee so the ONLY trigger is the explicit mention).
 	var issueID string
@@ -366,7 +379,7 @@ func TestEnqueueMentionedAgentTasks_A2AAnyAgentAllowsUnattributedMention(t *test
 		t.Errorf("any_agent private target: expected 1 enqueued task for unattributed agent mention, got %d", n)
 	}
 	if n := countTasks(closedAgentID); n != 0 {
-		t.Errorf("empty-mode private target: expected 0 enqueued tasks (fail-closed), got %d", n)
+		t.Errorf("default-mode private target: expected 0 enqueued tasks (fail-closed), got %d", n)
 	}
 }
 
@@ -379,7 +392,7 @@ func TestCreateAgent_A2AInvocationModePersists(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	granteeAgentID := createA2ATestAgent(t, "a2a-create-grantee", "private", "")
+	granteeAgentID := createA2ATestAgent(t, "a2a-create-grantee", "private", a2aModeDefault)
 
 	w := httptest.NewRecorder()
 	testHandler.CreateAgent(w, newRequest("POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
@@ -421,6 +434,35 @@ func TestCreateAgent_A2AInvocationModePersists(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("invalid a2a_invocation_mode: expected 400, got %d", w.Code)
 	}
+
+	// The empty string is no longer a legal value — strict 400.
+	w = httptest.NewRecorder()
+	testHandler.CreateAgent(w, newRequest("POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
+		"name":                "a2a-create-empty",
+		"runtime_id":          handlerTestRuntimeID(t),
+		"a2a_invocation_mode": "",
+	}))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("empty a2a_invocation_mode: expected 400, got %d", w.Code)
+	}
+
+	// An ABSENT field falls back to the DB default ('default').
+	w = httptest.NewRecorder()
+	testHandler.CreateAgent(w, newRequest("POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
+		"name":       "a2a-create-absent",
+		"runtime_id": handlerTestRuntimeID(t),
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create without a2a_invocation_mode: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var absent AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&absent); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, absent.ID) })
+	if absent.A2aInvocationMode != "default" {
+		t.Errorf("absent a2a_invocation_mode must default to 'default', got %q", absent.A2aInvocationMode)
+	}
 }
 
 // TestUpdateAgent_A2AInvocationModeOwnerOnly locks the owner-only write
@@ -433,7 +475,7 @@ func TestUpdateAgent_A2AInvocationModeOwnerOnly(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	granteeAgentID := createA2ATestAgent(t, "a2a-update-grantee", "private", "")
+	granteeAgentID := createA2ATestAgent(t, "a2a-update-grantee", "private", a2aModeDefault)
 	adminID := createPermissionTestAdmin(t, "a2a-update-admin@multica.test")
 
 	// Owner (testUserID) creates a specific_agents agent.
@@ -503,11 +545,11 @@ func TestUpdateAgent_A2AInvocationModeOwnerOnly(t *testing.T) {
 		t.Errorf("whitelist must be cleared after leaving specific_agents, got %d rows", n)
 	}
 
-	// Owner clears the axis back to status quo ("").
-	if code := put(testUserID, map[string]any{"a2a_invocation_mode": ""}); code != http.StatusOK {
-		t.Fatalf("owner clear to empty: expected 200, got %d", code)
+	// Owner clears the axis back to status quo ('default').
+	if code := put(testUserID, map[string]any{"a2a_invocation_mode": "default"}); code != http.StatusOK {
+		t.Fatalf("owner clear to default: expected 200, got %d", code)
 	}
-	if a, _ := testHandler.Queries.GetAgent(ctx, util.MustParseUUID(agentID)); a.A2aInvocationMode != "" {
-		t.Errorf("a2a_invocation_mode = %q, want empty (status quo)", a.A2aInvocationMode)
+	if a, _ := testHandler.Queries.GetAgent(ctx, util.MustParseUUID(agentID)); a.A2aInvocationMode != "default" {
+		t.Errorf("a2a_invocation_mode = %q, want default (status quo)", a.A2aInvocationMode)
 	}
 }

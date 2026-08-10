@@ -28,13 +28,15 @@ const (
 	invocationTargetTeam      = "team"
 )
 
-// A2A invocation mode values (NEX-24). The empty string is the stored default
-// and means "unset": the invoke gate falls through to the permission_mode
-// judgment, preserving the status-quo fail-closed behavior for agent/system
-// callers with no top-of-chain human originator. The three non-empty values
-// are explicit, owner-authored grants. There is deliberately no "default"
-// enum value in the CHECK constraint — empty IS the default.
+// A2A invocation mode values (NEX-24). The stored default is 'default'
+// (status-quo fail-closed): the invoke gate falls through to the
+// permission_mode judgment, preserving the status-quo fail-closed behavior for
+// agent callers with no top-of-chain human originator. The three other values
+// are explicit, owner-authored grants. Keeping a real 'default' enum is a
+// forward-compatibility choice — old clients / unknown values degrade to
+// 'default' (behavior zero-change). The empty string is NOT a legal value.
 const (
+	a2aModeDefault        = "default"
 	a2aModeAnyAgent       = "any_agent"
 	a2aModeSquadLeaders   = "squad_leaders"
 	a2aModeSpecificAgents = "specific_agents"
@@ -103,8 +105,8 @@ func (p resolvedPermission) legacyVisibility() string {
 //   - permissionMode == nil && visibility == nil  -> caller default (returns ok=false, nil)
 //   - permissionMode provided                     -> authoritative
 //   - only legacy visibility provided             -> mapped:
-//       "private"   -> private
-//       "workspace" -> public_to + workspace target
+//     "private"   -> private
+//     "workspace" -> public_to + workspace target
 //
 // workspaceID seeds workspace targets (stored as the workspace id). The
 // returned error is a client-facing 400 message.
@@ -327,24 +329,27 @@ type resolvedA2AInvocation struct {
 }
 
 // a2aModeValid reports whether the value is one of the A2A modes the DB CHECK
-// constraint accepts (the empty string means "unset / status quo").
+// constraint accepts. The empty string is NOT a legal value — 'default' is the
+// unset/status-quo representation.
 func a2aModeValid(mode string) bool {
-	return mode == "" || mode == a2aModeAnyAgent || mode == a2aModeSquadLeaders || mode == a2aModeSpecificAgents
+	return mode == a2aModeDefault || mode == a2aModeAnyAgent || mode == a2aModeSquadLeaders || mode == a2aModeSpecificAgents
 }
 
 // parseA2AInvocationInput validates + normalises the A2A invocation fields.
 //
 // Tri-state semantics mirror permission_mode / thinking_level:
 //   - mode absent AND grants nil  -> ok=false (nothing to do)
-//   - mode present (any value, "" included) -> authoritative; "" clears the
-//     axis back to status-quo fail-closed
+//   - mode present (one of the four enum values) -> authoritative;
+//     'default' clears the axis back to status-quo fail-closed
 //   - only grants present         -> mode is kept at currentMode (the caller's
 //     existing value); the grants only survive when that mode is
 //     specific_agents
 //
-// Grants are de-duped and each entry must be a well-formed UUID. Grants are
-// only retained for specific_agents — any other mode drops them, so a stale
-// whitelist can never linger behind a mode change.
+// A present-but-invalid mode is rejected (400) — strictly, mirroring
+// parsePermissionInput. Grants are de-duped and each entry must be a
+// well-formed UUID. Grants are only retained for specific_agents — any other
+// mode (default included) drops them, so a stale whitelist can never linger
+// behind a mode change.
 func parseA2AInvocationInput(mode string, hasMode bool, grants []string, currentMode string) (resolvedA2AInvocation, bool, error) {
 	if !hasMode && grants == nil {
 		return resolvedA2AInvocation{}, false, nil
@@ -355,7 +360,7 @@ func parseA2AInvocationInput(mode string, hasMode bool, grants []string, current
 		m = mode
 	}
 	if !a2aModeValid(m) {
-		return resolvedA2AInvocation{}, false, fmt.Errorf("a2a_invocation_mode must be 'any_agent', 'squad_leaders', 'specific_agents', or empty")
+		return resolvedA2AInvocation{}, false, fmt.Errorf("a2a_invocation_mode must be 'default', 'any_agent', 'squad_leaders', or 'specific_agents'")
 	}
 
 	res := resolvedA2AInvocation{mode: m}

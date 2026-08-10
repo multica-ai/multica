@@ -1579,7 +1579,7 @@ INSERT INTO agent (
     $17,
     $18::text[],
     COALESCE($19, 'private'),
-    COALESCE($20, '')
+    COALESCE($20, 'default')
 )
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, a2a_invocation_mode
 `
