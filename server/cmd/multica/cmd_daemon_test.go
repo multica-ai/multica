@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -931,5 +932,173 @@ func clearDaemonTaskEnv(t *testing.T) {
 		daemon.TaskWorkspacesRootEnv,
 	} {
 		t.Setenv(key, "")
+	}
+}
+
+// fakeDrainableDaemon serves a fake daemon on the given profile's health port
+// that reports a running state plus NEX-38 drain fields on /health and records
+// the action of any POST /drain request. Returns a channel that receives the
+// requested drain action.
+func fakeDrainableDaemon(t *testing.T, profile string) <-chan string {
+	t.Helper()
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", healthPortForProfile(profile)))
+	if err != nil {
+		t.Skipf("health port for profile %s unavailable: %v", profile, err)
+	}
+	actionCh := make(chan string, 1)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			_, _ = w.Write([]byte(`{"status":"running","state":"running","pid":` +
+				fmt.Sprintf("%d", os.Getpid()) +
+				`,"draining_inflight_tasks":2,"draining_queued_tasks":3}`))
+		case "/drain":
+			var body struct {
+				Action string `json:"action"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "bad body", http.StatusBadRequest)
+				return
+			}
+			actionCh <- body.Action
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	})}
+	go srv.Serve(ln)
+	t.Cleanup(func() { srv.Close() })
+	return actionCh
+}
+
+func newDrainTestCmd(t *testing.T, profile string) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{Use: "drain"}
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().Bool("abort", false, "")
+	cmd.Flags().Bool("finish-then-stop", false, "")
+	cmd.Flags().Bool("force", false, "")
+	cmd.Flags().Bool("wait", false, "")
+	if err := cmd.Flags().Set("profile", profile); err != nil {
+		t.Fatalf("set profile flag: %v", err)
+	}
+	return cmd
+}
+
+// TestDaemonDrainPostsAction pins the /drain contract the CLI drives: the
+// default drain action, --abort, and --finish-then-stop each map to the action
+// string the daemon's drainHandler switches on (AC-7).
+func TestDaemonDrainPostsAction(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		setup  func(*cobra.Command)
+		action string
+	}{
+		// --force on every subtest: the fake daemon reports queued tasks, so a
+		// non-force drain would prompt on stdin and hang the test. The
+		// force-vs-prompt behavior is pinned separately in
+		// TestDaemonDrainForceSkipsConfirmation.
+		{"drain", func(cmd *cobra.Command) {
+			if err := cmd.Flags().Set("force", "true"); err != nil {
+				t.Fatal(err)
+			}
+		}, "drain"},
+		{"abort", func(cmd *cobra.Command) {
+			if err := cmd.Flags().Set("abort", "true"); err != nil {
+				t.Fatal(err)
+			}
+		}, "abort"},
+		{"finish_then_stop", func(cmd *cobra.Command) {
+			if err := cmd.Flags().Set("finish-then-stop", "true"); err != nil {
+				t.Fatal(err)
+			}
+			// finish_then_stop shuts the daemon down, which also strands queued
+			// tasks, so it prompts too; skip the prompt the same way.
+			if err := cmd.Flags().Set("force", "true"); err != nil {
+				t.Fatal(err)
+			}
+		}, "finish_then_stop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const profile = "drain-action-test"
+			got := fakeDrainableDaemon(t, profile)
+			cmd := newDrainTestCmd(t, profile)
+			if tc.setup != nil {
+				tc.setup(cmd)
+			}
+			if err := runDaemonDrain(cmd, nil); err != nil {
+				t.Fatalf("runDaemonDrain: %v", err)
+			}
+			select {
+			case action := <-got:
+				if action != tc.action {
+					t.Fatalf("drain action = %q, want %q", action, tc.action)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("daemon did not receive a /drain request")
+			}
+		})
+	}
+}
+
+// TestDaemonDrainForceSkipsConfirmation: entering drain with queued tasks
+// prompts for confirmation unless --force is passed (needed on non-interactive
+// machines). The default drain here would read stdin, so this pins the --force
+// path and the not-running no-op.
+func TestDaemonDrainForceSkipsConfirmation(t *testing.T) {
+	const profile = "drain-force-test"
+	got := fakeDrainableDaemon(t, profile)
+	cmd := newDrainTestCmd(t, profile)
+	if err := cmd.Flags().Set("force", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDaemonDrain(cmd, nil); err != nil {
+		t.Fatalf("runDaemonDrain: %v", err)
+	}
+	select {
+	case action := <-got:
+		if action != "drain" {
+			t.Fatalf("drain action = %q, want drain", action)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("daemon did not receive a /drain request")
+	}
+}
+
+// TestPrintDaemonDrainingStatus pins the draining status line (AC-8): the
+// health response's NEX-38 drain fields are rendered as the 准备关闭中 line
+// parallel to running/stopped.
+func TestPrintDaemonDrainingStatus(t *testing.T) {
+	t.Parallel()
+
+	health := map[string]any{
+		"status":                   "running",
+		"state":                    "draining",
+		"pid":                      float64(1234),
+		"draining_inflight_tasks":  float64(2),
+		"draining_queued_tasks":    float64(3),
+	}
+
+	var out bytes.Buffer
+	printDaemonDrainingStatus(&out, "Daemon", health)
+
+	want := "Daemon: 准备关闭中（在跑任务 2，排队任务 3）\n"
+	if got := out.String(); got != want {
+		t.Fatalf("printDaemonDrainingStatus() = %q, want %q", got, want)
+	}
+}
+
+// TestDaemonDrainNotRunningNoOp: draining a stopped daemon is a no-op (prints
+// "is not running") rather than an error, matching `daemon stop`.
+func TestDaemonDrainNotRunningNoOp(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	const profile = "drain-stopped-test"
+	cmd := newDrainTestCmd(t, profile)
+	if err := cmd.Flags().Set("force", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDaemonDrain(cmd, nil); err != nil {
+		t.Fatalf("runDaemonDrain on stopped daemon = %v, want nil", err)
 	}
 }

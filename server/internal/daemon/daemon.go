@@ -3590,8 +3590,10 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 		return
 	}
 	// Cache the server-side queued task count (design §7) so /health can
-	// report draining_queued_tasks without a dedicated query.
-	d.recordQueuedTasks(runtimeID, resp.QueuedTaskCount)
+	// report draining_queued_tasks without a dedicated query. The server only
+	// populates QueuedTasks while the runtime is draining (nil otherwise), so
+	// an absent ack keeps the previous value.
+	d.recordQueuedTasks(runtimeID, resp.QueuedTasks)
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,

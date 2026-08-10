@@ -13,6 +13,10 @@ import (
 	"time"
 )
 
+// intPtr returns a pointer to v for test fixtures that exercise the *int
+// queued_tasks field in heartbeat acks.
+func intPtr(v int) *int { return &v }
+
 // newDrainTestDaemon returns a Daemon stripped to the pieces the drain logic
 // touches, with a real temp workspaces root so drain.json persistence is
 // exercised end-to-end.
@@ -372,8 +376,8 @@ func TestHealthReportsDrainStateAndCounts(t *testing.T) {
 	d := newDrainTestDaemon(t)
 	d.ready.Store(true)
 	d.activeTasks.Store(3)
-	d.recordQueuedTasks("rt-1", 4)
-	d.recordQueuedTasks("rt-2", 1)
+	d.recordQueuedTasks("rt-1", intPtr(4))
+	d.recordQueuedTasks("rt-2", intPtr(1))
 	if err := d.beginDrain(); err != nil {
 		t.Fatalf("beginDrain: %v", err)
 	}
@@ -402,23 +406,29 @@ func TestHealthReportsDrainStateAndCounts(t *testing.T) {
 func TestHeartbeatAckCachesQueuedTasks(t *testing.T) {
 	d := newDrainTestDaemon(t)
 	d.handleHeartbeatActions(context.Background(), "rt-1", &HeartbeatResponse{
-		RuntimeID:       "rt-1",
-		QueuedTaskCount: 7,
+		RuntimeID:  "rt-1",
+		QueuedTasks: intPtr(7),
 	})
 	d.handleHeartbeatActions(context.Background(), "rt-2", &HeartbeatResponse{
-		RuntimeID:       "rt-2",
-		QueuedTaskCount: 3,
+		RuntimeID:  "rt-2",
+		QueuedTasks: intPtr(3),
 	})
 	if got := d.queuedTaskCount(); got != 10 {
 		t.Fatalf("queuedTaskCount = %d, want 10", got)
 	}
 	// Updating one runtime leaves the other's count intact.
 	d.handleHeartbeatActions(context.Background(), "rt-1", &HeartbeatResponse{
-		RuntimeID:       "rt-1",
-		QueuedTaskCount: 1,
+		RuntimeID:  "rt-1",
+		QueuedTasks: intPtr(1),
 	})
 	if got := d.queuedTaskCount(); got != 4 {
 		t.Fatalf("queuedTaskCount after update = %d, want 4", got)
+	}
+	// An absent (nil) ack keeps the previous value — the server only fills
+	// QueuedTasks while draining, so a non-draining ack must not zero the cache.
+	d.handleHeartbeatActions(context.Background(), "rt-1", &HeartbeatResponse{RuntimeID: "rt-1"})
+	if got := d.queuedTaskCount(); got != 4 {
+		t.Fatalf("queuedTaskCount after nil ack = %d, want 4", got)
 	}
 }
 

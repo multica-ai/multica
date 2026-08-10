@@ -249,10 +249,10 @@ func (d *Daemon) daemonStateString() string {
 }
 
 // recordQueuedTasks updates the daemon's cached count of server-side queued
-// tasks, sourced from heartbeat acks (design §7). Best-effort: absent acks keep
-// the previous value.
-func (d *Daemon) recordQueuedTasks(runtimeID string, count int64) {
-	if runtimeID == "" {
+// tasks, sourced from heartbeat acks (design §7). Best-effort: an absent (nil)
+// ack keeps the previous value.
+func (d *Daemon) recordQueuedTasks(runtimeID string, count *int) {
+	if runtimeID == "" || count == nil {
 		return
 	}
 	d.queuedTasksMu.Lock()
@@ -260,7 +260,7 @@ func (d *Daemon) recordQueuedTasks(runtimeID string, count int64) {
 	if d.queuedTasksByRuntime == nil {
 		d.queuedTasksByRuntime = make(map[string]int64)
 	}
-	d.queuedTasksByRuntime[runtimeID] = count
+	d.queuedTasksByRuntime[runtimeID] = int64(*count)
 }
 
 // queuedTaskCount sums the per-runtime queued-task counts cached from heartbeat
