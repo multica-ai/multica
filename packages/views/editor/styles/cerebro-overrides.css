@@ -132,6 +132,12 @@
   max-width: min(100%, 70ch);
 }
 
+/* CEREBRO-PATCH(document-full-width): Documents should be full width, Notes should respect the 70ch readability constraint. */
+:root.cerebro-editor-full-width .rich-text-editor,
+.rich-text-editor.full-width {
+  max-width: 100%;
+}
+
 .rich-text-editor .tableWrapper {
   overflow-x: auto;
   max-width: 100%;

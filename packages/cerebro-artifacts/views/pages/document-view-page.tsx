@@ -288,7 +288,7 @@ function MarkdownDocumentEditor({
           // FIR-1621 — Documents are full-page surfaces, so the editor fills the
           // card. Override the global .rich-text-editor 70ch readability cap
           // (FIR-2114), which otherwise leaves a wide gap on the right here.
-          className="min-h-[60vh] !max-w-none"
+          className="min-h-[60vh] !max-w-none full-width"
         />
       </div>
     </section>
