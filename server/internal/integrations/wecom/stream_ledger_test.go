@@ -2,15 +2,17 @@ package wecom
 
 // stream_ledger_test.go — the ledger's invariants, held shut from the outside.
 //
-// Five review rounds have found five different ways to break the same promise,
+// Six review rounds have found six different ways to break the same promise,
 // and every one of them was a scenario nobody had written a test for. So the
 // table here is not a scenario: it enumerates every terminal path a round has
 // and asserts the properties the ledger claims for all of them at once.
 //
-// The fifth way was the one that shape could not reach. It takes two publishers
-// of one ending overlapping, which no sequential walk of the paths produces, and
-// the tests for it are at the bottom of the file — one publisher held on the
-// wire with its words unanswered, and a second deciding what to do about them.
+// The last two are the ones that shape cannot reach. Both need two deliveries
+// for one run overlapping, which no sequential walk of the paths produces, and
+// their tests are at the bottom of the file — one delivery held on the wire with
+// its words unanswered, and another deciding what to do about them. The fifth
+// raced two publishers of the SAME ending; the sixth raced the run's real ending
+// against the guard's promise, which lands words and ends nothing.
 
 import (
 	"context"
@@ -18,7 +20,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -589,8 +595,9 @@ func (r *bubbleRig) raceTwoFailurePublishers(t *testing.T, taskID string, sent, 
 //
 // The first publisher took the round and its closing frame is on the wire. The
 // repeat must add nothing — but it must not decide that before the frame is
-// answered, because the deciding fact is whether those words landed, and at that
-// moment nobody knows it yet. So it waits, hears that they did, and goes quiet.
+// answered, because the deciding fact is what became of those words, and at that
+// moment nobody knows it yet. So it waits, hears that this run's ending reached
+// the screen, and goes quiet.
 func TestASecondPublisherOfAnOpenRoundsFailureWaitsForTheFirst(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
@@ -700,4 +707,404 @@ func TestARefusedGuardOwedNoticeIsStillTheRepeatsToSay(t *testing.T) {
 			"The promise came back to the owed list with the one publisher that could still "+
 			"have kept it already sent away", got, streamCopyFailed)
 	}
+}
+
+// ---- a delivery that lands and ends nothing ----
+
+// The four tests above race two publishers of the SAME ending. These race a
+// publisher against the guard's, which is the one closer whose words end
+// nothing: "还在处理，完成后我再单独回复你" is a promise, and the run carries on
+// owing the user its real ending.
+//
+// A waiter that reads only whether the guard's words landed hears "delivered"
+// and goes quiet — which is what the store did until this round. The failure
+// notice and, worse, the answer itself were swallowed by a sentence that said
+// neither, and the promise those words had just created sat on owed with both
+// of its publishers spent.
+
+// holdTheGuardsPromiseOnTheWire fires the nine-minute guard and leaves its
+// closing frame in flight, unanswered, until the returned release is called.
+// That window is the one a concurrent ending of the same run arrives in.
+//
+// The guard is run directly rather than waited out, the way guardClosed does it,
+// so a test gets the real fireGuard body without nine minutes of clock.
+func (r *bubbleRig) holdTheGuardsPromiseOnTheWire(t *testing.T, batch engine.RunBatchID) func() {
+	t.Helper()
+	sessionID := bubbleSessionID(t)
+	r.conn.holdClosing = make(chan struct{})
+	r.conn.closingSent = make(chan struct{}, 4)
+	guard := make(chan struct{})
+	go func() {
+		defer close(guard)
+		r.typing.fireGuard(context.Background(), sessionID, batch)
+	}()
+	<-r.conn.closingSent
+	return func() {
+		close(r.conn.holdClosing)
+		<-guard
+	}
+}
+
+// wantSaid asserts what the person in the chat ended up reading, in order.
+func wantSaid(t *testing.T, c *bubbleConn, want []string, why string) {
+	t.Helper()
+	got := said(t, c)
+	same := len(got) == len(want)
+	for i := range want {
+		if same && got[i] != want[i] {
+			same = false
+		}
+	}
+	if !same {
+		t.Fatalf("the asker read %q, want %q — %s", got, want, why)
+	}
+}
+
+// TestTheGuardsPromiseDoesNotSilenceTheRunsFailure is the regression.
+//
+// The guard has taken the round and its promise is on the wire. The failure
+// notice arrives behind it and waits, correctly — nobody yet knows what became
+// of those words. What it must not conclude when they land is that this run has
+// been spoken for: what is on the screen says the opposite, that a reply is
+// still coming, and the promise the guard just filed is on owed for exactly this
+// publisher to keep.
+func TestTheGuardsPromiseDoesNotSilenceTheRunsFailure(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.ran(t, "REQ-PROMISE-FAILS", 1, "task-1")
+	taskID := taskUUID(t, "task-1")
+	release := rig.holdTheGuardsPromiseOnTheWire(t, 1)
+
+	failed := make(chan struct{})
+	go func() { defer close(failed); rig.publishFailure(taskID) }()
+	rig.waitForRepeatAtTheLedger(t)
+	letTheRepeatSpeak()
+
+	release()
+	<-failed
+
+	wantSaid(t, rig.conn, []string{streamCopyStillWorking, streamCopyFailed},
+		"the guard promised a separate reply and the run then failed, so the notice is that "+
+			"reply — a waiter that read only whether the guard's words landed took a promise "+
+			"for an ending and left the asker waiting for a reply nothing will ever send")
+	if rig.streams.owesEnding(bubbleSessionID(t), taskID) {
+		t.Error("the guard's promise is still outstanding after the failure was announced " +
+			"against it — the next publisher of this run would say it a second time")
+	}
+}
+
+// TestTheGuardsPromiseDoesNotSilenceTheAnswer is the same race with more at
+// stake: what the waiter is carrying is the reply the promise promised.
+//
+// Losing a failure notice costs the asker an explanation. Losing this costs them
+// the answer to their question, with the bubble already sealed on "还在处理" and
+// nothing left that will ever follow it.
+func TestTheGuardsPromiseDoesNotSilenceTheAnswer(t *testing.T) {
+	t.Parallel()
+	rig := newBoundRoomRig(t)
+	rig.ran(t, "REQ-PROMISE-ANSWERS", 1, "task-1")
+	taskID := taskUUID(t, "task-1")
+	release := rig.holdTheGuardsPromiseOnTheWire(t, 1)
+
+	answered := make(chan struct{})
+	go func() {
+		defer close(answered)
+		_ = rig.out.processEvent(context.Background(), events.Event{
+			ChatSessionID: bubbleSession,
+			TaskID:        taskID,
+			Payload:       protocol.ChatDonePayload{Content: "42"},
+		})
+	}()
+	rig.waitForOriginReads(t, 1)
+	letTheRepeatSpeak()
+
+	release()
+	<-answered
+
+	wantSaid(t, rig.conn, []string{streamCopyStillWorking, "42"},
+		"the answer arrived while the guard's promise was still on the wire, and the promise "+
+			"is what that reply was promised against — reading it as this run's ending drops "+
+			"the answer the asker was waiting for")
+}
+
+// TestASettleWaitsOutTheGuardHoldingItsRound is the same race on the other
+// lookup, and the only pair of publishers that reaches it.
+//
+// A round that never became a run is named by its batch rather than by a task
+// id, and two closers name it that way: the guard at nine minutes and the flush
+// that settled without creating one. So a settle can arrive while the guard's
+// promise is on the wire, and turning it away with "already said" leaves the
+// asker on "还在处理，完成后我再单独回复你" for a run that was never started and
+// will never report anything — the one path with no later lifecycle event to
+// rescue it.
+func TestASettleWaitsOutTheGuardHoldingItsRound(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.typing.settleRetryAfter = -1
+	sessionID := bubbleSessionID(t)
+	rig.ask(t, "REQ-SETTLE-RACE", 1) // a bubble, and a flush that never named a run
+	release := rig.holdTheGuardsPromiseOnTheWire(t, 1)
+
+	settled := make(chan struct{})
+	go func() {
+		defer close(settled)
+		rig.typing.OnSettled(context.Background(), sessionID, 1)
+	}()
+	letTheRepeatSpeak()
+
+	select {
+	case <-settled:
+		t.Fatal("the settle answered while the guard's frame was still on the wire — it can " +
+			"only have decided the round was accounted for, and at that moment nobody knew " +
+			"whether the guard's words had even landed")
+	default:
+	}
+
+	release()
+	<-settled
+
+	wantSaid(t, rig.conn, []string{streamCopyStillWorking, streamCopyNotStarted},
+		"the guard promised a separate reply for a run that was never started, so the settle "+
+			"is the only publisher left that can say so")
+}
+
+// ---- a delivery that never reported at all ----
+
+// TestADeliveryThatNeverReportedIsRetiredAndItsRunLeftOwed covers the one way a
+// reservation outlives its holder: the delivery panicked.
+//
+// events.Bus recovers a panic in a listener and carries on with the next one, and
+// sayEnding resolves its reservation on the line after the delivery rather than
+// from a defer — so a listener that blows up mid-send leaves the run on the
+// note's speaking list with nobody coming back for it. Every later publisher of
+// that run then parks on a channel nothing will ever close, and pays its whole
+// budget to find that out, on a bus that runs its listeners one after another.
+//
+// The reservation is honoured while a holder could still report, and retired
+// once one could not: what is on the asker's screen is a spinner the take
+// consumed, so I3 leaves the run owed its ending and the next publisher says it.
+func TestADeliveryThatNeverReportedIsRetiredAndItsRunLeftOwed(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	store := newStreamStore()
+	store.now = func() time.Time { return now }
+
+	sessionID := bubbleSessionID(t)
+	taskID := taskUUID(t, "task-1")
+	store.open(sessionID, 1, streamHandle{
+		ReqID: "REQ-PANIC", StreamID: "S1",
+		InstallationID: mustTestUUID(t), ChatID: "CHAT_1", ChatType: 1,
+	})
+	store.bind(sessionID, 1, taskID)
+
+	// A bus listener that panicked out of its delivery. The recover is the bus's
+	// own; what matters here is that endEnding never ran.
+	func() {
+		defer func() { _ = recover() }()
+		store.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
+			func(roundTurn) (roundAddress, error) { panic("listener blew up mid-send") })
+	}()
+
+	// Inside the window a holder could still report, so the reservation stands
+	// and a publisher behind it waits — as it must: those words may yet land.
+	stillHeld, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	spoke := false
+	if _, err := store.sayEnding(stillHeld, sessionID, byTask(taskID), roundOver, nil,
+		func(roundTurn) (roundAddress, error) { spoke = true; return roundAddress{}, nil }); err == nil {
+		t.Fatal("a publisher arriving while the reservation was still live spoke instead of " +
+			"waiting — the words it would have doubled may still have been on the wire")
+	}
+	if spoke {
+		t.Fatal("the delivery ran for a run another delivery was still holding")
+	}
+
+	now = now.Add(inFlightMaxAge + time.Second)
+
+	budget, cancelBudget := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelBudget()
+	verdict, err := store.sayEnding(budget, sessionID, byTask(taskID), roundOver, nil,
+		func(t roundTurn) (roundAddress, error) { spoke = true; return t.Addr, nil })
+	if err != nil {
+		t.Fatalf("the publisher after the reservation went stale reported %v, want it to have "+
+			"spoken — nobody is coming back for that delivery and it holds the round's only "+
+			"ending", err)
+	}
+	if !spoke || verdict != roundOwesAnEnding {
+		t.Fatalf("verdict = %v, spoke = %v; want roundOwesAnEnding and a delivery that ran — a "+
+			"reservation whose holder never returned silences every later publisher of that "+
+			"run for as long as the note lives", verdict, spoke)
+	}
+	if !store.wasTold(sessionID, taskID) {
+		t.Error("the run was not recorded as told after the words landed")
+	}
+	if store.owesEnding(sessionID, taskID) {
+		t.Error("the run is still owed an ending after one was delivered — the debt the sweep " +
+			"filed was never spent, so a later publisher would say it again")
+	}
+}
+
+// TestARetiredReservationIsNotFiledTwice is the objection this sweep was
+// declined for once, made into a test.
+//
+// The sweep files the debt of a delivery that never reported. In the case worth
+// having, that delivery is gone — but a slow one may still turn up afterwards
+// and file the same debt from the claim it was holding, and a promise on the
+// list twice is one no single ending clears: the asker reads their reply, and
+// the copy left behind is spent by whoever publishes next.
+func TestARetiredReservationIsNotFiledTwice(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	store := newStreamStore()
+	store.now = func() time.Time { return now }
+
+	sessionID := bubbleSessionID(t)
+	taskID := taskUUID(t, "task-1")
+	store.open(sessionID, 1, streamHandle{
+		ReqID: "REQ-SLOW", StreamID: "S1",
+		InstallationID: mustTestUUID(t), ChatID: "CHAT_1", ChatType: 1,
+	})
+	store.bind(sessionID, 1, taskID)
+
+	// The guard closes the round on a promise, so what the slow delivery below
+	// claims is a promise off the owed list rather than nothing — the case where
+	// the failed delivery restores rather than files.
+	if _, err := store.sayEnding(context.Background(), sessionID, byBatch(1), roundContinues, nil,
+		func(t roundTurn) (roundAddress, error) { return t.Handle.address(), nil }); err != nil {
+		t.Fatalf("the guard could not close the round: %v", err)
+	}
+	if !store.owesEnding(sessionID, taskID) {
+		t.Fatal("the guard left no promise behind")
+	}
+
+	// A delivery that outlasts its own reservation: it claims the promise, the
+	// clock passes inFlightMaxAge while it is still on the wire, and it reports a
+	// refusal only afterwards.
+	claimed, held := make(chan struct{}), make(chan struct{})
+	slow := make(chan struct{})
+	go func() {
+		defer close(slow)
+		store.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
+			func(roundTurn) (roundAddress, error) {
+				close(claimed)
+				<-held
+				return roundAddress{}, errNothingToSay
+			})
+	}()
+	<-claimed
+
+	// The next publisher sweeps on its way in, which is what retires the entry
+	// and leaves the run owed its ending again. Its own delivery says nothing, so
+	// the promise it claimed goes back too.
+	now = now.Add(inFlightMaxAge + time.Second)
+	budget, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	spoke := false
+	if _, err := store.sayEnding(budget, sessionID, byTask(taskID), roundOver, nil,
+		func(roundTurn) (roundAddress, error) { spoke = true; return roundAddress{}, errNothingToSay }); err == nil {
+		t.Fatal("the publisher after the sweep reported success from a delivery that said nothing")
+	}
+	if !spoke {
+		t.Fatal("the publisher after the sweep never ran its delivery — it was still parked on " +
+			"a reservation whose holder had stopped being able to report")
+	}
+
+	close(held)
+	<-slow
+
+	if n := countOwed(store, sessionID, taskID); n != 1 {
+		t.Fatalf("the run is on the owed list %d times, want 1 — the sweep filed the debt and "+
+			"the delivery it retired filed it again from the claim it was still holding, "+
+			"leaving a promise no single ending can clear", n)
+	}
+}
+
+// countOwed is how many entries the session's note holds for one run. Every
+// other reader answers yes-or-no, which cannot see a debt filed twice.
+func countOwed(s *streamStore, sessionID pgtype.UUID, taskID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, id := range s.ended[util.UUIDToString(sessionID)].owed {
+		if id == taskID {
+			n++
+		}
+	}
+	return n
+}
+
+// TestALateHolderDoesNotWithdrawTheNextPublishersReservation is the other half
+// of what the sweep makes possible.
+//
+// Retiring a reservation lets a later publisher take one of its own for the same
+// run — which is the point — and the holder that was retired may still turn up
+// afterwards. What it gives up then has to be its OWN entry: a delivery that
+// gave one up by run id would withdraw the live publisher's right to speak, and
+// the next repeat of that news would find nothing excluding it and say the same
+// words underneath.
+func TestALateHolderDoesNotWithdrawTheNextPublishersReservation(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	store := newStreamStore()
+	store.now = func() time.Time { return now }
+
+	sessionID := bubbleSessionID(t)
+	taskID := taskUUID(t, "task-1")
+	store.open(sessionID, 1, streamHandle{
+		ReqID: "REQ-LATE", StreamID: "S1",
+		InstallationID: mustTestUUID(t), ChatID: "CHAT_1", ChatType: 1,
+	})
+	store.bind(sessionID, 1, taskID)
+
+	// The first publisher takes the round and is still on the wire when the
+	// clock passes its reservation's age.
+	firstIn, releaseFirst := make(chan struct{}), make(chan struct{})
+	first := make(chan struct{})
+	go func() {
+		defer close(first)
+		store.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
+			func(roundTurn) (roundAddress, error) {
+				close(firstIn)
+				<-releaseFirst
+				return roundAddress{}, errNothingToSay
+			})
+	}()
+	<-firstIn
+	now = now.Add(inFlightMaxAge + time.Second)
+
+	// The second sweeps the first away on its way in, takes the debt that left
+	// behind, and is itself on the wire when the first finally reports.
+	secondIn, releaseSecond := make(chan struct{}), make(chan struct{})
+	second := make(chan struct{})
+	go func() {
+		defer close(second)
+		store.sayEnding(context.Background(), sessionID, byTask(taskID), roundOver, nil,
+			func(roundTurn) (roundAddress, error) {
+				close(secondIn)
+				<-releaseSecond
+				return roundAddress{}, nil
+			})
+	}()
+	<-secondIn
+
+	close(releaseFirst)
+	<-first
+
+	// A third publisher now, with the second's words still on the wire. It must
+	// find the second's reservation and wait it out.
+	third, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	spoke := false
+	if _, err := store.sayEnding(third, sessionID, byTask(taskID), roundOver, nil,
+		func(roundTurn) (roundAddress, error) { spoke = true; return roundAddress{}, nil }); err == nil {
+		t.Fatal("a third publisher spoke while the second's words were still on the wire")
+	}
+	if spoke {
+		t.Fatal("the delivery on the wire lost its reservation to a holder the sweep had already " +
+			"retired, so the run's ending went out twice — one reservation is given up by " +
+			"whoever took it and by nobody else")
+	}
+
+	close(releaseSecond)
+	<-second
 }
