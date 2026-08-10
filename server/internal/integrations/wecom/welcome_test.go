@@ -599,21 +599,21 @@ func TestTheTwoGreetingsSayDifferentThings(t *testing.T) {
 }
 
 // The greeting names what the bot accepts, in copy. dispatchFrame decides it
-// in code, off bodyText. Nothing connected the two, and they came apart the
+// in code, off ownText. Nothing connected the two, and they came apart the
 // moment voice routing landed: the greeting went on telling every linked user
 // that only text worked while a spoken message was already being answered —
 // including a spoken "/issue", which files a task.
 //
 // The failure is silent by construction. A capability arrives by widening
-// bodyText, which is a different file from the one holding the sentence that
+// ownText, which is a different file from the one holding the sentence that
 // describes it, so nothing about that change draws the eye here. This asserts
-// the relation directly: whatever bodyText routes, the greeting has to name.
+// the relation directly: whatever ownText routes, the greeting has to name.
 func TestTheBoundGreetingNamesEveryKindTheBotActuallyRoutes(t *testing.T) {
 	t.Parallel()
 
 	// Each kind the adapter can route, the frame that carries it, and the word
 	// a user would look for in the greeting to know it is allowed. Add a row
-	// when bodyText learns a kind — that is the point of the test.
+	// when ownText learns a kind — that is the point of the test.
 	kinds := []struct {
 		what string
 		mc   aibotMsgCallback
@@ -631,25 +631,43 @@ func TestTheBoundGreetingNamesEveryKindTheBotActuallyRoutes(t *testing.T) {
 			mc.Voice.Content = "在吗"
 			return mc
 		}()},
+		{what: "a photo", word: "图片", mc: func() aibotMsgCallback {
+			var mc aibotMsgCallback
+			mc.MsgType = "image"
+			mc.Image.URL = "https://cos.example/i"
+			return mc
+		}()},
+		{what: "a file", word: "文件", mc: func() aibotMsgCallback {
+			var mc aibotMsgCallback
+			mc.MsgType = "file"
+			mc.File.URL = "https://cos.example/f"
+			return mc
+		}()},
+		{what: "a video", word: "视频", mc: func() aibotMsgCallback {
+			var mc aibotMsgCallback
+			mc.MsgType = "video"
+			mc.Video.URL = "https://cos.example/v"
+			return mc
+		}()},
 	}
 
-	// Anti-vacuity: if bodyText routed nothing, every assertion below would
+	// Anti-vacuity: if ownText routed nothing, every assertion below would
 	// pass without testing anything.
 	var routed int
 	for _, k := range kinds {
-		if _, ok := k.mc.bodyText(); ok {
+		if _, ok := k.mc.ownText(); ok {
 			routed++
 		}
 	}
 	if routed == 0 {
-		t.Fatal("bodyText routes none of the kinds listed here, so this guard asserts nothing. " +
+		t.Fatal("ownText routes none of the kinds listed here, so this guard asserts nothing. " +
 			"Re-point it at whatever decides a routable message now")
 	}
 
 	for _, k := range kinds {
-		_, routable := k.mc.bodyText()
+		_, routable := k.mc.ownText()
 		if !routable {
-			t.Errorf("bodyText no longer routes %s. If that was deliberate, drop the row and take %q "+
+			t.Errorf("ownText no longer routes %s. If that was deliberate, drop the row and take %q "+
 				"out of the greeting — leaving it in promises a user something the bot will refuse",
 				k.what, k.word)
 			continue
@@ -662,12 +680,23 @@ func TestTheBoundGreetingNamesEveryKindTheBotActuallyRoutes(t *testing.T) {
 		}
 	}
 
-	// The other half: the greeting must not promise a kind that gets the
-	// text-only receipt instead. "只能" (only) is how the stale wording said it.
-	var img aibotMsgCallback
-	img.MsgType = "image"
-	if _, routable := img.bodyText(); !routable && strings.Contains(welcomeBoundText, "只能处理文字") {
-		t.Errorf("the greeting still says text is the only thing that works, which stopped being true "+
-			"when voice routing landed: %q", welcomeBoundText)
+	// The other half: the greeting must not narrow what the bot takes. It has
+	// said "text only" and then "text and voice", and both stopped being true
+	// while the sentence stayed put — first when voice routing landed, then
+	// when media did.
+	for _, stale := range []string{"只能处理文字", "只支持文字", "目前支持文字和语音消息"} {
+		if strings.Contains(welcomeBoundText, stale) {
+			t.Errorf("the greeting still says %q, which is narrower than what the bot routes: %q",
+				stale, welcomeBoundText)
+		}
+	}
+
+	// A kind the adapter genuinely refuses still has to read as refused, or the
+	// loop above would pass on a greeting that promised everything.
+	var unknown aibotMsgCallback
+	unknown.MsgType = "link"
+	if _, routable := unknown.ownText(); routable {
+		t.Error("ownText routes an unknown msgtype, so the rows above no longer distinguish " +
+			"what the bot accepts from what it does not")
 	}
 }

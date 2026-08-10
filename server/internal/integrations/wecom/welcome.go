@@ -69,12 +69,12 @@ const (
 	// fallback whenever we cannot establish that they are not. Offering a bind
 	// link to a linked user is the confusing outcome, so on doubt we do not.
 	//
-	// The parenthetical names what the bot takes, and that set is bodyText's
+	// The parenthetical names what the bot takes, and that set is ownText's
 	// (ws_frame.go), not this file's: text, and a voice note WeCom has already
 	// transcribed. It is the only place the bot volunteers its own limits, so
 	// TestTheBoundGreetingNamesEveryKindTheBotActuallyRoutes ties it to
-	// bodyText rather than leaving the two to drift.
-	welcomeBoundText = "👋 你好，我是 Multica 智能助手。有事直接发消息给我，或者用 “/issue 标题” 建一条任务。（目前支持文字和语音消息）"
+	// ownText rather than leaving the two to drift.
+	welcomeBoundText = "👋 你好，我是 Multica 智能助手。有事直接发消息给我，或者用 “/issue 标题” 建一条任务。（文字、语音、图片、文件、视频都能发给我）"
 
 	// welcomeUnboundPrefix / Suffix wrap the bind URL. The wording matches the
 	// needs_binding prompt in replier.go on purpose — a user who sees both
