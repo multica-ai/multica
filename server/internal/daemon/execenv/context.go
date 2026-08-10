@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"gopkg.in/yaml.v3"
 )
 
@@ -430,8 +430,6 @@ func skillsDirPath(workDir, provider string) string {
 		return filepath.Join(workDir, ".agent_context", "skills")
 	}
 }
-
-var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
 
 // ensureSkillFrontmatter returns SKILL.md content guaranteed to lead with a
 // YAML frontmatter block carrying a parseable, non-empty `name` key.
@@ -905,13 +903,7 @@ func yamlEscapeInline(s string) string {
 
 // sanitizeSkillName converts a skill name to a safe directory name.
 func sanitizeSkillName(name string) string {
-	s := strings.ToLower(strings.TrimSpace(name))
-	s = nonAlphaNum.ReplaceAllString(s, "-")
-	s = strings.Trim(s, "-")
-	if s == "" {
-		s = "skill"
-	}
-	return s
+	return skillbundle.NormalizeName(name)
 }
 
 // writeSkillFiles writes skill directories into the given parent directory.
