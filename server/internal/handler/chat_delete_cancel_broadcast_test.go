@@ -13,16 +13,17 @@ import (
 
 // Deleting a chat session cancels the session's active tasks, and every
 // subscriber that shows something for a running task — the web queue, and the
-// Slack, Lark and DingTalk processing indicators — learns about it from
-// task:cancelled and from nothing else.
+// Slack and Lark processing indicators — learns about it from task:cancelled
+// and from nothing else.
 //
 // It was never published. BroadcastCancelledTasks resolved each task's
 // workspace by reading the task's chat_session, which the transaction it runs
 // after has just deleted; the resolution returned "", and publishTaskEvent
 // drops an event with no workspace before it reaches the bus. So the rows went
-// to 'cancelled' in silence: nothing on the web cleared, and on every channel
-// the indicator for the deleted conversation kept spinning with no run behind
-// it. The workspace now comes from the caller, which knows it.
+// to 'cancelled' in silence and the event reached no subscriber at all — not
+// the web queue, not the realtime fanout, not a channel adapter — leaving the
+// deleted conversation showing a run that no longer existed. The workspace now
+// comes from the caller, which knows it.
 func TestDeleteChatSession_BroadcastsTaskCancelled(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

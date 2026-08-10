@@ -566,7 +566,7 @@ func (p *Patcher) fail(ctx context.Context, creds InstallationCredentials, bindi
 }
 
 // taskAndSessionFromEvent parses the typed-ish payload the task publishers
-// publishes — a map[string]any with `task_id` (always) and
+// emit — a map[string]any with `task_id` (always) and
 // `chat_session_id` (chat tasks only). EventChatDone carries a
 // ChatDonePayload struct instead.
 func taskAndSessionFromEvent(e events.Event) (taskID, chatSessionID pgtype.UUID, ok bool) {

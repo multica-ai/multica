@@ -24,19 +24,6 @@ type dingtalkSendServer struct {
 	// retry path is exercised.
 	failFirstSendAuth bool
 	sendCalls         int32
-
-	// mu guards sentBodies, which keeps every send in order — lastBody only
-	// keeps the most recent, and a test that asserts on both a reply and a
-	// cancellation notice has to see both.
-	mu         sync.Mutex
-	sentBodies []string
-}
-
-// sentBodies returns the raw body of every send the server has taken, in order.
-func (d *dingtalkSendServer) bodies() []string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return append([]string(nil), d.sentBodies...)
 }
 
 func newDingtalkSendServer(t *testing.T) *dingtalkSendServer {
@@ -56,9 +43,6 @@ func newDingtalkSendServer(t *testing.T) *dingtalkSendServer {
 				return
 			}
 			body, _ := io.ReadAll(r.Body)
-			d.mu.Lock()
-			d.sentBodies = append(d.sentBodies, string(body))
-			d.mu.Unlock()
 			d.lastPath = r.URL.Path
 			d.lastBody = map[string]any{}
 			_ = json.Unmarshal(body, &d.lastBody)
