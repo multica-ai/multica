@@ -7,10 +7,12 @@ import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../../i18n";
-
-const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
-const SETUP_CMD = "multica setup";
+import { SegmentedToggle } from "../../common/segmented-toggle";
+import {
+  CONNECTOR_INSTALL_COMMANDS,
+  CONNECTOR_SETUP_COMMAND,
+  type ConnectorPlatform,
+} from "../../common/connector-install";
 
 function CopyButton({ text }: { text: string }) {
   const { t } = useT("onboarding");
@@ -63,23 +65,44 @@ function Step({ n, label, cmd }: { n: number; label: string; cmd: string }) {
 }
 
 /**
- * CLI install instructions — two copy-and-run commands. Hardcoded because
- * there's nothing environmental to infer: step 1 is the public install
- * script, step 2 is the cloud `multica setup` which the CLI itself knows
- * the endpoints for. Local development tests a self-host variant by
- * typing the extended command directly in the terminal; no need to
- * thread env vars through React.
+ * CLI install instructions — two copy-and-run commands. The selected platform
+ * changes only the installer syntax; `multica setup` carries the fixed
+ * deployment endpoint for both operating-system families.
  */
 export function CliInstallInstructions() {
   const { t } = useT("onboarding");
+  const [platform, setPlatform] = useState<ConnectorPlatform>("unix");
   return (
     <Card className="w-full">
       <CardContent className="space-y-4 pt-4">
         <p className="text-caption leading-[1.55] text-muted-foreground">
           {t(($) => $.cli_install.intro)}
         </p>
-        <Step n={1} label={t(($) => $.cli_install.step1_label)} cmd={INSTALL_CMD} />
-        <Step n={2} label={t(($) => $.cli_install.step2_label)} cmd={SETUP_CMD} />
+        <div>
+          <p className="mb-1.5 text-caption font-medium text-foreground">
+            {t(($) => $.cli_install.platform_label)}
+          </p>
+          <SegmentedToggle
+            value={platform}
+            onChange={setPlatform}
+            ariaLabel={t(($) => $.cli_install.platform_label)}
+            options={[
+              ["unix", t(($) => $.cli_install.platform_unix)],
+              ["windows", t(($) => $.cli_install.platform_windows)],
+            ]}
+            buttonClassName="px-3 py-1.5 text-caption"
+          />
+        </div>
+        <Step
+          n={1}
+          label={t(($) => $.cli_install.step1_label)}
+          cmd={CONNECTOR_INSTALL_COMMANDS[platform]}
+        />
+        <Step
+          n={2}
+          label={t(($) => $.cli_install.step2_label)}
+          cmd={CONNECTOR_SETUP_COMMAND}
+        />
       </CardContent>
     </Card>
   );

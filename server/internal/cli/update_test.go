@@ -101,6 +101,13 @@ func TestFindReleaseAsset(t *testing.T) {
 	})
 }
 
+func TestReleaseAPIBaseURLUsesFork(t *testing.T) {
+	const want = "https://api.github.com/repos/SeimoDev/multica/releases"
+	if releaseAPIBaseURL != want {
+		t.Fatalf("releaseAPIBaseURL = %q, want %q", releaseAPIBaseURL, want)
+	}
+}
+
 func TestIsReleaseVersion(t *testing.T) {
 	tests := []struct {
 		name string

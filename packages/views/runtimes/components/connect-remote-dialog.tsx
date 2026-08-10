@@ -8,7 +8,6 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeKeys } from "@multica/core/runtimes/queries";
 import { useWSEvent } from "@multica/core/realtime";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
-import { useConfigStore } from "@multica/core/config";
 import {
   Dialog,
   DialogContent,
@@ -27,39 +26,15 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { SegmentedToggle } from "../../common/segmented-toggle";
+import {
+  CONNECTOR_INSTALL_COMMANDS,
+  CONNECTOR_SETUP_COMMAND,
+  CONNECTOR_TOKEN_COMMAND,
+  type ConnectorPlatform,
+} from "../../common/connector-install";
 
 type Step = "instructions" | "success";
-
-const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
-const CLOUD_SERVER_URL = "https://api.multica.ai";
-const CLOUD_APP_URL = "https://multica.ai";
-
-function normalizeCommandURL(url: string | undefined) {
-  return url?.trim().replace(/\/+$/, "") ?? "";
-}
-
-function daemonCommands(serverUrl: string | undefined, appUrl: string | undefined) {
-  const normalizedServerUrl = normalizeCommandURL(serverUrl);
-  const normalizedAppUrl = normalizeCommandURL(appUrl);
-  if (normalizedServerUrl && normalizedAppUrl) {
-    return {
-      setupCmd: `multica setup self-host --server-url ${normalizedServerUrl} --app-url ${normalizedAppUrl}`,
-      tokenCmd: `multica config set server_url ${normalizedServerUrl}
-multica config set app_url ${normalizedAppUrl}
-multica login --token <YOUR_TOKEN>
-multica daemon start`,
-    };
-  }
-
-  return {
-    setupCmd: "multica setup",
-    tokenCmd: `multica config set server_url ${CLOUD_SERVER_URL}
-multica config set app_url ${CLOUD_APP_URL}
-multica login --token <YOUR_TOKEN>
-multica daemon start`,
-  };
-}
 
 export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<Step>("instructions");
@@ -232,9 +207,7 @@ function CommandStep({
 
 function InstructionsStep({ onClose }: { onClose: () => void }) {
   const { t } = useT("runtimes");
-  const daemonServerUrl = useConfigStore((s) => s.daemonServerUrl);
-  const daemonAppUrl = useConfigStore((s) => s.daemonAppUrl);
-  const { setupCmd, tokenCmd } = daemonCommands(daemonServerUrl, daemonAppUrl);
+  const [platform, setPlatform] = useState<ConnectorPlatform>("unix");
   return (
     <>
       <DialogHeader className="px-6 pt-6 pb-2">
@@ -248,10 +221,26 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
         <div className="space-y-4">
+          <div>
+            <p className="mb-1.5 text-caption font-medium text-foreground">
+              {t(($) => $.connect.platform_label)}
+            </p>
+            <SegmentedToggle
+              value={platform}
+              onChange={setPlatform}
+              ariaLabel={t(($) => $.connect.platform_label)}
+              options={[
+                ["unix", t(($) => $.connect.platform_unix)],
+                ["windows", t(($) => $.connect.platform_windows)],
+              ]}
+              buttonClassName="px-3 py-1.5 text-caption"
+            />
+          </div>
+
           <CommandStep
             n={1}
             label={t(($) => $.connect.step1_label)}
-            cmd={INSTALL_CMD}
+            cmd={CONNECTOR_INSTALL_COMMANDS[platform]}
             copyAria={t(($) => $.connect.copy_aria)}
           />
 
@@ -259,7 +248,7 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
             <CommandStep
               n={2}
               label={t(($) => $.connect.step2_label)}
-              cmd={setupCmd}
+              cmd={CONNECTOR_SETUP_COMMAND}
               copyAria={t(($) => $.connect.copy_aria)}
             />
             <p className="mt-1.5 text-micro leading-[1.55] text-muted-foreground">
@@ -269,7 +258,7 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
 
           <LiveListening />
 
-          <TroubleshootingDetails tokenCmd={tokenCmd} />
+          <TroubleshootingDetails tokenCmd={CONNECTOR_TOKEN_COMMAND} />
         </div>
       </div>
 

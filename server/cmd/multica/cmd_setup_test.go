@@ -375,6 +375,34 @@ func TestSetupCallbackHostFlagWiring(t *testing.T) {
 	}
 }
 
+func TestSetupDefaultsToFlumaDeploymentWithoutVisibleModeChoices(t *testing.T) {
+	const wantURL = "https://multica.fluma.ai:26081"
+	if defaultCloudServerURL != wantURL {
+		t.Fatalf("default server URL = %q, want %q", defaultCloudServerURL, wantURL)
+	}
+	if defaultCloudAppURL != wantURL {
+		t.Fatalf("default app URL = %q, want %q", defaultCloudAppURL, wantURL)
+	}
+	if !setupCloudCmd.Hidden {
+		t.Fatal("setup cloud compatibility command must be hidden")
+	}
+	if !setupSelfHostCmd.Hidden {
+		t.Fatal("setup self-host compatibility command must be hidden")
+	}
+	if setupCmd.HasSubCommands() {
+		t.Fatal("setup must run directly without a cloud/self-host subcommand choice")
+	}
+	if err := setupCmd.Args(setupCmd, []string{"self-host"}); err == nil {
+		t.Fatal("setup must reject the removed self-host mode argument")
+	}
+	if err := setupCmd.Args(setupCmd, []string{"cloud"}); err == nil {
+		t.Fatal("setup must reject the removed cloud mode argument")
+	}
+	if strings.Contains(setupCmd.Long, "self-host") || strings.Contains(setupCmd.Long, "Multica Cloud") {
+		t.Fatalf("setup help still advertises a connection mode choice:\n%s", setupCmd.Long)
+	}
+}
+
 func TestSetupHelpShowsCallbackHostFlag(t *testing.T) {
 	var out bytes.Buffer
 	setupCmd.SetOut(&out)

@@ -122,6 +122,9 @@
   "cli_install": {
     "copy_aria": "Copy",
     "intro": "You'll need an agent runtime on this computer (Claude Code, Codex, Cursor, …) for it to run your agent. Also works on servers and remote dev boxes.",
+    "platform_label": "Operating system",
+    "platform_unix": "macOS / Linux",
+    "platform_windows": "Windows",
     "step1_label": "Install the Multica CLI",
     "step2_label": "Start the daemon"
   },

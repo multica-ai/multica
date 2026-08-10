@@ -56,6 +56,23 @@ if ($parseErrors) {
 }
 
 $installerSource = Get-Content -Raw -Path $InstallerPath
+foreach ($required in @(
+        "https://github.com/SeimoDev/multica",
+        "https://api.github.com/repos/SeimoDev/multica/releases/latest",
+        "https://multica.fluma.ai:26081")) {
+    if ($installerSource -notmatch [regex]::Escape($required)) {
+        Fail-Test "install.ps1 is missing the tailored connector target: $required"
+    }
+}
+foreach ($banned in @(
+        "https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1",
+        "multica setup self-host",
+        "# Connect to Multica Cloud",
+        "# Connect to a self-hosted server")) {
+    if ($installerSource -match [regex]::Escape($banned)) {
+        Fail-Test "install.ps1 still advertises an alternate login mode: $banned"
+    }
+}
 foreach ($banned in @("Get-SelfHostBackendPort", "Get-SelfHostFrontendPort", "Get-EnvFileValue")) {
     if ($installerSource -match [regex]::Escape($banned)) {
         Fail-Test "install.ps1 must not re-derive host ports from .env (found $banned)"

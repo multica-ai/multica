@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   verify:
+    if: github.repository_owner == 'multica-ai'
     runs-on: ubuntu-latest
     outputs:
       tag_name: ${{ steps.release_meta.outputs.tag_name }}

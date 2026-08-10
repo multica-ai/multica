@@ -12,15 +12,21 @@ export function SegmentedToggle<T extends string>({
   options,
   onChange,
   buttonClassName,
+  ariaLabel,
 }: {
   value: T;
   options: ReadonlyArray<readonly [T, ReactNode]>;
   onChange: (value: T) => void;
   /** Overrides the compact default sizing (text-caption px-2 py-1). */
   buttonClassName?: string;
+  ariaLabel?: string;
 }) {
   return (
-    <div className="grid auto-cols-fr grid-flow-col gap-1 rounded-md bg-muted p-1">
+    <div
+      role={ariaLabel ? "group" : undefined}
+      aria-label={ariaLabel}
+      className="grid auto-cols-fr grid-flow-col gap-1 rounded-md bg-muted p-1"
+    >
       {options.map(([key, label]) => (
         <button
           key={key}

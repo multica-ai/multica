@@ -2828,6 +2828,9 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     cli: {
       title: "想用 CLI？",
       sub: "适合服务器、远程开发机、无图形界面环境。底层 daemon 与 Desktop 相同，通过终端安装。",
+      platformLabel: "操作系统",
+      platformUnix: "macOS / Linux",
+      platformWindows: "Windows",
       installLabel: "安装",
       startLabel: "启动 daemon",
       sshNote: "已经在服务器上？通过 SSH 执行同样的命令即可。",

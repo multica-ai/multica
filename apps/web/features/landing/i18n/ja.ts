@@ -2330,6 +2330,9 @@ export function createJaDict(allowSignup: boolean): LandingDict {
       cli: {
         title: "CLI のほうが便利ですか?",
         sub: "サーバー、リモート開発環境、ヘッドレス環境に最適です。デスクトップと同じデーモンを、ターミナルからインストールできます。",
+        platformLabel: "オペレーティングシステム",
+        platformUnix: "macOS / Linux",
+        platformWindows: "Windows",
         installLabel: "インストール",
         startLabel: "デーモンを起動",
         sshNote: "すでにサーバーに接続中ですか? 同じコマンドが SSH 上でもそのまま使えます。",

@@ -19,12 +19,11 @@ import (
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Configure the CLI, authenticate, and start the daemon",
-	Long: `Configures the CLI to connect to Multica Cloud (multica.ai), then
+	Args:  cobra.NoArgs,
+	Long: `Configures the CLI to connect to https://multica.fluma.ai:26081, then
 authenticates via browser and starts the agent daemon.
 
 If a configuration already exists, you will be prompted before overwriting.
-
-Use 'multica setup self-host' to connect to a self-hosted server instead.
 
 If you run this command over SSH on a remote machine, keep the localhost
 callback and follow the SSH tunnel hint printed during browser login. If your
@@ -32,14 +31,14 @@ browser can reach this CLI directly on a private network address, pass
 --callback-host <host-or-ip>.
 
 Use --profile to create an isolated configuration for a separate environment:
-  multica setup self-host --profile staging --server-url https://api-staging.co`,
+  multica setup --profile staging`,
 	RunE: runSetupCloud,
 }
 
 var setupCloudCmd = &cobra.Command{
 	Use:   "cloud",
-	Short: "Configure the CLI for Multica Cloud (multica.ai)",
-	Long: `Explicitly configures the CLI to connect to Multica Cloud (multica.ai).
+	Short: "Compatibility alias for multica setup",
+	Long: `Compatibility alias that connects to https://multica.fluma.ai:26081.
 
 If you run this command over SSH on a remote machine, keep the localhost
 callback and follow the SSH tunnel hint printed during browser login. If your
@@ -47,7 +46,8 @@ browser can reach this CLI directly on a private network address, pass
 --callback-host <host-or-ip>.
 
 This is equivalent to running 'multica setup' without a subcommand.`,
-	RunE: runSetupCloud,
+	RunE:   runSetupCloud,
+	Hidden: true,
 }
 
 var setupSelfHostCmd = &cobra.Command{
@@ -66,7 +66,8 @@ Examples:
   multica setup self-host
   multica setup self-host --server-url https://api.internal.co --app-url https://app.internal.co
   multica setup self-host --port 9090 --frontend-port 4000`,
-	RunE: runSetupSelfHost,
+	RunE:   runSetupSelfHost,
+	Hidden: true,
 }
 
 func init() {
@@ -79,8 +80,6 @@ func init() {
 	setupSelfHostCmd.Flags().Int("frontend-port", 3000, "Frontend port (used when --app-url is not set)")
 	setupSelfHostCmd.Flags().String(callbackHostFlag, "", callbackHostFlagHelp)
 
-	setupCmd.AddCommand(setupCloudCmd)
-	setupCmd.AddCommand(setupSelfHostCmd)
 }
 
 // printConfigLocation prints the config file path and profile name.
@@ -161,7 +160,7 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("save config: %w", err)
 	}
 
-	fmt.Fprintln(os.Stderr, "Configured for Multica Cloud (https://multica.ai).")
+	fmt.Fprintln(os.Stderr, "Configured for https://multica.fluma.ai:26081.")
 	fmt.Fprintf(os.Stderr, "  server_url: %s\n", cfg.ServerURL)
 	fmt.Fprintf(os.Stderr, "  app_url:    %s\n", cfg.AppURL)
 	printConfigLocation(profile)

@@ -122,6 +122,9 @@
   "cli_install": {
     "copy_aria": "复制",
     "intro": "这台电脑上需要装一个 agent 运行时（Claude Code、Codex、Cursor 等）才能运行你的智能体。也支持服务器和远程开发机。",
+    "platform_label": "操作系统",
+    "platform_unix": "macOS / Linux",
+    "platform_windows": "Windows",
     "step1_label": "安装 Multica CLI",
     "step2_label": "启动守护进程"
   },

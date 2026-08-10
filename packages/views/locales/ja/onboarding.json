@@ -122,6 +122,9 @@
   "cli_install": {
     "copy_aria": "コピー",
     "intro": "エージェントを実行するには、このコンピュータにエージェントランタイム(Claude Code、Codex、Cursor など)が必要です。サーバーやリモート開発環境でも動作します。",
+    "platform_label": "オペレーティングシステム",
+    "platform_unix": "macOS / Linux",
+    "platform_windows": "Windows",
     "step1_label": "Multica CLI をインストール",
     "step2_label": "デーモンを起動"
   },

@@ -5,8 +5,13 @@ import { Check, Copy, Terminal } from "lucide-react";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useLocale } from "../../i18n";
 
-const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
+type CliPlatform = "unix" | "windows";
+
+const INSTALL_COMMANDS: Record<CliPlatform, string> = {
+  unix: "curl -fsSL https://raw.githubusercontent.com/SeimoDev/multica/main/scripts/install.sh | bash",
+  windows:
+    "irm https://raw.githubusercontent.com/SeimoDev/multica/main/scripts/install.ps1 | iex",
+};
 const SETUP_CMD = "multica setup";
 
 /**
@@ -17,6 +22,7 @@ const SETUP_CMD = "multica setup";
 export function CliSection() {
   const { t } = useLocale();
   const d = t.download.cli;
+  const [platform, setPlatform] = useState<CliPlatform>("unix");
 
   return (
     <section id="cli" className="bg-[#f7f7f5] py-20 text-[#0a0d12] sm:py-24">
@@ -28,10 +34,37 @@ export function CliSection() {
           {d.sub}
         </p>
 
-        <div className="mt-10 flex flex-col gap-5">
+        <div
+          role="group"
+          aria-label={d.platformLabel}
+          className="mt-8 inline-flex rounded-lg bg-[#0a0d12]/6 p-1"
+        >
+          {(
+            [
+              ["unix", d.platformUnix],
+              ["windows", d.platformWindows],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={platform === value}
+              onClick={() => setPlatform(value)}
+              className={`rounded-md px-4 py-2 text-label font-medium transition-colors ${
+                platform === value
+                  ? "bg-white text-[#0a0d12] shadow-sm"
+                  : "text-[#0a0d12]/60 hover:text-[#0a0d12]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-6 flex flex-col gap-5">
           <CommandBlock
             label={d.installLabel}
-            cmd={INSTALL_CMD}
+            cmd={INSTALL_COMMANDS[platform]}
             copyLabel={d.copyLabel}
             copiedLabel={d.copiedLabel}
           />

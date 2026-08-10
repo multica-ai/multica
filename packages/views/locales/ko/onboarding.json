@@ -122,6 +122,9 @@
   "cli_install": {
     "copy_aria": "복사",
     "intro": "이 컴퓨터에서 에이전트를 실행하려면 에이전트 런타임(Claude Code, Codex, Cursor 등)이 필요합니다. 서버와 원격 개발 환경에서도 사용할 수 있습니다.",
+    "platform_label": "운영 체제",
+    "platform_unix": "macOS / Linux",
+    "platform_windows": "Windows",
     "step1_label": "Multica CLI 설치",
     "step2_label": "데몬 시작"
   },

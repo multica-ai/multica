@@ -2355,6 +2355,9 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       cli: {
         title: "CLI가 더 편하신가요?",
         sub: "서버, 원격 개발 환경, headless 환경에 적합합니다. 데스크톱과 동일한 데몬을 터미널에서 바로 설치할 수 있습니다.",
+        platformLabel: "운영 체제",
+        platformUnix: "macOS / Linux",
+        platformWindows: "Windows",
         installLabel: "설치",
         startLabel: "데몬 시작",
         sshNote: "이미 서버에 접속해 있나요? 같은 명령을 SSH에서도 그대로 사용할 수 있습니다.",

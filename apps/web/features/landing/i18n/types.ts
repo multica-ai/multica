@@ -179,6 +179,9 @@ export type LandingDict = {
     cli: {
       title: string;
       sub: string;
+      platformLabel: string;
+      platformUnix: string;
+      platformWindows: string;
       installLabel: string;
       startLabel: string;
       sshNote: string;
