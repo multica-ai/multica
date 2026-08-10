@@ -72,7 +72,8 @@ func keepsPinnedModelWhenUncatalogued(provider string) bool {
 }
 
 // isStickyProviderModelError detects ACP failures caused by a resumed session
-// keeping the wrong provider/base_url for the Multica-pinned model.
+// keeping bad state (wrong provider/base_url, or a poisoned history that trips
+// gateway PII policy). Fresh session drops sticky Hermes state.db context.
 // CEREBRO-PATCH(daemon-hermes-sticky-provider-retry).
 func isStickyProviderModelError(provider, errText string) bool {
 	if !keepsPinnedModelWhenUncatalogued(provider) || errText == "" {
@@ -87,6 +88,13 @@ func isStickyProviderModelError(provider, errText string) bool {
 	}
 	// OpenCode rejecting a Firtal/TensorX model id after sticky base_url reuse.
 	if strings.Contains(lower, "opencode") && strings.Contains(lower, "not supported") {
+		return true
+	}
+	// Multica AGENTS.md always carries colleague names/@firtal.com; short calls
+	// pass via auto_route_eu_on_pii, but a long resumed Hermes transcript can
+	// still trip 451 pii_blocked (extra findings / secrets in tool history).
+	// Fresh session is the safe Multica-side recovery.
+	if strings.Contains(lower, "pii_blocked") || strings.Contains(lower, "gateway-pii-blocked") {
 		return true
 	}
 	return false

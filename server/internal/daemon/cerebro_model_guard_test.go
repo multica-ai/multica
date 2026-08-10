@@ -63,6 +63,9 @@ func TestIsStickyProviderModelError(t *testing.T) {
 	if isStickyProviderModelError("hermes", "upstream_server_error tensorx") {
 		t.Fatal("tensorx 502 must not be treated as sticky provider error")
 	}
+	if !isStickyProviderModelError("hermes", "hermes provider error: pii_blocked") {
+		t.Fatal("expected hermes pii_blocked to be sticky-session retryable")
+	}
 }
 
 // A provider with no discoverable catalog cannot prove the model wrong, so the
