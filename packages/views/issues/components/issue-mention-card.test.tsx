@@ -24,8 +24,10 @@ vi.mock("@multica/core/paths", () => ({
 }));
 
 vi.mock("./issue-chip", () => ({
-  IssueChip: ({ fallbackLabel }: { fallbackLabel?: string }) => (
-    <span data-testid="issue-chip">{fallbackLabel ?? "chip"}</span>
+  IssueChip: ({ fallbackLabel, variant }: { fallbackLabel?: string; variant?: string }) => (
+    <span data-testid="issue-chip" data-variant={variant}>
+      {fallbackLabel ?? "chip"}
+    </span>
   ),
 }));
 
@@ -124,11 +126,20 @@ describe("IssueMentionCard", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it("passes the reader's display mode down to the chip", () => {
+  // The one line that makes the whole preference do anything: without it every
+  // mention silently renders `full` and no other test in the repo notices.
+  it.each(["full", "compact", "plain"] as const)(
+    "passes the reader's display mode to the chip as variant=%s",
+    (mode) => {
+      mentionDisplayState.mode = mode;
+      renderCard(makeAdapter());
+      expect(screen.getByTestId("issue-chip")).toHaveAttribute("data-variant", mode);
+    },
+  );
+
+  it("keeps align-middle in the boxed modes so the chip centers in the line box", () => {
     mentionDisplayState.mode = "compact";
     renderCard(makeAdapter());
-    // The chip is stubbed, so the assertion that matters here is the wrapper's:
-    // only the boxed modes get vertical centering.
     expect(screen.getByTestId("issue-chip").closest("a")).toHaveClass("align-middle");
   });
 
