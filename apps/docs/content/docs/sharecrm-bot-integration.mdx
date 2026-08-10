@@ -74,7 +74,9 @@ Setting this up for **multiple agents**? Repeat the whole flow once per agent �
 
 ### First message: link your account
 
-The first time you @-mention or DM the bot, it replies with a **link your account** prompt pointing at the in-product **/sharecrm/bind** page. Open the link, sign in to Multica, and your ShareCRM identity is bound to your Multica membership — this is what lets the agent act as you (e.g. `/issue` files under your name). The link is single-use and expires in about 15 minutes; just message the bot again for a fresh one.
+The first time you **DM** the bot, it replies with a **link your account** prompt pointing at the in-product **/sharecrm/bind** page. Open the link, sign in to Multica, and your ShareCRM identity is bound to your Multica membership — this is what lets the agent act as you (e.g. `/issue` files under your name). The link is single-use and expires in about 15 minutes; just message the bot again for a fresh one.
+
+If you first @-mention the bot in a **group** while unbound, it replies in the group asking you to open a 1:1 chat. Binding links are never posted into groups (they are bearer credentials; only the 1:1 conversation receives the URL).
 
 <Callout type="warning">
 Only **members of the workspace** can use the bot. If you aren't a member, or you skip the identity link, the bot won't run — your message is dropped (recorded for audit, without its contents).
