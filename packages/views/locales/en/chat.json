@@ -18,6 +18,7 @@
     "placeholder_named": "Message {{name}}…",
     "placeholder_default": "Start a message…",
     "send_tooltip": "Send",
+    "queue_send_tooltip": "Queue message",
     "stop_tooltip": "Stop",
     "send_failed_toast": "Failed to send message",
     "send_blocked_toast": "Message not sent — you no longer have permission to use this agent",
@@ -30,6 +31,19 @@
     "remove_project_context": "Remove project context",
     "no_projects": "No projects yet",
     "project_context_unsupported": "Project description won't apply — this agent's daemon needs an upgrade"
+  },
+  "queue": {
+    "title_one": "{{count}} queued message",
+    "title_other": "{{count}} queued messages",
+    "clear": "Clear all",
+    "steer": "Steer",
+    "steer_unavailable": "Steer is available after the current reply starts",
+    "steer_unavailable_toast": "Steer is unavailable. Refreshing the queue.",
+    "edit": "Edit queued message",
+    "remove": "Remove queued message",
+    "more": "More queue actions",
+    "fallback": "Queued message",
+    "action_failed_toast": "Couldn't update the queued message"
   },
   "message_list": {
     "show_details": "Show details",
@@ -137,6 +151,26 @@
     "summarize_today": "Summarize what I did today",
     "plan_next": "Plan what to work on next"
   },
+  "onboarding_cards": {
+    "aria_label": "Ways to start",
+    "cta": "Start",
+    "board": {
+      "title": "Get a board up in minutes",
+      "desc": "Tell me the goal — I'll create the project, split the issues, and set priorities.",
+      "prompt": "Turn our current goals into a project board"
+    },
+    "delegate": {
+      "title": "Hand me one thing first",
+      "desc": "A quick piece of research, say — results come back as an issue and a report.",
+      "prompt": "Take one thing off my plate: run a quick piece of research and send the results back as a report"
+    },
+    "digest": {
+      "title": "Let the daily digest write itself",
+      "desc": "A morning summary of workspace progress, straight to your inbox.",
+      "prompt": "Set up a daily automation that posts a morning summary of workspace progress"
+    },
+    "digest_badge": "Daily 9:00"
+  },
   "no_agent_banner": "You need an agent to start chatting.",
   "archived_agent_banner": "{{name}} has been archived — this conversation is read-only.",
   "runtime_required_banner": {
@@ -153,6 +187,7 @@
     "stages": {
       "offline": "Offline",
       "reconnecting": "Reconnecting",
+      "retrying": "Retrying",
       "queued": "Queued",
       "waiting_local_directory": "Waiting for local directory",
       "starting_up": "Starting up",

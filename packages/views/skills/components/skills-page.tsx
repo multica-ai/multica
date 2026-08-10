@@ -872,7 +872,7 @@ export default function SkillsPage() {
                 className={`cursor-pointer ${
                   selectedIds.has(row.skill.id) ? "bg-accent/30" : ""
                 }`}
-                {...rowLink(paths.skillDetail(row.skill.id))}
+                {...rowLink(paths.skillDetail(row.skill.id), row.skill.name)}
               >
                 <CheckboxCell
                   checked={selectedIds.has(row.skill.id)}

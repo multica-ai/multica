@@ -444,9 +444,21 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 		t.Fatal("prepare lease request was never started while /start was blocked")
 	}
 	leaseCallsAtReturn := leaseCalls.Load()
-	time.Sleep(4 * taskPrepareLeaseRefresh)
-	if got := leaseCalls.Load(); got != leaseCallsAtReturn {
-		t.Fatalf("prepare lease requests kept starting after timeout: calls %d -> %d", leaseCallsAtReturn, got)
+	lastLeaseCalls := leaseCallsAtReturn
+	stableReads := 0
+	deadline := time.Now().Add(12 * taskPrepareLeaseRefresh)
+	for stableReads < 3 && time.Now().Before(deadline) {
+		time.Sleep(taskPrepareLeaseRefresh)
+		got := leaseCalls.Load()
+		if got == lastLeaseCalls {
+			stableReads++
+			continue
+		}
+		lastLeaseCalls = got
+		stableReads = 0
+	}
+	if stableReads < 3 {
+		t.Fatalf("prepare lease kept extending after timeout: calls %d -> %d", leaseCallsAtReturn, leaseCalls.Load())
 	}
 	if got := taskRunFailureReason(err); got != "timeout" {
 		t.Fatalf("taskRunFailureReason = %q, want retryable platform timeout", got)

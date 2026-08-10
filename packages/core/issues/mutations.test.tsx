@@ -10,8 +10,6 @@ import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import {
   useBatchUpdateIssues,
-  useLoadMoreByAssigneeGroup,
-  useLoadMoreByStatus,
   useResolveComment,
   useUpdateIssue,
 } from "./mutations";
@@ -21,13 +19,9 @@ import {
 } from "./queries";
 import { inboxKeys } from "../inbox/queries";
 import type {
-  GroupedIssuesResponse,
   InboxItem,
   Issue,
   ListIssuesCache,
-  ListIssuesParams,
-  ListGroupedIssuesParams,
-  ListIssuesResponse,
   TimelineEntry,
 } from "../types";
 
@@ -97,296 +91,6 @@ function createWrapper(qc: QueryClient) {
     return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
   };
 }
-
-describe("useLoadMoreByStatus", () => {
-  let qc: QueryClient;
-  let listIssues: ReturnType<typeof vi.fn<(p?: ListIssuesParams) => Promise<ListIssuesResponse>>>;
-
-  beforeEach(() => {
-    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    listIssues = vi.fn();
-    setApiInstance({ listIssues } as unknown as ApiClient);
-  });
-
-  afterEach(() => {
-    qc.clear();
-    vi.restoreAllMocks();
-  });
-
-  it("targets the sorted cache key and forwards sort to the API", async () => {
-    const sort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    const activeKey = issueKeys.listSorted(WS_ID, sort);
-    const seed: ListIssuesCache = {
-      byStatus: {
-        todo: { issues: [makeIssue(1)], total: 3 },
-      },
-    };
-    qc.setQueryData<ListIssuesCache>(activeKey, seed);
-
-    listIssues.mockResolvedValue({
-      issues: [makeIssue(2), makeIssue(3)],
-      total: 3,
-    });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", undefined, sort),
-      { wrapper: createWrapper(qc) },
-    );
-
-    expect(result.current.hasMore).toBe(true);
-    expect(result.current.total).toBe(3);
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listIssues).toHaveBeenCalledWith({
-      status: "todo",
-      limit: 50,
-      offset: 1,
-      sort_by: "priority",
-      sort_direction: "desc",
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.todo?.issues).toHaveLength(3);
-    expect(updated?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
-      "issue-1",
-      "issue-2",
-      "issue-3",
-    ]);
-  });
-
-  it("ignores a stale cache entry under a different sort", async () => {
-    // Stale entry from a previous sort lingers (kept by gcTime / keepPreviousData).
-    const staleSort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    qc.setQueryData<ListIssuesCache>(issueKeys.listSorted(WS_ID, staleSort), {
-      byStatus: { todo: { issues: [makeIssue(99)], total: 99 } },
-    });
-
-    // The active sort cache has its own bucket — load-more must target THIS one.
-    const activeSort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
-    const activeKey = issueKeys.listSorted(WS_ID, activeSort);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { todo: { issues: [makeIssue(1)], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({
-      issues: [makeIssue(2)],
-      total: 2,
-    });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", undefined, activeSort),
-      { wrapper: createWrapper(qc) },
-    );
-
-    // total derives from the active key, not the stale one.
-    expect(result.current.total).toBe(2);
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listIssues).toHaveBeenCalledWith(
-      expect.objectContaining({ offset: 1, sort_by: "position" }),
-    );
-
-    const active = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(active?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
-      "issue-1",
-      "issue-2",
-    ]);
-
-    // Stale cache is untouched.
-    const stale = qc.getQueryData<ListIssuesCache>(issueKeys.listSorted(WS_ID, staleSort));
-    expect(stale?.byStatus.todo?.issues.map((i) => i.id)).toEqual(["issue-99"]);
-  });
-
-  it("targets the myList scoped cache when myIssues is provided", async () => {
-    const sort: IssueSortParam = { sort_by: "title", sort_direction: "asc" };
-    const myIssues = { scope: "assigned", filter: { assignee_id: "user-1" } };
-    const activeKey = issueKeys.myListSorted(WS_ID, myIssues.scope, myIssues.filter, sort);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { in_progress: { issues: [makeIssue(1, { status: "in_progress" })], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({
-      issues: [makeIssue(2, { status: "in_progress" })],
-      total: 2,
-    });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("in_progress", myIssues, sort),
-      { wrapper: createWrapper(qc) },
-    );
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listIssues).toHaveBeenCalledWith({
-      status: "in_progress",
-      limit: 50,
-      offset: 1,
-      sort_by: "title",
-      sort_direction: "asc",
-      assignee_id: "user-1",
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.in_progress?.issues).toHaveLength(2);
-  });
-
-  it("targets the project surface cache when myIssues uses a project scope key", async () => {
-    const sort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
-    const myIssues = { scope: "project:p1", filter: { project_id: "p1" } };
-    const activeKey = issueKeys.myListSorted(WS_ID, myIssues.scope, myIssues.filter, sort);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { todo: { issues: [makeIssue(1, { project_id: "p1" })], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({
-      issues: [makeIssue(2, { project_id: "p1" })],
-      total: 2,
-    });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", myIssues, sort),
-      { wrapper: createWrapper(qc) },
-    );
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listIssues).toHaveBeenCalledWith({
-      status: "todo",
-      limit: 50,
-      offset: 1,
-      sort_by: "position",
-      sort_direction: undefined,
-      project_id: "p1",
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
-      "issue-1",
-      "issue-2",
-    ]);
-  });
-
-  it("works with no sort (matches the {} key used by sort-less callers)", async () => {
-    const myIssues = { scope: "actor", filter: { assignee_id: "user-2" } };
-    const activeKey = issueKeys.myListSorted(WS_ID, myIssues.scope, myIssues.filter, undefined);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { todo: { issues: [makeIssue(1)], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({ issues: [makeIssue(2)], total: 2 });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", myIssues),
-      { wrapper: createWrapper(qc) },
-    );
-
-    expect(result.current.total).toBe(2);
-    expect(result.current.hasMore).toBe(true);
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.todo?.issues).toHaveLength(2);
-  });
-});
-
-describe("useLoadMoreByAssigneeGroup", () => {
-  let qc: QueryClient;
-  let listGroupedIssues: ReturnType<
-    typeof vi.fn<(p: ListGroupedIssuesParams) => Promise<GroupedIssuesResponse>>
-  >;
-
-  beforeEach(() => {
-    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    listGroupedIssues = vi.fn();
-    setApiInstance({ listGroupedIssues } as unknown as ApiClient);
-  });
-
-  afterEach(() => {
-    qc.clear();
-    vi.restoreAllMocks();
-  });
-
-  it("forwards sort to the grouped API and appends into the right group", async () => {
-    const sort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    const queryKey = ["custom", "assignee-groups", "ws-1"] as const;
-    const seed: GroupedIssuesResponse = {
-      groups: [
-        {
-          id: "assignee:member:user-1",
-          assignee_type: "member",
-          assignee_id: "user-1",
-          issues: [makeIssue(1, { assignee_type: "member", assignee_id: "user-1" })],
-          total: 2,
-        },
-      ],
-    };
-    qc.setQueryData<GroupedIssuesResponse>(queryKey, seed);
-
-    listGroupedIssues.mockResolvedValue({
-      groups: [
-        {
-          id: "assignee:member:user-1",
-          assignee_type: "member",
-          assignee_id: "user-1",
-          issues: [makeIssue(2, { assignee_type: "member", assignee_id: "user-1" })],
-          total: 2,
-        },
-      ],
-    });
-
-    const { result } = renderHook(
-      () =>
-        useLoadMoreByAssigneeGroup(
-          {
-            id: "assignee:member:user-1",
-            assignee_type: "member",
-            assignee_id: "user-1",
-          },
-          queryKey,
-          { statuses: ["todo"] },
-          sort,
-        ),
-      { wrapper: createWrapper(qc) },
-    );
-
-    expect(result.current.hasMore).toBe(true);
-    expect(result.current.total).toBe(2);
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listGroupedIssues).toHaveBeenCalledWith({
-      group_by: "assignee",
-      limit: 50,
-      offset: 1,
-      sort_by: "priority",
-      sort_direction: "desc",
-      statuses: ["todo"],
-      group_assignee_type: "member",
-      group_assignee_id: "user-1",
-    });
-
-    const updated = qc.getQueryData<GroupedIssuesResponse>(queryKey);
-    expect(updated?.groups[0]?.issues.map((i) => i.id)).toEqual([
-      "issue-1",
-      "issue-2",
-    ]);
-  });
-});
 
 describe("useUpdateIssue — optimistic move keeps every bucketed board in sync", () => {
   const sort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
@@ -477,6 +181,43 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     for (const key of [wsKey, myKey, projectKey]) {
       expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
     }
+  });
+
+  it("keeps the authoritative description base while a description update is pending", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((r) => {
+        resolve = r;
+      }),
+    );
+    const detailKey = issueKeys.detail(WS_ID, "issue-1");
+    qc.setQueryData<Issue>(detailKey, makeIssue(1, { description: "base" }));
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({
+        id: "issue-1",
+        description: "local edit",
+        description_base: "base",
+      });
+    });
+
+    await waitFor(() => {
+      expect(updateIssue).toHaveBeenCalledWith("issue-1", {
+        description: "local edit",
+        description_base: "base",
+      });
+    });
+    const optimistic = qc.getQueryData<Issue & { description_base?: string }>(detailKey);
+    expect(optimistic?.description).toBe("base");
+    expect(optimistic).not.toHaveProperty("description_base");
+
+    await act(async () => {
+      resolve(makeIssue(1, { description: "local edit" }));
+    });
+    expect(qc.getQueryData<Issue>(detailKey)?.description).toBe("local edit");
   });
 
   it("uses server move intent while keeping provisional position optimistic-only", async () => {
@@ -810,6 +551,48 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     for (const key of [wsKey, myKey]) {
       expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
     }
+  });
+
+  it("does not optimistically replace description merge bases", async () => {
+    let resolve!: (r: { updated: number }) => void;
+    batchUpdateIssues.mockReturnValue(
+      new Promise<{ updated: number }>((r) => {
+        resolve = r;
+      }),
+    );
+    const detailKey = issueKeys.detail(WS_ID, "issue-1");
+    qc.setQueryData<Issue>(
+      detailKey,
+      makeIssue(1, { description: "base with marker" }),
+    );
+
+    const { result } = renderHook(() => useBatchUpdateIssues(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({
+        ids: ["issue-1"],
+        updates: {
+          description: "local edit",
+          description_base: "base with marker",
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(batchUpdateIssues).toHaveBeenCalledWith(["issue-1"], {
+        description: "local edit",
+        description_base: "base with marker",
+      });
+    });
+    expect(qc.getQueryData<Issue>(detailKey)?.description).toBe(
+      "base with marker",
+    );
+
+    await act(async () => {
+      resolve({ updated: 1 });
+    });
   });
 
   it("rolls both caches back when the request fails", async () => {

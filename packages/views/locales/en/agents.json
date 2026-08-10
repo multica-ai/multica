@@ -448,7 +448,14 @@
     "instructions": {
       "intro": "Set the system prompt used for every task. Markdown is supported.",
       "system_prompt_label": "System prompt",
-      "placeholder": "Define this agent's role, expertise, and working style.\n\n# Example\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/"
+      "placeholder": "Define this agent's role, expertise, and working style.\n\n# Example\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/",
+      "system_layer_label": "Maintained by Multica",
+      "system_layer_hint": "Updates with each Multica release. You can't edit it, and your notes below are never overwritten.",
+      "system_layer_show": "Show",
+      "system_layer_hide": "Hide",
+      "workspace_notes_label": "Workspace notes",
+      "workspace_notes_intro": "Add your team's context and preferences below. They apply on top of the instructions Multica maintains for this agent. Markdown is supported.",
+      "workspace_notes_placeholder": "Add context this agent should always have.\n\n# Example\nOur main repository is github.com/acme/platform.\nWrite issues in English even when we chat in Chinese.\nWe do not deploy on Fridays."
     },
     "env": {
       "intro_readonly": "Injected into the agent process at launch. Only workspace owners and admins can read or edit values; every reveal and edit is recorded in the workspace audit log.",
@@ -817,7 +824,13 @@
     "copy_workdir": "Copy working directory",
     "close": "Close",
     "fact_created": "Created {{time}}",
-    "fact_took": "Took {{duration}}"
+    "fact_took": "Took {{duration}}",
+    "details_input": "Input",
+    "details_output": "Output",
+    "details_cache_read": "Cache read",
+    "details_cache_write": "Cache write",
+    "details_cost": "Cost",
+    "usage_chip_title": "Tokens and estimated cost for this run"
   },
   "task_failure": {
     "agent_error": "Agent execution error",

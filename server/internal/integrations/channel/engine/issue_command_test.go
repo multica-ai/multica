@@ -41,14 +41,38 @@ func TestParseIssueCommand(t *testing.T) {
 	}
 }
 
-func TestTitleFromPreviousMessage(t *testing.T) {
-	if got := titleFromPreviousMessage("/issue Real title"); got != "Real title" {
-		t.Errorf("prev /issue should strip prefix: %q", got)
+func TestIssueDescriptionFromCommandBodyPreservesInlineLayout(t *testing.T) {
+	body := "/issue explain below questions\nWhat is this?\n[Image]\nAnd what is this?\n[Image]"
+	want := "What is this?\n[Image]\nAnd what is this?\n[Image]"
+	if got := issueDescriptionFromCommandBody(body, "/issue explain below questions\nWhat is this?And what is this?", "flattened fallback"); got != want {
+		t.Fatalf("description = %q, want %q", got, want)
 	}
-	if got := titleFromPreviousMessage("\n  first line\nsecond"); got != "first line" {
-		t.Errorf("prev plain should take first non-empty line: %q", got)
+}
+
+func TestIssueDescriptionFromCommandBodyExcludesEnrichedPrefix(t *testing.T) {
+	body := "> quoted context\n/issue Real intent\nrepro steps"
+	if got := issueDescriptionFromCommandBody(body, "/issue Real intent\nrepro steps", "fallback"); got != "repro steps" {
+		t.Fatalf("description = %q, want %q", got, "repro steps")
 	}
-	if got := titleFromPreviousMessage("   \n  "); got != "" {
-		t.Errorf("blank prev → empty: %q", got)
+}
+
+func TestIssueDescriptionFromCommandBodyIgnoresIssueLinesInEnrichedPrefix(t *testing.T) {
+	body := "<quoted_message>\n/issue Old intent\n</quoted_message>\n/issue Real intent\nrepro steps"
+	if got := issueDescriptionFromCommandBody(body, "/issue Real intent\nrepro steps", "fallback"); got != "repro steps" {
+		t.Fatalf("description = %q, want %q", got, "repro steps")
+	}
+}
+
+func TestIssueDescriptionFromCommandBodyHandlesRepeatedDirectiveLine(t *testing.T) {
+	body := "<quoted_message>\n/issue Same\n</quoted_message>\n/issue Same\nDetails\n/issue Same"
+	commandText := "/issue Same\nDetails\n/issue Same"
+	if got := issueDescriptionFromCommandBody(body, commandText, "fallback"); got != "Details\n/issue Same" {
+		t.Fatalf("description = %q, want %q", got, "Details\\n/issue Same")
+	}
+}
+
+func TestIssueDescriptionFromCommandBodyFallsBackWithoutDirective(t *testing.T) {
+	if got := issueDescriptionFromCommandBody("rewritten body", "/issue Missing", "parsed description"); got != "parsed description" {
+		t.Fatalf("description = %q, want parsed fallback", got)
 	}
 }

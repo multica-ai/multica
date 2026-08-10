@@ -302,7 +302,7 @@ func TestRefreshWorkspaceRuntimeProfiles_NoDrift_DoesNotReregister(t *testing.T)
 	d.cfg.Agents = map[string]AgentEntry{}
 
 	// Initial register seeds workspaceState (and ws.profileSetSig).
-	resp, profileSig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, profileSig, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("initial register: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestRefreshWorkspaceRuntimeProfiles_NewProfileTriggersReregister(t *testing
 	d.cfg.Agents = map[string]AgentEntry{}
 
 	// Initial register with one profile.
-	resp, profileSig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, profileSig, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("initial register: %v", err)
 	}
@@ -438,7 +438,7 @@ func TestRefreshWorkspaceRuntimeProfiles_DriftWithRunningRuntimeSkipsOrphanRecov
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/usr/bin/true"}}
 
-	resp, profileSig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, profileSig, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("initial register: %v", err)
 	}
@@ -496,7 +496,7 @@ func TestRefreshWorkspaceRuntimeProfiles_DisableConvergesCustomOnlyDaemon(t *tes
 	d.cfg.Agents = map[string]AgentEntry{}
 
 	// Initial register: one custom runtime.
-	resp, profileSig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, profileSig, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("initial register: %v", err)
 	}
@@ -594,7 +594,7 @@ func TestRefreshWorkspaceRuntimeProfiles_DisableOneOfManyDeregistersDroppedID(t 
 	// Mixed: one built-in + one custom.
 	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/usr/bin/true"}}
 
-	resp, profileSig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, profileSig, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("initial register: %v", err)
 	}

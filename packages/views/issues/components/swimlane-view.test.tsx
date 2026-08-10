@@ -95,6 +95,8 @@ vi.mock("../../navigation", () => ({
     </a>
   ),
   useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  resolveClickIntent: () => "push",
+  useIntentNavigate: () => () => {},
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -112,6 +114,7 @@ vi.mock("@multica/core/issues/config", () => ({
     cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
   },
   PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
+  PRIORITY_DISPLAY_ORDER: ["none", "urgent", "high", "medium", "low"],
   PRIORITY_CONFIG: {
     urgent: { label: "Urgent", bars: 4, color: "text-destructive" },
     high: { label: "High", bars: 3, color: "text-warning" },
@@ -120,27 +123,6 @@ vi.mock("@multica/core/issues/config", () => ({
     none: { label: "No priority", bars: 0, color: "text-muted-foreground" },
   },
 }));
-
-// Default mock returns hasMore=false so the load-more sentinels render
-// as no-op divs and don't pull IntersectionObserver into JSDOM.
-const mockLoadMore = vi.fn();
-const useLoadMoreByStatusMock = vi.fn(
-  (_status: string, _opts?: unknown, _sort?: unknown) => ({
-    total: 0,
-    loaded: 0,
-    hasMore: false,
-    isLoading: false,
-    loadMore: mockLoadMore,
-  }),
-);
-vi.mock("@multica/core/issues/mutations", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@multica/core/issues/mutations")>();
-  return {
-    ...actual,
-    useLoadMoreByStatus: (status: string, opts?: unknown, sort?: unknown) =>
-      useLoadMoreByStatusMock(status, opts, sort),
-  };
-});
 
 type SwimlaneGroupingMock = "parent" | "project" | "assignee";
 
@@ -420,13 +402,6 @@ describe("SwimLaneView", () => {
     mockViewState.agentRunningFilter = false;
     mockListChildrenByParents.mockResolvedValue({ issues: [] });
     mockGetAgentTaskSnapshot.mockResolvedValue([]);
-    useLoadMoreByStatusMock.mockImplementation(() => ({
-      total: 0,
-      loaded: 0,
-      hasMore: false,
-      isLoading: false,
-      loadMore: mockLoadMore,
-    }));
   });
 
   it("renders status columns as headers", () => {

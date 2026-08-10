@@ -62,6 +62,18 @@ export function clearIssueDetail(
   qc.removeQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
 }
 
+export function invalidateIssueAfterReconnect(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+) {
+  qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+  qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+  qc.invalidateQueries({ queryKey: issueKeys.attachments(wsId, issueId) });
+  qc.invalidateQueries({ queryKey: issueKeys.activeTasks(wsId, issueId) });
+  qc.invalidateQueries({ queryKey: issueKeys.tasks(wsId, issueId) });
+}
+
 // =====================================================
 // Issue timeline (flat TimelineEntry[], ASC oldest-first)
 // =====================================================

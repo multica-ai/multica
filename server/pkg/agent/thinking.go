@@ -11,8 +11,9 @@ import (
 )
 
 // thinking.go discovers per-model reasoning/effort catalogs for the
-// claude, codex, and opencode backends so the daemon can advertise them to the
-// UI without hard-coding (and getting wrong) what's installed locally.
+// claude, codex, opencode, pi, and kimi backends so the daemon can advertise
+// them to the UI without hard-coding (and getting wrong) what's installed
+// locally.
 //
 // MUL-2339: we deliberately do not flatten Claude's `low|medium|high|
 // xhigh|max` and Codex's `none|minimal|low|medium|high|xhigh|max|ultra`
@@ -760,22 +761,78 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"medium": true,
 		"high":   true,
 	},
+	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
+	// the exact subset supported by each model before execution.
+	"pi": {
+		"off":     true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
+	},
+}
+
+// thinkingDynamicCatalogProviders are the runtimes whose effort vocabulary is
+// owned by a daemon-local model catalog instead of a fixed enum above. The
+// server accepts any well-formed token for them and lets the daemon's
+// per-model check decide before execution.
+var thinkingDynamicCatalogProviders = map[string]bool{
+	"codex":    true,
+	"opencode": true,
+	"kimi":     true,
+}
+
+// ThinkingControlSupported reports whether Multica can deliver a per-agent
+// reasoning effort to this runtime at all. False means the answer to any
+// thinking_level is "no", regardless of the token: the runtime exposes no
+// effort dial on the surface the daemon speaks to it over, so there is nothing
+// to inject and nothing a different spelling would fix.
+//
+// Hermes is the instructive case (MUL-5770). The Hermes CLI does support
+// reasoning effort — `agent.reasoning_effort` in `<HERMES_HOME>/config.yaml`,
+// checked against its own `minimal|low|medium|high|xhigh|max|ultra` set — but
+// Multica drives Hermes over ACP (`hermes acp`), and its ACP adapter does not
+// carry that setting onto the session:
+//   - `session/new` advertises `models` and `modes` only, no `configOptions`,
+//     so there is no effort catalog to discover;
+//   - `session/set_config_option` records the value on the session and never
+//     applies it;
+//   - `acp_adapter/session.py::_make_agent` constructs the agent without
+//     `reasoning_config`, so every ACP session runs at the transport default.
+//
+// Verified against Hermes Agent v0.18.2. Because the config file is read by
+// the CLI/gateway paths but not the ACP one, writing an effort into a per-task
+// HERMES_HOME would be just as inert as accepting the value here — which is
+// why this is a capability gap to report, not a value to pass through. Revisit
+// when Hermes' ACP surface exposes reasoning; the picker then follows from the
+// discovered catalog like every other runtime's.
+func ThinkingControlSupported(providerType string) bool {
+	if thinkingDynamicCatalogProviders[providerType] {
+		return true
+	}
+	_, ok := providerThinkingEnums[providerType]
+	return ok
 }
 
 // IsKnownThinkingValue reports whether `value` is a recognised effort
 // token for the given provider. Empty string is always accepted (means
-// "use runtime default"). Unknown providers (no thinking concept) accept
-// only empty; Codex and OpenCode accept well-formed tokens here because their
-// daemon-local catalogs perform the exact per-model check before execution.
+// "use runtime default"). Providers with no reasoning control accept
+// only empty; Codex, OpenCode, and Kimi accept well-formed tokens here because
+// their daemon-local catalogs perform the exact per-model check before
+// execution.
 //
 // This is the cheap synchronous gate the server uses on CreateAgent /
 // UpdateAgent. Unlike ValidateThinkingLevel it does NOT consult the live
-// catalog or per-model subset.
+// catalog or per-model subset. Callers that surface a rejection to a user
+// should ask ThinkingControlSupported first so the message says "this runtime
+// has no reasoning control" instead of implying a bad token.
 func IsKnownThinkingValue(providerType, value string) bool {
 	if value == "" {
 		return true
 	}
-	if providerType == "codex" || providerType == "opencode" {
+	if thinkingDynamicCatalogProviders[providerType] {
 		return isValidDynamicThinkingValue(value)
 	}
 	enum, ok := providerThinkingEnums[providerType]

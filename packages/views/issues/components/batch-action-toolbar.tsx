@@ -174,7 +174,7 @@ export function BatchActionToolbar({
             className={cn(
               "z-50",
               placement === "fixed-bottom"
-                ? "fixed bottom-6 left-1/2 -translate-x-1/2"
+                ? "fixed bottom-6 left-1/2 -translate-x-1/2 max-md:above-chat-launcher"
                 : "mb-2 w-fit",
             )}
           >

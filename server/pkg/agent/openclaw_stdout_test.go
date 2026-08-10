@@ -3,11 +3,14 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -55,10 +58,39 @@ JSON
 }
 
 func newOpenclawTestBackend(bin string) *openclawBackend {
+	b, _ := newOpenclawTestBackendWithLog(bin)
+	return b
+}
+
+// newOpenclawTestBackendWithLog also captures what the backend logs, so a test
+// can assert that a specific branch was taken instead of inferring it from
+// timing. Warnings still reach stderr so a failure stays readable.
+func newOpenclawTestBackendWithLog(bin string) (*openclawBackend, *syncBuffer) {
+	buf := &syncBuffer{}
 	return &openclawBackend{cfg: Config{
 		ExecutablePath: bin,
-		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
-	}}
+		Logger: slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, buf),
+			&slog.HandlerOptions{Level: slog.LevelWarn})),
+	}}, buf
+}
+
+// syncBuffer is a bytes.Buffer safe for the backend's logging goroutine to write
+// to while the test reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // TestOpenclawExecuteCompletesWhenCLINeverExits is the assertion that would have
@@ -153,7 +185,7 @@ func TestOpenclawExecuteStillWorksWhenCLIExits(t *testing.T) {
 //
 // The stub reproduces precisely that shape: stdout reaches EOF when the parent
 // exits (the descendant's own stdout goes to /dev/null so it is not a writer on
-// that pipe), while the descendant keeps stderr open for ~1s, well past the
+// that pipe), while the descendant keeps stderr open for 5s, well past the
 // 500ms delay.
 func TestOpenclawExecuteToleratesLingeringStderrHolder(t *testing.T) {
 	dir := t.TempDir()
@@ -164,7 +196,13 @@ case "$1" in
 esac
 # Holds ONLY stderr: its stdout is /dev/null, so the stdout pipe's sole writer
 # is this parent and EOF arrives as soon as it exits.
-( sleep 1 ) >/dev/null &
+#
+# 5s rather than something nearer WaitDelay: at ~1s a loaded runner could let
+# this descendant exit before Wait's 500ms timer elapses, so ErrWaitDelay would
+# never fire and the test would pass without exercising the branch it exists
+# for. The margin plus the log assertion below turn that vacuous pass into a
+# failure.
+( sleep 5 ) >/dev/null &
 cat <<'JSON'
 ` + completeOpenclawResult + `
 JSON
@@ -173,7 +211,7 @@ exit 0
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatalf("write openclaw stub: %v", err)
 	}
-	b := newOpenclawTestBackend(bin)
+	b, logs := newOpenclawTestBackendWithLog(bin)
 
 	session, err := b.Execute(context.Background(), "hi", ExecOptions{})
 	if err != nil {
@@ -196,6 +234,13 @@ exit 0
 	}
 	if result.SessionID != "sess-abc" {
 		t.Errorf("session id = %q, want sess-abc", result.SessionID)
+	}
+	// Without this the test could pass on a run where the descendant happened to
+	// exit first, leaving the ErrWaitDelay branch untested and this regression
+	// silently uncovered.
+	if !strings.Contains(logs.String(), "held a pipe past WaitDelay") {
+		t.Errorf("the ErrWaitDelay branch was never taken, so this test proved "+
+			"nothing about it; logged warnings were: %q", logs.String())
 	}
 }
 
@@ -227,31 +272,69 @@ func TestReadOpenclawStdoutDoesNotWaitForIdleGraceAtEOF(t *testing.T) {
 	}
 }
 
+// stagedOpenclawEOFReader returns an incomplete result first, then waits until
+// the test releases the final bytes. The final Read returns data and io.EOF
+// together, so completion and clean EOF are one deterministic observation
+// rather than two independently scheduled pipe operations.
+type stagedOpenclawEOFReader struct {
+	prefix        string
+	suffix        string
+	suffixRead    chan struct{}
+	releaseSuffix chan struct{}
+	readCount     int
+}
+
+func (r *stagedOpenclawEOFReader) Read(p []byte) (int, error) {
+	switch r.readCount {
+	case 0:
+		r.readCount++
+		return copy(p, r.prefix), nil
+	case 1:
+		r.readCount++
+		close(r.suffixRead)
+		<-r.releaseSuffix
+		return copy(p, r.suffix), io.EOF
+	default:
+		return 0, io.EOF
+	}
+}
+
 // TestReadOpenclawStdoutWaitsForCompleteResult pins the safety half of the
 // shortcut: idle output alone is not enough. Cutting off a partial buffer would
 // throw away work the agent has already done, which is worse than the hang this
 // change fixes.
 func TestReadOpenclawStdoutWaitsForCompleteResult(t *testing.T) {
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
+	r := &stagedOpenclawEOFReader{
+		prefix:        `{"payloads":[{"text":"half`,
+		suffix:        `"}],"meta":{"durationMs":1}}`,
+		suffixRead:    make(chan struct{}),
+		releaseSuffix: make(chan struct{}),
 	}
-	defer pr.Close()
-
-	// A partial blob that cannot parse, followed by silence.
-	if _, err := pw.WriteString(`{"payloads":[{"text":"half`); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(r.releaseSuffix)
+		}
+	})
 
 	type outcome struct {
 		cutShort bool
 		buf      string
+		err      error
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		buf, cutShort, _ := readOpenclawStdout(pr, 200*time.Millisecond)
-		done <- outcome{cutShort: cutShort, buf: string(buf)}
+		buf, cutShort, err := readOpenclawStdout(r, 200*time.Millisecond)
+		done <- outcome{cutShort: cutShort, buf: string(buf), err: err}
 	}()
+
+	select {
+	case <-r.suffixRead:
+		// The incomplete prefix has been consumed and the reader is now
+		// deliberately silent until the test releases the suffix.
+	case <-time.After(5 * time.Second):
+		t.Fatal("readOpenclawStdout did not request the final bytes")
+	}
 
 	// Well past the idle grace: without the parse guard the reader would have
 	// returned cutShort by now.
@@ -264,14 +347,18 @@ func TestReadOpenclawStdoutWaitsForCompleteResult(t *testing.T) {
 	default:
 	}
 
-	// Completing the blob and closing gives the reader a clean EOF.
-	if _, err := pw.WriteString(`"}],"meta":{"durationMs":1}}`); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	pw.Close()
+	// Complete the blob and report EOF in the same Read. The old os.Pipe test
+	// performed a write and close separately, allowing the idle ticker to win
+	// after the bytes became parseable but before the read goroutine observed
+	// EOF on a loaded CI runner.
+	released = true
+	close(r.releaseSuffix)
 
 	select {
 	case got := <-done:
+		if got.err != nil {
+			t.Errorf("readOpenclawStdout: %v", got.err)
+		}
 		if got.cutShort {
 			t.Error("cutShort = true after a clean EOF, want false")
 		}

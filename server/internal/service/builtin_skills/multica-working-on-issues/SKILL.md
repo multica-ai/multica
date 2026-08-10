@@ -127,28 +127,21 @@ not observe a routable issue key in the PR title/body/branch — or the only mat
 was a bare body mention, which links as `reference_only` and is hidden from this
 list (see the reference-only rule above).
 
-## Metadata: high-signal keys only
+## Metadata: durable custom state
 
-Metadata is durable issue state. Reading metadata is safe. Writing a metadata key
-is a state mutation and should be tied to an explicit task requirement to record
-that state for later readers or runs.
+Metadata is a free-form KV bag of durable issue state. Reading metadata is safe.
+Writing a metadata key is a state mutation and should be tied to an explicit
+task requirement to record that state for later readers or runs. Keys are
+whatever your workflow needs — the platform curates no vocabulary; pick short
+snake_case names and reuse them consistently within your workspace.
 
-High-signal keys (reuse these names so queries stay consistent):
-
-- `pr_url`
-- `pr_number`
-- `pipeline_status`
-- `deploy_url`
-- `external_issue_url`
-- `waiting_on`
-- `blocked_reason`
-- `decision`
-
-Not metadata: logs, summaries, files touched, timestamps, attempt counts,
-investigation notes. Those belong in the result comment.
+Never store secrets, tokens, or API keys in metadata.
+Not metadata: logs or summaries; runtime bookkeeping such as timestamps,
+attempt counts, or agent IDs; or other single-run details such as
+files touched and investigation notes — those belong in the result comment.
 
 ```bash
-multica issue metadata set <issue-id> --key pr_url --value <url>
+multica issue metadata set <issue-id> --key <key> --value <value>
 multica issue metadata delete <issue-id> --key <stale-key>
 ```
 
@@ -179,7 +172,7 @@ multica issue property unset <issue-id> --name Environment
   If a needed property does not exist, propose it in a comment instead.
 - Property vs metadata: if the value is workflow state a human should see and
   filter by, and a definition exists, prefer the property. Metadata stays the
-  free-form scratchpad for run state (`pr_url`, `waiting_on`, ...).
+  free-form bag for durable custom issue state.
 
 ## Status changes have server side effects
 

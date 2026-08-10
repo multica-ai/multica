@@ -17,15 +17,14 @@ import (
 // appropriate Lark-side reply card. This is the outbound half of the
 // `EventEmitter` contract in hub.go: NeedsBinding sends the binding
 // prompt to the sender's open_id, AgentOffline / AgentArchived send
-// a status notice into the chat. OutcomeIngested is owned by the
-// Patcher (task lifecycle); OutcomeDropped is silent.
+// a status notice into the chat, and FreshPending / IssueUsage send
+// command guidance. OutcomeIngested is owned by the Patcher (task
+// lifecycle); OutcomeDropped is silent.
 //
 // Reply is best-effort by design: a transient Lark outage MUST NOT
-// fail the inbound pipeline (the message is already durable in
-// chat_session by the time we get here for OutcomeIngested, and for
-// the other outcomes there is no durable side effect to undo). Errors
-// are logged and swallowed; the next inbound message for the same
-// user retries the reply on its own.
+// fail the inbound pipeline. Any command state or chat message is already
+// durable by the time we get here, so a reply failure cannot roll it back.
+// Errors are logged and swallowed.
 type OutcomeReplier interface {
 	Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult)
 }
@@ -53,7 +52,7 @@ type noopReplier struct {
 
 func (n *noopReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
-	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived:
+	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived, OutcomeFreshPending, OutcomeIssueUsage:
 		n.log.Warn("lark outcome replier: outbound reply skipped (replier not wired)",
 			"outcome", string(res.Outcome),
 			"installation_id", uuidString(inst.ID),
@@ -180,19 +179,34 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 				"err", err.Error(),
 			)
 		}
+	case OutcomeFreshPending:
+		if err := r.sendChatNotice(ctx, inst, msg, freshPendingCopy); err != nil {
+			r.log.Warn("lark outcome replier: fresh-start confirmation failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"err", err.Error(),
+			)
+		}
+	case OutcomeIssueUsage:
+		copy := issueUsageCopy
+		if res.IssueUsageHadMedia {
+			copy = issueUsageWithMediaCopy
+		}
+		if err := r.sendChatNotice(ctx, inst, msg, copy); err != nil {
+			r.log.Warn("lark outcome replier: issue usage reply failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"err", err.Error(),
+			)
+		}
 	case OutcomeIngested:
-		// The agent's chat reply itself goes through the Patcher (text
-		// message on ChatDone). But /issue does NOT block on the
-		// agent — the user expects an immediate "Created [MUL-42]"
-		// confirmation as soon as the issue row commits, separate
-		// from whatever the agent eventually replies. Without this,
-		// the user types `/issue fix login bug` and just sees the
-		// agent's eventual response, with no clear signal that the
-		// command itself was understood. Gate on IssueID.Valid so a
-		// plain chat message (no /issue) stays silent here.
+		// The agent's chat reply itself goes through the Patcher. An /issue
+		// command gets an immediate product result: either the newly created
+		// issue or the active duplicate that blocked it. Gate on IssueID.Valid
+		// so a plain chat message stays silent here.
 		if res.IssueID.Valid {
-			if err := r.sendIssueCreated(ctx, inst, msg, res); err != nil {
-				r.log.Warn("lark outcome replier: issue-created confirmation failed",
+			if err := r.sendIssueOutcome(ctx, inst, msg, res); err != nil {
+				r.log.Warn("lark outcome replier: issue outcome reply failed",
 					"installation_id", uuidString(inst.ID),
 					"chat_id", string(msg.ChatID),
 					"issue_id", uuidString(res.IssueID),
@@ -228,14 +242,9 @@ func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Install
 	})
 }
 
-// sendIssueCreated posts the "Created [MUL-42] <title>" confirmation
-// as a plain text message. We deliberately send text rather than an
-// interactive card so the confirmation flows inline with the rest of
-// the Lark conversation — consistent with how chat replies render
-// after MUL-2671's plain-text refactor. The link to Multica is
-// included on its own line so Lark's auto-linker turns it into a
-// tappable URL.
-func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) error {
+// sendIssueOutcome posts either the created confirmation or active-duplicate
+// conflict as plain text, with a link to the relevant issue when configured.
+func (r *LarkOutcomeReplier) sendIssueOutcome(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")
 	}
@@ -244,12 +253,15 @@ func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst Installa
 		return err
 	}
 	text := issueCreatedText(res, r.appURL)
+	if res.IssueDuplicate {
+		text = issueDuplicateText(res, r.appURL)
+	}
 	// Share the Patcher's classified fallback: a thread reply that
 	// fails because the topic cannot receive it (recalled trigger,
 	// topics disabled, aggregated message) falls back to a chat-level
-	// send so the confirmation is not lost; transport/5xx/rate-limit
+	// send so the product result is not lost; transport/5xx/rate-limit
 	// failures stay failures rather than leaking into the group chat.
-	return sendWithThreadFallback(r.log, "send issue-created text", inboundReplyTarget(msg), func(t ReplyTarget) error {
+	return sendWithThreadFallback(r.log, "send issue outcome text", inboundReplyTarget(msg), func(t ReplyTarget) error {
 		_, err := r.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
 			ChatID:         msg.ChatID,
@@ -296,6 +308,24 @@ func issueCreatedText(res DispatchResult, appURL string) string {
 	return line + "\n" + strings.TrimRight(appURL, "/") + "/issues/" + identifier
 }
 
+func issueDuplicateText(res DispatchResult, appURL string) string {
+	identifier := res.IssueIdentifier
+	if identifier == "" {
+		identifier = fmt.Sprintf("#%d", res.IssueNumber)
+	}
+	title := strings.TrimSpace(res.IssueTitle)
+	var line string
+	if title == "" {
+		line = fmt.Sprintf("Not created — active issue %s already exists.", identifier)
+	} else {
+		line = fmt.Sprintf("Not created — active issue %s already exists: %s", identifier, title)
+	}
+	if appURL == "" {
+		return line
+	}
+	return line + "\n" + strings.TrimRight(appURL, "/") + "/issues/" + identifier
+}
+
 func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installation, msg InboundMessage, body string) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")
@@ -312,7 +342,7 @@ func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installati
 	if err != nil {
 		return fmt.Errorf("render notice card: %w", err)
 	}
-	// Same classified fallback as sendIssueCreated: only thread-reply
+	// Same classified fallback as sendIssueOutcome: only thread-reply
 	// failures that mean the topic cannot receive the message fall back
 	// to a chat-level send; ambiguous/transport failures stay failures.
 	return sendWithThreadFallback(r.log, "send notice card", inboundReplyTarget(msg), func(t ReplyTarget) error {
@@ -377,6 +407,9 @@ func renderNoticeCard(header, body string) (string, error) {
 // match the §4.6 design: an offline agent will run when the daemon
 // comes back; an archived agent needs operator action.
 const (
-	agentOfflineCopy  = "Agent 当前离线，消息已记录。下次 daemon 上线后会自动继续处理。"
-	agentArchivedCopy = "这个 Agent 已被归档，无法继续处理消息。请联系工作区管理员恢复或重新绑定。"
+	agentOfflineCopy        = "Agent 当前离线，消息已记录。下次 daemon 上线后会自动继续处理。"
+	agentArchivedCopy       = "这个 Agent 已被归档，无法继续处理消息。请联系工作区管理员恢复或重新绑定。"
+	freshPendingCopy        = "✅ 已准备开始新对话。你的下一条聊天消息将不带之前的上下文运行。"
+	issueUsageCopy          = "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）"
+	issueUsageWithMediaCopy = "请添加标题，并与图片或视频一起重新发送（*图片或视频可以位于命令之前或之后*）：\n\n`/issue <标题>`\n`[描述]`（可选）"
 )

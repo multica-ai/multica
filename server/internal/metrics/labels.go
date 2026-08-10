@@ -127,6 +127,7 @@ var (
 		"hermes":        "hermes",
 		"kiro":          "kiro",
 		"kimi":          "kimi",
+		"reasonix":      "reasonix",
 		"multica_agent": "multica_agent",
 		"openclaw":      "openclaw",
 		"opencode":      "opencode",

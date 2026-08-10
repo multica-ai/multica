@@ -10,8 +10,10 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { Archive, ArchiveRestore, Check, CircleDot } from "lucide-react";
+import { Archive, ArchiveRestore, Check, CircleDot, ExternalLink } from "lucide-react";
+import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
+import { useIntentNavigate } from "../../navigation";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -130,6 +132,14 @@ function InboxContextMenuSingleton({
   onOpenChange: (v: boolean) => void;
 }) {
   const { t } = useT("inbox");
+  // Null-safe slug (not useWorkspacePaths, which throws): keeps the menu
+  // renderable outside a workspace route; the item just doesn't show.
+  const slug = useWorkspaceSlug();
+  const issueHref =
+    slug && item.issue_id
+      ? paths.workspace(slug).issueDetail(item.issue_id)
+      : null;
+  const intentNavigate = useIntentNavigate();
   const isArchivedView = view === "archived";
 
   // Point-sized virtual anchor at the right-click position, so the menu opens
@@ -145,6 +155,20 @@ function InboxContextMenuSingleton({
   return (
     <ContextMenu open={open} onOpenChange={onOpenChange}>
       <ContextMenuContent anchor={anchor}>
+        {/* An explicit "Open in new tab" CTA is a foreground open — focus
+            follows, per the navigation spec's right-click row. Only rows that
+            reference an issue have somewhere to open. */}
+        {issueHref && (
+          <>
+            <ContextMenuItem
+              onClick={() => intentNavigate(issueHref, "foreground-tab")}
+            >
+              <ExternalLink className="h-4 w-4" />
+              {t(($) => $.context_menu.open_in_new_tab)}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        )}
         {/* The read toggle is main-view only. Archived rows deliberately render
             as read (archiving preserves `read` so a restore can bring the real
             state back) and the unread count excludes archived items — so a

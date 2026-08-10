@@ -1,11 +1,18 @@
-import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
+import {
+  cloneElement,
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetLastActor = vi.hoisted(() => vi.fn());
-const mockSetLastProjectId = vi.hoisted(() => vi.fn());
 const mockSetQuickCreateFieldVisible = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
@@ -58,10 +65,12 @@ const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
   lastActorId: null as string | null,
   setLastActor: mockSetLastActor,
-  lastProjectId: null as string | null,
-  setLastProjectId: mockSetLastProjectId,
   keepOpen: false,
   setKeepOpen: mockSetKeepOpen,
+  // Not part of the store's interface any more (MUL-5862), but an older
+  // build persisted it and localStorage still hands it back on rehydrate.
+  // Kept here so the tests can prove the panel ignores it.
+  lastProjectId: null as string | null,
 };
 
 const mockCreateSettingsStore = {
@@ -134,7 +143,9 @@ vi.mock("@multica/core/paths", () => ({
   }),
 }));
 
-vi.mock("../navigation", () => ({
+// Mocked at the context module rather than the barrel so <AppLink> stays the
+// real component and its click contract is what the test exercises.
+vi.mock("../navigation/context", () => ({
   useNavigation: () => ({ push: mockNavigationPush }),
 }));
 
@@ -211,24 +222,38 @@ vi.mock("../issues/components", () => ({
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
-  ProjectPicker: ({ projectId, onUpdate }: any) => (
-    <button type="button" data-testid="project-picker" onClick={() => onUpdate({ project_id: "proj-1" })}>
-      Project {projectId ?? "none"}
-    </button>
+  ProjectPicker: ({ projectId, onUpdate, triggerRender }: any) => (
+    <>
+      <button type="button" data-testid="project-picker" onClick={() => onUpdate({ project_id: "proj-1" })}>
+        Project {projectId ?? "none"}
+      </button>
+      {/* The caller's own trigger renders too — the pill carries the
+          quick-clear ×, which belongs to this panel, not to the picker. */}
+      {triggerRender}
+    </>
   ),
-}));
-
-vi.mock("../common/pill-button", () => ({
-  PillButton: ({ children, ...props }: any) => <button type="button" {...props}>{children}</button>,
 }));
 
 vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
   DropdownMenuTrigger: ({ render }: { render: ReactNode }) => <>{render}</>,
   DropdownMenuContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuItem: ({ children, onClick }: any) => (
-    <button type="button" onClick={onClick}>{children}</button>
-  ),
+  // `render` mirrors Base UI: an item can BE another element (an <AppLink>).
+  // The real Item gives that element role="button", which the queries match.
+  DropdownMenuItem: ({
+    children,
+    onClick,
+    render,
+  }: {
+    children: ReactNode;
+    onClick?: () => void;
+    render?: ReactElement<{ role?: string; children?: ReactNode }>;
+  }) =>
+    render ? (
+      cloneElement(render, { role: "button" }, children)
+    ) : (
+      <button type="button" onClick={onClick}>{children}</button>
+    ),
   DropdownMenuSeparator: () => null,
 }));
 
@@ -403,9 +428,12 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enModals from "../locales/en/modals.json";
 import enEditor from "../locales/en/editor.json";
+import enProjects from "../locales/en/projects.json";
 import { AgentCreatePanel } from "./quick-create-issue";
 
-const TEST_RESOURCES = { en: { common: enCommon, modals: enModals, editor: enEditor } };
+const TEST_RESOURCES = {
+  en: { common: enCommon, modals: enModals, editor: enEditor, projects: enProjects },
+};
 
 function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
   return render(
@@ -541,9 +569,6 @@ describe("AgentCreatePanel", () => {
     });
 
     expect(mockSetLastActor).toHaveBeenCalledWith("agent", "agent-1");
-    // No project picked → persisted project preference is cleared so the
-    // store stays in sync with the actual outgoing request.
-    expect(mockSetLastProjectId).toHaveBeenCalledWith(null);
     // A successful create ends the whole unified draft.
     expect(mockClearDraft).toHaveBeenCalled();
     expect(mockSetLastMode).toHaveBeenCalledWith("agent");
@@ -783,35 +808,116 @@ describe("AgentCreatePanel", () => {
     expect(screen.queryByRole("button", { name: /Orphan Squad/ })).toBeNull();
   });
 
-  // If the user's persisted `lastProjectId` points at a project that has
-  // been deleted (or moved to another workspace), the modal must not keep
-  // submitting that dead UUID. Once the projects query resolves and the id
-  // is missing, we clear BOTH local state and the persisted preference;
-  // dropping only local state would leave the next open re-seeding the same
-  // dead value and trigger the server's `project not found` rejection.
-  it("clears a stale persisted project once the projects list resolves without it", async () => {
-    mockQuickCreateStore.lastProjectId = "deleted-proj";
+  // A successful create used to persist its project, so the NEXT open
+  // re-seeded the pill with it and quietly filed the following issue into the
+  // same place. The target project belongs to the issue being filed, not to
+  // the user as a standing preference — the actor is the only thing that
+  // carries over now (MUL-5862).
+  describe("project is not remembered across creates", () => {
+    it("ignores a lastProjectId left behind by an older build", () => {
+      mockQuickCreateStore.lastProjectId = "proj-1";
+      mockProjectsQuery.data = [{ id: "proj-1", title: "Web", icon: null }];
+      mockProjectsQuery.isSuccess = true;
+
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      // Seeding from it is exactly the removed behavior — the pill must be
+      // empty, and with no value there is nothing to clear.
+      expect(screen.getByTestId("project-picker")).toHaveTextContent("Project none");
+      expect(screen.queryByRole("button", { name: "Clear project" })).not.toBeInTheDocument();
+    });
+
+    it("still submits the project picked in this session", async () => {
+      // Guard against over-removal: dropping the memory must not drop the
+      // field from the outgoing request.
+      const user = userEvent.setup();
+      mockProjectsQuery.data = [{ id: "proj-1", title: "Web", icon: null }];
+      mockProjectsQuery.isSuccess = true;
+
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      await user.click(screen.getByRole("button", { name: /Bohan/ }));
+      await user.click(screen.getByTestId("project-picker"));
+      await user.type(
+        screen.getByPlaceholderText(
+          'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+        ),
+        "Ship it",
+      );
+      await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+      await waitFor(() => {
+        expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+          expect.objectContaining({ project_id: "proj-1" }),
+        );
+      });
+      // The actor is still remembered — only the project memory is gone.
+      expect(mockSetLastActor).toHaveBeenCalledWith("agent", "agent-1");
+    });
+  });
+
+  // If the unfinished draft points at a project that has been deleted (or
+  // moved to another workspace), the modal must not keep submitting that dead
+  // UUID. Once the projects query resolves and the id is missing, we clear
+  // BOTH local state and the draft; dropping only local state would leave the
+  // next open re-seeding the same dead value and trigger the server's
+  // `project not found` rejection. The draft is now the only persisted copy —
+  // the last-create memory is gone (MUL-5862).
+  it("clears a stale drafted project once the projects list resolves without it", async () => {
+    mockIssueDraftStore.draft.shared.projectId = "deleted-proj";
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
 
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
     await waitFor(() => {
-      expect(mockSetLastProjectId).toHaveBeenCalledWith(null);
+      expect(mockSetShared).toHaveBeenCalledWith({ projectId: undefined });
+    });
+    expect(screen.getByTestId("project-picker")).toHaveTextContent("Project none");
+  });
+
+  // Dropping a project used to cost two clicks — open the popover, hit
+  // "No project" — because the pill had no clear affordance of its own
+  // (MUL-5862). The × is part of the pill, so it only exists once the field
+  // has a value to drop.
+  describe("project pill quick-clear", () => {
+    it("has no × while no project is selected", () => {
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      expect(screen.getByTestId("project-picker")).toHaveTextContent("Project none");
+      expect(screen.queryByRole("button", { name: "Clear project" })).not.toBeInTheDocument();
+    });
+
+    it("clears local state and the shared draft in one click", async () => {
+      const user = userEvent.setup();
+      mockIssueDraftStore.draft.shared.projectId = "proj-1";
+      mockProjectsQuery.data = [{ id: "proj-1", title: "Web", icon: null }];
+      mockProjectsQuery.isSuccess = true;
+
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+      expect(screen.getByTestId("project-picker")).toHaveTextContent("Project proj-1");
+
+      await user.click(screen.getByRole("button", { name: "Clear project" }));
+
+      expect(screen.getByTestId("project-picker")).toHaveTextContent("Project none");
+      expect(mockSetShared).toHaveBeenCalledWith({ projectId: undefined });
+      // The × retires with the value it cleared.
+      expect(screen.queryByRole("button", { name: "Clear project" })).not.toBeInTheDocument();
     });
   });
 
   // Mirror case: while the query is still loading, we must NOT preemptively
-  // clear the persisted preference — that would wipe a perfectly valid
-  // selection on every open before the list ever renders.
-  it("keeps the persisted project while the projects list is still loading", () => {
-    mockQuickCreateStore.lastProjectId = "proj-1";
+  // clear the drafted project — that would wipe a perfectly valid selection
+  // on every open before the list ever renders.
+  it("keeps the drafted project while the projects list is still loading", () => {
+    mockIssueDraftStore.draft.shared.projectId = "proj-1";
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = false;
 
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
-    expect(mockSetLastProjectId).not.toHaveBeenCalled();
+    expect(mockSetShared).not.toHaveBeenCalled();
+    expect(screen.getByTestId("project-picker")).toHaveTextContent("Project proj-1");
   });
 
   // When the modal was opened from "Add sub issue" on an existing issue,

@@ -40,10 +40,12 @@ import (
 //     the user's global/builtin skills read-only without copying them;
 //   - populates the task-local `skills/` dir with ONLY the Multica-bound skills,
 //     which take precedence because Hermes lists the home skills dir first;
-//   - keeps `memories/` overlay-owned (a fresh per-task dir), NOT symlinked to
-//     the shared home: Hermes loads and writes back MEMORY.md/USER.md there, and
-//     per-agent memory is a Multica product concern — the host's local Hermes
-//     memory must not bleed into a task, nor task memory back out to the host;
+//   - keeps `memories/` overlay-owned, NOT symlinked to the shared home: Hermes
+//     loads and writes back MEMORY.md/USER.md there, and per-agent memory is a
+//     Multica product concern — the host's local Hermes memory must not bleed
+//     into a task, nor task memory back out to the host. The overlay links it to
+//     the agent's persistent store so it survives across tasks and issues
+//     (hermes_memory.go); it is a fresh per-task dir only when no store applies;
 //   - keeps the state.db SQLite session store and its journal sidecars
 //     overlay-owned too: Hermes creates them lazily, Reuse preserves them for
 //     the task, and host conversation history is never linked or copied;
@@ -63,7 +65,7 @@ import (
 // reconciliation:
 //   - skills/       task-local, only the bound skills
 //   - config.yaml   derived config with absolutized external_dirs
-//   - memories/     fresh per-task dir, isolated from the host's memory
+//   - memories/     link to the agent's persistent store, isolated from the host
 //   - marker below  records that legacy shared SQLite state was detached
 //
 // The state.db SQLite family is classified dynamically by
@@ -366,8 +368,10 @@ func hermesProfileDir(root, name string) (home string, mustExist bool, err error
 // source home is absent — set for an explicitly named profile so a typo doesn't
 // silently seed from an empty dir and drop the user's auth/config. env is the
 // sanitized effective env used to expand ${VAR} in external_dirs so it matches
-// what the Hermes child sees.
-func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, workspaceSkills []SkillContextForEnv, env map[string]string, logger *slog.Logger) error {
+// what the Hermes child sees. memoryStore is the agent's persistent memory store
+// (execenv.HermesMemoryStorePath) that memories/ is linked to; empty keeps the
+// pre-MUL-5932 task-local dir, which is what the rollback switch produces.
+func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, workspaceSkills []SkillContextForEnv, env map[string]string, memoryStore string, logger *slog.Logger) error {
 	sharedHome := strings.TrimSpace(sourceHome)
 	if sharedHome == "" {
 		sharedHome = platformDefaultHermesHome()
@@ -389,9 +393,14 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	if err := prepareHermesTaskLocalState(hermesHome); err != nil {
 		return fmt.Errorf("prepare task-local state: %w", err)
 	}
-	// Fresh, isolated per-task memories dir (idempotent — preserved across reuse
-	// so the task/issue lifecycle keeps its own memory).
-	if err := os.MkdirAll(filepath.Join(hermesHome, "memories"), 0o700); err != nil {
+	// Memory: link memories/ at the agent's persistent store so it survives the
+	// task, or fall back to a fresh task-local dir when there is no store (no
+	// agent to key on, or the rollback switch is engaged). See hermes_memory.go.
+	if memoryStore != "" {
+		if err := mountHermesMemories(hermesHome, memoryStore, logger); err != nil {
+			return fmt.Errorf("mount agent memories: %w", err)
+		}
+	} else if err := detachHermesMemories(hermesHome); err != nil {
 		return fmt.Errorf("create task memories dir: %w", err)
 	}
 

@@ -14,6 +14,7 @@ import (
 	"github.com/mattn/go-shellwords"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 const (
@@ -69,6 +70,7 @@ const (
 	DefaultGCOrphanTTL                    = 72 * time.Hour      // 3 days — orphans with no meta (crashes, pre-GC leftovers)
 	DefaultGCArtifactTTL                  = 12 * time.Hour      // 12h — drop regenerable artifacts on completed but still-open issues
 	DefaultGCCodexSessionTTL              = 14 * 24 * time.Hour // 14 days — reclaim per-issue Codex session stores untouched this long
+	DefaultGCHermesMemoryTTL              = 90 * 24 * time.Hour // 90 days — reclaim per-agent Hermes memory stores untouched this long (long: reclaiming these is visible amnesia, and they are a few markdown files)
 	DefaultGCRepoTTL                      = 30 * 24 * time.Hour // 30 days — evict a bare repo cache no task has checked out this long
 	DefaultAutoUpdateCheckInterval        = 6 * time.Hour       // how often the daemon polls GitHub for a newer CLI release
 )
@@ -91,7 +93,7 @@ type Config struct {
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -104,8 +106,10 @@ type Config struct {
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
 	GCRepoTTL                      time.Duration         // evict a cached bare repo under .repos once no task has created a worktree from it for this long, it has no worktrees left, and it is no longer attached to any watched workspace (default: 30d, set 0 to disable)
 	GCCodexSessionTTL              time.Duration         // reclaim a per-issue Codex session store (~/.codex/multica-sessions/<agent>/<issue>) untouched for at least this long, so a done/abandoned issue's conversation history does not accumulate forever (default: 14d, set 0 to disable)
+	GCHermesMemoryTTL              time.Duration         // reclaim a per-agent Hermes memory store (<profile dir>/hermes-state/<agent>/<profile>) untouched for at least this long, so a deleted agent's memory does not sit on disk forever (default: 90d, set 0 to disable)
 	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
+	AutoReloadEnabled              bool                  // restart when the multica binary on disk no longer matches the running version (default: true for CLI-launched daemons)
 	PollInterval                   time.Duration
 	HeartbeatInterval              time.Duration
 	AgentTimeout                   time.Duration
@@ -118,6 +122,7 @@ type Config struct {
 	CodexArgs                      []string
 	CodebuddyArgs                  []string
 	QwenArgs                       []string
+	QwenpawArgs                    []string
 
 	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
 	// executable path to use for that profile on THIS machine (MUL-3284).
@@ -154,6 +159,10 @@ type Overrides struct {
 	// resolves to enabled; the flag exists so users can opt out from the CLI.
 	DisableAutoUpdate       bool
 	AutoUpdateCheckInterval time.Duration // 0 = use env/default
+	// DisableAutoReload, when true, forces the on-disk version watcher off.
+	// Single-direction for the same reason as DisableAutoUpdate: the
+	// env/default already resolves to enabled.
+	DisableAutoReload bool
 }
 
 // LoadConfig builds the daemon configuration from environment variables
@@ -219,7 +228,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// can re-run the same discovery on a live daemon (MUL-5439).
 	agents := probeAgentCLIs()
 	if len(agents) == 0 && !overrides.AllowNoAgents {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, or qwen and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, or qwenpaw and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -235,6 +244,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 	qwenArgs, err := shellArgsFromEnv("MULTICA_QWEN_ARGS")
+	if err != nil {
+		return Config{}, err
+	}
+	qwenpawArgs, err := shellArgsFromEnv("MULTICA_QWENPAW_ARGS")
 	if err != nil {
 		return Config{}, err
 	}
@@ -409,6 +422,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	gcHermesMemoryTTL, err := durationFromEnv("MULTICA_GC_HERMES_MEMORY_TTL", DefaultGCHermesMemoryTTL)
+	if err != nil {
+		return Config{}, err
+	}
 	gcRepoTTL, err := durationFromEnv("MULTICA_GC_REPO_TTL", DefaultGCRepoTTL)
 	if err != nil {
 		return Config{}, err
@@ -424,15 +441,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// older server build, which a fresh CLI may no longer talk to. Keeping
 	// auto-update off by default for self-host avoids both footguns (MUL-2381).
 	// Operators on either side can flip the default with MULTICA_DAEMON_AUTO_UPDATE.
-	autoUpdateEnabled := isOfficialCloudServer(serverBaseURL)
-	if v := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_AUTO_UPDATE")); v != "" {
-		switch strings.ToLower(v) {
-		case "false", "0", "no", "off":
-			autoUpdateEnabled = false
-		case "true", "1", "yes", "on":
-			autoUpdateEnabled = true
-		}
-	}
+	autoUpdateEnabled := boolFromEnv("MULTICA_DAEMON_AUTO_UPDATE", isOfficialCloudServer(serverBaseURL))
 	if overrides.DisableAutoUpdate {
 		autoUpdateEnabled = false
 	}
@@ -442,6 +451,17 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if overrides.AutoUpdateCheckInterval > 0 {
 		autoUpdateInterval = overrides.AutoUpdateCheckInterval
+	}
+
+	// Auto-reload is deliberately NOT gated on autoUpdateEnabled. "Don't pull
+	// new versions from GitHub" and "follow the binary I replaced myself" are
+	// different concerns, and the self-host rationale for defaulting the former
+	// off (don't clobber my fork) argues the opposite way for the latter: an
+	// operator who installed a build by hand wants the daemon to run it.
+	// Default on for every CLI-launched daemon; Desktop opts out at the loop.
+	autoReloadEnabled := boolFromEnv("MULTICA_DAEMON_AUTO_RELOAD", true)
+	if overrides.DisableAutoReload {
+		autoReloadEnabled = false
 	}
 
 	return Config{
@@ -462,8 +482,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCArtifactPatterns:             gcArtifactPatterns,
 		GCRepoTTL:                      gcRepoTTL,
 		GCCodexSessionTTL:              gcCodexSessionTTL,
+		GCHermesMemoryTTL:              gcHermesMemoryTTL,
 		AutoUpdateEnabled:              autoUpdateEnabled,
 		AutoUpdateCheckInterval:        autoUpdateInterval,
+		AutoReloadEnabled:              autoReloadEnabled,
 		HealthPort:                     healthPort,
 		MaxConcurrentTasks:             maxConcurrentTasks,
 		PollInterval:                   pollInterval,
@@ -478,6 +500,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexArgs:                      codexArgs,
 		CodebuddyArgs:                  codebuddyArgs,
 		QwenArgs:                       qwenArgs,
+		QwenpawArgs:                    qwenpawArgs,
 		ProfileCommandOverrides:        profileCommandOverrides,
 	}, nil
 }
@@ -526,12 +549,20 @@ func NormalizeServerBaseURL(raw string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
+// TaskWorkspacesRootEnv carries the workspaces root of the daemon that owns a
+// managed task into that task's environment. Task-mode `daemon disk-usage`
+// reads this and nothing else: ResolveWorkspacesRoot derives its default from
+// $HOME and the --profile name, so a task hosted by a named-profile daemon
+// would otherwise scan the default root and silently report the wrong tree.
+const TaskWorkspacesRootEnv = "MULTICA_TASK_WORKSPACES_ROOT"
+
 // ResolveWorkspacesRoot returns the absolute path that the daemon and CLI
 // should treat as the workspaces root. Resolution order: explicit override >
 // MULTICA_WORKSPACES_ROOT env > default ($HOME/multica_workspaces, or
 // $HOME/multica_workspaces_<profile> for a named profile). Read-only callers
 // (e.g. `multica daemon disk-usage`) use this directly so they pick the same
-// directory the running daemon would have picked.
+// directory the running daemon would have picked. Inside a managed task use
+// TaskWorkspacesRootEnv instead — see resolveDiskUsageRoot.
 func ResolveWorkspacesRoot(profile, override string) (string, error) {
 	root := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACES_ROOT"))
 	if override != "" {
@@ -736,10 +767,14 @@ func isExecutableFile(path string) bool {
 // `probe(...)` calls in LoadConfig — the shell-fallback resolver uses this
 // list to pre-fetch canonical paths for every known agent in a single shell
 // invocation, instead of paying the cost-per-miss.
-var defaultAgentCommandNames = []string{
+//
+// Built-in runtime identity commands (e.g. "omp") are appended from the
+// descriptor registry (agent.BuiltinRuntimeCommands) so adding a new fork
+// doesn't require editing this list by hand.
+var defaultAgentCommandNames = append([]string{
 	"claude", "codex", "opencode", "deveco", "openclaw", "hermes",
-	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy", "qodercli", "qoderclicn", "traecli", "grok", "qwen",
-}
+	"pi", "cursor-agent", "copilot", "kimi", "reasonix", "kiro-cli", "codebuddy", "agy", "qodercli", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw",
+}, agent.BuiltinRuntimeCommands()...)
 
 // codexDesktopAppBundlePaths returns candidate macOS app-bundle locations for
 // the bundled Codex CLI. OpenAI relocated the Desktop app from Codex.app to

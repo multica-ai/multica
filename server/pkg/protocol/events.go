@@ -3,10 +3,11 @@ package protocol
 // Event types for WebSocket communication between server, web clients, and daemon.
 const (
 	// Issue events
-	EventIssueCreated         = "issue:created"
-	EventIssueUpdated         = "issue:updated"
-	EventIssueDeleted         = "issue:deleted"
-	EventIssueMetadataChanged = "issue_metadata:changed"
+	EventIssueCreated            = "issue:created"
+	EventIssueUpdated            = "issue:updated"
+	EventIssueDeleted            = "issue:deleted"
+	EventIssueMetadataChanged    = "issue_metadata:changed"
+	EventIssueAttachmentsChanged = "issue_attachments:changed"
 
 	// Comment events
 	EventCommentCreated       = "comment:created"
@@ -181,4 +182,18 @@ const (
 	// invalidate the Slack installations query on either.
 	EventSlackInstallationCreated = "slack_installation:created"
 	EventSlackInstallationRevoked = "slack_installation:revoked"
+
+	// DingTalk installation lifecycle follows the same create/revoke semantics
+	// as Slack's BYO channel installation.
+	EventDingTalkInstallationCreated = "dingtalk_installation:created"
+	EventDingTalkInstallationRevoked = "dingtalk_installation:revoked"
+
+	// WeCom smart-bot installation lifecycle. Same semantics as Lark /
+	// Slack: `created` covers both first install and re-install via
+	// UpsertChannelInstallation (the UNIQUE on (workspace_id, agent_id,
+	// channel_type) means at most one row per agent); `revoked` flips
+	// status without deleting the row. Front-ends invalidate the wecom
+	// installations query on either.
+	EventWecomInstallationCreated = "wecom_installation:created"
+	EventWecomInstallationRevoked = "wecom_installation:revoked"
 )

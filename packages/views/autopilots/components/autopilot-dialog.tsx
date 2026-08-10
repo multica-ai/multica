@@ -562,7 +562,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden"
         >
           {/* Left: Runbook */}
-          <div className="flex-none lg:flex-1 min-h-0 flex flex-col border-b lg:border-b-0 lg:border-r">
+          <div className="flex-none lg:flex-1 min-h-0 min-w-0 flex flex-col border-b lg:border-b-0 lg:border-r">
             <div className="px-6 pt-5 pb-3 shrink-0">
               <TitleEditor
                 ref={titleEditorRef}

@@ -25,6 +25,9 @@ export interface CreateIssueRequest {
 export interface UpdateIssueRequest {
   title?: string;
   description?: string;
+  /** Authoritative description the editor had adopted before producing this
+   * update. The server uses it to merge channel media that landed meanwhile. */
+  description_base?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
@@ -242,7 +245,7 @@ export interface GroupedIssuesResponse {
 // state such as collapsed groups/parents.
 export type IssueTableScope =
   | { kind: "workspace"; assignee_types?: IssueAssigneeType[] }
-  | { kind: "project"; project_id: string }
+  | { kind: "project"; project_id: string; assignee_types?: IssueAssigneeType[] }
   | { kind: "assignee"; actor: IssueActorRef }
   | { kind: "creator"; actor: IssueActorRef }
   | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };

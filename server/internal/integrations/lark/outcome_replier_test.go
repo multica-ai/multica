@@ -240,6 +240,35 @@ func TestLarkOutcomeReplierAgentArchivedSendsCard(t *testing.T) {
 	}
 }
 
+func TestLarkOutcomeReplierCommandOutcomesSendGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		outcome  Outcome
+		hadMedia bool
+		want     string
+	}{
+		{"fresh pending", OutcomeFreshPending, false, "下一条聊天消息"},
+		{"plain issue usage", OutcomeIssueUsage, false, "请填写任务标题"},
+		{"issue usage with media", OutcomeIssueUsage, true, "请添加标题，并与图片或视频一起重新发送"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+			stub := &stubAPIClientWithRecorder{configured: true}
+			rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+				APIClient: stub, BindingSvc: &BindingTokenService{}, Credentials: stubCredentialsResolver{secret: "s"},
+				Queries: stubReplierQueries{}, AppURL: "https://multica.test", Logger: log,
+			})
+			rep.Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc_chat"}, DispatchResult{Outcome: tc.outcome, IssueUsageHadMedia: tc.hadMedia})
+			if len(stub.interactiveOut) != 1 {
+				t.Fatalf("expected one guidance card, got %d", len(stub.interactiveOut))
+			}
+			if !contains(stub.interactiveOut[0].CardJSON, tc.want) {
+				t.Fatalf("guidance card %q does not contain %q", stub.interactiveOut[0].CardJSON, tc.want)
+			}
+		})
+	}
+}
+
 // TestLarkOutcomeReplierIngestedAndDroppedAreSilent asserts that the
 // replier does NOT call the APIClient on outcomes owned elsewhere
 // (Patcher handles Ingested; Dropped is informational only).
@@ -386,6 +415,44 @@ func TestLarkOutcomeReplierIssueCreatedSendsConfirmation(t *testing.T) {
 	// plain text, matching how chat replies render.
 	if len(stub.interactiveOut) != 0 {
 		t.Errorf("issue-created confirmation must not send a card; got %d cards", len(stub.interactiveOut))
+	}
+}
+
+func TestLarkOutcomeReplierIssueDuplicateSendsConflict(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{configured: true}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  &BindingTokenService{},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		AppURL:      "https://multica.test",
+		Logger:      log,
+	})
+
+	inst := Installation{AppID: "cli_x"}
+	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
+	rep.Reply(context.Background(), inst, InboundMessage{ChatID: "oc_chat_42"}, DispatchResult{
+		Outcome:         OutcomeIngested,
+		IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
+		IssueNumber:     42,
+		IssueIdentifier: "MUL-42",
+		IssueTitle:      "fix login bug",
+		IssueDuplicate:  true,
+	})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.textOut) != 1 {
+		t.Fatalf("expected one duplicate reply, got %d", len(stub.textOut))
+	}
+	text := stub.textOut[0].Text
+	if !strings.Contains(text, "Not created") || !strings.Contains(text, "MUL-42") || !strings.Contains(text, "fix login bug") {
+		t.Fatalf("duplicate reply = %q", text)
+	}
+	if strings.Contains(text, "Created MUL-42") {
+		t.Fatalf("duplicate reply falsely claimed creation: %q", text)
 	}
 }
 

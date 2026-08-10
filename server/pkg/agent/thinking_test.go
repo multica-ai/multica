@@ -467,8 +467,20 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"opencode", "fast-mode", true},  // custom opencode.json variant names are valid
 		{"opencode", ".hidden", false},   // reject suspicious / malformed names server-side
 		{"opencode", "bad value", false}, // spaces are not valid variant names
+		{"pi", "", true},
+		{"pi", "off", true},
+		{"pi", "minimal", true},
+		{"pi", "max", true},
+		{"pi", "ultra", false},
+		{"pi", "future-level", false},
+		{"kimi", "", true},
+		{"kimi", "low", true},
+		{"kimi", "max", true},
+		{"kimi", "future-level", true}, // exact support is checked against the daemon catalog
+		{"kimi", ".hidden", false},
+		{"kimi", "bad value", false},
 		{"hermes", "", true},
-		{"hermes", "low", false}, // hermes has no thinking concept
+		{"hermes", "low", false}, // hermes' ACP surface exposes no effort dial
 		{"grok", "", true},
 		{"grok", "low", true},
 		{"grok", "medium", true},
@@ -483,6 +495,53 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		if got := IsKnownThinkingValue(tc.provider, tc.value); got != tc.want {
 			t.Errorf("IsKnownThinkingValue(%q, %q) = %v, want %v",
 				tc.provider, tc.value, got, tc.want)
+		}
+	}
+}
+
+// TestThinkingControlSupported pins which runtimes Multica can actually hand a
+// per-agent effort to. The distinction drives the API's rejection copy, so a
+// provider must not drift into "supported" without a real injection path.
+func TestThinkingControlSupported(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		provider string
+		want     bool
+	}{
+		{"claude", true},
+		{"codebuddy", true},
+		{"grok", true},
+		{"codex", true},    // dynamic catalog, validated per model by the daemon
+		{"opencode", true}, // dynamic variant names from opencode.json
+		{"pi", true},       // fixed tokens, per-model subset discovered over RPC
+		{"hermes", false},  // ACP adapter drops reasoning entirely (MUL-5770)
+		{"kimi", true},     // dynamic catalog; ACP session/set_config_option applies it
+		{"qwenpaw", false},
+		{"", false},
+		{"not-a-runtime", false},
+	}
+	for _, tc := range tests {
+		if got := ThinkingControlSupported(tc.provider); got != tc.want {
+			t.Errorf("ThinkingControlSupported(%q) = %v, want %v", tc.provider, got, tc.want)
+		}
+	}
+}
+
+// TestThinkingControlSupportedMatchesTokenGate keeps the capability predicate
+// and the value gate from disagreeing: if a provider accepts any non-empty
+// token it must report the capability, and if it reports none it must accept
+// nothing but the empty "runtime default" sentinel. Otherwise the API can
+// reject a level while claiming the runtime supports one, or vice versa.
+func TestThinkingControlSupportedMatchesTokenGate(t *testing.T) {
+	t.Parallel()
+	providers := []string{"claude", "codebuddy", "grok", "codex", "opencode", "pi", "hermes", "kimi", "cursor"}
+	// "medium" is in every fixed enum and is a well-formed dynamic token, so a
+	// provider with any reasoning control accepts it.
+	for _, provider := range providers {
+		accepts := IsKnownThinkingValue(provider, "medium")
+		if got := ThinkingControlSupported(provider); got != accepts {
+			t.Errorf("provider %q: ThinkingControlSupported = %v but IsKnownThinkingValue(%q, \"medium\") = %v",
+				provider, got, provider, accepts)
 		}
 	}
 }
@@ -510,6 +569,34 @@ func TestCodexAdvertisedLevelsArePersistable(t *testing.T) {
 // validator. Both the daemon's per-model guard and the server's API
 // layer call this; if it gets default-model wrong, any agent without an
 // explicit model set would have its thinking_level dropped silently.
+
+func TestValidateThinkingLevel_PiRPCPerModelCatalog(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake pi binary is a /bin/sh script")
+	}
+	fakePi := writeFakePiRPCModelsBinary(t)
+	ctx := context.Background()
+
+	check := func(model, value string, want bool) {
+		t.Helper()
+		ok, err := ValidateThinkingLevel(ctx, "pi", fakePi, model, value)
+		if err != nil {
+			t.Fatalf("ValidateThinkingLevel(pi, %q, %q): %v", model, value, err)
+		}
+		if ok != want {
+			t.Errorf("ValidateThinkingLevel(pi, %q, %q) = %v, want %v", model, value, ok, want)
+		}
+	}
+
+	check("openai-multi/gpt-5.6-sol", "high", true)
+	check("openai-multi/gpt-5.6-sol", "xhigh", false)
+	check("openai-multi/gpt-5.6-luna", "max", true)
+	check("openai-multi/gpt-5.6-luna", "medium", false)
+	check("openai-multi/plain-chat", "off", false)
+	check("", "max", true)     // current Pi model is Luna
+	check("", "medium", false) // Luna explicitly disables medium in the fixture
+	check("openai-multi/gpt-5.6-luna", "", true)
+}
 
 func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 	if runtime.GOOS == "windows" {

@@ -26,8 +26,11 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
-vi.mock("../navigation", () => ({
+// Mock the context module, not the barrel: AppLink stays the real component
+// (the sign-in button renders through it) and reads the mocked adapter.
+vi.mock("../navigation/context", () => ({
   useNavigation: () => ({ push: mockNavigatePush }),
+  useOptionalNavigation: () => ({ push: mockNavigatePush }),
 }));
 
 vi.mock("@multica/core/api", () => ({

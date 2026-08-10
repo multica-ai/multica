@@ -125,6 +125,23 @@ func TestReply_AgentOfflineAndArchived_PostNotices(t *testing.T) {
 	}
 }
 
+func TestReply_CommandOutcomes_PostGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		outcome engine.Outcome
+		want    string
+	}{
+		{engine.OutcomeFreshPending, freshPendingText},
+		{engine.OutcomeIssueUsage, issueUsageText},
+	} {
+		sender := &fakeReplySender{}
+		r := newTestReplier(&fakeBindingMinter{}, sender)
+		r.Reply(context.Background(), testResolvedInstallation(t), testInboundForReply(), engine.Result{Outcome: tc.outcome})
+		if sender.calls != 1 || sender.sent == nil || sender.sent.Text != tc.want {
+			t.Errorf("outcome %s: got %d sends, text %q, want %q", tc.outcome, sender.calls, textOrEmpty(sender.sent), tc.want)
+		}
+	}
+}
+
 func TestReply_IngestedWithIssue_Confirms(t *testing.T) {
 	sender := &fakeReplySender{}
 	r := newTestReplier(&fakeBindingMinter{}, sender)
@@ -139,6 +156,27 @@ func TestReply_IngestedWithIssue_Confirms(t *testing.T) {
 	}
 	if !strings.Contains(sender.sent.Text, "MUL-42") || !strings.Contains(sender.sent.Text, "Fix the thing") {
 		t.Errorf("confirmation text = %q", sender.sent.Text)
+	}
+}
+
+func TestReply_IngestedWithDuplicateIssue_ReportsConflict(t *testing.T) {
+	sender := &fakeReplySender{}
+	r := newTestReplier(&fakeBindingMinter{}, sender)
+	r.Reply(context.Background(), testResolvedInstallation(t), testInboundForReply(), engine.Result{
+		Outcome:         engine.OutcomeIngested,
+		IssueID:         mustUUID(t, "55555555-5555-5555-5555-555555555555"),
+		IssueIdentifier: "MUL-42",
+		IssueTitle:      "Fix the thing",
+		IssueDuplicate:  true,
+	})
+	if sender.calls != 1 || sender.sent == nil {
+		t.Fatalf("expected one duplicate reply, got %d", sender.calls)
+	}
+	if !strings.Contains(sender.sent.Text, "Not created") || !strings.Contains(sender.sent.Text, "MUL-42") {
+		t.Fatalf("duplicate reply = %q", sender.sent.Text)
+	}
+	if strings.Contains(sender.sent.Text, "Created MUL-42") {
+		t.Fatalf("duplicate reply falsely claimed creation: %q", sender.sent.Text)
 	}
 }
 
@@ -170,6 +208,15 @@ func TestIssueCreatedText(t *testing.T) {
 	}
 	if got := issueCreatedText(engine.Result{IssueNumber: 9}); got != "✅ Created #9" {
 		t.Errorf("fallback to number = %q", got)
+	}
+}
+
+func TestIssueDuplicateText(t *testing.T) {
+	got := issueDuplicateText(engine.Result{
+		IssueIdentifier: "MUL-7", IssueTitle: "Title", IssueDuplicate: true,
+	})
+	if got != "⚠️ Not created — active issue MUL-7 already exists: Title" {
+		t.Fatalf("duplicate text = %q", got)
 	}
 }
 

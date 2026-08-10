@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -487,9 +488,10 @@ type WorktreeParams struct {
 	CoAuthoredByEnabled bool   // install prepare-commit-msg hook for Co-authored-by trailer
 	// IsolatedGitMetadata creates a local clone whose .git directory lives
 	// inside WorkDir instead of a linked worktree whose gitdir lives under the
-	// shared cache. Linux Codex tasks need this because workspace-write keeps a
+	// shared cache. Codex tasks need this because workspace-write keeps a
 	// resolved external worktree gitdir read-only even when it is explicitly
-	// listed as a writable root (multica-ai/multica#2925).
+	// listed as a writable root — on Linux (multica-ai/multica#2925) and on the
+	// Windows native sandbox (multica-ai/multica#6449).
 	IsolatedGitMetadata bool
 }
 
@@ -688,11 +690,12 @@ const (
 )
 
 // createOrUpdateIsolatedCheckout keeps Git metadata inside the task workdir.
-// The fresh path uses a same-filesystem local clone, so immutable Git objects
-// are hard-linked from the daemon's cache while refs, index, logs, config, and
-// new objects remain private to the task checkout. The temporary cache remote
-// is then replaced with the real repository URL so an agent's normal fetch /
-// push commands still target GitHub rather than the daemon-owned bare cache.
+// The fresh path uses a local clone, so immutable Git objects are hard-linked
+// (copied on Windows, see localCloneArgs) from the daemon's cache while refs,
+// index, logs, config, and new objects remain private to the task checkout.
+// The temporary cache remote is then replaced with the real repository URL so
+// an agent's normal fetch / push commands still target GitHub rather than the
+// daemon-owned bare cache.
 func (c *Cache) createOrUpdateIsolatedCheckout(barePath, repoURL, checkoutPath, branchName, baseRef string) (string, error) {
 	baseCommit, err := resolveCommit(barePath, baseRef)
 	if err != nil {
@@ -726,8 +729,8 @@ func (c *Cache) createOrUpdateIsolatedCheckout(barePath, repoURL, checkoutPath, 
 		}
 		return actualBranch, nil
 	}
-	// A daemon upgrade can resume a pre-fix Linux Codex workdir that still has
-	// a linked worktree. Remove it through Git (so the shared admin record is
+	// A daemon upgrade can resume a pre-fix Codex workdir that still has a
+	// linked worktree. Remove it through Git (so the shared admin record is
 	// cleaned too), then recreate the same checkout path with local metadata.
 	if isGitWorktree(checkoutPath) {
 		if err := removeLinkedWorktree(barePath, checkoutPath); err != nil {
@@ -780,11 +783,27 @@ func sameResolvedPath(a, b string) bool {
 	return clean(a) == clean(b)
 }
 
+// localCloneArgs builds the `git clone --local` invocation that seeds a fresh
+// isolated checkout from the shared bare cache.
+//
+// On Windows the clone also passes --no-hardlinks. A local clone hardlinks
+// .git/objects whenever it can, but an NTFS hard link only exists within a
+// single volume and every link shares one underlying file *and* one security
+// descriptor. Copying the objects instead keeps a cache and workdir that live
+// on different drives working, and stops a task checkout — whose tree the
+// sandbox makes writable — from re-permissioning the daemon-owned cache's
+// object files. The cost is extra disk and a slower first checkout on Windows.
+func localCloneArgs(goos, barePath, checkoutPath string) []string {
+	args := []string{"clone", "--local", "--no-checkout", "--no-tags"}
+	if goos == "windows" {
+		args = append(args, "--no-hardlinks")
+	}
+	return append(args, "--origin", isolatedCacheRemoteName, barePath, checkoutPath)
+}
+
 func createIsolatedCheckout(barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit string) (_ string, retErr error) {
 	if out, err := runGitCombinedOutput(
-		"clone", "--local", "--no-checkout", "--no-tags",
-		"--origin", isolatedCacheRemoteName,
-		barePath, checkoutPath,
+		localCloneArgs(runtime.GOOS, barePath, checkoutPath)...,
 	); err != nil {
 		// Do not remove checkoutPath here. A different repository with the
 		// same basename could have won the path race after our pre-check; Git

@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -543,6 +544,32 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		ELSE 7
 	END`
 
+	// Cancelled issues are abandoned work. statusRank alone cannot keep them
+	// down because it is only a tie-breaker within one relevance tier: a
+	// cancelled issue whose title matches the phrase exactly (tier 1) still
+	// outranks an in_progress issue that merely contains it (tier 3), and a
+	// workspace with many cancelled issues can fill the whole LIMIT window and
+	// push live work off the page entirely. So demote cancelled ahead of
+	// rankExpr — they sort after every other match and are the first rows the
+	// LIMIT drops. Unlike 'done', which is finished work worth referencing,
+	// cancelled work was thrown away. The exception is a direct hit: an exact
+	// identifier or exact title means the user is targeting that one issue and
+	// knows what they asked for.
+	//
+	// The title half reuses tier 1's predicate verbatim, including its quirk:
+	// phraseParam is escapeLike'd, so a title containing _ or % never compares
+	// equal and is not treated as a direct hit. Such an issue is still returned
+	// by number; keeping the two predicates identical matters more than working
+	// around an escaping bug that belongs with tier 1.
+	directHitParts := []string{fmt.Sprintf("LOWER(i.title) = %s", phraseParam)}
+	if hasNum {
+		directHitParts = append(directHitParts, fmt.Sprintf("i.number = %s", numParam))
+	}
+	cancelledRank := fmt.Sprintf(
+		"CASE WHEN i.status = 'cancelled' AND NOT (%s) THEN 1 ELSE 0 END",
+		strings.Join(directHitParts, " OR "),
+	)
+
 	// --- match_source expression ---
 	matchSourceExpr := fmt.Sprintf(`CASE
 		WHEN LOWER(i.title) LIKE %s THEN 'title'
@@ -608,12 +635,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		%s AS matched_comment_content
 	FROM issue i
 	WHERE i.workspace_id = %s AND %s
-	ORDER BY %s, %s, i.updated_at DESC
+	ORDER BY %s, %s, %s, i.updated_at DESC
 	LIMIT %s OFFSET %s`,
 		matchSourceExpr,
 		commentSubquery,
 		wsParam,
 		whereClause,
+		cancelledRank,
 		rankExpr,
 		statusRank,
 		limitParam,
@@ -2680,18 +2708,24 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title         *string  `json:"title"`
-	Description   *string  `json:"description"`
-	Status        *string  `json:"status"`
-	Priority      *string  `json:"priority"`
-	AssigneeType  *string  `json:"assignee_type"`
-	AssigneeID    *string  `json:"assignee_id"`
-	Position      *float64 `json:"position"`
-	StartDate     *string  `json:"start_date"`
-	DueDate       *string  `json:"due_date"`
-	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
-	Stage         *int32   `json:"stage"`
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	// DescriptionBase is the authoritative Markdown the editor had adopted
+	// before producing Description. It lets the server preserve channel media
+	// that landed asynchronously after that base without making media already
+	// present in the base impossible for the user to delete. Older clients omit
+	// it and receive conservative channel-media preservation.
+	DescriptionBase *string  `json:"description_base,omitempty"`
+	Status          *string  `json:"status"`
+	Priority        *string  `json:"priority"`
+	AssigneeType    *string  `json:"assignee_type"`
+	AssigneeID      *string  `json:"assignee_id"`
+	Position        *float64 `json:"position"`
+	StartDate       *string  `json:"start_date"`
+	DueDate         *string  `json:"due_date"`
+	ParentIssueID   *string  `json:"parent_issue_id"`
+	ProjectID       *string  `json:"project_id"`
+	Stage           *int32   `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -2708,6 +2742,133 @@ type UpdateIssueRequest struct {
 	// MUL-3375). Only consumed when a run actually starts: SuppressRun=true or
 	// a parked/non-triggering write drops it. Never fabricates a comment.
 	HandoffNote string `json:"handoff_note,omitempty"`
+}
+
+func mergeIssueChannelMediaDescription(current, incoming string, base *string, attachments []db.Attachment) string {
+	currentIDs := channelmedia.MarkedIDs(current)
+	if len(currentIDs) == 0 {
+		return incoming
+	}
+
+	baseIDs := map[string]bool{}
+	if base != nil {
+		for _, id := range channelmedia.MarkedIDs(*base) {
+			baseIDs[id] = true
+		}
+	}
+	attachmentsByID := make(map[string]db.Attachment, len(attachments))
+	for _, attachment := range attachments {
+		attachmentsByID[uuidToString(attachment.ID)] = attachment
+	}
+
+	merged := incoming
+	for _, id := range currentIDs {
+		attachment, exists := attachmentsByID[id]
+		if !exists {
+			// A deleted attachment must not be resurrected from stale Markdown.
+			continue
+		}
+		downloadPath := channelmedia.DownloadPath(id)
+		hasLink := strings.Contains(merged, downloadPath)
+		knownToEditor := base != nil && baseIDs[id]
+		if knownToEditor && !hasLink {
+			// The editor adopted this media and then removed its link: preserve
+			// the user's explicit deletion rather than treating it as a race.
+			continue
+		}
+		if !hasLink {
+			merged = channelmedia.Append(merged, channelmedia.Block(
+				id,
+				attachment.Filename,
+				strings.HasPrefix(attachment.ContentType, "image/"),
+			))
+			continue
+		}
+		// Tiptap may omit HTML comments when serializing an otherwise intact
+		// image. Restore provenance without duplicating the visible link.
+		if !channelmedia.HasMarker(merged, id) {
+			merged = channelmedia.Append(merged, channelmedia.Marker(id))
+		}
+	}
+	return merged
+}
+
+func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current db.Issue, rawFields map[string]json.RawMessage) {
+	_, assigneeTypeTouched := rawFields["assignee_type"]
+	_, assigneeIDTouched := rawFields["assignee_id"]
+	// Assignee type and id form one validated value. If either half was
+	// supplied, retain the pre-validation counterpart in params rather than
+	// combining the supplied half with a concurrently-written counterpart that
+	// has never been validated with it.
+	if !assigneeTypeTouched && !assigneeIDTouched {
+		params.AssigneeType = current.AssigneeType
+		params.AssigneeID = current.AssigneeID
+	}
+	if _, touched := rawFields["start_date"]; !touched {
+		params.StartDate = current.StartDate
+	}
+	if _, touched := rawFields["due_date"]; !touched {
+		params.DueDate = current.DueDate
+	}
+	if _, touched := rawFields["parent_issue_id"]; !touched {
+		params.ParentIssueID = current.ParentIssueID
+	}
+	if _, touched := rawFields["project_id"]; !touched {
+		params.ProjectID = current.ProjectID
+	}
+	if _, touched := rawFields["stage"]; !touched {
+		params.Stage = current.Stage
+	}
+}
+
+func (h *Handler) updateIssueWithDescriptionMerge(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, base *string) (db.Issue, db.Issue, error) {
+	if h.TxStarter == nil {
+		return db.Issue{}, db.Issue{}, errors.New("issue description update requires transaction starter")
+	}
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.Issue{}, db.Issue{}, fmt.Errorf("begin issue description update: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := h.Queries.WithTx(tx)
+	current, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
+		ID:          params.ID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return db.Issue{}, db.Issue{}, fmt.Errorf("lock issue description: %w", err)
+	}
+	attachments, err := qtx.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{
+		IssueID:     current.ID,
+		WorkspaceID: current.WorkspaceID,
+	})
+	if err != nil {
+		return db.Issue{}, db.Issue{}, fmt.Errorf("list issue attachments for description merge: %w", err)
+	}
+
+	currentDescription := ""
+	if current.Description.Valid {
+		currentDescription = current.Description.String
+	}
+	incomingDescription := ""
+	if params.Description.Valid {
+		incomingDescription = params.Description.String
+	}
+	params.Description = pgtype.Text{
+		String: mergeIssueChannelMediaDescription(currentDescription, incomingDescription, base, attachments),
+		Valid:  true,
+	}
+	refreshUntouchedNullableIssueParams(&params, current, rawFields)
+
+	issue, err := qtx.UpdateIssue(ctx, params)
+	if err != nil {
+		return db.Issue{}, db.Issue{}, fmt.Errorf("update locked issue description: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.Issue{}, db.Issue{}, fmt.Errorf("commit issue description update: %w", err)
+	}
+	return issue, current, nil
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -2892,7 +3053,18 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issue, err := h.Queries.UpdateIssue(r.Context(), params)
+	var issue db.Issue
+	if req.Description != nil {
+		var lockedPrev db.Issue
+		issue, lockedPrev, err = h.updateIssueWithDescriptionMerge(
+			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.DescriptionBase,
+		)
+		if err == nil {
+			prevIssue = lockedPrev
+		}
+	} else {
+		issue, err = h.Queries.UpdateIssue(r.Context(), params)
+	}
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
@@ -3174,13 +3346,7 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
 	h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
-	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
-	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
-
-	err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
-		ID:          issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-	})
+	attachmentURLs, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete issue")
 		return
@@ -3196,6 +3362,41 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": resolvedID})
 	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", resolvedID, "workspace_id", uuidToString(issue.WorkspaceID))...)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteIssueAndCollectAttachmentURLs serializes issue deletion with channel
+// media binding. The delete-side FOR UPDATE conflicts with the binder's
+// FOR KEY SHARE, and URL collection happens only after that lock is held:
+// bind-first means the new URL is collected; delete-first means the bind rolls
+// back without consuming its durable object intent.
+func (h *Handler) deleteIssueAndCollectAttachmentURLs(ctx context.Context, issue db.Issue) ([]string, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin issue delete: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	if _, err := qtx.LockIssueForDelete(ctx, db.LockIssueForDeleteParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	}); err != nil {
+		return nil, fmt.Errorf("lock issue for delete: %w", err)
+	}
+	attachmentURLs, err := qtx.ListAttachmentURLsByIssueOrComments(ctx, issue.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list issue attachment URLs: %w", err)
+	}
+	if err := qtx.DeleteIssue(ctx, db.DeleteIssueParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	}); err != nil {
+		return nil, fmt.Errorf("delete issue: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit issue delete: %w", err)
+	}
+	return attachmentURLs, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -3435,7 +3636,21 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		issue, err := h.Queries.UpdateIssue(r.Context(), params)
+		var issue db.Issue
+		if req.Updates.Description != nil {
+			// One batch-level base cannot describe multiple issue documents.
+			// Preserve every marked channel-media block conservatively, matching
+			// legacy single-update clients that omit description_base.
+			var lockedPrev db.Issue
+			issue, lockedPrev, err = h.updateIssueWithDescriptionMerge(
+				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil,
+			)
+			if err == nil {
+				prevIssue = lockedPrev
+			}
+		} else {
+			issue, err = h.Queries.UpdateIssue(r.Context(), params)
+		}
 		if err != nil {
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
 			continue
@@ -3549,13 +3764,8 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 		h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
-		// Collect attachment URLs before CASCADE delete to clean up S3 objects.
-		attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
-
-		if err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-		}); err != nil {
+		attachmentURLs, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue)
+		if err != nil {
 			slog.Warn("batch delete issue failed", "issue_id", issueID, "error", err)
 			continue
 		}

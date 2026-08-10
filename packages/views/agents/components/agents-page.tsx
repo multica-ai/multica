@@ -971,11 +971,11 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
   // Straight to the manual form: a duplicate already has every field decided,
   // so the method chooser would be a step with nothing to choose.
-  const handleDuplicate = useCallback((agent: Agent) => {
-    navigation.push(
+  const duplicateHref = useCallback(
+    (agent: Agent) =>
       `${paths.newAgentManual()}?duplicate=${encodeURIComponent(agent.id)}`,
-    );
-  }, [navigation, paths]);
+    [paths],
+  );
 
   const selectedRows = rows.filter((row) => selectedIds.has(row.agent.id));
   const allSelected = rows.length > 0 && selectedRows.length === rows.length;
@@ -1106,7 +1106,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       className={`h-16 cursor-pointer ${
                         selectedIds.has(row.agent.id) ? "bg-accent/30" : ""
                       }`}
-                      {...rowLink(paths.agentDetail(row.agent.id))}
+                      {...rowLink(paths.agentDetail(row.agent.id), row.agent.name)}
                     >
                       <CheckboxCell
                         checked={selectedIds.has(row.agent.id)}
@@ -1172,7 +1172,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                             agent={row.agent}
                             presence={row.presence}
                             canManage={row.canManage}
-                            onDuplicate={handleDuplicate}
+                            duplicateHref={duplicateHref(row.agent)}
                           />
                         </span>
                       </ListGridCell>

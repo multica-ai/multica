@@ -29,9 +29,12 @@ Multica は現在、次のコマンドを検出します。
 | OpenClaw | `openclaw` | [OpenClaw のインストール](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode クイックスタート](https://opencode.ai/en/docs) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
+| Oh-My-Pi | `omp` | [Oh-My-Pi インストール](https://omp.sh) |
 | Qoder CLI | `qodercli` | [Qoder CLI クイックスタート](https://docs.qoder.com/en/cli/quick-start) |
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI クイックスタート](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
+| QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 公式サイト](https://www.trae.cn/) |
 
 ここでの「対応」とは、Multica が該当する CLI を呼び出せるという意味です。そのツールのアカウント、サブスクリプション、モデルの利用枠を Multica が提供するわけではありません。
@@ -39,6 +42,10 @@ Multica は現在、次のコマンドを検出します。
 ## 2. ローカル環境でログインする
 
 インストール後、まずターミナルからツールを単独で起動し、各ツールの手順に従ってログインするか、モデルプロバイダーを設定してください。ターミナル上でリクエストを実行できない場合は、デーモンから呼び出しても失敗します。
+
+Reasonix を使う場合は、デーモンを起動する前に `reasonix setup` を実行し、デフォルトのプロバイダーとモデルを設定してください。
+
+QwenPaw を使う場合は、QwenPaw 側の設定でプロバイダーとモデルを選んでください。Multica が実行時に QwenPaw のモデルを上書きすることはできません。
 
 ログイン情報はツールがローカル環境に保存します。Multica が Claude、Codex、Cursor などの CLI のログイントークンを受け取ることはありません。
 

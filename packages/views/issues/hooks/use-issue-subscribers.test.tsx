@@ -6,11 +6,18 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
+import { issueKeys } from "@multica/core/issues/queries";
 import { ApiError } from "@multica/core/api/client";
 import type { ApiClient } from "@multica/core/api/client";
 
 const toastError = vi.fn();
-vi.mock("sonner", () => ({ toast: { error: (msg: string) => toastError(msg) } }));
+const toastSuccess = vi.fn();
+vi.mock("sonner", () => ({
+  toast: {
+    error: (msg: string) => toastError(msg),
+    success: (msg: string) => toastSuccess(msg),
+  },
+}));
 
 // Return the key path so an assertion can tell the two failure messages apart
 // without depending on the English copy.
@@ -51,9 +58,12 @@ function renderSubscribers() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return renderHook(() => useIssueSubscribers("issue-1", "user-1"), {
-    wrapper: wrapper(queryClient),
-  });
+  return {
+    ...renderHook(() => useIssueSubscribers("issue-1", "user-1"), {
+      wrapper: wrapper(queryClient),
+    }),
+    queryClient,
+  };
 }
 
 /**
@@ -68,6 +78,7 @@ describe("useIssueSubscribers subtree unsubscribe failures", () => {
   afterEach(() => {
     cleanup();
     toastError.mockClear();
+    toastSuccess.mockClear();
   });
 
   it("tells the user when the backend has no subtree route yet", async () => {
@@ -123,7 +134,11 @@ describe("useIssueSubscribers subtree unsubscribe failures", () => {
     expect(toastError).toHaveBeenCalledWith("detail.unsubscribe_subtree_failed");
   });
 
-  it("stays silent when the unsubscribe succeeds", async () => {
+  // Unlike the direct toggle, this mutation is not optimistic — no label or
+  // avatar flips to confirm the click landed, and the descendants it retired
+  // are not on screen at all. Silence here is indistinguishable from a dead
+  // button, which is the MUL-5710 complaint (MUL-5714).
+  it("confirms a successful subtree unsubscribe", async () => {
     setApiInstance({
       listIssueSubscribers: async () => [],
       unsubscribeFromIssueSubtree: async () => undefined,
@@ -132,6 +147,134 @@ describe("useIssueSubscribers subtree unsubscribe failures", () => {
     const { result } = renderSubscribers();
     result.current.unsubscribeFromSubtree();
 
-    await waitFor(() => expect(toastError).not.toHaveBeenCalled());
+    await waitFor(() =>
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "detail.unsubscribe_subtree_succeeded",
+      ),
+    );
+    expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
+const SUBSCRIBED_AS_MEMBER = [
+  {
+    issue_id: "issue-1",
+    user_type: "member",
+    user_id: "user-1",
+    reason: "manual",
+    created_at: "2026-01-01T00:00:00Z",
+  },
+];
+
+/**
+ * useToggleIssueSubscriber patches the cache optimistically and rolls that
+ * patch back when the request fails, which restores the exact row the user
+ * started from. Without a message that is pixel-identical to a button that
+ * never fired — the same symptom MUL-5710 was reported as (MUL-5714).
+ */
+describe("useIssueSubscribers direct toggle feedback", () => {
+  afterEach(() => {
+    cleanup();
+    toastError.mockClear();
+    toastSuccess.mockClear();
+  });
+
+  it("reports a failed unsubscribe", async () => {
+    setApiInstance({
+      listIssueSubscribers: async () => SUBSCRIBED_AS_MEMBER,
+      unsubscribeFromIssue: async () => {
+        throw new ApiError("boom", 500, "Internal Server Error");
+      },
+    } as unknown as ApiClient);
+
+    const { result } = renderSubscribers();
+    await waitFor(() => expect(result.current.isSubscribed).toBe(true));
+    result.current.toggleSubscribe();
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "detail.subscription_update_failed",
+      ),
+    );
+  });
+
+  it("reports a failed subscribe", async () => {
+    setApiInstance({
+      listIssueSubscribers: async () => [],
+      subscribeToIssue: async () => {
+        throw new ApiError("boom", 500, "Internal Server Error");
+      },
+    } as unknown as ApiClient);
+
+    const { result } = renderSubscribers();
+    await waitFor(() => expect(result.current.subscriptionKnown).toBe(true));
+    result.current.toggleSubscribe();
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "detail.subscription_update_failed",
+      ),
+    );
+  });
+
+  // The optimistic patch IS the success feedback here; a toast on top of a
+  // button that already flipped is noise on a control people press often.
+  it("stays quiet when the toggle succeeds", async () => {
+    setApiInstance({
+      listIssueSubscribers: async () => SUBSCRIBED_AS_MEMBER,
+      unsubscribeFromIssue: async () => undefined,
+    } as unknown as ApiClient);
+
+    const { result } = renderSubscribers();
+    await waitFor(() => expect(result.current.isSubscribed).toBe(true));
+    result.current.toggleSubscribe();
+
+    await waitFor(() => expect(result.current.togglePending).toBe(false));
+    expect(toastError).not.toHaveBeenCalled();
+    expect(toastSuccess).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `isSubscribed` is derived from `data ?? []`, so it reads false for everyone
+ * until the query resolves. `subscriptionKnown` is what lets the UI tell that
+ * default apart from a real answer (MUL-5714).
+ */
+describe("useIssueSubscribers subscriptionKnown", () => {
+  afterEach(() => {
+    cleanup();
+    toastError.mockClear();
+    toastSuccess.mockClear();
+  });
+
+  it("is false until the subscribers query resolves", async () => {
+    setApiInstance({
+      listIssueSubscribers: async () => SUBSCRIBED_AS_MEMBER,
+    } as unknown as ApiClient);
+
+    const { result } = renderSubscribers();
+    // The very first render already carries the misleading default.
+    expect(result.current.isSubscribed).toBe(false);
+    expect(result.current.subscriptionKnown).toBe(false);
+
+    await waitFor(() => expect(result.current.subscriptionKnown).toBe(true));
+    expect(result.current.isSubscribed).toBe(true);
+  });
+
+  it("stays false when the subscribers query fails", async () => {
+    setApiInstance({
+      listIssueSubscribers: async () => {
+        throw new ApiError("boom", 500, "Internal Server Error");
+      },
+    } as unknown as ApiClient);
+
+    const { result, queryClient } = renderSubscribers();
+
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryState(issueKeys.subscribers("issue-1"))?.status,
+      ).toBe("error"),
+    );
+    expect(result.current.subscriptionKnown).toBe(false);
   });
 });

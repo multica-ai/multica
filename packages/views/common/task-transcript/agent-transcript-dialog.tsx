@@ -19,6 +19,7 @@ import {
   ArrowUpNarrowWide,
   ListCollapse,
   Info,
+  Coins,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -47,7 +48,8 @@ import {
   type TranscriptSortDirection,
 } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
-import { runtimeDisplayName } from "@multica/core/runtimes";
+import { runtimeDisplayName, providerDisplayName } from "@multica/core/runtimes";
+import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { redactSecrets } from "./redact";
 import {
   createNewestFirstFollow,
@@ -68,6 +70,11 @@ import {
 import type { TraceDiffLine, TracePatchFile, TraceSummaryLabels } from "./trace-event-presenter";
 import { highlightBlock, highlightToLines, languageForPath } from "./diff-highlight";
 import { useT } from "../../i18n";
+import {
+  formatTokens,
+  formatUsd,
+  summarizeTaskUsage,
+} from "../../runtimes/utils";
 import "../../editor/styles/code.css";
 import "./task-transcript.css";
 
@@ -599,7 +606,7 @@ export function AgentTranscriptDialog({
 
   // Diagnostic detail for the ⓘ popover: everything a reader needs only when
   // debugging this specific run, kept off the always-visible surface.
-  const providerLabel = runtimeInfo?.provider ? formatProvider(runtimeInfo.provider) : null;
+  const providerLabel = runtimeInfo?.provider ? transcriptProviderLabel(runtimeInfo.provider) : null;
   const createdLabel = task.created_at ? formatRunTime(task.created_at) : null;
   const startedLabel = task.started_at ? formatRunTime(task.started_at) : null;
   const completedLabel = task.completed_at ? formatRunTime(task.completed_at) : null;
@@ -614,12 +621,22 @@ export function AgentTranscriptDialog({
       })
     : null;
   const hasTriggeredBy = !!task.attribution?.initiator;
+  // This run's own spend. Present on transcripts opened from the issue
+  // execution log (the endpoint that hydrates usage); absent elsewhere, where
+  // the chip and the usage rows below simply don't render.
+  //
+  // `summarizeTaskUsage` prices through the custom-rate store, which it reads
+  // imperatively — subscribing here is what makes a saved rate change reach
+  // this figure, same as on the other usage surfaces.
+  useCustomPricingStore((s) => s.pricings);
+  const usage = summarizeTaskUsage(task.usage);
   const hasRunDetails =
     !!runtimeInfo ||
     !!task.relative_work_dir ||
     !!createdLabel ||
     !!startedLabel ||
-    !!completedLabel;
+    !!completedLabel ||
+    !!usage;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -668,6 +685,22 @@ export function AgentTranscriptDialog({
               )}
               <span className="shrink-0">{triggerLabel}</span>
             </div>
+
+            {/* What this run cost, in the header of the run you are reading —
+                so "why was this one expensive" is answerable without going
+                back to the list. The split lives one click away in the ⓘ
+                popover. */}
+            {usage && (
+              <span
+                className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-micro tabular-nums"
+                title={t(($) => $.transcript.usage_chip_title)}
+              >
+                <Coins aria-hidden="true" className="h-3 w-3 text-muted-foreground" />
+                <span className="font-medium">{formatTokens(usage.tokens)}</span>
+                <span className="text-faint-foreground">·</span>
+                <span className="text-muted-foreground">{formatUsd(usage.cost)}</span>
+              </span>
+            )}
 
             <div className="flex shrink-0 items-center gap-0.5">
               {hasRunDetails && (
@@ -720,6 +753,35 @@ export function AgentTranscriptDialog({
                       )}
                       {completedLabel && (
                         <RunDetailRow label={t(($) => $.transcript.details_completed)} value={completedLabel} />
+                      )}
+                      {usage && (
+                        <>
+                          <div className="my-2 h-px bg-border" />
+                          <RunDetailRow
+                            label={t(($) => $.transcript.details_input)}
+                            value={formatTokens(usage.input)}
+                          />
+                          <RunDetailRow
+                            label={t(($) => $.transcript.details_output)}
+                            value={formatTokens(usage.output)}
+                          />
+                          {usage.cacheRead > 0 && (
+                            <RunDetailRow
+                              label={t(($) => $.transcript.details_cache_read)}
+                              value={formatTokens(usage.cacheRead)}
+                            />
+                          )}
+                          {usage.cacheWrite > 0 && (
+                            <RunDetailRow
+                              label={t(($) => $.transcript.details_cache_write)}
+                              value={formatTokens(usage.cacheWrite)}
+                            />
+                          )}
+                          <RunDetailRow
+                            label={t(($) => $.transcript.details_cost)}
+                            value={formatUsd(usage.cost)}
+                          />
+                        </>
                       )}
                     </div>
                   </PopoverContent>
@@ -1000,6 +1062,22 @@ function SortDirectionToggle({ value, onChange, labels }: SortDirectionTogglePro
   );
 }
 
+// Provider slugs this view names differently from the runtime list. The daemon
+// has no display-name override for Claude, so the shared formatter answers
+// "Claude" — but a run's diagnostics have always named the tool "Claude Code",
+// and `claude-code` is a legacy provider value still present on older tasks
+// (title-casing it alone would read as "Claude-code"). Every other provider
+// defers to the shared formatter so this row cannot drift from the runtime
+// list the way it did before (#5260).
+const TRANSCRIPT_PROVIDER_LABELS: Record<string, string> = {
+  claude: "Claude Code",
+  "claude-code": "Claude Code",
+};
+
+function transcriptProviderLabel(provider: string): string {
+  return TRANSCRIPT_PROVIDER_LABELS[provider.toLowerCase()] ?? providerDisplayName(provider);
+}
+
 // ─── Facts line separator ───────────────────────────────────────────────────
 
 function FactDot() {
@@ -1008,16 +1086,6 @@ function FactDot() {
       ·
     </span>
   );
-}
-
-function formatProvider(provider: string): string {
-  const map: Record<string, string> = {
-    claude: "Claude Code",
-    "claude-code": "Claude Code",
-    codex: "Codex",
-    pi: "Pi",
-  };
-  return map[provider.toLowerCase()] ?? provider;
 }
 
 // ─── Timeline bar (colored segments) ────────────────────────────────────────

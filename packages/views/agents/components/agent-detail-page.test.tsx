@@ -194,8 +194,11 @@ describe("AgentDetailPage DM button", () => {
     // would get a wrong "no access" toast. Undetermined must disable, not deny.
     membersPendingRef.current = true;
     const { push } = renderPage();
+    // The control is an anchor now, so "disabled" is expressed the only way a
+    // link can express it: aria-disabled plus removal from the tab order.
     const dm = await screen.findByRole("button", { name: "DM" });
-    expect(dm).toBeDisabled();
+    expect(dm).toHaveAttribute("aria-disabled", "true");
+    expect(dm).toHaveAttribute("tabindex", "-1");
     fireEvent.click(dm);
     expect(mockToastError).not.toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();

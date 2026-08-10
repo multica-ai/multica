@@ -49,7 +49,7 @@ export function WeeklyErrorsChart({ data }: { data: WeeklyErrorsData[] }) {
           axisLine={false}
           tickMargin={8}
           allowDecimals={false}
-          width={40}
+          width="auto"
         />
         <ChartTooltip
           content={

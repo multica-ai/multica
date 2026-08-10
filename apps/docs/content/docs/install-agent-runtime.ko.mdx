@@ -29,9 +29,12 @@ Multica는 현재 다음 명령을 감지합니다.
 | OpenClaw | `openclaw` | [OpenClaw 설치](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode 빠른 시작](https://opencode.ai/en/docs) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
+| Oh-My-Pi | `omp` | [Oh-My-Pi 설치](https://omp.sh) |
 | Qoder CLI | `qodercli` | [Qoder CLI 빠른 시작](https://docs.qoder.com/en/cli/quick-start) |
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI 빠른 시작](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
+| QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 공식 사이트](https://www.trae.cn/) |
 
 "지원됨"은 Multica가 해당 CLI를 호출할 수 있다는 뜻이며 Multica가 도구의 계정, 구독, 모델 사용량을 제공한다는 뜻은 아닙니다.
@@ -39,6 +42,10 @@ Multica는 현재 다음 명령을 감지합니다.
 ## 2. 로컬에서 로그인 완료
 
 설치 후 터미널에서 도구를 한 번 직접 실행하고 도구 자체의 절차에 따라 로그인하거나 모델 서비스를 설정합니다. 터미널에서 요청을 완료하지 못하면 데몬이 호출할 때도 실패합니다.
+
+Reasonix를 사용할 때는 데몬을 시작하기 전에 `reasonix setup`을 실행해 기본 공급자와 모델을 설정하세요.
+
+QwenPaw를 사용할 때는 QwenPaw 자체 설정에서 공급자와 모델을 선택하세요. Multica는 실행 시 QwenPaw의 모델을 덮어쓸 수 없습니다.
 
 로그인 자격 증명은 도구가 로컬에 저장합니다. Multica는 Claude, Codex, Cursor 또는 다른 CLI의 로그인 token을 받지 않습니다.
 

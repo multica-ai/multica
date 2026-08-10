@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { IssuePriority, UpdateIssueRequest } from "@multica/core/types";
-import { PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { PRIORITY_DISPLAY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { PriorityIcon } from "../priority-icon";
 import { DeferredPopup } from "../../../common/deferred-popup";
 import { PropertyPicker, PickerItem, PICKER_TRIGGER_CLASS } from "./property-picker";
@@ -88,7 +88,8 @@ function PriorityPickerImpl({
         ) : null)
       }
     >
-      {PRIORITY_ORDER.map((p) => {
+      {/* "No priority" leads — see PRIORITY_DISPLAY_ORDER. */}
+      {PRIORITY_DISPLAY_ORDER.map((p) => {
         const c = PRIORITY_CONFIG[p];
         return (
           <PickerItem

@@ -108,6 +108,31 @@ export interface ActorFilterValue {
   id: string;
 }
 
+/** The nine query-defining filter fields as one value — what a saved view
+ *  fixes, and what resets restore. */
+export interface FilterSnapshot {
+  statusFilters: IssueStatus[];
+  priorityFilters: IssuePriority[];
+  assigneeFilters: ActorFilterValue[];
+  includeNoAssignee: boolean;
+  creatorFilters: ActorFilterValue[];
+  projectFilters: string[];
+  includeNoProject: boolean;
+  labelFilters: string[];
+  propertyFilters: Record<string, string[]>;
+}
+
+/** Filter-bar chip dimensions. Date is excluded: `dateFilter` lives outside
+ *  the persisted slice and clears through `setDateFilter(null)`. */
+export type FilterDimension =
+  | "status"
+  | "priority"
+  | "assignee"
+  | "creator"
+  | "project"
+  | "label"
+  | `property:${string}`;
+
 export const PROPERTY_VIEW_PREFIX = "property:";
 
 export function propertyIdFromViewKey(key: string): string | null {
@@ -215,6 +240,13 @@ export interface IssueViewState {
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
+  /** Clear one filter dimension (a filter-bar chip). `property:<id>` clears
+   *  that definition's entry only. Paired boolean flags (no-assignee /
+   *  no-project) clear with their dimension. */
+  clearFilterDimension: (dimension: FilterDimension) => void;
+  /** Replace every filter field at once — how "reset inside a saved view"
+   *  returns to the view's own conditions instead of to nothing. */
+  resetFiltersTo: (snapshot: FilterSnapshot) => void;
   setSortBy: (field: SortField) => void;
   setSortDirection: (dir: SortDirection) => void;
   toggleCardProperty: (key: keyof CardProperties) => void;
@@ -379,6 +411,31 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       propertyFilters: {},
       dateFilter: null,
       agentRunningFilter: false,
+    }),
+  resetFiltersTo: (snapshot) => set({ ...snapshot }),
+  clearFilterDimension: (dimension) =>
+    set((state) => {
+      switch (dimension) {
+        case "status":
+          return { statusFilters: [] };
+        case "priority":
+          return { priorityFilters: [] };
+        case "assignee":
+          return { assigneeFilters: [], includeNoAssignee: false };
+        case "creator":
+          return { creatorFilters: [] };
+        case "project":
+          return { projectFilters: [], includeNoProject: false };
+        case "label":
+          return { labelFilters: [] };
+        default: {
+          const propertyId = propertyIdFromViewKey(dimension);
+          if (!propertyId || !(propertyId in state.propertyFilters)) return state;
+          const propertyFilters = { ...state.propertyFilters };
+          delete propertyFilters[propertyId];
+          return { propertyFilters };
+        }
+      }
     }),
   setSortBy: (field) => set({ sortBy: field }),
   setSortDirection: (dir) => set({ sortDirection: dir }),

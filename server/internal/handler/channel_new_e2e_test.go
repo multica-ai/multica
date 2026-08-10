@@ -31,6 +31,7 @@ func TestChannelNewCommandE2EStartsFreshProviderSession(t *testing.T) {
 		text             string
 		commandText      string
 		forceFresh       bool
+		followUpText     string
 		wantStoredText   string
 		wantForceFresh   bool
 		wantPriorSession string
@@ -44,6 +45,15 @@ func TestChannelNewCommandE2EStartsFreshProviderSession(t *testing.T) {
 			wantStoredText:   "what model are you?",
 			wantPriorSession: "old-provider-session",
 			wantPriorWorkDir: "/tmp/old-provider-workdir",
+		},
+		{
+			name:           "bare /new applies to the next real message",
+			channelType:    channel.Type("slack"),
+			text:           "/new",
+			commandText:    "/new",
+			followUpText:   "what model are you?",
+			wantStoredText: "what model are you?",
+			wantForceFresh: true,
 		},
 		{
 			name:           "Slack /new message starts without provider context",
@@ -91,12 +101,12 @@ func TestChannelNewCommandE2EStartsFreshProviderSession(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runChannelNewCommandE2E(t, tt.channelType, tt.text, tt.commandText, tt.forceFresh, tt.wantStoredText, tt.wantForceFresh, tt.wantPriorSession, tt.wantPriorWorkDir)
+			runChannelNewCommandE2E(t, tt.channelType, tt.text, tt.commandText, tt.forceFresh, tt.followUpText, tt.wantStoredText, tt.wantForceFresh, tt.wantPriorSession, tt.wantPriorWorkDir)
 		})
 	}
 }
 
-func runChannelNewCommandE2E(t *testing.T, channelType channel.Type, text, commandText string, adapterForceFresh bool, wantStoredText string, wantForceFresh bool, wantPriorSession, wantPriorWorkDir string) {
+func runChannelNewCommandE2E(t *testing.T, channelType channel.Type, text, commandText string, adapterForceFresh bool, followUpText, wantStoredText string, wantForceFresh bool, wantPriorSession, wantPriorWorkDir string) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -187,6 +197,38 @@ func runChannelNewCommandE2E(t *testing.T, channelType channel.Type, text, comma
 	}); err != nil {
 		t.Fatalf("route channel message: %v", err)
 	}
+	if followUpText != "" {
+		var taskCount, userMessageCount int
+		var pendingFresh bool
+		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id = $1`, sessionID).Scan(&taskCount); err != nil {
+			t.Fatalf("count tasks after bare /new: %v", err)
+		}
+		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM chat_message WHERE chat_session_id = $1 AND role = 'user'`, sessionID).Scan(&userMessageCount); err != nil {
+			t.Fatalf("count messages after bare /new: %v", err)
+		}
+		if err := testPool.QueryRow(ctx, `SELECT pending_fresh FROM channel_chat_session_binding WHERE chat_session_id = $1`, sessionID).Scan(&pendingFresh); err != nil {
+			t.Fatalf("load pending fresh after bare /new: %v", err)
+		}
+		if taskCount != 0 || userMessageCount != 0 || !pendingFresh {
+			t.Fatalf("bare /new state: tasks=%d messages=%d pending_fresh=%t, want 0/0/true", taskCount, userMessageCount, pendingFresh)
+		}
+
+		if err := router.Handle(ctx, channel.InboundMessage{
+			EventID:     "event-follow-up-" + t.Name(),
+			MessageID:   "message-follow-up-" + t.Name(),
+			Type:        channel.MsgTypeText,
+			Text:        followUpText,
+			CommandText: followUpText,
+			Source: channel.Source{
+				ChannelType: channelType,
+				ChatID:      t.Name(),
+				ChatType:    channel.ChatTypeP2P,
+				SenderID:    "platform-user-e2e",
+			},
+		}); err != nil {
+			t.Fatalf("route follow-up channel message: %v", err)
+		}
+	}
 
 	var taskID string
 	var forceFresh bool
@@ -201,6 +243,13 @@ func runChannelNewCommandE2E(t *testing.T, channelType channel.Type, text, comma
 	}
 	if forceFresh != wantForceFresh {
 		t.Fatalf("queued task %s: force_fresh_session = %t, want %t", taskID, forceFresh, wantForceFresh)
+	}
+	var pendingFresh bool
+	if err := testPool.QueryRow(ctx, `SELECT pending_fresh FROM channel_chat_session_binding WHERE chat_session_id = $1`, sessionID).Scan(&pendingFresh); err != nil {
+		t.Fatalf("load pending fresh after task enqueue: %v", err)
+	}
+	if pendingFresh {
+		t.Fatal("successful task enqueue did not consume pending_fresh")
 	}
 
 	var issueCount int
@@ -217,12 +266,17 @@ func runChannelNewCommandE2E(t *testing.T, channelType channel.Type, text, comma
 		t.Fatalf("created issues = %d, want 0; /new must be mutually exclusive with /issue", issueCount)
 	}
 
-	messages, err := queries.ListChatMessages(ctx, sessionID)
-	if err != nil {
-		t.Fatalf("list persisted chat messages: %v", err)
+	var storedText string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content FROM chat_message
+		WHERE chat_session_id = $1 AND role = 'user'
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`, sessionID).Scan(&storedText); err != nil {
+		t.Fatalf("load persisted chat message: %v", err)
 	}
-	if len(messages) != 1 || messages[0].Content != wantStoredText {
-		t.Fatalf("persisted messages = %#v, want one user message %q", messages, wantStoredText)
+	if storedText != wantStoredText {
+		t.Fatalf("persisted message = %q, want %q", storedText, wantStoredText)
 	}
 
 	claimed := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
@@ -301,6 +355,10 @@ func (b *channelNewE2ESessionBinder) EnsureSession(ctx context.Context, p engine
 	})
 }
 
+func (b *channelNewE2ESessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
+	return b.session.MarkPendingFresh(ctx, sessionID)
+}
+
 func (b *channelNewE2ESessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
 	return b.session.AppendUserMessage(ctx, engine.AppendInput{
 		SessionID:           p.SessionID,
@@ -312,6 +370,7 @@ func (b *channelNewE2ESessionBinder) AppendMessage(ctx context.Context, p engine
 		ThreadID:            p.Message.Source.ThreadID,
 		ClaimToken:          p.ClaimToken,
 		MediaPendingSeconds: p.MediaPendingSeconds,
+		ForceFresh:          p.Message.ForceFresh,
 	})
 }
 
@@ -321,6 +380,7 @@ func (b *channelNewE2ESessionBinder) BindMedia(ctx context.Context, p engine.Bin
 		SessionID:   p.SessionID,
 		WorkspaceID: p.WorkspaceID,
 		Sender:      p.Sender,
+		IssueID:     p.IssueID,
 		MediaRefs:   p.MediaRefs,
 	})
 }

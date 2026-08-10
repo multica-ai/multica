@@ -77,6 +77,11 @@ type PrepareParams struct {
 	// is absent — set when an explicit named profile was requested so a typo
 	// doesn't silently seed from an empty home and drop the user's auth/config.
 	HermesSourceMustExist bool
+	// HermesMemoryStore is the agent's persistent Hermes memory store
+	// (HermesMemoryStorePath) the overlay links memories/ to, so memory outlives
+	// the task. Empty keeps memories/ task-local — no agent to key on, or the
+	// MULTICA_HERMES_TASK_MEMORY rollback switch is engaged.
+	HermesMemoryStore string
 	// HermesEnv is the sanitized effective env (agent custom_env minus the daemon
 	// blocklisted keys) used to expand ${VAR} in Hermes external_dirs so it
 	// matches what the Hermes child process actually sees. Only used for hermes.
@@ -126,12 +131,12 @@ type TaskContextForEnv struct {
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID                 string                  // non-empty for chat tasks
 	// ChatChannelType is the IM platform behind a chat session ("slack",
-	// "feishu"); empty for a web/mobile chat. The brief reads it for DELIVERY
-	// policy only: any non-empty value means the reply leaves Multica for an
-	// external channel, so `multica attachment upload` cannot deliver a file and
-	// the Output section says text-only instead (MUL-4899). The orthogonal
-	// history-command policy is Slack-only and lives in the per-turn chat prompt
-	// (daemon/prompt.go) — the server has no Feishu history reader.
+	// "feishu", "wecom"); empty for a web/mobile chat. Any non-empty value
+	// means the reply leaves Multica for an external channel, so `multica
+	// attachment upload` cannot deliver a file and the Output section says
+	// text-only instead (MUL-4899). The orthogonal audience and history policies
+	// live in the per-turn chat prompt (daemon/prompt.go) — the server has no
+	// history reader for any other channel.
 	ChatChannelType         string
 	AutopilotRunID          string // non-empty for autopilot run_only tasks
 	AutopilotID             string
@@ -141,7 +146,7 @@ type TaskContextForEnv struct {
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
 	HandoffNote             string // assignment handoff instruction; rendered into issue_context.md (MUL-3375)
-	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
+	IsSquadLeader           bool   // true when THIS TASK runs the agent in the squad-leader role (may exit silently on no_action); derived from the claim's is_leader_task / squad_id, never sniffed from instructions text (MUL-5811)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
 	// non-empty so every agent in the workspace sees the same shared context,
@@ -198,6 +203,10 @@ type Environment struct {
 	// on "may I remove WorkDir as scratch?" must check this — for example
 	// the GC loop never deletes the user's directory.
 	LocalDirectory bool
+	// MulticaConfigRoot is the private per-task config directory exported to
+	// child CLI invocations. It prevents implicit discovery of the daemon
+	// owner's ~/.multica profile without changing the provider-facing HOME.
+	MulticaConfigRoot string
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
 	// ClaudeSettingsPath is a task-local --settings JSON file that applies
@@ -231,6 +240,13 @@ type Environment struct {
 	// .agent_context/skills/ fallback was never read (issue #5242). See
 	// hermes_home.go.
 	HermesHome string
+	// QwenpawWorkspace is the path to the per-task QwenPaw workspace directory
+	// (set only for the qwenpaw provider). It is populated with the bound skills
+	// and their skill.json manifest with enabled: true, so the skills are
+	// immediately effective. The daemon passes --workspace <dir> to
+	// `qwenpaw acp` so the QwenPaw agent discovers the skills natively.
+	// See qwenpaw_workspace.go.
+	QwenpawWorkspace string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -294,12 +310,20 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: create directory %s: %w", dir, err)
 		}
 	}
+	multicaConfigRoot := filepath.Join(envRoot, "multica-config")
+	if err := os.MkdirAll(multicaConfigRoot, 0o700); err != nil {
+		return nil, fmt.Errorf("execenv: create task-local Multica config directory: %w", err)
+	}
+	if err := os.Chmod(multicaConfigRoot, 0o700); err != nil {
+		return nil, fmt.Errorf("execenv: restrict task-local Multica config directory: %w", err)
+	}
 
 	env := &Environment{
-		RootDir:        envRoot,
-		WorkDir:        workDir,
-		LocalDirectory: params.LocalWorkDir != "",
-		logger:         logger,
+		RootDir:           envRoot,
+		WorkDir:           workDir,
+		LocalDirectory:    params.LocalWorkDir != "",
+		MulticaConfigRoot: multicaConfigRoot,
+		logger:            logger,
 	}
 
 	// Write context files into workdir (skills go to provider-native paths).
@@ -336,7 +360,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
@@ -359,12 +383,25 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// skills visible — Hermes discovers skills only from its home, so the old
 	// .agent_context/skills/ fallback was never read (issue #5242). See
 	// hermes_home.go.
+	//
+	// Note this is a local contract, not an observable product behaviour: the
+	// server appends the platform's built-in skills to every agent's skill set
+	// (service.LoadAgentSkillBundles), so a claimed task's AgentSkills is never
+	// empty and the skill-less branch is effectively unreachable in production.
+	// Emptying an agent's own skill list is NOT a way to opt out of the overlay.
 	if params.Provider == "hermes" && len(params.Task.AgentSkills) > 0 {
 		hermesHome := filepath.Join(envRoot, "hermes-home")
-		if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
+		if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
 		}
 		env.HermesHome = hermesHome
+	}
+	if params.Provider == "qwenpaw" {
+		qwenpawWorkspace := filepath.Join(envRoot, "qwenpaw-workspace")
+		if err := prepareQwenpawWorkspace(qwenpawWorkspace, params.Task.AgentSkills, logger); err != nil {
+			return nil, fmt.Errorf("execenv: prepare qwenpaw workspace: %w", err)
+		}
+		env.QwenpawWorkspace = qwenpawWorkspace
 	}
 
 	// For Cursor, materialize managed MCP into project-local config and use
@@ -395,6 +432,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			OpenclawBin: params.OpenclawBin,
 			McpConfig:   params.McpConfig,
 			Gateway:     params.OpenclawGateway,
+			Logger:      logger,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare openclaw config: %w", err)
@@ -447,12 +485,13 @@ type ReuseParams struct {
 	// loop) keep the "never delete the user's directory" invariant on
 	// reuse paths.
 	LocalDirectory bool
-	// HermesSourceHome and HermesEnv mirror PrepareParams on reuse so the Hermes
-	// overlay re-derives against the agent's current source home / profile and
-	// external_dirs vars.
+	// HermesSourceHome, HermesEnv and HermesMemoryStore mirror PrepareParams on
+	// reuse so the Hermes overlay re-derives against the agent's current source
+	// home / profile, external_dirs vars, and memory store.
 	HermesSourceHome      string
 	HermesSourceMustExist bool
 	HermesEnv             map[string]string
+	HermesMemoryStore     string
 	// CodexCustomArgs mirrors PrepareParams.CodexCustomArgs on reuse so the
 	// Windows sandbox decision honors a `-c windows.sandbox=...` override here
 	// too (MUL-4957).
@@ -496,6 +535,17 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		WorkDir:        params.WorkDir,
 		LocalDirectory: params.LocalDirectory,
 		logger:         logger,
+	}
+	if env.RootDir != "" {
+		env.MulticaConfigRoot = filepath.Join(env.RootDir, "multica-config")
+		if err := os.MkdirAll(env.MulticaConfigRoot, 0o700); err != nil {
+			logger.Warn("execenv: restore task-local Multica config directory failed; forcing fresh prepare", "error", err)
+			return nil
+		}
+		if err := os.Chmod(env.MulticaConfigRoot, 0o700); err != nil {
+			logger.Warn("execenv: restrict task-local Multica config directory failed; forcing fresh prepare", "error", err)
+			return nil
+		}
 	}
 
 	// Roll back the previous dispatch's sidecar writes before refreshing.
@@ -552,7 +602,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome
@@ -571,6 +621,17 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		}
 	}
 
+	// Refresh (or tear down) the per-task QwenPaw workspace on reuse.
+	// Rebuild the workspace so an added/removed/edited skill is reflected.
+	if params.Provider == "qwenpaw" && env.RootDir != "" {
+		qwenpawWorkspace := filepath.Join(env.RootDir, "qwenpaw-workspace")
+		if err := prepareQwenpawWorkspace(qwenpawWorkspace, params.Task.AgentSkills, logger); err != nil {
+			logger.Warn("execenv: refresh qwenpaw workspace failed; forcing fresh prepare", "error", err)
+			return nil
+		}
+		env.QwenpawWorkspace = qwenpawWorkspace
+	}
+
 	// Refresh (or tear down) the per-task HERMES_HOME on reuse. With skills
 	// bound, rebuild the overlay so an added/removed/edited skill and the
 	// mirrored home/config track the user's current ~/.hermes/ before the next
@@ -580,7 +641,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if params.Provider == "hermes" && env.RootDir != "" {
 		hermesHome := filepath.Join(env.RootDir, "hermes-home")
 		if len(params.Task.AgentSkills) > 0 {
-			if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
+			if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, logger); err != nil {
 				// Fail closed: a half-built overlay must not run. Returning nil
 				// makes the daemon fall back to a fresh Prepare, whose error
 				// then blocks dispatch rather than silently dropping the bound
@@ -626,6 +687,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			OpenclawBin: params.OpenclawBin,
 			McpConfig:   params.McpConfig,
 			Gateway:     params.OpenclawGateway,
+			Logger:      logger,
 		})
 		if err != nil {
 			logger.Warn("execenv: refresh openclaw config failed", "error", err)

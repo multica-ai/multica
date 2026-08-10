@@ -53,8 +53,9 @@ type ModelServiceTier struct {
 // ModelThinking carries the per-model reasoning/effort catalog
 // surfaced by an agent runtime. Values are runtime-native — Codex can emit
 // "none|minimal|low|medium|high|xhigh|max|ultra"; Claude emits
-// "low|medium|high|xhigh|max". The frontend renders SupportedLevels
-// as-is so what users see matches each CLI's own UI.
+// "low|medium|high|xhigh|max"; Pi emits
+// "off|minimal|low|medium|high|xhigh|max". The frontend renders
+// SupportedLevels as-is so what users see matches each CLI's own UI.
 type ModelThinking struct {
 	SupportedLevels []ThinkingLevel `json:"supported_levels"`
 	// DefaultLevel is the value the runtime picks when no override is
@@ -120,14 +121,30 @@ const modelCacheTTL = 60 * time.Second
 // pi, openclaw) it shells out with caching and falls back where the
 // provider has a safe static catalog.
 //
-// For claude, codex, and opencode, the catalog is augmented with per-model
-// thinking-level options discovered from the local CLI. Codex discovery
-// failures fall back to a model + thinking snapshot; providers without a safe
-// fallback leave Thinking nil, which makes the UI hide the thinking picker.
+// For claude, codex, opencode, pi, and kimi, the catalog is augmented with
+// per-model thinking-level options discovered from the local CLI. Codex
+// discovery failures fall back to a model + thinking snapshot; providers
+// without a safe fallback leave Thinking nil, which makes the UI hide the
+// thinking picker.
 //
 // executablePath lets the caller point at a non-default binary; pass
 // "" to use the provider's default name on PATH.
 func ListModels(ctx context.Context, providerType, executablePath string) (Catalog, error) {
+	// Built-in runtime identities (e.g. "omp") declare their model discovery
+	// strategy in the descriptor. Resolve generically before the protocol-
+	// family switch so no runtime-specific case is needed below. When the
+	// descriptor has no ModelDiscovery strategy, return an empty catalog
+	// (not the family's default) — running a semantically incompatible
+	// discovery command (e.g. omp rejecting --list-models) is worse than
+	// degrading to manual entry.
+	if desc, ok := BuiltinRuntimeByID(providerType); ok {
+		if desc.ModelDiscovery != nil {
+			return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
+				return discovered(desc.ModelDiscovery(ctx, executablePath))
+			})
+		}
+		return Catalog{Models: []Model{}}, nil
+	}
 	switch providerType {
 	case "claude":
 		models := claudeStaticModels()
@@ -143,38 +160,42 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// agy 1.0.6 added a `--model` flag plus an `agy models` catalog
 		// command (MUL-3125). Enumerate it on demand like the other
 		// dynamic-discovery backends.
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverAntigravityModels(ctx, executablePath))
 		})
 	case "traecli":
 		// Official TRAE CLI is ACP-native: it returns its model catalog from
 		// session/new. Enumerate it on demand like the other ACP backends
 		// (requires a logged-in traecli; falls back to manual entry on error).
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverTraecliModels(ctx, executablePath))
 		})
 	case "cursor":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discoverCursorModels(ctx, executablePath)
 		})
 	case "copilot":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discoverCopilotModels(ctx, executablePath)
 		})
 	case "hermes":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverHermesModels(ctx, executablePath))
 		})
 	case "kimi":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverKimiModels(ctx, executablePath))
 		})
+	case "reasonix":
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
+			return discovered(discoverReasonixModels(ctx, executablePath))
+		})
 	case "kiro":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverKiroModels(ctx, executablePath))
 		})
 	case "qoder", "qoderclicn":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverQoderModels(ctx, executablePath, qoderDefaultBinary(providerType)))
 		})
 	case "opencode":
@@ -186,18 +207,18 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 			return discovered(discoverDevecoModels(ctx, executablePath))
 		})
 	case "pi":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverPiModels(ctx, executablePath))
 		})
 	case "openclaw":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverOpenclawAgents(ctx, executablePath))
 		})
 	case "codebuddy":
 		// discoverCodebuddyModels owns the thinking annotation too, so the one
 		// `--help` capture feeds both catalogs. Annotating out here would run
 		// the command a second time (MUL-5549).
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discoverCodebuddyModels(ctx, executablePath)
 		})
 	case "qwen":
@@ -205,11 +226,19 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
 		return Catalog{Models: []Model{}}, nil
+	case "qwenpaw":
+		// QwenPaw's model selection is unsupported (session/set_model
+		// persists to agent scope, not session scope), so there is no
+		// consumer for a discovered catalog. Return an empty list to
+		// avoid spawning an ACP subprocess that has no effect. If upstream
+		// makes model selection session-scoped, restore a discovery helper
+		// here modelled on discoverTraecliModels.
+		return Catalog{Models: []Model{}}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
 		// UI picker stays usable offline / unauthenticated.
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discoverGrokModels(ctx, executablePath)
 		})
 	default:
@@ -221,16 +250,27 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 // any effect for the given provider. Every built-in provider now honours
 // `opts.Model` end-to-end — Hermes routes it through the ACP
 // `session/set_model` RPC before each prompt; Claude / Codex / Cursor /
-// Gemini / Copilot / Kimi / Kiro / OpenCode / OpenClaw / Pi / Antigravity
+// Gemini / Copilot / Kimi / Reasonix / Kiro / OpenCode / OpenClaw / Pi / Antigravity
 // pass it via flag or session config (Antigravity gained `--model` in agy
 // 1.0.6 — MUL-3125).
 //
 // The hook is retained — rather than inlining `true` at the call sites — so
-// a future model-less runtime can opt out in one place, which makes the UI
+// a model-less runtime can opt out in one place, which makes the UI
 // render a disabled "Managed by runtime" picker instead of an empty
 // dropdown plus a silently-ignored manual-entry field.
 func ModelSelectionSupported(providerType string) bool {
-	return true
+	switch providerType {
+	case "qwenpaw":
+		// QwenPaw's `session/set_model` persists to agent.json at the agent
+		// scope, not the session scope. Calling it would mutate the user's
+		// shared, persistent agent config. Model override is therefore
+		// unsupported — the runtime uses whatever model is configured in
+		// the agent profile. If QwenPaw makes model selection session-scoped
+		// upstream, this can be reverted to `true`.
+		return false
+	default:
+		return true
+	}
 }
 
 // ModelKnownIncompatibleWithProvider reports whether a saved model is a known
@@ -292,9 +332,9 @@ func modelHasKnownPrefix(model string) bool {
 }
 
 // cachedDiscovery invokes fn and caches the result for modelCacheTTL.
-// The cache is keyed on providerType only; callers that need to
-// distinguish discovery by host/user should include that in the key
-// if we ever introduce such a mode.
+// Callers build the key with discoveryCacheKey so two runtimes of the same
+// protocol family never share one memo entry when they enumerate different
+// binaries.
 func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 	modelCacheMu.Lock()
 	if entry, ok := modelCache[key]; ok && time.Now().Before(entry.expiresAt) {
@@ -330,6 +370,13 @@ func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 	return catalog, nil
 }
 
+// discoveryCacheKey scopes a discovery memo to the binary it enumerated.
+// A custom runtime profile (MUL-3284) runs a different executable under a
+// built-in protocol family, so a provider-only key would let a built-in
+// runtime and a same-family profile runtime on one host serve each other's
+// catalog for the TTL — the same mismatch the daemon's path resolution
+// fixes, reintroduced at the cache layer (MUL-5789). An empty path keeps
+// the bare provider key, which is what a built-in on PATH resolves to.
 func discoveryCacheKey(providerType, executablePath string) string {
 	if executablePath == "" {
 		return providerType
@@ -730,16 +777,251 @@ func openCodeThinkingLevelsFromVariants(variants map[string]opencodeModelVariant
 	return levels
 }
 
-// discoverPiModels runs `pi --list-models` and parses its output.
-// Older pi versions print the list to stderr; newer versions use
-// stdout. We capture both and parse whichever is non-empty.
+var piThinkingLevelLabels = map[string]string{
+	"off":     "Off",
+	"minimal": "Minimal",
+	"low":     "Low",
+	"medium":  "Medium",
+	"high":    "High",
+	"xhigh":   "Extra high",
+	"max":     "Max",
+}
+
+var piThinkingLevelOrder = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// Keep Pi discovery within the established 15-second window while reserving a
+// real opportunity for the compatibility fallback when RPC hangs.
+const (
+	piRPCDiscoveryTimeout   = 7 * time.Second
+	piTableDiscoveryTimeout = 8 * time.Second
+)
+
+type piRPCModel struct {
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Provider         string             `json:"provider"`
+	Reasoning        bool               `json:"reasoning"`
+	ThinkingLevelMap map[string]*string `json:"thinkingLevelMap"`
+}
+
+type piRPCState struct {
+	Model         *piRPCModel `json:"model"`
+	ThinkingLevel string      `json:"thinkingLevel"`
+}
+
+type piRPCResponse struct {
+	ID      string          `json:"id"`
+	Type    string          `json:"type"`
+	Command string          `json:"command"`
+	Success bool            `json:"success"`
+	Data    json.RawMessage `json:"data"`
+}
+
+// discoverPiModels asks Pi's RPC API for its machine-readable model catalog.
+// The RPC model objects carry the exact per-model reasoning metadata that the
+// human-readable `--list-models` table reduces to a yes/no column. Older Pi
+// versions and pi-family forks may not implement RPC, so discovery falls back
+// to the existing table parser without advertising a guessed thinking catalog.
 func discoverPiModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverPiModelsWithin(ctx, executablePath, piRPCDiscoveryTimeout, piTableDiscoveryTimeout)
+}
+
+func discoverPiModelsWithin(ctx context.Context, executablePath string, rpcTimeout, tableTimeout time.Duration) ([]Model, error) {
 	if executablePath == "" {
 		executablePath = "pi"
 	}
-	if _, err := exec.LookPath(executablePath); err != nil {
+	lookedUp, err := exec.LookPath(executablePath)
+	if err != nil {
 		return []Model{}, nil
 	}
+	// Split the established 15-second discovery budget so an RPC surface that
+	// accepts the mode but never answers cannot starve the compatibility table
+	// fallback. Both phase contexts still inherit caller cancellation.
+	rpcCtx, rpcCancel := context.WithTimeout(ctx, rpcTimeout)
+	models, ok := discoverPiModelsRPC(rpcCtx, executablePath, lookedUp)
+	rpcCancel()
+	if ok {
+		return models, nil
+	}
+
+	tableCtx, tableCancel := context.WithTimeout(ctx, tableTimeout)
+	defer tableCancel()
+	return discoverPiModelsTable(tableCtx, executablePath)
+}
+
+// discoverPiModelsRPC starts a short-lived Pi RPC session and requests both
+// the available models and current state. The state identifies the model Pi
+// will choose when Multica omits --model; its thinking level is the runtime's
+// effective default for that selected model.
+func discoverPiModelsRPC(ctx context.Context, executablePath, lookedUp string) ([]Model, bool) {
+	args := []string{
+		"--mode", "rpc",
+		"--no-session",
+		// Extensions stay enabled because Pi extensions can register providers
+		// and models; disabling them would make RPC discovery disagree with the
+		// catalog used by real task execution.
+		"--no-skills",
+		"--no-prompt-templates",
+		"--no-context-files",
+	}
+	argv0, cmdArgs := choosePiInvocation(executablePath, lookedUp, args, slog.Default())
+	cmd := exec.CommandContext(ctx, argv0, cmdArgs...)
+	hideAgentWindow(cmd)
+	cmd.WaitDelay = time.Second
+	cmd.Stderr = io.Discard
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, false
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return nil, false
+	}
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		return nil, false
+	}
+
+	encoder := json.NewEncoder(stdin)
+	requests := []map[string]string{
+		{"id": "multica-state", "type": "get_state"},
+		{"id": "multica-models", "type": "get_available_models"},
+	}
+	for _, request := range requests {
+		if err := encoder.Encode(request); err != nil {
+			_ = stdin.Close()
+			_ = cmd.Wait()
+			return nil, false
+		}
+	}
+
+	var (
+		rawModels  []piRPCModel
+		state      piRPCState
+		modelsDone bool
+		stateDone  bool
+	)
+	scanner := newAgentStreamScanner(stdout)
+	for scanner.Scan() {
+		var response piRPCResponse
+		if err := json.Unmarshal(scanner.Bytes(), &response); err != nil || response.Type != "response" {
+			continue
+		}
+		switch {
+		case response.ID == "multica-state" || response.Command == "get_state":
+			stateDone = true
+			if response.Success {
+				_ = json.Unmarshal(response.Data, &state)
+			}
+		case response.ID == "multica-models" || response.Command == "get_available_models":
+			modelsDone = true
+			if response.Success {
+				var payload struct {
+					Models []piRPCModel `json:"models"`
+				}
+				if err := json.Unmarshal(response.Data, &payload); err == nil {
+					rawModels = payload.Models
+				}
+			}
+		}
+		if modelsDone && stateDone {
+			break
+		}
+	}
+
+	// Pi's RPC loop waits for more commands while stdin remains open. EOF ends
+	// the throwaway session cleanly; the context remains a safety net for an
+	// older/forked CLI that ignores EOF or never completes both responses.
+	_ = stdin.Close()
+	_, _ = io.Copy(io.Discard, stdout)
+	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
+		return nil, false
+	}
+	if !modelsDone || len(rawModels) == 0 {
+		return nil, false
+	}
+	return piModelsFromRPC(rawModels, state), true
+}
+
+func piModelsFromRPC(rawModels []piRPCModel, state piRPCState) []Model {
+	defaultID := ""
+	if state.Model != nil && state.Model.Provider != "" && state.Model.ID != "" {
+		defaultID = state.Model.Provider + "/" + state.Model.ID
+	}
+
+	models := make([]Model, 0, len(rawModels))
+	seen := make(map[string]bool, len(rawModels))
+	for _, raw := range rawModels {
+		provider := strings.TrimSpace(raw.Provider)
+		modelID := strings.TrimSpace(raw.ID)
+		if provider == "" || modelID == "" {
+			continue
+		}
+		id := provider + "/" + modelID
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+
+		model := Model{
+			ID:       id,
+			Label:    id,
+			Provider: provider,
+			Default:  id == defaultID,
+			Thinking: piThinkingFromRPCModel(raw),
+		}
+		if model.Default && model.Thinking != nil && piThinkingSupports(model.Thinking, state.ThinkingLevel) {
+			model.Thinking.DefaultLevel = state.ThinkingLevel
+		}
+		models = append(models, model)
+	}
+	return models
+}
+
+// piThinkingFromRPCModel follows Pi's getSupportedThinkingLevels(model) for
+// reasoning-capable models: off..high are available unless explicitly mapped
+// to null; xhigh/max require an explicit non-null mapping. Pi reports only
+// "off" for reasoning=false; Multica intentionally hides that no-op picker.
+func piThinkingFromRPCModel(model piRPCModel) *ModelThinking {
+	if !model.Reasoning {
+		return nil
+	}
+	levels := make([]ThinkingLevel, 0, len(piThinkingLevelOrder))
+	for _, value := range piThinkingLevelOrder {
+		mapped, present := model.ThinkingLevelMap[value]
+		if present && mapped == nil {
+			continue
+		}
+		if (value == "xhigh" || value == "max") && !present {
+			continue
+		}
+		levels = append(levels, ThinkingLevel{Value: value, Label: piThinkingLevelLabels[value]})
+	}
+	if len(levels) == 0 {
+		return nil
+	}
+	return &ModelThinking{SupportedLevels: levels}
+}
+
+func piThinkingSupports(thinking *ModelThinking, value string) bool {
+	if thinking == nil || value == "" {
+		return false
+	}
+	for _, level := range thinking.SupportedLevels {
+		if level.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+// discoverPiModelsTable runs the legacy human-readable catalog command.
+// Older pi versions print the list to stderr; newer versions use stdout. We
+// capture both and parse whichever is non-empty. The fallback intentionally
+// leaves Thinking nil because the table exposes only a yes/no capability bit.
+func discoverPiModelsTable(ctx context.Context, executablePath string) ([]Model, error) {
 	// Newer pi fetches its catalog from each configured provider over the
 	// network, so discovery time scales with provider count — a multi-provider
 	// setup measured ~4.6-4.8s, right at the old 5s cap. When jitter pushed it
@@ -834,14 +1116,117 @@ func parsePiModels(output string) []Model {
 // pattern message is also matched on its own. These are prose, not
 // `provider model` rows; without skipping them the field splitter coins bogus
 // models like `No/models`. See #3729.
+//
+// A pi-family custom runtime profile (MUL-3284) can point at a fork that has
+// no `--list-models` at all. Those exit non-zero printing usage text —
+//
+//	Error: unknown flag: --list-models
+//	Run `omp --help` for available flags.
+//
+// — and the second line has no diagnostic prefix, so it used to be coined into
+// a `Run/`omp` model. Usage hints are matched on their own markers (backtick-
+// quoted commands, `--help`, `usage:`, unknown flag/command) so the picker
+// comes back empty and the UI falls back to manual entry instead of offering
+// garbage IDs. Deliberately narrow: catalog rows are `provider/model` or
+// `provider model …` tokens, none of which carry these markers. The parse-on-
+// non-zero-exit behaviour from #3729 is untouched — older pi really does print
+// its catalog to stderr while exiting non-zero. See #4482.
 func isPiDiscoveryNoise(line string) bool {
 	lower := strings.ToLower(line)
 	if strings.Contains(lower, "no models match pattern") {
 		return true
 	}
-	return strings.HasPrefix(lower, "warning:") ||
+	if strings.HasPrefix(lower, "warning:") ||
 		strings.HasPrefix(lower, "error:") ||
-		strings.HasPrefix(lower, "info:")
+		strings.HasPrefix(lower, "info:") {
+		return true
+	}
+	return strings.Contains(line, "`") ||
+		strings.Contains(lower, "--help") ||
+		strings.Contains(lower, "usage:") ||
+		strings.Contains(lower, "unknown flag") ||
+		strings.Contains(lower, "unknown command")
+}
+
+// discoverOmpModels runs `omp models --json` and parses the JSON catalog.
+// omp (oh-my-pi) rejects `--list-models` — a pi flag it never adopted, and it
+// exits non-zero on it — so its native discovery is `omp models --json`, which
+// prints a `{"models":[...]}` object; parseOmpModels documents the entry shape.
+// An empty catalog (an omp with no provider credentials configured prints
+// `{"models":[]}`) or a non-zero exit (binary missing, omp too old) falls back
+// to an empty list so the UI degrades to manual entry instead of erroring.
+func discoverOmpModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "omp"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return []Model{}, nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "models", "--json")
+	hideAgentWindow(cmd)
+	stdout, err := cmd.Output()
+	if err != nil || len(stdout) == 0 {
+		return []Model{}, nil
+	}
+	return parseOmpModels(stdout)
+}
+
+// parseOmpModels parses the JSON output from `omp models --json`. omp emits
+// an object wrapper with a `models` array — NOT a bare top-level array:
+//
+//	{"models":[{"provider":"anthropic","id":"claude-sonnet-5","selector":"anthropic/claude-sonnet-5","name":"Claude Sonnet 5",...}]}
+//
+// The persistable Model.ID is the selector (provider/id), matching the
+// convention parsePiModels uses: buildPiArgs splits Model.ID on "/" and
+// emits --provider + --model. Using the bare id would drop --provider and
+// let omp's internal provider priority ranking pick a different backend
+// for the same model id. Provider is kept for UI grouping. The dedup key
+// is the selector when present, falling back to provider/id.
+func parseOmpModels(data []byte) ([]Model, error) {
+	var wrapper struct {
+		Models []struct {
+			ID       string `json:"id"`
+			Provider string `json:"provider"`
+			Selector string `json:"selector"`
+			Name     string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return []Model{}, nil
+	}
+	var models []Model
+	seen := map[string]bool{}
+	for _, e := range wrapper.Models {
+		bareID := strings.TrimSpace(e.ID)
+		if bareID == "" {
+			continue
+		}
+		provider := strings.TrimSpace(e.Provider)
+		// Model.ID is the qualified selector (provider/id) so buildPiArgs
+		// emits both --provider and --model. When selector is absent, fall
+		// back to provider/id; when provider is also absent, the bare id is
+		// the only form available.
+		selector := strings.TrimSpace(e.Selector)
+		if selector == "" {
+			if provider != "" {
+				selector = provider + "/" + bareID
+			} else {
+				selector = bareID
+			}
+		}
+		if seen[selector] {
+			continue
+		}
+		seen[selector] = true
+		label := strings.TrimSpace(e.Name)
+		if label == "" {
+			label = selector
+		}
+		models = append(models, Model{ID: selector, Label: label, Provider: provider})
+	}
+	return models, nil
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,
@@ -863,20 +1248,275 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 	})
 }
 
-// discoverKimiModels spins up a throwaway `kimi acp` process and
-// drives the same minimal ACP handshake as Hermes to surface the
-// model catalog advertised by Kimi's `session/new` response. Kimi
-// ≤0.28 returns a `models` block (`availableModels`/`currentModelId`);
-// 0.29 moved the same catalog into `configOptions` (MUL-5239). The
-// shared parser accepts both, so the discovery path stays identical.
+// discoverKimiModels combines Kimi's ACP model catalog with the structured
+// per-model effort data from `kimi provider list --json`. The provider catalog
+// is the only authoritative source for per-model supportEfforts/defaultEffort,
+// because a session/new response only ever describes the single model that
+// session was created with.
 //
-// Failure modes (kimi missing, not logged in, config error) all
-// return an empty list so the UI falls back to manual entry.
+// Reading the effort catalog out of the session instead does not work, even
+// though Kimi (0.33.0) does refresh the thinking option after
+// session/set_model. The refreshed option arrives as a `session/update`
+// notification (`sessionUpdate: "config_option_update"`), and the requestACP
+// helper this file shares matches responses by id and drops notifications.
+// Consuming that notification would not be enough either: the option list Kimi
+// sends after switching to a low/high/max model still carries the previous
+// model's currentValue as a trailing entry (`[low, high, max, on]`), so using
+// it as a catalog would render a phantom level. supportEfforts has no such
+// residue.
+//
+// The ACP side is unchanged: Kimi ≤0.28 returns a `models` block
+// (`availableModels`/`currentModelId`) and 0.29 moved the same catalog into
+// `configOptions` (MUL-5239); the shared parser still accepts both, so the
+// discovery path stays identical. See parseACPConfigOptionModels.
+//
+// Effort selection is gated on the CLI build, because provider-list alone
+// cannot tell whether the runtime can act on what it advertises. Verified
+// against real binaries: 0.28.1 reports supportEfforts [low high max] for K3
+// exactly like 0.33.0 does, but its ACP only implements the on/off toggle, so
+// set_config_option("max") returns success while confirming "on". Gating on the
+// session's `thinking` config id cannot separate the two — 0.28.1 advertises
+// that id too. The version is the only honest signal, and the initialize
+// response already carries it, so this costs no extra process.
+//
+// Above that, support is decided per model and nothing else: a model that
+// provider-list does not list, or lists without efforts, keeps Thinking nil,
+// which hides the control for that model alone.
+//
+// Failure modes (kimi missing, not logged in, config error) return an empty
+// list so the UI falls back to manual entry.
 func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, error) {
-	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+	var acpVersion string
+	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:   "kimi",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kimi-discovery-",
+		inspectInit: func(initResult json.RawMessage) {
+			acpVersion = acpAgentInfoVersion(initResult)
+		},
+	})
+	if err != nil || len(models) == 0 {
+		return models, err
+	}
+	if !kimiSupportsThinkingEfforts(acpVersion) {
+		// Not an error and not worth a Warn: an older CLI still lists models and
+		// runs tasks, it just cannot be told which effort to use. Model discovery
+		// re-runs on every cache miss, so a Warn here would repeat forever.
+		slog.Debug("kimi CLI predates ACP effort selection; hiding thinking controls",
+			"detected_version", acpVersion,
+			"required_version", kimiMinThinkingEffortVersion,
+		)
+		return models, nil
+	}
+
+	perModel, err := discoverKimiProviderThinking(ctx, executablePath)
+	if err != nil {
+		// Do not include err or command output here: provider JSON can contain
+		// credentials. The fixed reason explains why thinking controls are hidden
+		// without leaking host or account data. Debug, not Warn: model discovery
+		// re-runs on every cache miss, so an older CLI would log this forever.
+		slog.Debug("kimi per-model thinking discovery unavailable; hiding thinking controls",
+			"reason", "provider_list_unavailable",
+		)
+		return models, nil
+	}
+	for i := range models {
+		if thinking, ok := perModel[models[i].ID]; ok {
+			models[i].Thinking = thinking
+		}
+	}
+	return models, nil
+}
+
+// kimiMinThinkingEffortVersion is the first Kimi Code CLI whose ACP surface
+// applies an effort level instead of a plain on/off toggle (upstream 0.29.0,
+// released 2026-07-22). Below it, `session/set_config_option` accepts
+// "low"/"high"/"max" without error and leaves the session on "on", so
+// advertising those levels would promise something the runtime cannot deliver.
+const kimiMinThinkingEffortVersion = "0.29.0"
+
+// kimiSupportsThinkingEfforts reports whether an ACP-reported Kimi version can
+// act on an effort level. An empty or unparsable version answers no: a build we
+// cannot identify (a fork, a wrapper, a future format) is not one we can
+// promise effort selection for, and hiding the picker only costs that build a
+// control it may not honour anyway. Tasks still run either way.
+func kimiSupportsThinkingEfforts(version string) bool {
+	detected, err := parseSemver(strings.TrimSpace(version))
+	if err != nil {
+		return false
+	}
+	minimum, err := parseSemver(kimiMinThinkingEffortVersion)
+	if err != nil {
+		return false
+	}
+	return !detected.lessThan(minimum)
+}
+
+// acpAgentInfoVersion pulls `agentInfo.version` out of an ACP initialize
+// result. ACP agents report their own build here (Kimi sends
+// {"name":"Kimi Code CLI","version":"0.33.0"}); an agent that omits it yields
+// "", which every caller must treat as "unknown", never as "new enough".
+func acpAgentInfoVersion(raw json.RawMessage) string {
+	var response struct {
+		AgentInfo struct {
+			Version string `json:"version"`
+		} `json:"agentInfo"`
+		AgentInfoSnake struct {
+			Version string `json:"version"`
+		} `json:"agent_info"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return ""
+	}
+	if version := strings.TrimSpace(response.AgentInfo.Version); version != "" {
+		return version
+	}
+	return strings.TrimSpace(response.AgentInfoSnake.Version)
+}
+
+func discoverKimiProviderThinking(ctx context.Context, executablePath string) (map[string]*ModelThinking, error) {
+	if executablePath == "" {
+		executablePath = "kimi"
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(runCtx, executablePath, "provider", "list", "--json")
+	hideAgentWindow(cmd)
+	cmd.Stderr = io.Discard
+	raw, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("kimi provider list: %w", err)
+	}
+	return parseKimiProviderThinking(raw)
+}
+
+type kimiProviderModel struct {
+	SupportEfforts      []string `json:"supportEfforts"`
+	SupportEffortsSnake []string `json:"support_efforts"`
+	DefaultEffort       string   `json:"defaultEffort"`
+	DefaultEffortSnake  string   `json:"default_effort"`
+}
+
+func parseKimiProviderThinking(raw []byte) (map[string]*ModelThinking, error) {
+	var response struct {
+		Models map[string]kimiProviderModel `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, fmt.Errorf("parse kimi provider catalog: %w", err)
+	}
+	if len(response.Models) == 0 {
+		return nil, fmt.Errorf("kimi provider catalog contained no models")
+	}
+
+	result := make(map[string]*ModelThinking, len(response.Models))
+	for modelID, model := range response.Models {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			continue
+		}
+		efforts := model.SupportEfforts
+		if len(efforts) == 0 {
+			efforts = model.SupportEffortsSnake
+		}
+		seen := make(map[string]bool, len(efforts))
+		levels := make([]ThinkingLevel, 0, len(efforts))
+		for _, rawEffort := range efforts {
+			effort := strings.TrimSpace(rawEffort)
+			if effort == "" || seen[effort] || !isValidDynamicThinkingValue(effort) {
+				continue
+			}
+			seen[effort] = true
+			levels = append(levels, ThinkingLevel{
+				Value: effort,
+				Label: kimiThinkingLabel(effort),
+			})
+		}
+		if len(levels) == 0 {
+			continue
+		}
+
+		defaultEffort := strings.TrimSpace(model.DefaultEffort)
+		if defaultEffort == "" {
+			defaultEffort = strings.TrimSpace(model.DefaultEffortSnake)
+		}
+		if !seen[defaultEffort] {
+			defaultEffort = ""
+		}
+		result[modelID] = &ModelThinking{
+			SupportedLevels: levels,
+			DefaultLevel:    defaultEffort,
+		}
+	}
+	return result, nil
+}
+
+func kimiThinkingLabel(value string) string {
+	switch value {
+	case "low":
+		return "Low"
+	case "medium":
+		return "Medium"
+	case "high":
+		return "High"
+	case "max":
+		return "Max"
+	default:
+		return strings.Title(value) //nolint:staticcheck
+	}
+}
+
+type acpConfigOptionState struct {
+	ID                string `json:"id"`
+	CurrentValue      string `json:"currentValue"`
+	CurrentValueSnake string `json:"current_value"`
+}
+
+// findACPConfigOption returns one exact config-id match from an ACP response.
+// Config ids are protocol identifiers, not display labels: category-only or
+// case-insensitive matches would advertise a control that execution cannot set.
+// Both camelCase and snake_case field spellings are accepted because ACP agents
+// in the wild emit both.
+func findACPConfigOption(raw json.RawMessage, configID string) (acpConfigOptionState, bool) {
+	var response struct {
+		ConfigOptions      []acpConfigOptionState `json:"configOptions"`
+		ConfigOptionsSnake []acpConfigOptionState `json:"config_options"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return acpConfigOptionState{}, false
+	}
+	options := append(response.ConfigOptions, response.ConfigOptionsSnake...)
+	for _, option := range options {
+		if option.ID == configID {
+			return option, true
+		}
+	}
+	return acpConfigOptionState{}, false
+}
+
+func acpConfigOptionCurrentValue(raw json.RawMessage, configID string) (string, bool) {
+	option, ok := findACPConfigOption(raw, configID)
+	if !ok {
+		return "", false
+	}
+	value := strings.TrimSpace(option.CurrentValue)
+	if value == "" {
+		value = strings.TrimSpace(option.CurrentValueSnake)
+	}
+	return value, value != ""
+}
+
+// discoverReasonixModels drives a short Reasonix ACP session and parses the
+// model configOptions advertised by session/new. Authentication and provider
+// configuration remain owned by `reasonix setup`; discovery failure therefore
+// falls back to manual model entry like the other ACP runtimes.
+func discoverReasonixModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:       "reasonix",
+		clientName:       "multica-model-discovery",
+		acpArgs:          reasonixACPLaunchArgs(),
+		tmpdirPrefix:     "multica-reasonix-discovery-",
+		isolatedStateEnv: "REASONIX_STATE_HOME",
 	})
 }
 
@@ -948,10 +1588,11 @@ func discoverQoderModels(ctx context.Context, executablePath, defaultBin string)
 // `--acp`), and what to label temporary work directories so they're
 // easy to identify in logs.
 type acpDiscoveryProvider struct {
-	defaultBin   string
-	clientName   string
-	extraEnv     []string
-	tmpdirPrefix string
+	defaultBin       string
+	clientName       string
+	extraEnv         []string
+	tmpdirPrefix     string
+	isolatedStateEnv string
 	// acpArgs is the argv passed to the binary to start it in ACP
 	// server mode. Defaults to []string{"acp"} when nil/empty.
 	acpArgs []string
@@ -968,6 +1609,13 @@ type acpDiscoveryProvider struct {
 	// ignores. CodeBuddy uses it to read its effort catalog out of the same
 	// handshake, which is why it needs no separate discovery call at all.
 	annotate func([]Model, json.RawMessage)
+	// inspectInit receives the raw initialize result before any session is
+	// created. It is for reading capability facts the handshake already
+	// carries — Kimi reads `agentInfo.version` to gate a feature on the CLI
+	// build — so a provider does not have to spend a second process asking the
+	// binary what it is. It cannot fail discovery: a provider that learns
+	// nothing useful here must degrade, not abort.
+	inspectInit func(json.RawMessage)
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
@@ -991,6 +1639,15 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	var isolatedStateDir string
+	if p.isolatedStateEnv != "" {
+		var err error
+		isolatedStateDir, err = os.MkdirTemp("", p.tmpdirPrefix+"state-")
+		if err != nil {
+			return fail("temporary state", err)
+		}
+		defer os.RemoveAll(isolatedStateDir)
+	}
 
 	cmdArgs := p.acpArgs
 	if len(cmdArgs) == 0 {
@@ -999,6 +1656,9 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	cmd := exec.CommandContext(runCtx, executablePath, cmdArgs...)
 	hideAgentWindow(cmd)
 	childEnv := append(os.Environ(), p.extraEnv...)
+	if isolatedStateDir != "" {
+		childEnv = replaceEnvValue(childEnv, p.isolatedStateEnv, isolatedStateDir)
+	}
 	cmd.Env = childEnv
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -1095,6 +1755,9 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	if err != nil {
 		return fail("initialize", err)
 	}
+	if p.inspectInit != nil {
+		p.inspectInit(initResult)
+	}
 
 	// session/new requires a valid cwd — use a temp directory we
 	// clean up afterwards, not the daemon's workdir (which might
@@ -1148,6 +1811,18 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 		p.annotate(models, sessionResult)
 	}
 	return models, nil
+}
+
+func replaceEnvValue(env []string, key, value string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(name, key) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, key+"="+value)
 }
 
 // parseACPSessionNewModels extracts the model catalog from an ACP
@@ -1730,7 +2405,7 @@ func isOpenclawIdentifier(s string) bool {
 // ── CodeBuddy model discovery ──
 
 // discoverCodebuddyModels asks CodeBuddy for its catalog over ACP
-// (`codebuddy --acp`), the same handshake Copilot / Kimi / Kiro / Qoder / Grok /
+// (`codebuddy --acp`), the same handshake Copilot / Kimi / Reasonix / Kiro / Qoder / Grok /
 // TRAE already use. `session/new` answers with a structured catalog under
 // `models.availableModels` plus a `currentModelId`, which is what the shared
 // parseACPSessionNewModels reads.

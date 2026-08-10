@@ -27,6 +27,15 @@
       "hint": "보통 몇 초 정도 걸립니다. 데몬이 워크스페이스에 등록되는 중입니다."
     }
   },
+  "mika_setup": {
+    "title": "런타임이 준비되었습니다. Mika와 시작하세요.",
+    "description": "Mika가 목표를 태스크로 구체화하고 적합한 에이전트를 조율하며, 워크플로에 필요할 때 재사용 가능한 specialist 추가를 돕습니다.",
+    "action": "Mika와 시작",
+    "failed": "Mika를 시작하지 못했습니다",
+    "dialog_title": "Mika를 어디에서 실행할까요?",
+    "dialog_description": "Mika가 사용할 런타임을 선택하세요. 나중에 설정에서 변경할 수 있습니다.",
+    "cancel": "취소"
+  },
   "machine": {
     "search_placeholder": "기기 검색...",
     "filters": {
@@ -243,6 +252,8 @@
     "managed_by_desktop_title": "CLI 바이너리는 Multica Desktop에서 관리합니다. CLI를 업그레이드하려면 Desktop을 업데이트하세요.",
     "read_only": "읽기 전용",
     "read_only_title": "런타임 소유자와 워크스페이스 관리자만 CLI를 업데이트할 수 있습니다.",
+    "local_build": "로컬 빌드",
+    "local_build_title": "이 런타임은 릴리스 버전이 아닌 버전을 보고하므로 Multica가 업그레이드 가능 여부를 판단할 수 없습니다. 머신에서 직접 업데이트하세요.",
     "latest": "최신",
     "available": "사용 가능",
     "action": "업데이트",

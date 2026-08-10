@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -94,6 +95,56 @@ func TestCreateAgent_ThinkingLevel_ValidationConsistency(t *testing.T) {
 		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("garbage thinking_level: expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+}
+
+func TestCreateAgent_PiThinkingLevelValidation(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	piRuntimeID := createPiProviderRuntime(t)
+	t.Cleanup(func() {
+		testPool.Exec(ctx,
+			`DELETE FROM agent WHERE workspace_id = $1 AND name LIKE 'pi-thinking-%'`,
+			testWorkspaceID,
+		)
+	})
+
+	t.Run("native max value succeeds", func(t *testing.T) {
+		body := map[string]any{
+			"name":                 "pi-thinking-max",
+			"runtime_id":           piRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"thinking_level":       "max",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("Pi thinking_level=max: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		if resp["thinking_level"] != "max" {
+			t.Fatalf("Pi thinking_level response = %v, want max", resp["thinking_level"])
+		}
+	})
+
+	t.Run("non-Pi token is rejected", func(t *testing.T) {
+		body := map[string]any{
+			"name":                 "pi-thinking-ultra",
+			"runtime_id":           piRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"thinking_level":       "ultra",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("Pi thinking_level=ultra: expected 400, got %d: %s", w.Code, w.Body.String())
 		}
 	})
 }
@@ -471,6 +522,142 @@ func TestUpdateAgent_RuntimeSwitch_ClearsKnownIncompatibleModel(t *testing.T) {
 			t.Errorf("expected unknown custom model preserved, got %v", resp["model"])
 		}
 	})
+}
+
+// TestThinkingLevelRejectionCopy pins WHY a thinking_level was refused, not
+// just that it was. A runtime with no reasoning control must not be described
+// as receiving an unrecognised value: "high" is a fine effort token, and the
+// old shared sentence sent Hermes users looking for a spelling that cannot
+// exist (MUL-5770).
+func TestThinkingLevelRejectionCopy(t *testing.T) {
+	t.Parallel()
+
+	t.Run("runtime without reasoning control names the capability gap", func(t *testing.T) {
+		msg := thinkingLevelRejection("hermes", "high")
+		if !strings.Contains(msg, "does not support a per-agent reasoning effort") {
+			t.Errorf("expected a capability explanation, got %q", msg)
+		}
+		if strings.Contains(msg, "not a recognised value") {
+			t.Errorf("capability gap must not read as a bad token, got %q", msg)
+		}
+		if !strings.Contains(msg, `"hermes"`) {
+			t.Errorf("expected the runtime named in %q", msg)
+		}
+	})
+
+	t.Run("runtime with reasoning control names the value", func(t *testing.T) {
+		msg := thinkingLevelRejection("claude", "supersonic")
+		if !strings.Contains(msg, "not a recognised value") {
+			t.Errorf("expected a value-level explanation, got %q", msg)
+		}
+		if !strings.Contains(msg, `"supersonic"`) {
+			t.Errorf("expected the rejected token echoed in %q", msg)
+		}
+	})
+
+	t.Run("carry-over path always offers the clear escape hatch", func(t *testing.T) {
+		for _, provider := range []string{"hermes", "claude"} {
+			msg := existingThinkingLevelRejection(provider, "xhigh")
+			if !strings.Contains(msg, `thinking_level=""`) {
+				t.Errorf("provider %q: expected the clear instruction, got %q", provider, msg)
+			}
+		}
+		if msg := existingThinkingLevelRejection("hermes", "xhigh"); !strings.Contains(msg, "does not support a per-agent reasoning effort") {
+			t.Errorf("expected the capability explanation on the carry-over path, got %q", msg)
+		}
+	})
+}
+
+// TestCreateAgent_HermesRejectsThinkingLevel covers the reported flow
+// end-to-end: creating a Hermes agent with a reasoning effort 400s, and the
+// body explains that the runtime has no such control rather than blaming the
+// value. Empty stays valid — it means "runtime default".
+func TestCreateAgent_HermesRejectsThinkingLevel(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	hermesRuntimeID := createHermesProviderRuntime(t)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent WHERE workspace_id = $1 AND name LIKE 'hermes-thinking-%'`,
+			testWorkspaceID,
+		)
+	})
+
+	t.Run("effort value rejected with a capability message", func(t *testing.T) {
+		body := map[string]any{
+			"name":                 "hermes-thinking-high",
+			"runtime_id":           hermesRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"thinking_level":       "high",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("hermes thinking_level=high: expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "does not support a per-agent reasoning effort") {
+			t.Errorf("expected a capability explanation in the 400 body, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("empty value still creates", func(t *testing.T) {
+		body := map[string]any{
+			"name":                 "hermes-thinking-empty",
+			"runtime_id":           hermesRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"thinking_level":       "",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("hermes empty thinking_level: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+}
+
+// createHermesProviderRuntime stands up a runtime row with provider "hermes",
+// the runtime whose ACP surface exposes no reasoning-effort control.
+func createHermesProviderRuntime(t *testing.T) string {
+	t.Helper()
+	var runtimeID string
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, last_seen_at, owner_id
+		)
+		VALUES ($1, NULL, $2, 'cloud', 'hermes', 'online', $3, '{}'::jsonb, now(), $4)
+		RETURNING id
+	`, testWorkspaceID, "Hermes Thinking Runtime", "Hermes thinking-level test runtime", testUserID).Scan(&runtimeID)
+	if err != nil {
+		t.Fatalf("create hermes runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	return runtimeID
+}
+
+func createPiProviderRuntime(t *testing.T) string {
+	t.Helper()
+	var runtimeID string
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, last_seen_at, owner_id
+		)
+		VALUES ($1, NULL, $2, 'cloud', 'pi', 'online', $3, '{}'::jsonb, now(), $4)
+		RETURNING id
+	`, testWorkspaceID, "Pi Thinking Runtime", "Pi thinking-level test runtime", testUserID).Scan(&runtimeID)
+	if err != nil {
+		t.Fatalf("create pi runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	return runtimeID
 }
 
 // createCodexProviderRuntime mirrors createClaudeProviderRuntime but for

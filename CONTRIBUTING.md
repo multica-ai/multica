@@ -512,7 +512,9 @@ derives, from the worktree path (same `cksum % 1000` offset as the backend /
 frontend ports in `.env.worktree`):
 
 - `DESKTOP_RENDERER_PORT` = `5174 + offset` — its own Vite dev server (`5174`
-  base leaves `5173` for the primary checkout, even when `offset` is `0`)
+  base leaves `5173` for the primary checkout, even when `offset` is `0`). The
+  one offset that would land on `6000` gets `6174` instead: Chromium treats
+  `6000` as a restricted port and fails the load with `ERR_UNSAFE_PORT`
 - `DESKTOP_APP_SUFFIX` = `<folder>-<offset>` — its own single-instance lock /
   `userData`, and an app named `Multica Canary <folder>-<offset>` so it is
   distinguishable in Cmd+Tab. The offset keeps it unique across worktrees that

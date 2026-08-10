@@ -163,7 +163,7 @@ func init() {
 	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
-	agentCreateCmd.Flags().String("thinking-level", "", "Reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Empty = runtime default.")
+	agentCreateCmd.Flags().String("thinking-level", "", "Reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Empty = runtime default.")
 	agentCreateCmd.Flags().String("service-tier", "", "Codex execution service tier from the selected model's runtime catalog (e.g. priority, displayed as Fast). Empty = inherit local Codex configuration.")
 	agentCreateCmd.Flags().String("custom-args", "", "Custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
 	agentCreateCmd.Flags().String("custom-env", "", "Custom environment variables as JSON object, e.g. '{\"KEY\":\"value\"}'. Treated as secret material — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --custom-env-stdin or --custom-env-file for real secrets. Pass '{}' to set an empty map.")
@@ -186,7 +186,7 @@ func init() {
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
-	agentUpdateCmd.Flags().String("thinking-level", "", "New reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Pass an empty string to clear and fall back to the runtime default.")
+	agentUpdateCmd.Flags().String("thinking-level", "", "New reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("service-tier", "", "New Codex execution service tier from the selected model's runtime catalog. Pass an empty string to clear and inherit local Codex configuration.")
 	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
 	// custom_env is intentionally NOT part of `agent update`. Use
@@ -252,14 +252,9 @@ func resolveProfile(cmd *cobra.Command) string {
 }
 
 func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
-	serverURL := resolveServerURL(cmd)
-	workspaceID := resolveWorkspaceID(cmd)
+	taskContext := inDaemonManagedExecutionContext()
 	token := resolveToken(cmd)
-
-	if serverURL == "" {
-		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
-	}
-	if inDaemonManagedExecutionContext() && !strings.HasPrefix(token, "mat_") {
+	if taskContext && !strings.HasPrefix(token, "mat_") {
 		// When the ONLY daemon signal is a workdir marker (no MULTICA_AGENT_ID /
 		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), the likeliest cause outside a
 		// real task is a leftover marker from a crashed daemon task in a
@@ -271,6 +266,12 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 			}
 		}
 		return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
+	}
+
+	serverURL := resolveServerURL(cmd)
+	workspaceID := resolveWorkspaceID(cmd)
+	if serverURL == "" {
+		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
 	}
 
 	client := cli.NewAPIClient(serverURL, workspaceID, token)
@@ -293,6 +294,9 @@ func tryResolveServerURL(cmd *cobra.Command) string {
 	val := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
 	if val != "" {
 		return normalizeAPIBaseURL(val)
+	}
+	if inDaemonManagedExecutionContext() && strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) == "" {
+		return ""
 	}
 	profile := resolveProfile(cmd)
 	cfg, err := cli.LoadCLIConfigForProfile(profile)
@@ -340,6 +344,30 @@ func inAgentExecutionContext() bool {
 // user-global ~/.multica/config.json can make agent writes land as a member.
 func inDaemonManagedExecutionContext() bool {
 	return inAgentExecutionContext() || os.Getenv("MULTICA_DAEMON_PORT") != "" || hasDaemonTaskContextMarker()
+}
+
+// requireTaskLocalConfigRoot prevents daemon-managed subprocesses that lost
+// part of their injected environment from silently resolving Multica state
+// below the daemon owner's HOME. Commands that intentionally support task-local
+// config (currently config show/set and auth status) call this before any load.
+func requireTaskLocalConfigRoot() error {
+	if !inDaemonManagedExecutionContext() {
+		return nil
+	}
+	if strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) == "" {
+		return fmt.Errorf("daemon-managed task requires a task-local Multica config root in %s", cli.TaskConfigRootEnv)
+	}
+	return nil
+}
+
+// requireHumanLocalCommand rejects commands whose purpose is to authenticate,
+// set up, or operate the human-owned local daemon/profile. Task API commands
+// remain available with the injected mat_ token; these local commands do not.
+func requireHumanLocalCommand(command string) error {
+	if inDaemonManagedExecutionContext() {
+		return fmt.Errorf("%s is not available inside a daemon-managed task", command)
+	}
+	return nil
 }
 
 func hasDaemonTaskContextMarker() bool {

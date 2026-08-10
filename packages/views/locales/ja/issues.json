@@ -1,10 +1,10 @@
 {
   "page": {
-    "breadcrumb_title": "イシュー",
+    "breadcrumb_title": "タスク",
     "breadcrumb_workspace_fallback": "ワークスペース",
-    "empty_title": "まだイシューがありません",
-    "empty_hint": "イシューを作成して始めましょう。",
-    "move_failed": "イシューを移動できませんでした"
+    "empty_title": "まだタスクがありません",
+    "empty_hint": "タスクを作成して始めましょう。",
+    "move_failed": "タスクを移動できませんでした"
   },
   "status": {
     "backlog": "バックログ",
@@ -28,11 +28,11 @@
   },
   "scope": {
     "all_label": "すべて",
-    "all_description": "このワークスペースのすべてのイシュー",
+    "all_description": "このワークスペースのすべてのタスク",
     "members_label": "メンバー",
-    "members_description": "チームメンバーに割り当てられたイシュー",
+    "members_description": "チームメンバーに割り当てられたタスク",
     "agents_label": "エージェント",
-    "agents_description": "AI エージェントに割り当てられたイシュー"
+    "agents_description": "AI エージェントに割り当てられたタスク"
   },
   "filters": {
     "tooltip": "フィルター",
@@ -60,9 +60,17 @@
     "members_group": "メンバー",
     "agents_group": "エージェント",
     "squads_group": "スクワッド",
-    "issue_count_other": "イシュー {{count}} 件",
+    "issue_count_other": "タスク {{count}} 件",
     "reset": "すべてのフィルターをリセット",
-    "active_count_other": "フィルター {{count}} 件"
+    "chip_remove": "{{name}}フィルターを削除",
+    "chip_status_count_other": "ステータス{{count}}件",
+    "chip_priority_count_other": "優先度{{count}}件",
+    "chip_clear": "クリア",
+    "chip_save": "保存",
+    "active_count_other": "フィルター {{count}} 件",
+    "in_view": "このビューに含まれています",
+    "chip_edit": "編集",
+    "chip_save_as": "別名で保存"
   },
   "display": {
     "tooltip": "表示設定",
@@ -74,7 +82,7 @@
     "descending_title": "降順",
     "group_status": "ステータス",
     "group_assignee": "担当者",
-    "group_parent": "親イシュー",
+    "group_parent": "親タスク",
     "group_project": "プロジェクト",
     "sort_manual": "手動",
     "sort_status": "ステータス",
@@ -91,8 +99,8 @@
     "card_due_date": "期限",
     "card_project": "プロジェクト",
     "card_labels": "ラベル",
-    "card_child_progress": "サブイシューの進捗",
-    "show_sub_issues": "サブイシューを表示"
+    "card_child_progress": "サブタスクの進捗",
+    "show_sub_issues": "サブタスクを表示"
   },
   "view": {
     "tooltip_board": "ボード表示",
@@ -108,22 +116,22 @@
     "swimlane": "スイムレーン"
   },
   "table": {
-    "select_all": "表示中のイシューをすべて選択",
+    "select_all": "表示中のタスクをすべて選択",
     "select_issue": "{{identifier}} を選択",
     "sort_ascending": "昇順",
     "sort_descending": "降順",
-    "toggle_sub_issues": "サブイシューを展開または折りたたむ",
-    "rename_title": "イシュー名を変更",
+    "toggle_sub_issues": "サブタスクを展開または折りたたむ",
+    "rename_title": "タスク名を変更",
     "empty_value": "空",
-    "quick_create_placeholder": "イシューを追加…",
+    "quick_create_placeholder": "タスクを追加…",
     "quick_create_submit": "追加",
-    "quick_create_failed": "イシューを作成できませんでした",
+    "quick_create_failed": "タスクを作成できませんでした",
     "no_value": "値なし",
     "unassigned": "未割り当て",
-    "empty": "この表示に一致するイシューはありません。",
-    "search_placeholder": "タイトルまたは Issue ID を検索…",
+    "empty": "この表示に一致するタスクはありません。",
+    "search_placeholder": "タイトルまたはタスク ID を検索…",
     "search_clear": "検索をクリア",
-    "load_failed": "イシューを読み込めませんでした。",
+    "load_failed": "タスクを読み込めませんでした。",
     "load_failed_retry": "再試行",
     "load_more_failed_retry": "続きの読み込みに失敗しました — 再試行",
     "load_more": "さらに読み込む",
@@ -132,25 +140,25 @@
     "value_unavailable": "利用できない値",
     "group_property_unavailable": "グループ化に使っていたプロパティは利用できないため、グループ化を解除しました。",
     "hierarchy": "階層",
-    "hierarchy_description": "サブイシューを親イシューの下に入れ子で表示",
+    "hierarchy_description": "サブタスクを親タスクの下に入れ子で表示",
     "group_label": "グループ",
     "group_active": "グループ：{{group}}",
     "group_none": "グループ化なし",
     "export": "エクスポート",
     "export_all": "すべてエクスポート",
     "export_selected": "選択項目をエクスポート（{{count}}）",
-    "export_success": "{{count}} 件のイシューをエクスポートしました",
-    "export_failed": "イシューをエクスポートできませんでした",
+    "export_success": "{{count}} 件のタスクをエクスポートしました",
+    "export_failed": "タスクをエクスポートできませんでした",
     "columns": {
       "section": "列",
-      "system_section": "イシューのプロパティ",
+      "system_section": "タスクのプロパティ",
       "property_section": "カスタムプロパティ",
       "search_placeholder": "列を検索…",
       "no_results": "一致する列がありません",
       "add": "列を追加",
       "hide": "列を非表示",
       "reorder": "{{column}} 列を並べ替え",
-      "title": "イシュー",
+      "title": "タスク",
       "identifier": "ID",
       "status": "ステータス",
       "priority": "優先度",
@@ -161,7 +169,7 @@
       "due_date": "期限",
       "created_at": "作成日",
       "updated_at": "更新日",
-      "child_progress": "サブイシューの進捗",
+      "child_progress": "サブタスクの進捗",
       "creator": "作成者"
     },
     "calculation": {
@@ -174,83 +182,82 @@
     }
   },
   "gantt": {
-    "header_issue": "イシュー",
+    "header_issue": "タスク",
     "zoom_day": "日",
     "zoom_week": "週",
     "zoom_month": "月",
     "show_completed": "完了済みを表示",
-    "empty": "スケジュールされたイシューがまだありません。いずれかのイシューに開始日または期限を設定すると、タイムラインに表示されます。",
+    "empty": "スケジュールされたタスクがまだありません。いずれかのタスクに開始日または期限を設定すると、タイムラインに表示されます。",
     "inverted_dates_warning": "開始日が期限より後になっています。バーは早い日付から遅い日付まで表示されます。"
   },
   "actor_issues": {
     "scope": {
       "assigned": {
         "label": "割り当て済み",
-        "description": "このメンバーまたはエージェントに割り当てられたイシュー"
+        "description": "このメンバーまたはエージェントに割り当てられたタスク"
       },
       "created": {
         "label": "作成済み",
-        "description": "このメンバーまたはエージェントが作成したイシュー"
+        "description": "このメンバーまたはエージェントが作成したタスク"
       }
     },
     "empty": {
       "assigned": {
-        "title": "割り当てられたイシューはありません",
-        "description": "ここに割り当てられたイシューがこの表示に表示されます。"
+        "title": "割り当てられたタスクはありません",
+        "description": "ここに割り当てられたタスクがこの表示に表示されます。"
       },
       "created": {
-        "title": "作成したイシューはありません",
-        "description": "ここで作成したイシューがこの表示に表示されます。"
+        "title": "作成したタスクはありません",
+        "description": "ここで作成したタスクがこの表示に表示されます。"
       }
     },
-    "search_placeholder": "イシューを検索...",
-    "search_empty": "検索条件に一致するイシューがありません。"
+    "search_placeholder": "タスクを検索...",
+    "search_empty": "検索条件に一致するタスクがありません。"
   },
   "list": {
-    "empty_status": "イシューなし",
-    "add_issue_tooltip": "イシューを追加"
+    "empty_status": "タスクなし",
+    "add_issue_tooltip": "タスクを追加"
   },
   "swimlane": {
-    "no_parent": "親イシューなし",
-    "other_parents": "その他の親イシュー",
+    "no_parent": "親タスクなし",
+    "other_parents": "その他の親タスク",
     "no_project": "プロジェクトなし",
     "no_assignee": "未割り当て",
-    "open_parent": "親イシューを開く",
+    "open_parent": "親タスクを開く",
     "toggle_collapse": "レーンの開閉"
   },
   "board": {
     "hidden_columns_label": "非表示の列",
     "hide_column": "列を非表示",
     "show_column": "列を表示",
-    "add_issue_tooltip": "イシューを追加",
-    "empty_column": "イシューなし",
-    "empty_grouping": "一致するイシューがありません",
+    "add_issue_tooltip": "タスクを追加",
+    "empty_column": "タスクなし",
+    "empty_grouping": "一致するタスクがありません",
     "no_value": "値なし",
     "ordered_by": "{{field}} 順に並べたボード"
   },
   "detail": {
-    "not_found": "このイシューはこのワークスペースに存在しないか、削除されています。",
+    "not_found": "このタスクはこのワークスペースに存在しないか、削除されています。",
     "breadcrumb_project_unknown": "不明なプロジェクト",
     "back": "戻る",
-    "title_placeholder": "イシューのタイトル",
+    "title_placeholder": "タスクのタイトル",
     "desc_placeholder": "説明を追加...",
-    "sub_issues_label": "サブイシュー",
-    "sub_issue_of": "親イシュー",
-    "add_sub_issues": "サブイシューを追加",
-    "add_sub_issue_tooltip": "サブイシューを追加",
-    "add_sub_issue_aria": "サブイシューを追加",
+    "sub_issues_label": "サブタスク",
+    "sub_issue_of": "親タスク",
+    "add_sub_issues": "サブタスクを追加",
+    "add_sub_issue_tooltip": "サブタスクを追加",
+    "add_sub_issue_aria": "サブタスクを追加",
     "section_properties": "プロパティ",
-    "section_parent_issue": "親イシュー",
+    "section_parent_issue": "親タスク",
     "section_pull_requests": "Pull requests",
     "section_metadata": "メタデータ",
     "section_details": "詳細",
-    "section_token_usage": "トークン使用量",
     "section_quick_actions": "クイックアクション",
     "quick_actions_more": "残り {{count}} 件を表示",
     "quick_action_runs_as": "{{name}} が実行します",
     "quick_action_target_fallback": "このエージェント",
     "quick_action_queued": "{{name}} が作業を開始しました",
-    "quick_action_coalesced": "{{name}} の実行中タスクに追加しました",
+    "quick_action_coalesced": "{{name}} の実行中の作業に追加しました",
     "quick_action_deferred": "{{name}} はオフラインです。復帰後に開始します",
     "quick_action_blocked": "{{name}} を実行できませんでした",
     "quick_action_posted": "コメントを投稿しました",
@@ -258,7 +265,7 @@
     "quick_action_blocked_body": "「{{name}}」は、あなたが実行を許可されていないエージェントで動作します。ワークスペース管理者にそのエージェントをチームへ公開してもらうか、共有エージェントへの変更を依頼してください。",
     "quick_action_blocked_ok": "了解",
     "pull_requests_loading": "読み込み中...",
-    "pull_requests_empty": "まだリンクされた Pull request がありません。PR のブランチ名、タイトル、または本文にこのイシューの識別子を入れると、自動的にリンクされます。",
+    "pull_requests_empty": "まだリンクされた Pull request がありません。PR のブランチ名、タイトル、または本文にこのタスクの識別子を入れると、自動的にリンクされます。",
     "pull_request_state_open": "オープン",
     "pull_request_state_draft": "ドラフト",
     "pull_request_state_merged": "マージ済み",
@@ -292,20 +299,17 @@
     "prop_created_by": "作成者",
     "prop_created": "作成日",
     "prop_updated": "更新日",
-    "prop_input": "入力",
-    "prop_output": "出力",
-    "prop_cache": "キャッシュ",
-    "prop_cache_value": "読み取り {{read}} / 書き込み {{write}}",
-    "prop_runs": "実行",
     "activity_section": "アクティビティ",
     "subscribe": "購読",
     "unsubscribe": "購読解除",
     "delegated_subscription_badge": "エージェント経由で購読中",
-    "delegated_subscription_hint": "エージェントがあなたに代わってこの課題を作成したため、購読しています。レビュー待ち・完了・ブロック時に通知されます。",
-    "unsubscribe_this": "この課題の購読を解除",
-    "unsubscribe_subtree": "この課題とサブ課題の購読を解除",
-    "unsubscribe_subtree_failed": "サブ課題の購読解除に失敗しました。もう一度お試しください。",
-    "unsubscribe_subtree_unsupported": "現在のサーバーはサブ課題の購読解除にまだ対応していません。次回の更新後にお試しください。",
+    "delegated_subscription_hint": "エージェントがあなたに代わってこのタスクを作成したため、購読しています。レビュー待ち・完了・ブロック時に通知されます。",
+    "unsubscribe_this": "このタスクの購読を解除",
+    "unsubscribe_subtree": "このタスクとサブタスクの購読を解除",
+    "unsubscribe_subtree_failed": "サブタスクの購読解除に失敗しました。もう一度お試しください。",
+    "unsubscribe_subtree_succeeded": "このタスクとサブタスクの購読を解除しました。",
+    "unsubscribe_subtree_unsupported": "現在のサーバーはサブタスクの購読解除にまだ対応していません。次回の更新後にお試しください。",
+    "subscription_update_failed": "購読状態を更新できませんでした。もう一度お試しください。",
     "no_subscribers_results": "結果が見つかりません",
     "change_subscribers_placeholder": "購読者を変更...",
     "members_group": "メンバー",
@@ -316,28 +320,46 @@
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "thread_nav_label": "スレッドへ移動",
     "thread_nav_resolved_label": "{{title}}（解決済み）",
+    "thread_nav": {
+      "button_label_other": "スレッド（{{count}}）",
+      "search_placeholder": "スレッド・作成者を検索",
+      "match_count_other": "{{count}} 件ヒット",
+      "filter_all": "すべて",
+      "filter_unresolved": "未解決",
+      "filter_resolved": "解決済み",
+      "filter_mine": "@自分",
+      "group": {
+        "today": "今日",
+        "yesterday": "昨日",
+        "earlier": "それ以前"
+      },
+      "empty": "一致するスレッドはありません",
+      "hint_select": "選択",
+      "hint_jump": "移動",
+      "hint_close": "閉じる"
+    },
     "sidebar_tooltip": "サイドバーの開閉",
     "find": {
-      "placeholder": "イシュー内を検索...",
+      "placeholder": "タスク内を検索...",
       "count": "{{current}}/{{total}}",
       "no_matches": "一致なし",
       "previous": "前の一致",
       "next": "次の一致",
       "close": "検索を閉じる"
     },
-    "update_failed": "イシューを更新できませんでした",
+    "update_failed": "タスクを更新できませんでした",
     "link_copied": "リンクをコピーしました",
     "link_copy_failed": "リンクをコピーできませんでした",
     "workdir_path_copied": "作業ディレクトリのパスをコピーしました",
     "workdir_path_copy_failed": "作業ディレクトリのパスをコピーできませんでした",
-    "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのイシューを実行していません"
+    "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません"
   },
   "timeline": {
     "loading": "読み込み中..."
   },
   "activity": {
-    "created": "このイシューを作成しました",
-    "self_assigned": "このイシューを自分に割り当てました",
+    "created": "このタスクを作成しました",
+    "self_assigned": "このタスクを自分に割り当てました",
     "assigned_to": "{{name}} に割り当てました",
     "removed_assignee": "担当者を削除しました",
     "changed_assignee": "担当者を変更しました",
@@ -347,10 +369,10 @@
     "start_date_removed": "開始日を削除しました",
     "due_date_set": "期限を {{date}} に設定しました",
     "due_date_removed": "期限を削除しました",
-    "title_renamed": "このイシューのタイトルを \"{{from}}\" から \"{{to}}\" に変更しました",
+    "title_renamed": "このタスクのタイトルを \"{{from}}\" から \"{{to}}\" に変更しました",
     "description_updated": "説明を更新しました",
-    "task_completed_other": "タスクを完了しました（{{count}} 回）",
-    "task_failed_other": "タスクが失敗しました（{{count}} 回）",
+    "task_completed_other": "作業を完了しました（{{count}} 回）",
+    "task_failed_other": "作業が失敗しました（{{count}} 回）",
     "squad_leader_evaluated": "スクワッドのトリガーを評価しました",
     "squad_leader_action": "評価してアクションを実行しました",
     "squad_leader_action_reason": "評価してアクションを実行しました: {{reason}}",
@@ -432,21 +454,21 @@
   },
   "agent_activity": {
     "hover_header_other": "作業中のエージェント {{count}} 件",
-    "hover_header_tasks_other": "作業中のタスク {{count}} 件",
+    "hover_header_tasks_other": "実行中の作業 {{count}} 件",
     "hover_header_queued_other": "待機中のエージェント {{count}} 件",
     "status_running": "作業中",
     "status_queued": "待機中",
     "empty_hover": "現在作業中のエージェントはありません",
     "unknown_hover": "作業中のエージェント: まだ読み込まれていません",
-    "filter_active_label": "エージェントが作業中の issue を表示中",
+    "filter_active_label": "エージェントが作業中のタスクを表示中",
     "tasks_count_other": "task {{count}} 件",
     "chip_agents_working_other": "作業中のエージェント {{count}} 件",
-    "issues_count_other": "issue {{count}} 件",
+    "issues_count_other": "タスク {{count}} 件",
     "chip_agents_working_unknown": "作業中のエージェント: —"
   },
   "filtered_empty": {
-    "title": "フィルター条件に一致する issue がありません",
-    "hint": "フィルターを変更または解除すると、このビューの issue が表示されます。",
+    "title": "フィルター条件に一致するタスクがありません",
+    "hint": "フィルターを変更または解除すると、このビューのタスクが表示されます。",
     "clear_button": "フィルターを解除"
   },
   "agent_live": {
@@ -459,20 +481,20 @@
     "transcript_button": "トランスクリプトを表示",
     "stop_button": "停止",
     "stop_tooltip": "エージェントを停止",
-    "cancel_failed": "タスクをキャンセルできませんでした"
+    "cancel_failed": "作業をキャンセルできませんでした"
   },
   "execution_log": {
     "section": "実行ログ",
     "show_past": "過去の実行を表示 ({{count}})",
     "hide_past": "過去の実行を非表示 ({{count}})",
-    "cancel_task_tooltip": "タスクをキャンセル",
-    "cancel_task_aria": "タスクをキャンセル",
-    "retry_task_tooltip": "タスクを再試行",
-    "retry_task_aria": "タスクを再試行",
-    "retry_failed": "タスクを再試行できませんでした",
+    "cancel_task_tooltip": "作業をキャンセル",
+    "cancel_task_aria": "作業をキャンセル",
+    "retry_task_tooltip": "作業を再試行",
+    "retry_task_aria": "作業を再試行",
+    "retry_failed": "作業を再試行できませんでした",
     "retry_blocked": "再試行されませんでした — このエージェントを使用する権限がありません",
     "transcript_tooltip": "トランスクリプトを表示",
-    "cancel_failed": "タスクをキャンセルできませんでした",
+    "cancel_failed": "作業をキャンセルできませんでした",
     "trigger_retry": "再試行",
     "trigger_retry_attempt": "再試行 #{{attempt}}",
     "trigger_retry_attempt_prefix": "再試行 #{{attempt}} · ",
@@ -500,14 +522,41 @@
       "source_owner_fallback": "正確な責任者なし — エージェント所有者に帰属",
       "source_backfill": "バックフィルされた帰属",
       "source_unattributed": "責任メンバーを解決できません"
-    }
+    },
+    "usage_total_tooltip": "この課題のトークン使用量 — クリックで実行ごとの内訳"
+  },
+  "usage_detail": {
+    "title": "使用量の内訳",
+    "subtitle_other": "{{identifier}} · {{count}} 回の実行",
+    "empty": "この課題では、まだトークン使用量が記録された実行はありません。",
+    "kpi_cost": "費用",
+    "kpi_cost_hint_other": "失敗した {{count}} 回の実行が {{pct}}% を占めます",
+    "kpi_cache": "キャッシュ削減",
+    "kpi_cache_hint": "ヒット率 {{pct}}% · 読み取り {{reads}}",
+    "kpi_tokens": "トークン",
+    "kpi_tokens_hint": "入力 {{input}} · 出力 {{output}}",
+    "by_agent": "エージェント別",
+    "by_agent_total": "合計 {{cost}}",
+    "col_run": "実行",
+    "col_model": "モデル",
+    "col_duration": "所要時間",
+    "col_input": "入力",
+    "col_output": "出力",
+    "col_cache_read": "キャッシュ読",
+    "col_cache_write": "キャッシュ書",
+    "col_tokens": "トークン",
+    "col_cost": "費用",
+    "total": "合計",
+    "note_unpriced_other": "{{count}} 回の実行は使用量が記録されておらず、合計に含まれません。",
+    "note_unmapped": "{{models}} は価格が未登録です。トークンは集計されますが費用は含まれません。",
+    "note_estimate": "費用は公開モデル料金からの概算です（プロバイダーが独自の費用を返した分を除く）。"
   },
   "terminate_dialog": {
-    "title": "このタスクを停止しますか？",
-    "body": "タスクはキャンセルされ、再開できません。",
+    "title": "この作業を停止しますか？",
+    "body": "作業はキャンセルされ、再開できません。",
     "running_note": " 実行中の処理が完全に停止するまで数秒かかる場合があります。",
     "keep": "実行を続ける",
-    "confirm": "タスクを停止"
+    "confirm": "作業を停止"
   },
   "batch": {
     "selected": "{{count}} 件選択中",
@@ -515,17 +564,17 @@
     "priority": "優先度",
     "assignee": "担当者",
     "delete": "削除",
-    "update_success_other": "イシュー {{count}} 件を更新しました",
-    "update_failed": "イシューを更新できませんでした",
-    "delete_success_other": "イシュー {{count}} 件を削除しました",
-    "delete_failed": "イシューを削除できませんでした",
-    "delete_dialog_title_other": "イシュー {{count}} 件を削除しますか？",
-    "delete_dialog_desc_other": "この操作は元に戻せません。選択したイシューと関連データがすべて完全に削除されます。",
-    "delete_dialog_warning": "ワークスペースのメンバーであれば誰でもイシューを削除できます。",
+    "update_success_other": "タスク {{count}} 件を更新しました",
+    "update_failed": "タスクを更新できませんでした",
+    "delete_success_other": "タスク {{count}} 件を削除しました",
+    "delete_failed": "タスクを削除できませんでした",
+    "delete_dialog_title_other": "タスク {{count}} 件を削除しますか？",
+    "delete_dialog_desc_other": "この操作は元に戻せません。選択したタスクと関連データがすべて完全に削除されます。",
+    "delete_dialog_warning": "ワークスペースのメンバーであれば誰でもタスクを削除できます。",
     "cancel": "キャンセル"
   },
   "card": {
-    "update_failed": "イシューを更新できませんでした",
+    "update_failed": "タスクを更新できませんでした",
     "updated_ago": "{{time}} に更新"
   },
   "actions": {
@@ -549,17 +598,17 @@
     "copy_link": "リンクをコピー",
     "copy_workdir_path": "ローカルの作業ディレクトリのパスをコピー",
     "relations": "関係",
-    "create_sub_issue": "サブイシューを作成",
-    "set_parent_issue": "親イシューを設定...",
-    "remove_parent_issue": "親イシューを解除",
-    "remove_parent_issue_success": "親イシューを解除しました",
-    "add_sub_issue": "サブイシューを追加...",
-    "delete_issue": "イシューを削除"
+    "create_sub_issue": "サブタスクを作成",
+    "set_parent_issue": "親タスクを設定...",
+    "remove_parent_issue": "親タスクを解除",
+    "remove_parent_issue_success": "親タスクを解除しました",
+    "add_sub_issue": "サブタスクを追加...",
+    "delete_issue": "タスクを削除"
   },
   "pickers": {
     "custom_property": {
       "empty": "空",
-      "clear_action": "クリア",
+      "none": "値なし",
       "true_label": "はい",
       "false_label": "いいえ",
       "value_placeholder": "値を入力…",
@@ -581,11 +630,11 @@
     },
     "start_date": {
       "trigger_label": "開始日",
-      "clear_action": "日付をクリア"
+      "none": "開始日なし"
     },
     "due_date": {
       "trigger_label": "期限",
-      "clear_action": "日付をクリア"
+      "none": "期限なし"
     },
     "label": {
       "trigger_label": "ラベルを追加",
@@ -597,7 +646,7 @@
     }
   },
   "labels_panel": {
-    "intro": "ワークスペース全体でイシューを分類するラベルを作成・管理します。",
+    "intro": "ワークスペース全体でタスクを分類するラベルを作成・管理します。",
     "new_placeholder": "新しいラベル名...",
     "new_aria": "新しいラベル名",
     "add_action": "追加",
@@ -612,7 +661,7 @@
     "cancel_aria": "キャンセル",
     "delete_dialog_title": "ラベルを削除しますか？",
     "delete_dialog_desc_prefix": "ラベル ",
-    "delete_dialog_desc_suffix": " がすべてのイシューから削除されます。この操作は元に戻せません。",
+    "delete_dialog_desc_suffix": " がすべてのタスクから削除されます。この操作は元に戻せません。",
     "delete_dialog_cancel": "キャンセル",
     "delete_dialog_confirm": "削除",
     "create_failed": "ラベルを作成できませんでした",
@@ -621,10 +670,83 @@
   },
   "backlog_hint": {
     "title": "バックログではエージェントが一時停止します",
-    "description": "このイシューは保留中のため、割り当てられたエージェントは待機します。エージェントを開始したいときは未着手に移動してください。",
+    "description": "このタスクは保留中のため、割り当てられたエージェントは待機します。エージェントを開始したいときは未着手に移動してください。",
     "row_backlog_label": "バックログ",
     "row_backlog_hint": "エージェントを一時停止のままにします",
     "row_todo_label": "未着手",
     "row_todo_hint": "エージェントを開始します"
+  },
+  "save_view": {
+    "title": "ビューとして保存",
+    "hint_workspace": "ワークスペースの全 issue をもとに作成",
+    "hint_my_any": "「マイ issue · すべて」をもとに作成",
+    "hint_my_assigned": "「マイ issue · 自分に割り当て」をもとに作成",
+    "hint_my_created": "「マイ issue · 自分が作成」をもとに作成",
+    "hint_my_involved": "「マイ issue · 関与中」をもとに作成",
+    "hint_project": "プロジェクト「{{title}}」をもとに作成（そのプロジェクトページでのみ利用可能）",
+    "hint_project_agents": "プロジェクト「{{title}}」のエージェントが担当する issue をもとに作成（そのプロジェクトページでのみ利用可能）",
+    "hint_project_members": "プロジェクト「{{title}}」のメンバーが担当する issue をもとに作成（そのプロジェクトページでのみ利用可能）",
+    "my_private_note": "マイ issue のビューは自分にのみ表示されます",
+    "name_label": "名前",
+    "visibility_label": "公開範囲",
+    "visibility_private": "自分のみ",
+    "visibility_workspace": "ワークスペースのメンバーに表示",
+    "filters_label": "フィルター",
+    "custom_property": "カスタムプロパティ",
+    "create": "ビューを作成",
+    "layout_label": "レイアウト",
+    "display_defaults": "デフォルト表示",
+    "default_hint": "メンバーが最初にこのビューを開いたときの表示。以降は各自で調整できます",
+    "add_filter": "フィルターを追加",
+    "name_placeholder": "例：レビュー待ち",
+    "cancel": "キャンセル",
+    "name_required": "ビュー名を入力してください",
+    "toast_created": "ビューを作成しました",
+    "toast_failed": "ビューの作成に失敗しました",
+    "edit_title": "ビューを編集",
+    "update": "変更を保存",
+    "toast_updated": "ビューを更新しました",
+    "toast_conflict": "他のユーザーがこのビューを編集しました。開き直してから再試行してください",
+    "hint_workspace_members": "メンバーが担当するワークスペースの issue をもとに作成",
+    "hint_workspace_agents": "エージェントが担当するワークスペースの issue をもとに作成",
+    "scope_label_workspace": "担当者タイプ",
+    "scope_label_my": "自分との関係",
+    "variant_all": "担当者を問わない",
+    "variant_members": "メンバーに割り当て",
+    "variant_agents": "エージェントに割り当て",
+    "variant_my_any": "何らかの関わり",
+    "variant_my_assigned": "自分に割り当て",
+    "variant_my_created": "自分が作成",
+    "variant_my_involved": "関与中"
+  },
+  "view_selector": {
+    "trigger": "ビュー",
+    "empty": "保存されたビューはまだありません",
+    "private_group": "プライベート",
+    "shared_group": "ワークスペース共有",
+    "exit": "ビューを終了",
+    "unavailable": "このビューは利用できなくなりました",
+    "edit": "ビューを編集"
+  },
+  "view_bar": {
+    "menu_label": "ビュー",
+    "menu_new": "新規ビュー",
+    "builtin_tag": "組み込み",
+    "drag_handle": "ドラッグで並べ替え",
+    "delete": "削除",
+    "delete_title": "ビューを削除しますか？",
+    "delete_description": "「{{name}}」は閲覧できる全メンバーから削除されます",
+    "toast_deleted": "ビューを削除しました",
+    "context_edit": "ビューを編集",
+    "context_pin": "サイドバーに固定",
+    "context_unpin": "サイドバーから固定解除",
+    "row_menu": "その他の操作",
+    "row_hide": "バーから隠す",
+    "row_show": "バーに表示",
+    "menu_manage": "ビューを管理",
+    "manage_title": "ビューを管理",
+    "manage_hint": "並び順と表示設定は自分にのみ適用されます",
+    "visible_toggle": "ビューバーに表示",
+    "more_label": "その他のビュー"
   }
 }

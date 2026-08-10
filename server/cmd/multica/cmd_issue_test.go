@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -2136,6 +2137,7 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	cmd.Flags().Bool("roots-only", false, "")
 	cmd.Flags().Bool("summary", false, "")
 	cmd.Flags().Bool("full", false, "")
+	cmd.Flags().Bool("compact", false, "")
 	cmd.Flags().String("thread", "", "")
 	cmd.Flags().Int("recent", 0, "")
 	cmd.Flags().Int("tail", 0, "")
@@ -2878,6 +2880,98 @@ func TestRunIssueUpdateSendsPosition(t *testing.T) {
 	}
 }
 
+func TestIssueReadCommandsUseInjectedTaskToken(t *testing.T) {
+	const fakeTaskToken = "mat_task_issue_sentinel"
+	ownerHome := t.TempDir()
+	t.Setenv("HOME", ownerHome)
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TOKEN", fakeTaskToken)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-task")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+
+	ownerPath := filepath.Join(ownerHome, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ownerPath, []byte("{\n  \"server_url\": \"https://owner.invalid\",\n  \"workspace_id\": \"owner-workspace-sentinel\",\n  \"token\": \"mul_owner_sentinel\"\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+fakeTaskToken {
+			t.Errorf("Authorization = %q, want injected fake task token", got)
+		}
+		gotPaths = append(gotPaths, r.URL.RequestURI())
+		switch r.URL.Path {
+		case "/api/issues":
+			if got := r.URL.Query().Get("workspace_id"); got != "ws-task" {
+				t.Errorf("workspace_id = %q, want task workspace", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"issues": []any{}, "total": 0})
+		case "/api/issues/MUL-46":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "issue-uuid", "identifier": "MUL-46", "title": "Task isolation"})
+		case "/api/issues/issue-uuid":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "issue-uuid", "identifier": "MUL-46", "title": "Task isolation"})
+		case "/api/issues/issue-uuid/task-runs":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	listCmd := newIssueListTestCmd()
+	_ = listCmd.Flags().Set("output", "json")
+	if _, err := captureStdout(t, func() error { return runIssueList(listCmd, nil) }); err != nil {
+		t.Fatalf("issue list: %v", err)
+	}
+
+	getCmd := &cobra.Command{Use: "get"}
+	getCmd.Flags().String("output", "json", "")
+	if _, err := captureStdout(t, func() error { return runIssueGet(getCmd, []string{"MUL-46"}) }); err != nil {
+		t.Fatalf("issue get: %v", err)
+	}
+
+	runsCmd := &cobra.Command{Use: "runs"}
+	runsCmd.Flags().String("output", "json", "")
+	runsCmd.Flags().Bool("full-id", false, "")
+	if _, err := captureStdout(t, func() error { return runIssueRuns(runsCmd, []string{"MUL-46"}) }); err != nil {
+		t.Fatalf("issue runs: %v", err)
+	}
+
+	if len(gotPaths) != 5 {
+		t.Fatalf("request paths = %v, want issue list + get resolution/get + runs resolution/list", gotPaths)
+	}
+}
+
+func TestIssueReadCommandsFailClosedWithoutTaskToken(t *testing.T) {
+	ownerHome := t.TempDir()
+	t.Setenv("HOME", ownerHome)
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TOKEN", "")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:1")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-task")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+
+	ownerPath := filepath.Join(ownerHome, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ownerPath, []byte("{\n  \"token\": \"mul_owner_sentinel\"\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newIssueListTestCmd()
+	err := runIssueList(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "task-scoped mat_ token") {
+		t.Fatalf("issue list error = %v, want missing task token failure", err)
+	}
+}
+
 func TestRunIssueListSendsSortAndDirection(t *testing.T) {
 	var gotQuery url.Values
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -3416,5 +3510,192 @@ func TestRunIssueUpdateOmitsPositionWhenUnset(t *testing.T) {
 	}
 	if _, present := body["position"]; present {
 		t.Fatalf("position must be absent from the body when --position is not passed, got %#v", body["position"])
+	}
+}
+
+// TestIssueCommentListHelpCarriesReadContract pins the read-surface contract
+// that MUL-5442 moved out of the runtime brief into this command's --help: the
+// --recent saturation semantics (MUL-5372), the bounded two-step alternative,
+// and the pagination cursor labels. The brief now only points here — if these
+// leave the help, the pointer dangles and the over-read trap returns
+// undocumented.
+//
+// The assertions run against the RENDERED FlagUsages output, not raw
+// Flag.Usage: pflag's UnquoteUsage hijacks the first backtick pair in a usage
+// string as the flag's value placeholder (see
+// TestLoginTokenHelpOutputRendersCleanly for the original regression), so only
+// the rendered output proves what an agent actually reads.
+func TestIssueCommentListHelpCarriesReadContract(t *testing.T) {
+	help := issueCommentListCmd.Flags().FlagUsages()
+
+	for _, want := range []string{
+		// --before must keep its string placeholder — a backticked phrase in
+		// the usage text would replace it (the UnquoteUsage hijack).
+		"--before string",
+		// The saturation contract relocated from the brief (MUL-5372).
+		"caps THREADS, not comments",
+		"no per-thread cap",
+		"fewer than N root threads",
+		// The bounded alternative, as two sequential reads — the flags are
+		// mutually exclusive, so the help must never suggest composing them.
+		"scan with --roots-only --summary",
+		"then open selected threads with --thread <id> --tail N",
+		// Pagination cursor labels, exactly as the CLI prints them on stderr.
+		"Next thread cursor",
+		"Next reply cursor",
+		// The --compact contract (#5999 follow-up): what goes and what is
+		// untouchable.
+		"drop response fields that carry no information",
+		"Content and identity fields pass through untouched",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("comment list rendered help missing %q, got:\n%s", want, help)
+		}
+	}
+}
+
+// TestCompactCommentsDropsReaderNoise pins the --compact contract (#5999
+// follow-up, MUL-5442): reader-noise fields go — the echoed issue_id,
+// source_task_id, updated_at when identical to created_at, null values,
+// empty arrays — while information-carrying fields and content pass
+// through untouched, and a REAL edit timestamp or non-empty array is
+// never dropped.
+func TestCompactCommentsDropsReaderNoise(t *testing.T) {
+	t.Parallel()
+
+	comments := []map[string]any{{
+		"id":                "c-1",
+		"issue_id":          "i-1",
+		"parent_id":         nil,
+		"author_type":       "agent",
+		"author_id":         "a-1",
+		"content":           "hello",
+		"type":              "comment",
+		"created_at":        "2026-08-07T02:00:00Z",
+		"updated_at":        "2026-08-07T02:00:00Z",
+		"source_task_id":    "t-1",
+		"resolved_at":       nil,
+		"resolved_by_id":    nil,
+		"attachments":       []any{},
+		"reactions":         []any{},
+		"reply_count":       float64(0),
+		"content_truncated": false,
+		"last_activity_at":  "2026-08-07T03:00:00Z",
+	}, {
+		"id":          "c-2",
+		"issue_id":    "i-1",
+		"content":     "edited later",
+		"created_at":  "2026-08-07T02:00:00Z",
+		"updated_at":  "2026-08-07T04:00:00Z",
+		"attachments": []any{map[string]any{"id": "att-1"}},
+	}}
+	compactComments(comments)
+
+	for _, k := range []string{"issue_id", "source_task_id", "updated_at", "parent_id", "resolved_at", "resolved_by_id", "attachments", "reactions"} {
+		if _, ok := comments[0][k]; ok {
+			t.Errorf("compact kept reader-noise field %q", k)
+		}
+	}
+	// reply_count: 0 and content_truncated: false are semantic zero values,
+	// not nulls — null pruning must never generalize to zero pruning
+	// (#6546 review).
+	for _, k := range []string{"id", "author_type", "author_id", "content", "type", "created_at", "reply_count", "content_truncated", "last_activity_at"} {
+		if _, ok := comments[0][k]; !ok {
+			t.Errorf("compact dropped information field %q", k)
+		}
+	}
+	if _, ok := comments[1]["updated_at"]; !ok {
+		t.Error("compact dropped a real edit timestamp (updated_at != created_at)")
+	}
+	if _, ok := comments[1]["attachments"]; !ok {
+		t.Error("compact dropped a non-empty attachments array")
+	}
+}
+
+// TestRunIssueCommentListCompactWiring proves the flag is wired end to end
+// (#6546 review nit): the same server response loses reader-noise fields
+// under --compact while zero-value scalars like reply_count: 0 and
+// content_truncated: false are KEPT (null pruning must never generalize to
+// zero pruning), and without the flag the default output still carries
+// every field — the default contract is untouched.
+func TestRunIssueCommentListCompactWiring(t *testing.T) {
+	const issueID = "22222222-2222-4222-8222-222222222222"
+	payload := []map[string]any{{
+		"id":                "c-1",
+		"issue_id":          issueID,
+		"parent_id":         nil,
+		"author_type":       "member",
+		"author_id":         "u-1",
+		"type":              "comment",
+		"content":           "hello",
+		"created_at":        "2026-08-07T02:00:00Z",
+		"updated_at":        "2026-08-07T02:00:00Z",
+		"source_task_id":    "t-1",
+		"attachments":       []any{},
+		"reply_count":       0,
+		"content_truncated": false,
+		"folded_count":      0,
+	}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "TST-2"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID+"/comments":
+			_ = json.NewEncoder(w).Encode(payload)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	run := func(compact bool) []map[string]any {
+		t.Helper()
+		cmd := newIssueCommentListTestCmd()
+		if compact {
+			_ = cmd.Flags().Set("compact", "true")
+		}
+		orig := os.Stdout
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("pipe: %v", err)
+		}
+		os.Stdout = w
+		runErr := runIssueCommentList(cmd, []string{issueID})
+		w.Close()
+		os.Stdout = orig
+		if runErr != nil {
+			t.Fatalf("runIssueCommentList: %v", runErr)
+		}
+		out, _ := io.ReadAll(r)
+		var got []map[string]any
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("output not JSON: %v\n---\n%s", err, out)
+		}
+		return got
+	}
+
+	plain := run(false)
+	if len(plain) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(plain))
+	}
+	for _, k := range []string{"issue_id", "source_task_id", "updated_at", "parent_id", "attachments"} {
+		if _, ok := plain[0][k]; !ok {
+			t.Errorf("default output must be untouched but lost %q", k)
+		}
+	}
+
+	compacted := run(true)
+	for _, k := range []string{"issue_id", "source_task_id", "updated_at", "parent_id", "attachments"} {
+		if _, ok := compacted[0][k]; ok {
+			t.Errorf("--compact kept reader-noise field %q", k)
+		}
+	}
+	for _, k := range []string{"id", "content", "created_at", "reply_count", "content_truncated", "folded_count"} {
+		if _, ok := compacted[0][k]; !ok {
+			t.Errorf("--compact dropped %q — zero-value scalars must survive", k)
+		}
 	}
 }

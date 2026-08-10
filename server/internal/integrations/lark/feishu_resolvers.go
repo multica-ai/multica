@@ -159,6 +159,7 @@ func (r *feishuDeduper) Release(ctx context.Context, installationID pgtype.UUID,
 // unit-tested with a fake; *engine.ChatSession is the production value.
 type chatSession interface {
 	EnsureSession(ctx context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error)
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error
 	AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error)
 	BindMediaRefs(ctx context.Context, in engine.BindMediaInput) error
 }
@@ -202,6 +203,10 @@ func (r *feishuSessionBinder) EnsureSession(ctx context.Context, p engine.Ensure
 	})
 }
 
+func (r *feishuSessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
+	return r.session.MarkPendingFresh(ctx, sessionID)
+}
+
 func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
 	commandText := p.Message.CommandText
 	if commandText == "" {
@@ -217,16 +222,21 @@ func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.Append
 		ThreadID:            p.Message.Source.ThreadID,
 		ClaimToken:          p.ClaimToken,
 		MediaPendingSeconds: p.MediaPendingSeconds,
+		ForceFresh:          p.Message.ForceFresh,
 	})
 }
 
 func (r *feishuSessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) error {
 	return r.session.BindMediaRefs(ctx, engine.BindMediaInput{
-		MessageID:   p.MessageID,
-		SessionID:   p.SessionID,
-		WorkspaceID: p.WorkspaceID,
-		Sender:      p.Sender,
-		MediaRefs:   p.MediaRefs,
+		MessageID:            p.MessageID,
+		SessionID:            p.SessionID,
+		WorkspaceID:          p.WorkspaceID,
+		Sender:               p.Sender,
+		IssueID:              p.IssueID,
+		IssueDescriptionBase: p.IssueDescriptionBase,
+		IssueCommandText:     p.IssueCommandText,
+		Body:                 p.Body,
+		MediaRefs:            p.MediaRefs,
 	})
 }
 
@@ -265,15 +275,17 @@ func (r *feishuOutboundReplier) Reply(ctx context.Context, inst engine.ResolvedI
 // the OutcomeReplier consumes. The Outcome/DropReason string values match 1:1.
 func dispatchResultFromEngine(res engine.Result) DispatchResult {
 	return DispatchResult{
-		Outcome:         Outcome(string(res.Outcome)),
-		DropReason:      DropReason(string(res.DropReason)),
-		InstallationID:  res.InstallationID,
-		ChatSessionID:   res.ChatSessionID,
-		SenderOpenID:    OpenID(res.Sender),
-		IssueID:         res.IssueID,
-		IssueNumber:     res.IssueNumber,
-		IssueIdentifier: res.IssueIdentifier,
-		IssueTitle:      res.IssueTitle,
+		Outcome:            Outcome(string(res.Outcome)),
+		DropReason:         DropReason(string(res.DropReason)),
+		InstallationID:     res.InstallationID,
+		ChatSessionID:      res.ChatSessionID,
+		SenderOpenID:       OpenID(res.Sender),
+		IssueID:            res.IssueID,
+		IssueNumber:        res.IssueNumber,
+		IssueIdentifier:    res.IssueIdentifier,
+		IssueTitle:         res.IssueTitle,
+		IssueDuplicate:     res.IssueDuplicate,
+		IssueUsageHadMedia: res.IssueUsageHadMedia,
 	}
 }
 
