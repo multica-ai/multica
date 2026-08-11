@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS memoryhub_memory_docket_workspace_revision_uidx;

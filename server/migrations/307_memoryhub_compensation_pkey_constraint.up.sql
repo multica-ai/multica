@@ -1,0 +1,1 @@
+ALTER TABLE memoryhub_compensation ADD CONSTRAINT memoryhub_compensation_pkey PRIMARY KEY USING INDEX memoryhub_compensation_pkey;

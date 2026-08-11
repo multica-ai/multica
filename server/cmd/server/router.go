@@ -1095,6 +1095,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
+		// --- MemoryHub routes (ALL-16) ---
+		// Registered only when the MemoryHub service is wired (nil-safe).
+		if h.MemoryHubSvc != nil {
+			r.Route("/api/memoryhub", func(r chi.Router) {
+				r.Get("/health", h.HandleMemoryHubHealth)
+				r.Get("/evidence/{execution_id}", h.HandleGetExecutionEvidence)
+				r.Get("/evidence/{execution_id}/score", h.HandleGetExecutionEvidenceScore)
+				// V6-1/V6-2 owner repair surface: only workspace owner/admin.
+				r.With(handler.RequireWorkspaceOwnerOrAdmin("")).
+					Post("/evidence/{execution_id}/review-repair", h.HandleRepairBlockedReviewer)
+			})
+		}
+
 		// --- User-scoped routes (no workspace context required) ---
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)

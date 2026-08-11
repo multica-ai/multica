@@ -165,6 +165,10 @@ type Handler struct {
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
 	EmailService           *service.EmailService
+	// MemoryHubSvc owns the MemoryHub binding and evidence-review lifecycle.
+	// Optional: when nil the /api/memoryhub routes are not registered and any
+	// handler call returns 503.
+	MemoryHubSvc           *service.MemoryHubService
 	UpdateStore            UpdateStore
 	ModelListStore         ModelListStore
 	LocalSkillListStore    LocalSkillListStore

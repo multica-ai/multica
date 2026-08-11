@@ -1,0 +1,1 @@
+ALTER TABLE memoryhub_compensation DROP CONSTRAINT IF EXISTS memoryhub_compensation_pkey;

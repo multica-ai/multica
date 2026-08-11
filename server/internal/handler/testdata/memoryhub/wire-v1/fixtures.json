@@ -1,0 +1,514 @@
+{
+  "schema_version": 1,
+  "fixture_bundle_version": "mhm-sk-wire-v1.5",
+  "requests": {
+    "config_update": {
+      "schema_version": 1,
+      "user_key": "test-only-user-key-never-log",
+      "service_id": null
+    },
+    "binding_create": {
+      "schema_version": 1,
+      "scope_kind": "workspace",
+      "scope_id": null,
+      "subject_type": "issue",
+      "subject_id": "33333333-3333-4333-8333-333333333333",
+      "mode": "create",
+      "name": "issue-3333",
+      "remote_ref": null,
+      "confirm": false
+    },
+    "binding_update": {
+      "schema_version": 1,
+      "expected_version": 4,
+      "name": "issue-3333-renamed",
+      "remote_ref": {
+        "schema_version": 1,
+        "team_id": "team-17",
+        "agent_id": "agent-9",
+        "task_id": "task-4",
+        "remote_name": "issue-3333-renamed"
+      },
+      "confirm": true
+    },
+    "binding_action": {
+      "schema_version": 1,
+      "expected_version": 4
+    },
+    "delete_remote": {
+      "schema_version": 1,
+      "expected_version": 4,
+      "confirm": true
+    },
+    "withdraw_memory_item": {
+      "schema_version": 1,
+      "reason": "superseded by a newer owner decision",
+      "expected_state": "active"
+    }
+  },
+  "responses": {
+    "config": {
+      "schema_version": 1,
+      "config": {
+        "schema_version": 1,
+        "has_key": true,
+        "key_masked": "tdai_****9f2a",
+        "service_id": "memoryhub-primary",
+        "updated_at": "2026-08-10T17:20:00Z"
+      },
+      "capabilities": {
+        "schema_version": 1,
+        "can_manage": true,
+        "can_delete_remote": false,
+        "can_withdraw_memory": true,
+        "can_read_docket": true,
+        "can_write_config": true
+      }
+    },
+    "binding": {
+      "schema_version": 1,
+      "binding": {
+        "schema_version": 1,
+        "id": "44444444-4444-4444-8444-444444444444",
+        "workspace_id": "11111111-1111-4111-8111-111111111111",
+        "scope_kind": "workspace",
+        "scope_id": null,
+        "subject_type": "issue",
+        "subject_id": "33333333-3333-4333-8333-333333333333",
+        "status": "bound",
+        "version": 4,
+        "remote_ref": {
+          "schema_version": 1,
+          "team_id": "team-17",
+          "agent_id": "agent-9",
+          "task_id": "task-4",
+          "remote_name": "issue-3333"
+        },
+        "evidence_ref": null,
+        "next_wakeup": null,
+        "created_at": "2026-08-10T17:20:00Z",
+        "updated_at": "2026-08-10T17:22:00Z"
+      },
+      "capabilities": {
+        "schema_version": 1,
+        "can_manage": true,
+        "can_delete_remote": false,
+        "can_withdraw_memory": true,
+        "can_read_docket": true,
+        "can_write_config": false
+      }
+    },
+    "binding_list": {
+      "schema_version": 1,
+      "bindings": [],
+      "page": {
+        "schema_version": 1,
+        "next_cursor": null,
+        "has_more": false
+      },
+      "capabilities": {
+        "schema_version": 1,
+        "can_manage": false,
+        "can_delete_remote": false,
+        "can_withdraw_memory": false,
+        "can_read_docket": true,
+        "can_write_config": false
+      }
+    },
+    "delete_remote": {
+      "schema_version": 1,
+      "deleted_remote": true,
+      "local_status": "unbound",
+      "evidence_ref": "77777777-7777-4777-8777-777777777777",
+      "capabilities": {
+        "schema_version": 1,
+        "can_manage": true,
+        "can_delete_remote": true,
+        "can_withdraw_memory": true,
+        "can_read_docket": true,
+        "can_write_config": true
+      }
+    },
+    "health": {
+      "schema_version": 1,
+      "services": {
+        "schema_version": 1,
+        "memory_core": {
+          "schema_version": 1,
+          "ok": true,
+          "latency_ms": 21,
+          "error_code": null,
+          "checked_at": "2026-08-10T17:25:00Z"
+        },
+        "proxy": {
+          "schema_version": 1,
+          "ok": true,
+          "latency_ms": 18,
+          "error_code": null,
+          "checked_at": "2026-08-10T17:25:00Z"
+        },
+        "hub": {
+          "schema_version": 1,
+          "ok": true,
+          "latency_ms": 24,
+          "error_code": null,
+          "checked_at": "2026-08-10T17:25:00Z"
+        },
+        "knowledge": {
+          "schema_version": 1,
+          "ok": false,
+          "latency_ms": null,
+          "error_code": "upstream_timeout",
+          "checked_at": "2026-08-10T17:25:00Z"
+        }
+      },
+      "capabilities": {
+        "schema_version": 1,
+        "can_manage": false,
+        "can_delete_remote": false,
+        "can_withdraw_memory": false,
+        "can_read_docket": false,
+        "can_write_config": false
+      }
+    },
+    "candidate_list": {
+      "schema_version": 1,
+      "candidates": [
+        {
+          "schema_version": 1,
+          "kind": "agent",
+          "remote_id": "agent-9",
+          "remote_name": "MHM-SK-Codex",
+          "parent_remote_id": "team-17",
+          "scope_kind": "project",
+          "scope_id": "22222222-2222-4222-8222-222222222222",
+          "availability": "available",
+          "evidence_ref": null
+        }
+      ],
+      "page": {
+        "schema_version": 1,
+        "next_cursor": "eyJ2IjoxLCJsYXN0IjoiYWdlbnQtOSJ9",
+        "has_more": true
+      },
+      "capabilities": {
+        "schema_version": 1,
+        "can_manage": true,
+        "can_delete_remote": false,
+        "can_withdraw_memory": false,
+        "can_read_docket": true,
+        "can_write_config": false
+      }
+    },
+    "memory_docket": {
+      "schema_version": 1,
+      "docket": {
+        "schema_version": 1,
+        "id": "55555555-5555-4555-8555-555555555555",
+        "workspace_id": "11111111-1111-4111-8111-111111111111",
+        "scope_kind": "workspace",
+        "scope_id": null,
+        "subject_type": "issue",
+        "subject_id": "33333333-3333-4333-8333-333333333333",
+        "policy": "required",
+        "revision": 3,
+        "generated_at": "2026-08-10T17:23:00Z",
+        "expires_at": "2026-08-10T18:23:00Z",
+        "items": [
+          {
+            "schema_version": 1,
+            "id": "66666666-6666-4666-8666-666666666666",
+            "docket_id": "55555555-5555-4555-8555-555555555555",
+            "state": "active",
+            "kind": "decision",
+            "summary": "Use workspace binding only for projectless executions.",
+            "source_ref": "comment:2d41b8",
+            "evidence_ref": null,
+            "priority": 100,
+            "expires_at": null,
+            "withdrawn_at": null,
+            "created_at": "2026-08-10T17:23:00Z"
+          }
+        ]
+      },
+      "capabilities": {
+        "schema_version": 1,
+        "can_manage": false,
+        "can_delete_remote": false,
+        "can_withdraw_memory": true,
+        "can_read_docket": true,
+        "can_write_config": false
+      }
+    },
+    "memory_item": {
+      "schema_version": 1,
+      "item": {
+        "schema_version": 1,
+        "id": "66666666-6666-4666-8666-666666666666",
+        "docket_id": "55555555-5555-4555-8555-555555555555",
+        "state": "withdrawn",
+        "kind": "decision",
+        "summary": "Use workspace binding only for projectless executions.",
+        "source_ref": "comment:2d41b8",
+        "evidence_ref": "77777777-7777-4777-8777-777777777777",
+        "priority": 100,
+        "expires_at": null,
+        "withdrawn_at": "2026-08-10T17:29:00Z",
+        "created_at": "2026-08-10T17:23:00Z"
+      },
+      "capabilities": {
+        "schema_version": 1,
+        "can_manage": false,
+        "can_delete_remote": false,
+        "can_withdraw_memory": true,
+        "can_read_docket": true,
+        "can_write_config": false
+      }
+    },
+    "execution_evidence": {
+      "schema_version": 1,
+      "record": {
+        "schema_version": 1,
+        "execution_id": "88888888-8888-4888-8888-888888888888",
+        "runtime_evidence_state": "complete",
+        "output_ref": {
+          "schema_version": 1,
+          "kind": "task_output",
+          "id": "output-1",
+          "uri": null,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "message_refs": [
+          {
+            "schema_version": 1,
+            "kind": "message",
+            "id": "message-1",
+            "uri": null,
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "usage_refs": [
+          {
+            "schema_version": 1,
+            "kind": "usage",
+            "id": "usage-1",
+            "uri": null,
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        ],
+        "artifact_refs": [],
+        "test_refs": [],
+        "review_policy": "independent",
+        "review_state": "recorded",
+        "review_version": 3,
+        "reviewer_agent_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "review_task_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "review_output_ref": {
+          "schema_version": 1,
+          "kind": "review",
+          "id": "review-1",
+          "uri": null,
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "review_attempt": 1,
+        "max_review_attempts": 3,
+        "review_next_wakeup": null,
+        "review_failure_code": null,
+        "created_at": "2026-08-10T17:20:00Z",
+        "updated_at": "2026-08-10T17:32:00Z"
+      },
+      "events": [
+        {
+          "schema_version": 1,
+          "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          "execution_id": "88888888-8888-4888-8888-888888888888",
+          "run_id": "run-001",
+          "workspace_id": "11111111-1111-4111-8111-111111111111",
+          "project_id": null,
+          "agent_id": "99999999-9999-4999-8999-999999999999",
+          "runtime_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "model": "gpt-5.6-sol",
+          "sequence": 1,
+          "occurred_at": "2026-08-10T17:30:00Z",
+          "kind": "completion",
+          "payload_ref": {
+            "schema_version": 1,
+            "kind": "task_output",
+            "id": "output-1",
+            "uri": null,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ],
+      "page": {
+        "schema_version": 1,
+        "next_cursor": null,
+        "has_more": false
+      },
+      "capabilities": {
+        "schema_version": 1,
+        "can_manage": false,
+        "can_delete_remote": false,
+        "can_withdraw_memory": false,
+        "can_read_docket": true,
+        "can_write_config": false
+      }
+    },
+    "evidence_score": {
+      "schema_version": 1,
+      "score": {
+        "schema_version": 1,
+        "execution_id": "88888888-8888-4888-8888-888888888888",
+        "algorithm_version": "h6-v1",
+        "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "availability": 100,
+        "isolation": 100,
+        "security": 100,
+        "recovery": 95,
+        "performance": 90,
+        "observability": 100,
+        "overall": 97,
+        "eligible": true,
+        "computed_at": "2026-08-10T17:33:00Z",
+        "evidence_refs": [
+          "77777777-7777-4777-8777-777777777777"
+        ]
+      },
+      "capabilities": {
+        "schema_version": 1,
+        "can_manage": false,
+        "can_delete_remote": false,
+        "can_withdraw_memory": false,
+        "can_read_docket": true,
+        "can_write_config": false
+      }
+    },
+    "error": {
+      "schema_version": 1,
+      "error": {
+        "schema_version": 1,
+        "code": "binding_transition_invalid",
+        "message": "blocked may only transition to binding after manual unlock",
+        "retryable": false,
+        "evidence_ref": null,
+        "next_wakeup": null,
+        "details": {
+          "schema_version": 1,
+          "field_paths": [
+            "/status"
+          ],
+          "allowed_values": [
+            "binding"
+          ]
+        }
+      }
+    }
+  },
+  "queries": {
+    "bindings_default": {
+      "method": "GET",
+      "path": "/api/memoryhub/bindings",
+      "query": {},
+      "effective_limit": 50,
+      "sort": "created_at DESC, id DESC"
+    },
+    "bindings_project_page": {
+      "method": "GET",
+      "path": "/api/memoryhub/bindings",
+      "query": {
+        "scope_kind": "project",
+        "scope_id": "22222222-2222-4222-8222-222222222222",
+        "subject_type": "issue",
+        "subject_id": "33333333-3333-4333-8333-333333333333",
+        "cursor": "eyJ2IjoxLCJsYXN0IjoiNDQ0NCJ9",
+        "limit": "25"
+      },
+      "effective_limit": 25,
+      "sort": "created_at DESC, id DESC"
+    },
+    "candidates_project": {
+      "method": "GET",
+      "path": "/api/memoryhub/candidates",
+      "query": {
+        "kind": "agent",
+        "q": "codex",
+        "scope_kind": "project",
+        "scope_id": "22222222-2222-4222-8222-222222222222",
+        "limit": "50"
+      },
+      "effective_limit": 50,
+      "sort": "remote_name ASC, kind ASC, remote_id ASC"
+    },
+    "memory_docket_workspace": {
+      "method": "GET",
+      "path": "/api/memoryhub/memory-docket",
+      "query": {
+        "scope_kind": "workspace",
+        "subject_type": "issue",
+        "subject_id": "33333333-3333-4333-8333-333333333333"
+      }
+    },
+    "evidence_page": {
+      "method": "GET",
+      "path": "/api/memoryhub/evidence/88888888-8888-4888-8888-888888888888",
+      "query": {
+        "cursor": "eyJ2IjoxLCJzZXF1ZW5jZSI6MX0",
+        "limit": "100"
+      },
+      "effective_limit": 100,
+      "sort": "sequence ASC, id ASC"
+    },
+    "delete_binding": {
+      "method": "DELETE",
+      "path": "/api/memoryhub/bindings/44444444-4444-4444-8444-444444444444",
+      "query": {
+        "expected_version": "4"
+      },
+      "success_status": 204
+    }
+  },
+  "credential_transport": {
+    "handle": {
+      "schema_version": 1,
+      "handle_id": "mhch_example_7f3c",
+      "audience": "memoryhub-provider-credential",
+      "task_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "execution_id": "88888888-8888-4888-8888-888888888888",
+      "runtime_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "expires_at": "2026-08-10T17:30:00Z",
+      "redeem_path": "/api/daemon/tasks/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/memoryhub-credential/redeem",
+      "ack_path": "/api/daemon/tasks/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/memoryhub-credential/ack",
+      "release_path": "/api/daemon/tasks/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/memoryhub-credential/release"
+    },
+    "expected_request_targets": {
+      "redeem": "/api/daemon/tasks/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/memoryhub-credential/redeem",
+      "ack": "/api/daemon/tasks/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/memoryhub-credential/ack",
+      "release": "/api/daemon/tasks/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/memoryhub-credential/release"
+    },
+    "forbidden_join_example": "/api/daemon/tasks/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/memoryhub-credential/redeem/api/daemon/tasks/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/memoryhub-credential/redeem"
+  },
+  "review_repair": {
+    "blocked_missing_reviewer": {
+      "review_state": "blocked",
+      "review_version": 2,
+      "reviewer_agent_id": null,
+      "review_attempt": 0,
+      "review_next_wakeup": null,
+      "review_failure_code": "memoryhub_reviewer_unavailable"
+    },
+    "owner_repair_request": {
+      "execution_id": "88888888-8888-4888-8888-888888888888",
+      "expected_review_version": 2,
+      "reviewer_agent_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    },
+    "owner_repair_result": {
+      "review_state": "pending",
+      "review_version": 3,
+      "reviewer_agent_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "review_attempt": 0,
+      "review_next_wakeup": "2026-08-10T17:35:00Z",
+      "review_failure_code": null
+    }
+  }
+}

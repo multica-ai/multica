@@ -106,3 +106,38 @@ func RequireHumanActor(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// RequireWorkspaceOwnerOrAdmin rejects every actor except a human workspace
+// owner/admin. It is the V6-1 actor guard for the review-repair surface: agent,
+// task-token, daemon, runtime, project-lead, subject-owner, and ordinary-member
+// actors receive 403 before any execution lookup is exposed (V6-1.1).
+//
+// The workspace is read from the X-Workspace-ID header stamped by the workspace
+// membership middleware that runs before this guard. The caller passes the
+// allowed workspace id explicitly so the guard can be reused on any route that
+// has already resolved the workspace.
+func RequireWorkspaceOwnerOrAdmin(allowedWorkspaceID string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Machine credentials (task token / cloud PAT) are never owners.
+			switch r.Header.Get("X-Actor-Source") {
+			case "task_token", "cloud_pat":
+				writeError(w, http.StatusForbidden, "workspace owner or admin role is required")
+				return
+			}
+			// The workspace membership middleware stamps the membership role
+			// for the resolved workspace; a non-owner/admin role is rejected.
+			role := r.Header.Get("X-Workspace-Role")
+			ws := r.Header.Get("X-Workspace-ID")
+			if allowedWorkspaceID != "" && ws != allowedWorkspaceID {
+				writeError(w, http.StatusForbidden, "workspace owner or admin role is required")
+				return
+			}
+			if role != "owner" && role != "admin" {
+				writeError(w, http.StatusForbidden, "workspace owner or admin role is required")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}

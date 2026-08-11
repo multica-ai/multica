@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS memoryhub_binding_project_remote_agent_uidx;

@@ -1,0 +1,1 @@
+ALTER TABLE memoryhub_workspace_config DROP CONSTRAINT IF EXISTS memoryhub_workspace_config_pkey;

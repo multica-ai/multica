@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY execution_evidence_event_retention_idx ON execution_evidence_event (retention_until);

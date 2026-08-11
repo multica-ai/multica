@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY memoryhub_memory_docket_project_revision_uidx ON memoryhub_memory_docket (workspace_id, scope_id, subject_type, subject_id, revision) WHERE scope_kind = 'project' AND scope_id IS NOT NULL;

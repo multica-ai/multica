@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY execution_evidence_event_workspace_occurred_idx ON execution_evidence_event (workspace_id, occurred_at);

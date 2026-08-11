@@ -107,6 +107,14 @@ type ExecOptions struct {
 	// through Claude Code's --settings flag. It currently carries restrictive
 	// runtime-skill overrides only; other providers ignore it.
 	ClaudeSettingsPath string
+	// MemoryHubCredential carries the MemoryHub derived credential to the
+	// provider child process. It is a NON-JSON field: the type has no String,
+	// MarshalJSON, or logging method, so a stray fmt/log/JSON call cannot leak
+	// the value. It is never merged into McpConfig, TaskAgentData, persistent
+	// agent env, or an execenv sidecar file; the common launch layer adds it
+	// only to the child environment immediately before spawn (Plan v1.4
+	// V4-3.2). Zero value means no MemoryHub credential for this execution.
+	MemoryHubCredential MemoryHubCredential
 }
 
 // runContext derives the execution context for an agent subprocess from the

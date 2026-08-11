@@ -1,0 +1,1 @@
+ALTER TABLE memoryhub_workspace_config ADD CONSTRAINT memoryhub_workspace_config_pkey PRIMARY KEY USING INDEX memoryhub_workspace_config_pkey;

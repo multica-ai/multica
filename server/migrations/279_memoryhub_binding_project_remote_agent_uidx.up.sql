@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY memoryhub_binding_project_remote_agent_uidx ON memoryhub_binding (workspace_id, scope_id, remote_agent_id) WHERE scope_kind = 'project' AND remote_agent_id IS NOT NULL;
