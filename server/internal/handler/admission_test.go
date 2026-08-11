@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -29,6 +31,13 @@ func TestRunToResponseDoesNotReverseEngineerReasonCode(t *testing.T) {
 	}
 }
 
+func TestCommentEnqueueFailureReasonPreservesExecutionSuppression(t *testing.T) {
+	err := fmt.Errorf("create task: %w", service.ErrIssueExecutionSuppressed)
+	if got := commentEnqueueFailureReason(err); got != ReasonExecutionSuppressed {
+		t.Fatalf("commentEnqueueFailureReason = %q, want %q", got, ReasonExecutionSuppressed)
+	}
+}
+
 // TestDispatchBlockedFallbackMessageIsNonEnumerating asserts the legacy `error`
 // string for every reason code stays generic — it must be safe to show to a
 // caller who is not allowed to know whether the target exists, so it must not
@@ -36,8 +45,8 @@ func TestRunToResponseDoesNotReverseEngineerReasonCode(t *testing.T) {
 func TestDispatchBlockedFallbackMessageIsNonEnumerating(t *testing.T) {
 	codes := []DispatchReasonCode{
 		ReasonInvocationNotAllowed, ReasonTargetUnavailable, ReasonRuntimeOffline,
-		ReasonAttributionBlocked, ReasonAlreadyActive, ReasonInternalError,
-		DispatchReasonCode("some_future_code"),
+		ReasonAttributionBlocked, ReasonAlreadyActive, ReasonExecutionSuppressed,
+		ReasonInternalError, DispatchReasonCode("some_future_code"),
 	}
 	for _, c := range codes {
 		msg := dispatchBlockedFallbackMessage(c)
