@@ -72,7 +72,6 @@ describe("EnvTab", () => {
     expect(
       screen.getByText(/paste KEY=value lines into a key field/i),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /^add$/i }));
     const keyInput = screen.getByPlaceholderText("KEY");
     keyInput.focus();
     fireEvent.paste(keyInput, {
@@ -100,12 +99,38 @@ describe("EnvTab", () => {
     expect(screen.getAllByPlaceholderText("KEY")[0]).toHaveFocus();
   });
 
+  it("leaves a bare key with a trailing newline to native paste handling", async () => {
+    const user = userEvent.setup();
+    renderTab();
+
+    await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
+    const keyInput = screen.getByPlaceholderText("KEY");
+    const pasteAllowed = fireEvent.paste(keyInput, {
+      clipboardData: { getData: () => "API_KEY\n" },
+    });
+
+    expect(pasteAllowed).toBe(true);
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("leaves a comment-only paste to native handling without an error", async () => {
+    const user = userEvent.setup();
+    renderTab();
+
+    await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
+    const pasteAllowed = fireEvent.paste(screen.getByPlaceholderText("KEY"), {
+      clipboardData: { getData: () => "# database settings\n" },
+    });
+
+    expect(pasteAllowed).toBe(true);
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
   it("preserves special environment keys in the save payload", async () => {
     const user = userEvent.setup();
     renderTab();
 
     await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
-    await user.click(screen.getByRole("button", { name: /^add$/i }));
     fireEvent.paste(screen.getByPlaceholderText("KEY"), {
       clipboardData: { getData: () => "__proto__=secret" },
     });
@@ -123,7 +148,6 @@ describe("EnvTab", () => {
     renderTab();
 
     await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
-    await user.click(screen.getByRole("button", { name: /^add$/i }));
     const keyInput = screen.getByPlaceholderText("KEY");
     const pasteAllowed = fireEvent.paste(keyInput, {
       clipboardData: { getData: () => "FIRST=one\necho unsafe" },
@@ -133,6 +157,21 @@ describe("EnvTab", () => {
     expect(keyInput).toHaveValue("");
     expect(toastError).toHaveBeenCalledWith(
       "Couldn't parse pasted environment variables",
+    );
+  });
+
+  it("rejects duplicate keys during paste", async () => {
+    const user = userEvent.setup();
+    renderTab();
+
+    await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
+    const pasteAllowed = fireEvent.paste(screen.getByPlaceholderText("KEY"), {
+      clipboardData: { getData: () => "API_KEY=first\nAPI_KEY=second" },
+    });
+
+    expect(pasteAllowed).toBe(false);
+    expect(toastError).toHaveBeenCalledWith(
+      "Duplicate environment variable keys",
     );
   });
 });

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { isEnvFilePaste, parseEnvFile } from "./env-file";
 
 describe("parseEnvFile", () => {
-  it("parses Bash-style assignments while preserving values", () => {
+  it("parses dotenv-style assignments while preserving literal values", () => {
     expect(
       parseEnvFile(String.raw`
 # Agent credentials
@@ -12,8 +12,10 @@ EMPTY=
 URL=https://example.com/path?first=one&second=two
 HASH='value # kept'
 PLAIN=value # ignored comment
-ESCAPED=hello\ world
-ESCAPED_HASH=value\ # kept
+WIN_DIR=C:\Users\me\.ssh
+PASSWORD=p$ss${"`"}word
+JSON={"a":1}
+QUOTED='say "hello" with $HOME and C:\path'
 `),
     ).toEqual([
       { key: "API_KEY", value: "secret value" },
@@ -24,8 +26,10 @@ ESCAPED_HASH=value\ # kept
       },
       { key: "HASH", value: "value # kept" },
       { key: "PLAIN", value: "value" },
-      { key: "ESCAPED", value: "hello world" },
-      { key: "ESCAPED_HASH", value: "value # kept" },
+      { key: "WIN_DIR", value: String.raw`C:\Users\me\.ssh` },
+      { key: "PASSWORD", value: "p$ss`word" },
+      { key: "JSON", value: '{"a":1}' },
+      { key: "QUOTED", value: String.raw`say "hello" with $HOME and C:\path` },
     ]);
   });
 
@@ -40,12 +44,14 @@ ESCAPED_HASH=value\ # kept
     expect(parseEnvFile("FIRST=one\necho hello\nSECOND=two")).toBeNull();
     expect(parseEnvFile('BROKEN="unterminated')).toBeNull();
     expect(parseEnvFile('TOKEN="abc"#suffix')).toBeNull();
-    expect(parseEnvFile('EXPANDED="$HOME"')).toBeNull();
+    expect(parseEnvFile("FIRST=one\nFIRST=two")).toBeNull();
   });
 
   it("does not treat ordinary key text as an environment file", () => {
     expect(parseEnvFile("API_KEY")).toBeNull();
     expect(isEnvFilePaste("API_KEY")).toBe(false);
+    expect(isEnvFilePaste("API_KEY\n")).toBe(false);
+    expect(isEnvFilePaste("# database settings\n")).toBe(false);
     expect(isEnvFilePaste("API_KEY=value")).toBe(true);
     expect(isEnvFilePaste("FIRST=one\nSECOND=two")).toBe(true);
   });

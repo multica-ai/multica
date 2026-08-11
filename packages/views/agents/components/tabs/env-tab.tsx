@@ -27,12 +27,16 @@ interface EnvEntry {
 }
 
 function envMapToEntries(env: Record<string, string>): EnvEntry[] {
-  return Object.entries(env).map(([key, value]) => ({
+  const entries = Object.entries(env).map(([key, value]) => ({
     id: nextEnvId++,
     key,
     value,
     visible: false,
   }));
+
+  return entries.length > 0
+    ? entries
+    : [{ id: nextEnvId++, key: "", value: "", visible: true }];
 }
 
 function entriesToEnvMap(entries: EnvEntry[]): Record<string, string> {
@@ -109,7 +113,12 @@ export function EnvTab({
   };
 
   const removeEnvEntry = (index: number) => {
-    setRevealed((prev) => (prev ?? []).filter((_, i) => i !== index));
+    setRevealed((prev) => {
+      const entries = (prev ?? []).filter((_, i) => i !== index);
+      return entries.length > 0
+        ? entries
+        : [{ id: nextEnvId++, key: "", value: "", visible: true }];
+    });
   };
 
   const updateEnvEntry = (
@@ -133,7 +142,23 @@ export function EnvTab({
     if (!assignments) {
       if (isEnvFilePaste(text)) {
         event.preventDefault();
-        toast.error(t(($) => $.tab_body.env.paste_invalid_toast));
+        const assignmentKeys = text
+          .replace(/\r\n?/g, "\n")
+          .split("\n")
+          .map(
+            (line) =>
+              /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line)?.[1],
+          )
+          .filter((key): key is string => key !== undefined);
+        const hasDuplicateKeys =
+          new Set(assignmentKeys).size < assignmentKeys.length;
+        toast.error(
+          t(($) =>
+            hasDuplicateKeys
+              ? $.tab_body.env.duplicate_keys_toast
+              : $.tab_body.env.paste_invalid_toast,
+          ),
+        );
       }
       return;
     }
