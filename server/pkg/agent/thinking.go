@@ -375,6 +375,7 @@ func parseCodexModelCatalog(raw []byte) ([]Model, error) {
 		if label == "" {
 			label = m.Slug
 		}
+		label = normalizeCodexModelLabel(m.Slug, label)
 		models = append(models, Model{
 			ID:           m.Slug,
 			Label:        label,
@@ -387,6 +388,19 @@ func parseCodexModelCatalog(raw []byte) ([]Model, error) {
 		models[0].Default = true
 	}
 	return models, nil
+}
+
+func normalizeCodexModelLabel(id, label string) string {
+	switch id {
+	case "gpt-5.6-sol":
+		return "GPT-5.6 Sol"
+	case "gpt-5.6-terra":
+		return "GPT-5.6 Terra"
+	case "gpt-5.6-luna":
+		return "GPT-5.6 Luna"
+	default:
+		return label
+	}
 }
 
 func codexServiceTiersFromDebugModel(m codexDebugModel) []ModelServiceTier {
