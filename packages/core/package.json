@@ -85,6 +85,8 @@
     "./testing/queries": "./testing/queries.ts",
     "./testing/mutations": "./testing/mutations.ts",
     "./testing/config": "./testing/config.ts",
+    "./products": "./products/index.ts",
+    "./products/queries": "./products/queries.ts",
     "./designs": "./designs/index.ts",
     "./designs/keys": "./designs/keys.ts",
     "./designs/queries": "./designs/queries.ts",

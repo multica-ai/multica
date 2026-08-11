@@ -1670,6 +1670,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Product map (MVP read-only; SY-20)
+			r.Route("/api/product-map", func(r chi.Router) {
+				r.Get("/", h.ListProductMap)
+				r.Get("/{id}", h.GetProductMapNode)
+			})
+
 			// Attachments
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
 			// /api/attachments/{id}/download is registered in the

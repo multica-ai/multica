@@ -44,6 +44,7 @@ describe("workspace page coverage", () => {
 describe("pageForSegment", () => {
   it("maps a known segment to its page key", () => {
     expect(pageForSegment("projects")).toBe("projects");
+    expect(pageForSegment("products")).toBe("products");
     expect(pageForSegment("my-issues")).toBe("myIssues");
     expect(pageForSegment("settings")).toBe("settings");
     expect(pageForSegment("pmo")).toBe("pmo");
@@ -58,6 +59,7 @@ describe("pageForSegment", () => {
 describe("resolveRouteIconName", () => {
   it("resolves a page path to its page icon", () => {
     expect(resolveRouteIconName("/acme/projects")).toBe("FolderKanban");
+    expect(resolveRouteIconName("/acme/products")).toBe("Network");
     expect(resolveRouteIconName("/acme/autopilots")).toBe("Zap");
     expect(resolveRouteIconName("/acme/chat")).toBe("MessageSquare");
     expect(resolveRouteIconName("/acme/squads")).toBe("Users");

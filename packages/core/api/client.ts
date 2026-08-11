@@ -128,6 +128,8 @@ import type {
   CreatePinRequest,
   PinnedItemType,
   ReorderPinsRequest,
+  ProductMapResponse,
+  ProductMapNode,
   Invitation,
   Autopilot,
   AutopilotTrigger,
@@ -3850,6 +3852,15 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  // Product map (read-only, SY-20)
+  async listProductMap(): Promise<ProductMapResponse> {
+    return this.fetch("/api/product-map");
+  }
+
+  async getProductMapNode(nodeId: string): Promise<ProductMapNode> {
+    return this.fetch(`/api/product-map/${nodeId}`);
   }
 
   // Squads

@@ -32,6 +32,7 @@ function workspaceScoped(slug: string) {
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
     issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
+    products: () => `${ws}/products`,
     projects: () => `${ws}/projects`,
     pmo: () => `${ws}/pmo`,
     pmoConfigDetail: (id: string) => `${ws}/pmo/${encode(id)}`,

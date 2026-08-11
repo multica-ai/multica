@@ -114,6 +114,7 @@ type NavKey =
   | "chat"
   | "myIssues"
   | "issues"
+  | "products"
   | "projects"
   | "pmo"
   | "designs"
@@ -133,6 +134,7 @@ type NavLabelKey =
   | "chat"
   | "my_issues"
   | "issues"
+  | "products"
   | "projects"
   | "pmo"
   | "designs"
@@ -156,6 +158,7 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey }[] = [
 
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "issues", labelKey: "issues" },
+  { key: "products", labelKey: "products" },
   { key: "projects", labelKey: "projects" },
   { key: "pmo", labelKey: "pmo" },
   { key: "designs", labelKey: "designs" },

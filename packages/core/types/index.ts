@@ -225,6 +225,7 @@ export type {
   DispatchTestRunBlockedResponse,
 } from "./testing";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
+export type * from "./product-map";
 export type {
   GitHubInstallation,
   GitHubMergeableState,
