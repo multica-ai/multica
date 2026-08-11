@@ -70,10 +70,17 @@ WHERE r.workspace_id = sqlc.arg(workspace_id)
 ORDER BY r.discovered_at ASC;
 
 -- name: GetDingTalkGroupRouteInWorkspace :one
-SELECT *
-FROM dingtalk_group_route
-WHERE id = sqlc.arg(id)
-  AND workspace_id = sqlc.arg(workspace_id);
+-- Handler diagnosis deliberately uses the same active-installation boundary as
+-- reassignment. Retained routes stay available for reconnect internally, but a
+-- revoked installation's route is not a PATCH-visible resource.
+SELECT r.*
+FROM dingtalk_group_route r
+JOIN channel_installation i ON i.id = r.installation_id
+WHERE r.id = sqlc.arg(id)
+  AND r.workspace_id = sqlc.arg(workspace_id)
+  AND i.workspace_id = sqlc.arg(workspace_id)
+  AND i.channel_type = 'dingtalk'
+  AND i.status = 'active';
 
 -- name: ReassignDingTalkGroupRoute :one
 -- Reassigning a group must also sever its existing chat-session binding. The
@@ -81,22 +88,44 @@ WHERE id = sqlc.arg(id)
 -- pending outbound updates cannot cross agent boundaries. The old chat session
 -- remains as history; only its DingTalk route and outbound card state are
 -- removed. The target agent existence/workspace/archive check is repeated here
--- so a concurrent archive or delete cannot create a dangling route.
-WITH target_agent AS MATERIALIZED (
+-- so a concurrent archive or delete cannot create a dangling route. The active
+-- workspace, active installation, and route locks preserve the teardown order;
+-- the installation is share-locked before the route is update-locked. Revoke
+-- takes an exclusive lock on that same installation row, defining the race:
+-- PATCH-first may finish before revoke, while revoke-first makes PATCH wait,
+-- re-check status, and return no row without touching the route or binding.
+WITH workspace_guard AS MATERIALIZED (
+    SELECT w.id
+    FROM workspace w
+    WHERE w.id = sqlc.arg(workspace_id)
+    FOR KEY SHARE
+), target_agent AS MATERIALIZED (
     SELECT a.id
     FROM agent a
+    JOIN workspace_guard w ON w.id = a.workspace_id
     WHERE a.id = sqlc.arg(agent_id)
       AND a.workspace_id = sqlc.arg(workspace_id)
       AND a.kind = 'user'
       AND a.archived_at IS NULL
     FOR SHARE
+), active_installation AS MATERIALIZED (
+    SELECT i.id
+    FROM channel_installation i
+    JOIN dingtalk_group_route r ON r.installation_id = i.id
+    WHERE r.id = sqlc.arg(id)
+      AND r.workspace_id = sqlc.arg(workspace_id)
+      AND i.workspace_id = sqlc.arg(workspace_id)
+      AND i.channel_type = 'dingtalk'
+      AND i.status = 'active'
+      AND EXISTS (SELECT 1 FROM target_agent)
+    FOR SHARE OF i
 ), target AS (
     SELECT r.*, r.agent_id AS previous_agent_id
     FROM dingtalk_group_route r
+    JOIN active_installation i ON i.id = r.installation_id
     WHERE r.id = sqlc.arg(id)
       AND r.workspace_id = sqlc.arg(workspace_id)
-      AND EXISTS (SELECT 1 FROM target_agent)
-    FOR UPDATE
+    FOR UPDATE OF r
 ), updated AS (
     UPDATE dingtalk_group_route r
     SET agent_id = sqlc.arg(agent_id),

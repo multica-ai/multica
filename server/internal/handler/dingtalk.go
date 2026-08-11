@@ -131,6 +131,19 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	// Fail closed before agent diagnosis so a retained route behind a revoked
+	// installation is always an absent PATCH resource. The reassignment query
+	// repeats this check under an installation lock to close the revoke race.
+	if _, err := h.Queries.GetDingTalkGroupRouteInWorkspace(r.Context(), db.GetDingTalkGroupRouteInWorkspaceParams{
+		ID: routeUUID, WorkspaceID: wsUUID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "dingtalk group route not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load dingtalk group route")
+		return
+	}
 	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
 		ID: agentUUID, WorkspaceID: wsUUID,
 	})
@@ -155,6 +168,18 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			// Diagnose the route boundary first. Revoke-first makes the locked
+			// reassignment return no rows; the retained route must still look
+			// absent and must not be mislabeled as an agent lifecycle conflict.
+			if _, routeErr := h.Queries.GetDingTalkGroupRouteInWorkspace(r.Context(), db.GetDingTalkGroupRouteInWorkspaceParams{
+				ID: routeUUID, WorkspaceID: wsUUID,
+			}); errors.Is(routeErr, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "dingtalk group route not found")
+				return
+			} else if routeErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load dingtalk group route")
+				return
+			}
 			// The query re-checks and locks the target agent so a concurrent
 			// archive cannot land an assignment from a stale active snapshot.
 			// Distinguish that lifecycle conflict from a genuinely missing route.
@@ -167,15 +192,6 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 			}
 			if agentErr != nil && !errors.Is(agentErr, pgx.ErrNoRows) {
 				writeError(w, http.StatusInternalServerError, "failed to load agent")
-				return
-			}
-			if _, routeErr := h.Queries.GetDingTalkGroupRouteInWorkspace(r.Context(), db.GetDingTalkGroupRouteInWorkspaceParams{
-				ID: routeUUID, WorkspaceID: wsUUID,
-			}); errors.Is(routeErr, pgx.ErrNoRows) {
-				writeError(w, http.StatusNotFound, "dingtalk group route not found")
-				return
-			} else if routeErr != nil {
-				writeError(w, http.StatusInternalServerError, "failed to load dingtalk group route")
 				return
 			}
 			writeError(w, http.StatusConflict, "the selected agent is no longer available")

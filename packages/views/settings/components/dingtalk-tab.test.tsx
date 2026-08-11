@@ -42,7 +42,16 @@ vi.mock("@tanstack/react-query", () => ({
     if (opts.enabled === false) return { data: undefined, isLoading: false };
     const key = JSON.stringify(opts.queryKey);
     if (key.includes("members")) return { data: membersRef.current, isLoading: false };
-    if (key.includes("agents")) return { data: agentsRef.current, isLoading: false };
+    if (key.includes("agents")) {
+      return {
+        data: agentsRef.current,
+        isLoading: false,
+        isError: false,
+        isFetching: false,
+        isSuccess: true,
+        refetch: vi.fn(),
+      };
+    }
     if (key.includes("group-routes")) return { data: groupRoutesRef.current, isLoading: false };
     if (key.includes("installations")) return { data: installationsRef.current, isLoading: false };
     return { data: undefined, isLoading: false };

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -75,6 +76,168 @@ func requestWithRouteParams(req *http.Request, workspaceID, routeID string) *htt
 		rctx.URLParams.Add("routeId", routeID)
 	}
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+func patchDingTalkGroupRoute(t *testing.T, routeID, agentID string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := requestWithRouteParams(
+		newRequest(
+			http.MethodPatch,
+			"/api/workspaces/"+testWorkspaceID+"/dingtalk/group-routes/"+routeID,
+			UpdateDingTalkGroupRouteRequest{AgentID: agentID},
+		),
+		testWorkspaceID,
+		routeID,
+	)
+	rec := httptest.NewRecorder()
+	testHandler.UpdateDingTalkGroupRoute(rec, req)
+	return rec
+}
+
+func seedDingTalkGroupRouteBinding(t *testing.T, fx dingtalkGroupRouteHandlerFixture) (string, int64) {
+	t.Helper()
+	sessionID := createHandlerTestChatSession(t, fx.defaultAgentID)
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO channel_chat_session_binding (
+			chat_session_id, installation_id, channel_type,
+			channel_chat_id, chat_type, config
+		) VALUES ($1, $2, 'dingtalk', 'cid-handler-routes', 'group',
+		          jsonb_build_object('agent_id', $3::text))
+	`, sessionID, fx.installationID, fx.defaultAgentID); err != nil {
+		t.Fatalf("seed DingTalk route chat binding: %v", err)
+	}
+	var revision int64
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT revision FROM dingtalk_group_route WHERE id = $1
+	`, fx.routeID).Scan(&revision); err != nil {
+		t.Fatalf("read initial DingTalk route revision: %v", err)
+	}
+	return sessionID, revision
+}
+
+func assertDingTalkGroupRouteBindingUnchanged(
+	t *testing.T,
+	fx dingtalkGroupRouteHandlerFixture,
+	sessionID string,
+	revision int64,
+) {
+	t.Helper()
+	var agentID string
+	var durableRevision int64
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT agent_id, revision FROM dingtalk_group_route WHERE id = $1
+	`, fx.routeID).Scan(&agentID, &durableRevision); err != nil {
+		t.Fatalf("read durable DingTalk route: %v", err)
+	}
+	if agentID != fx.defaultAgentID || durableRevision != revision {
+		t.Fatalf(
+			"durable route = agent %s revision %d, want agent %s revision %d",
+			agentID,
+			durableRevision,
+			fx.defaultAgentID,
+			revision,
+		)
+	}
+	var durableSessionID string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT chat_session_id
+		FROM channel_chat_session_binding
+		WHERE installation_id = $1
+		  AND channel_type = 'dingtalk'
+		  AND channel_chat_id = 'cid-handler-routes'
+	`, fx.installationID).Scan(&durableSessionID); err != nil {
+		t.Fatalf("read durable DingTalk route binding: %v", err)
+	}
+	if durableSessionID != sessionID {
+		t.Fatalf("durable route binding = %s, want %s", durableSessionID, sessionID)
+	}
+}
+
+func assertDingTalkRouteNotFoundWithoutMetadata(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("PATCH revoked route status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	for _, secret := range []string{"Handler routes", "cid-handler-routes"} {
+		if strings.Contains(rec.Body.String(), secret) {
+			t.Fatalf("PATCH revoked route leaked %q: %s", secret, rec.Body.String())
+		}
+	}
+}
+
+func TestDingTalkGroupRoutePatchRejectsRevokedInstallation(t *testing.T) {
+	fx := newDingTalkGroupRouteHandlerFixture(t)
+	sessionID, revision := seedDingTalkGroupRouteBinding(t, fx)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE channel_installation SET status = 'revoked' WHERE id = $1
+	`, fx.installationID); err != nil {
+		t.Fatalf("revoke DingTalk installation before PATCH: %v", err)
+	}
+
+	rec := patchDingTalkGroupRoute(t, fx.routeID, fx.targetAgentID)
+	assertDingTalkRouteNotFoundWithoutMetadata(t, rec)
+	assertDingTalkGroupRouteBindingUnchanged(t, fx, sessionID, revision)
+}
+
+func TestDingTalkGroupRoutePatchSerializesWithRevoke(t *testing.T) {
+	fx := newDingTalkGroupRouteHandlerFixture(t)
+	sessionID, revision := seedDingTalkGroupRouteBinding(t, fx)
+	ctx := context.Background()
+
+	revokeTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin controlled DingTalk revoke: %v", err)
+	}
+	t.Cleanup(func() { _ = revokeTx.Rollback(context.Background()) })
+	var revokePID int32
+	if err := revokeTx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&revokePID); err != nil {
+		t.Fatalf("read controlled revoke backend pid: %v", err)
+	}
+	if _, err := revokeTx.Exec(ctx, `
+		UPDATE channel_installation SET status = 'revoked' WHERE id = $1
+	`, fx.installationID); err != nil {
+		t.Fatalf("lock installation for controlled revoke: %v", err)
+	}
+
+	patchDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		patchDone <- patchDingTalkGroupRoute(t, fx.routeID, fx.targetAgentID)
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	blocked := false
+	for time.Now().Before(deadline) {
+		if err := testPool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_stat_activity a
+				WHERE $1 = ANY(pg_blocking_pids(a.pid))
+			)
+		`, revokePID).Scan(&blocked); err != nil {
+			_ = revokeTx.Rollback(ctx)
+			t.Fatalf("inspect controlled revoke lock wait: %v", err)
+		}
+		if blocked {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !blocked {
+		_ = revokeTx.Rollback(ctx)
+		rec := <-patchDone
+		t.Fatalf("PATCH never waited for revoke; status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := revokeTx.Commit(ctx); err != nil {
+		t.Fatalf("commit controlled DingTalk revoke: %v", err)
+	}
+
+	select {
+	case rec := <-patchDone:
+		assertDingTalkRouteNotFoundWithoutMetadata(t, rec)
+	case <-time.After(5 * time.Second):
+		t.Fatal("PATCH did not resume after controlled revoke committed")
+	}
+	assertDingTalkGroupRouteBindingUnchanged(t, fx, sessionID, revision)
 }
 
 func TestDingTalkGroupRouteHandlersValidationAndErrors(t *testing.T) {

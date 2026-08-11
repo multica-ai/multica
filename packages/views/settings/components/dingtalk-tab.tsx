@@ -74,7 +74,14 @@ export function DingTalkTab() {
   const user = useAuthStore((s) => s.user);
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const {
+    data: agents,
+    isLoading: agentsLoading,
+    isError: agentsError,
+    isFetching: agentsFetching,
+    isSuccess: agentsLoaded,
+    refetch: retryAgents,
+  } = useQuery(agentListOptions(wsId));
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage =
     currentMember?.role === "owner" || currentMember?.role === "admin";
@@ -84,6 +91,9 @@ export function DingTalkTab() {
   });
   const installations = data?.installations ?? [];
   const configured = data?.configured === true;
+  const hasActiveInstallation = installations.some(
+    (installation) => installation.status === "active",
+  );
   const {
     data: groupRouteData,
     isLoading: routesLoading,
@@ -92,10 +102,10 @@ export function DingTalkTab() {
     refetch: retryGroupRoutes,
   } = useQuery({
     ...dingtalkGroupRoutesOptions(wsId),
-    enabled: configured && !!wsId,
+    enabled: configured && hasActiveInstallation && !!wsId,
   });
   const groupRoutes = groupRouteData?.routes ?? [];
-  const activeAgents = agents.filter((agent) => !agent.archived_at);
+  const activeAgents = (agents ?? []).filter((agent) => !agent.archived_at);
 
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -119,7 +129,7 @@ export function DingTalkTab() {
   }
 
   async function handleRouteAgentChange(route: DingTalkGroupRoute, agentId: string) {
-    if (!canManage || updatingRouteId || route.agent_id === agentId) return;
+    if (!canManage || !agentsLoaded || updatingRouteId || route.agent_id === agentId) return;
     setUpdatingRouteId(route.id);
     try {
       await api.updateDingTalkGroupRoute(wsId, route.id, { agent_id: agentId });
@@ -187,7 +197,7 @@ export function DingTalkTab() {
         </section>
       )}
 
-      {configured && installations.some((installation) => installation.status === "active") && (
+      {configured && hasActiveInstallation && (
         <section className="space-y-3">
           <div className="space-y-1">
             <h2 className="text-body font-semibold">
@@ -238,6 +248,47 @@ export function DingTalkTab() {
                 </p>
               </CardContent>
             </Card>
+          ) : agentsLoading ? (
+            <Card>
+              <CardContent>
+                <p className="text-body text-muted-foreground">
+                  {t(($) => $.dingtalk.group_routes_agents_loading)}
+                </p>
+              </CardContent>
+            </Card>
+          ) : agentsError ? (
+            <Card>
+              <CardContent className="space-y-3" role="alert">
+                <div className="space-y-1">
+                  <p className="text-body font-medium">
+                    {t(($) => $.dingtalk.group_routes_agents_error_title)}
+                  </p>
+                  <p className="text-caption text-muted-foreground">
+                    {t(($) => $.dingtalk.group_routes_agents_error_description)}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={agentsFetching}
+                  onClick={() => void retryAgents()}
+                >
+                  {t(($) => $.dingtalk.group_routes_agents_retry)}
+                </Button>
+              </CardContent>
+            </Card>
+          ) : agentsLoaded && activeAgents.length === 0 ? (
+            <Card>
+              <CardContent className="space-y-1">
+                <p className="text-body font-medium">
+                  {t(($) => $.dingtalk.group_routes_agents_empty_title)}
+                </p>
+                <p className="text-caption text-muted-foreground">
+                  {t(($) => $.dingtalk.group_routes_agents_empty_description)}
+                </p>
+              </CardContent>
+            </Card>
           ) : (
             <Card>
               <CardContent className="divide-y">
@@ -246,7 +297,7 @@ export function DingTalkTab() {
                     key={route.id}
                     route={route}
                     agents={activeAgents}
-                    selectedAgentName={agents.find((agent) => agent.id === route.agent_id)?.name}
+                    selectedAgentName={agents?.find((agent) => agent.id === route.agent_id)?.name}
                     canManage={canManage}
                     updating={updatingRouteId === route.id}
                     onAgentChange={(agentId) => handleRouteAgentChange(route, agentId)}

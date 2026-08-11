@@ -245,10 +245,14 @@ func (q *Queries) DiscoverDingTalkGroupRoute(ctx context.Context, arg DiscoverDi
 }
 
 const getDingTalkGroupRouteInWorkspace = `-- name: GetDingTalkGroupRouteInWorkspace :one
-SELECT id, workspace_id, installation_id, conversation_id, conversation_title, agent_id, revision, discovered_at, updated_at
-FROM dingtalk_group_route
-WHERE id = $1
-  AND workspace_id = $2
+SELECT r.id, r.workspace_id, r.installation_id, r.conversation_id, r.conversation_title, r.agent_id, r.revision, r.discovered_at, r.updated_at
+FROM dingtalk_group_route r
+JOIN channel_installation i ON i.id = r.installation_id
+WHERE r.id = $1
+  AND r.workspace_id = $2
+  AND i.workspace_id = $2
+  AND i.channel_type = 'dingtalk'
+  AND i.status = 'active'
 `
 
 type GetDingTalkGroupRouteInWorkspaceParams struct {
@@ -413,21 +417,38 @@ func (q *Queries) LockDingTalkInstallationOwner(ctx context.Context, arg LockDin
 }
 
 const reassignDingTalkGroupRoute = `-- name: ReassignDingTalkGroupRoute :one
-WITH target_agent AS MATERIALIZED (
+WITH workspace_guard AS MATERIALIZED (
+    SELECT w.id
+    FROM workspace w
+    WHERE w.id = $2
+    FOR KEY SHARE
+), target_agent AS MATERIALIZED (
     SELECT a.id
     FROM agent a
+    JOIN workspace_guard w ON w.id = a.workspace_id
     WHERE a.id = $1
       AND a.workspace_id = $2
       AND a.kind = 'user'
       AND a.archived_at IS NULL
     FOR SHARE
+), active_installation AS MATERIALIZED (
+    SELECT i.id
+    FROM channel_installation i
+    JOIN dingtalk_group_route r ON r.installation_id = i.id
+    WHERE r.id = $3
+      AND r.workspace_id = $2
+      AND i.workspace_id = $2
+      AND i.channel_type = 'dingtalk'
+      AND i.status = 'active'
+      AND EXISTS (SELECT 1 FROM target_agent)
+    FOR SHARE OF i
 ), target AS (
     SELECT r.id, r.workspace_id, r.installation_id, r.conversation_id, r.conversation_title, r.agent_id, r.revision, r.discovered_at, r.updated_at, r.agent_id AS previous_agent_id
     FROM dingtalk_group_route r
+    JOIN active_installation i ON i.id = r.installation_id
     WHERE r.id = $3
       AND r.workspace_id = $2
-      AND EXISTS (SELECT 1 FROM target_agent)
-    FOR UPDATE
+    FOR UPDATE OF r
 ), updated AS (
     UPDATE dingtalk_group_route r
     SET agent_id = $1,
@@ -475,7 +496,12 @@ type ReassignDingTalkGroupRouteRow struct {
 // pending outbound updates cannot cross agent boundaries. The old chat session
 // remains as history; only its DingTalk route and outbound card state are
 // removed. The target agent existence/workspace/archive check is repeated here
-// so a concurrent archive or delete cannot create a dangling route.
+// so a concurrent archive or delete cannot create a dangling route. The active
+// workspace, active installation, and route locks preserve the teardown order;
+// the installation is share-locked before the route is update-locked. Revoke
+// takes an exclusive lock on that same installation row, defining the race:
+// PATCH-first may finish before revoke, while revoke-first makes PATCH wait,
+// re-check status, and return no row without touching the route or binding.
 func (q *Queries) ReassignDingTalkGroupRoute(ctx context.Context, arg ReassignDingTalkGroupRouteParams) (ReassignDingTalkGroupRouteRow, error) {
 	row := q.db.QueryRow(ctx, reassignDingTalkGroupRoute, arg.AgentID, arg.WorkspaceID, arg.ID)
 	var i ReassignDingTalkGroupRouteRow
