@@ -436,6 +436,9 @@ func main() {
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+	// MemoryHub background workers (ALL-16): the compensation sweeper and the
+	// unique independent-review producer. Same lifecycle as the task sweeper.
+	runMemoryHubSweepers(sweepCtx, queries, pool, buildMemoryHubRemoteClient(), envDuration("MEMORYHUB_SWEEP_INTERVAL", 30*time.Second))
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
 	}

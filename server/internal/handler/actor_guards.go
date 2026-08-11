@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+
+	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 // RequireHumanActor is a chi-style middleware that rejects requests
@@ -112,10 +114,11 @@ func RequireHumanActor(next http.Handler) http.Handler {
 // task-token, daemon, runtime, project-lead, subject-owner, and ordinary-member
 // actors receive 403 before any execution lookup is exposed (V6-1.1).
 //
-// The workspace is read from the X-Workspace-ID header stamped by the workspace
-// membership middleware that runs before this guard. The caller passes the
-// allowed workspace id explicitly so the guard can be reused on any route that
-// has already resolved the workspace.
+// It runs AFTER a workspace membership middleware that has resolved the
+// workspace and stamped the member into the request context (the memoryhub
+// route group uses middleware.RequireWorkspaceRole(queries, "owner", "admin"),
+// which sets that context). allowedWorkspaceID, when non-empty, restricts the
+// resolved workspace to that exact id.
 func RequireWorkspaceOwnerOrAdmin(allowedWorkspaceID string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -125,15 +128,17 @@ func RequireWorkspaceOwnerOrAdmin(allowedWorkspaceID string) func(http.Handler) 
 				writeError(w, http.StatusForbidden, "workspace owner or admin role is required")
 				return
 			}
-			// The workspace membership middleware stamps the membership role
-			// for the resolved workspace; a non-owner/admin role is rejected.
-			role := r.Header.Get("X-Workspace-Role")
-			ws := r.Header.Get("X-Workspace-ID")
+			member, ok := middleware.MemberFromContext(r.Context())
+			if !ok {
+				writeError(w, http.StatusForbidden, "workspace owner or admin role is required")
+				return
+			}
+			ws := middleware.WorkspaceIDFromContext(r.Context())
 			if allowedWorkspaceID != "" && ws != allowedWorkspaceID {
 				writeError(w, http.StatusForbidden, "workspace owner or admin role is required")
 				return
 			}
-			if role != "owner" && role != "admin" {
+			if member.Role != "owner" && member.Role != "admin" {
 				writeError(w, http.StatusForbidden, "workspace owner or admin role is required")
 				return
 			}

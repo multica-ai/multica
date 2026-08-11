@@ -63,7 +63,22 @@ func (s *MemoryHubService) RepairBlockedReviewer(
 		return nil, err
 	}
 
-	// 3. reviewer must differ from the execution agent (422).
+	// 3. the proposed reviewer must exist, be active, belong to the same
+	//    workspace, and differ from the execution agent (422).
+	if reviewerAgentID.Valid {
+		reviewer, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          reviewerAgentID,
+			WorkspaceID: uuidFromString(workspaceID),
+		})
+		if err != nil {
+			return nil, ErrReviewerScopeMismatch
+		}
+		// Active reviewers are idle/working; archived/error/offline/blocked
+		// reviewers cannot be assigned.
+		if !isActiveReviewer(reviewer) {
+			return nil, ErrReviewerScopeMismatch
+		}
+	}
 	if executionAgentID.Valid && reviewerAgentID.Valid && executionAgentID == reviewerAgentID {
 		return nil, ErrReviewerSelfForbidden
 	}
@@ -85,3 +100,15 @@ func (s *MemoryHubService) RepairBlockedReviewer(
 }
 
 var _ = fmt.Sprintf
+
+// isActiveReviewer reports whether an agent can be assigned as an independent
+// reviewer: it must be online/working (not archived, blocked, offline, or
+// error). The agent status enum is idle|working|blocked|error|offline.
+func isActiveReviewer(a db.Agent) bool {
+	switch a.Status {
+	case "idle", "working":
+		return true
+	default:
+		return false
+	}
+}

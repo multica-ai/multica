@@ -50,13 +50,11 @@ func newReviewSchedulerFixture(t *testing.T, ctx context.Context, pool *pgxpool.
 	t.Helper()
 
 	// The due scan is global (migration 328 index), so stale rows from prior
-	// runs would be picked up and enqueued. Remove any evidence records that
-	// belong to test workspaces before seeding a fresh one.
+	// runs would be picked up and enqueued. Only this package's tests write
+	// execution_evidence_record, so remove every row before seeding a fresh
+	// one to keep the global due scan deterministic.
 	if _, err := pool.Exec(ctx, `
 		DELETE FROM execution_evidence_record
-		WHERE workspace_id IN (
-			SELECT id FROM workspace WHERE slug LIKE 'review-%'
-		)
 	`); err != nil {
 		t.Fatalf("clean test evidence records: %v", err)
 	}
@@ -104,9 +102,9 @@ func newReviewSchedulerFixture(t *testing.T, ctx context.Context, pool *pgxpool.
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks, owner_id
+			runtime_id, visibility, status, max_concurrent_tasks, owner_id
 		)
-		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 'idle', 1, $4)
 		RETURNING id
 	`, workspaceID, "Review Scheduler Agent", runtimeID, userID).Scan(&agentID); err != nil {
 		t.Fatalf("create agent: %v", err)

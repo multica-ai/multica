@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -28,6 +29,9 @@ func parseUUIDParam(s string) (pgtype.UUID, error) {
 // workspaceIDFromRequest extracts the workspace id stamped by the workspace
 // membership middleware. Returns ok=false when absent (caller rejects 403).
 func workspaceIDFromRequest(r *http.Request) (string, bool) {
+	if id := middleware.WorkspaceIDFromContext(r.Context()); id != "" {
+		return id, true
+	}
 	id := r.Header.Get("X-Workspace-ID")
 	if id == "" {
 		return "", false
