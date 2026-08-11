@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -241,9 +244,23 @@ func TestGetChatHistory_NoSlackBindingReadsStoredTranscript(t *testing.T) {
 	if resp.Messages[1].Role != channel.HistoryRoleAssistant {
 		t.Errorf("assistant row role = %q, want %q", resp.Messages[1].Role, channel.HistoryRoleAssistant)
 	}
+	// Author uses the channel vocabulary ("Bot" / "User"), not the raw role
+	// string, and TS is the row's RFC3339 creation time.
+	if resp.Messages[0].Author != "User" || resp.Messages[1].Author != "Bot" || resp.Messages[2].Author != "User" {
+		t.Errorf("transcript authors = %q/%q/%q, want User/Bot/User",
+			resp.Messages[0].Author, resp.Messages[1].Author, resp.Messages[2].Author)
+	}
+	if got := resp.Messages[0].TS; got != base.UTC().Format(time.RFC3339Nano) {
+		t.Errorf("transcript TS = %q, want %q", got, base.UTC().Format(time.RFC3339Nano))
+	}
 }
 
-func TestGetChatHistory_NilReaderReturnsNote(t *testing.T) {
+// TestGetChatHistory_NilReaderServesTranscript: a deployment with no Slack
+// integration has SlackHistory == nil, but a web chat / Feishu / WeCom /
+// DingTalk session's history still lives in chat_message — so the transcript is
+// served instead of a "no channel integration" note. A fresh session has no
+// messages, so the fallback returns an empty page with no note.
+func TestGetChatHistory_NilReaderServesTranscript(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("requires test database")
 	}
@@ -258,8 +275,113 @@ func TestGetChatHistory_NilReaderReturnsNote(t *testing.T) {
 	}
 	var resp ChatChannelHistoryResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp.Note == "" {
-		t.Fatalf("expected a note when no reader configured, got %+v", resp)
+	if resp.Note != "" || len(resp.Messages) != 0 {
+		t.Fatalf("expected empty transcript with no note when no reader configured, got %+v", resp)
+	}
+}
+
+// TestGetChatHistory_NilReaderServesStoredTranscript is the regression for the
+// no-Slack deployment: SlackHistory == nil AND the session has stored rows. The
+// transcript must still be served — a no-Slack self-host is exactly the target
+// of the transcript read-back feature, and must not dead-end on a
+// "no channel integration" note.
+func TestGetChatHistory_NilReaderServesStoredTranscript(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("requires test database")
+	}
+	agentID := createHandlerTestAgent(t, "ChatHistoryNilReaderAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID := newChatHistoryTaskForSession(t, sessionID)
+	withSlackHistory(t, nil)
+
+	base := time.Date(2026, 8, 11, 1, 0, 0, 0, time.UTC)
+	insertChatVisibilityMessage(t, sessionID, "nil reader still reads me", "message", true, base)
+	insertChatMessageRole(t, sessionID, "assistant", "and my reply", "message", true, base.Add(time.Second))
+
+	w := httptest.NewRecorder()
+	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var resp ChatChannelHistoryResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Note != "" {
+		t.Fatalf("expected no note when the transcript is served, got %q", resp.Note)
+	}
+	if len(resp.Messages) != 2 || resp.Messages[0].Text != "nil reader still reads me" || resp.Messages[1].Text != "and my reply" {
+		t.Fatalf("nil reader did not serve the stored transcript: %+v", resp.Messages)
+	}
+}
+
+// TestGetChatHistory_TranscriptPagesWithoutDuplicatesOrGaps: the transcript
+// honors the ?limit / ?before paging contract — walking back page by page with
+// next_cursor yields every stored message exactly once, and a full page
+// advertises a cursor while a short page does not.
+func TestGetChatHistory_TranscriptPagesWithoutDuplicatesOrGaps(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("requires test database")
+	}
+	agentID := createHandlerTestAgent(t, "ChatHistoryPagingAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID := newChatHistoryTaskForSession(t, sessionID)
+	withSlackHistory(t, nil)
+
+	base := time.Date(2026, 8, 11, 2, 0, 0, 0, time.UTC)
+	const total = 7
+	for i := 0; i < total; i++ {
+		insertChatVisibilityMessage(t, sessionID, "msg "+strconv.Itoa(i), "message", true, base.Add(time.Duration(i)*time.Second))
+	}
+
+	seen := make([]string, 0, total)
+	before := ""
+	for page := 0; ; page++ {
+		target := "/api/chat/history?limit=3"
+		if before != "" {
+			target += "&before=" + url.QueryEscape(before)
+		}
+		w := httptest.NewRecorder()
+		testHandler.GetChatChannelHistory(w, taskActorReq(target, taskID))
+		if w.Code != http.StatusOK {
+			t.Fatalf("page %d status = %d, want 200: %s", page, w.Code, w.Body.String())
+		}
+		var resp ChatChannelHistoryResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		if resp.Note != "" {
+			t.Fatalf("page %d unexpected note %q", page, resp.Note)
+		}
+		for _, m := range resp.Messages {
+			seen = append(seen, m.Text)
+		}
+		if len(resp.Messages) < 3 {
+			// A short page is the last one: no cursor advertised.
+			if resp.NextCursor != "" {
+				t.Fatalf("last page advertised a cursor: %q", resp.NextCursor)
+			}
+			break
+		}
+		if resp.NextCursor == "" {
+			t.Fatalf("full page %d advertised no cursor", page)
+		}
+		before = resp.NextCursor
+	}
+
+	if len(seen) != total {
+		t.Fatalf("paged %d messages, want %d: %v", len(seen), total, seen)
+	}
+	// Oldest-first across pages, no duplicates.
+	dup := map[string]bool{}
+	prev := -1
+	for i, text := range seen {
+		if dup[text] {
+			t.Fatalf("duplicate message %q at position %d", text, i)
+		}
+		dup[text] = true
+		n, _ := strconv.Atoi(strings.TrimPrefix(text, "msg "))
+		if n <= prev {
+			t.Fatalf("messages not strictly oldest-first: %v", seen)
+		}
+		prev = n
 	}
 }
 

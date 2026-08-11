@@ -405,10 +405,11 @@ func writeInstructionPrecedence(b *strings.Builder) {
 //   - Slack: the conversation lives in the channel and `multica chat history` /
 //     `multica chat thread` can fetch it — see buildChatPrompt, which hands the
 //     agent exactly those commands. Recoverable, just from a different place.
-//   - Web chat, Feishu and WeCom: the conversation is persisted in Multica's
-//     chat_message table and `multica chat history` reads it back — see
-//     handler/chat_history.go's chat_message fallback for non-Slack sessions.
-//     Recoverable, just from a different place.
+//   - Web chat, Feishu, WeCom and DingTalk: the conversation is persisted in
+//     Multica's chat_message table and `multica chat history` reads it back —
+//     see handler/chat_history.go's chat_message fallback for non-Slack
+//     sessions. Recoverable, just from a different place. The readable set is
+//     decided in one place, SurfacePersistsTranscript.
 //
 // Only a surface whose conversation Multica never stored (so there is nothing
 // to read back) warrants telling the user; no current surface is in that
@@ -434,9 +435,9 @@ const SessionContinuityNoticeChatTranscript = "## Session Continuity Notice\n\n"
 
 // SessionContinuityNoticeUnrecoverable is the defensive fallback for a surface
 // whose conversation Multica never stored and cannot read back. Every current
-// chat surface (web chat, Feishu, WeCom, Slack) persists a transcript that
-// `multica chat history` can fetch, so no surface routes here today — it exists
-// so a future channel that stores no transcript degrades to an honest
+// chat surface (web chat, Feishu, WeCom, DingTalk, Slack) persists a transcript
+// that `multica chat history` can fetch, so no surface routes here today — it
+// exists so a future channel that stores no transcript degrades to an honest
 // "this is a new session" instead of silently pretending continuity. Unlike the
 // readable variants it scripts the user-facing disclosure, because here the
 // loss is real and the user must hear it.

@@ -11,7 +11,7 @@ import (
 // actually lost. See the constants in execenv for the full reasoning; the
 // question is whether the conversation is still READABLE, not whether it is a
 // chat — an issue's comments, a Slack channel's history, and a web chat's /
-// Feishu's / WeCom's chat_message transcript all are (MUL-5722).
+// Feishu's / WeCom's / DingTalk's chat_message transcript all are (MUL-5722).
 func sessionContinuityNoticeFor(task Task) string {
 	if task.ChatSessionID == "" {
 		return execenv.SessionContinuityNoticeIssue
@@ -19,12 +19,14 @@ func sessionContinuityNoticeFor(task Task) string {
 	if task.ChatChannelType == execenv.ChannelTypeSlack {
 		return execenv.SessionContinuityNoticeChannelHistory
 	}
-	// Every other chat session — web chat (no channel type), Feishu, WeCom —
-	// persists the conversation to chat_message, which `multica chat history`
-	// reads back for any non-Slack session (handler/chat_history.go). Slack
-	// alone reads the live channel instead; only a surface that never stored a
-	// transcript would fall through to Unrecoverable.
-	return execenv.SessionContinuityNoticeChatTranscript
+	// Every other chat session that persists a transcript (web chat, Feishu,
+	// WeCom, DingTalk) reads it back via `multica chat history`; Slack alone
+	// reads the live channel. Only a surface that never stored a transcript
+	// falls through to Unrecoverable — see SurfacePersistsTranscript.
+	if execenv.SurfacePersistsTranscript(task.ChatChannelType) {
+		return execenv.SessionContinuityNoticeChatTranscript
+	}
+	return execenv.SessionContinuityNoticeUnrecoverable
 }
 
 // backendResumeContinuityNotice returns the notice the BACKEND should inject if
@@ -461,10 +463,11 @@ func buildChatPrompt(task Task) string {
 	//
 	// The history half: `multica chat history` is served by handler/chat_history.go,
 	// which reads the live channel for Slack and falls back to the stored
-	// chat_message transcript for every other session — so Slack, Feishu and WeCom
-	// can all read the conversation back. Slack additionally has `multica chat
-	// thread` (thread expansion); Feishu and WeCom have no thread reader, so they
-	// get the transcript command without the thread drill-down (MUL-4899).
+	// chat_message transcript for every other surface — so Slack, Feishu, WeCom
+	// and DingTalk can all read the conversation back. Slack additionally has
+	// `multica chat thread` (thread expansion); the transcript surfaces have no
+	// thread reader, so they get the transcript command without the thread
+	// drill-down (MUL-4899).
 	//
 	// The no-narration rule is a THIRD axis and belongs to neither half: it is a
 	// property of delivering to an IM channel at all, so it is emitted for every
@@ -487,7 +490,7 @@ func buildChatPrompt(task Task) string {
 			// into a chat reply reads as noise (the user reported every reply being
 			// prefixed with "我先读取…"). Tell the agent to keep them out of its answer.
 			b.WriteString("Do these reads SILENTLY as an internal step — they are how you gather context, not part of your answer.\n")
-		} else if task.ChatChannelType == execenv.ChannelTypeFeishu || task.ChatChannelType == execenv.ChannelTypeWecom {
+		} else if execenv.SurfacePersistsTranscript(task.ChatChannelType) {
 			b.WriteString("The message below may be only what triggered you. Multica stores this conversation and you can read it back with `multica chat history` when you need earlier context that is not below — it returns the stored transcript.\n")
 		} else {
 			fmt.Fprintf(&b, "Work from the context already provided to you below — Multica has no history reader for %s, so there is no command that can fetch more of this conversation. If you genuinely need earlier context that is not here, ask the user for it rather than guessing.\n", platform)

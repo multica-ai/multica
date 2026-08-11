@@ -625,6 +625,21 @@ func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 				"You cannot attach a file to it",
 			},
 		},
+		{
+			// DingTalk persists to chat_message through the same AppendUserMessage
+			// path, so it gets the transcript reader copy too, not the
+			// "no history reader for dingtalk" else-branch.
+			name:        "dingtalk: no upload, has transcript history",
+			channelType: execenv.ChannelTypeDingtalk,
+			wantUpload:  false,
+			wantHistory: true,
+			wantPhrases: []string{
+				"DingTalk",
+				"read it back with `multica chat history`",
+				"delivered to DingTalk as text",
+				"You cannot attach a file to it",
+			},
+		},
 	}
 
 	for _, tc := range cases {

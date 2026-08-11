@@ -756,10 +756,11 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 // event costs each surface something different, so it cannot be reported with
 // one sentence. The dividing question is whether the conversation can still be
 // READ, not whether it is a chat: an issue's comments, a Slack channel's
-// history, and a web chat's / Feishu's / WeCom's stored chat_message transcript
-// all can; only a surface Multica stores no transcript for cannot. Announcing a
-// loss on the readable ones describes something that did not happen — the user
-// hears "the discussion is gone" when every word survives.
+// history, and a web chat's / Feishu's / WeCom's / DingTalk's stored
+// chat_message transcript all can; only a surface Multica stores no transcript
+// for cannot. Announcing a loss on the readable ones describes something that
+// did not happen — the user hears "the discussion is gone" when every word
+// survives.
 func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 	t.Parallel()
 
@@ -806,6 +807,14 @@ func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 			// handler's non-Slack fallback serves it just like Feishu's.
 			name:         "wecom rebuilds from the stored transcript",
 			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeWecom},
+			tellUser:     false,
+			wantMentions: "multica chat history",
+		},
+		{
+			// DingTalk persists to chat_message through the same AppendUserMessage
+			// path as Feishu/WeCom, so its transcript is readable the same way.
+			name:         "dingtalk rebuilds from the stored transcript",
+			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeDingtalk},
 			tellUser:     false,
 			wantMentions: "multica chat history",
 		},
