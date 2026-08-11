@@ -22,8 +22,9 @@ import (
 var feedbackImageRegex = regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`)
 
 const (
-	feedbackMaxMessageLen   = 10000
-	feedbackHourlyRateLimit = 10
+	feedbackMaxMessageLen                = 10000
+	feedbackHourlyRateLimit              = 10
+	desktopRouteErrorFeedbackContextKind = "desktop_route_error"
 	// feedbackBodyLimit caps the request body at 64 KiB. Message is capped at
 	// 10k chars separately; the extra budget covers JSON overhead, optional
 	// request fields, and diagnostic context without letting an authenticated
@@ -82,6 +83,10 @@ func (h *Handler) CreateFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(message) > feedbackMaxMessageLen {
 		writeError(w, http.StatusBadRequest, "message too long")
+		return
+	}
+	if !validFeedbackContext(req.Context) {
+		writeError(w, http.StatusBadRequest, "invalid feedback context")
 		return
 	}
 
@@ -159,4 +164,14 @@ func (h *Handler) CreateFeedback(w http.ResponseWriter, r *http.Request) {
 		ID:        uuidToString(fb.ID),
 		CreatedAt: timestampToString(fb.CreatedAt),
 	})
+}
+
+func validFeedbackContext(context *FeedbackContext) bool {
+	if context == nil {
+		return true
+	}
+	return context.Kind == desktopRouteErrorFeedbackContextKind &&
+		strings.TrimSpace(context.Trigger) != "" &&
+		strings.TrimSpace(context.Error.Name) != "" &&
+		strings.TrimSpace(context.Error.Message) != ""
 }

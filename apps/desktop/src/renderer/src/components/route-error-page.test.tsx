@@ -29,7 +29,10 @@ vi.mock("@/stores/tab-store", () => {
   return { useTabStore };
 });
 
-import { createRouteErrorFeedback, DesktopRouteErrorPage } from "./route-error-page";
+import {
+  createRouteErrorFeedbackContext,
+  DesktopRouteErrorPage,
+} from "./route-error-page";
 
 function Boom(): null {
   throw new Error("route render exploded");
@@ -110,7 +113,6 @@ describe("DesktopRouteErrorPage", () => {
     expect(openModal).toHaveBeenCalledWith(
       "feedback",
       expect.objectContaining({
-        initialMessage: "route render exploded",
         kind: "bug",
         context: {
           kind: "desktop_route_error",
@@ -123,27 +125,25 @@ describe("DesktopRouteErrorPage", () => {
         },
       }),
     );
+    expect(openModal.mock.calls[0]?.[1]).not.toHaveProperty("initialMessage");
   });
 
-  it("separates the editable message from diagnostic context", () => {
+  it("keeps system diagnostics out of the member-editable message", () => {
     const error = new Error("bad route");
     error.stack = "Error: bad route\n  at Route";
 
-    const feedback = createRouteErrorFeedback({
+    const context = createRouteErrorFeedbackContext({
       error,
       trigger: "route-errorElement",
     });
 
-    expect(feedback).toEqual({
-      initialMessage: "bad route",
-      context: {
-        kind: "desktop_route_error",
-        trigger: "route-errorElement",
-        error: {
-          name: "Error",
-          message: "bad route",
-          stack: "Error: bad route\n  at Route",
-        },
+    expect(context).toEqual({
+      kind: "desktop_route_error",
+      trigger: "route-errorElement",
+      error: {
+        name: "Error",
+        message: "bad route",
+        stack: "Error: bad route\n  at Route",
       },
     });
   });

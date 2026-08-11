@@ -96,6 +96,98 @@ func TestCreateFeedbackStoresStructuredContext(t *testing.T) {
 	}
 }
 
+func TestCreateFeedbackRejectsMalformedContext(t *testing.T) {
+	req := newRequest("POST", "/api/feedback", map[string]any{
+		"message": "Desktop route crashed",
+		"context": "not-an-object",
+	})
+	w := httptest.NewRecorder()
+	testHandler.CreateFeedback(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateFeedbackRejectsUnknownContextKind(t *testing.T) {
+	req := newRequest("POST", "/api/feedback", CreateFeedbackRequest{
+		Message: "Desktop route crashed",
+		Context: &FeedbackContext{
+			Kind:    "arbitrary_diagnostic",
+			Trigger: "route-errorElement",
+			Error: FeedbackErrorContext{
+				Name:    "TypeError",
+				Message: "Cannot read properties of undefined",
+			},
+		},
+	})
+	w := httptest.NewRecorder()
+	testHandler.CreateFeedback(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateFeedbackRejectsEmptyContextFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		context FeedbackContext
+	}{
+		{
+			name:    "empty context",
+			context: FeedbackContext{},
+		},
+		{
+			name: "trigger",
+			context: FeedbackContext{
+				Kind: desktopRouteErrorFeedbackContextKind,
+				Error: FeedbackErrorContext{
+					Name:    "TypeError",
+					Message: "Cannot read properties of undefined",
+				},
+			},
+		},
+		{
+			name: "error name",
+			context: FeedbackContext{
+				Kind:    desktopRouteErrorFeedbackContextKind,
+				Trigger: "route-errorElement",
+				Error: FeedbackErrorContext{
+					Name:    "   ",
+					Message: "Cannot read properties of undefined",
+				},
+			},
+		},
+		{
+			name: "error message",
+			context: FeedbackContext{
+				Kind:    desktopRouteErrorFeedbackContextKind,
+				Trigger: "route-errorElement",
+				Error: FeedbackErrorContext{
+					Name:    "TypeError",
+					Message: "\n\t",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := newRequest("POST", "/api/feedback", CreateFeedbackRequest{
+				Message: "Desktop route crashed",
+				Context: &tt.context,
+			})
+			w := httptest.NewRecorder()
+			testHandler.CreateFeedback(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestCreateFeedbackEmptyMessage(t *testing.T) {
 	req := newRequest("POST", "/api/feedback", CreateFeedbackRequest{Message: "   "})
 	w := httptest.NewRecorder()

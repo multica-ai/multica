@@ -185,16 +185,18 @@ describe("FeedbackModal", () => {
       <FeedbackModal
         onClose={vi.fn()}
         data={{ kind: "bug", context }}
-        initialMessage="route render exploded"
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const editor = screen.getByLabelText("feedback editor");
+    expect(editor).toHaveValue("");
+    fireEvent.change(editor, { target: { value: "I clicked an issue link." } });
+    fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
 
     await waitFor(() => {
       expect(feedbackMocks.mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: "route render exploded",
+          message: "I clicked an issue link.",
           kind: "bug",
           context,
         }),

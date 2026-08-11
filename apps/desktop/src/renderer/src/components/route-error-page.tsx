@@ -6,24 +6,18 @@ import type { DesktopRouteErrorFeedbackContext } from "@multica/core/feedback";
 import { useModalStore } from "@multica/core/modals";
 import { useTabStore } from "@/stores/tab-store";
 
-export function createRouteErrorFeedback({
+export function createRouteErrorFeedbackContext({
   error,
   trigger,
 }: {
   error: unknown;
   trigger: string;
-}): {
-  initialMessage: string;
-  context: DesktopRouteErrorFeedbackContext;
-} {
+}): DesktopRouteErrorFeedbackContext {
   const normalized = normalizeError(error);
   return {
-    initialMessage: normalized.message,
-    context: {
-      kind: "desktop_route_error",
-      trigger,
-      error: normalized,
-    },
+    kind: "desktop_route_error",
+    trigger,
+    error: normalized,
   };
 }
 
@@ -114,9 +108,9 @@ function DesktopNotFoundPage() {
 
 function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
   const recoveryRoute = useRecoveryRoute();
-  const feedback = useMemo(
+  const feedbackContext = useMemo(
     () =>
-      createRouteErrorFeedback({
+      createRouteErrorFeedbackContext({
         error,
         trigger: "route-errorElement",
       }),
@@ -176,8 +170,8 @@ function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
           type="button"
           onClick={() =>
             useModalStore.getState().open("feedback", {
-              ...feedback,
               kind: "bug",
+              context: feedbackContext,
             })
           }
         >
