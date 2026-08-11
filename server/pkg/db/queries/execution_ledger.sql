@@ -18,6 +18,20 @@ INSERT INTO execution_ledger (
 )
 RETURNING *;
 
+-- name: StampTaskExecutionIdentity :one
+-- P1 producer: stamp the frozen execution snapshot onto the queue row in the
+-- SAME transaction as the queue create and ledger insert, so claim-time gate
+-- commit and the ledger agree on execution identity. Runs only for executions
+-- that carry a MemoryHub execution snapshot; non-memory rows stay untouched.
+UPDATE agent_task_queue
+SET execution_id = $2,
+    memoryhub_run_id = $3,
+    memory_policy = COALESCE(sqlc.narg(memory_policy), memory_policy),
+    review_policy = COALESCE(sqlc.narg(review_policy), review_policy),
+    reviewer_agent_id = COALESCE(sqlc.narg(reviewer_agent_id), reviewer_agent_id)
+WHERE id = $1
+RETURNING *;
+
 -- name: GetExecutionLedgerByExecutionID :one
 SELECT * FROM execution_ledger WHERE execution_id = $1;
 

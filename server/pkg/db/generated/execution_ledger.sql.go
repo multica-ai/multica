@@ -677,6 +677,109 @@ func (q *Queries) ReleaseExpiredExecutionLedgerLeases(ctx context.Context) error
 	return err
 }
 
+const stampTaskExecutionIdentity = `-- name: StampTaskExecutionIdentity :one
+UPDATE agent_task_queue
+SET execution_id = $2,
+    memoryhub_run_id = $3,
+    memory_policy = COALESCE($4, memory_policy),
+    review_policy = COALESCE($5, review_policy),
+    reviewer_agent_id = COALESCE($6, reviewer_agent_id)
+WHERE id = $1
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, memory_gate_state, memory_gate_error_code, memory_gate_evidence_ref, memory_gate_next_wakeup, memory_gate_lease_id, memory_gate_lease_expires_at, memoryhub_run_id, execution_id, memory_policy, memory_attachment_ref, review_policy, reviewer_agent_id, review_of_execution_id
+`
+
+type StampTaskExecutionIdentityParams struct {
+	ID              pgtype.UUID `json:"id"`
+	ExecutionID     pgtype.UUID `json:"execution_id"`
+	MemoryhubRunID  pgtype.Text `json:"memoryhub_run_id"`
+	MemoryPolicy    pgtype.Text `json:"memory_policy"`
+	ReviewPolicy    pgtype.Text `json:"review_policy"`
+	ReviewerAgentID pgtype.UUID `json:"reviewer_agent_id"`
+}
+
+// P1 producer: stamp the frozen execution snapshot onto the queue row in the
+// SAME transaction as the queue create and ledger insert, so claim-time gate
+// commit and the ledger agree on execution identity. Runs only for executions
+// that carry a MemoryHub execution snapshot; non-memory rows stay untouched.
+func (q *Queries) StampTaskExecutionIdentity(ctx context.Context, arg StampTaskExecutionIdentityParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, stampTaskExecutionIdentity,
+		arg.ID,
+		arg.ExecutionID,
+		arg.MemoryhubRunID,
+		arg.MemoryPolicy,
+		arg.ReviewPolicy,
+		arg.ReviewerAgentID,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.MemoryGateState,
+		&i.MemoryGateErrorCode,
+		&i.MemoryGateEvidenceRef,
+		&i.MemoryGateNextWakeup,
+		&i.MemoryGateLeaseID,
+		&i.MemoryGateLeaseExpiresAt,
+		&i.MemoryhubRunID,
+		&i.ExecutionID,
+		&i.MemoryPolicy,
+		&i.MemoryAttachmentRef,
+		&i.ReviewPolicy,
+		&i.ReviewerAgentID,
+		&i.ReviewOfExecutionID,
+	)
+	return i, err
+}
+
 const startExecutionLedgerRunningCAS = `-- name: StartExecutionLedgerRunningCAS :one
 UPDATE execution_ledger
 SET state = 'running',

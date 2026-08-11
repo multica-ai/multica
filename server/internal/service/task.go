@@ -1155,7 +1155,21 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 			FireAt:               fireAt,
 		})
 	} else {
-		task, err = s.Queries.CreateAgentTask(ctx, createParams)
+		// P1 producer: queue row + execution ledger row commit in ONE
+		// transaction. The frozen execution_id/run_id are stamped onto the
+		// queue row so the claim-time gate commit and the ledger agree.
+		task, err = s.enqueueTaskWithExecutionLedger(ctx, func(q *db.Queries) (db.AgentTaskQueue, error) {
+			return q.CreateAgentTask(ctx, createParams)
+		}, executionEnqueueInput{
+			WorkspaceID:  issue.WorkspaceID,
+			ProjectID:    issue.ProjectID,
+			IssueID:      issue.ID,
+			AgentID:      issue.AssigneeID,
+			RuntimeID:    agent.RuntimeID,
+			Model:        agent.Model.String,
+			ReviewPolicy: string(protocol.ReviewPolicyNone),
+			Prefix:       "enqueue",
+		})
 	}
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -2887,10 +2901,35 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 		}
 
 		t0 = time.Now()
-		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
+		// MemoryHub gate (B6): BEFORE ClaimAgentTask changes the row to
+		// dispatched, evaluate the claim gate for any MemoryHub candidate.
+		// Required failures keep the queue queued (no token, no running, no
+		// claim response); a blocked candidate is recorded and skipped so the
+		// claim loop can move to the next agent.
+		var task db.AgentTaskQueue
+		gateTask, hadCandidate, gerr := s.claimWithMemoryGate(ctx, qtx, agentID)
+		if gerr != nil {
+			outcome = "error_memory_gate"
+			return fmt.Errorf("memory gate claim: %w", gerr)
+		}
+		if hadCandidate {
+			if gateTask == nil {
+				outcome = "memory_gate_blocked"
+				return nil
+			}
+			task = *gateTask
+			claimAgentMs = time.Since(t0).Milliseconds()
+			claimedTask := task
+			claimed = &claimedTask
+			return nil
+		}
+
+		claimedAgent, cerr := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
 			AgentID:          agentID,
 			PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
 		})
+		task = claimedAgent
+		err = cerr
 		claimAgentMs = time.Since(t0).Milliseconds()
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {

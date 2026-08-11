@@ -46,6 +46,16 @@ WHERE workspace_id = $1
   AND (@subject_id::uuid IS NULL OR subject_id = @subject_id)
 ORDER BY created_at DESC, id DESC;
 
+-- name: ListBoundMemoryHubBindingsForClaim :many
+-- Claim-gate binding resolution: NULL-safe scope match (IS NOT DISTINCT FROM)
+-- so a workspace-scoped binding (scope_id NULL) is found whether the claim
+-- scope carries no scope_id or an explicit one. Only bound rows count.
+SELECT * FROM memoryhub_binding
+WHERE workspace_id = $1
+  AND scope_kind = $2
+  AND scope_id IS NOT DISTINCT FROM $3
+  AND status = 'bound';
+
 -- name: UpdateMemoryHubBindingStateCAS :one
 -- Optimistic state transition: zero rows => 409 binding_transition_conflict.
 UPDATE memoryhub_binding
@@ -258,6 +268,41 @@ WHERE state = 'active' AND expires_at IS NOT NULL AND expires_at < now();
 -- Claim gate (reservation + outcome, queue stays queued until commit)
 -- =====================
 
+-- name: SelectQueuedMemoryClaimCandidateForAgent :one
+-- Select the next queued MemoryHub candidate for an agent WITHOUT dispatching
+-- it, mirroring ClaimAgentTask's per-(issue, agent) serialization rule. A
+-- MemoryHub candidate is a row whose execution snapshot carries an explicit
+-- REQUIRED memory policy (migration 317 defaults memory_policy to 'optional'
+-- on every row, so 'optional' alone does not denote a MemoryHub run). The
+-- claim path reserves this row for the gate, evaluates the gate, then either
+-- commits the claim (queued -> dispatched) or records a gate outcome (keeps
+-- queued). Non-memory candidates never appear here; they use the existing
+-- ClaimAgentTask path unchanged.
+SELECT atq.* FROM agent_task_queue atq
+WHERE atq.agent_id = $1
+  AND atq.status = 'queued'
+  AND atq.execution_id IS NOT NULL
+  AND atq.memory_policy = 'required'
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue active
+      WHERE active.agent_id = atq.agent_id
+        AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+        AND (
+          (atq.issue_id IS NOT NULL AND active.issue_id = atq.issue_id)
+          OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
+          OR (
+            atq.issue_id IS NULL
+            AND atq.chat_session_id IS NULL
+            AND atq.autopilot_run_id IS NULL
+            AND active.issue_id IS NULL
+            AND active.chat_session_id IS NULL
+            AND active.autopilot_run_id IS NULL
+          )
+        )
+  )
+ORDER BY atq.priority DESC, atq.created_at ASC, atq.id ASC
+LIMIT 1;
+
 -- name: ReserveQueuedTaskForMemoryGate :one
 -- Reserve a queued row for gate preflight without changing status or
 -- dispatched_at. Excludes rows with a live gate lease held by someone else.
@@ -276,15 +321,15 @@ RETURNING *;
 
 -- name: SetMemoryGateOutcome :one
 -- Persist a gate outcome without changing queue status (required-fail and
--- degraded outcomes both keep the row queued).
+-- degraded outcomes both keep the row queued). agent_task_queue has no
+-- updated_at column; the gate fields carry the outcome.
 UPDATE agent_task_queue
 SET memory_gate_state = $2,
     memory_gate_error_code = sqlc.narg(memory_gate_error_code),
     memory_gate_evidence_ref = sqlc.narg(memory_gate_evidence_ref),
     memory_gate_next_wakeup = sqlc.narg(memory_gate_next_wakeup),
     memory_gate_lease_id = NULL,
-    memory_gate_lease_expires_at = NULL,
-    updated_at = now()
+    memory_gate_lease_expires_at = NULL
 WHERE id = $1
 RETURNING *;
 
@@ -302,8 +347,7 @@ SET status = 'dispatched',
     memory_gate_evidence_ref = NULL,
     memory_gate_next_wakeup = NULL,
     memory_gate_lease_id = NULL,
-    memory_gate_lease_expires_at = NULL,
-    updated_at = now()
+    memory_gate_lease_expires_at = NULL
 WHERE id = $1
   AND status = 'queued'
   AND memory_gate_lease_id = $2
@@ -356,6 +400,23 @@ SET output_ref = $2,
     runtime_evidence_state = 'complete',
     updated_at = now()
 WHERE execution_id = $1 AND runtime_evidence_state = 'collecting'
+RETURNING *;
+
+-- name: InitializeEvidenceRecordReview :one
+-- V5-7.1 initial review state frozen at runtime completion. The scheduler
+-- owns every later transition; this is the only writer that sets the initial
+-- state. blocked is never given a wakeup (V5-7).
+UPDATE execution_evidence_record
+SET review_policy = $2,
+    review_state = $3,
+    review_version = $4,
+    reviewer_agent_id = sqlc.narg(reviewer_agent_id),
+    review_attempt = $5,
+    max_review_attempts = $6,
+    review_next_wakeup = sqlc.narg(review_next_wakeup),
+    review_failure_code = sqlc.narg(review_failure_code),
+    updated_at = now()
+WHERE execution_id = $1
 RETURNING *;
 
 -- name: SetEvidenceRecordGateFailure :one

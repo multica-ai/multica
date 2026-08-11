@@ -433,6 +433,11 @@ type AgentTaskResponse struct {
 	// owning user; the daemon must not fall back to its own credential. See
 	// MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+	// MemoryHub carries the claim-time MemoryHub preparation for a MemoryHub
+	// execution (V4-3): the frozen ExecutionIdentity plus the refs-only
+	// MemoryAttachment and any credential handle issued at claim. Absent for
+	// non-MemoryHub runs and for old daemons, which ignore it.
+	MemoryHub *protocol.MemoryHubClaimPreparation `json:"memoryhub,omitempty"`
 }
 
 // TaskAttribution is the wire shape of a run's accountable-human provenance
