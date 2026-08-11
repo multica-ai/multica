@@ -12,7 +12,7 @@ Comments only. This is not a visual editor.
 |---|---|
 | `static/review.js` | The widget. Vanilla JS, no build step, no secrets. |
 | `src/server.js` | Ingest service. Holds the `mul_` token, verifies review links. |
-| `cli/mint-review-link.js` | Issues a signed review link for a client. |
+| `bin/mint-review-link.js` | Issues a signed review link for a client. |
 | `projects.json` | Maps a project slug to its workspace, project and assignee. |
 
 ## How it fits together
@@ -46,20 +46,30 @@ Edit `projects.json` to map each project:
   "ips": {
     "workspace_id": "…",
     "project_id": "…",
-    "assignee_type": "agent",
-    "assignee_id": "…",
-    "base_url": "https://dart.flexmedia.is"
+    "base_url": "https://dart.hbhf.is"
   }
 }
 ```
 
-`assignee_*` matters: per the Multica handoff contract an issue must be assigned
-or the daemon never picks it up. Point it at Tech Lead to route, or at a person.
+### Client comments land in `backlog`, unassigned — on purpose
+
+A client comment is a **request**, not an approved work order. Issues are created
+in `backlog` with no assignee, which is the one state the Multica handoff
+contract allows to be unassigned and the one the daemon will not dispatch from.
+Triage them yourself, then assign and move to `todo` when the work is approved.
+
+**Do not add `assignee_id` to a project here unless you mean it.** Assignment
+plus `todo` is exactly what makes the daemon pick an issue up. An earlier version
+of this service created assigned `todo` issues, and agents opened real PRs
+against the live ips repo within seconds of a comment being posted (PR #264,
+from a *test* comment, reached CI before it was caught). Optional overrides
+`assignee_type` / `assignee_id` / `status` exist for projects that genuinely want
+auto-dispatch, but the default is deliberately inert.
 
 ## Issuing a review link
 
 ```bash
-node cli/mint-review-link.js ips "Jón at IPS" --days 30
+node bin/mint-review-link.js ips "Jón at IPS" --days 30
 ```
 
 Prints a link like `https://dart.flexmedia.is/?review=<token>`. Send it to the

@@ -163,11 +163,21 @@ async function createIssue({ config, client, comment, url, path, selector, label
 	const body = {
 		title,
 		description,
-		priority: 'medium'
+		priority: 'medium',
+		// Land in `backlog`, NOT `todo`. A client comment is a request, not an
+		// approved work order — it must be triaged by a human before any agent
+		// touches the codebase. `backlog` is the one status the handoff contract
+		// allows to be unassigned, and the daemon does not dispatch from it.
+		//
+		// This is load-bearing. Creating these as assigned `todo` had agents
+		// opening real PRs against the live repo within seconds of a comment
+		// (ips PR #264, from a test comment, reached CI before being caught).
+		status: config.status || 'backlog'
 	};
 	if (config.project_id) body.project_id = config.project_id;
-	// Per the Multica handoff contract: never leave an issue unassigned, or
-	// the daemon will never pick it up.
+	// Assign only when a project explicitly opts in. Assignment plus `todo` is
+	// what makes the daemon pick an issue up, so the default (no assignee,
+	// backlog) is deliberately inert.
 	if (config.assignee_id) {
 		body.assignee_type = config.assignee_type || 'user';
 		body.assignee_id = config.assignee_id;

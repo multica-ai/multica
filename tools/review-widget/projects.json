@@ -2,8 +2,8 @@
   "ips": {
     "workspace_id": "9c5d6e0c-3c93-4496-8317-71af3001b103",
     "project_id": "95c912c7-3a3d-4173-aedc-0834506ddfe2",
-    "assignee_type": "agent",
-    "assignee_id": "58b734da-56f1-4590-adf9-b805d5e3b895",
-    "base_url": "https://dart.flexmedia.is"
+    "base_url": "https://dart.hbhf.is",
+
+    "_comment": "No assignee and no status override on purpose. Client comments land in `backlog`, unassigned, where the daemon cannot dispatch them. Triage them yourself, then assign + move to `todo` when the work is actually approved. Setting assignee_id here re-arms automatic agent dispatch on every client comment — do not do it without meaning to."
   }
 }
