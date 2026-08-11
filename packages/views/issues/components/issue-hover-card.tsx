@@ -33,8 +33,9 @@ interface IssueHoverCardProps {
  *
  * The inline chip shows status, identifier, and as much title as fits inside
  * its `min(18rem, 100%)` cap — so a long title arrives truncated. The card
- * carries what the chip cannot: the full untruncated title, a description
- * snippet, the assignee, and sub-issue progress. Member and agent mentions
+ * carries what the chip cannot: the full untruncated title, priority, a
+ * description snippet, the assignee, and sub-issue progress. Member and agent
+ * mentions
  * already preview this way via MentionHoverCard
  * (packages/ui/components/common/mention-hover-card.tsx); this is the issue
  * equivalent, and lives here rather than in packages/ui because it reads
