@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -280,6 +281,143 @@ func healthPortForProfile(profile string) int {
 		h += int(b)
 	}
 	return daemon.DefaultHealthPort + 1 + (h % 1000)
+}
+
+// unknownProfileError reports an explicitly named --profile that has no
+// directory under ~/.multica/profiles. It carries the known profile names so
+// both the text and JSON renderings can list them without re-reading the disk.
+type unknownProfileError struct {
+	Profile string
+	Known   []string
+}
+
+func (e *unknownProfileError) Error() string {
+	if len(e.Known) == 0 {
+		// The command is left unquoted so the shell-quoted profile name below
+		// stays the only quoting in the line and the hint pastes cleanly.
+		return fmt.Sprintf("unknown profile %q: no named profiles exist yet.\nCreate one with: multica login --profile %s", e.Profile, shellQuoteArg(e.Profile))
+	}
+	return fmt.Sprintf("unknown profile %q\nKnown profiles: %s", e.Profile, strings.Join(e.Known, ", "))
+}
+
+// jsonPayload renders the error for `--output json`. Known stays a non-nil
+// slice so the field marshals as [] rather than null.
+func (e *unknownProfileError) jsonPayload() map[string]any {
+	known := e.Known
+	if known == nil {
+		known = []string{}
+	}
+	return map[string]any{
+		"status":         "unknown_profile",
+		"profile":        e.Profile,
+		"known_profiles": known,
+	}
+}
+
+// profileConfigFileName is the file whose presence marks a directory under the
+// profiles root as an actual profile rather than just a parent of one. Kept in
+// step with cli.CLIConfigPathForProfile.
+const profileConfigFileName = "config.json"
+
+// profileExists reports whether an explicitly named profile has state on disk.
+//
+// The name is resolved through the same path logic the config layer uses
+// rather than matched against a flat directory listing, because a profile name
+// may contain separators: `multica --profile team/dev config set ...` creates
+// ~/.multica/profiles/team/dev. Matching against top-level entries would
+// reject that profile while offering its parent "team" as a suggestion.
+func profileExists(profile string) (bool, error) {
+	dir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return false, err
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return info.IsDir(), nil
+}
+
+// knownProfiles lists the profiles that exist on disk, sorted by name, for use
+// as suggestions after a name misses. A profile is a directory under the
+// profiles root holding a config.json, at any depth — requiring that file is
+// what keeps a bare parent directory such as "team" out of a list where every
+// entry is meant to be directly usable as --profile.
+//
+// A missing profiles root is not an error: it just means no named profile has
+// been created yet, the common case for a default-profile-only user.
+func knownProfiles() ([]string, error) {
+	root, err := profilesRootDir()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0)
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// An unreadable subtree costs us suggestions, not correctness:
+			// skip it so the rest of the list still reaches the user.
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || d.Name() != profileConfigFileName {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, filepath.Dir(path))
+		if relErr != nil || rel == "." {
+			return nil
+		}
+		names = append(names, filepath.ToSlash(rel))
+		return nil
+	})
+	if walkErr != nil {
+		if os.IsNotExist(walkErr) {
+			return nil, nil
+		}
+		return nil, walkErr
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// requireKnownProfile rejects an explicitly named profile that does not exist.
+//
+// healthPortForProfile hashes ANY string into a port, so without this check a
+// mistyped --profile probes a port nothing is bound to and the command reports
+// a flat "stopped" — indistinguishable from a daemon that is genuinely not
+// running, even while the correctly-named daemon serves happily on another
+// port (#6694). Failing loudly with the known names turns that dead end into a
+// one-glance fix.
+//
+// The default profile is never validated: it owns ~/.multica directly, has no
+// entry under profiles/, and is always legitimate.
+//
+// Callers must invoke this AFTER their daemon-managed-task guard
+// (requireHumanLocalCommand, or daemonStatusHealthPort for status). Listing the
+// profiles root inside a task would disclose the Owner's profile names, which
+// those guards exist to prevent.
+func requireKnownProfile(profile string) error {
+	if profile == "" {
+		return nil
+	}
+	exists, err := profileExists(profile)
+	if err != nil {
+		return fmt.Errorf("resolve profile %q: %w", profile, err)
+	}
+	if exists {
+		return nil
+	}
+	// Only now is the listing worth its disk walk, and only now can it be
+	// wrong in a way the user sees.
+	names, err := knownProfiles()
+	if err != nil {
+		return fmt.Errorf("list profiles: %w", err)
+	}
+	return &unknownProfileError{Profile: profile, Known: names}
 }
 
 // --- daemon start ---
@@ -957,6 +1095,9 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	profile := resolveProfile(cmd)
+	if err := requireKnownProfile(profile); err != nil {
+		return err
+	}
 	healthPort := healthPortForProfile(profile)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -1006,6 +1147,9 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	profile := resolveProfile(cmd)
+	if err := requireKnownProfile(profile); err != nil {
+		return err
+	}
 	healthPort := healthPortForProfile(profile)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -1092,13 +1236,28 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	output, _ := cmd.Flags().GetString("output")
+
+	// Safe to list profiles here: daemonStatusHealthPort already rejected an
+	// explicit --profile inside a daemon-managed task.
+	if err := requireKnownProfile(profile); err != nil {
+		var unknown *unknownProfileError
+		if output == "json" && errors.As(err, &unknown) {
+			// Keep stdout a single valid JSON document. The non-zero exit
+			// carries the failure, so errSilent suppresses the stderr copy.
+			if printErr := cli.PrintJSON(os.Stdout, unknown.jsonPayload()); printErr != nil {
+				return printErr
+			}
+			return errSilent
+		}
+		return err
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
 
-	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, health)
 	}
@@ -1190,6 +1349,9 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	profile := resolveProfile(cmd)
+	if err := requireKnownProfile(profile); err != nil {
+		return err
+	}
 	logPath := daemonLogPathForProfile(profile)
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {
 		return fmt.Errorf("no log file found at %s\nThe daemon may not have been started in background mode", logPath)

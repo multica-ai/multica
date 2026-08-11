@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -53,6 +54,7 @@ type outboundQueries interface {
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
 }
 
 // Outbound delivers an agent's chat reply back to WeCom over the same
@@ -68,6 +70,38 @@ type Outbound struct {
 	// retryAfter is the first delay before an answer the ledger handed back
 	// undelivered is tried again. Negative disables the retry; test-only.
 	retryAfter time.Duration
+
+	// objects is the deployment's object storage, or nil when there is none.
+	// Non-nil is what turns file delivery on (outbound_media.go).
+	objects mediaObjectStore
+
+	// spawn runs an attachment delivery. A field rather than a bare `go` so a
+	// test can run it inline and observe the result deterministically.
+	spawn func(func())
+
+	// Two counters bound attachment delivery, and they are two because one
+	// cannot be in both places at once.
+	//
+	// admittedAttachments counts goroutines this subscriber has started and
+	// not yet seen return. It is claimed before the spawn, so it bounds the
+	// attachment lookup each goroutine runs as well as the goroutine itself.
+	// Nothing is known about the turn at that point, so exceeding it can only
+	// be logged.
+	//
+	// pendingAttachments counts deliveries that have looked the turn up and
+	// found a file. It is claimed after the lookup, which is what lets a
+	// delivery refused for want of capacity be reported to the user without
+	// ever warning about a file that never existed.
+	//
+	// The admitted cap is deliberately the larger of the two, so that a
+	// backlog of turns that DO carry a file fills the pending cap first and is
+	// shed on the path that can say what was dropped. Reaching the admitted cap
+	// does not imply the pending cap is full: admission is held for a
+	// goroutine's whole life, including its lookup and including turns that
+	// turn out to carry no file, and those never claim a pending slot at all.
+	pendingMu           sync.Mutex
+	pendingAttachments  int
+	admittedAttachments int
 }
 
 // NewOutbound builds the WeCom outbound subscriber. senders is the same
@@ -78,14 +112,26 @@ type Outbound struct {
 //
 // streams is the same store the typing indicator writes to; nil disables the
 // in-place reply and leaves every answer going out as a new message.
-func NewOutbound(q outboundQueries, senders *sendersRegistry, streams *streamStore, logger *slog.Logger) *Outbound {
+//
+// WithAttachments is the one option: pass the deployment's object storage and
+// the files an agent produced are delivered into the chat behind the answer.
+func NewOutbound(q outboundQueries, senders *sendersRegistry, streams *streamStore, logger *slog.Logger, opts ...OutboundOption) *Outbound {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Outbound{
-		q: q, tasks: q, senders: senders, streams: streams, logger: logger,
+	o := &Outbound{
+		q:          q,
+		tasks:      q,
+		senders:    senders,
+		streams:    streams,
+		logger:     logger,
 		retryAfter: answerRetryAfter,
+		spawn:      func(f func()) { go f() },
 	}
+	for _, opt := range opts {
+		opt(o)
+	}
+	return o
 }
 
 // Register subscribes to the chat-done event on the bus.
@@ -121,14 +167,35 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		// Issue / autopilot tasks carry no chat_session.
 		return nil
 	}
+	// Refuses a chat:done for a Slack, Lark or web-only session in one query
+	// instead of the two the origin gate below costs, and its row is the
+	// address an attachment falls back to when the answer itself had nothing to
+	// say. The row is read AGAIN in sendAsMessage, which is where a plain
+	// message needs it — that lookup sits past the take on purpose, and this
+	// one cannot stand in for it because a round can be taken and sealed
+	// without ever reaching a plain message.
+	binding, err := o.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
+		ChatSessionID: sessionID,
+		ChannelType:   channelTypeWecom,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // not a wecom session (Slack / Lark / web-only)
+		}
+		return fmt.Errorf("wecom: lookup chat binding: %w", err)
+	}
+	// An empty completion does NOT end the turn. Two things can still be owed:
+	// a file the agent produced and said nothing about, and — since the bubble
+	// — the seal on a spinner the asker is watching. deliverAnswer decides
+	// which, and answers errNothingToSay when it is neither.
 	content := chatDoneContent(e.Payload)
-
-	// Where was this question asked? A question asked in the Multica web UI can
-	// reuse a session that originated in WeCom — and its answer belongs only in
-	// Multica. Without this gate that answer is pushed into the WeCom chat,
-	// which in a group means in front of everyone in the room.
-	// slack/outbound.go:118 and the lark and dingtalk equivalents all gate
-	// here; WeCom was the one that did not.
+	// Only bound, non-empty completions reach here, so classify the task
+	// origin before loading credentials or sending. A question asked in the
+	// Multica web UI can reuse a session that originated in WeCom — and its
+	// answer belongs only in Multica. Without this gate that answer is pushed
+	// into the WeCom chat, which in a group means in front of everyone in the
+	// room. slack/outbound.go:118 and the lark and dingtalk equivalents all
+	// gate here; WeCom was the one that did not.
 	//
 	// Fails closed: an origin we cannot establish is not delivered.
 	//
@@ -171,7 +238,11 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// the ledger records the ending only from what deliverAnswer reports. There
 	// is no path here that sends without recording, and none that records
 	// without sending — see the ending ledger's contract in stream_store.go.
-	return o.sayTheAnswer(ctx, sessionID, taskIDFromEvent(e), content, endingRetries{})
+	return o.sayTheAnswer(ctx, e, sessionID, taskIDFromEvent(e), content, attachmentTarget{
+		InstallationID: binding.InstallationID,
+		ChatID:         binding.ChannelChatID,
+		ChatType:       aibotChatTypeFromChannel(channel.ChatType(binding.ChatType)),
+	}, endingRetries{})
 }
 
 // answerRetryAfter is how long an answer the ledger handed back undelivered
@@ -244,19 +315,53 @@ const (
 // a WARN — but for as long as the chain runs, the answer exists nowhere but in a
 // time.AfterFunc closure. A restart or a panic in that window loses it with no
 // log line and no metric, and chat:done does not fire again.
-func (o *Outbound) sayTheAnswer(ctx context.Context, sessionID pgtype.UUID, taskID, content string, retries endingRetries) error {
+func (o *Outbound) sayTheAnswer(ctx context.Context, e events.Event, sessionID pgtype.UUID, taskID, content string, fallback attachmentTarget, retries endingRetries) error {
 	retries = retries.begin(time.Now())
+	// deliveredTo is set only by an attempt of OURS that landed. sayEnding
+	// returns a verdict rather than an address, and the difference matters
+	// here: roundToldAlready means somebody else already said this round's
+	// ending, and a file sent behind words we did not write would arrive with
+	// no answer in front of it.
+	var deliveredTo roundAddress
+	delivered := false
 	_, err := o.rounds().sayEnding(ctx, sessionID, byTask(taskID), roundOver,
 		func(ctx context.Context, t roundTurn) (roundAddress, error) {
-			return o.deliverAnswer(ctx, sessionID, t, content)
+			addr, err := o.deliverAnswer(ctx, sessionID, t, content)
+			if err == nil {
+				deliveredTo, delivered = addr, true
+			}
+			return addr, err
 		})
 	if err == nil || errors.Is(err, errNothingToSay) {
-		// Said, or deliberately not said. Either way nobody is owed anything
-		// this subscriber is still holding.
+		// The words landed. Whatever the agent produced alongside them goes out
+		// behind them as its own message — a WeCom reply cannot carry a file
+		// inline.
+		//
+		// Here rather than beside the send, because THIS is the line that means
+		// delivered. A booked retry also returns nil to the bus, and firing the
+		// attachment on that path would put the file in front of an answer that
+		// has not been said yet; the attempt that finally lands comes back
+		// through here and sends it then. The address is the one the delivery
+		// actually used, so a bubble sealed in place and a plain message both
+		// address the same chat.
+		// Addressed from the delivery when there was one, and from the binding
+		// when the answer had nothing to say — an empty completion whose only
+		// reply IS the file reaches here with no address of its own, and
+		// throwing the file away because no words went with it is how the work
+		// gets lost.
+		target := fallback
+		if delivered {
+			target = attachmentTarget{
+				InstallationID: deliveredTo.InstallationID,
+				ChatID:         deliveredTo.ChatID,
+				ChatType:       deliveredTo.ChatType,
+			}
+		}
+		o.deliverAttachments(e, target)
 		return nil
 	}
 	if cause, again := answerRetryCause(err); again &&
-		o.bookAnswerRetry(sessionID, taskID, content, retries, cause) {
+		o.bookAnswerRetry(e, sessionID, taskID, content, fallback, retries, cause) {
 		return nil
 	}
 	// Out of attempts for this cause, or retries disabled. The answer is lost
@@ -327,7 +432,7 @@ func answerRetryCause(err error) (retryCause, bool) {
 // out, and it goes back through sayEnding like any other publisher — an answer
 // something else delivered in the meantime finds the run on told and says
 // nothing, and one whose round was handed back finds the bubble and seals it.
-func (o *Outbound) bookAnswerRetry(sessionID pgtype.UUID, taskID, content string, retries endingRetries, cause retryCause) bool {
+func (o *Outbound) bookAnswerRetry(e events.Event, sessionID pgtype.UUID, taskID, content string, fallback attachmentTarget, retries endingRetries, cause retryCause) bool {
 	if o.retryAfter <= 0 {
 		return false
 	}
@@ -338,7 +443,7 @@ func (o *Outbound) bookAnswerRetry(sessionID pgtype.UUID, taskID, content string
 	time.AfterFunc(wait, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 		defer cancel()
-		if err := o.sayTheAnswer(ctx, sessionID, taskID, content, next); err != nil {
+		if err := o.sayTheAnswer(ctx, e, sessionID, taskID, content, fallback, next); err != nil {
 			o.logger.WarnContext(ctx, "wecom outbound: reply delivery failed",
 				"error", err, "chat_session_id", util.UUIDToString(sessionID))
 		}

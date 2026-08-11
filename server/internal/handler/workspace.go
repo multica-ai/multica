@@ -2,13 +2,16 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -729,6 +732,69 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// workspaceDeleteLockTimeout bounds every lock wait inside the workspace
+// teardown transaction.
+//
+// The teardown waits on three kinds of lock: the workspace row (FOR UPDATE),
+// every chat_session row in the workspace (FOR UPDATE), and the global
+// advisory lock 4246 that serialises it against the task_usage_hourly rollup.
+// The advisory lock is the dangerous one — it is global and batch-held. A
+// rollup tick may hold it for as long as its 25 min scheduler RunTimeout, the
+// backfill commands (cmd/backfill_task_usage_hourly, cmd/backfill_codex_usage_cache)
+// hold it for an entire run, and before migration 272 a tick whose query was
+// cancelled leaked it for the remaining life of its pooled connection.
+//
+// Waiting on that lock without a cap is what the user sees as "delete does
+// nothing": the request never returns, and no layer above it times out — the
+// browser/Electron fetch in packages/core/api/client.ts has no deadline and
+// the delete dialog stays in its "Deleting…" state forever (MUL-5983). A
+// bounded wait turns the same contention into a retryable error.
+//
+// 10 s is far above the millisecond-scale waits an uncontended teardown sees,
+// and short enough to fail while the user is still watching the dialog.
+const workspaceDeleteLockTimeout = 10 * time.Second
+
+// workspaceDeleteLockTimeoutOverride, when non-zero, replaces
+// workspaceDeleteLockTimeout for the duration of a test. Never read outside
+// effectiveWorkspaceDeleteLockTimeout — see workspace_delete_lock_test.go.
+var workspaceDeleteLockTimeoutOverride time.Duration
+
+func effectiveWorkspaceDeleteLockTimeout() time.Duration {
+	if workspaceDeleteLockTimeoutOverride > 0 {
+		return workspaceDeleteLockTimeoutOverride
+	}
+	return workspaceDeleteLockTimeout
+}
+
+// isLockTimeout reports whether err is Postgres' lock_not_available
+// (SQLSTATE 55P03), which is what `SET LOCAL lock_timeout` raises when a lock
+// wait exceeds its budget. It says nothing about the workspace itself: the row
+// is untouched and the caller can retry once the other holder is done.
+func isLockTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "55P03"
+	}
+	return false
+}
+
+// failWorkspaceDelete logs a failed teardown step and writes the response for
+// it. A lock timeout is transient and retryable, so it answers 503 with a
+// message the delete dialog can show; every other failure stays a 500.
+func failWorkspaceDelete(w http.ResponseWriter, r *http.Request, workspaceID, step string, err error) {
+	attrs := append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "step", step)
+	if isLockTimeout(err) {
+		slog.Warn("workspace delete blocked by lock timeout", attrs...)
+		writeError(w, http.StatusServiceUnavailable, "workspace deletion is temporarily blocked by another operation, please try again")
+		return
+	}
+	slog.Warn("workspace delete step failed", attrs...)
+	writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+}
+
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
 
@@ -782,15 +848,23 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
+	// SET LOCAL is transaction-scoped, so pgxpool hands this connection back
+	// out with the default (unbounded) lock_timeout after COMMIT / ROLLBACK.
+	// It caps waiting for a lock, not the teardown work itself — deleting a
+	// large workspace is allowed to take as long as it takes.
+	lockTimeoutMs := int(effectiveWorkspaceDeleteLockTimeout() / time.Millisecond)
+	if _, err := tx.Exec(r.Context(), fmt.Sprintf("SET LOCAL lock_timeout = %d", lockTimeoutMs)); err != nil {
+		failWorkspaceDelete(w, r, workspaceID, "set lock timeout", err)
+		return
+	}
+
 	if _, err := qtx.LockWorkspaceForDelete(r.Context(), requester.WorkspaceID); err != nil {
-		slog.Warn("lock workspace for delete failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+		failWorkspaceDelete(w, r, workspaceID, "lock workspace", err)
 		return
 	}
 
 	if _, err := qtx.LockChatSessionsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
-		slog.Warn("lock workspace chat sessions failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+		failWorkspaceDelete(w, r, workspaceID, "lock chat sessions", err)
 		return
 	}
 
@@ -817,7 +891,9 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			// This is the first stage that touches usage rollups. Keep the
 			// global rollup lock out of relationship preparation so unrelated
-			// workspaces skip the shortest possible rollup window.
+			// workspaces skip the shortest possible rollup window. This wait
+			// is bounded by workspaceDeleteLockTimeout — 4246 is held by
+			// batch jobs, so an unbounded wait here is what hangs the delete.
 			name: "lock task usage rollup",
 			run:  func() error { return qtx.LockTaskUsageRollupForWorkspaceDelete(ctx) },
 		},
@@ -891,13 +967,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, step := range deleteSteps {
 		if err := step.run(); err != nil {
-			slog.Warn("workspace delete step failed", append(
-				logger.RequestAttrs(r),
-				"error", err,
-				"workspace_id", workspaceID,
-				"step", step.name,
-			)...)
-			writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+			failWorkspaceDelete(w, r, workspaceID, step.name, err)
 			return
 		}
 	}

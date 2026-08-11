@@ -448,7 +448,7 @@ func TestNoRetriesWithoutADelay(t *testing.T) {
 		t.Error("a manager with retries disabled booked one")
 	}
 	o := &Outbound{retryAfter: -1}
-	if o.bookAnswerRetry(bubbleSessionID(t), "task", "content", endingRetries{}.begin(time.Now()), retryRefused) {
+	if o.bookAnswerRetry(events.Event{}, bubbleSessionID(t), "task", "content", attachmentTarget{}, endingRetries{}.begin(time.Now()), retryRefused) {
 		t.Error("a subscriber with retries disabled booked one")
 	}
 }

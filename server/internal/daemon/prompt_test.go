@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -561,36 +562,57 @@ func TestBuildChatPromptNoNarrationOnEveryChannel(t *testing.T) {
 // chat channel policy (MUL-4899). Collapsing them into one condition is exactly
 // the bug this matrix exists to catch:
 //
-//   - delivery: `attachment upload` guidance is injected iff there is NO channel.
-//     Any IM reply leaves Multica, where the upload has nothing to bind to.
+//   - delivery: `attachment upload` guidance is injected iff something actually
+//     carries the file the last hop. That is a per-DEPLOYMENT answer the server
+//     sends on the claim, not "is there a channel" and not a property of the
+//     channel type: web/mobile renders a card, and a channel gets the upload
+//     guidance only where the adapter goes back for the bound attachment AND
+//     that deployment has the object storage to go back to
+//     (integrations/wecom/outbound_media.go, cmd/server/router.go).
 //   - history: the `chat history` / `chat thread` commands are injected iff the
 //     channel is Slack. Those endpoints are hardwired to h.SlackHistory
 //     (handler/chat_history.go) — on Feishu they answer "no channel
 //     integration", so teaching them there sends the agent down a dead path.
 //
-// Feishu is the case that proves the axes are separate: no upload AND no
-// history. A single `ChatChannelType != ""` gate cannot express it.
+// Three cases prove the axes are separate. Feishu has no upload AND no history,
+// so a single gate cannot express it. WeCom on a deployment that can deliver is
+// the mirror image — upload but no history — which is why the delivery axis
+// cannot be `ChatChannelType != ""`. And the same WeCom chat on a deployment
+// that cannot deliver flips back to text-only, which is why it cannot be the
+// channel type either.
 func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 	// Match the IMPERATIVE, not the bare command name. An IM prompt names
 	// `multica attachment upload` on purpose — to state that it does not apply
-	// here. That negation is the useful copy (the agent knows the command exists
-	// from the brief's Available Commands; silence would leave it guessing), so
-	// asserting on the bare name would forbid the very sentence we want.
+	// here. That negation is the useful copy (an agent carries the command over
+	// from every other surface, and the brief no longer names it for a
+	// channel-backed chat, so silence would leave it guessing), so asserting on
+	// the bare name would forbid the very sentence we want.
 	const uploadGuidance = "run `multica attachment upload <local-path>`"
 	const historyGuidance = "multica chat history"
 
 	cases := []struct {
-		name        string
-		channelType string
-		wantUpload  bool
-		wantHistory bool
-		wantPhrases []string
+		name          string
+		channelType   string
+		deliversFiles bool
+		wantUpload    bool
+		wantHistory   bool
+		wantPhrases   []string
 	}{
 		{
 			name:        "direct chat: upload, no history",
 			channelType: "",
 			wantUpload:  true,
 			wantHistory: false,
+		},
+		{
+			// A web chat is not made file-less by a stray capability flag, and
+			// not made file-carrying by one either — it has its own branch.
+			name:          "direct chat ignores the channel capability",
+			channelType:   "",
+			deliversFiles: true,
+			wantUpload:    true,
+			wantHistory:   false,
+			wantPhrases:   []string{"appears as an attachment card below it"},
 		},
 		{
 			name:        "slack: no upload, has history",
@@ -611,14 +633,50 @@ func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 				"You cannot attach a file to it",
 			},
 		},
+		{
+			// The mirror of Feishu, and the row that makes the delivery axis
+			// impossible to express as "is there a channel". The adapter goes
+			// back for the bound file and this deployment has the storage, so
+			// the upload guidance applies — with the caveat that the file lands
+			// as its own message, since an agent told only "files work here"
+			// writes "see the chart below" and nothing appears below.
+			name:          "wecom on a deployment that delivers: upload, no history",
+			channelType:   execenv.ChannelTypeWecom,
+			deliversFiles: true,
+			wantUpload:    true,
+			wantHistory:   false,
+			wantPhrases: []string{
+				"WeCom",
+				"sends it into the WeCom conversation as a separate message",
+				"there is no way to place it inline",
+			},
+		},
+		{
+			// Same channel, same adapter, deployment with no object storage —
+			// or a server too old to answer, which arrives here identically
+			// because an absent field decodes as false. Either way there is no
+			// last hop, so the agent is told to describe the file in words.
+			// This row is what fails if the capability is ever inferred from
+			// the channel type again.
+			name:          "wecom on a deployment that cannot deliver: no upload",
+			channelType:   execenv.ChannelTypeWecom,
+			deliversFiles: false,
+			wantUpload:    false,
+			wantHistory:   false,
+			wantPhrases: []string{
+				"delivered to WeCom as text",
+				"You cannot attach a file to it",
+			},
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			out := buildChatPrompt(Task{
-				ChatSessionID:   "sess-1",
-				ChatChannelType: tc.channelType,
-				ChatMessage:     "hi",
+				ChatSessionID:            "sess-1",
+				ChatChannelType:          tc.channelType,
+				ChatChannelDeliversFiles: tc.deliversFiles,
+				ChatMessage:              "hi",
 			})
 			if got := strings.Contains(out, uploadGuidance); got != tc.wantUpload {
 				t.Errorf("upload guidance present=%v, want %v\n--- output ---\n%s", got, tc.wantUpload, out)
@@ -1552,5 +1610,62 @@ func TestBriefModeRouterMatchesPromptMarkers(t *testing.T) {
 	// actually the [NEW COMMENT] block.
 	if strings.Contains(brief, "It opens with a `[NEW COMMENT]` block") {
 		t.Error("brief still routes on the prompt's opening line; it must route on the explicit marker")
+	}
+}
+
+// TestChatChannelDeliversFilesDefaultsOffAcrossVersions pins the mixed-version
+// half of the delivery capability at the wire, where it is actually decided.
+//
+// A daemon can be newer than the server it talks to — that pairing is normal,
+// not exotic, since the daemon runs on the user's machine and updates on its
+// own schedule. A server that predates this field simply does not send it, and
+// the whole compatibility story rests on what a new daemon then believes. It
+// must believe the file cannot be delivered: the old server has no code to
+// perform the hop, so a run told otherwise writes "the file is attached" into a
+// room where nothing ever arrives.
+//
+// Decoded from JSON rather than constructed as a struct, because the struct
+// literal cannot express "the server did not send this" and that is the entire
+// case under test.
+func TestChatChannelDeliversFilesDefaultsOffAcrossVersions(t *testing.T) {
+	t.Parallel()
+
+	// Exactly what an older server puts on the wire for a WeCom chat: the
+	// channel type, and no word about delivery.
+	const oldServerClaim = `{
+		"id": "task-1",
+		"chat_session_id": "sess-1",
+		"chat_channel_type": "wecom",
+		"chat_message": "make me a chart"
+	}`
+
+	var task Task
+	if err := json.Unmarshal([]byte(oldServerClaim), &task); err != nil {
+		t.Fatalf("decode claim: %v", err)
+	}
+	if task.ChatChannelType != execenv.ChannelTypeWecom {
+		t.Fatalf("chat_channel_type = %q, want wecom — the fixture is wrong", task.ChatChannelType)
+	}
+	if task.ChatChannelDeliversFiles {
+		t.Error("a claim with no chat_channel_delivers_files decoded as true; an old server would be taken to perform a hop it has no code for")
+	}
+
+	out := buildChatPrompt(task)
+	if strings.Contains(out, "run `multica attachment upload <local-path>`") {
+		t.Errorf("an old server's WeCom claim was told to upload files\n--- output ---\n%s", out)
+	}
+	if !strings.Contains(out, "You cannot attach a file to it") {
+		t.Errorf("an old server's WeCom claim was not told the conversation is text-only\n--- output ---\n%s", out)
+	}
+
+	// And the same claim from a current server that CAN deliver flips it,
+	// which is what proves the assertion above is reading the field rather
+	// than the channel type.
+	var delivering Task
+	if err := json.Unmarshal([]byte(`{"chat_session_id":"sess-1","chat_channel_type":"wecom","chat_channel_delivers_files":true}`), &delivering); err != nil {
+		t.Fatalf("decode claim: %v", err)
+	}
+	if !strings.Contains(buildChatPrompt(delivering), "run `multica attachment upload <local-path>`") {
+		t.Error("a server that reported file delivery did not produce the upload guidance")
 	}
 }

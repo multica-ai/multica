@@ -5725,6 +5725,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
 		ChatChannelType:                  task.ChatChannelType,
+		ChatChannelDeliversFiles:         task.ChatChannelDeliversFiles,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
 		AutopilotTitle:                   task.AutopilotTitle,
@@ -5872,6 +5873,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			defer d.unmarkActiveStore(store)
 		}
 	}
+	// Reasonix locates its user config from the environment (REASONIX_HOME, and
+	// the platform config dirs behind it), which an agent's custom_env may
+	// re-point or clear. The per-task reasonix.toml has to restate the
+	// permissions from whichever config the child ends up loading, so the deny
+	// rules the runtime owner set there survive the task-scoped config that
+	// overrides them — hence the same sanitized env the child is launched with.
+	var reasonixEnv map[string]string
+	if provider == "reasonix" {
+		reasonixEnv = sanitizeAgentEnv(agentEnvOverrides)
+	}
 	// Guard this task's per-issue Codex session store from the GC for the whole
 	// task, starting before Prepare/Reuse mounts it — so a prune that samples the
 	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
@@ -5899,6 +5910,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
 			HermesMemoryStore:     hermesMemoryStore,
+			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		})
@@ -5924,6 +5936,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
 			HermesMemoryStore:     hermesMemoryStore,
+			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}

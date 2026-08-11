@@ -633,6 +633,30 @@ func TestModelKnownIncompatibleWithProvider(t *testing.T) {
 			want:     false,
 		},
 		{
+			name:     "claude context variant is compatible with claude",
+			provider: "claude",
+			model:    "claude-opus-5[1m]",
+			want:     false,
+		},
+		{
+			name:     "future-shaped claude context variant is compatible with claude",
+			provider: "claude",
+			model:    "claude-opus-5[500k]",
+			want:     false,
+		},
+		{
+			name:     "malformed claude context variant is incompatible with claude",
+			provider: "claude",
+			model:    "claude-opus-5[weird]",
+			want:     true,
+		},
+		{
+			name:     "unknown claude base stays incompatible after context normalization",
+			provider: "claude",
+			model:    "claude-fake-9[1m]",
+			want:     true,
+		},
+		{
 			name:     "provider-prefixed openai model is incompatible with codex",
 			provider: "codex",
 			model:    "openai/gpt-4o",

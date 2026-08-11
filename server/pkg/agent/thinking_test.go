@@ -686,8 +686,37 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 		}
 	}
 
+	// Claude Code appends a bracketed context-window tag to the model ID for
+	// long-context sessions. Capability validation must inherit the base
+	// model's effort catalog without rewriting the model passed to the CLI.
+	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-5[1m]", "xhigh")
+	if err != nil {
+		t.Fatalf("unexpected err for context-tagged opus-5: %v", err)
+	}
+	if !ok {
+		t.Error("xhigh should be valid on the opus-5[1m] context variant")
+	}
+
+	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-5[500k]", "high")
+	if err != nil {
+		t.Fatalf("unexpected err for future context-tag shape: %v", err)
+	}
+	if !ok {
+		t.Error("high should be valid on a syntactically valid opus-5 context variant")
+	}
+
+	// Arbitrary bracket suffixes are not context-window tags. Keep malformed
+	// variants fail-closed even when their apparent base model is known.
+	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-5[weird]", "high")
+	if err != nil {
+		t.Fatalf("unexpected err for malformed context tag: %v", err)
+	}
+	if ok {
+		t.Error("malformed context tag must fail closed")
+	}
+
 	// xhigh is NOT valid on Sonnet — should fail.
-	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-sonnet-4-6", "xhigh")
+	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-sonnet-4-6[1m]", "xhigh")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -1181,6 +1210,35 @@ func TestBuildClaudeArgs_InjectsEffort(t *testing.T) {
 	effortIdx := argIndexOf(args, "--effort")
 	if modelIdx < 0 || effortIdx < 0 || modelIdx > effortIdx {
 		t.Errorf("expected --model before --effort: %v", args)
+	}
+}
+
+func TestBuildClaudeArgs_ContextTaggedModelKeepsModelAndEffort(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		resumeID string
+	}{
+		{name: "fresh"},
+		{name: "resume", resumeID: "session-123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			args := buildClaudeArgs(ExecOptions{
+				Model:           "claude-opus-5[1m]",
+				ThinkingLevel:   "xhigh",
+				ResumeSessionID: tc.resumeID,
+			}, slog.Default())
+			if !containsAdjacent(args, "--model", "claude-opus-5[1m]") {
+				t.Errorf("expected original context-tagged --model value: %v", args)
+			}
+			if !containsAdjacent(args, "--effort", "xhigh") {
+				t.Errorf("expected --effort xhigh: %v", args)
+			}
+			if tc.resumeID != "" && !containsAdjacent(args, "--resume", tc.resumeID) {
+				t.Errorf("expected --resume %s: %v", tc.resumeID, args)
+			}
+		})
 	}
 }
 

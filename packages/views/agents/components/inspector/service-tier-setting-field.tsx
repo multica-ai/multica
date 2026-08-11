@@ -3,10 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Gauge } from "lucide-react";
-import type {
-  RuntimeModel,
-  RuntimeModelServiceTier,
-} from "@multica/core/types";
+import type { RuntimeModelServiceTier } from "@multica/core/types";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import {
   PickerItem,
@@ -14,10 +11,11 @@ import {
 } from "../../../issues/components/pickers";
 import { SettingsRow } from "../../../settings/components/settings-layout";
 import { useT } from "../../../i18n";
+import { findModelCapabilityEntry } from "./model-capability";
 
 /**
  * Full-width service-tier field for Codex agents. Capability comes from the
- * exact model's live catalog rather than a hard-coded Fast switch. An empty
+ * resolved model's live catalog rather than a hard-coded Fast switch. An empty
  * model follows config.toml and cannot be resolved safely, so the field fails
  * closed unless a saved value needs to remain visible for explicit clearing.
  */
@@ -25,6 +23,7 @@ export function ServiceTierSettingField({
   label,
   runtimeId,
   runtimeOnline,
+  provider,
   model,
   value,
   canEdit,
@@ -33,6 +32,7 @@ export function ServiceTierSettingField({
   label: ReactNode;
   runtimeId: string | null;
   runtimeOnline: boolean;
+  provider: string;
   model: string;
   value: string;
   canEdit: boolean;
@@ -41,7 +41,11 @@ export function ServiceTierSettingField({
   const modelsQuery = useQuery(
     runtimeModelsOptions(runtimeOnline ? runtimeId : null),
   );
-  const entry = pickModelEntry(modelsQuery.data?.models ?? [], model);
+  const entry = findModelCapabilityEntry(
+    modelsQuery.data?.models ?? [],
+    model,
+    provider,
+  );
   const tiers = entry?.service_tiers ?? [];
 
   if (tiers.length === 0 && !value) return null;
@@ -151,12 +155,4 @@ function ServiceTierPicker({
       ) : null}
     </PropertyPicker>
   );
-}
-
-function pickModelEntry(
-  models: RuntimeModel[],
-  model: string,
-): RuntimeModel | undefined {
-  if (!model) return undefined;
-  return models.find((entry) => entry.id === model);
 }

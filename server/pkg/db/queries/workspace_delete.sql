@@ -8,9 +8,12 @@
 SELECT set_config('multica.workspace_teardown', 'on', true);
 
 -- name: LockTaskUsageRollupForWorkspaceDelete :exec
--- The hourly rollup uses session advisory lock 4246. The transaction-scoped
--- lock shares that namespace: an in-flight rollup finishes first, then no new
--- rollup can write the workspace's aggregates until this delete commits.
+-- Advisory lock 4246 is the hourly rollup family's key: the rollup function
+-- takes it per transaction (migration 272) and the backfill commands take it
+-- per session. An in-flight rollup finishes first, then no new rollup can
+-- write the workspace's aggregates until this delete commits. The caller
+-- bounds this wait with SET LOCAL lock_timeout — batch jobs hold 4246 for
+-- minutes, and an unbounded wait here hangs the delete request (MUL-5983).
 SELECT pg_advisory_xact_lock(4246);
 
 -- name: PrepareWorkspaceDeletionLinks :exec

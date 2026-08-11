@@ -214,6 +214,39 @@ describe("AgentDetailPage DM button", () => {
     expect(screen.queryByRole("button", { name: "DM" })).not.toBeInTheDocument();
   });
 
+  it("hides the more-actions trigger when no menu actions are available", async () => {
+    // The gate must survive a caller who genuinely CAN archive: an admin
+    // passes `canEditAgent`, so `canArchive` is true. The only thing keeping
+    // the menu empty is the system agent's undefined `onArchive`. Assert the
+    // real aria label (locale `detail.more_actions_aria` = "Agent actions"),
+    // so removing the `hasMoreActions` gate would render the empty shell and
+    // fail this test.
+    agentsRef.current = [
+      { ...baseAgent, system_key: "mika" },
+    ];
+    membersRef.current = [{ user_id: "user-1", role: "admin" }];
+    renderPage();
+
+    await screen.findByRole("button", { name: "Assign work" });
+    expect(
+      screen.queryByLabelText("Agent actions"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the more-actions trigger for an editable non-system agent", async () => {
+    // Positive counterpart: an owner of a normal agent has a real archive
+    // action, so the menu trigger must still render. Guards the gate against
+    // over-hiding.
+    agentsRef.current = [{ ...baseAgent, owner_id: "user-1" }];
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    renderPage();
+
+    await screen.findByRole("button", { name: "Assign work" });
+    expect(
+      screen.getByLabelText("Agent actions"),
+    ).toBeInTheDocument();
+  });
+
   it("explains an unbound agent and blocks run actions without losing the profile", async () => {
     agentsRef.current = [
       {

@@ -116,6 +116,8 @@
       "findInIssue": { "label": "在任务中查找", "description": "搜索当前打开的任务详情。" },
       "openThreadNav": { "label": "打开讨论导航", "description": "列出、搜索并跳转当前任务的评论讨论。" },
       "send": { "label": "发送", "description": "发送聊天消息、评论、回复、反馈和提示词，并在创建弹窗中创建任务。" },
+      "goBack": { "label": "后退", "description": "像浏览器一样在历史记录中后退。" },
+      "goForward": { "label": "前进", "description": "像浏览器一样在历史记录中前进。" },
       "goInbox": { "label": "前往收件箱", "description": "打开工作区收件箱。" },
       "goChat": { "label": "前往聊天", "description": "打开工作区聊天。" },
       "goMyIssues": { "label": "前往我的任务", "description": "打开分配给你的任务。" },

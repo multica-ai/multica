@@ -263,7 +263,6 @@ Agent-specific overrides:
 | `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |
-| `MULTICA_HERMES_TASK_MEMORY` | Revert Hermes memory to a fresh task-local `memories/` per task (see [Hermes agent memory](#hermes-agent-memory)) |
 | `MULTICA_PI_PATH` | Custom path to the `pi` binary |
 | `MULTICA_PI_MODEL` | Override the Pi model used |
 | `MULTICA_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
@@ -326,7 +325,6 @@ Consequences worth knowing:
 - **Session history is not covered.** `state.db` and its WAL sidecars stay task-local: sharing a live SQLite database across one agent's concurrent tasks needs lock and consistency handling (plus Windows byte-range locks on `-shm`) that plain memory files do not. The agent remembers accumulated notes, not previous transcripts.
 - **Concurrent tasks of one agent are last-writer-wins.** Hermes rewrites its memory files whole, so two tasks writing memory at the same time can overwrite each other.
 - **Every Hermes agent gets the overlay in practice**, so every one of them gets a persistent memory store. The daemon builds the overlay only when a task carries skills, but the server appends Multica's built-in skills to every agent's skill set (`LoadAgentSkillBundles`), so that list is never empty — leaving an agent's own skill list empty does not opt out of the overlay, and is not a way to keep using the host's `~/.hermes/memories`.
-- `MULTICA_HERMES_TASK_MEMORY=1` on the daemon reverts to the previous behaviour, a fresh task-local `memories/` per task.
 
 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS` are parsed with POSIX shellword quoting, so values such as `--model "gpt-5.1 codex" --sandbox read-only` are split like a shell command line. Agent arguments are applied in this order: hardcoded Multica defaults, daemon-wide env defaults, then per-agent `custom_args` from the task.
 

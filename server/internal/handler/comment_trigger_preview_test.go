@@ -173,6 +173,58 @@ func requirePreviewAgents(t *testing.T, preview CommentTriggerPreviewResponse, w
 	}
 }
 
+func TestCommentTriggers_PlainReplyToUnownedMemberRootSkipsAssigneeFallback(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	assigneeID := createHandlerTestAgent(t, "Unowned Member Thread Assignee", nil)
+	leaderID := createHandlerTestAgent(t, "Unowned Member Thread Leader", nil)
+	squadID := createCommentTriggerPreviewSquad(t, "Unowned Member Thread Squad", leaderID)
+
+	tests := []struct {
+		name          string
+		assigneeType  string
+		assigneeID    string
+		routedAgentID string
+	}{
+		{
+			name:          "agent assignee",
+			assigneeType:  "agent",
+			assigneeID:    assigneeID,
+			routedAgentID: assigneeID,
+		},
+		{
+			name:          "squad assignee",
+			assigneeType:  "squad",
+			assigneeID:    squadID,
+			routedAgentID: leaderID,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issueID := createCommentTriggerPreviewIssue(t, "plain reply to unowned member thread", tt.assigneeType, tt.assigneeID)
+			rootID := insertMemberRootCommentForTriggerPreviewTest(t, issueID, "human-only discussion")
+			replyContent := "plain human reply"
+
+			preview := previewCommentTriggersForTest(t, issueID, CommentTriggerPreviewRequest{
+				Content:  replyContent,
+				ParentID: &rootID,
+			})
+			requirePreviewAgents(t, preview)
+
+			postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+				"content":   replyContent,
+				"parent_id": rootID,
+			})
+			if got := countQueuedCommentTriggerTasks(t, issueID, tt.routedAgentID); got != 0 {
+				t.Fatalf("plain member reply queued assignee tasks = %d, want 0", got)
+			}
+		})
+	}
+}
+
 func TestPreviewCommentTriggers_PlainReplyToMemberRootMentionRoutesToMentionedAgent(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

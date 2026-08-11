@@ -21,6 +21,36 @@ function attachmentDownloadEndpoint(
   return resolvePublicFileUrl(endpoint) ?? endpoint;
 }
 
+// The capability download URL the server minted, if any.
+//
+// In proxy mode the backend puts a signed, single-attachment capability into
+// `download_url` (a site-relative `/api/attachments/{id}/signed-download?...`
+// URL, added in #6092). It carries its own credential in the query string, so a
+// top-level `<a download>` navigation authenticates on its own — no
+// `Authorization` header, no session cookie — which is what clears the 401 that
+// otherwise makes the browser save the error body as `download.txt`. That 401
+// is the token-mode case: auth is a bearer token held in JS, so a bare
+// navigation to the cookie-gated slug endpoint sends no credential at all.
+//
+// The capability does NOT force an attachment disposition — it streams through
+// `proxyAttachmentDownload` → `storage.ContentDisposition`, which returns
+// `inline` for image/video/audio/PDF. What makes the browser download rather
+// than preview is the request staying same-origin combined with the `download`
+// attribute. `resolvePublicFileUrl` leaves this URL same-origin whenever the app
+// reaches the API on its own origin; if it resolves cross-origin AND the file is
+// media, the capability previews in-tab instead — a row #6712 still tracks.
+//
+// Absolute CloudFront / S3 `download_url`s are deliberately NOT used here: they
+// are cross-origin and inline-tuned, so an `<a download>` to them previews the
+// file instead of downloading it. Those modes keep entering through the unified
+// slug endpoint, and a server that predates #6092 returns no capability at all.
+function capabilityDownloadUrl(downloadUrl: string | undefined): string | null {
+  if (!downloadUrl) return null;
+  if (!downloadUrl.startsWith("/api/attachments/")) return null;
+  if (!downloadUrl.includes("/signed-download")) return null;
+  return resolvePublicFileUrl(downloadUrl);
+}
+
 function triggerBrowserDownload(url: string): void {
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -54,10 +84,13 @@ function hasDesktopDownloadBridge(): boolean {
  *
  * Two execution shapes, picked at call time:
  *
- * - **Web**: first refreshes attachment metadata for the existing error
- *   feedback path, then clicks a temporary same-origin
- *   `/api/attachments/{id}/download?workspace_slug=...` anchor. The backend
- *   endpoint owns CloudFront / S3 presign / proxy selection and download
+ * - **Web**: refreshes attachment metadata (for the existing error feedback
+ *   path and to obtain the capability `download_url`), then clicks a temporary
+ *   anchor. It prefers the signed capability URL the backend mints in proxy
+ *   mode — the one a bare `<a download>` navigation can authenticate without a
+ *   header or cookie — and otherwise falls back to the cookie-gated
+ *   `/api/attachments/{id}/download?workspace_slug=...` endpoint. Either way the
+ *   backend owns CloudFront / S3 presign / proxy selection and download
  *   Content-Disposition, so large files stay in the browser's native download
  *   pipeline.
  *
@@ -101,16 +134,29 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
       }
 
       try {
-        // Keep the preflight metadata request so permission/API failures still
-        // produce the existing toast instead of a silent failed navigation. Do
-        // not use `download_url` here: in CloudFront mode it may already be a
-        // signed CDN URL, while the unified endpoint is the stable browser
-        // entry point that chooses cloudfront / presign / proxy server-side.
-        await api.getAttachment(attachmentId);
+        // The preflight metadata request is both the permission check (so API
+        // failures still produce the existing toast instead of a silent failed
+        // navigation) and where the server hands back the capability
+        // `download_url` it mints in proxy mode.
+        const fresh = await api.getAttachment(attachmentId);
         if (typeof document === "undefined") {
           failed();
           return;
         }
+        // Prefer the capability URL when the server minted one. A top-level
+        // `<a download>` navigation sends no `Authorization` header, so in
+        // token-mode — where auth is a bearer token in JS rather than a cookie —
+        // the cookie-gated slug endpoint 401s and the browser saves the error
+        // body as `download.txt`. The capability URL carries its own credential
+        // in the query string, so it authenticates that bare navigation itself.
+        const capability = capabilityDownloadUrl(fresh.download_url);
+        if (capability) {
+          triggerBrowserDownload(capability);
+          return;
+        }
+        // No capability (CloudFront / S3 signing, or a server that predates
+        // #6092): fall back to the cookie-authenticated unified endpoint, which
+        // still works wherever the session cookie applies.
         if (!workspaceSlug) {
           failed();
           return;

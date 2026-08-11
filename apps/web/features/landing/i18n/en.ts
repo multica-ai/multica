@@ -294,6 +294,38 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.23",
+        date: "2026-08-11",
+        title: "WeCom photos and files, Reasonix thinking levels, and browser-style history navigation",
+        changes: [],
+        features: [
+          "Photos, files and videos sent to your WeCom bot now reach your agents.",
+          "Reasonix agents can now be set to think harder or faster.",
+          "Cmd+[ and Cmd+] step back and forward through the pages you visited.",
+        ],
+        improvements: [
+          "A new sub-issue starts in the same project, with the same assignee as its parent.",
+          "Codex tasks now take far less disk space on the machine running them.",
+          "Cancelling many tasks at once now finishes faster.",
+          "The DingTalk settings page now carries DingTalk's own mark.",
+          "An agent replying to your comment no longer pulls other people into the thread.",
+        ],
+        fixes: [
+          "Hermes agents now remember what they learned, task after task.",
+          "Reasonix tasks no longer stop to ask a question nobody is there to answer.",
+          "Claude's long-context models keep the thinking level you picked.",
+          "Deleting a workspace no longer sits on \"Deleting…\" forever.",
+          "Cancelling a run now stops the typing indicator in your channel.",
+          "Attachments in the editor download again.",
+          "Sending the same Issue command twice no longer uploads its files again.",
+          "An Issue can no longer be moved into another workspace's project.",
+          "The composer keeps focus after you send or stop a message.",
+          "Agent details no longer show an empty menu.",
+          "A very long Issue or project name no longer breaks the line it sits in.",
+          "Self-hosted setups now send email from the address you configured.",
+        ],
+      },
+      {
         version: "0.4.22",
         date: "2026-08-10",
         title: "Saved Issue views, the Oh-My-Pi runtime, and WeCom voice notes",

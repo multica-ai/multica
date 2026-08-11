@@ -145,9 +145,25 @@ func (r *iotest1ByteReader) Read(p []byte) (int, error) {
 
 // A wrong key must be refused rather than producing a file of noise the agent
 // would then be handed.
+// Both keys are fixed, and that is the substance of this test rather than a
+// shortcut.
+//
+// PKCS#7 cannot always tell a wrong key from the right one. The bytes a wrong
+// key produces are garbage, and roughly one time in 256 that garbage ends in
+// 0x01 — a pad of one byte, which validates against itself and leaves the
+// decrypt reporting success. There is no MAC on this path to catch it; the
+// platform does not send one.
+//
+// So with a fresh random key per run this test failed about 0.4% of the time
+// (20 reds in 5000 runs), which on a shared CI is a red nobody can reproduce.
+// Fixed keys make the outcome a property of the code under test instead of the
+// draw. The pair below decrypts to a tail that is not a valid pad, which is the
+// case worth pinning; the 1-in-256 collision is a limit of the format and is
+// not something this function can be asked to fix.
 func TestStreamingDecryptRefusesAWrongKey(t *testing.T) {
-	key, _ := mediaTestKey(t)
-	_, otherB64 := mediaTestKey(t)
+	key := bytes.Repeat([]byte{0x2b}, mediaAESKeyBytes)
+	other := bytes.Repeat([]byte{0x7e}, mediaAESKeyBytes)
+	otherB64 := base64.StdEncoding.EncodeToString(other)
 	ct := sealMedia(t, key, []byte("the real contents"))
 
 	if _, _, err := decryptToFile(otherB64, strings.NewReader(ct), t.TempDir()); err == nil {
