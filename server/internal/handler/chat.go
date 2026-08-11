@@ -743,6 +743,17 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to remove chat session agent label assignments")
 		return
 	}
+	// The builder carrier agent is hard-deleted below, so clear its A2A
+	// invocation grants first: rows it owns (agent side) and rows that name
+	// it as a grantee (agent_invocation_grant has no FK to agent, NEX-24).
+	if err := qtx.DeleteAgentInvocationGrantsByAgent(r.Context(), session.AgentID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove chat session agent A2A invocation grants")
+		return
+	}
+	if err := qtx.DeleteAgentInvocationGrantsByGrantee(r.Context(), session.AgentID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove chat session agent A2A invocation grantee rows")
+		return
+	}
 	if err := qtx.DeleteSystemAgentByID(r.Context(), session.AgentID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up chat session agent")
 		return

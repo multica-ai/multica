@@ -818,6 +818,10 @@ func unbindRuntimeForDelete(ctx context.Context, qtx *db.Queries, runtimeID pgty
 	if err := qtx.DeleteAgentInvocationTargetsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return out, fmt.Errorf("clean up agent invocation targets: %w", err)
 	}
+	// agent_invocation_grant has no agent_id / grantee_agent_id FK (NEX-24).
+	if err := qtx.DeleteAgentInvocationGrantsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
+		return out, fmt.Errorf("clean up agent invocation grants: %w", err)
+	}
 	// channel_* has no workspace/agent FK (MUL-3515 §4); an orphaned
 	// installation would keep occupying its bot's (channel_type, app_id)
 	// routing slot and make that bot un-rebindable (#4810).

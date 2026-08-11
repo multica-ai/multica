@@ -52,3 +52,24 @@ WHERE agent_id = $1;
 -- as a grantee (Stage 3 cleanup wiring).
 DELETE FROM agent_invocation_grant
 WHERE grantee_agent_id = $1;
+
+-- name: DeleteAgentInvocationGrantsBySystemRuntimeAgents :exec
+-- Application-layer replacement for the (deliberately absent) agent_id /
+-- grantee_agent_id ON DELETE CASCADE: removes the A2A whitelist rows tied to
+-- the system agents a runtime delete is about to hard-delete. MUST run in the
+-- same tx as, and BEFORE, DeleteSystemAgentsByRuntime so no orphan grant rows
+-- survive the agent rows they referenced. Mirrors
+-- DeleteAgentInvocationTargetsBySystemRuntimeAgents and the agent hard-delete
+-- predicate exactly.
+--
+-- Scoped to kind = 'system' since MUL-5559: user agents are no longer deleted
+-- with their runtime (they are unbound and keep their configuration), so
+-- clearing THEIR grants here would silently strip a surviving agent's
+-- whitelist.
+DELETE FROM agent_invocation_grant
+WHERE agent_id IN (
+    SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system'
+)
+   OR grantee_agent_id IN (
+    SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system'
+);
