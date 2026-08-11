@@ -1441,8 +1441,14 @@ func (s *streamStore) sayEnding(
 // and then hands the remainder to the send, the binding row and the
 // installation row. When the remainder is nothing, those fail with a context
 // error, the round has already been consumed, and there is no deferral to book
-// a retry from because the wait did not lose. That is a silent drop with the
-// news still in hand.
+// a retry from because the wait did not lose.
+//
+// For a NOTICE that is a silent drop with the news still in hand, and it is
+// what this budget exists to prevent. For an ANSWER it no longer is: a context
+// error now takes answerRetryCause's default and books a refusal attempt
+// (outbound.go). The budget stays because the notices are still on the old
+// terms, and because a delivery that dies mid-send is worth not having whoever
+// is carrying it — answer or notice — pay for it.
 //
 // So every delivery gets a fresh one, of the same length as the budget every
 // closing frame written from a timer runs on. Detached from the caller

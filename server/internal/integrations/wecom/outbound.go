@@ -490,13 +490,26 @@ func (o *Outbound) sendAsMessage(ctx context.Context, sessionID pgtype.UUID, con
 	if sender == nil {
 		// No live WS for this installation on this replica. Two causes:
 		// (1) the Supervisor lost the lease or is mid-reconnect — transient,
-		// and this run's promise stays owed for the next attempt to keep;
+		// and the socket is usually back within seconds;
 		// (2) on a multi-replica deployment the lease is held by a DIFFERENT
 		// replica than the one that published this event, so it can never be
 		// delivered from here (see the single-replica constraint in this
-		// file's header). Either way, buffering is wrong — the reply is stale
-		// by the time a socket returns — so we surface it to the caller's WARN
-		// rather than drop it silently.
+		// file's header).
+		//
+		// An ANSWER carrying this comes back for it. This comment used to say
+		// the opposite — that buffering is wrong because the reply is stale by
+		// the time a socket returns — and answerRetryCause overrules that for
+		// the answer specifically: a stale reply beats none, the chain is over
+		// inside sixteen minutes against a one-hour roundMemory, and case (1)
+		// is exactly what an attempt behind a reconnect is for. Case (2) spends
+		// its attempts and gives up, which costs nothing a delivery from here
+		// was ever going to have.
+		//
+		// The caller's WARN therefore arrives at the END of the chain rather
+		// than on the first try, and sayTheAnswer returns nil until then. That
+		// is what a booked retry costs everywhere, and sayTheAnswer's own doc
+		// states the price: the answer lives in a time.AfterFunc closure and a
+		// restart in that window loses it silently.
 		return roundAddress{}, errors.New("wecom: connection not ready on this replica")
 	}
 	addr := roundAddress{
