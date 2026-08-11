@@ -305,3 +305,26 @@ func (q *Queries) ReleaseExpiredCompensationLeases(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, releaseExpiredCompensationLeases)
 	return err
 }
+
+const resetExpiredRunningCompensations = `-- name: ResetExpiredRunningCompensations :exec
+UPDATE memoryhub_compensation
+SET state = 'retry_wait',
+    next_attempt_at = now(),
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    updated_at = now()
+WHERE state = 'running'
+  AND lease_owner IS NOT NULL
+  AND lease_expires_at < now()
+`
+
+// Crash recovery (crash point 4): a worker that died mid-execution leaves the
+// row in 'running' with an expired lease. ReleaseExpiredCompensationLeases only
+// clears the lease, so this reset moves stale 'running' rows back to
+// 'retry_wait' so ClaimDueCompensations can re-drive them idempotently. The
+// executor is idempotent (find-or-create / reuse remote_ref), so re-driving
+// never duplicates a remote side effect.
+func (q *Queries) ResetExpiredRunningCompensations(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, resetExpiredRunningCompensations)
+	return err
+}

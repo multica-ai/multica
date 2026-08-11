@@ -352,6 +352,108 @@ func (q *Queries) CompleteSecretRotationCAS(ctx context.Context, arg CompleteSec
 	return i, err
 }
 
+const createReviewerTask = `-- name: CreateReviewerTask :one
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, trigger_summary,
+    memory_policy, review_policy, reviewer_agent_id, review_of_execution_id
+) VALUES (
+    $1, $2, $6, 'queued', $3, $4,
+    'optional', 'none', $1, $5
+)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, memory_gate_state, memory_gate_error_code, memory_gate_evidence_ref, memory_gate_next_wakeup, memory_gate_lease_id, memory_gate_lease_expires_at, memoryhub_run_id, execution_id, memory_policy, memory_attachment_ref, review_policy, reviewer_agent_id, review_of_execution_id
+`
+
+type CreateReviewerTaskParams struct {
+	AgentID             pgtype.UUID `json:"agent_id"`
+	RuntimeID           pgtype.UUID `json:"runtime_id"`
+	Priority            int32       `json:"priority"`
+	TriggerSummary      pgtype.Text `json:"trigger_summary"`
+	ReviewOfExecutionID pgtype.UUID `json:"review_of_execution_id"`
+	IssueID             pgtype.UUID `json:"issue_id"`
+}
+
+// V5-7.2 dispatching -> queued: creates the reviewer's agent_task_queue row.
+// review_policy is frozen to 'none' so a reviewer run never requests its own
+// reviewer (recursion guard). memory_policy is 'optional' (refs-only evidence).
+func (q *Queries) CreateReviewerTask(ctx context.Context, arg CreateReviewerTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, createReviewerTask,
+		arg.AgentID,
+		arg.RuntimeID,
+		arg.Priority,
+		arg.TriggerSummary,
+		arg.ReviewOfExecutionID,
+		arg.IssueID,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.MemoryGateState,
+		&i.MemoryGateErrorCode,
+		&i.MemoryGateEvidenceRef,
+		&i.MemoryGateNextWakeup,
+		&i.MemoryGateLeaseID,
+		&i.MemoryGateLeaseExpiresAt,
+		&i.MemoryhubRunID,
+		&i.ExecutionID,
+		&i.MemoryPolicy,
+		&i.MemoryAttachmentRef,
+		&i.ReviewPolicy,
+		&i.ReviewerAgentID,
+		&i.ReviewOfExecutionID,
+	)
+	return i, err
+}
+
 const deleteMemoryHubBinding = `-- name: DeleteMemoryHubBinding :exec
 DELETE FROM memoryhub_binding WHERE id = $1
 `
@@ -1850,6 +1952,61 @@ func (q *Queries) ReserveQueuedTaskForMemoryGate(ctx context.Context, arg Reserv
 		&i.ReviewPolicy,
 		&i.ReviewerAgentID,
 		&i.ReviewOfExecutionID,
+	)
+	return i, err
+}
+
+const resetExpiredDispatchingReviewCAS = `-- name: ResetExpiredDispatchingReviewCAS :one
+UPDATE execution_evidence_record
+SET review_state = 'pending',
+    review_lease_owner = NULL,
+    review_lease_expires_at = NULL,
+    review_task_id = NULL,
+    review_next_wakeup = now(),
+    updated_at = now()
+WHERE execution_id = $1
+  AND review_state = 'dispatching'
+  AND (review_lease_expires_at IS NULL OR review_lease_expires_at < now())
+  AND review_version = $2
+RETURNING execution_id, workspace_id, schema_version, runtime_evidence_state, output_ref, message_refs, usage_refs, artifact_refs, test_refs, review_policy, review_state, review_version, reviewer_agent_id, review_task_id, review_output_ref, review_attempt, max_review_attempts, review_next_wakeup, review_lease_owner, review_lease_expires_at, review_failure_code, created_at, updated_at
+`
+
+type ResetExpiredDispatchingReviewCASParams struct {
+	ExecutionID   pgtype.UUID `json:"execution_id"`
+	ReviewVersion int32       `json:"review_version"`
+}
+
+// Recovery: a dispatching lease that is expired or already released (null)
+// means the scheduler died before committing the reviewer task. Reset to
+// pending so the next sweep re-claims it (review_attempt is preserved; the
+// wakeup is refreshed to now).
+func (q *Queries) ResetExpiredDispatchingReviewCAS(ctx context.Context, arg ResetExpiredDispatchingReviewCASParams) (ExecutionEvidenceRecord, error) {
+	row := q.db.QueryRow(ctx, resetExpiredDispatchingReviewCAS, arg.ExecutionID, arg.ReviewVersion)
+	var i ExecutionEvidenceRecord
+	err := row.Scan(
+		&i.ExecutionID,
+		&i.WorkspaceID,
+		&i.SchemaVersion,
+		&i.RuntimeEvidenceState,
+		&i.OutputRef,
+		&i.MessageRefs,
+		&i.UsageRefs,
+		&i.ArtifactRefs,
+		&i.TestRefs,
+		&i.ReviewPolicy,
+		&i.ReviewState,
+		&i.ReviewVersion,
+		&i.ReviewerAgentID,
+		&i.ReviewTaskID,
+		&i.ReviewOutputRef,
+		&i.ReviewAttempt,
+		&i.MaxReviewAttempts,
+		&i.ReviewNextWakeup,
+		&i.ReviewLeaseOwner,
+		&i.ReviewLeaseExpiresAt,
+		&i.ReviewFailureCode,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

@@ -492,6 +492,37 @@ WHERE review_lease_owner IS NOT NULL
   AND review_lease_expires_at < now()
   AND review_state IN ('dispatching', 'queued', 'running');
 
+-- name: CreateReviewerTask :one
+-- V5-7.2 dispatching -> queued: creates the reviewer's agent_task_queue row.
+-- review_policy is frozen to 'none' so a reviewer run never requests its own
+-- reviewer (recursion guard). memory_policy is 'optional' (refs-only evidence).
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, trigger_summary,
+    memory_policy, review_policy, reviewer_agent_id, review_of_execution_id
+) VALUES (
+    $1, $2, sqlc.narg(issue_id), 'queued', $3, $4,
+    'optional', 'none', $1, $5
+)
+RETURNING *;
+
+-- name: ResetExpiredDispatchingReviewCAS :one
+-- Recovery: a dispatching lease that is expired or already released (null)
+-- means the scheduler died before committing the reviewer task. Reset to
+-- pending so the next sweep re-claims it (review_attempt is preserved; the
+-- wakeup is refreshed to now).
+UPDATE execution_evidence_record
+SET review_state = 'pending',
+    review_lease_owner = NULL,
+    review_lease_expires_at = NULL,
+    review_task_id = NULL,
+    review_next_wakeup = now(),
+    updated_at = now()
+WHERE execution_id = $1
+  AND review_state = 'dispatching'
+  AND (review_lease_expires_at IS NULL OR review_lease_expires_at < now())
+  AND review_version = $2
+RETURNING *;
+
 -- =====================
 -- Evidence events + scores
 -- =====================
