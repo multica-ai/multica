@@ -712,15 +712,23 @@ func (s *wsSender) request(ctx context.Context, cmd string, body map[string]any)
 // (846605). streamID is ours — reuse it to replace the bubble's body, and set
 // finish once the content is final.
 func (s *wsSender) respondStream(ctx context.Context, reqID, streamID, content string, finish bool) error {
+	// Everything ahead of the write says errFrameNotOnTheWire, and this is the
+	// last place that can: no byte has moved on any of these three, and the
+	// consumer has no way to work that out afterwards. Left bare they cost the
+	// round its bubble — bubbleSurvivedTheFailure cannot clear an unnamed
+	// failure, so a spinner nothing touched is given up, and the retry
+	// sayTheAnswer books for exactly this case arrives to speak beside it
+	// instead of sealing it. The context one is not a programming error: these
+	// callers run on a bus subscriber's own budget.
 	if reqID == "" {
-		return errors.New("wecom: stream frame requires the callback req_id")
+		return fmt.Errorf("%w: stream frame requires the callback req_id", errFrameNotOnTheWire)
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errFrameNotOnTheWire, err)
 	}
 	body, err := respondStreamBody(streamID, content, finish)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errFrameNotOnTheWire, err)
 	}
 
 	w, ok := s.awaitAck(reqID, finish)

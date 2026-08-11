@@ -657,3 +657,59 @@ func TestAnAnswerNoRouteEvenStartedIsNotWrittenOffAsPossiblyDelivered(t *testing
 			"is about the sends that never started", now, opened)
 	}
 }
+
+// A frame stopped before the write has to say so, or its round loses the bubble
+// it never spent.
+//
+// respondStream has three ways out ahead of the write — no callback req_id, a
+// context already over, a body that would not marshal — and each returns a bare
+// error with no name on it. Nothing reached the wire on any of them, which is
+// exactly what errFrameNotOnTheWire exists to say, and only this function is in
+// a position to say it.
+//
+// What that costs is not the answer. sayTheAnswer comes back for an outcome it
+// cannot classify, so the words are still delivered. It is the BUBBLE: the round
+// goes back on the open list only when bubbleSurvivedTheFailure agrees the
+// spinner is untouched, and an unnamed failure cannot clear that bar. So the
+// round is consumed, and the retry sayTheAnswer just booked — the one whose
+// whole point is to "seal the spinner the asker is watching, in place, with the
+// answer" — arrives to find no bubble and speaks beside it instead.
+//
+// The context case is the live one: respondStream's callers run on a bus
+// subscriber's own budget, so a context already over here is an ordinary busy
+// afternoon rather than a programming error.
+func TestAFrameStoppedBeforeTheWriteKeepsItsBubble(t *testing.T) {
+	t.Parallel()
+
+	over, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cases := []struct {
+		name  string
+		ctx   context.Context
+		reqID string
+	}{
+		{"no callback req_id", context.Background(), ""},
+		{"context already over", over, "REQ-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := &silentConn{}
+			sender := newWSSender(conn, nil)
+
+			err := sender.respondStream(tc.ctx, tc.reqID, "S-1", "the answer", true)
+			if err == nil {
+				t.Fatal("want an error; this case's premise is gone")
+			}
+			if n := conn.count(); n != 0 {
+				t.Fatalf("%d frames were written — the premise of this test is that none was", n)
+			}
+			if !errors.Is(err, errFrameNotOnTheWire) {
+				t.Errorf("err = %v, want it to carry errFrameNotOnTheWire — this is the last place that knows no byte moved", err)
+			}
+			if !bubbleSurvivedTheFailure(err) {
+				t.Errorf("bubbleSurvivedTheFailure(%v) = false — the round gives up a spinner nothing touched, and the retry that follows speaks beside it instead of sealing it", err)
+			}
+		})
+	}
+}
