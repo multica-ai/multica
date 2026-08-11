@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -21,6 +20,11 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.dingtalk_group_route') IS NOT NULL`).Scan(&migrated); err != nil || !migrated {
 		t.Skip("dingtalk group route table not present (database not migrated)")
 	}
+	observerConn, connectErr := pgx.ConnectConfig(ctx, pool.Config().ConnConfig.Copy())
+	if connectErr != nil {
+		t.Fatalf("connect PostgreSQL lock observer: %v", connectErr)
+	}
+	t.Cleanup(func() { _ = observerConn.Close(context.Background()) })
 
 	const (
 		workspaceID   = "d2480000-0000-4000-8000-000000000001"
@@ -113,7 +117,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 		})
 		discoveryDone <- discoverErr
 	}()
-	waitForDingTalkBackendBlocked(t, pool, discoveryPID)
+	waitForDingTalkBackendBlocked(t, observerConn, discoveryPID)
 	if err := revokeTx.Commit(ctx); err != nil {
 		t.Fatalf("commit controlled pre-discovery revoke: %v", err)
 	}
@@ -125,6 +129,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	case <-time.After(5 * time.Second):
 		t.Fatal("discovery did not resume after revoke committed")
 	}
+	discoveryConn.Release()
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM dingtalk_group_route WHERE installation_id = $1`, installation).Scan(&revokedDiscoveryCount); err != nil || revokedDiscoveryCount != 0 {
 		t.Fatalf("revoke-wins discovery persisted %d routes, err=%v", revokedDiscoveryCount, err)
 	}
@@ -312,7 +317,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 		})
 		appendWinsReassign <- reassignErr
 	}()
-	waitForDingTalkBackendBlocked(t, pool, reassignPID)
+	waitForDingTalkBackendBlocked(t, observerConn, reassignPID)
 	close(allowAppendCommit)
 	select {
 	case appendErr := <-appendDone:
@@ -417,7 +422,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 		}()
 		workspaceDeleteDone <- deleteErr
 	}()
-	waitForDingTalkBackendBlocked(t, pool, deletePID)
+	waitForDingTalkBackendBlocked(t, observerConn, deletePID)
 	close(allowWorkspaceAppend)
 	select {
 	case appendErr := <-workspaceAppendDone:
@@ -435,6 +440,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	case <-time.After(5 * time.Second):
 		t.Fatal("workspace deletion did not resume after append committed")
 	}
+	deleteConn.Release()
 	var workspaceAppendProcessed bool
 	if err := pool.QueryRow(ctx, `SELECT processed_at IS NOT NULL FROM channel_inbound_message_dedup WHERE installation_id = $1 AND message_id = 'msg-append-during-workspace-delete'`, installation).Scan(&workspaceAppendProcessed); err != nil || !workspaceAppendProcessed {
 		t.Fatalf("workspace-delete append dedup processed = %t, err=%v", workspaceAppendProcessed, err)
@@ -485,7 +491,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 		})
 		reassignDone <- reassignErr
 	}()
-	waitForDingTalkBackendBlocked(t, pool, reassignPID)
+	waitForDingTalkBackendBlocked(t, observerConn, reassignPID)
 	if _, err := archiveTx.Exec(ctx, `UPDATE agent SET archived_at = now() WHERE id = $1`, routedAgent); err != nil {
 		_ = archiveTx.Rollback(ctx)
 		t.Fatalf("archive controlled route target: %v", err)
@@ -501,6 +507,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	case <-time.After(5 * time.Second):
 		t.Fatal("reassignment did not resume after archive commit")
 	}
+	reassignConn.Release()
 
 	// Assignment-wins ordering is also defined: a later archive preserves the
 	// selected B route, inbound validation reports it unavailable, and restore
@@ -529,12 +536,12 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	}
 }
 
-func waitForDingTalkBackendBlocked(t *testing.T, pool *pgxpool.Pool, pid int32) {
+func waitForDingTalkBackendBlocked(t *testing.T, observer *pgx.Conn, pid int32) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		var blocked bool
-		if err := pool.QueryRow(context.Background(), `SELECT cardinality(pg_blocking_pids($1)) > 0`, pid).Scan(&blocked); err != nil {
+		if err := observer.QueryRow(context.Background(), `SELECT cardinality(pg_blocking_pids($1)) > 0`, pid).Scan(&blocked); err != nil {
 			t.Fatalf("inspect PostgreSQL lock wait for backend %d: %v", pid, err)
 		}
 		if blocked {
