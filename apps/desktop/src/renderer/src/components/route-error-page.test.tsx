@@ -29,7 +29,7 @@ vi.mock("@/stores/tab-store", () => {
   return { useTabStore };
 });
 
-import { DesktopRouteErrorPage, formatRouteErrorReport } from "./route-error-page";
+import { createRouteErrorFeedback, DesktopRouteErrorPage } from "./route-error-page";
 
 function Boom(): null {
   throw new Error("route render exploded");
@@ -96,7 +96,7 @@ describe("DesktopRouteErrorPage", () => {
     expect(closeActiveTab).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the existing feedback modal with a structured markdown report only after click", async () => {
+  it("opens the feedback modal with structured error context only after click", async () => {
     const router = createMemoryRouter(
       [{ path: "/acme/issues", element: <Boom />, errorElement: <DesktopRouteErrorPage /> }],
       { initialEntries: ["/acme/issues"] },
@@ -110,23 +110,42 @@ describe("DesktopRouteErrorPage", () => {
     expect(openModal).toHaveBeenCalledWith(
       "feedback",
       expect.objectContaining({
-        initialMessage: expect.stringContaining("kind: desktop_route_error"),
+        initialMessage: "route render exploded",
         kind: "bug",
+        context: {
+          kind: "desktop_route_error",
+          trigger: "route-errorElement",
+          error: {
+            name: "Error",
+            message: "route render exploded",
+            stack: expect.stringContaining("route render exploded"),
+          },
+        },
       }),
     );
   });
 
-  it("documents the structured context follow-up debt in the report template", () => {
-    const report = formatRouteErrorReport({
-      error: new Error("bad route"),
-      url: "app://desktop/acme/issues",
-      appInfo: { version: "1.2.3", os: "macos" },
+  it("separates the editable message from diagnostic context", () => {
+    const error = new Error("bad route");
+    error.stack = "Error: bad route\n  at Route";
+
+    const feedback = createRouteErrorFeedback({
+      error,
       trigger: "route-errorElement",
     });
 
-    expect(report).toContain("kind: desktop_route_error");
-    expect(report).toContain("trigger: route-errorElement");
-    expect(report).toContain("TODO: promote error context to structured feedback fields");
+    expect(feedback).toEqual({
+      initialMessage: "bad route",
+      context: {
+        kind: "desktop_route_error",
+        trigger: "route-errorElement",
+        error: {
+          name: "Error",
+          message: "bad route",
+          stack: "Error: bad route\n  at Route",
+        },
+      },
+    });
   });
 
   // --- 404 as a first-class product state (MUL-4899) -----------------------

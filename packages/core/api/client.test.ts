@@ -915,6 +915,15 @@ describe("ApiClient", () => {
       url: "app://desktop/acme/issues",
       workspace_id: "ws-1",
       kind: "bug",
+      context: {
+        kind: "desktop_route_error",
+        trigger: "route-errorElement",
+        error: {
+          name: "TypeError",
+          message: "Cannot read properties of undefined",
+          stack: "TypeError: Cannot read properties of undefined",
+        },
+      },
     });
 
     expect(response).toEqual({
@@ -930,6 +939,15 @@ describe("ApiClient", () => {
           url: "app://desktop/acme/issues",
           workspace_id: "ws-1",
           kind: "bug",
+          context: {
+            kind: "desktop_route_error",
+            trigger: "route-errorElement",
+            error: {
+              name: "TypeError",
+              message: "Cannot read properties of undefined",
+              stack: "TypeError: Cannot read properties of undefined",
+            },
+          },
         }),
       }),
     );

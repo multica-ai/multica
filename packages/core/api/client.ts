@@ -183,7 +183,11 @@ import type {
   CreateBillingPortalSessionResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
-import type { CreateFeedbackResponse, FeedbackKind } from "../feedback/types";
+import type {
+  CreateFeedbackResponse,
+  FeedbackContext,
+  FeedbackKind,
+} from "../feedback/types";
 import type {
   CloudRuntimeNode,
   CreateCloudRuntimeNodeRequest,
@@ -928,6 +932,7 @@ export class ApiClient {
     url?: string;
     workspace_id?: string;
     kind?: FeedbackKind;
+    context?: FeedbackContext;
   }): Promise<CreateFeedbackResponse> {
     const raw = await this.fetch<unknown>("/api/feedback", {
       method: "POST",

@@ -59,6 +59,11 @@ vi.mock("@multica/core/api", () => ({ api: {} }));
 vi.mock("sonner", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 vi.mock("@multica/core/feedback", () => ({
   FEEDBACK_KINDS: ["bug", "feature", "general", "praise"] as const,
+  isFeedbackContext: (value: unknown) =>
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === "desktop_route_error",
   useCreateFeedback: () => ({ isPending: false, mutateAsync: feedbackMocks.mutateAsync }),
   useFeedbackDraftStore: (selector: any) =>
     selector({ draft: { message: storedDraftMessage }, setDraft: vi.fn(), clearDraft: vi.fn() }),
@@ -161,6 +166,38 @@ describe("FeedbackModal", () => {
     await waitFor(() => {
       expect(feedbackMocks.mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({ message: "fresh feedback" }),
+      );
+    });
+  });
+
+  it("forwards structured diagnostic context without putting it in the message", async () => {
+    storedDraftMessage = "";
+    const context = {
+      kind: "desktop_route_error" as const,
+      trigger: "route-errorElement",
+      error: {
+        name: "Error",
+        message: "route render exploded",
+        stack: "Error: route render exploded",
+      },
+    };
+    render(
+      <FeedbackModal
+        onClose={vi.fn()}
+        data={{ kind: "bug", context }}
+        initialMessage="route render exploded"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(feedbackMocks.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "route render exploded",
+          kind: "bug",
+          context,
+        }),
       );
     });
   });
