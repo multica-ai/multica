@@ -83,9 +83,12 @@ type Outbound struct {
 	// delivery refused for want of capacity be reported to the user without
 	// ever warning about a file that never existed.
 	//
-	// The admitted cap is deliberately the larger of the two: reaching it
-	// means the pending cap is full AND as many more turns are still in their
-	// lookup, so the honest post-lookup path is the one a backlog meets first.
+	// The admitted cap is deliberately the larger of the two, so that a
+	// backlog of turns that DO carry a file fills the pending cap first and is
+	// shed on the path that can say what was dropped. Reaching the admitted cap
+	// does not imply the pending cap is full: admission is held for a
+	// goroutine's whole life, including its lookup and including turns that
+	// turn out to carry no file, and those never claim a pending slot at all.
 	pendingMu           sync.Mutex
 	pendingAttachments  int
 	admittedAttachments int

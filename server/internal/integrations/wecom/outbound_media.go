@@ -524,10 +524,13 @@ const (
 
 	// maxAdmittedAttachmentDeliveries bounds the goroutines themselves, and
 	// with them the attachment lookups they run before anything about the
-	// turn is known. Twice the pending cap, so it is reached only when the
-	// pending cap is already full and as many turns again are still in their
-	// lookup — the ordering that keeps the user-facing shed on the path that
-	// can name a real file.
+	// turn is known. Twice the pending cap as headroom, not as a derived
+	// quantity: a turn holds admission for its whole life but claims a pending
+	// slot only once its lookup has found a file, so a backlog of
+	// file-carrying turns meets the pending cap first — the ordering that
+	// keeps the user-facing shed on the path that can name a real file. A
+	// backlog of turns carrying no file reaches this cap with nothing pending
+	// (TestDeliverAttachments_AdmissionBoundsTheLookupStage).
 	maxAdmittedAttachmentDeliveries = 2 * maxPendingAttachmentDeliveries
 )
 
