@@ -272,7 +272,7 @@ func marshalCursorMcpApprovalServer(raw json.RawMessage) ([]byte, error) {
 	}
 
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
+	if err := json.Unmarshal(compact.Bytes(), &fields); err != nil {
 		return nil, err
 	}
 	command, isStdio := fields["command"]
