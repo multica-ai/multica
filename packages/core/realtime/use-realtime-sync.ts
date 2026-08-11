@@ -92,6 +92,7 @@ import type {
   SubscriberRemovedPayload,
   TaskMessagePayload,
   TaskQueuedPayload,
+  TaskWaitingRuntimePayload,
   TaskDispatchPayload,
   TaskRunningPayload,
   TaskWaitingLocalDirectoryPayload,
@@ -121,6 +122,14 @@ export function invalidateChatMessageQueries(
 ) {
   qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
   qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+}
+
+export function invalidateIssueTaskLifecycle(
+  qc: QueryClient,
+  payload: Pick<TaskQueuedPayload, "issue_id">,
+) {
+  if (!payload.issue_id) return;
+  qc.invalidateQueries({ queryKey: issueKeys.tasks(payload.issue_id) });
 }
 
 // refetchPendingChatAggregate marks the current user's cross-session pending
@@ -1368,9 +1377,15 @@ export function useRealtimeSync(
     // the complete queue shape.
     const unsubTaskQueued = ws.on("task:queued", (p) => {
       const payload = p as TaskQueuedPayload;
+      invalidateIssueTaskLifecycle(qc, payload);
       if (!payload.chat_session_id) return;
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
+    });
+
+    const unsubTaskWaitingRuntime = ws.on("task:waiting_runtime", (p) => {
+      const payload = p as TaskWaitingRuntimePayload;
+      invalidateIssueTaskLifecycle(qc, payload);
     });
 
     // task:dispatch fires when the daemon claims the queued task. The daemon
@@ -1579,6 +1594,7 @@ export function useRealtimeSync(
       unsubChatQuickActions();
       unsubChatCancelFinalized();
       unsubTaskQueued();
+      unsubTaskWaitingRuntime();
       unsubTaskDispatch();
       unsubTaskRunning();
       unsubTaskWaitingLocalDir();

@@ -24,6 +24,7 @@ export type WSEventType =
   | "agent:archived"
   | "agent:restored"
   | "task:queued"
+  | "task:waiting_runtime"
   | "task:dispatch"
   | "task:running"
   | "task:waiting_local_directory"
@@ -280,6 +281,18 @@ export interface TaskQueuedPayload {
   status: string;
 }
 
+export interface TaskWaitingRuntimePayload {
+  task_id: string;
+  agent_id: string;
+  issue_id: string;
+  runtime_id: string;
+  runtime_binding_mode: "pool";
+  status: "waiting_runtime";
+  wait_reason: string;
+  session_affinity_state: "none" | "pinned" | "removed";
+  chat_session_id?: string;
+}
+
 export interface TaskDispatchPayload {
   task_id: string;
   agent_id: string;
@@ -527,6 +540,7 @@ export interface WSEventPayloadMap {
   "agent:archived": AgentArchivedPayload;
   "agent:restored": AgentRestoredPayload;
   "task:queued": TaskQueuedPayload;
+  "task:waiting_runtime": TaskWaitingRuntimePayload;
   "task:dispatch": TaskDispatchPayload;
   "task:running": TaskRunningPayload;
   "task:waiting_local_directory": TaskWaitingLocalDirectoryPayload;

@@ -2,7 +2,18 @@ import type { ChatSession } from "./chat";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "error" | "offline";
 
-export type AgentRuntimeMode = "local" | "cloud";
+export type RuntimeLocationMode = "local" | "cloud";
+export type AgentExecutionMode = RuntimeLocationMode | "pool";
+/** @deprecated Prefer RuntimeLocationMode or AgentExecutionMode explicitly. */
+export type AgentRuntimeMode = AgentExecutionMode;
+
+export type RuntimeBindingMode = "fixed" | "pool";
+export type SessionAffinityState = "none" | "pinned" | "removed";
+
+export interface RuntimeRequirements {
+  schema_version: "multica.runtime-requirements/v1";
+  capabilities_all: string[];
+}
 
 export type AgentVisibility = "workspace" | "private";
 
@@ -67,7 +78,7 @@ export interface RuntimeDevice {
    * name" (see runtimeDisplayName).
    */
   custom_name?: string | null;
-  runtime_mode: AgentRuntimeMode;
+  runtime_mode: RuntimeLocationMode;
   provider: string;
   launch_header: string;
   status: "online" | "offline";
@@ -272,6 +283,9 @@ export interface AgentTask {
   id: string;
   agent_id: string;
   runtime_id: string;
+  runtime_binding_mode?: RuntimeBindingMode;
+  wait_reason?: string;
+  session_affinity_state?: SessionAffinityState;
   // Empty string ("") when the task has no linked issue — either chat- or
   // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
   // which source produced it.
@@ -282,7 +296,9 @@ export interface AgentTask {
   // Treated as an active (non-terminal) state alongside queued/dispatched/
   // running by every consumer that buckets tasks into "active vs done".
   status:
+    | "waiting_runtime"
     | "queued"
+    | "deferred"
     | "dispatched"
     | "waiting_local_directory"
     | "running"
@@ -433,6 +449,11 @@ export interface Agent {
   runtime_id: string;
   /** False exactly when the agent has no runtime. Older backends omit it. */
   runtime_bound?: boolean;
+  /** Pool Agents remain invokable before a concrete Runtime is selected. */
+  runtime_routable?: boolean;
+  /** Defaults to fixed when reading a pre-Pool server. */
+  runtime_binding_mode?: RuntimeBindingMode;
+  runtime_requirements?: RuntimeRequirements;
   name: string;
   description: string;
   /** What this agent's owner wrote. For a system agent this holds only the
@@ -446,7 +467,7 @@ export interface Agent {
    *  backend binary. Absent for ordinary agents. */
   system_instructions?: string;
   avatar_url: string | null;
-  runtime_mode: AgentRuntimeMode;
+  runtime_mode: AgentExecutionMode;
   runtime_config: Record<string, unknown>;
   custom_args: string[];
   /**

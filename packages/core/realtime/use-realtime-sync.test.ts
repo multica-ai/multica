@@ -30,6 +30,7 @@ import {
   applyWorkspaceUpdatedToCache,
   handleInboxNew,
   invalidateChatMessageQueries,
+  invalidateIssueTaskLifecycle,
   refetchPendingChatAggregate,
   resolveInboxSourceSlug,
 } from "./use-realtime-sync";
@@ -46,6 +47,21 @@ function createQueryClient() {
     },
   });
 }
+
+describe("runtime Pool issue task realtime", () => {
+  it("invalidates the issue task list while a Task waits for placement", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    invalidateIssueTaskLifecycle(qc, {
+      issue_id: "issue-1",
+    });
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: issueKeys.tasks("issue-1"),
+    });
+  });
+});
 
 function userMessage(): ChatMessage {
   return {

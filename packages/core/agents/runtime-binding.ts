@@ -14,3 +14,23 @@ export function isAgentRuntimeBound(
     (agent.runtime_id ?? "").trim().length > 0
   );
 }
+
+/**
+ * Invocation readiness is deliberately separate from Runtime navigation.
+ * Pool Agents are runnable while unbound because placement happens after the
+ * Task commits; fixed Agents retain the legacy bound-Runtime requirement.
+ */
+export function isAgentRunnable(
+  agent: Pick<
+    Agent,
+    | "runtime_id"
+    | "runtime_bound"
+    | "runtime_binding_mode"
+    | "runtime_routable"
+  >,
+): boolean {
+  if (agent.runtime_binding_mode === "pool") {
+    return agent.runtime_routable === true;
+  }
+  return isAgentRuntimeBound(agent);
+}

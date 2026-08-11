@@ -324,6 +324,27 @@ describe("AgentTaskListSchema", () => {
     trigger_comment_id: "comment-3",
   };
 
+  it("preserves waiting Runtime Pool state", () => {
+    const parsed = AgentTaskListSchema.parse([
+      {
+        ...task,
+        runtime_id: "",
+        runtime_binding_mode: "pool",
+        status: "waiting_runtime",
+        wait_reason: "no_eligible_runtime",
+        session_affinity_state: "none",
+      },
+    ]);
+
+    expect(parsed[0]).toMatchObject({
+      runtime_id: "",
+      runtime_binding_mode: "pool",
+      status: "waiting_runtime",
+      wait_reason: "no_eligible_runtime",
+      session_affinity_state: "none",
+    });
+  });
+
   it("preserves planned and delivered comment IDs for a task run", () => {
     const parsed = AgentTaskListSchema.parse([
       {
