@@ -13,6 +13,7 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { descriptionPreview } from "./description-preview";
+import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { StatusIcon } from "./status-icon";
 
@@ -87,10 +88,19 @@ function IssueHoverCardBody({ issueId }: { issueId: string }) {
   const hasAssignee = !!assigneeType && !!assigneeId;
   const progress = childProgress?.get(issue.id);
   const hasProgress = !!progress && progress.total > 0;
+  // Board cards and list rows render the glyph into a fixed grid slot, so the
+  // "none" dash holds a column there. This card has no column to hold, leaving
+  // the dash a mark carrying no information in an already dense popup.
+  const hasPriority = !!issue.priority && issue.priority !== "none";
 
   return (
     <div className="flex flex-col gap-1.5">
+      {/* Priority, status, identifier — the same lead-with-priority order as
+          BoardCardContent, at the icon size the status glyph already uses. No
+          aria-label: naming it would need a translation key, and this card
+          deliberately carries no copy of its own. */}
       <div className="flex items-center gap-1.5">
+        {hasPriority && <PriorityIcon priority={issue.priority} />}
         <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
         <span className="text-caption font-medium text-muted-foreground">
           {issue.identifier}

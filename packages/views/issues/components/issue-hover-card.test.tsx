@@ -53,6 +53,12 @@ vi.mock("./status-icon", () => ({
   StatusIcon: () => <svg data-testid="status-icon" />,
 }));
 
+vi.mock("./priority-icon", () => ({
+  PriorityIcon: ({ priority }: { priority: string }) => (
+    <svg data-testid="priority-icon" data-priority={priority} />
+  ),
+}));
+
 const mockUseQuery = vi.mocked(useQuery);
 
 type Issue = {
@@ -60,6 +66,7 @@ type Issue = {
   identifier: string;
   title: string;
   status: string;
+  priority: string;
   description?: string | null;
   assignee_type?: string | null;
   assignee_id?: string | null;
@@ -70,6 +77,7 @@ const BASE_ISSUE: Issue = {
   identifier: "MUL-3405",
   title: "A very long issue title that the inline chip never shows",
   status: "todo",
+  priority: "none",
 };
 
 /**
@@ -139,6 +147,26 @@ describe("IssueHoverCard", () => {
       await screen.findByText("A very long issue title that the inline chip never shows"),
     ).toBeInTheDocument();
     expect(mockUseQuery).toHaveBeenCalled();
+  });
+
+  it("shows the priority glyph ahead of the status icon", async () => {
+    mockQueries({ ...BASE_ISSUE, priority: "high" });
+
+    await openCard();
+
+    const priority = screen.getByTestId("priority-icon");
+    expect(priority).toHaveAttribute("data-priority", "high");
+    // Ordering: priority leads the header, the status icon follows it.
+    expect(priority.nextElementSibling).toBe(screen.getByTestId("status-icon"));
+  });
+
+  it("omits the priority glyph when the issue has no priority", async () => {
+    mockQueries({ ...BASE_ISSUE, priority: "none" });
+
+    await openCard();
+
+    expect(screen.getByTestId("status-icon")).toBeInTheDocument();
+    expect(screen.queryByTestId("priority-icon")).not.toBeInTheDocument();
   });
 
   it("shows the assignee avatar and name, without nesting another hover card", async () => {
