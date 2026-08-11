@@ -12,6 +12,7 @@ const draft = (): AgentDraft => ({
   instructions: "# Role\nShip.",
   avatarUrl: "🚀",
   runtimeId: "runtime-1",
+  runtimeBindingMode: "fixed",
   model: "gpt-5.6-sol",
   thinkingLevel: "high",
   serviceTier: "priority",

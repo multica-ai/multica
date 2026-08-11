@@ -168,6 +168,8 @@
     "section_execution_hint": "Choose the runtime, model, reasoning level, speed, and parallel task limit.",
     "section_access": "Access",
     "section_access_hint": "Control who can run this agent and use its connected capabilities.",
+    "section_comment_mentions": "Comment mentions",
+    "section_comment_mentions_hint": "Control who may be mentioned in comments on issues assigned to this agent.",
     "section_properties": "Properties",
     "section_details": "Details",
     "section_details_hint": "Read-only ownership and lifecycle information.",
@@ -179,6 +181,8 @@
     "prop_speed": "Speed",
     "prop_visibility": "Visibility",
     "prop_concurrency": "Concurrency",
+    "prop_comment_mention_restriction": "Restrict comment mentions",
+    "prop_comment_mention_restriction_hint": "When enabled, non-creators may mention only the issue creator. The creator remains unrestricted.",
     "prop_owner": "Owner",
     "prop_created": "Created",
     "prop_updated": "Updated",
@@ -310,6 +314,17 @@
       "execution_hint": "Choose where the agent runs, and optionally override the runtime's default model, thinking level and speed.",
       "access": "Access",
       "access_hint": "Control who can start runs with this agent. You can change this later."
+    },
+    "execution_mode": {
+      "fixed": {
+        "title": "Fixed runtime",
+        "description": "Always run this agent on one selected runtime."
+      },
+      "pool": {
+        "title": "Runtime pool",
+        "description": "Assign an available compatible runtime for each task.",
+        "active_hint": "No runtime is selected now. Each task will be assigned to an available Platform Agent CLI runtime automatically."
+      }
     },
     "thinking_label": "Thinking",
     "speed_label": "Speed",

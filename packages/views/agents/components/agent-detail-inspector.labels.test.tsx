@@ -69,4 +69,29 @@ describe("AgentDetailInspector labels", () => {
     expect(screen.queryByTestId("resource-label-picker")).toBeNull();
     expect(screen.queryByText("Labels")).toBeNull();
   });
+
+  it("shows Pool execution without a fake concrete runtime", () => {
+    renderWithI18n(
+      <AgentDetailInspector
+        agent={{
+          ...agent,
+          runtime_id: "",
+          runtime_binding_mode: "pool",
+          runtime_mode: "pool",
+        } as Agent}
+        runtime={null}
+        runtimes={[]}
+        members={[]}
+        currentUserId="user-1"
+        canEdit
+        onUpdate={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(screen.getByText("Runtime pool")).toBeInTheDocument();
+    expect(screen.queryByTestId("runtime-picker")).toBeNull();
+    expect(screen.queryByTestId("model-picker")).toBeNull();
+    expect(screen.queryByTestId("thinking-field")).toBeNull();
+    expect(screen.queryByTestId("service-tier-field")).toBeNull();
+  });
 });

@@ -15,6 +15,7 @@ import {
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { isImeComposing } from "@multica/core/utils";
 import { Input } from "@multica/ui/components/ui/input";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import {
@@ -235,6 +236,22 @@ export function AgentDetailInspector({
         description={t(($) => $.inspector.section_execution_hint)}
       >
         <SettingsCard>
+          {agent.runtime_binding_mode === "pool" ? (
+            <SettingsRow
+              label={t(($) => $.inspector.prop_runtime)}
+              size="select-wide"
+            >
+              <div>
+                <div className="text-body font-medium">
+                  {t(($) => $.creation_studio.execution_mode.pool.title)}
+                </div>
+                <p className="mt-1 text-caption text-muted-foreground">
+                  {t(($) => $.creation_studio.execution_mode.pool.description)}
+                </p>
+              </div>
+            </SettingsRow>
+          ) : (
+            <>
           <SettingsRow
             label={t(($) => $.inspector.prop_runtime)}
             size="select-wide"
@@ -295,6 +312,8 @@ export function AgentDetailInspector({
             canEdit={canEdit}
             onChange={(serviceTier) => update({ service_tier: serviceTier })}
           />
+            </>
+          )}
           <SettingsRow
             label={t(($) => $.inspector.prop_concurrency)}
             size="select-wide"
@@ -303,6 +322,31 @@ export function AgentDetailInspector({
               value={agent.max_concurrent_tasks}
               canEdit={canEdit}
               onSave={(next) => update({ max_concurrent_tasks: next })}
+            />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t(($) => $.inspector.section_comment_mentions)}
+        description={t(($) => $.inspector.section_comment_mentions_hint)}
+      >
+        <SettingsCard>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_comment_mention_restriction)}
+            description={t(($) => $.inspector.prop_comment_mention_restriction_hint)}
+          >
+            <Switch
+              checked={agent.comment_mention_policy === "creator_only_for_non_creator"}
+              onCheckedChange={(checked) =>
+                update({
+                  comment_mention_policy: checked
+                    ? "creator_only_for_non_creator"
+                    : "unrestricted",
+                })
+              }
+              disabled={!canEdit}
+              aria-label={t(($) => $.inspector.prop_comment_mention_restriction)}
             />
           </SettingsRow>
         </SettingsCard>

@@ -6,6 +6,7 @@ export type {
   AgentExecutionMode,
   RuntimeLocationMode,
   RuntimeBindingMode,
+  CommentMentionPolicy,
   RuntimeRequirements,
   SessionAffinityState,
   AgentVisibility,

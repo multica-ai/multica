@@ -771,6 +771,62 @@ func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestCreateAgent_PoolDoesNotRequireRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	const name = "pool-agent-client-create"
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+			testWorkspaceID, name,
+		)
+	})
+
+	requirements := map[string]any{
+		"schema_version":   "multica.runtime-requirements/v1",
+		"capabilities_all": []string{"multica.agent.execute/v1"},
+	}
+	w := httptest.NewRecorder()
+	testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", map[string]any{
+		"name":                 name,
+		"runtime_binding_mode": "pool",
+		"runtime_requirements": requirements,
+		"visibility":           "private",
+		"max_concurrent_tasks": 1,
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent Pool: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.RuntimeBindingMode != "pool" || response.RuntimeID != "" ||
+		response.RuntimeMode != "pool" || !response.RuntimeRoutable || response.RuntimeBound {
+		t.Fatalf("Pool response routing = %+v", response)
+	}
+
+	var mode, runtimeMode string
+	var runtimeID *string
+	var storedRequirements []byte
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT runtime_binding_mode, runtime_mode, runtime_id::text, runtime_requirements
+		FROM agent WHERE id = $1
+	`, response.ID).Scan(&mode, &runtimeMode, &runtimeID, &storedRequirements); err != nil {
+		t.Fatalf("load created Pool Agent: %v", err)
+	}
+	if mode != "pool" || runtimeMode != "pool" || runtimeID != nil {
+		t.Fatalf("stored routing = mode %q runtime_mode %q runtime_id %v", mode, runtimeMode, runtimeID)
+	}
+	if got := string(storedRequirements); got != `{"schema_version": "multica.runtime-requirements/v1", "capabilities_all": ["multica.agent.execute/v1"]}` &&
+		got != `{"schema_version":"multica.runtime-requirements/v1","capabilities_all":["multica.agent.execute/v1"]}` {
+		t.Fatalf("runtime_requirements = %s", got)
+	}
+}
+
 // TestUpdateAgent_RejectsRenameToArchivedName is the regression for #5914: the
 // (workspace_id, name) unique constraint does not exclude archived agents, so a
 // rename that collides with an *archived* agent's still-reserved name used to

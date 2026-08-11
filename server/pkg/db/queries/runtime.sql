@@ -115,6 +115,7 @@ WHERE id = sqlc.arg(task_id)::uuid
   AND runtime_binding_mode = sqlc.arg(expected_runtime_binding_mode)
   AND placement_workspace_id = sqlc.arg(expected_placement_workspace_id)::uuid
   AND runtime_requester_user_id = sqlc.arg(expected_runtime_requester_user_id)::uuid
+  AND runtime_trigger_user_id IS NOT DISTINCT FROM sqlc.narg('expected_runtime_trigger_user_id')::uuid
   AND runtime_requirements = sqlc.arg(expected_runtime_requirements)::jsonb
   AND session_affinity_state = sqlc.arg(expected_session_affinity_state)
   AND session_affinity_runtime_id IS NOT DISTINCT FROM sqlc.narg('expected_session_affinity_runtime_id')::uuid
@@ -571,9 +572,11 @@ WHERE ar.workspace_id = sqlc.arg(workspace_id)::uuid
   AND ar.status = 'online'
   AND ar.capabilities @> sqlc.arg(requirements_all)::text[]
   AND (
-    m.role IN ('owner', 'admin')
-    OR ar.owner_id = sqlc.arg(requester_user_id)::uuid
-    OR ar.visibility = 'public'
+    ar.runtime_mode = 'cloud'
+    OR (
+      ar.runtime_mode = 'local'
+      AND ar.owner_id = sqlc.narg(trigger_user_id)::uuid
+    )
   )
   AND NOT EXISTS (
     SELECT 1 FROM agent_task_queue AS occupied
@@ -587,7 +590,7 @@ GROUP BY ar.id
 ORDER BY
   CASE
     WHEN ar.runtime_mode = 'local'
-     AND ar.owner_id = sqlc.arg(requester_user_id)::uuid THEN 0
+     AND ar.owner_id = sqlc.narg(trigger_user_id)::uuid THEN 0
     ELSE 1
   END,
   ar.last_seen_at DESC NULLS LAST,
@@ -608,9 +611,11 @@ WHERE ar.id = sqlc.arg(runtime_id)::uuid
   AND ar.status = 'online'
   AND ar.capabilities @> sqlc.arg(requirements_all)::text[]
   AND (
-    m.role IN ('owner', 'admin')
-    OR ar.owner_id = sqlc.arg(requester_user_id)::uuid
-    OR ar.visibility = 'public'
+    ar.runtime_mode = 'cloud'
+    OR (
+      ar.runtime_mode = 'local'
+      AND ar.owner_id = sqlc.narg(trigger_user_id)::uuid
+    )
   );
 
 -- name: LockPoolRuntimeForPlacement :one

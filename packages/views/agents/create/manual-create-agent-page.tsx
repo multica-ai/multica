@@ -113,11 +113,15 @@ export function ManualCreateAgentPage() {
           <AgentCreateChip>
             {t(($) => $.creation_studio.modes.blank.title)}
           </AgentCreateChip>
-          {form.selectedRuntime && (
+          {(form.draft.runtimeBindingMode ?? "fixed") === "pool" ? (
+            <AgentCreateChip>
+              {t(($) => $.creation_studio.execution_mode.pool.title)}
+            </AgentCreateChip>
+          ) : form.selectedRuntime ? (
             <AgentCreateChip>
               {runtimeDisplayLabel(form.selectedRuntime)}
             </AgentCreateChip>
-          )}
+          ) : null}
         </>
       }
     >

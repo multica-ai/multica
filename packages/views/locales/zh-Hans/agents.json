@@ -160,6 +160,8 @@
     "section_execution_hint": "选择运行时、模型、思考强度、速度和并行 task 上限。",
     "section_access": "访问权限",
     "section_access_hint": "控制谁可以运行该智能体并使用它已连接的能力。",
+    "section_comment_mentions": "评论 Mention",
+    "section_comment_mentions_hint": "控制分配给该智能体的任务评论中允许 @ 的对象。",
     "section_properties": "属性",
     "section_details": "详情",
     "section_details_hint": "只读的所有权和生命周期信息。",
@@ -171,6 +173,8 @@
     "prop_speed": "速度",
     "prop_visibility": "可见性",
     "prop_concurrency": "并发",
+    "prop_comment_mention_restriction": "限制评论 Mention",
+    "prop_comment_mention_restriction_hint": "启用后，非任务创建者只能 @ 任务创建者；任务创建者不受限制。",
     "prop_owner": "所有者",
     "prop_created": "创建时间",
     "prop_updated": "更新时间",
@@ -301,6 +305,17 @@
       "execution_hint": "选择智能体使用的运行时，也可以覆盖运行时的默认模型、思考等级和速度。",
       "access": "访问权限",
       "access_hint": "控制谁可以运行此智能体，创建后仍可修改。"
+    },
+    "execution_mode": {
+      "fixed": {
+        "title": "固定运行时",
+        "description": "始终在一个指定运行时上执行。"
+      },
+      "pool": {
+        "title": "运行时池",
+        "description": "每个任务自动分配一个空闲且兼容的运行时。",
+        "active_hint": "现在无需选择运行时。任务创建后会自动分配可用的 Platform Agent CLI 运行时。"
+      }
     },
     "thinking_label": "思考",
     "speed_label": "速度",

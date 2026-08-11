@@ -160,6 +160,8 @@
     "section_execution_hint": "런타임, 모델, 추론 수준, 속도와 병렬 작업 한도를 설정합니다.",
     "section_access": "접근 권한",
     "section_access_hint": "이 에이전트와 연결된 기능을 사용할 수 있는 대상을 관리합니다.",
+    "section_comment_mentions": "댓글 멘션",
+    "section_comment_mentions_hint": "이 에이전트에 할당된 작업의 댓글에서 멘션할 수 있는 대상을 관리합니다.",
     "section_properties": "속성",
     "section_details": "세부 정보",
     "section_details_hint": "소유권과 수명 주기에 대한 읽기 전용 정보입니다.",
@@ -171,6 +173,8 @@
     "prop_speed": "속도",
     "prop_visibility": "공개 범위",
     "prop_concurrency": "동시 실행",
+    "prop_comment_mention_restriction": "댓글 멘션 제한",
+    "prop_comment_mention_restriction_hint": "활성화하면 작업 생성자 외에는 작업 생성자만 멘션할 수 있습니다. 생성자는 제한되지 않습니다.",
     "prop_owner": "소유자",
     "prop_created": "생성일",
     "prop_updated": "수정일",
@@ -782,6 +786,17 @@
       "execution_hint": "에이전트를 실행할 위치를 선택하고 필요하면 런타임 기본 모델, 추론 수준, 속도를 변경하세요.",
       "access": "접근 권한",
       "access_hint": "이 에이전트를 실행할 수 있는 사용자를 설정합니다. 나중에 변경할 수 있습니다."
+    },
+    "execution_mode": {
+      "fixed": {
+        "title": "고정 런타임",
+        "description": "선택한 하나의 런타임에서 항상 실행합니다."
+      },
+      "pool": {
+        "title": "런타임 풀",
+        "description": "작업마다 사용 가능한 호환 런타임을 자동 할당합니다.",
+        "active_hint": "지금 런타임을 선택하지 않습니다. 작업이 생성되면 사용 가능한 Platform Agent CLI 런타임이 자동 할당됩니다."
+      }
     },
     "thinking_label": "추론",
     "speed_label": "속도",

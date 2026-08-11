@@ -61,7 +61,8 @@ export function useCreateAgentSubmit(options: {
     options;
 
   const create = async () => {
-    if (!runtimeId || creating) return;
+    if (((draft.runtimeBindingMode ?? "fixed") === "fixed" && !runtimeId) || creating)
+      return;
     setCreating(true);
     setNameError(null);
     setFormError(null);

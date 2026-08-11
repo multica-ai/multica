@@ -152,6 +152,8 @@
     "section_execution_hint": "ランタイム、モデル、思考レベル、速度、同時作業数を設定します。",
     "section_access": "アクセス",
     "section_access_hint": "このエージェントと接続済み機能を利用できる相手を管理します。",
+    "section_comment_mentions": "コメントのメンション",
+    "section_comment_mentions_hint": "このエージェントに割り当てられた issue のコメントでメンションできる相手を管理します。",
     "section_properties": "プロパティ",
     "section_details": "詳細",
     "section_details_hint": "所有者とライフサイクルに関する読み取り専用情報です。",
@@ -163,6 +165,8 @@
     "prop_speed": "速度",
     "prop_visibility": "公開範囲",
     "prop_concurrency": "同時実行数",
+    "prop_comment_mention_restriction": "コメントのメンションを制限",
+    "prop_comment_mention_restriction_hint": "有効にすると、作成者以外は issue の作成者だけをメンションできます。作成者には制限がありません。",
     "prop_owner": "オーナー",
     "prop_created": "作成日",
     "prop_updated": "更新日",
@@ -782,6 +786,17 @@
       "execution_hint": "エージェントを実行する場所を選び、必要に応じてランタイムの既定モデル・思考レベル・速度を変更します。",
       "access": "アクセス",
       "access_hint": "このエージェントを実行できるユーザーを設定します。後から変更できます。"
+    },
+    "execution_mode": {
+      "fixed": {
+        "title": "固定ランタイム",
+        "description": "選択した1つのランタイムで常に実行します。"
+      },
+      "pool": {
+        "title": "ランタイムプール",
+        "description": "タスクごとに利用可能な互換ランタイムを自動割り当てします。",
+        "active_hint": "ここではランタイムを選びません。タスク作成時に利用可能な Platform Agent CLI ランタイムが自動割り当てされます。"
+      }
     },
     "thinking_label": "思考",
     "speed_label": "速度",

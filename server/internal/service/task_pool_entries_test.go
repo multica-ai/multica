@@ -43,6 +43,7 @@ func TestPoolRetryRoutingSnapshot(t *testing.T) {
 				agent,
 				member,
 				requesterID,
+				requesterID,
 				PoolPlacementRequest{RetryOfTaskID: retryID},
 				tt.placement,
 				[]byte(`{"capabilities_all":[]}`),
@@ -54,7 +55,21 @@ func TestPoolRetryRoutingSnapshot(t *testing.T) {
 			if snapshot.Status != tt.wantStatus || snapshot.SessionAffinityState != tt.wantState || snapshot.SessionAffinityRuntimeID != tt.wantRuntime {
 				t.Fatalf("retry routing = %+v, want status=%q state=%q runtime=%v", snapshot, tt.wantStatus, tt.wantState, tt.wantRuntime)
 			}
+			if snapshot.RuntimeTriggerUserID != requesterID {
+				t.Fatalf("runtime_trigger_user_id = %v, want %v", snapshot.RuntimeTriggerUserID, requesterID)
+			}
 		})
+	}
+}
+
+func TestPoolTriggerUserRequiresCurrentInvocationActor(t *testing.T) {
+	userID := pgtype.UUID{Bytes: [16]byte{9}, Valid: true}
+	service := &TaskService{}
+	if got := service.poolTriggerUserForIssue(context.Background(), pgtype.UUID{}, pgtype.UUID{}, userID); got != userID {
+		t.Fatalf("explicit actor = %v, want %v", got, userID)
+	}
+	if got := service.poolTriggerUserForIssue(context.Background(), pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}); got.Valid {
+		t.Fatalf("missing actor produced personal trigger %v", got)
 	}
 }
 
@@ -75,6 +90,7 @@ func TestPoolRetrySQLAndTransactionShape(t *testing.T) {
 	for _, fragment := range []string{
 		"NULL::uuid", "runtime_binding_mode", "runtime_requirements",
 		"placement_workspace_id", "runtime_requester_user_id",
+		"runtime_trigger_user_id",
 		"session_affinity_state", "session_affinity_runtime_id",
 		"retry_of_task_id", "fire_at",
 	} {
@@ -221,7 +237,7 @@ func TestPoolDeferredAssigneeFallbackSQLShape(t *testing.T) {
 	for _, fragment := range []string{
 		"escalation_for_task_id", "squad_id", "fire_at", "'pool'",
 		"runtime_requirements", "placement_workspace_id",
-		"runtime_requester_user_id", "session_affinity_state",
+		"runtime_requester_user_id", "runtime_trigger_user_id", "session_affinity_state",
 		"session_affinity_runtime_id", "wait_reason",
 	} {
 		if !strings.Contains(pool, fragment) {
@@ -413,6 +429,9 @@ func TestPoolEntryIssuePersistsWaitingSnapshotAndAssignsOnce(t *testing.T) {
 	if persisted.RuntimeID.Valid {
 		t.Errorf("runtime_id = %v, want NULL", persisted.RuntimeID)
 	}
+	if persisted.RuntimeTriggerUserID.Valid {
+		t.Errorf("runtime_trigger_user_id = %v, want NULL for an entry without an explicit actor", persisted.RuntimeTriggerUserID)
+	}
 	if persisted.RuntimeBindingMode != runtimepool.BindingPool {
 		t.Errorf("runtime_binding_mode = %q, want pool", persisted.RuntimeBindingMode)
 	}
@@ -555,6 +574,7 @@ func TestPoolEntryMentionPreservesPayloadAndAssignsOnce(t *testing.T) {
 	if persisted.Status != runtimepool.StatusWaitingRuntime || persisted.RuntimeID.Valid ||
 		persisted.RuntimeBindingMode != runtimepool.BindingPool ||
 		persisted.PlacementWorkspaceID != workspaceID || persisted.RuntimeRequesterUserID != userID ||
+		persisted.RuntimeTriggerUserID != userID ||
 		persisted.SessionAffinityState != runtimepool.SessionAffinityNone ||
 		persisted.WaitReason.String != "no_eligible_runtime" {
 		t.Errorf("persisted routing snapshot = %+v", persisted)

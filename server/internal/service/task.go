@@ -23,7 +23,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
-	"github.com/multica-ai/multica/server/internal/runtimeaccess"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/runtimepool"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -645,6 +644,24 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 		}
 	}
 	return attribution.ClassifyDirect(facts)
+}
+
+// poolTriggerUserForIssue is deliberately narrower than attribution. Only a
+// human carried by this invocation, or the member author of this invocation's
+// trigger comment, may select a personal Runtime. Issue creators, rule owners,
+// owner fallbacks and agent-authored delegation chains remain cloud-only.
+func (s *TaskService) poolTriggerUserForIssue(ctx context.Context, workspaceID, triggerCommentID, actorUserID pgtype.UUID) pgtype.UUID {
+	if actorUserID.Valid {
+		return actorUserID
+	}
+	if !triggerCommentID.Valid {
+		return pgtype.UUID{}
+	}
+	trigger := s.attributionFromTriggerComment(ctx, workspaceID, triggerCommentID, attribution.SourceCommentSource)
+	if trigger.Source == attribution.SourceDirectHuman && trigger.UserID.Valid {
+		return trigger.UserID
+	}
+	return pgtype.UUID{}
 }
 
 // ruleOwnerAttribution resolves the rule_owner attribution for an autopilot run
@@ -1271,6 +1288,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 			AgentID:          agent.ID,
 			WorkspaceID:      issue.WorkspaceID,
 			OriginatorUserID: originatorUserID,
+			TriggerUserID:    s.poolTriggerUserForIssue(ctx, issue.WorkspaceID, triggerCommentID, actorUserID),
 			Deferred:         fireAt.Valid,
 			Placement: PoolPlacementRequest{
 				ForceFreshSession: forceFreshSession,
@@ -1446,6 +1464,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 			AgentID:          agent.ID,
 			WorkspaceID:      issue.WorkspaceID,
 			OriginatorUserID: originatorUserID,
+			TriggerUserID:    s.poolTriggerUserForIssue(ctx, issue.WorkspaceID, triggerCommentID, actorUserID),
 			Placement: PoolPlacementRequest{
 				AgentID: agent.ID,
 				IssueID: issue.ID,
@@ -1540,6 +1559,7 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 			AgentID:          agentID,
 			WorkspaceID:      issue.WorkspaceID,
 			OriginatorUserID: attr.UserID,
+			TriggerUserID:    s.poolTriggerUserForIssue(ctx, issue.WorkspaceID, triggerCommentID, pgtype.UUID{}),
 			Placement: PoolPlacementRequest{
 				AgentID: agentID,
 				IssueID: issue.ID,
@@ -1685,6 +1705,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 			AgentID:          agent.ID,
 			WorkspaceID:      workspaceID,
 			OriginatorUserID: requesterID,
+			TriggerUserID:    requesterID,
 			Placement: PoolPlacementRequest{
 				AgentID: agent.ID,
 			},
@@ -3472,6 +3493,7 @@ func claimCurrentGlobalRuntimeHead(
 		ExpectedRuntimeBindingMode:       head.RuntimeBindingMode,
 		ExpectedPlacementWorkspaceID:     head.PlacementWorkspaceID,
 		ExpectedRuntimeRequesterUserID:   head.RuntimeRequesterUserID,
+		ExpectedRuntimeTriggerUserID:     head.RuntimeTriggerUserID,
 		ExpectedRuntimeRequirements:      head.RuntimeRequirements,
 		ExpectedSessionAffinityState:     head.SessionAffinityState,
 		ExpectedSessionAffinityRuntimeID: head.SessionAffinityRuntimeID,
@@ -3491,6 +3513,7 @@ func staleReclaimParams(head db.AgentTaskQueue, runtimeID pgtype.UUID) db.Reclai
 		ExpectedRuntimeBindingMode:       head.RuntimeBindingMode,
 		ExpectedPlacementWorkspaceID:     head.PlacementWorkspaceID,
 		ExpectedRuntimeRequesterUserID:   head.RuntimeRequesterUserID,
+		ExpectedRuntimeTriggerUserID:     head.RuntimeTriggerUserID,
 		ExpectedRuntimeRequirements:      head.RuntimeRequirements,
 		ExpectedSessionAffinityState:     head.SessionAffinityState,
 		ExpectedSessionAffinityRuntimeID: head.SessionAffinityRuntimeID,
@@ -3509,6 +3532,7 @@ func staleCancelParams(head db.AgentTaskQueue, runtimeID pgtype.UUID) db.CancelI
 		ExpectedRuntimeBindingMode:       head.RuntimeBindingMode,
 		ExpectedPlacementWorkspaceID:     head.PlacementWorkspaceID,
 		ExpectedRuntimeRequesterUserID:   head.RuntimeRequesterUserID,
+		ExpectedRuntimeTriggerUserID:     head.RuntimeTriggerUserID,
 		ExpectedRuntimeRequirements:      head.RuntimeRequirements,
 		ExpectedSessionAffinityState:     head.SessionAffinityState,
 		ExpectedSessionAffinityRuntimeID: head.SessionAffinityRuntimeID,
@@ -3526,6 +3550,7 @@ func freshRequeueParams(head db.AgentTaskQueue, runtimeID pgtype.UUID, reason st
 		ExpectedRuntimeBindingMode:       head.RuntimeBindingMode,
 		ExpectedPlacementWorkspaceID:     head.PlacementWorkspaceID,
 		ExpectedRuntimeRequesterUserID:   head.RuntimeRequesterUserID,
+		ExpectedRuntimeTriggerUserID:     head.RuntimeTriggerUserID,
 		ExpectedRuntimeRequirements:      head.RuntimeRequirements,
 		ExpectedSessionAffinityState:     head.SessionAffinityState,
 		ExpectedSessionAffinityRuntimeID: head.SessionAffinityRuntimeID,
@@ -3543,6 +3568,7 @@ func sameRuntimeClaimRoutingSnapshot(a, b db.AgentTaskQueue) bool {
 		a.RuntimeBindingMode == b.RuntimeBindingMode &&
 		a.PlacementWorkspaceID == b.PlacementWorkspaceID &&
 		a.RuntimeRequesterUserID == b.RuntimeRequesterUserID &&
+		a.RuntimeTriggerUserID == b.RuntimeTriggerUserID &&
 		bytes.Equal(a.RuntimeRequirements, b.RuntimeRequirements) &&
 		a.SessionAffinityState == b.SessionAffinityState &&
 		a.SessionAffinityRuntimeID == b.SessionAffinityRuntimeID &&
@@ -3571,7 +3597,7 @@ func validatePoolRuntimeClaimSnapshot(
 		runtime.WorkspaceID != task.PlacementWorkspaceID ||
 		agent.WorkspaceID != task.PlacementWorkspaceID ||
 		agent.ArchivedAt.Valid ||
-		!runtimeaccess.CanUse(member, runtime) {
+		!runtimepool.RuntimeMatchesTriggerPolicy(runtime, task.RuntimeTriggerUserID) {
 		return reason("session_runtime_unauthorized")
 	}
 	if task.ChatSessionID.Valid && (!chatFound || chat.WorkspaceID != task.PlacementWorkspaceID || chat.AgentID != task.AgentID) {
@@ -5473,6 +5499,7 @@ func (s *TaskService) newPoolManualRerunTaskInput(
 		AgentID:          agent.ID,
 		WorkspaceID:      issue.WorkspaceID,
 		OriginatorUserID: attr.UserID,
+		TriggerUserID:    actorUserID,
 		Placement:        placement,
 		Insert: func(ctx context.Context, qtx *db.Queries, routing PoolRoutingSnapshot) (db.AgentTaskQueue, error) {
 			return insertPoolAgentTask(ctx, qtx, createParams, routing)

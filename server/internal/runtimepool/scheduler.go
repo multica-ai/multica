@@ -10,7 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/runtimeaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -121,6 +120,7 @@ func (s *Scheduler) AssignWaiting(ctx context.Context, request AssignRequest) (A
 		case SessionAffinityNone:
 			plan.candidates, err = s.q.ListPoolRuntimeCandidates(ctx, db.ListPoolRuntimeCandidatesParams{
 				RequesterUserID: task.RuntimeRequesterUserID,
+				TriggerUserID:   task.RuntimeTriggerUserID,
 				WorkspaceID:     request.WorkspaceID,
 				RequirementsAll: requirements.CapabilitiesAll,
 				RuntimeLimit:    RuntimeScanLimit,
@@ -133,6 +133,7 @@ func (s *Scheduler) AssignWaiting(ctx context.Context, request AssignRequest) (A
 			var candidate db.AgentRuntime
 			candidate, err = s.q.GetPinnedPoolRuntimeCandidate(ctx, db.GetPinnedPoolRuntimeCandidateParams{
 				RequesterUserID: task.RuntimeRequesterUserID,
+				TriggerUserID:   task.RuntimeTriggerUserID,
 				RuntimeID:       task.SessionAffinityRuntimeID,
 				WorkspaceID:     request.WorkspaceID,
 				RequirementsAll: requirements.CapabilitiesAll,
@@ -230,7 +231,7 @@ func (s *Scheduler) diagnosePinnedReason(ctx context.Context, task db.AgentTaskQ
 	if runtime.WorkspaceID != task.PlacementWorkspaceID {
 		return "session_runtime_unauthorized", nil
 	}
-	member, err := s.q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+	_, err = s.q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 		UserID:      task.RuntimeRequesterUserID,
 		WorkspaceID: task.PlacementWorkspaceID,
 	})
@@ -240,7 +241,7 @@ func (s *Scheduler) diagnosePinnedReason(ctx context.Context, task db.AgentTaskQ
 	if err != nil {
 		return "", err
 	}
-	if !runtimeaccess.CanUse(member, runtime) {
+	if !RuntimeMatchesTriggerPolicy(runtime, task.RuntimeTriggerUserID) {
 		return "session_runtime_unauthorized", nil
 	}
 	if !ContainsAllCapabilities(runtime.Capabilities, requirements.CapabilitiesAll) {
@@ -263,6 +264,7 @@ func (s *Scheduler) updatePinnedReason(ctx context.Context, task db.AgentTaskQue
 		ExpectedRuntimeBindingMode:       task.RuntimeBindingMode,
 		ExpectedPlacementWorkspaceID:     task.PlacementWorkspaceID,
 		ExpectedRuntimeRequesterUserID:   task.RuntimeRequesterUserID,
+		ExpectedRuntimeTriggerUserID:     task.RuntimeTriggerUserID,
 		ExpectedRuntimeRequirements:      task.RuntimeRequirements,
 		ExpectedSessionAffinityState:     task.SessionAffinityState,
 		ExpectedSessionAffinityRuntimeID: task.SessionAffinityRuntimeID,
@@ -309,7 +311,7 @@ func (s *Scheduler) assignCandidate(ctx context.Context, plan placementPlan, can
 	if err != nil {
 		return nil, true, "", fmt.Errorf("lock Pool Runtime: %w", err)
 	}
-	if runtime.WorkspaceID != plan.task.PlacementWorkspaceID || !runtimeaccess.CanUse(member, runtime) {
+	if runtime.WorkspaceID != plan.task.PlacementWorkspaceID || !RuntimeMatchesTriggerPolicy(runtime, plan.task.RuntimeTriggerUserID) {
 		return nil, plan.task.SessionAffinityState == SessionAffinityPinned, pinnedReason(plan.task, "session_runtime_unauthorized"), nil
 	}
 	if !ContainsAllCapabilities(runtime.Capabilities, plan.requirements.CapabilitiesAll) {
@@ -402,6 +404,7 @@ func sameRoutingSnapshot(before, after db.AgentTaskQueue) bool {
 		before.RuntimeBindingMode == after.RuntimeBindingMode &&
 		before.PlacementWorkspaceID == after.PlacementWorkspaceID &&
 		before.RuntimeRequesterUserID == after.RuntimeRequesterUserID &&
+		before.RuntimeTriggerUserID == after.RuntimeTriggerUserID &&
 		bytes.Equal(before.RuntimeRequirements, after.RuntimeRequirements) &&
 		before.SessionAffinityState == after.SessionAffinityState &&
 		before.SessionAffinityRuntimeID == after.SessionAffinityRuntimeID &&

@@ -3,6 +3,7 @@ export {
   type ContentEditorProps,
   type ContentEditorRef,
 } from "./content-editor";
+export type { MentionActorTarget } from "./extensions/mention-suggestion";
 export {
   TitleEditor,
   type TitleEditorProps,

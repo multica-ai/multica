@@ -237,9 +237,9 @@ func TestRuntimeTargetedClaimBatchOrdersResolvedGlobalHeads(t *testing.T) {
 		INSERT INTO agent_task_queue (
 			agent_id, issue_id, status, priority, context, runtime_id,
 			runtime_binding_mode, runtime_requirements, placement_workspace_id,
-			runtime_requester_user_id, session_affinity_state
+			runtime_requester_user_id, runtime_trigger_user_id, session_affinity_state
 		)
-		VALUES ($1, $2, 'queued', 100, '{}'::jsonb, $3, 'pool', $4::jsonb, $5, $6, 'none')
+		VALUES ($1, $2, 'queued', 100, '{}'::jsonb, $3, 'pool', $4::jsonb, $5, $6, $6, 'none')
 		RETURNING id
 	`, fixture.agentID, blockedIssue, fixture.runtimeA, runtimeTargetedRequirementsJSON(), fixture.workspaceID, fixture.userID).Scan(&blockedHigh); err != nil {
 		t.Fatalf("create blocked high Task: %v", err)
@@ -248,10 +248,10 @@ func TestRuntimeTargetedClaimBatchOrdersResolvedGlobalHeads(t *testing.T) {
 		INSERT INTO agent_task_queue (
 			agent_id, issue_id, status, priority, context, runtime_id, dispatched_at, started_at,
 			runtime_binding_mode, runtime_requirements, placement_workspace_id,
-			runtime_requester_user_id, session_affinity_state
+			runtime_requester_user_id, runtime_trigger_user_id, session_affinity_state
 		)
 		VALUES ($1, $2, 'running', 0, '{}'::jsonb, $3, now(), now(),
-			'pool', $4::jsonb, $5, $6, 'none')
+			'pool', $4::jsonb, $5, $6, $6, 'none')
 	`, fixture.agentID, blockedIssue, fixture.runtimeA, runtimeTargetedRequirementsJSON(), fixture.workspaceID, fixture.userID)
 
 	lowA := fixture.addIssueTaskForAgent(t, fixture.agentID, fixture.runtimeA, "queued", 1)
@@ -340,10 +340,10 @@ func TestRuntimeTargetedStalePreviewDistinctAttemptsDoNotStarve(t *testing.T) {
 		INSERT INTO agent_task_queue (
 			agent_id, issue_id, status, priority, context, runtime_id, dispatched_at,
 			runtime_binding_mode, runtime_requirements, placement_workspace_id,
-			runtime_requester_user_id, session_affinity_state
+			runtime_requester_user_id, runtime_trigger_user_id, session_affinity_state
 		)
 		SELECT $3, id, 'dispatched', number - 930000, '{}'::jsonb, $4,
-			now() - interval '2 minutes', 'pool', $5::jsonb, $1, $2, 'none'
+			now() - interval '2 minutes', 'pool', $5::jsonb, $1, $2, $2, 'none'
 		FROM created_issues
 	`, fixture.workspaceID, fixture.userID, fixture.agentID, fixture.runtimeA, runtimeTargetedRequirementsJSON())
 	fixture.addIssueTaskForAgent(t, fixture.agentID, runtimeOutside, "dispatched", 10000)
@@ -767,9 +767,9 @@ func (f *runtimeTargetedClaimFixture) addIssueTaskForAgent(t *testing.T, agentID
 		INSERT INTO agent_task_queue (
 			agent_id, issue_id, status, priority, context, runtime_id,
 			runtime_binding_mode, runtime_requirements, placement_workspace_id,
-			runtime_requester_user_id, session_affinity_state
+			runtime_requester_user_id, runtime_trigger_user_id, session_affinity_state
 		)
-		VALUES ($1, $2, $3, $4, '{}'::jsonb, $5, 'pool', $6::jsonb, $7, $8, 'none')
+		VALUES ($1, $2, $3, $4, '{}'::jsonb, $5, 'pool', $6::jsonb, $7, $8, $8, 'none')
 		RETURNING id
 	`, agentID, issueID, status, priority, runtimeID, requirements, f.workspaceID, f.userID).Scan(&taskID); err != nil {
 		t.Fatalf("create Task: %v", err)
@@ -873,9 +873,9 @@ func (f *runtimeTargetedClaimFixture) addDirectChatTask(t *testing.T, status str
 		INSERT INTO agent_task_queue (
 			agent_id, chat_session_id, status, priority, context, runtime_id,
 			runtime_binding_mode, runtime_requirements, placement_workspace_id,
-			runtime_requester_user_id, session_affinity_state
+			runtime_requester_user_id, runtime_trigger_user_id, session_affinity_state
 		)
-		VALUES ($1, $2, $3, 1, '{}'::jsonb, $4, 'pool', $5::jsonb, $6, $7, 'none')
+		VALUES ($1, $2, $3, 1, '{}'::jsonb, $4, 'pool', $5::jsonb, $6, $7, $7, 'none')
 		RETURNING id
 	`, f.agentID, sessionID, status, f.runtimeA, runtimeTargetedRequirementsJSON(), f.workspaceID, f.userID).Scan(&taskID); err != nil {
 		t.Fatalf("create direct Chat Task: %v", err)
@@ -947,13 +947,13 @@ func (f *runtimeTargetedClaimFixture) addLinkedPoolTask(
 		INSERT INTO agent_task_queue (
 			agent_id, issue_id, chat_session_id, status, priority, context, runtime_id,
 			dispatched_at, started_at, runtime_binding_mode, runtime_requirements,
-			placement_workspace_id, runtime_requester_user_id, session_affinity_state
+			placement_workspace_id, runtime_requester_user_id, runtime_trigger_user_id, session_affinity_state
 		)
 		VALUES (
 			$1, $2, $3, $4::text, $5, '{}'::jsonb, $6,
 			CASE WHEN $4::text IN ('dispatched', 'running') THEN now() END,
 			CASE WHEN $4::text = 'running' THEN now() END,
-			'pool', $7::jsonb, $8, $9, 'none'
+			'pool', $7::jsonb, $8, $9, $9, 'none'
 		)
 		RETURNING id
 	`, agentID, issueID, chatSessionID, status, priority, runtimeID,

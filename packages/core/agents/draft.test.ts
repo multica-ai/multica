@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Agent, RuntimeDevice } from "../types";
 import {
+	applyDraftBindingModeChange,
   applyDraftModelChange,
   applyDraftRuntimeChange,
   buildCreateAgentRequest,
@@ -106,6 +107,40 @@ describe("duplicate access", () => {
 // flow never exposed them, so a Fast Codex agent could only be configured after
 // the fact and a Duplicate silently dropped the setting.
 describe("agent draft execution overrides", () => {
+	it("builds a Pool request without a concrete Runtime or Runtime-native overrides", () => {
+		const poolDraft = applyDraftBindingModeChange(
+			{
+				...draft(),
+				thinkingLevel: "high",
+				serviceTier: "priority",
+			},
+			"pool",
+		);
+		const request = buildCreateAgentRequest({
+			draft: poolDraft,
+			runtimeId: null,
+		});
+
+		expect(poolDraft).toMatchObject({
+			runtimeBindingMode: "pool",
+			runtimeId: "",
+			model: "",
+			thinkingLevel: "",
+			serviceTier: "",
+		});
+		expect(request).toMatchObject({
+			runtime_binding_mode: "pool",
+			runtime_requirements: {
+				schema_version: "multica.runtime-requirements/v1",
+				capabilities_all: ["multica.agent.execute/v1"],
+			},
+		});
+		expect(request).not.toHaveProperty("runtime_id");
+		expect(request).not.toHaveProperty("model");
+		expect(request).not.toHaveProperty("thinking_level");
+		expect(request).not.toHaveProperty("service_tier");
+	});
+
   it("sends the selected thinking level and service tier", () => {
     const request = buildCreateAgentRequest({
       draft: {

@@ -5,6 +5,7 @@ import type {
   AgentPermissionScope,
   CreateAgentRequest,
   RuntimeDevice,
+  RuntimeBindingMode,
 } from "../types";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
@@ -27,6 +28,8 @@ export interface AgentDraft {
   instructions: string;
   avatarUrl: string | null;
   runtimeId: string;
+  /** Defaults to fixed for drafts restored from older clients. */
+  runtimeBindingMode?: RuntimeBindingMode;
   model: string;
   /** Runtime-native reasoning/effort token, scoped to `model`. */
   thinkingLevel: string;
@@ -45,6 +48,7 @@ export const EMPTY_AGENT_DRAFT: AgentDraft = {
   instructions: "",
   avatarUrl: null,
   runtimeId: "",
+  runtimeBindingMode: "fixed",
   model: "",
   thinkingLevel: "",
   serviceTier: "",
@@ -69,7 +73,24 @@ export function applyDraftRuntimeChange(
 ): AgentDraft {
   return {
     ...draft,
+    runtimeBindingMode: "fixed",
     runtimeId,
+    model: "",
+    thinkingLevel: "",
+    serviceTier: "",
+  };
+}
+
+/** Switching execution policy invalidates every concrete Runtime-native field. */
+export function applyDraftBindingModeChange(
+  draft: AgentDraft,
+  runtimeBindingMode: RuntimeBindingMode,
+): AgentDraft {
+  if ((draft.runtimeBindingMode ?? "fixed") === runtimeBindingMode) return draft;
+  return {
+    ...draft,
+    runtimeBindingMode,
+    runtimeId: "",
     model: "",
     thinkingLevel: "",
     serviceTier: "",
@@ -174,7 +195,9 @@ export function buildDuplicateDraft(
     nameSuffix: string;
   },
 ): AgentDraft {
+  const pool = source.runtime_binding_mode === "pool";
   const keepsRuntime =
+    !pool &&
     !!source.runtime_id &&
     options.runtimes.some(
       (runtime) =>
@@ -187,6 +210,7 @@ export function buildDuplicateDraft(
     description: source.description ?? "",
     instructions: source.instructions ?? "",
     avatarUrl: source.avatar_url ?? null,
+    runtimeBindingMode: pool ? "pool" : "fixed",
     runtimeId: keepsRuntime
       ? (source.runtime_id as string)
       : options.fallbackRuntimeId,
@@ -206,21 +230,37 @@ export function buildDuplicateDraft(
  */
 export function buildCreateAgentRequest(options: {
   draft: AgentDraft;
-  runtimeId: string;
+  runtimeId: string | null;
   /** Template attribution for the `agent_created` event, not a template create. */
   template?: string;
   duplicateSource?: Agent | null;
 }): CreateAgentRequest {
   const { draft, runtimeId, template, duplicateSource } = options;
+  const runtimeBindingMode = draft.runtimeBindingMode ?? "fixed";
   const request: CreateAgentRequest = {
     name: draft.name.trim(),
     description: draft.description.trim(),
     instructions: draft.instructions.trim() || undefined,
     avatar_url: draft.avatarUrl ?? undefined,
-    runtime_id: runtimeId,
-    model: draft.model.trim() || undefined,
-    thinking_level: draft.thinkingLevel.trim() || undefined,
-    service_tier: draft.serviceTier.trim() || undefined,
+    ...(runtimeBindingMode === "fixed" && runtimeId
+      ? { runtime_id: runtimeId }
+      : {}),
+    runtime_binding_mode: runtimeBindingMode,
+    ...(runtimeBindingMode === "pool"
+      ? {
+          runtime_requirements: {
+            schema_version: "multica.runtime-requirements/v1",
+            capabilities_all: ["multica.agent.execute/v1"],
+          },
+        }
+      : {}),
+    ...(runtimeBindingMode === "fixed"
+      ? {
+          model: draft.model.trim() || undefined,
+          thinking_level: draft.thinkingLevel.trim() || undefined,
+          service_tier: draft.serviceTier.trim() || undefined,
+        }
+      : {}),
     permission_mode:
       draft.permissionScope === "private" ? "private" : "public_to",
     invocation_targets: buildInvocationTargets(draft),
@@ -238,6 +278,9 @@ export function buildCreateAgentRequest(options: {
       sourceConcurrency <= AGENT_MAX_CONCURRENT_TASKS_MAX
     ) {
       request.max_concurrent_tasks = sourceConcurrency;
+    }
+    if (duplicateSource.comment_mention_policy === "creator_only_for_non_creator") {
+      request.comment_mention_policy = "creator_only_for_non_creator";
     }
   }
   return request;

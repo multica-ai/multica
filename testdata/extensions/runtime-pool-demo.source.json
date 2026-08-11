@@ -1,0 +1,95 @@
+{
+  "schema_version": "platform.extension/v1",
+  "extension": {
+    "key": "runtime-pool-demo",
+    "name": "Runtime Pool Demo",
+    "version": "1.0.0",
+    "description": "A small extension used to verify client-side Platform Extension import and Pool execution.",
+    "instructions": "Coordinate the request through the Pool, verify the result, and return a concise evidence-backed answer."
+  },
+  "leader": "pool-coordinator",
+  "agents": [
+    {
+      "key": "pool-coordinator",
+      "name": "Pool Coordinator",
+      "description": "Coordinates work assigned to the Runtime Pool.",
+      "prompt": "Break the request into independent checks, delegate when useful, and synthesize the final answer."
+    },
+    {
+      "key": "pool-researcher",
+      "name": "Pool Researcher",
+      "description": "Collects concrete facts and supporting evidence.",
+      "prompt": "Investigate the assigned question, record the important facts, and cite the evidence you used."
+    },
+    {
+      "key": "pool-reviewer",
+      "name": "Pool Reviewer",
+      "description": "Reviews the result for omissions and contradictions.",
+      "prompt": "Review the proposed result, identify missing evidence or contradictions, and report only actionable corrections."
+    }
+  ],
+  "skills": [
+    {
+      "key": "pool-evidence",
+      "name": "Pool Evidence",
+      "description": "A compact checklist for evidence-backed Pool tasks.",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "content": "---\nname: pool-evidence\ndescription: Collect and check evidence for a Pool task.\n---\n\n# Pool Evidence\n\n1. State the question being answered.\n2. Separate observations from assumptions.\n3. Preserve links, identifiers, or other concrete evidence.\n4. Call out unresolved uncertainty."
+        },
+        {
+          "path": "references/checklist.md",
+          "content": "# Evidence checklist\n\n- Is the claim directly supported?\n- Is the source identifiable?\n- Did the reviewer check the conclusion?"
+        }
+      ]
+    },
+    {
+      "key": "pool-handoff",
+      "name": "Pool Handoff",
+      "description": "Defines the handoff format between Pool agents.",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "content": "---\nname: pool-handoff\ndescription: Keep delegated Pool work easy to review.\n---\n\n# Pool Handoff\n\nReturn: task, findings, evidence, risks, and recommended next step."
+        }
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "name": "delegate.flow",
+      "description": "Delegates independent checks to the researcher and reviewer.",
+      "content": "Ask the researcher for evidence, ask the reviewer to challenge the result, then synthesize both outputs.",
+      "metadata": {
+        "owner": "pool-coordinator",
+        "mode": "parallel"
+      }
+    },
+    {
+      "name": "evidence.tool",
+      "description": "Runs the evidence checklist for a Pool result.",
+      "content": "Check that every important claim has an identifiable supporting observation.",
+      "metadata": {
+        "scope": "pool-task",
+        "output": "checklist"
+      }
+    },
+    {
+      "name": "summarize",
+      "description": "Produces the final concise handoff.",
+      "content": "Summarize the answer, evidence, uncertainty, and next action in a compact format.",
+      "metadata": {
+        "format": "concise"
+      }
+    }
+  ],
+  "command_suffixes": {
+    "flow": [
+      ".flow"
+    ],
+    "tool": [
+      ".tool"
+    ]
+  }
+}

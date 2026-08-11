@@ -113,6 +113,7 @@ export function useCreateAgentForm(options?: {
   const seedReady = seed.ready;
   const seedRuntimeId = seed.runtimeId;
   useEffect(() => {
+    if ((draft.runtimeBindingMode ?? "fixed") === "pool") return;
     if (draft.runtimeId || !seedReady) return;
     const next = seedRuntimeId || usableRuntimes[0]?.id || "";
     if (!next) return;
@@ -136,8 +137,9 @@ export function useCreateAgentForm(options?: {
     workspaceSkills,
     currentUserId,
     draftReady:
-      selectedRuntime != null &&
-      isRuntimeUsableForUser(selectedRuntime, currentUserId) &&
+      ((draft.runtimeBindingMode ?? "fixed") === "pool" ||
+        (selectedRuntime != null &&
+          isRuntimeUsableForUser(selectedRuntime, currentUserId))) &&
       isDraftDescriptionWithinLimit(draft.description) &&
       !accessInvalid,
   };

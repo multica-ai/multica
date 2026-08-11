@@ -655,11 +655,12 @@ func TestRuntimeRegistrationCapabilitiesPresence(t *testing.T) {
 		capabilitiesPresent bool
 		capabilities        []string
 		want                string
+		wantRuntimeMode     string
 	}{
-		{name: "legacy platform omission derives extension capability", provider: "platform-agent-cli", want: "multica.extension.execute/v1"},
-		{name: "explicit platform empty remains empty", provider: "platform-agent-cli", capabilitiesPresent: true, capabilities: []string{}, want: ""},
-		{name: "other provider omission remains empty", provider: "codex", want: ""},
-		{name: "platform prefix omission remains empty", provider: "platform-agent-cli-compatible", want: ""},
+		{name: "legacy platform omission derives extension capability", provider: "platform-agent-cli", want: "multica.extension.execute/v1", wantRuntimeMode: "cloud"},
+		{name: "explicit platform empty remains empty", provider: "platform-agent-cli", capabilitiesPresent: true, capabilities: []string{}, want: "", wantRuntimeMode: "cloud"},
+		{name: "other provider omission remains empty", provider: "codex", want: "", wantRuntimeMode: "local"},
+		{name: "platform prefix omission remains empty", provider: "platform-agent-cli-compatible", want: "", wantRuntimeMode: "local"},
 	}
 
 	for _, test := range tests {
@@ -670,14 +671,18 @@ func TestRuntimeRegistrationCapabilitiesPresence(t *testing.T) {
 				t.Fatalf("DaemonRegister status = %d: %s", response.Code, response.Body.String())
 			}
 			var capabilities []string
+			var runtimeMode string
 			if err := fixture.tx.QueryRow(fixture.ctx, `
-				SELECT capabilities FROM agent_runtime
+				SELECT capabilities, runtime_mode FROM agent_runtime
 				WHERE workspace_id = $1 AND daemon_id = $2 AND provider = $3 AND profile_id IS NULL
-			`, fixture.workspaceID, daemonID, test.provider).Scan(&capabilities); err != nil {
+			`, fixture.workspaceID, daemonID, test.provider).Scan(&capabilities, &runtimeMode); err != nil {
 				t.Fatalf("load registered capabilities: %v", err)
 			}
 			if got := strings.Join(capabilities, ","); got != test.want {
 				t.Fatalf("stored capabilities = %q, want %q", got, test.want)
+			}
+			if runtimeMode != test.wantRuntimeMode {
+				t.Fatalf("stored runtime_mode = %q, want %q", runtimeMode, test.wantRuntimeMode)
 			}
 		})
 	}
@@ -943,14 +948,14 @@ func TestFailedProfileRegistrationPreservesStoredCapabilities(t *testing.T) {
 		t.Fatalf("DaemonRegister status = %d: %s", response.Code, response.Body.String())
 	}
 	var capabilities []string
-	var status string
+	var status, runtimeMode string
 	if err := fixture.tx.QueryRow(fixture.ctx, `
-		SELECT capabilities, status FROM agent_runtime WHERE id = $1
-	`, runtimeID).Scan(&capabilities, &status); err != nil {
+		SELECT capabilities, status, runtime_mode FROM agent_runtime WHERE id = $1
+	`, runtimeID).Scan(&capabilities, &status, &runtimeMode); err != nil {
 		t.Fatalf("load failed-profile runtime: %v", err)
 	}
-	if got := strings.Join(capabilities, ","); got != "custom.profile.execute/v1" || status != "offline" {
-		t.Fatalf("failed-profile state = capabilities %q status %q", got, status)
+	if got := strings.Join(capabilities, ","); got != "custom.profile.execute/v1" || status != "offline" || runtimeMode != runtimeModeLocal {
+		t.Fatalf("failed-profile state = capabilities %q status %q runtime_mode %q", got, status, runtimeMode)
 	}
 }
 

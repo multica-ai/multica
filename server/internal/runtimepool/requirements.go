@@ -17,6 +17,7 @@ type Requirements struct {
 
 const (
 	RequirementsSchemaV1          = "multica.runtime-requirements/v1"
+	CapabilityAgentExecuteV1      = "multica.agent.execute/v1"
 	CapabilityExtensionExecuteV1  = "multica.extension.execute/v1"
 	BindingFixed                  = "fixed"
 	BindingPool                   = "pool"

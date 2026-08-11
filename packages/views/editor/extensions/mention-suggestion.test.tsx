@@ -201,6 +201,40 @@ describe("createMentionSuggestion", () => {
     expect(items.some((i) => i.type === "agent" && i.label === "Aegis")).toBe(true);
   });
 
+  it("limits Pool task mentions to the creator and hides issue references", () => {
+    const qc = fakeQc({
+      members: [
+        { user_id: "creator", name: "Creator", role: "member" },
+        { user_id: "other", name: "Other", role: "member" },
+      ],
+      agents: [
+        {
+          id: "agent-1",
+          name: "Agent One",
+          archived_at: null,
+          visibility: "workspace",
+          owner_id: null,
+        },
+      ],
+      squads: [
+        { id: "squad-1", name: "Squad One", leader_id: "agent-1", archived_at: null },
+      ],
+      issues: [
+        { id: "issue-1", identifier: "MUL-1", title: "Pool issue", status: "todo" },
+      ],
+    });
+
+    const config = createMentionSuggestion(qc, {
+      getAllowedActorMention: () => ({ type: "member", id: "creator" }),
+    } as never);
+    const result = config.items!(itemArgs("")) as MentionItem[];
+
+    expect(result.filter((item) => ["member", "agent", "squad", "all"].includes(item.type))).toEqual([
+      expect.objectContaining({ type: "member", id: "creator" }),
+    ]);
+    expect(result).not.toContainEqual(expect.objectContaining({ type: "issue", id: "issue-1" }));
+  });
+
   it("keeps an unbound agent discoverable but marks it as unselectable", () => {
     const qc = fakeQc({
       members: [{ user_id: "u1", name: "Alice", role: "member" }],

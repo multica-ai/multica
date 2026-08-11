@@ -9,6 +9,9 @@ export type AgentRuntimeMode = AgentExecutionMode;
 
 export type RuntimeBindingMode = "fixed" | "pool";
 export type SessionAffinityState = "none" | "pinned" | "removed";
+export type CommentMentionPolicy =
+  | "unrestricted"
+  | "creator_only_for_non_creator";
 
 export interface RuntimeRequirements {
   schema_version: "multica.runtime-requirements/v1";
@@ -454,6 +457,8 @@ export interface Agent {
   /** Defaults to fixed when reading a pre-Pool server. */
   runtime_binding_mode?: RuntimeBindingMode;
   runtime_requirements?: RuntimeRequirements;
+  /** Controls who may be mentioned in comments on issues assigned to this agent. */
+  comment_mention_policy?: CommentMentionPolicy;
   name: string;
   description: string;
   /** What this agent's owner wrote. For a system agent this holds only the
@@ -608,7 +613,10 @@ export interface CreateAgentRequest {
   description?: string;
   instructions?: string;
   avatar_url?: string;
-  runtime_id: string;
+  runtime_id?: string;
+  runtime_binding_mode?: RuntimeBindingMode;
+  runtime_requirements?: RuntimeRequirements;
+  comment_mention_policy?: CommentMentionPolicy;
   runtime_config?: Record<string, unknown>;
   custom_env?: Record<string, string>;
   custom_args?: string[];
@@ -663,6 +671,8 @@ export interface StoredAgentDraft {
   model: string;
   thinking_level: string;
   service_tier: string;
+  /** Omitted by drafts saved before Runtime Pool support; defaults to fixed. */
+  runtime_binding_mode?: RuntimeBindingMode;
   skill_ids: string[];
   permission_scope: AgentPermissionScope;
   member_ids: string[];
@@ -784,6 +794,7 @@ export interface UpdateAgentRequest {
   avatar_url?: string;
   runtime_id?: string;
   runtime_config?: Record<string, unknown>;
+  comment_mention_policy?: CommentMentionPolicy;
   /**
    * NOTE: `custom_env` is intentionally NOT updatable through this
    * request shape. Env edits flow through `client.updateAgentEnv` /

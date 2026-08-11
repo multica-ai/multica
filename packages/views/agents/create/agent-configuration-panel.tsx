@@ -3,12 +3,17 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
+  applyDraftBindingModeChange,
   applyDraftModelChange,
   applyDraftRuntimeChange,
   type AgentDraft,
   type AgentPermissionScope,
 } from "@multica/core/agents";
-import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
+import type {
+  MemberWithUser,
+  RuntimeBindingMode,
+  RuntimeDevice,
+} from "@multica/core/types";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -184,6 +189,30 @@ export function AgentConfigurationPanel({
         description={t(($) => $.creation_studio.sections.execution_hint)}
       >
         <SettingsCard>
+          {!onRuntimeSelect && (
+            <div className="border-b px-4 py-4">
+              <RuntimeBindingModePicker
+                value={draft.runtimeBindingMode ?? "fixed"}
+                onChange={(mode) =>
+                  onChange(applyDraftBindingModeChange(draft, mode))
+                }
+                fixedLabel={t(
+                  ($) => $.creation_studio.execution_mode.fixed.title,
+                )}
+                fixedDescription={t(
+                  ($) => $.creation_studio.execution_mode.fixed.description,
+                )}
+                poolLabel={t(
+                  ($) => $.creation_studio.execution_mode.pool.title,
+                )}
+                poolDescription={t(
+                  ($) => $.creation_studio.execution_mode.pool.description,
+                )}
+              />
+            </div>
+          )}
+          {(draft.runtimeBindingMode ?? "fixed") === "fixed" ? (
+            <>
           <div
             className={cn("grid gap-4 px-4 py-4", !compact && "sm:grid-cols-2")}
           >
@@ -227,6 +256,12 @@ export function AgentConfigurationPanel({
             disabled={runtimeLocked}
             onChange={onChange}
           />
+            </>
+          ) : (
+            <div className="px-4 py-4 text-body text-muted-foreground">
+              {t(($) => $.creation_studio.execution_mode.pool.active_hint)}
+            </div>
+          )}
         </SettingsCard>
       </SettingsSection>
 
@@ -313,6 +348,54 @@ export function AgentConfigurationPanel({
           ) : null}
         </SettingsCard>
       </SettingsSection>
+    </div>
+  );
+}
+
+export function RuntimeBindingModePicker({
+  value,
+  onChange,
+  fixedLabel,
+  fixedDescription,
+  poolLabel,
+  poolDescription,
+}: {
+  value: RuntimeBindingMode;
+  onChange: (value: RuntimeBindingMode) => void;
+  fixedLabel: string;
+  fixedDescription: string;
+  poolLabel: string;
+  poolDescription: string;
+}) {
+  const choices: Array<{
+    value: RuntimeBindingMode;
+    label: string;
+    description: string;
+  }> = [
+    { value: "fixed", label: fixedLabel, description: fixedDescription },
+    { value: "pool", label: poolLabel, description: poolDescription },
+  ];
+  return (
+    <div className="grid gap-2 sm:grid-cols-2" role="radiogroup">
+      {choices.map((choice) => (
+        <button
+          key={choice.value}
+          type="button"
+          role="radio"
+          aria-checked={value === choice.value}
+          aria-label={choice.label}
+          onClick={() => onChange(choice.value)}
+          className={cn(
+            "rounded-md border px-3 py-3 text-left transition-colors hover:bg-muted",
+            value === choice.value && "border-primary bg-muted",
+          )}
+        >
+          <span className="block text-label font-medium">{choice.label}</span>
+          <span className="mt-1 block text-caption text-muted-foreground">
+            {choice.description}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }

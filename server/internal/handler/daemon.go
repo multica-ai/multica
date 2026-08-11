@@ -428,11 +428,15 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		runtimeMode := runtimeModeLocal
+		if !isCustom {
+			runtimeMode = runtimeProviderDefinitionFor(provider).RuntimeMode
+		}
 		registration, err := h.registerRuntimeMutation(r.Context(), runtimeRegistrationMutation{
 			WorkspaceID:  wsUUID,
 			DaemonID:     strToText(req.DaemonID),
 			Name:         name,
-			RuntimeMode:  "local",
+			RuntimeMode:  runtimeMode,
 			Provider:     provider,
 			Status:       status,
 			DeviceInfo:   deviceInfo,

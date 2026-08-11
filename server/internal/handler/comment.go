@@ -1701,6 +1701,46 @@ func taskCoversReplyParent(task db.AgentTaskQueue, parentID pgtype.UUID) bool {
 	return false
 }
 
+func (h *Handler) issueMentionsCreatorOnlyForNonCreator(ctx context.Context, issue db.Issue, authorType, authorID, content string) (bool, error) {
+	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
+		return true, nil
+	}
+
+	agentID := issue.AssigneeID
+	if issue.AssigneeType.String == "squad" {
+		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID: issue.AssigneeID, WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return false, err
+		}
+		agentID = squad.LeaderID
+	} else if issue.AssigneeType.String != "agent" {
+		return true, nil
+	}
+
+	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID: agentID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return false, err
+	}
+	if agent.CommentMentionPolicy != commentMentionPolicyCreatorOnlyForNonCreator {
+		return true, nil
+	}
+	if authorType == issue.CreatorType && authorID == uuidToString(issue.CreatorID) {
+		return true, nil
+	}
+
+	creatorID := uuidToString(issue.CreatorID)
+	for _, mention := range util.ParseMentions(content) {
+		if mention.Type != issue.CreatorType || creatorID == "" || mention.ID != creatorID {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -1745,7 +1785,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid comment type")
 		return
 	}
-
 	var parentID pgtype.UUID
 	var parentComment *db.Comment
 	if req.ParentID != nil {
@@ -1774,6 +1813,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	mentionsAllowed, err := h.issueMentionsCreatorOnlyForNonCreator(r.Context(), issue, authorType, authorID, req.Content)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to validate comment mention policy")
+		return
+	}
+	if !mentionsAllowed {
+		writeError(w, http.StatusForbidden, "this agent may only mention the issue creator in comments")
+		return
+	}
 
 	// Defense against resumed-session drift: when an agent posts from inside a
 	// comment-triggered task AND the comment is being posted on that same
@@ -3231,6 +3279,15 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		triggerIssue = &issue
+		mentionsAllowed, err := h.issueMentionsCreatorOnlyForNonCreator(r.Context(), issue, actorType, actorID, req.Content)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to validate comment mention policy")
+			return
+		}
+		if !mentionsAllowed {
+			writeError(w, http.StatusForbidden, "this agent may only mention the issue creator in comments")
+			return
+		}
 		// A content edit is a NEW action, so its delegation lineage must key on THIS
 		// edit. Only the AGENT author re-editing its OWN comment carries issue-scoped
 		// lineage forward (commentSourceTaskIDForIssue re-stamps the current editing

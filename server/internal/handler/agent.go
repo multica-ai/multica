@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/internal/runtimepool"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -52,7 +53,8 @@ type AgentResponse struct {
 	// routable only while bound.
 	RuntimeRoutable     bool            `json:"runtime_routable"`
 	RuntimeBindingMode  string          `json:"runtime_binding_mode"`
-	RuntimeRequirements json.RawMessage `json:"runtime_requirements"`
+	RuntimeRequirements  json.RawMessage `json:"runtime_requirements"`
+	CommentMentionPolicy string          `json:"comment_mention_policy"`
 	Name                string          `json:"name"`
 	Description         string          `json:"description"`
 	// Instructions is what this agent's owner wrote. For a system agent it
@@ -189,6 +191,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		RuntimeRoutable:          service.IsAgentRoutable(a),
 		RuntimeBindingMode:       a.RuntimeBindingMode,
 		RuntimeRequirements:      json.RawMessage(a.RuntimeRequirements),
+		CommentMentionPolicy:     a.CommentMentionPolicy,
 		Name:                     a.Name,
 		Description:              a.Description,
 		Instructions:             a.Instructions,
@@ -1011,16 +1014,19 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
-	Name          string            `json:"name"`
-	Description   string            `json:"description"`
-	Instructions  string            `json:"instructions"`
-	AvatarURL     *string           `json:"avatar_url"`
-	RuntimeID     string            `json:"runtime_id"`
-	RuntimeConfig any               `json:"runtime_config"`
-	CustomEnv     map[string]string `json:"custom_env"`
-	CustomArgs    []string          `json:"custom_args"`
-	McpConfig     json.RawMessage   `json:"mcp_config"`
-	Visibility    string            `json:"visibility"`
+	Name                string            `json:"name"`
+	Description         string            `json:"description"`
+	Instructions        string            `json:"instructions"`
+	AvatarURL           *string           `json:"avatar_url"`
+	RuntimeID           string            `json:"runtime_id"`
+	RuntimeBindingMode  string            `json:"runtime_binding_mode"`
+	RuntimeRequirements json.RawMessage   `json:"runtime_requirements"`
+	CommentMentionPolicy string            `json:"comment_mention_policy"`
+	RuntimeConfig       any               `json:"runtime_config"`
+	CustomEnv           map[string]string `json:"custom_env"`
+	CustomArgs          []string          `json:"custom_args"`
+	McpConfig           json.RawMessage   `json:"mcp_config"`
+	Visibility          string            `json:"visibility"`
 	// PermissionMode + InvocationTargets are the new invocation-permission
 	// inputs (MUL-3963). When permission_mode is present it is authoritative
 	// and Visibility is ignored; when absent, legacy Visibility is mapped
@@ -1094,8 +1100,28 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("description must be %d characters or fewer", maxAgentDescriptionLength))
 		return
 	}
-	if req.RuntimeID == "" {
+	runtimeBindingMode := req.RuntimeBindingMode
+	if runtimeBindingMode == "" {
+		runtimeBindingMode = runtimepool.BindingFixed
+	}
+	if runtimeBindingMode != runtimepool.BindingFixed && runtimeBindingMode != runtimepool.BindingPool {
+		writeError(w, http.StatusBadRequest, "runtime_binding_mode must be fixed or pool")
+		return
+	}
+	if runtimeBindingMode == runtimepool.BindingFixed && req.RuntimeID == "" {
 		writeError(w, http.StatusBadRequest, "runtime_id is required")
+		return
+	}
+	if runtimeBindingMode == runtimepool.BindingPool && req.RuntimeID != "" {
+		writeError(w, http.StatusBadRequest, "runtime_id must be empty for pool agents")
+		return
+	}
+	commentMentionPolicy := req.CommentMentionPolicy
+	if commentMentionPolicy == "" {
+		commentMentionPolicy = commentMentionPolicyUnrestricted
+	}
+	if !validCommentMentionPolicy(commentMentionPolicy) {
+		writeError(w, http.StatusBadRequest, "comment_mention_policy must be unrestricted or creator_only_for_non_creator")
 		return
 	}
 	if req.Visibility == "" {
@@ -1106,10 +1132,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
-	if !ok {
-		return
-	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
 		return
@@ -1126,34 +1148,65 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, permErr.Error())
 		return
 	}
-	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-		ID:          runtimeUUID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid runtime_id")
-		return
-	}
-
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
 		return
 	}
-	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
-		return
+
+	var runtimeID pgtype.UUID
+	var runtimeMode, runtimeProvider, runtimeStatus string
+	runtimeRequirements := json.RawMessage(`{}`)
+	if runtimeBindingMode == runtimepool.BindingPool {
+		parsed, err := runtimepool.ParseRequirements(req.RuntimeRequirements)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid runtime_requirements: "+err.Error())
+			return
+		}
+		canonical, err := runtimepool.CanonicalRequirements(parsed)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid runtime_requirements: "+err.Error())
+			return
+		}
+		runtimeRequirements = canonical
+		runtimeMode = runtimepool.BindingPool
+		runtimeProvider = runtimepool.BindingPool
+		if req.Model != "" || req.ThinkingLevel != "" || req.ServiceTier != "" {
+			writeError(w, http.StatusBadRequest, "model, thinking_level, and service_tier require a fixed runtime")
+			return
+		}
+	} else {
+		runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
+		if !ok {
+			return
+		}
+		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+			ID:          runtimeUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
+			return
+		}
+		runtimeID = runtime.ID
+		runtimeMode = runtime.RuntimeMode
+		runtimeProvider = runtime.Provider
+		runtimeStatus = runtime.Status
 	}
 
 	// thinking_level validation: fixed-enum providers reject unknown literals;
 	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
 	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
 	// combination-invalid values are logged and omitted from the invocation.
-	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
-		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
+	if runtimeBindingMode == runtimepool.BindingFixed && !agent.IsKnownThinkingValue(runtimeProvider, req.ThinkingLevel) {
+		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtimeProvider, req.ThinkingLevel))
 		return
 	}
-	if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtime.Provider))
+	if runtimeBindingMode == runtimepool.BindingFixed && !agent.IsKnownServiceTier(runtimeProvider, req.ServiceTier) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtimeProvider))
 		return
 	}
 
@@ -1235,9 +1288,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Description:              req.Description,
 		Instructions:             req.Instructions,
 		AvatarUrl:                avatarURL,
-		RuntimeMode:              runtime.RuntimeMode,
+		RuntimeMode:              runtimeMode,
 		RuntimeConfig:            rc,
-		RuntimeID:                runtime.ID,
+		RuntimeID:                runtimeID,
 		Visibility:               perm.legacyVisibility(),
 		PermissionMode:           perm.mode,
 		MaxConcurrentTasks:       req.MaxConcurrentTasks,
@@ -1249,6 +1302,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ThinkingLevel:            pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
 		ServiceTier:              pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
 		ComposioToolkitAllowlist: allowlist,
+		RuntimeBindingMode:       runtimeBindingMode,
+		RuntimeRequirements:      runtimeRequirements,
+		CommentMentionPolicy:     pgtype.Text{String: commentMentionPolicy, Valid: true},
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -1281,7 +1337,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(created.ID), "name", created.Name, "workspace_id", workspaceID)...)
 
-	if runtime.Status == "online" {
+	if runtimeBindingMode == runtimepool.BindingFixed && runtimeStatus == "online" {
 		h.TaskService.ReconcileAgentStatus(r.Context(), created.ID)
 		created, _ = h.Queries.GetAgent(r.Context(), created.ID)
 	}
@@ -1300,8 +1356,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ownerID,
 		workspaceID,
 		uuidToString(created.ID),
-		runtime.Provider,
-		runtime.RuntimeMode,
+		runtimeProvider,
+		runtimeMode,
 		req.Template,
 		isFirstAgent,
 	))
@@ -1319,7 +1375,8 @@ type UpdateAgentRequest struct {
 	Instructions  *string `json:"instructions"`
 	AvatarURL     *string `json:"avatar_url"`
 	RuntimeID     *string `json:"runtime_id"`
-	RuntimeConfig any     `json:"runtime_config"`
+	RuntimeConfig        any     `json:"runtime_config"`
+	CommentMentionPolicy *string `json:"comment_mention_policy"`
 	// custom_env is intentionally NOT updatable through this endpoint.
 	// Use `PUT /api/agents/{id}/env` for env changes — that path admits
 	// the agent owner or a workspace owner/admin, denies agent actors,
@@ -1570,6 +1627,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	params := db.UpdateAgentParams{
 		ID: existing.ID,
+	}
+	if req.CommentMentionPolicy != nil {
+		if !validCommentMentionPolicy(*req.CommentMentionPolicy) {
+			writeError(w, http.StatusBadRequest, "comment_mention_policy must be unrestricted or creator_only_for_non_creator")
+			return
+		}
+		params.CommentMentionPolicy = pgtype.Text{String: *req.CommentMentionPolicy, Valid: true}
 	}
 	if req.Name != nil {
 		params.Name = pgtype.Text{String: *req.Name, Valid: true}

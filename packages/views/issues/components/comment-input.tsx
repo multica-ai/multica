@@ -2,7 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 import { cn } from "@multica/ui/lib/utils";
-import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
+import { ContentEditor, type ContentEditorRef, type MentionActorTarget, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { contentReferencesAttachment } from "@multica/core/types";
@@ -17,13 +17,14 @@ import { useStickyComposer } from "../hooks/use-sticky-composer";
 
 interface CommentInputProps {
   issueId: string;
+  allowedActorMention?: MentionActorTarget | null;
   /** Resolves true on success, false on failure. The composer keeps the text
    *  (editor locked + button spinning) until this settles, then clears only on
    *  success — a failed send must not silently discard the user's draft. */
   onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
 }
 
-function CommentInput({ issueId, onSubmit }: CommentInputProps) {
+function CommentInput({ issueId, allowedActorMention, onSubmit }: CommentInputProps) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
@@ -228,6 +229,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           onUploadingChange={uploadGate.onUploadingChange}
           debounceMs={100}
           currentIssueId={issueId}
+          allowedActorMention={allowedActorMention}
           attachments={pendingAttachments}
           enableSlashCommands
           slashCommandMode="command"

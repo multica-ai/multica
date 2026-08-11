@@ -2,7 +2,10 @@ import { createElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
-import { AgentNameField } from "./agent-configuration-panel";
+import {
+  AgentNameField,
+  RuntimeBindingModePicker,
+} from "./agent-configuration-panel";
 import { CreateMethodChooser } from "./choose-create-method-page";
 import { CreateAgentFooter } from "./create-agent-footer";
 import { draftPreview } from "./unfinished-drafts";
@@ -64,6 +67,23 @@ vi.mock("../../i18n", () => ({
 }));
 
 describe("Agent creation errors", () => {
+  it("switches an agent from a fixed runtime to the runtime pool", () => {
+    const onChange = vi.fn();
+    render(
+      createElement(RuntimeBindingModePicker, {
+        value: "fixed",
+        onChange,
+        fixedLabel: "Fixed runtime",
+        fixedDescription: "Always use one runtime.",
+        poolLabel: "Runtime pool",
+        poolDescription: "Assign an idle runtime for each task.",
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: /runtime pool/i }));
+    expect(onChange).toHaveBeenCalledWith("pool");
+  });
+
   it("classifies a conflict as a name error", () => {
     expect(
       classifyAgentCreateError(

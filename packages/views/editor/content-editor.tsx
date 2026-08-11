@@ -54,7 +54,7 @@ import {
   MARKDOWN_CHUNK_THRESHOLD,
   type MarkdownManagerLike,
 } from "./utils/parse-markdown-chunked";
-import type { MentionItem } from "./extensions/mention-suggestion";
+import type { MentionActorTarget, MentionItem } from "./extensions/mention-suggestion";
 import type { IssueIdentifierResolver } from "./extensions/issue-identifier-autolink";
 import type { BuiltinCommandSuggestionOptions } from "./extensions/slash-command-suggestion";
 import { createEditorExtensions } from "./extensions";
@@ -182,6 +182,8 @@ interface ContentEditorBaseProps {
   /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
   mentionMode?: "default" | "context";
   mentionContextItems?: MentionItem[];
+  /** Restrict all mentions to one actor target. */
+  allowedActorMention?: MentionActorTarget | null;
   /** Enable the `/` command picker. Defaults false. */
   enableSlashCommands?: boolean;
   /**
@@ -367,6 +369,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       disableMentions = false,
       mentionMode = "default",
       mentionContextItems,
+      allowedActorMention,
       enableSlashCommands = false,
       slashCommandMode = "skill",
       quickActionMenu,
@@ -395,6 +398,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // live without remounting the editor.
     const pasteAsFileThresholdRef = useRef<number | undefined>(pasteAsFileThreshold);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
+    const allowedActorMentionRef = useRef<MentionActorTarget | null>(allowedActorMention ?? null);
     // Kept in a ref for the same reason as mentionContextItems: the extension
     // set is built once at mount, so a directly-captured options object would
     // freeze whatever closures existed then and stop seeing new quick actions.
@@ -494,6 +498,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onUploadFileRef.current = wrappedOnUploadFile;
     pasteAsFileThresholdRef.current = pasteAsFileThreshold;
     mentionContextItemsRef.current = mentionContextItems ?? [];
+    allowedActorMentionRef.current = allowedActorMention ?? null;
     quickActionMenuRef.current = quickActionMenu;
     flushPendingOnUnmountRef.current = flushPendingOnUnmount;
 
@@ -595,6 +600,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         disableMentions,
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
+        getAllowedActorMention: () => allowedActorMentionRef.current,
         enableSlashCommands,
         slashCommandMode,
         quickActionMenu: {

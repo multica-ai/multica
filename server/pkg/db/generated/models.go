@@ -54,6 +54,7 @@ type Agent struct {
 	ServiceTier           pgtype.Text `json:"service_tier"`
 	RuntimeBindingMode    string      `json:"runtime_binding_mode"`
 	RuntimeRequirements   []byte      `json:"runtime_requirements"`
+	CommentMentionPolicy  string      `json:"comment_mention_policy"`
 }
 
 type AgentBuilderDraft struct {
@@ -182,6 +183,7 @@ type AgentTaskQueue struct {
 	SessionAffinityState      string      `json:"session_affinity_state"`
 	SessionAffinityRuntimeID  pgtype.UUID `json:"session_affinity_runtime_id"`
 	ExplicitFreshSession      bool        `json:"explicit_fresh_session"`
+	RuntimeTriggerUserID      pgtype.UUID `json:"runtime_trigger_user_id"`
 }
 
 type AgentToLabel struct {

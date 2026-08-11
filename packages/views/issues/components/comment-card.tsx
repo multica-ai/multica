@@ -29,7 +29,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
-import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useComposerSubmit } from "../../editor";
+import { ContentEditor, type ContentEditorRef, type MentionActorTarget, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useComposerSubmit } from "../../editor";
 import { useCommentUploads } from "./use-comment-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { api, dispatchReasonCode } from "@multica/core/api";
@@ -88,6 +88,7 @@ function StickyHeaderShell({
 
 interface CommentCardProps {
   issueId: string;
+  allowedActorMention?: MentionActorTarget | null;
   entry: TimelineEntry;
   /**
    * Flat list of every nested reply under this thread root, in render order.
@@ -506,6 +507,7 @@ function useEditAttachmentState(
 
 function CommentRow({
   issueId,
+  allowedActorMention,
   entry,
   currentUserId,
   canModerate = false,
@@ -517,6 +519,7 @@ function CommentRow({
   onResolveToggle,
 }: {
   issueId: string;
+  allowedActorMention?: MentionActorTarget | null;
   entry: TimelineEntry;
   currentUserId?: string;
   canModerate?: boolean;
@@ -659,6 +662,7 @@ function CommentRow({
               onUploadingChange={edit.onUploadingChange}
               debounceMs={100}
               currentIssueId={issueId}
+              allowedActorMention={allowedActorMention}
               attachments={edit.editorAttachments}
             />
           </div>
@@ -746,6 +750,7 @@ function CommentRow({
 
 function CommentCardImpl({
   issueId,
+  allowedActorMention,
   entry,
   replies,
   currentUserId,
@@ -975,6 +980,7 @@ function CommentCardImpl({
                     onUploadingChange={edit.onUploadingChange}
                     debounceMs={100}
                     currentIssueId={issueId}
+                    allowedActorMention={allowedActorMention}
                     attachments={edit.editorAttachments}
                   />
                 </div>
@@ -1075,6 +1081,7 @@ function CommentCardImpl({
                 >
                   <CommentRow
                     issueId={issueId}
+                    allowedActorMention={allowedActorMention}
                     entry={resolutionReply}
                     currentUserId={currentUserId}
                     canModerate={canModerate}
@@ -1114,6 +1121,7 @@ function CommentCardImpl({
                 >
                   <CommentRow
                     issueId={issueId}
+                    allowedActorMention={allowedActorMention}
                     entry={reply}
                     currentUserId={currentUserId}
                     canModerate={canModerate}
@@ -1131,6 +1139,7 @@ function CommentCardImpl({
               <div className="border-t border-border/50 px-4 max-md:px-3 py-2.5">
                 <ReplyInput
                   issueId={issueId}
+                  allowedActorMention={allowedActorMention}
                   parentId={entry.id}
                   placeholder={t(($) => $.reply.placeholder)}
                   size="sm"

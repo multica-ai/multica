@@ -58,14 +58,17 @@ INSERT INTO agent (
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     service_tier,
-    composio_toolkit_allowlist, permission_mode
+    composio_toolkit_allowlist, permission_mode,
+    runtime_binding_mode, runtime_requirements, comment_mention_policy
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
     $17,
     sqlc.narg('composio_toolkit_allowlist')::text[],
-    COALESCE(sqlc.narg('permission_mode'), 'private')
+    COALESCE(sqlc.narg('permission_mode'), 'private'),
+    sqlc.arg('runtime_binding_mode'), sqlc.arg('runtime_requirements'),
+    COALESCE(sqlc.narg('comment_mention_policy'), 'unrestricted')
 )
 RETURNING *;
 
@@ -288,6 +291,7 @@ UPDATE agent SET
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
+    comment_mention_policy = COALESCE(sqlc.narg('comment_mention_policy'), comment_mention_policy),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -509,7 +513,7 @@ INSERT INTO agent_task_queue (
     runtime_connected_apps, originator_source, delegated_from_task_id,
     rule_version_id, rerun_of_task_id, trigger_evidence_kind,
     trigger_evidence_ref_id, runtime_binding_mode, runtime_requirements,
-    placement_workspace_id, runtime_requester_user_id,
+    placement_workspace_id, runtime_requester_user_id, runtime_trigger_user_id,
     session_affinity_state, session_affinity_runtime_id,
     explicit_fresh_session, wait_reason
 )
@@ -533,7 +537,7 @@ VALUES (
     sqlc.narg(rule_version_id), sqlc.narg(rerun_of_task_id),
     sqlc.narg(trigger_evidence_kind), sqlc.narg(trigger_evidence_ref_id),
     'pool', sqlc.arg(runtime_requirements)::jsonb,
-    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id),
+    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id), sqlc.narg(runtime_trigger_user_id),
     sqlc.arg(session_affinity_state), sqlc.narg(session_affinity_runtime_id),
     sqlc.arg(explicit_fresh_session), sqlc.narg(wait_reason)
 )
@@ -585,7 +589,7 @@ INSERT INTO agent_task_queue (
     runtime_connected_apps, originator_source, delegated_from_task_id,
     rule_version_id, rerun_of_task_id, trigger_evidence_kind,
     trigger_evidence_ref_id, fire_at, runtime_binding_mode,
-    runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+    runtime_requirements, placement_workspace_id, runtime_requester_user_id, runtime_trigger_user_id,
     session_affinity_state, session_affinity_runtime_id,
     explicit_fresh_session, wait_reason
 )
@@ -609,7 +613,7 @@ VALUES (
     sqlc.narg(trigger_evidence_kind), sqlc.narg(trigger_evidence_ref_id),
     CASE WHEN sqlc.arg(status) = 'deferred' THEN sqlc.arg(fire_at)::timestamptz ELSE NULL END,
     'pool', sqlc.arg(runtime_requirements)::jsonb,
-    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id),
+    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id), sqlc.narg(runtime_trigger_user_id),
     sqlc.arg(session_affinity_state), sqlc.narg(session_affinity_runtime_id),
     sqlc.arg(explicit_fresh_session), sqlc.narg(wait_reason)
 )
@@ -676,7 +680,7 @@ INSERT INTO agent_task_queue (
     originator_user_id, accountable_user_id, runtime_mcp_overlay,
     runtime_connected_apps, originator_source, trigger_evidence_kind,
     trigger_evidence_ref_id, runtime_binding_mode, runtime_requirements,
-    placement_workspace_id, runtime_requester_user_id,
+    placement_workspace_id, runtime_requester_user_id, runtime_trigger_user_id,
     session_affinity_state, session_affinity_runtime_id,
     explicit_fresh_session, wait_reason
 )
@@ -688,7 +692,7 @@ VALUES (
     sqlc.narg(originator_source), sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id), 'pool',
     sqlc.arg(runtime_requirements)::jsonb,
-    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id),
+    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id), sqlc.narg(runtime_trigger_user_id),
     sqlc.arg(session_affinity_state), sqlc.narg(session_affinity_runtime_id),
     sqlc.arg(explicit_fresh_session), sqlc.narg(wait_reason)
 )
@@ -735,7 +739,7 @@ INSERT INTO agent_task_queue (
     escalation_for_task_id, fire_at, originator_user_id,
     accountable_user_id, originator_source, delegated_from_task_id,
     trigger_evidence_kind, trigger_evidence_ref_id, runtime_binding_mode,
-    runtime_requirements, placement_workspace_id, runtime_requester_user_id,
+    runtime_requirements, placement_workspace_id, runtime_requester_user_id, runtime_trigger_user_id,
     session_affinity_state, session_affinity_runtime_id,
     explicit_fresh_session, wait_reason
 )
@@ -750,7 +754,7 @@ VALUES (
     sqlc.narg(originator_source), sqlc.narg(delegated_from_task_id),
     sqlc.narg(trigger_evidence_kind), sqlc.narg(trigger_evidence_ref_id),
     'pool', sqlc.arg(runtime_requirements)::jsonb,
-    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id),
+    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id), sqlc.narg(runtime_trigger_user_id),
     sqlc.arg(session_affinity_state), sqlc.narg(session_affinity_runtime_id),
     sqlc.arg(explicit_fresh_session), sqlc.narg(wait_reason)
 )
@@ -884,7 +888,7 @@ INSERT INTO agent_task_queue (
     delegated_from_task_id, rule_version_id, trigger_evidence_kind,
     trigger_evidence_ref_id, retry_of_task_id, chat_input_task_id, fire_at,
     runtime_binding_mode, runtime_requirements, placement_workspace_id,
-    runtime_requester_user_id, session_affinity_state,
+    runtime_requester_user_id, runtime_trigger_user_id, session_affinity_state,
     session_affinity_runtime_id, explicit_fresh_session, wait_reason
 )
 SELECT
@@ -903,7 +907,7 @@ SELECT
     p.trigger_evidence_ref_id, p.id, p.chat_input_task_id,
     CASE WHEN sqlc.arg(status)::text = 'deferred' THEN sqlc.narg(fire_at)::timestamptz ELSE NULL END,
     'pool', sqlc.arg(runtime_requirements)::jsonb,
-    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id),
+    sqlc.arg(placement_workspace_id), sqlc.arg(runtime_requester_user_id), sqlc.narg(runtime_trigger_user_id),
     sqlc.arg(session_affinity_state), sqlc.narg(session_affinity_runtime_id),
     sqlc.arg(explicit_fresh_session), sqlc.narg(wait_reason)
 FROM agent_task_queue AS p
@@ -1110,6 +1114,7 @@ WHERE q.id = head.id
   AND q.runtime_binding_mode = sqlc.arg(expected_runtime_binding_mode)::text
   AND q.placement_workspace_id IS NOT DISTINCT FROM sqlc.narg(expected_placement_workspace_id)::uuid
   AND q.runtime_requester_user_id IS NOT DISTINCT FROM sqlc.narg(expected_runtime_requester_user_id)::uuid
+  AND q.runtime_trigger_user_id IS NOT DISTINCT FROM sqlc.narg(expected_runtime_trigger_user_id)::uuid
   AND q.runtime_requirements = sqlc.arg(expected_runtime_requirements)::jsonb
   AND q.session_affinity_state = sqlc.arg(expected_session_affinity_state)::text
   AND q.session_affinity_runtime_id IS NOT DISTINCT FROM sqlc.narg(expected_session_affinity_runtime_id)::uuid
@@ -1135,6 +1140,7 @@ WHERE q.id = sqlc.arg(expected_task_id)::uuid
   AND q.runtime_binding_mode = sqlc.arg(expected_runtime_binding_mode)::text
   AND q.placement_workspace_id IS NOT DISTINCT FROM sqlc.narg(expected_placement_workspace_id)::uuid
   AND q.runtime_requester_user_id IS NOT DISTINCT FROM sqlc.narg(expected_runtime_requester_user_id)::uuid
+  AND q.runtime_trigger_user_id IS NOT DISTINCT FROM sqlc.narg(expected_runtime_trigger_user_id)::uuid
   AND q.runtime_requirements = sqlc.arg(expected_runtime_requirements)::jsonb
   AND q.session_affinity_state = sqlc.arg(expected_session_affinity_state)::text
   AND q.session_affinity_runtime_id IS NOT DISTINCT FROM sqlc.narg(expected_session_affinity_runtime_id)::uuid
@@ -1354,6 +1360,7 @@ WHERE q.id = head.id
   AND q.runtime_binding_mode = sqlc.arg(expected_runtime_binding_mode)::text
   AND q.placement_workspace_id IS NOT DISTINCT FROM sqlc.narg(expected_placement_workspace_id)::uuid
   AND q.runtime_requester_user_id IS NOT DISTINCT FROM sqlc.narg(expected_runtime_requester_user_id)::uuid
+  AND q.runtime_trigger_user_id IS NOT DISTINCT FROM sqlc.narg(expected_runtime_trigger_user_id)::uuid
   AND q.runtime_requirements = sqlc.arg(expected_runtime_requirements)::jsonb
   AND q.session_affinity_state = sqlc.arg(expected_session_affinity_state)::text
   AND q.session_affinity_runtime_id IS NOT DISTINCT FROM sqlc.narg(expected_session_affinity_runtime_id)::uuid
@@ -1381,6 +1388,7 @@ WHERE q.id = sqlc.arg(expected_task_id)::uuid
   AND q.runtime_binding_mode = sqlc.arg(expected_runtime_binding_mode)::text
   AND q.placement_workspace_id IS NOT DISTINCT FROM sqlc.narg(expected_placement_workspace_id)::uuid
   AND q.runtime_requester_user_id IS NOT DISTINCT FROM sqlc.narg(expected_runtime_requester_user_id)::uuid
+  AND q.runtime_trigger_user_id IS NOT DISTINCT FROM sqlc.narg(expected_runtime_trigger_user_id)::uuid
   AND q.runtime_requirements = sqlc.arg(expected_runtime_requirements)::jsonb
   AND q.session_affinity_state = sqlc.arg(expected_session_affinity_state)::text
   AND q.session_affinity_runtime_id IS NOT DISTINCT FROM sqlc.narg(expected_session_affinity_runtime_id)::uuid

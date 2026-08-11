@@ -84,6 +84,11 @@ export interface MentionItem {
   disabledReason?: "agent_runtime_required";
 }
 
+export type MentionActorTarget = {
+  type: "member" | "agent" | "squad";
+  id: string;
+};
+
 interface MentionListProps {
   items: MentionItem[];
   query: string;
@@ -674,6 +679,7 @@ function matchesMentionQuery(item: MentionItem, query: string): boolean {
 interface MentionSuggestionOptions {
   mode?: "default" | "context";
   getContextItems?: () => MentionItem[];
+  getAllowedActorMention?: () => MentionActorTarget | null;
 }
 
 export function createMentionSuggestion(
@@ -686,6 +692,12 @@ export function createMentionSuggestion(
   // The explicit key is passed into Tiptap Suggestion and reused by the
   // shared popup controller when it dispatches exitSuggestion(view, pluginKey).
   const pluginKey = new PluginKey("mentionSuggestion");
+
+  function applyActorPolicy(items: MentionItem[]): MentionItem[] {
+    const allowed = options.getAllowedActorMention?.();
+    if (!allowed) return items;
+    return items.filter((item) => item.type === allowed.type && item.id === allowed.id);
+  }
 
   function buildSyncItems(query: string): MentionItem[] {
     // Read workspace id imperatively because this runs in TipTap factory scope
@@ -781,7 +793,7 @@ export function createMentionSuggestion(
       )
       .map(issueToMention);
 
-    return [...allItem, ...userItems, ...issueItems];
+    return applyActorPolicy([...allItem, ...userItems, ...issueItems]);
   }
 
   return {
@@ -794,7 +806,9 @@ export function createMentionSuggestion(
     items: ({ query }) => {
       if (options.mode === "context") {
         const normalizedQuery = query.trim();
-        const contextItems = (options.getContextItems?.() ?? []).filter((item) => matchesMentionQuery(item, query));
+        const contextItems = applyActorPolicy(
+          (options.getContextItems?.() ?? []).filter((item) => matchesMentionQuery(item, query)),
+        );
         if (!normalizedQuery) return contextItems;
         return mergeMentionItems(contextItems, buildSyncItems(query));
       }

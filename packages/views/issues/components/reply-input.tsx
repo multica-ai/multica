@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
+import { ContentEditor, type ContentEditorRef, type MentionActorTarget, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -22,6 +22,7 @@ import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 
 interface ReplyInputProps {
   issueId: string;
+  allowedActorMention?: MentionActorTarget | null;
   parentId: string;
   placeholder?: string;
   avatarType: string;
@@ -42,6 +43,7 @@ interface ReplyInputProps {
 
 function ReplyInput({
   issueId,
+  allowedActorMention,
   parentId,
   placeholder,
   avatarType,
@@ -248,6 +250,7 @@ function ReplyInput({
             onUploadingChange={uploadGate.onUploadingChange}
             debounceMs={100}
             currentIssueId={issueId}
+            allowedActorMention={allowedActorMention}
             attachments={pendingAttachments}
             enableSlashCommands
             slashCommandMode="command"

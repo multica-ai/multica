@@ -26,6 +26,7 @@ type PoolRoutingSnapshot struct {
 	RuntimeRequirements      []byte
 	PlacementWorkspaceID     pgtype.UUID
 	RuntimeRequesterUserID   pgtype.UUID
+	RuntimeTriggerUserID     pgtype.UUID
 	SessionAffinityState     string
 	SessionAffinityRuntimeID pgtype.UUID
 	ExplicitFreshSession     bool
@@ -39,6 +40,7 @@ type PoolTaskCreateInput struct {
 	AgentID          pgtype.UUID
 	WorkspaceID      pgtype.UUID
 	OriginatorUserID pgtype.UUID
+	TriggerUserID    pgtype.UUID
 	Placement        PoolPlacementRequest
 	Deferred         bool
 	BeforePlacement  func(context.Context, *db.Queries, db.Member, db.Agent) error
@@ -181,7 +183,7 @@ func (s *TaskService) createPoolTaskLocked(
 	if err != nil {
 		return db.AgentTaskQueue{}, err
 	}
-	routing, err := newPoolRoutingSnapshot(agent, member, input.OriginatorUserID, placementRequest, placement, canonicalRequirements, input.Deferred)
+	routing, err := newPoolRoutingSnapshot(agent, member, input.OriginatorUserID, input.TriggerUserID, placementRequest, placement, canonicalRequirements, input.Deferred)
 	if err != nil {
 		return db.AgentTaskQueue{}, err
 	}
@@ -199,6 +201,7 @@ func newPoolRoutingSnapshot(
 	agent db.Agent,
 	member db.Member,
 	originator pgtype.UUID,
+	triggerUserID pgtype.UUID,
 	request PoolPlacementRequest,
 	placement PoolPlacement,
 	requirements []byte,
@@ -208,11 +211,15 @@ func newPoolRoutingSnapshot(
 	if !requester.Valid {
 		requester = agent.OwnerID
 	}
+	if triggerUserID.Valid && triggerUserID != member.UserID {
+		return PoolRoutingSnapshot{}, ErrPoolPlacementMemberRequired
+	}
 	snapshot := PoolRoutingSnapshot{
 		Status:                 runtimepool.StatusWaitingRuntime,
 		RuntimeRequirements:    requirements,
 		PlacementWorkspaceID:   member.WorkspaceID,
 		RuntimeRequesterUserID: requester,
+		RuntimeTriggerUserID:   triggerUserID,
 		SessionAffinityState:   placement.State,
 		ExplicitFreshSession:   request.ExplicitFreshSession,
 		WaitReason:             pgtype.Text{String: "no_eligible_runtime", Valid: true},
@@ -256,6 +263,7 @@ func validatePoolTaskRoutingSnapshot(created db.AgentTaskQueue, agentID pgtype.U
 		created.RuntimeBindingMode != runtimepool.BindingPool || !bytes.Equal(canonical, expected.RuntimeRequirements) ||
 		created.PlacementWorkspaceID != expected.PlacementWorkspaceID ||
 		created.RuntimeRequesterUserID != expected.RuntimeRequesterUserID ||
+		created.RuntimeTriggerUserID != expected.RuntimeTriggerUserID ||
 		created.SessionAffinityState != expected.SessionAffinityState ||
 		created.SessionAffinityRuntimeID != expected.SessionAffinityRuntimeID ||
 		created.ExplicitFreshSession != expected.ExplicitFreshSession ||
@@ -300,6 +308,7 @@ func insertPoolAgentTask(
 		RuntimeRequirements:      routing.RuntimeRequirements,
 		PlacementWorkspaceID:     routing.PlacementWorkspaceID,
 		RuntimeRequesterUserID:   routing.RuntimeRequesterUserID,
+		RuntimeTriggerUserID:     routing.RuntimeTriggerUserID,
 		SessionAffinityState:     routing.SessionAffinityState,
 		SessionAffinityRuntimeID: routing.SessionAffinityRuntimeID,
 		ExplicitFreshSession:     routing.ExplicitFreshSession,
@@ -369,6 +378,7 @@ func insertPoolDeferredChannelIssueTask(
 		RuntimeRequirements:      routing.RuntimeRequirements,
 		PlacementWorkspaceID:     routing.PlacementWorkspaceID,
 		RuntimeRequesterUserID:   routing.RuntimeRequesterUserID,
+		RuntimeTriggerUserID:     routing.RuntimeTriggerUserID,
 		SessionAffinityState:     routing.SessionAffinityState,
 		SessionAffinityRuntimeID: routing.SessionAffinityRuntimeID,
 		ExplicitFreshSession:     routing.ExplicitFreshSession,
@@ -405,6 +415,7 @@ func insertPoolDeferredAgentTask(
 		RuntimeRequirements:      routing.RuntimeRequirements,
 		PlacementWorkspaceID:     routing.PlacementWorkspaceID,
 		RuntimeRequesterUserID:   routing.RuntimeRequesterUserID,
+		RuntimeTriggerUserID:     routing.RuntimeTriggerUserID,
 		SessionAffinityState:     routing.SessionAffinityState,
 		SessionAffinityRuntimeID: routing.SessionAffinityRuntimeID,
 		ExplicitFreshSession:     routing.ExplicitFreshSession,
@@ -434,6 +445,7 @@ func insertPoolQuickCreateTask(
 		RuntimeRequirements:      routing.RuntimeRequirements,
 		PlacementWorkspaceID:     routing.PlacementWorkspaceID,
 		RuntimeRequesterUserID:   routing.RuntimeRequesterUserID,
+		RuntimeTriggerUserID:     routing.RuntimeTriggerUserID,
 		SessionAffinityState:     routing.SessionAffinityState,
 		SessionAffinityRuntimeID: routing.SessionAffinityRuntimeID,
 		ExplicitFreshSession:     routing.ExplicitFreshSession,
@@ -457,6 +469,7 @@ func insertPoolRetryTask(
 		RuntimeRequirements:      routing.RuntimeRequirements,
 		PlacementWorkspaceID:     routing.PlacementWorkspaceID,
 		RuntimeRequesterUserID:   routing.RuntimeRequesterUserID,
+		RuntimeTriggerUserID:     routing.RuntimeTriggerUserID,
 		SessionAffinityState:     routing.SessionAffinityState,
 		SessionAffinityRuntimeID: routing.SessionAffinityRuntimeID,
 		ExplicitFreshSession:     routing.ExplicitFreshSession,
@@ -470,6 +483,7 @@ func newPoolRetryTaskCreateInput(parent db.AgentTaskQueue, params db.CreateRetry
 		AgentID:          parent.AgentID,
 		WorkspaceID:      parent.PlacementWorkspaceID,
 		OriginatorUserID: parent.RuntimeRequesterUserID,
+		TriggerUserID:    parent.RuntimeTriggerUserID,
 		Placement:        PoolPlacementRequest{RetryOfTaskID: parent.ID},
 		Deferred:         params.FireAt.Valid,
 		BeforePlacement: func(ctx context.Context, qtx *db.Queries, member db.Member, agent db.Agent) error {
@@ -509,6 +523,7 @@ func samePoolRetrySourceSnapshot(before, after db.AgentTaskQueue) bool {
 		before.RuntimeBindingMode == after.RuntimeBindingMode &&
 		before.PlacementWorkspaceID == after.PlacementWorkspaceID &&
 		before.RuntimeRequesterUserID == after.RuntimeRequesterUserID &&
+		before.RuntimeTriggerUserID == after.RuntimeTriggerUserID &&
 		before.SessionAffinityState == after.SessionAffinityState &&
 		before.SessionAffinityRuntimeID == after.SessionAffinityRuntimeID
 }

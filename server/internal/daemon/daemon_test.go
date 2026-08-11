@@ -1261,8 +1261,8 @@ func TestRuntimeRegistrationCapabilitiesAreExplicit(t *testing.T) {
 			}
 			continue
 		}
-		if len(capabilities) != 0 {
-			t.Fatalf("provider %q capabilities = %#v, want explicit empty", provider, capabilities)
+		if len(capabilities) != 1 || capabilities[0] != "multica.agent.execute/v1" {
+			t.Fatalf("provider %q capabilities = %#v, want [multica.agent.execute/v1]", provider, capabilities)
 		}
 	}
 
@@ -1270,8 +1270,10 @@ func TestRuntimeRegistrationCapabilitiesAreExplicit(t *testing.T) {
 		"name": "Platform Compatible",
 		"type": "platform-agent-cli-compatible",
 	}})
-	if len(prefixRegistration) != 1 || prefixRegistration[0].Capabilities == nil || len(*prefixRegistration[0].Capabilities) != 0 {
-		t.Fatalf("provider prefix capabilities = %#v, want explicit empty", prefixRegistration)
+	if len(prefixRegistration) != 1 || prefixRegistration[0].Capabilities == nil ||
+		len(*prefixRegistration[0].Capabilities) != 1 ||
+		(*prefixRegistration[0].Capabilities)[0] != "multica.agent.execute/v1" {
+		t.Fatalf("provider prefix capabilities = %#v, want generic agent execution", prefixRegistration)
 	}
 }
 

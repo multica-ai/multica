@@ -2178,7 +2178,7 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 func typedRuntimeRegistrations(entries []map[string]string) []protocol.RuntimeRegistration {
 	registrations := make([]protocol.RuntimeRegistration, 0, len(entries))
 	for _, entry := range entries {
-		capabilities := []string{}
+		capabilities := []string{runtimepool.CapabilityAgentExecuteV1}
 		if entry["type"] == "platform-agent-cli" {
 			capabilities = []string{runtimepool.CapabilityExtensionExecuteV1}
 		}

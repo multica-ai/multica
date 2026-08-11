@@ -50,6 +50,15 @@ func TestSchedulerCandidateOrderPrecedesLimit(t *testing.T) {
 	if strings.Contains(query[:limit], "platform-agent-cli") {
 		t.Fatal("generic Runtime Pool query contains a Provider predicate")
 	}
+	for _, fragment := range []string{
+		"ar.runtime_mode = 'cloud'",
+		"ar.runtime_mode = 'local'",
+		"ar.owner_id = sqlc.narg(trigger_user_id)::uuid",
+	} {
+		if !strings.Contains(query[:limit], fragment) {
+			t.Fatalf("candidate trigger policy missing %q", fragment)
+		}
+	}
 }
 
 func TestSchedulerLivenessRedisAndFallback(t *testing.T) {
@@ -94,6 +103,7 @@ func TestSchedulerPinnedReasonCASCoversRoutingSnapshot(t *testing.T) {
 		"runtime_binding_mode = sqlc.arg(expected_runtime_binding_mode)",
 		"placement_workspace_id = sqlc.arg(expected_placement_workspace_id)::uuid",
 		"runtime_requester_user_id = sqlc.arg(expected_runtime_requester_user_id)::uuid",
+		"runtime_trigger_user_id IS NOT DISTINCT FROM sqlc.narg('expected_runtime_trigger_user_id')::uuid",
 		"runtime_requirements = sqlc.arg(expected_runtime_requirements)::jsonb",
 		"session_affinity_state = sqlc.arg(expected_session_affinity_state)",
 		"session_affinity_runtime_id IS NOT DISTINCT FROM sqlc.narg('expected_session_affinity_runtime_id')::uuid",
@@ -854,6 +864,25 @@ func TestSchedulerBusyLocalSelectsShared(t *testing.T) {
 	}
 }
 
+func TestSchedulerAnonymousUsesCloudOnly(t *testing.T) {
+	fixture := newSchedulerDBFixture(t)
+	fixture.addRuntime(t, fixture.userID, "local", "private", []string{CapabilityExtensionExecuteV1}, "online", time.Now())
+	cloud := fixture.addRuntime(t, pgtype.UUID{}, "cloud", "private", []string{CapabilityExtensionExecuteV1}, "online", time.Now().Add(-time.Minute))
+	taskID := fixture.addWaiting(t, SessionAffinityNone, pgtype.UUID{}, pgtype.UUID{}, "waiting_runtime", 2, time.Time{})
+	if _, err := fixture.pool.Exec(context.Background(), `UPDATE agent_task_queue SET runtime_trigger_user_id=NULL WHERE id=$1`, taskID); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := NewScheduler(fixture.q, fixture.pool, &schedulerTestLiveness{ok: true}).AssignWaiting(
+		context.Background(), AssignRequest{WorkspaceID: fixture.workspaceID, Limit: AssignmentBatchLimit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Assigned) != 1 || result.Assigned[0].RuntimeID != cloud {
+		t.Fatalf("assigned = %+v, want cloud Runtime %v", result.Assigned, cloud)
+	}
+}
+
 func TestSchedulerPinnedBusyRuntime(t *testing.T) {
 	fixture := newSchedulerDBFixture(t)
 	runtimeID := fixture.addRuntime(t, fixture.userID, "local", "private", []string{CapabilityExtensionExecuteV1}, "online", time.Now())
@@ -1370,10 +1399,10 @@ func (f *schedulerDBFixture) addWaiting(t *testing.T, affinity string, affinityR
 		INSERT INTO agent_task_queue (
 			agent_id,status,priority,chat_session_id,fire_at,runtime_binding_mode,
 			runtime_requirements,placement_workspace_id,runtime_requester_user_id,
-			session_affinity_state,session_affinity_runtime_id,wait_reason
+			runtime_trigger_user_id,session_affinity_state,session_affinity_runtime_id,wait_reason
 		) VALUES ($1,$2,$3,$4,$5,'pool',
 			'{"schema_version":"multica.runtime-requirements/v1","capabilities_all":["multica.extension.execute/v1"]}'::jsonb,
-			$6,$7,$8,$9,$10)
+			$6,$7,$7,$8,$9,$10)
 		RETURNING id
 	`, f.agentID, status, priority, chatID, fire, f.workspaceID, f.userID, affinity, affinityRuntimeID, reason).Scan(&taskID)
 	if err != nil {
