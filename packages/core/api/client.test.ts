@@ -1904,3 +1904,70 @@ describe("ApiClient unsubscribe endpoints", () => {
     ).rejects.toBeInstanceOf(ApiError);
   });
 });
+
+describe("ApiClient startMikaOnboarding", () => {
+  it("returns the opening a well-formed response reports", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            started: true,
+            message_id: "message-1",
+            created_at: "2026-01-01T00:00:00Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").startMikaOnboarding("session-1", {
+        language: "en",
+      }),
+    ).resolves.toEqual({
+      started: true,
+      message_id: "message-1",
+      created_at: "2026-01-01T00:00:00Z",
+    });
+  });
+
+  it("falls back to started=false when the response is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ started: "yes" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    // started=false is the safe reading: the flow treats it as "someone else
+    // already opened this conversation" and navigates, rather than acting on a
+    // body it could not understand.
+    await expect(
+      new ApiClient("https://api.example.test").startMikaOnboarding("session-1", {
+        language: "en",
+      }),
+    ).resolves.toEqual({ started: false });
+  });
+
+  it("tolerates a backend that omits the optional opening fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ started: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").startMikaOnboarding("session-1", {
+        language: "en",
+      }),
+    ).resolves.toEqual({ started: false });
+  });
+});

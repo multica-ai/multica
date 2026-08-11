@@ -2,9 +2,10 @@ package wecom
 
 // senders_registry.go — a small process-wide map from installation_id to
 // live wsSender. wecomChannel.Connect adds an entry on entry and clears it
-// on exit; OutboundReplier and wecomChannel.Send look up by installation
-// id to push aibot_send_msg over the same socket the inbound loop owns
-// (aibot has no REST outbound path; every write goes over the WebSocket).
+// on exit; OutboundReplier and Outbound look up by installation id to push
+// aibot_send_msg over the same socket the inbound loop owns (aibot has no
+// REST outbound path; every write goes over the WebSocket). wecomChannel.Send
+// is not a reader — it returns ErrSendNotSupported.
 //
 // Why a registry rather than storing the sender on wecomChannel:
 // OutboundReplier is created once at boot with the shared engine.Router
@@ -45,10 +46,26 @@ func (r *sendersRegistry) set(id pgtype.UUID, s *wsSender) {
 	r.byKey[util.UUIDToString(id)] = s
 }
 
-func (r *sendersRegistry) clear(id pgtype.UUID) {
+// clear removes this installation's entry, but only if s is still the sender
+// registered under it. A generation that is shutting down must not evict its
+// own successor: Connect installs on entry and clears on a defer, so when a
+// lease flips while the old socket is still draining, the two overlap and the
+// loser's defer runs after the winner's set. Deleting unconditionally there
+// leaves the registry empty while a healthy connection is up, and every
+// outbound push resolves to nil — the bot goes silent with nothing in the log
+// to say why, until the next reconnect happens to re-register.
+//
+// dingtalk_channel.go:74 guards the same handover with
+// `CompareAndSwap(c, nil)`; slack and lark have no registry at all because
+// their outbound is REST. WeCom was the one platform deleting unconditionally.
+func (r *sendersRegistry) clear(id pgtype.UUID, s *wsSender) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.byKey, util.UUIDToString(id))
+	key := util.UUIDToString(id)
+	if cur, ok := r.byKey[key]; ok && cur != s {
+		return
+	}
+	delete(r.byKey, key)
 }
 
 // get returns the live wsSender for an installation, or nil when no

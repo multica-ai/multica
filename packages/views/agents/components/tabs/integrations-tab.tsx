@@ -13,7 +13,9 @@ import { memberListOptions } from "@multica/core/workspace/queries";
 import { LarkAgentBindButton } from "../../../settings/components/lark-tab";
 import { SlackAgentBindButton } from "../../../settings/components/slack-tab";
 import { DingTalkAgentBindButton } from "../../../settings/components/dingtalk-tab";
+import { DingTalkMark } from "../../../settings/components/dingtalk-mark";
 import { WecomAgentBindButton } from "../../../settings/components/wecom-tab";
+import { WecomMark } from "../../../settings/components/wecom-mark";
 import { useT } from "../../../i18n";
 
 /**
@@ -211,7 +213,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
       <section className="rounded-lg border">
         <div className="flex items-start gap-3 p-4">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
-            <MessagesSquare className="h-4 w-4" />
+            <DingTalkMark className="h-5 w-5" />
           </span>
           <div className="min-w-0 flex-1 space-y-1">
             <h3 className="text-body font-medium">{ts(($) => $.dingtalk.section_title)}</h3>
@@ -241,7 +243,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
       <section className="rounded-lg border">
         <div className="flex items-start gap-3 p-4">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
-            <MessagesSquare className="h-4 w-4" />
+            <WecomMark className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1 space-y-1">
             <h3 className="text-body font-medium">{ts(($) => $.wecom.section_title)}</h3>

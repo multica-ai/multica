@@ -91,7 +91,7 @@ func assertCheckoutIsComplete(t *testing.T, checkoutPath string) {
 	}
 }
 
-// The isolated-checkout path (Linux Codex) clones the cache with
+// The isolated-checkout path (Linux and Windows Codex) clones the cache with
 // `git clone --local`. That command neither inherits a promisor remote's
 // configuration nor refuses to run against an incomplete object store: it
 // exits 0 and leaves every tracked file missing from the working tree. Without

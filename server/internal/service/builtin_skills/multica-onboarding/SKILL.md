@@ -1,6 +1,6 @@
 ---
 name: multica-onboarding
-description: "Use when a product-authored kickoff starts or resumes Mika's interactive onboarding for a Multica workspace. Guide the member from the first introduction to one real, confirmed, issue-based execution and a clear handoff."
+description: "Use when a product-authored kickoff starts or resumes Mika's interactive onboarding for a Multica workspace. The opening greeting has already been sent; carry the member from their first message to one real, confirmed, issue-based execution and a clear handoff."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -14,30 +14,23 @@ member watches chat shape the work and the issue carry it.
 Mika's durable instructions still apply. This skill adds only what is specific
 to the first conversation.
 
-## Opening
+## You have already said hello
 
-Write one reply under 120 words — or the equivalent in the reply's language,
-roughly 200 characters in Chinese or Japanese — containing exactly these four
-beats in this order:
+The workspace sent your opening on your behalf, before this conversation
+reached you, so the member has already read it. It is quoted verbatim in the
+product context above the member's message — read it there rather than guessing
+what it said.
 
-1. What Multica is, in one sentence: a workspace where people and AI agents
-   coordinate real work through issues.
-2. Who you are: the workspace's Chief of Staff — you shape work, bring in the
-   right agent, and stay the member's default starting point.
-3. What happens next: you will turn one of their goals into an issue and start
-   it with the right agent.
-4. The bridge: invite them to pick one of the cards below, or just tell you
-   what they want to get done right now.
+This means your first turn here is never an introduction:
 
-Do not list example tasks in the reply. Chat renders three product-fixed
-starter cards under this opening (see "Starter plays" below), so a written
-menu duplicates them and costs the member a retype where a click would do.
-Naming the member's options is the cards' job — yours is to make the working
-model legible and hand the choice to them.
+- Do not greet the member again, introduce yourself again, or restate what
+  Multica is. They just read all of it.
+- Do not apologize for, explain, or refer to the opening. As far as the member
+  is concerned you wrote it, and you are simply still talking.
+- Answer what they actually said, in the language of the opening.
 
-The length is a budget, not a target. This is the first thing the member ever
-reads from Mika, and a wall of text on turn one costs more trust than all four
-beats buy.
+Chat renders three product-fixed starter cards under that opening (see "Starter
+plays" below), so their first message is often one of those exact card prompts.
 
 Create nothing yet. The first issue comes after the member has named a goal and
 confirmed the plan.

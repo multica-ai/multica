@@ -17,15 +17,14 @@ import (
 // appropriate Lark-side reply card. This is the outbound half of the
 // `EventEmitter` contract in hub.go: NeedsBinding sends the binding
 // prompt to the sender's open_id, AgentOffline / AgentArchived send
-// a status notice into the chat. OutcomeIngested is owned by the
-// Patcher (task lifecycle); OutcomeDropped is silent.
+// a status notice into the chat, and FreshPending / IssueUsage send
+// command guidance. OutcomeIngested is owned by the Patcher (task
+// lifecycle); OutcomeDropped is silent.
 //
 // Reply is best-effort by design: a transient Lark outage MUST NOT
-// fail the inbound pipeline (the message is already durable in
-// chat_session by the time we get here for OutcomeIngested, and for
-// the other outcomes there is no durable side effect to undo). Errors
-// are logged and swallowed; the next inbound message for the same
-// user retries the reply on its own.
+// fail the inbound pipeline. Any command state or chat message is already
+// durable by the time we get here, so a reply failure cannot roll it back.
+// Errors are logged and swallowed.
 type OutcomeReplier interface {
 	Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult)
 }
@@ -53,7 +52,7 @@ type noopReplier struct {
 
 func (n *noopReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
-	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived:
+	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived, OutcomeFreshPending, OutcomeIssueUsage:
 		n.log.Warn("lark outcome replier: outbound reply skipped (replier not wired)",
 			"outcome", string(res.Outcome),
 			"installation_id", uuidString(inst.ID),
@@ -175,6 +174,26 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 	case OutcomeAgentArchived:
 		if err := r.sendChatNotice(ctx, inst, msg, agentArchivedCopy); err != nil {
 			r.log.Warn("lark outcome replier: archived notice failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"err", err.Error(),
+			)
+		}
+	case OutcomeFreshPending:
+		if err := r.sendChatNotice(ctx, inst, msg, freshPendingCopy); err != nil {
+			r.log.Warn("lark outcome replier: fresh-start confirmation failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"err", err.Error(),
+			)
+		}
+	case OutcomeIssueUsage:
+		copy := issueUsageCopy
+		if res.IssueUsageHadMedia {
+			copy = issueUsageWithMediaCopy
+		}
+		if err := r.sendChatNotice(ctx, inst, msg, copy); err != nil {
+			r.log.Warn("lark outcome replier: issue usage reply failed",
 				"installation_id", uuidString(inst.ID),
 				"chat_id", string(msg.ChatID),
 				"err", err.Error(),
@@ -388,6 +407,9 @@ func renderNoticeCard(header, body string) (string, error) {
 // match the §4.6 design: an offline agent will run when the daemon
 // comes back; an archived agent needs operator action.
 const (
-	agentOfflineCopy  = "Agent 当前离线，消息已记录。下次 daemon 上线后会自动继续处理。"
-	agentArchivedCopy = "这个 Agent 已被归档，无法继续处理消息。请联系工作区管理员恢复或重新绑定。"
+	agentOfflineCopy        = "Agent 当前离线，消息已记录。下次 daemon 上线后会自动继续处理。"
+	agentArchivedCopy       = "这个 Agent 已被归档，无法继续处理消息。请联系工作区管理员恢复或重新绑定。"
+	freshPendingCopy        = "✅ 已准备开始新对话。你的下一条聊天消息将不带之前的上下文运行。"
+	issueUsageCopy          = "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）"
+	issueUsageWithMediaCopy = "请添加标题，并与图片或视频一起重新发送（*图片或视频可以位于命令之前或之后*）：\n\n`/issue <标题>`\n`[描述]`（可选）"
 )

@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -2707,18 +2708,24 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title         *string  `json:"title"`
-	Description   *string  `json:"description"`
-	Status        *string  `json:"status"`
-	Priority      *string  `json:"priority"`
-	AssigneeType  *string  `json:"assignee_type"`
-	AssigneeID    *string  `json:"assignee_id"`
-	Position      *float64 `json:"position"`
-	StartDate     *string  `json:"start_date"`
-	DueDate       *string  `json:"due_date"`
-	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
-	Stage         *int32   `json:"stage"`
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	// DescriptionBase is the authoritative Markdown the editor had adopted
+	// before producing Description. It lets the server preserve channel media
+	// that landed asynchronously after that base without making media already
+	// present in the base impossible for the user to delete. Older clients omit
+	// it and receive conservative channel-media preservation.
+	DescriptionBase *string  `json:"description_base,omitempty"`
+	Status          *string  `json:"status"`
+	Priority        *string  `json:"priority"`
+	AssigneeType    *string  `json:"assignee_type"`
+	AssigneeID      *string  `json:"assignee_id"`
+	Position        *float64 `json:"position"`
+	StartDate       *string  `json:"start_date"`
+	DueDate         *string  `json:"due_date"`
+	ParentIssueID   *string  `json:"parent_issue_id"`
+	ProjectID       *string  `json:"project_id"`
+	Stage           *int32   `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -2735,6 +2742,133 @@ type UpdateIssueRequest struct {
 	// MUL-3375). Only consumed when a run actually starts: SuppressRun=true or
 	// a parked/non-triggering write drops it. Never fabricates a comment.
 	HandoffNote string `json:"handoff_note,omitempty"`
+}
+
+func mergeIssueChannelMediaDescription(current, incoming string, base *string, attachments []db.Attachment) string {
+	currentIDs := channelmedia.MarkedIDs(current)
+	if len(currentIDs) == 0 {
+		return incoming
+	}
+
+	baseIDs := map[string]bool{}
+	if base != nil {
+		for _, id := range channelmedia.MarkedIDs(*base) {
+			baseIDs[id] = true
+		}
+	}
+	attachmentsByID := make(map[string]db.Attachment, len(attachments))
+	for _, attachment := range attachments {
+		attachmentsByID[uuidToString(attachment.ID)] = attachment
+	}
+
+	merged := incoming
+	for _, id := range currentIDs {
+		attachment, exists := attachmentsByID[id]
+		if !exists {
+			// A deleted attachment must not be resurrected from stale Markdown.
+			continue
+		}
+		downloadPath := channelmedia.DownloadPath(id)
+		hasLink := strings.Contains(merged, downloadPath)
+		knownToEditor := base != nil && baseIDs[id]
+		if knownToEditor && !hasLink {
+			// The editor adopted this media and then removed its link: preserve
+			// the user's explicit deletion rather than treating it as a race.
+			continue
+		}
+		if !hasLink {
+			merged = channelmedia.Append(merged, channelmedia.Block(
+				id,
+				attachment.Filename,
+				strings.HasPrefix(attachment.ContentType, "image/"),
+			))
+			continue
+		}
+		// Tiptap may omit HTML comments when serializing an otherwise intact
+		// image. Restore provenance without duplicating the visible link.
+		if !channelmedia.HasMarker(merged, id) {
+			merged = channelmedia.Append(merged, channelmedia.Marker(id))
+		}
+	}
+	return merged
+}
+
+func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current db.Issue, rawFields map[string]json.RawMessage) {
+	_, assigneeTypeTouched := rawFields["assignee_type"]
+	_, assigneeIDTouched := rawFields["assignee_id"]
+	// Assignee type and id form one validated value. If either half was
+	// supplied, retain the pre-validation counterpart in params rather than
+	// combining the supplied half with a concurrently-written counterpart that
+	// has never been validated with it.
+	if !assigneeTypeTouched && !assigneeIDTouched {
+		params.AssigneeType = current.AssigneeType
+		params.AssigneeID = current.AssigneeID
+	}
+	if _, touched := rawFields["start_date"]; !touched {
+		params.StartDate = current.StartDate
+	}
+	if _, touched := rawFields["due_date"]; !touched {
+		params.DueDate = current.DueDate
+	}
+	if _, touched := rawFields["parent_issue_id"]; !touched {
+		params.ParentIssueID = current.ParentIssueID
+	}
+	if _, touched := rawFields["project_id"]; !touched {
+		params.ProjectID = current.ProjectID
+	}
+	if _, touched := rawFields["stage"]; !touched {
+		params.Stage = current.Stage
+	}
+}
+
+func (h *Handler) updateIssueWithDescriptionMerge(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, base *string) (db.Issue, db.Issue, error) {
+	if h.TxStarter == nil {
+		return db.Issue{}, db.Issue{}, errors.New("issue description update requires transaction starter")
+	}
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.Issue{}, db.Issue{}, fmt.Errorf("begin issue description update: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := h.Queries.WithTx(tx)
+	current, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
+		ID:          params.ID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return db.Issue{}, db.Issue{}, fmt.Errorf("lock issue description: %w", err)
+	}
+	attachments, err := qtx.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{
+		IssueID:     current.ID,
+		WorkspaceID: current.WorkspaceID,
+	})
+	if err != nil {
+		return db.Issue{}, db.Issue{}, fmt.Errorf("list issue attachments for description merge: %w", err)
+	}
+
+	currentDescription := ""
+	if current.Description.Valid {
+		currentDescription = current.Description.String
+	}
+	incomingDescription := ""
+	if params.Description.Valid {
+		incomingDescription = params.Description.String
+	}
+	params.Description = pgtype.Text{
+		String: mergeIssueChannelMediaDescription(currentDescription, incomingDescription, base, attachments),
+		Valid:  true,
+	}
+	refreshUntouchedNullableIssueParams(&params, current, rawFields)
+
+	issue, err := qtx.UpdateIssue(ctx, params)
+	if err != nil {
+		return db.Issue{}, db.Issue{}, fmt.Errorf("update locked issue description: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.Issue{}, db.Issue{}, fmt.Errorf("commit issue description update: %w", err)
+	}
+	return issue, current, nil
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -2885,6 +3019,19 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+				ID:          projectUUID,
+				WorkspaceID: prevIssue.WorkspaceID,
+			}); err != nil {
+				if !isNotFound(err) {
+					slog.Error("update issue: validate project scope",
+						append(logger.RequestAttrs(r), "project_id", uuidToString(projectUUID), "error", err)...)
+					writeError(w, http.StatusInternalServerError, "failed to validate project")
+					return
+				}
+				writeError(w, http.StatusBadRequest, "project not found in this workspace")
+				return
+			}
 			params.ProjectID = projectUUID
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
@@ -2919,7 +3066,18 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issue, err := h.Queries.UpdateIssue(r.Context(), params)
+	var issue db.Issue
+	if req.Description != nil {
+		var lockedPrev db.Issue
+		issue, lockedPrev, err = h.updateIssueWithDescriptionMerge(
+			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.DescriptionBase,
+		)
+		if err == nil {
+			prevIssue = lockedPrev
+		}
+	} else {
+		issue, err = h.Queries.UpdateIssue(r.Context(), params)
+	}
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
@@ -3335,6 +3493,31 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The batch shares one project_id, so it is checked once here rather than
+	// per issue, and rejected instead of skipped like the per-item guards in
+	// the loop: a foreign project invalidates the whole request.
+	batchProjectID := pgtype.UUID{Valid: false}
+	if _, ok := rawUpdates["project_id"]; ok && req.Updates.ProjectID != nil {
+		projectUUID, ok := parseUUIDOrBadRequest(w, *req.Updates.ProjectID, "project_id")
+		if !ok {
+			return
+		}
+		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          projectUUID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			if !isNotFound(err) {
+				slog.Error("batch update issues: validate project scope",
+					append(logger.RequestAttrs(r), "project_id", uuidToString(projectUUID), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to validate project")
+				return
+			}
+			writeError(w, http.StatusBadRequest, "project not found in this workspace")
+			return
+		}
+		batchProjectID = projectUUID
+	}
+
 	updated := 0
 	// Children that transitioned into a terminal status this batch, collected so
 	// the parent/stage notification is evaluated once against the final state
@@ -3460,15 +3643,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if _, ok := rawUpdates["project_id"]; ok {
-			if req.Updates.ProjectID != nil {
-				projectUUID, err := util.ParseUUID(*req.Updates.ProjectID)
-				if err != nil {
-					continue
-				}
-				params.ProjectID = projectUUID
-			} else {
-				params.ProjectID = pgtype.UUID{Valid: false}
-			}
+			// Resolved before the loop; an explicit null stays invalid and clears.
+			params.ProjectID = batchProjectID
 		}
 		if _, ok := rawUpdates["stage"]; ok {
 			if req.Updates.Stage != nil {
@@ -3491,7 +3667,21 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		issue, err := h.Queries.UpdateIssue(r.Context(), params)
+		var issue db.Issue
+		if req.Updates.Description != nil {
+			// One batch-level base cannot describe multiple issue documents.
+			// Preserve every marked channel-media block conservatively, matching
+			// legacy single-update clients that omit description_base.
+			var lockedPrev db.Issue
+			issue, lockedPrev, err = h.updateIssueWithDescriptionMerge(
+				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil,
+			)
+			if err == nil {
+				prevIssue = lockedPrev
+			}
+		} else {
+			issue, err = h.Queries.UpdateIssue(r.Context(), params)
+		}
 		if err != nil {
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
 			continue

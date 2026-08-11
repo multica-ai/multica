@@ -127,7 +127,8 @@
   "picker": {
     "no_project": "无项目",
     "empty": "还没有项目",
-    "search_placeholder": "搜索项目..."
+    "search_placeholder": "搜索项目...",
+    "clear_aria": "清除项目"
   },
   "chip": {
     "fallback_label": "项目"

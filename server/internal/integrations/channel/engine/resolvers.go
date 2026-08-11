@@ -26,6 +26,8 @@ const (
 	OutcomeDropped       Outcome = "dropped"
 	OutcomeNeedsBinding  Outcome = "needs_binding"
 	OutcomeIngested      Outcome = "ingested"
+	OutcomeFreshPending  Outcome = "fresh_pending"
+	OutcomeIssueUsage    Outcome = "issue_usage"
 	OutcomeAgentOffline  Outcome = "agent_offline"
 	OutcomeAgentArchived Outcome = "agent_archived"
 )
@@ -62,6 +64,10 @@ type Result struct {
 	// because the shared duplicate guard found the active IssueID above.
 	// Repliers render this as a business conflict, never as an internal error.
 	IssueDuplicate bool
+	// IssueUsageHadMedia marks a title-less /issue whose current inbound
+	// message also carried downloadable media. Repliers use it to tell the
+	// sender to include that media again with the corrected command.
+	IssueUsageHadMedia bool
 	// runScheduled reports whether this ingest scheduled a normal chat run.
 	// It is Router-internal state: repliers must continue to use Outcome.
 	runScheduled bool
@@ -125,16 +131,20 @@ type AppendResult struct {
 // BindMediaParams carries stored media references to the post-append
 // attachment transaction. MessageID is the durable chat_message whose pending
 // marker the binder clears. IssueID selects issue ownership for an /issue turn;
-// otherwise the references bind to MessageID. Media downloads must never run
-// inside this transaction.
+// otherwise the references bind to MessageID. IssueDescriptionBase is valid
+// only for an issue created by this turn and lets the binder replace inline
+// placeholders iff nobody edited the description first. Media downloads must
+// never run inside this transaction.
 type BindMediaParams struct {
-	MessageID   pgtype.UUID
-	SessionID   pgtype.UUID
-	WorkspaceID pgtype.UUID
-	Sender      pgtype.UUID
-	IssueID     pgtype.UUID
-	Body        string
-	MediaRefs   []channel.MediaRef
+	MessageID            pgtype.UUID
+	SessionID            pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	Sender               pgtype.UUID
+	IssueID              pgtype.UUID
+	IssueDescriptionBase pgtype.Text
+	IssueCommandText     string
+	Body                 string
+	MediaRefs            []channel.MediaRef
 }
 
 // IssueCommand is the parsed /issue command.
@@ -191,6 +201,7 @@ type Deduper interface {
 // rotated mid-flight.
 type SessionBinder interface {
 	EnsureSession(ctx context.Context, p EnsureSessionParams) (pgtype.UUID, error)
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error
 	AppendMessage(ctx context.Context, p AppendParams) (AppendResult, error)
 	BindMedia(ctx context.Context, p BindMediaParams) error
 }
@@ -317,7 +328,7 @@ type ResolverSet struct {
 // for the /issue command. Shared across platforms.
 type IssueCreator interface {
 	Create(ctx context.Context, p service.IssueCreateParams, opts service.IssueCreateOpts) (service.IssueCreateResult, error)
-	PublishAttachmentsChanged(issue db.Issue, actorID pgtype.UUID)
+	PublishAttachmentsChanged(ctx context.Context, issue db.Issue, actorID pgtype.UUID)
 }
 
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to

@@ -55,7 +55,7 @@ func TestPublishAttachmentsChangedCarriesIssueScope(t *testing.T) {
 	var got events.Event
 	bus.Subscribe(protocol.EventIssueAttachmentsChanged, func(e events.Event) { got = e })
 
-	svc.PublishAttachmentsChanged(db.Issue{ID: issueID, WorkspaceID: workspaceID}, actorID)
+	svc.PublishAttachmentsChanged(context.Background(), db.Issue{ID: issueID, WorkspaceID: workspaceID}, actorID)
 
 	if got.Type != protocol.EventIssueAttachmentsChanged || got.WorkspaceID != util.UUIDToString(workspaceID) || got.ActorType != "member" || got.ActorID != util.UUIDToString(actorID) {
 		t.Fatalf("event envelope = %+v", got)
@@ -63,6 +63,54 @@ func TestPublishAttachmentsChangedCarriesIssueScope(t *testing.T) {
 	payload, ok := got.Payload.(map[string]any)
 	if !ok || payload["issue_id"] != util.UUIDToString(issueID) {
 		t.Fatalf("event payload = %#v", got.Payload)
+	}
+}
+
+func TestPublishAttachmentsChangedAlsoBroadcastsUpdatedDescription(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, _, issueID := seedAttributionFixture(t, pool)
+	workspaceUUID := util.MustParseUUID(workspaceID)
+	issueUUID := util.MustParseUUID(issueID)
+	actorID := util.MustParseUUID(userID)
+	const description = "![](/api/attachments/22222222-2222-4222-8222-222222222222/download)"
+	if _, err := pool.Exec(ctx, `UPDATE issue SET description = $1 WHERE id = $2`, description, issueUUID); err != nil {
+		t.Fatalf("update issue description: %v", err)
+	}
+	issue, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID: issueUUID, WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+
+	bus := events.New()
+	svc := &IssueService{Bus: bus, Queries: q}
+	var updated events.Event
+	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) { updated = e })
+
+	svc.PublishAttachmentsChanged(ctx, issue, actorID)
+
+	if updated.Type != protocol.EventIssueUpdated || updated.WorkspaceID != workspaceID || updated.ActorType != "member" || updated.ActorID != userID {
+		t.Fatalf("issue update envelope = %+v", updated)
+	}
+	payload, ok := updated.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("issue update payload = %#v", updated.Payload)
+	}
+	issuePayload, ok := payload["issue"].(map[string]any)
+	if !ok {
+		t.Fatalf("issue update body = %#v", payload["issue"])
+	}
+	gotDescription, ok := issuePayload["description"].(*string)
+	if !ok || gotDescription == nil || *gotDescription != description {
+		t.Fatalf("broadcast description = %#v, want %q", issuePayload["description"], description)
+	}
+	for _, key := range []string{"assignee_changed", "status_changed", "project_changed"} {
+		if changed, ok := payload[key].(bool); !ok || changed {
+			t.Fatalf("%s = %#v, want false", key, payload[key])
+		}
 	}
 }
 

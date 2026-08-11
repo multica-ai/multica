@@ -6,7 +6,6 @@ import type {
   AgentBuilderSessionSummary,
   RuntimeDevice,
 } from "@multica/core/types";
-import { useNavigation } from "../../navigation";
 import { BuilderSetup } from "./builder-conversation";
 import { UnfinishedDraftsBanner } from "./unfinished-drafts";
 import { useBuilderSession } from "./use-builder-session";
@@ -35,7 +34,6 @@ export function BuilderSetupPanel({
   onRuntimeLabel: (runtime: RuntimeDevice | null) => void;
 }) {
   const paths = useWorkspacePaths();
-  const navigation = useNavigation();
   const form = useCreateAgentForm();
   const { draft, setDraft, selectedRuntime } = form;
 
@@ -71,7 +69,7 @@ export function BuilderSetupPanel({
       starting={builder.starting}
       error={builder.error}
       onStart={() => void startConversation()}
-      onConnectRuntime={() => navigation.push(paths.runtimes())}
+      connectRuntimeHref={paths.runtimes()}
     />
   );
 }

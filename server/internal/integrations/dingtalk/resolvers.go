@@ -231,6 +231,7 @@ func (r *deduper) Release(ctx context.Context, installationID pgtype.UUID, messa
 
 type chatSession interface {
 	EnsureSession(ctx context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error)
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error
 	AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error)
 	BindMediaRefs(ctx context.Context, in engine.BindMediaInput) error
 }
@@ -250,6 +251,10 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 	})
 }
 
+func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
+	return r.session.MarkPendingFresh(ctx, sessionID)
+}
+
 func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
 	commandText := p.Message.CommandText
 	if commandText == "" {
@@ -265,18 +270,21 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 		ThreadID:            p.Message.Source.ThreadID,
 		ClaimToken:          p.ClaimToken,
 		MediaPendingSeconds: p.MediaPendingSeconds,
+		ForceFresh:          p.Message.ForceFresh,
 	})
 }
 
 func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) error {
 	return r.session.BindMediaRefs(ctx, engine.BindMediaInput{
-		MessageID:   p.MessageID,
-		SessionID:   p.SessionID,
-		WorkspaceID: p.WorkspaceID,
-		Sender:      p.Sender,
-		IssueID:     p.IssueID,
-		Body:        p.Body,
-		MediaRefs:   p.MediaRefs,
+		MessageID:            p.MessageID,
+		SessionID:            p.SessionID,
+		WorkspaceID:          p.WorkspaceID,
+		Sender:               p.Sender,
+		IssueID:              p.IssueID,
+		IssueDescriptionBase: p.IssueDescriptionBase,
+		IssueCommandText:     p.IssueCommandText,
+		Body:                 p.Body,
+		MediaRefs:            p.MediaRefs,
 	})
 }
 

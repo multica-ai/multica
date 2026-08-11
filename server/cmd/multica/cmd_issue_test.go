@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -2876,6 +2877,98 @@ func TestRunIssueUpdateSendsPosition(t *testing.T) {
 	}
 	if got := body["position"]; got != float64(7.5) {
 		t.Fatalf("position = %#v, want 7.5 in request body", got)
+	}
+}
+
+func TestIssueReadCommandsUseInjectedTaskToken(t *testing.T) {
+	const fakeTaskToken = "mat_task_issue_sentinel"
+	ownerHome := t.TempDir()
+	t.Setenv("HOME", ownerHome)
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TOKEN", fakeTaskToken)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-task")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+
+	ownerPath := filepath.Join(ownerHome, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ownerPath, []byte("{\n  \"server_url\": \"https://owner.invalid\",\n  \"workspace_id\": \"owner-workspace-sentinel\",\n  \"token\": \"mul_owner_sentinel\"\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+fakeTaskToken {
+			t.Errorf("Authorization = %q, want injected fake task token", got)
+		}
+		gotPaths = append(gotPaths, r.URL.RequestURI())
+		switch r.URL.Path {
+		case "/api/issues":
+			if got := r.URL.Query().Get("workspace_id"); got != "ws-task" {
+				t.Errorf("workspace_id = %q, want task workspace", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"issues": []any{}, "total": 0})
+		case "/api/issues/MUL-46":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "issue-uuid", "identifier": "MUL-46", "title": "Task isolation"})
+		case "/api/issues/issue-uuid":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "issue-uuid", "identifier": "MUL-46", "title": "Task isolation"})
+		case "/api/issues/issue-uuid/task-runs":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	listCmd := newIssueListTestCmd()
+	_ = listCmd.Flags().Set("output", "json")
+	if _, err := captureStdout(t, func() error { return runIssueList(listCmd, nil) }); err != nil {
+		t.Fatalf("issue list: %v", err)
+	}
+
+	getCmd := &cobra.Command{Use: "get"}
+	getCmd.Flags().String("output", "json", "")
+	if _, err := captureStdout(t, func() error { return runIssueGet(getCmd, []string{"MUL-46"}) }); err != nil {
+		t.Fatalf("issue get: %v", err)
+	}
+
+	runsCmd := &cobra.Command{Use: "runs"}
+	runsCmd.Flags().String("output", "json", "")
+	runsCmd.Flags().Bool("full-id", false, "")
+	if _, err := captureStdout(t, func() error { return runIssueRuns(runsCmd, []string{"MUL-46"}) }); err != nil {
+		t.Fatalf("issue runs: %v", err)
+	}
+
+	if len(gotPaths) != 5 {
+		t.Fatalf("request paths = %v, want issue list + get resolution/get + runs resolution/list", gotPaths)
+	}
+}
+
+func TestIssueReadCommandsFailClosedWithoutTaskToken(t *testing.T) {
+	ownerHome := t.TempDir()
+	t.Setenv("HOME", ownerHome)
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TOKEN", "")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:1")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-task")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+
+	ownerPath := filepath.Join(ownerHome, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ownerPath, []byte("{\n  \"token\": \"mul_owner_sentinel\"\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newIssueListTestCmd()
+	err := runIssueList(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "task-scoped mat_ token") {
+		t.Fatalf("issue list error = %v, want missing task token failure", err)
 	}
 }
 

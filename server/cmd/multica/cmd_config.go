@@ -78,6 +78,9 @@ func init() {
 }
 
 func runConfigShow(cmd *cobra.Command, _ []string) error {
+	if err := requireTaskLocalConfigRoot(); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 	cfg, err := cli.LoadCLIConfigForProfile(profile)
 	if err != nil {
@@ -107,6 +110,9 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 }
 
 func runConfigSet(cmd *cobra.Command, args []string) error {
+	if err := requireTaskLocalConfigRoot(); err != nil {
+		return err
+	}
 	key, value := args[0], args[1]
 
 	profile := resolveProfile(cmd)

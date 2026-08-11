@@ -77,10 +77,6 @@
     "sticky_comment_bar": {
       "title": "固定评论栏",
       "hint": "滚动任务页面时，评论栏始终固定在底部。"
-    },
-    "issue_link_new_tab": {
-      "title": "在新标签页打开任务链接",
-      "hint": "点击描述、评论或聊天中的任务链接时，在新标签页中打开，而不是在当前页面跳转。"
     }
   },
   "shortcuts": {
@@ -120,6 +116,8 @@
       "findInIssue": { "label": "在任务中查找", "description": "搜索当前打开的任务详情。" },
       "openThreadNav": { "label": "打开讨论导航", "description": "列出、搜索并跳转当前任务的评论讨论。" },
       "send": { "label": "发送", "description": "发送聊天消息、评论、回复、反馈和提示词，并在创建弹窗中创建任务。" },
+      "goBack": { "label": "后退", "description": "像浏览器一样在历史记录中后退。" },
+      "goForward": { "label": "前进", "description": "像浏览器一样在历史记录中前进。" },
       "goInbox": { "label": "前往收件箱", "description": "打开工作区收件箱。" },
       "goChat": { "label": "前往聊天", "description": "打开工作区聊天。" },
       "goMyIssues": { "label": "前往我的任务", "description": "打开分配给你的任务。" },
@@ -726,7 +724,7 @@
   },
   "wecom": {
     "section_title": "企业微信",
-    "page_description": "将每个 Multica 智能体连接到专属的企业微信智能机器人。成员在企业微信中与机器人对话，Agent 通过长连接实时回复——无需公网回调地址。",
+    "page_description": "将每个 Multica 智能体连接到专属的企业微信智能机器人。成员可私聊机器人、在群里 @ 它，或输入 /issue 直接创建 Multica 任务。Agent 通过 WebSocket 长连接回复，无需公网回调地址。",
     "not_enabled_title": "企业微信集成未启用",
     "not_enabled_description_prefix": "在服务器上设置",
     "not_enabled_description_suffix": "以启用企业微信智能机器人的安装。",
@@ -758,10 +756,20 @@
     "byo_bot_id_placeholder": "例如：aibot_xxxxxxxxxxxxxxxx",
     "byo_secret_label": "长连接 Secret",
     "byo_secret_placeholder": "粘贴在管理后台仅显示一次的 Secret",
+    "byo_bot_name_label": "机器人在聊天里的名字（可选）",
+    "byo_bot_name_placeholder": "例如 Multica Bot",
+    "byo_bot_name_hint": "名字里有空格时才需要填，机器人靠它把自己的 @ 和后面的命令分开。之后想改（包括在企业微信后台改名后），要先断开这个机器人再重新连接。",
     "byo_submit": "连接",
     "byo_submitting": "连接中…",
     "byo_cancel": "取消",
     "byo_success_toast": "企业微信机器人已连接",
+    "byo_conflict_same_workspace": "该机器人已连接到本工作区的另一个智能体。请先在那里断开，再连接到这里。",
+    "byo_conflict_archived_agent": "该机器人连接在本工作区一个已归档的智能体上。请先恢复那个智能体，或断开它的机器人，再连接到这里。",
+    "byo_conflict_other_workspace": "该机器人已连接到另一个 Multica 工作区。请先在那边断开，再连接到这里。",
+    "byo_rejected": "无法连接机器人。请核对企业微信管理后台的 Bot ID 与密钥，并确认它是已开启长连接的智能机器人。",
+    "byo_credentials_rejected": "企业微信拒绝了这组 Bot ID 和密钥。请在企业微信管理后台核对这两项，并确认它是已开启长连接的智能机器人。",
+    "byo_credentials_unverifiable": "没能连上企业微信来校验这个机器人。你的凭据没有被改动，请稍后重试。",
+    "byo_install_failed": "没能保存这个机器人，是我们这边出了问题。你的凭据没有被改动，请重试；如果一直失败，请联系支持。",
     "byo_failed_toast": "无法连接企业微信机器人"
   },
   "repositories": {

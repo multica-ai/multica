@@ -91,11 +91,30 @@ const (
 // shrink it, same as the other timing knobs in this package.
 var pendingWorkHintMinInterval = time.Second
 
+// repoCheckoutModeFor picks the Git metadata layout for a task's
+// `multica repo checkout`. Under Codex's workspace-write sandbox a linked
+// worktree's gitdir resolves into the shared cache and stays read-only even
+// when the task workdir is an explicit writable root, so `git add` /
+// `git commit` fail from inside the checkout — Linux hit this in
+// multica-ai/multica#2925, Codex's native Windows sandbox in
+// multica-ai/multica#6449.
+//
+// Both platforms now default to danger-full-access (execenv's
+// codexSandboxPolicyFor), so in practice only a user who opted into
+// windows.sandbox still trips the Windows case. The layout stays a per-platform
+// choice rather than a per-policy one: it is decided before a task's resolved
+// sandbox config is known, one workdir is reused across tasks whose policies
+// can differ, and task-local metadata is correct under either policy.
 func repoCheckoutModeFor(provider, goos string) string {
-	if provider == "codex" && goos == "linux" {
-		return repoCheckoutModeIsolated
+	if provider != "codex" {
+		return ""
 	}
-	return ""
+	switch goos {
+	case "linux", "windows":
+		return repoCheckoutModeIsolated
+	default:
+		return ""
+	}
 }
 
 var (
@@ -112,6 +131,24 @@ func taskScopedAuthToken(task Task) (string, error) {
 		return "", errors.New("server provided non-task-scoped auth token")
 	}
 	return token, nil
+}
+
+func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesRoot, serverURL string, healthPort, slot int, tempDir string) map[string]string {
+	return map[string]string{
+		"MULTICA_TOKEN":        token,
+		cli.TaskConfigRootEnv:  configRoot,
+		TaskWorkspacesRootEnv:  workspacesRoot,
+		"MULTICA_SERVER_URL":   serverURL,
+		"MULTICA_DAEMON_PORT":  strconv.Itoa(healthPort),
+		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
+		"MULTICA_AGENT_NAME":   agentName,
+		"MULTICA_AGENT_ID":     task.AgentID,
+		"MULTICA_TASK_ID":      task.ID,
+		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+		"TMPDIR":               tempDir,
+		"TMP":                  tempDir,
+		"TEMP":                 tempDir,
+	}
 }
 
 // taskRunner executes a single agent task and returns the result.
@@ -474,10 +511,10 @@ type Daemon struct {
 	activeEnvRoots     map[string]int  // env root path -> reference count (handles reuse paths marked twice)
 	deletingEnvRoots   map[string]bool // env roots reserved by GC; new tasks wait until the mutation finishes
 
-	activeCodexStoresMu   sync.Mutex
-	activeCodexStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
-	activeCodexStores     map[string]int  // per-issue Codex session store path -> live-task refcount; guards the store from GC mid-task (MUL-4424)
-	deletingCodexStores   map[string]bool // store paths a GC delete has reserved; markActive waits these out so a task never mounts a store mid-removal
+	activeStoresMu   sync.Mutex
+	activeStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
+	activeStores     map[string]int  // persistent store path (per-conversation Codex sessions, per-agent Hermes memories) -> live-task refcount; guards the store from GC mid-task (MUL-4424)
+	deletingStores   map[string]bool // store paths a GC delete has reserved; markActive waits these out so a task never mounts a store mid-removal
 
 	// localPathLocks serialises agent tasks whose project resource is a
 	// local_directory pinned to this daemon. Two tasks targeting the same
@@ -538,8 +575,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
 		deletingEnvRoots:          make(map[string]bool),
-		activeCodexStores:         make(map[string]int),
-		deletingCodexStores:       make(map[string]bool),
+		activeStores:              make(map[string]int),
+		deletingStores:            make(map[string]bool),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		pendingWorkInflight:       make(map[string]struct{}),
@@ -553,7 +590,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
 	}
 	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
-	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
+	d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
 	// Seed the copy-on-write availability set from the startup probe. Callers
 	// must go through d.agents() from here on; cfg.Agents is the initial value
 	// only and does not track later refreshes.
@@ -5093,12 +5130,23 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 // runtimeDisplayNameOverrides maps a provider key to the human-facing runtime
 // name when simple title-casing would read awkwardly. Providers not listed
 // here fall back to capitalizing the key (claude → "Claude", codex → "Codex").
+// Built-in runtime identities (from agent.BuiltinRuntimes) are seeded into
+// this map at init so their display names stay in lockstep with the
+// descriptor.
 var runtimeDisplayNameOverrides = map[string]string{
 	"traecli":    "Trae",
 	"grok":       "Grok",
 	"qoderclicn": "Qoder CN",
 	"qwen":       "Qwen Code",
 	"qwenpaw":    "QwenPaw",
+}
+
+func init() {
+	// Seed built-in runtime identity display names from the descriptor so
+	// adding a new fork doesn't require editing this map by hand.
+	for _, desc := range agent.BuiltinRuntimes {
+		runtimeDisplayNameOverrides[desc.ID] = desc.DisplayName
+	}
 }
 
 // providerDisplayName returns the human-facing runtime name for a provider key.
@@ -5677,6 +5725,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
 		ChatChannelType:                  task.ChatChannelType,
+		ChatChannelDeliversFiles:         task.ChatChannelDeliversFiles,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
 		AutopilotTitle:                   task.AutopilotTitle,
@@ -5799,6 +5848,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var hermesSourceHome string
 	var hermesSourceMustExist bool
 	var hermesEnv map[string]string
+	var hermesMemoryStore string
 	if provider == "hermes" {
 		sel := agent.ParseHermesProfileArgs(agentCustomArgs)
 		res := execenv.ResolveHermesProfile(agentEnvOverrides["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
@@ -5812,15 +5862,35 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			hermesEnv = map[string]string{}
 		}
 		hermesEnv["HERMES_HOME"] = res.SourceHome
+		// The overlay links memories/ here so the agent's long-term memory
+		// survives the task instead of being reset by every run (#6638). Keyed on
+		// the resolved source home so switching an agent's profile switches its
+		// memory line, matching Hermes' own "a profile is an isolated instance"
+		// model. Guarded from the GC for the whole task, as the Codex store below.
+		if store := execenv.HermesMemoryStorePath(d.cfg.Profile, task.AgentID, res.SourceHome); store != "" {
+			hermesMemoryStore = store
+			d.markActiveStore(store)
+			defer d.unmarkActiveStore(store)
+		}
+	}
+	// Reasonix locates its user config from the environment (REASONIX_HOME, and
+	// the platform config dirs behind it), which an agent's custom_env may
+	// re-point or clear. The per-task reasonix.toml has to restate the
+	// permissions from whichever config the child ends up loading, so the deny
+	// rules the runtime owner set there survive the task-scoped config that
+	// overrides them — hence the same sanitized env the child is launched with.
+	var reasonixEnv map[string]string
+	if provider == "reasonix" {
+		reasonixEnv = sanitizeAgentEnv(agentEnvOverrides)
 	}
 	// Guard this task's per-issue Codex session store from the GC for the whole
 	// task, starting before Prepare/Reuse mounts it — so a prune that samples the
 	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
 	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
 	if provider == "codex" {
-		if store := execenv.CodexSessionStorePath(d.cfg.Profile, task.AgentID, task.IssueID); store != "" {
-			d.markActiveCodexStore(store)
-			defer d.unmarkActiveCodexStore(store)
+		if store := execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx); store != "" {
+			d.markActiveStore(store)
+			defer d.unmarkActiveStore(store)
 		}
 	}
 	if shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
@@ -5839,6 +5909,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
+			HermesMemoryStore:     hermesMemoryStore,
+			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		})
@@ -5863,6 +5935,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
+			HermesMemoryStore:     hermesMemoryStore,
+			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}
@@ -5971,19 +6045,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
 		return TaskResult{}, err
 	}
-	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        agentToken,
-		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
-		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
-		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
-		"MULTICA_AGENT_NAME":   agentName,
-		"MULTICA_AGENT_ID":     task.AgentID,
-		"MULTICA_TASK_ID":      task.ID,
-		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
-		"TMPDIR":               taskTempDir,
-		"TMP":                  taskTempDir,
-		"TEMP":                 taskTempDir,
-	}
+	agentEnv := taskMulticaEnvironment(task, agentName, agentToken, env.MulticaConfigRoot, d.cfg.WorkspacesRoot, d.cfg.ServerBaseURL, d.cfg.HealthPort, slot, taskTempDir)
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode
 	}
@@ -6020,10 +6082,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
-	// HOME and the XDG base dirs are deliberately not touched here: tasks run
-	// with the daemon user's real home on every platform, so host CLI config
-	// and credentials resolve inside a task exactly as they do in the daemon
-	// user's shell (MUL-5578).
+	// HOME and the XDG base dirs are deliberately not touched here: provider
+	// tools such as gh, aws, kubectl, and npm continue resolving the daemon
+	// user's existing state (MUL-5578). The Multica CLI is the exception:
+	// MULTICA_TASK_CONFIG_ROOT above redirects its implicit profile lookup to
+	// private task-local state and prevents Owner-profile fallback.
 	// (Hermes HERMES_HOME is applied after custom_env below so the per-task
 	// overlay can win over a user-set HERMES_HOME; see
 	// layerCustomEnvAndHermesHome.)
@@ -6070,7 +6133,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
 	}
-	backend, err := agent.New(provider, agent.Config{
+	// Resolve the backend through the unified runtime resolver: built-in
+	// runtime identities (e.g. "omp") dispatch through NewRuntime, protocol
+	// families go through New. This is the single production boundary — the
+	// daemon never calls agent.New or agent.NewRuntime directly, so the two
+	// factories stay meaning exactly one thing each.
+	backend, err := agent.ResolveBackend(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		CLIVersion:     resolvedVersion,
 		Env:            agentEnv,
@@ -7308,56 +7376,58 @@ func (d *Daemon) reserveEnvRootForGC(envRoot string) (release func(), ok bool) {
 	}, true
 }
 
-// markActiveCodexStore records that a task is about to use the given per-issue
-// Codex session store, so the GC never reclaims it mid-task — the store lives
-// outside the env root, so isActiveEnvRoot does not cover it (MUL-4424). If a GC
+// markActiveStore records that a task is about to use the given persistent
+// store — a per-issue Codex session store or a per-agent Hermes memory store —
+// so the GC never reclaims it mid-task. These stores live outside the env root,
+// so isActiveEnvRoot does not cover them (MUL-4424). If a GC
 // delete has already reserved this store, we wait for that removal to finish
 // before claiming it, so a task never mounts a store mid-removal; the store is
 // then recreated fresh by Prepare. Reference-counted like the env-root guard.
-func (d *Daemon) markActiveCodexStore(store string) {
+func (d *Daemon) markActiveStore(store string) {
 	if store == "" {
 		return
 	}
-	d.activeCodexStoresMu.Lock()
-	defer d.activeCodexStoresMu.Unlock()
-	for d.deletingCodexStores[store] {
-		d.activeCodexStoresCond.Wait()
+	d.activeStoresMu.Lock()
+	defer d.activeStoresMu.Unlock()
+	for d.deletingStores[store] {
+		d.activeStoresCond.Wait()
 	}
-	d.activeCodexStores[store]++
+	d.activeStores[store]++
 }
 
-func (d *Daemon) unmarkActiveCodexStore(store string) {
+func (d *Daemon) unmarkActiveStore(store string) {
 	if store == "" {
 		return
 	}
-	d.activeCodexStoresMu.Lock()
-	defer d.activeCodexStoresMu.Unlock()
-	if d.activeCodexStores[store] <= 1 {
-		delete(d.activeCodexStores, store)
+	d.activeStoresMu.Lock()
+	defer d.activeStoresMu.Unlock()
+	if d.activeStores[store] <= 1 {
+		delete(d.activeStores, store)
 		return
 	}
-	d.activeCodexStores[store]--
+	d.activeStores[store]--
 }
 
-// reserveCodexStoreForDeletion atomically checks that no live task holds store
+// reserveStoreForDeletion atomically checks that no live task holds store
 // and, if so, marks it reserved so no task can claim it until the caller runs
 // the returned commit (after the actual removal). ok=false means a task holds it
-// — do not delete. This is the exclusive protocol PruneCodexSessionStores needs:
+// — do not delete. This is the exclusive protocol the store pruners
+// (PruneCodexSessionStores, PruneHermesMemoryStores) need:
 // the "confirm inactive" and the mark happen under one lock acquisition, so a
-// markActiveCodexStore either loses the check (store stays) or blocks on the
+// markActiveStore either loses the check (store stays) or blocks on the
 // reservation, closing the stat->remove race (MUL-4424).
-func (d *Daemon) reserveCodexStoreForDeletion(store string) (commit func(), ok bool) {
-	d.activeCodexStoresMu.Lock()
-	defer d.activeCodexStoresMu.Unlock()
-	if d.activeCodexStores[store] > 0 || d.deletingCodexStores[store] {
+func (d *Daemon) reserveStoreForDeletion(store string) (commit func(), ok bool) {
+	d.activeStoresMu.Lock()
+	defer d.activeStoresMu.Unlock()
+	if d.activeStores[store] > 0 || d.deletingStores[store] {
 		return nil, false
 	}
-	d.deletingCodexStores[store] = true
+	d.deletingStores[store] = true
 	return func() {
-		d.activeCodexStoresMu.Lock()
-		delete(d.deletingCodexStores, store)
-		d.activeCodexStoresCond.Broadcast()
-		d.activeCodexStoresMu.Unlock()
+		d.activeStoresMu.Lock()
+		delete(d.deletingStores, store)
+		d.activeStoresCond.Broadcast()
+		d.activeStoresMu.Unlock()
 	}, true
 }
 

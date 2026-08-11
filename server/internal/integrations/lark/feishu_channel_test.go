@@ -765,10 +765,11 @@ func TestChannelMsgType(t *testing.T) {
 
 func TestDispatchResultFromEngine(t *testing.T) {
 	res := dispatchResultFromEngine(engine.Result{
-		Outcome:         engine.OutcomeNeedsBinding,
-		Sender:          "ou_user",
-		IssueIdentifier: "MUL-7",
-		IssueDuplicate:  true,
+		Outcome:            engine.OutcomeNeedsBinding,
+		Sender:             "ou_user",
+		IssueIdentifier:    "MUL-7",
+		IssueDuplicate:     true,
+		IssueUsageHadMedia: true,
 	})
 	if res.Outcome != OutcomeNeedsBinding {
 		t.Fatalf("outcome not mapped: %q", res.Outcome)
@@ -781,5 +782,8 @@ func TestDispatchResultFromEngine(t *testing.T) {
 	}
 	if !res.IssueDuplicate {
 		t.Fatal("issue duplicate flag not mapped")
+	}
+	if !res.IssueUsageHadMedia {
+		t.Fatal("issue usage media flag not mapped")
 	}
 }

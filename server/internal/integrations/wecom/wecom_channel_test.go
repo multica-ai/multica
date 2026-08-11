@@ -15,6 +15,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -190,4 +191,150 @@ func mustTestUUID(t *testing.T) pgtype.UUID {
 		t.Fatalf("parse uuid: %v", err)
 	}
 	return u
+}
+
+// floodConn acks subscribe, hands out a fixed run of msg_callback frames
+// back-to-back, then blocks until Close. It reports (via delivered) the moment
+// the last frame has left it, which is the moment the read loop is committed
+// to a send the dead worker can no longer receive.
+type floodConn struct {
+	mu        sync.Mutex
+	ack       []byte
+	acked     bool
+	frames    [][]byte
+	sent      int
+	delivered chan struct{}
+	unblock   chan struct{}
+	closeOne  sync.Once
+}
+
+func (c *floodConn) WriteMessage(_ int, data []byte) error {
+	var env frameEnvelope
+	if err := json.Unmarshal(data, &env); err == nil && env.Cmd == cmdSubscribe {
+		c.mu.Lock()
+		c.ack, _ = json.Marshal(frameEnvelope{Headers: frameHeaders{ReqID: env.Headers.ReqID}})
+		c.mu.Unlock()
+	}
+	return nil
+}
+
+func (c *floodConn) ReadMessage() (int, []byte, error) {
+	c.mu.Lock()
+	if !c.acked && c.ack != nil {
+		c.acked = true
+		ack := c.ack
+		c.mu.Unlock()
+		return websocket.TextMessage, ack, nil
+	}
+	if c.sent < len(c.frames) {
+		f := c.frames[c.sent]
+		c.sent++
+		last := c.sent == len(c.frames)
+		c.mu.Unlock()
+		if last {
+			close(c.delivered)
+		}
+		return websocket.TextMessage, f, nil
+	}
+	c.mu.Unlock()
+	<-c.unblock
+	return 0, nil, errors.New("closed")
+}
+
+func (c *floodConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *floodConn) SetWriteDeadline(time.Time) error { return nil }
+func (c *floodConn) Close() error {
+	c.closeOne.Do(func() { close(c.unblock) })
+	return nil
+}
+
+// TestConnectReturnsWhenCallbackWorkerDiesWithAFullQueue drives the one
+// arrangement in which the callback hand-off has no receiver and no closer:
+// the worker returns on its first dispatch error while the read loop is parked
+// on a send into a full queue.
+//
+// The worker closes the socket on its way out, which wakes a read loop parked
+// in ReadMessage — but a parked channel send is not a read, and closing a
+// socket does not move it. Nothing else closes the queue either: that happens
+// in a defer that cannot run until the read loop returns. Only ctx
+// cancellation would break the cycle, and on this path ctx is live: the
+// Supervisor holds the lease open and reports the installation connected, so
+// the bot stops answering that installation until the process restarts.
+//
+// The frame count is deliberate: the worker holds one frame while its handler
+// blocks, callbackQueueDepth more fill the buffer, and the next send is the
+// one with nowhere to go.
+func TestConnectReturnsWhenCallbackWorkerDiesWithAFullQueue(t *testing.T) {
+	t.Parallel()
+
+	frames := make([][]byte, 0, callbackQueueDepth+2)
+	for i := 0; i < callbackQueueDepth+2; i++ {
+		payload, err := json.Marshal(msgCallbackFrame(t, "text", "hello"))
+		if err != nil {
+			t.Fatalf("marshal frame: %v", err)
+		}
+		frames = append(frames, payload)
+	}
+
+	conn := &floodConn{
+		frames:    frames,
+		delivered: make(chan struct{}),
+		unblock:   make(chan struct{}),
+	}
+
+	// The first callback's handler parks until the queue behind it is full,
+	// then fails. Every later one would succeed — they never get the chance,
+	// which is the point.
+	var calls atomic.Int32
+	firstIn := make(chan struct{})
+	release := make(chan struct{})
+	wantErr := errors.New("handler failed")
+
+	c := &wecomChannel{
+		installationID: mustTestUUID(t),
+		botID:          "bot-1",
+		secret:         "secret-1",
+		handler: func(context.Context, channel.InboundMessage) error {
+			if calls.Add(1) == 1 {
+				close(firstIn)
+				<-release
+				return wantErr
+			}
+			return nil
+		},
+		dialer:  scriptedDialer{conn: conn},
+		wsURL:   "wss://example.test/ws",
+		senders: newSendersRegistry(),
+	}
+
+	// Cancelling at the end releases a Connect this test proved is stuck, so a
+	// failure here does not also strand a goroutine for the rest of the run.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Connect(ctx) }()
+
+	select {
+	case <-firstIn:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the first callback never reached the handler; the worker is not running")
+	}
+	select {
+	case <-conn.delivered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the read loop never took every frame, so the queue never filled and this test proves nothing")
+	}
+
+	close(release) // the worker's dispatch now fails and it returns
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("Connect returned %v, want the dispatch error %v", err, wantErr)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Connect did not return within 3s after the callback worker died with a full queue — " +
+			"the read loop is parked on a send with no receiver and no close, and only ctx cancellation can free it")
+	}
 }

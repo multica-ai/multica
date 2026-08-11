@@ -51,6 +51,9 @@ export function BreadcrumbHeader({ segments, leaf, actions, leading, className }
           <Fragment key={segment.href}>
             <AppLink
               href={segment.href}
+              newTabTitle={
+                typeof segment.label === "string" ? segment.label : undefined
+              }
               className={cn(
                 "text-muted-foreground hover:text-foreground transition-colors",
                 segment.className ?? "shrink-0",

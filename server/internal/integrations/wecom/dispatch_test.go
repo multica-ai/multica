@@ -1,9 +1,10 @@
 package wecom
 
 // dispatch_test.go — dispatchFrame routing, driven with a recording wsConn and
-// a capturing handler (no network). Covers the text-only receipt for non-text
-// messages, the text path reaching the handler, the superseded-disconnect
-// escalation, and the server-ping / pong frames.
+// a capturing handler (no network). Covers the receipt for a kind that cannot
+// be read, the text path reaching the handler, the superseded-disconnect
+// escalation, and the server-ping / pong frames. Media routing lives next
+// door in inbound_media_test.go.
 
 import (
 	"context"
@@ -40,7 +41,7 @@ func TestDispatchFrame_TextReachesHandler(t *testing.T) {
 		return nil
 	})
 	conn := &recordingConn{}
-	err := c.dispatchFrame(context.Background(), msgCallbackFrame(t, "text", "hello"), newWSSender(conn, nil), slog.Default())
+	err := c.dispatchFrame(context.Background(), msgCallbackFrame(t, "text", "hello"), conn.autoAck(newWSSender(conn, nil)), slog.Default())
 	if err != nil {
 		t.Fatalf("dispatchFrame: %v", err)
 	}
@@ -55,27 +56,35 @@ func TestDispatchFrame_TextReachesHandler(t *testing.T) {
 	}
 }
 
-func TestDispatchFrame_NonTextGetsReceiptAndSkipsHandler(t *testing.T) {
+func TestDispatchFrame_UnreadableKindGetsReceiptAndSkipsHandler(t *testing.T) {
 	t.Parallel()
-	called := false
-	c := testChannel(func(context.Context, channel.InboundMessage) error {
-		called = true
-		return nil
-	})
-	conn := &recordingConn{}
-	err := c.dispatchFrame(context.Background(), msgCallbackFrame(t, "image", ""), newWSSender(conn, nil), slog.Default())
-	if err != nil {
-		t.Fatalf("dispatchFrame: %v", err)
-	}
-	if called {
-		t.Error("handler must NOT be called for a non-text message")
-	}
-	if len(conn.frames) != 1 {
-		t.Fatalf("expected one text-only receipt, got %d frames", len(conn.frames))
-	}
-	body := conn.sendBody(t, 0)
-	if body["chatid"] != "CHAT_1" {
-		t.Errorf("receipt chatid = %v, want the same chat CHAT_1", body["chatid"])
+	// Two ways a callback can be unreadable: a kind this adapter does not
+	// model at all, and a kind it does model that arrived without the one
+	// field that makes it usable (an image frame carrying no url).
+	for _, name := range []string{"location", "image"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			called := false
+			c := testChannel(func(context.Context, channel.InboundMessage) error {
+				called = true
+				return nil
+			})
+			conn := &recordingConn{}
+			err := c.dispatchFrame(context.Background(), msgCallbackFrame(t, name, ""), conn.autoAck(newWSSender(conn, nil)), slog.Default())
+			if err != nil {
+				t.Fatalf("dispatchFrame: %v", err)
+			}
+			if called {
+				t.Error("handler must NOT be called for a message with nothing readable in it")
+			}
+			if len(conn.frames) != 1 {
+				t.Fatalf("expected one receipt, got %d frames", len(conn.frames))
+			}
+			body := conn.sendBody(t, 0)
+			if body["chatid"] != "CHAT_1" {
+				t.Errorf("receipt chatid = %v, want the same chat CHAT_1", body["chatid"])
+			}
+		})
 	}
 }
 
@@ -95,7 +104,7 @@ func TestDispatchFrame_ServerPingIsPonged(t *testing.T) {
 	t.Parallel()
 	c := testChannel(func(context.Context, channel.InboundMessage) error { return nil })
 	conn := &recordingConn{}
-	err := c.dispatchFrame(context.Background(), frameEnvelope{Cmd: cmdServerPing, Headers: frameHeaders{ReqID: "r1"}}, newWSSender(conn, nil), slog.Default())
+	err := c.dispatchFrame(context.Background(), frameEnvelope{Cmd: cmdServerPing, Headers: frameHeaders{ReqID: "r1"}}, conn.autoAck(newWSSender(conn, nil)), slog.Default())
 	if err != nil {
 		t.Fatalf("dispatchFrame: %v", err)
 	}

@@ -170,4 +170,26 @@ describe("sidebar auto-collapse between lg and xl", () => {
 
     expect(state()).toBe("expanded");
   });
+
+  it("never persists the open state, however it changed", () => {
+    // The guard for the trap upstream shadcn sets: it writes a `sidebar_state`
+    // cookie in `setOpen` and seeds `defaultOpen` from it server-side. Because
+    // the auto-collapse above drives `setOpen(false)` from the viewport rather
+    // than from the user, wiring that pair back up would carry a collapse
+    // nobody asked for out of this band and into the next session on a wider
+    // display. Asserted for both paths — a real toggle and a crossing — since
+    // it is the crossing that makes persistence wrong here.
+    renderWithI18n(
+      <SidebarProvider>
+        <Probe />
+      </SidebarProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId("state"));
+    expect(document.cookie).not.toContain("sidebar_state");
+
+    setWidth(1100);
+    expect(state()).toBe("collapsed");
+    expect(document.cookie).not.toContain("sidebar_state");
+  });
 });

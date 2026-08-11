@@ -88,6 +88,33 @@ SELECT id FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR KEY SHARE;
 
+-- name: LockIssueForDescriptionUpdate :one
+-- Serialize user description saves with detached channel-media appends. The
+-- handler merges channel media that landed after the editor's submitted base
+-- while holding this lock, then performs UpdateIssue in the same transaction.
+SELECT * FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
+-- name: MaterializeIssueChannelMediaMarkdown :one
+-- Detached channel media resolves after /issue creation. When the description
+-- still equals the exact creation-time base, replace its inline placeholders
+-- with the fully composed Markdown so rich-text ordering survives. If a user
+-- edited concurrently (or the adapter has no inline layout), append instead;
+-- preserving user-authored bytes takes precedence over layout fidelity.
+UPDATE issue
+SET description = CASE
+        WHEN sqlc.narg('base_description')::text IS NOT NULL
+             AND COALESCE(description, '') = sqlc.narg('base_description')::text
+            THEN sqlc.arg('description')::text
+        WHEN description IS NULL OR description = '' THEN sqlc.arg(markdown)
+        ELSE description || E'\n\n' || sqlc.arg(markdown)
+    END,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND workspace_id = sqlc.arg(workspace_id)
+RETURNING *;
+
 -- name: LockIssueForDelete :one
 -- Issue deletion must collect every attachment URL after it has won the same
 -- row-lock race used by channel media binding. FOR UPDATE conflicts with the

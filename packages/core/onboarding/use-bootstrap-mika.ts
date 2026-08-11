@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { chatKeys } from "../chat/queries";
-import type { ChatPendingTask, ChatSession, MikaBootstrapResponse } from "../types";
+import type { ChatSession, MikaBootstrapResponse } from "../types";
 import { workspaceKeys } from "../workspace/queries";
 
 export type MikaOnboardingLanguage = "en" | "zh" | "ko" | "ja";
@@ -21,9 +21,6 @@ export interface BootstrapMikaInput {
   /** Localized title for the opening conversation. */
   title: string;
   language: MikaOnboardingLanguage;
-  /** Set when the member has onboarded in another workspace before, so Mika
-   *  opens with one line instead of re-explaining the product. */
-  returning?: boolean;
 }
 
 export interface BootstrapMikaResult {
@@ -68,12 +65,11 @@ export async function bootstrapMika(
     throw new Error("Mika onboarding session was not returned");
   }
 
+  // Language only. Every workspace onboards from scratch — what this member
+  // did in another workspace is deliberately not part of this one's opening.
   const kickoff = await api.startMikaOnboarding(
     chatSession.id,
-    {
-      language: input.language,
-      returning: input.returning ?? false,
-    },
+    { language: input.language },
     input.workspaceSlug,
   );
 
@@ -85,17 +81,12 @@ export function useBootstrapMika(workspaceId: string) {
 
   return useMutation({
     mutationFn: (input: BootstrapMikaInput) => bootstrapMika(input),
-    onSuccess: ({ chatSession, kickoff }) => {
-      if (kickoff.started && kickoff.task_id) {
-        queryClient.setQueryData<ChatPendingTask>(
-          chatKeys.pendingTask(chatSession.id),
-          {
-            task_id: kickoff.task_id,
-            status: "queued",
-            created_at: kickoff.created_at,
-          },
-        );
-      }
+    onSuccess: ({ chatSession }) => {
+      // No pending task is seeded any more: the opening is written by the
+      // server and already persisted by the time this resolves, so there is
+      // nothing in flight for the chat view to await. Invalidating the message
+      // list is what makes it appear — and because it is real persisted state,
+      // it survives a reload, unlike the pending-task marker it replaces.
       return Promise.all([
         queryClient.invalidateQueries({
           queryKey: workspaceKeys.agents(workspaceId),
@@ -104,7 +95,10 @@ export function useBootstrapMika(workspaceId: string) {
           queryKey: chatKeys.sessions(workspaceId),
         }),
         queryClient.invalidateQueries({
-          queryKey: chatKeys.pendingTask(chatSession.id),
+          queryKey: chatKeys.messages(chatSession.id),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: chatKeys.messagesPage(chatSession.id),
         }),
       ]);
     },

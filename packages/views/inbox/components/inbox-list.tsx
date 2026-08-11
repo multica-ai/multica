@@ -9,7 +9,14 @@ import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
 import { InboxListItem } from "./inbox-list-item";
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
+import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { useT } from "../../i18n";
+
+// Sizing only (like the board's card estimate): the seed's trailing spacer
+// and Virtuoso's defaultItemHeight share this value so the scroller's height
+// is truthful from the first frame and a restored offset sticks. A row is
+// two text lines (body + caption) plus py-2.5.
+const INBOX_ROW_ESTIMATED_HEIGHT = 58;
 
 /**
  * Scrollable, virtualized inbox notification list.
@@ -56,6 +63,19 @@ export function InboxList({
   // A callback ref into state hands the element over once it mounts and
   // triggers the re-render that lets Virtuoso attach to it.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  // Pull-based scroll restoration (MUL-4741): assign the saved offset at
+  // ref-attach (the seed's estimate spacer gives the container a truthful
+  // height on the first commit, so the assignment sticks pre-paint) and feed
+  // the same offset into the Virtuoso as its initial position.
+  const restoredScrollTop = useRestoredScrollOffset("list");
+  const restoreScrollRef = useRestoredScrollRef("list");
+  const attachScrollEl = useCallback(
+    (el: HTMLDivElement | null) => {
+      setScrollEl(el);
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isArchivedView = view === "archived";
 
@@ -185,7 +205,8 @@ export function InboxList({
   // `initialItemCount` so the measurement frame keeps those rows (MUL-4750).
   return (
     <div
-      ref={setScrollEl}
+      ref={attachScrollEl}
+      data-tab-scroll-root="list"
       // Programmatically focusable only: the rows are buttons and already
       // carry their own tab stops, so a tabbable container would just add a
       // redundant one.
@@ -200,7 +221,9 @@ export function InboxList({
             customScrollParent={scrollEl}
             data={items}
             computeItemKey={computeItemKey}
+            initialScrollTop={restoredScrollTop}
             initialItemCount={Math.min(items.length, VIRTUOSO_SEED_COUNT)}
+            defaultItemHeight={INBOX_ROW_ESTIMATED_HEIGHT}
             increaseViewportBy={{ top: 400, bottom: 400 }}
             itemContent={itemContent}
             components={{ Footer }}
@@ -211,6 +234,7 @@ export function InboxList({
               data={items}
               itemContent={itemContent}
               computeItemKey={computeItemKey}
+              estimatedItemHeight={INBOX_ROW_ESTIMATED_HEIGHT}
             />
             {/* The seed frame renders a bounded slice, so the entry would be
                 mid-list rather than after the last row — only show it once the

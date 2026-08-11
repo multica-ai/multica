@@ -524,7 +524,7 @@ export function DashboardPage() {
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl p-6">
-          <TabsContent value="usage">
+          <TabsContent value="usage" className="space-y-5">
             {usageLoading ? (
               <DashboardSkeleton />
             ) : usageHasNoData ? (

@@ -24,11 +24,12 @@ func TestBuildPiArgsNoToolAllowlist(t *testing.T) {
 
 func TestBuildPiArgsBasicFlags(t *testing.T) {
 	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{
-		Model: "anthropic/claude-sonnet-4-20250514",
+		Model:         "anthropic/claude-sonnet-4-20250514",
+		ThinkingLevel: "high",
 	}, slog.Default())
 
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"-p", "--mode json", "--session /tmp/s.jsonl", "--provider anthropic", "--model claude-sonnet-4-20250514"} {
+	for _, want := range []string{"-p", "--mode json", "--session /tmp/s.jsonl", "--provider anthropic", "--model claude-sonnet-4-20250514", "--thinking high"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("expected %q in args, got: %v", want, args)
 		}
@@ -87,7 +88,8 @@ func TestBuildPiArgsFiltersCustomInputButKeepsOptionValues(t *testing.T) {
 			"--verbose",
 			"after-boolean",
 			"--extension-option", "extension-value",
-			"--thinking", "high",
+			"--thinking", "low",
+			"--thinking=medium",
 			"--offline",
 			"trailing-input",
 		},
@@ -102,7 +104,6 @@ func TestBuildPiArgsFiltersCustomInputButKeepsOptionValues(t *testing.T) {
 	for _, pair := range [][2]string{
 		{"--tools", "read,bash"},
 		{"--extension-option", "extension-value"},
-		{"--thinking", "high"},
 	} {
 		found := false
 		for i := 0; i+1 < len(args); i++ {
@@ -114,6 +115,36 @@ func TestBuildPiArgsFiltersCustomInputButKeepsOptionValues(t *testing.T) {
 		if !found {
 			t.Errorf("option/value %q %q missing from %v", pair[0], pair[1], args)
 		}
+	}
+	for _, arg := range args {
+		if arg == "--thinking" || strings.HasPrefix(arg, "--thinking=") || arg == "low" || arg == "medium" {
+			t.Errorf("custom --thinking must be owned by thinking_level and filtered, got %v", args)
+		}
+	}
+}
+
+func TestBuildPiArgsThinkingLevelOverridesCustomArgs(t *testing.T) {
+	t.Parallel()
+
+	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{
+		ThinkingLevel: "max",
+		CustomArgs:    []string{"--thinking", "low", "--thinking=medium"},
+	}, slog.Default())
+
+	count := 0
+	for i, arg := range args {
+		if arg == "--thinking" {
+			count++
+			if i+1 >= len(args) || args[i+1] != "max" {
+				t.Fatalf("selected thinking level missing from args: %v", args)
+			}
+		}
+		if strings.HasPrefix(arg, "--thinking=") {
+			t.Fatalf("custom inline thinking flag leaked through: %v", args)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one daemon-owned --thinking flag, got %d in %v", count, args)
 	}
 }
 

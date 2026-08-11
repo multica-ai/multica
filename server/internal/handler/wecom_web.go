@@ -8,6 +8,7 @@ package handler
 // WebSocket long connection, so a public callback URL is not required.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -15,11 +16,27 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// wecomBodyLimit caps what either WeCom JSON endpoint will read. Both bodies
+// are a handful of short fields, and encoding/json materializes a string value
+// whole before Decode returns — so without a ceiling, one authenticated caller
+// POSTing a multi-gigabyte token string costs the API server that much RSS per
+// request.
+const wecomBodyLimit = 16 * 1024
+
+// WecomBindingRedeemer is the slice of wecom.BindingTokenService the redeem
+// endpoint drives. *wecom.BindingTokenService is the production value; the
+// interface exists so the body ceiling can be pinned in a test without a live
+// channel_binding_token table.
+type WecomBindingRedeemer interface {
+	RedeemAndBind(ctx context.Context, raw string, multicaUserID pgtype.UUID) (wecom.RedeemedBindingToken, error)
+}
 
 // WecomInstallationResponse is the wire shape for a wecom installation
 // row. The secret is NEVER included — it remains sealed on the row. BotID
@@ -89,13 +106,19 @@ func (h *Handler) ListWecomInstallations(w http.ResponseWriter, r *http.Request)
 }
 
 // RegisterWecomBYORequest is the body an admin submits from the Web UI's
-// BYO dialog. Two fields: the bot's stable identifier (BotID) and its
-// long-connection secret. The secret is written straight through the
-// secretbox so plaintext never lives on this file's stack past the
-// wecom.InstallationService.Upsert call.
+// BYO dialog. The bot's stable identifier (BotID) and its long-connection
+// secret are copied from the WeCom admin console; the secret is written
+// straight through the secretbox so plaintext never lives on this file's
+// stack past the wecom.InstallationService.Upsert call.
 type RegisterWecomBYORequest struct {
 	BotID  string `json:"bot_id"`
 	Secret string `json:"secret"`
+
+	// BotName is the bot's name as it appears in a chat. Optional, and used
+	// for one thing: recognising the bot's own @-mention in a group, which
+	// WeCom delivers as literal text. Omitting it on a re-install of the same
+	// bot keeps whatever name the row already carries.
+	BotName string `json:"bot_name,omitempty"`
 }
 
 // RegisterWecomBYO (POST /api/workspaces/{id}/wecom/install/byo?agent_id=…)
@@ -140,6 +163,7 @@ func (h *Handler) RegisterWecomBYO(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body RegisterWecomBYORequest
+	r.Body = http.MaxBytesReader(w, r.Body, wecomBodyLimit)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -150,35 +174,89 @@ func (h *Handler) RegisterWecomBYO(w http.ResponseWriter, r *http.Request) {
 		InstallerUserID: initiatorUUID,
 		BotID:           strings.TrimSpace(body.BotID),
 		Secret:          strings.TrimSpace(body.Secret),
+		BotDisplayName:  strings.TrimSpace(body.BotName),
 	})
 	if err != nil {
-		// One bot is one live long connection, so the (wecom, bot_id) slot has
-		// exactly one owner. Upsert conflicts on
-		// (workspace_id, agent_id, channel_type), which means connecting an
-		// already-connected bot to a SECOND agent misses ON CONFLICT and trips
-		// idx_channel_installation_type_appid instead. Each sentinel gets the
-		// sentence that tells the admin where the bot actually is; returning
-		// err.Error() here used to toast them the raw "duplicate key value
-		// violates unique constraint" text — and forwarded every other database
-		// error verbatim to the API caller besides.
-		switch {
-		case errors.Is(err, wecom.ErrBotOwnedBySameWorkspace):
-			writeError(w, http.StatusConflict, "this bot is already connected to another agent in this workspace — disconnect it there first, then connect it here")
-		case errors.Is(err, wecom.ErrBotOwnedByArchivedAgent):
-			writeError(w, http.StatusConflict, "this bot is connected to an archived agent in this workspace — restore that agent, or disconnect its bot, before connecting it here")
-		case errors.Is(err, wecom.ErrBotOwnedByAnotherWorkspace):
-			writeError(w, http.StatusConflict, "this bot is already connected to a different Multica workspace — disconnect it there before connecting it here")
-		default:
-			slog.Warn("wecom install failed",
-				"error", err, "workspace_id", uuidToString(wsUUID), "agent_id", uuidToString(agentUUID))
-			writeError(w, http.StatusBadRequest, "could not connect the WeCom bot — check the Bot ID and secret from the WeCom admin console, and that the bot is a smart bot with the long connection enabled")
-		}
+		writeWecomInstallError(w, err, wsUUID, agentUUID)
 		return
 	}
 	h.publish(protocol.EventWecomInstallationCreated, uuidToString(inst.WorkspaceID), "user", userID, map[string]any{
 		"id": uuidToString(inst.ID),
 	})
 	writeJSON(w, http.StatusOK, wecomInstallationToResponse(inst))
+}
+
+// writeWecomInstallError is the whole response matrix for a failed install, in
+// one place so it can be read and tested as a matrix rather than inferred from
+// a switch buried in the handler.
+//
+// The distinction it draws is who has to do something about the failure:
+//
+//	bot already owned (same ws / archived agent / other ws) → 409, go disconnect it there
+//	required field missing                                  → 400, the admin's input
+//	WeCom refused the pair                                  → 400, the ONE branch that may blame the credentials
+//	WeCom unreachable, so unverified                        → 503, say the credentials were not changed
+//	anything else (DB, encryption key, a bug)               → 500, log it, do not blame the admin
+//
+// One bot is one live long connection, so the (wecom, bot_id) slot has exactly
+// one owner. Upsert conflicts on (workspace_id, agent_id, channel_type), which
+// means connecting an already-connected bot to a SECOND agent misses ON
+// CONFLICT and trips idx_channel_installation_type_appid instead. Each sentinel
+// gets the sentence that tells the admin where the bot actually is; returning
+// err.Error() here used to toast them the raw "duplicate key value violates
+// unique constraint" text — and forwarded every other database error verbatim
+// to the API caller besides.
+//
+// Every case carries a stable code as well as the sentence, so the settings tab
+// can say this in the admin's own language instead of toasting English at them.
+// The sentence stays as the fallback for a client that does not know the code.
+// The codes are a published contract: each one means one outcome and keeps
+// meaning it, because the admin action differs per outcome.
+func writeWecomInstallError(w http.ResponseWriter, err error, wsUUID, agentUUID pgtype.UUID) {
+	switch {
+	case errors.Is(err, wecom.ErrBotOwnedBySameWorkspace):
+		writeErrorCode(w, http.StatusConflict, "wecom_bot_owned_by_same_workspace",
+			"this bot is already connected to another agent in this workspace — disconnect it there first, then connect it here")
+	case errors.Is(err, wecom.ErrBotOwnedByArchivedAgent):
+		writeErrorCode(w, http.StatusConflict, "wecom_bot_owned_by_archived_agent",
+			"this bot is connected to an archived agent in this workspace — restore that agent, or disconnect its bot, before connecting it here")
+	case errors.Is(err, wecom.ErrBotOwnedByAnotherWorkspace):
+		writeErrorCode(w, http.StatusConflict, "wecom_bot_owned_by_another_workspace",
+			"this bot is already connected to a different Multica workspace — disconnect it there before connecting it here")
+	case errors.Is(err, wecom.ErrInvalidInstallationParams):
+		// Something the admin left out. Their input, their fix. This code means
+		// exactly that and nothing else — the two credential outcomes below get
+		// their own, because "you left a field out", "WeCom said no" and "we
+		// could not ask WeCom" are three different next actions for the admin,
+		// and a client keying off one code cannot tell them apart.
+		writeErrorCode(w, http.StatusBadRequest, "wecom_install_rejected",
+			"could not connect the WeCom bot — check the Bot ID and secret from the WeCom admin console, and that the bot is a smart bot with the long connection enabled")
+	case errors.Is(err, wecom.ErrCredentialsRejected):
+		// WeCom itself refused the pair. This is the one branch entitled to
+		// blame the credentials, and the only one the admin can act on by going
+		// back to the console.
+		writeErrorCode(w, http.StatusBadRequest, "wecom_credentials_rejected",
+			"WeCom rejected this Bot ID and secret — check both on the WeCom admin console, and that the bot is a smart bot with the long connection enabled")
+	case errors.Is(err, wecom.ErrCredentialsUnverifiable):
+		// The deployment could not reach WeCom. Reporting this as a bad
+		// credential sends the admin to rotate a secret that was fine — and a
+		// rotated WeCom secret cannot be recovered. 503: nothing is wrong with
+		// the input, the check could not be made.
+		slog.Warn("wecom install could not verify the bot",
+			"error", err, "workspace_id", uuidToString(wsUUID), "agent_id", uuidToString(agentUUID))
+		writeErrorCode(w, http.StatusServiceUnavailable, "wecom_credentials_unverifiable",
+			"could not reach WeCom to verify this bot — the credentials were not changed; try again in a moment")
+	default:
+		// Ours: the database, the encryption key, a bug. This branch used to
+		// answer 400 and blame the credentials, which sent the admin to the
+		// WeCom console to rotate a secret that was fine — and a rotated WeCom
+		// secret cannot be recovered, so a thirty-second Postgres failover cost
+		// them a working bot. Whatever went wrong here, it was not their Bot ID.
+		slog.Error("wecom install failed",
+			"error", err, "workspace_id", uuidToString(wsUUID), "agent_id", uuidToString(agentUUID))
+		writeErrorCode(w, http.StatusInternalServerError, "wecom_install_failed",
+			"could not save this bot — something went wrong on our side. Your credentials were not changed; please try again, and contact support if it keeps failing")
+	}
 }
 
 // RevokeWecomInstallation (DELETE /api/workspaces/{id}/wecom/installations/{installationId})
@@ -239,7 +317,16 @@ func (h *Handler) wecomInstallService() *wecom.InstallationService {
 	if !ok || res == nil || res.Box == nil {
 		return nil
 	}
-	svc, err := wecom.NewInstallationService(h.Queries, h.TxStarter, res.Box)
+	// The probe is what makes the reclaim inside Upsert safe to run against a
+	// row this caller may not own. h.WecomCredentialProbe is a test seam;
+	// production leaves it nil and NewInstallationService supplies the real
+	// handshake. There is no wiring that leaves the check off — a nil probe is
+	// a construction error there, not a fail-open mode.
+	var opts []wecom.InstallationOption
+	if h.WecomCredentialProbe != nil {
+		opts = append(opts, wecom.WithCredentialProbe(h.WecomCredentialProbe))
+	}
+	svc, err := wecom.NewInstallationService(h.Queries, h.TxStarter, res.Box, opts...)
 	if err != nil {
 		return nil
 	}
@@ -279,6 +366,7 @@ func (h *Handler) RedeemWecomBindingToken(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req RedeemWecomBindingTokenRequest
+	r.Body = http.MaxBytesReader(w, r.Body, wecomBodyLimit)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return

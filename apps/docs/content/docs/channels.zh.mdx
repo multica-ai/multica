@@ -43,6 +43,8 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 没有 @ Bot 的频道消息不会触发智能体，也不会被加入它的对话上下文。
 
+普通消息按上述流程处理。`/issue` 是命令，不是对话轮次：Multica 会在原平台返回处理结果，但不会把命令加入 Multica Chat。Slack 原生 slash 命令仍按独立的异步创建任务流程处理。
+
 ## 会话隔离
 
 - 飞书/Lark 按聊天区分会话；同一个聊天中的后续消息会继续原会话。

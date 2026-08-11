@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, ExternalLink, MessagesSquare, Trash2 } from "lucide-react";
+import { ChevronRight, ExternalLink, Trash2 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -28,6 +28,7 @@ import {
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
+import { DingTalkMark } from "./dingtalk-mark";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { dingtalkInstallationsOptions, dingtalkKeys } from "@multica/core/dingtalk";
 import { api } from "@multica/core/api";
@@ -361,7 +362,7 @@ export function DingTalkAgentBindButton({
         }
         data-testid="dingtalk-agent-connect"
       >
-        <MessagesSquare className="h-3 w-3" />
+        <DingTalkMark className="h-4 w-4" />
         {t(($) => $.dingtalk.bind_button)}
       </Button>
 

@@ -79,6 +79,10 @@ vi.mock("@multica/core/api", () => ({
     registerWecomBYO: mockRegisterBYO,
     deleteWecomInstallation: mockDeleteInstallation,
   },
+  // The real one digs the code out of an ApiError body; the fake reads it off
+  // whatever the test threw, so a test can drive one branch of the switch.
+  errorCode: (e: unknown) =>
+    e && typeof e === "object" ? (e as { code?: string }).code : undefined,
 }));
 
 vi.mock("@multica/core/auth", () => {
@@ -94,6 +98,7 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() },
 }));
 
+import { toast } from "sonner";
 import { WecomAgentBindButton, WecomTab } from "./wecom-tab";
 
 const TEST_RESOURCES = { en: { common: enCommon, settings: enSettings } };
@@ -131,6 +136,111 @@ describe("WecomAgentBindButton", () => {
         secret: "s3cr3t",
       }),
     );
+  });
+
+  // The whole point of the server sending a code: a zh-Hans admin gets the
+  // Chinese sentence, not the English one the API happens to carry.
+  it("renders the localized sentence for a coded failure, not the server's English", async () => {
+    mockRegisterBYO.mockRejectedValue(
+      Object.assign(new Error("this bot is already connected to another agent in this workspace"), {
+        code: "wecom_bot_owned_by_same_workspace",
+      }),
+    );
+    renderUI(<WecomAgentBindButton agentId="agent-1" agentName="Bot" />);
+    await userEvent.click(screen.getByTestId("wecom-agent-connect"));
+    await userEvent.type(await screen.findByTestId("wecom-byo-bot-id"), "aibot_xyz");
+    await userEvent.type(screen.getByTestId("wecom-byo-secret"), "s3cr3t");
+    await userEvent.click(screen.getByTestId("wecom-byo-submit"));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(enSettings.wecom.byo_conflict_same_workspace),
+    );
+  });
+
+  // The 503 branch: we could not reach WeCom, so nothing was verified and
+  // nothing was changed. The admin must not read this as "your secret is
+  // wrong" — that sends them to rotate one that was fine, and a rotated WeCom
+  // secret cannot be recovered. Separate code, separate sentence.
+  it("tells the admin their credentials were not changed when WeCom was unreachable", async () => {
+    mockRegisterBYO.mockRejectedValue(
+      Object.assign(new Error("could not reach WeCom to verify this bot"), {
+        code: "wecom_credentials_unverifiable",
+      }),
+    );
+    renderUI(<WecomAgentBindButton agentId="agent-1" agentName="Bot" />);
+    await userEvent.click(screen.getByTestId("wecom-agent-connect"));
+    await userEvent.type(await screen.findByTestId("wecom-byo-bot-id"), "aibot_xyz");
+    await userEvent.type(screen.getByTestId("wecom-byo-secret"), "s3cr3t");
+    await userEvent.click(screen.getByTestId("wecom-byo-submit"));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(enSettings.wecom.byo_credentials_unverifiable),
+    );
+  });
+
+  // WeCom refusing the pair is the one outcome entitled to blame the
+  // credentials, and it must not reuse byo_rejected — that sentence means
+  // "you left a field out".
+  it("renders the credentials-rejected sentence, distinct from the missing-field one", async () => {
+    mockRegisterBYO.mockRejectedValue(
+      Object.assign(new Error("WeCom rejected this Bot ID and secret"), {
+        code: "wecom_credentials_rejected",
+      }),
+    );
+    renderUI(<WecomAgentBindButton agentId="agent-1" agentName="Bot" />);
+    await userEvent.click(screen.getByTestId("wecom-agent-connect"));
+    await userEvent.type(await screen.findByTestId("wecom-byo-bot-id"), "aibot_xyz");
+    await userEvent.type(screen.getByTestId("wecom-byo-secret"), "s3cr3t");
+    await userEvent.click(screen.getByTestId("wecom-byo-submit"));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(enSettings.wecom.byo_credentials_rejected),
+    );
+    expect(toast.error).not.toHaveBeenCalledWith(enSettings.wecom.byo_rejected);
+  });
+
+  // A server that sends no code must still say something useful, so the
+  // fallback cannot regress into the generic toast.
+  it("falls back to the server's message when no code is attached", async () => {
+    mockRegisterBYO.mockRejectedValue(new Error("something the server said"));
+    renderUI(<WecomAgentBindButton agentId="agent-1" agentName="Bot" />);
+    await userEvent.click(screen.getByTestId("wecom-agent-connect"));
+    await userEvent.type(await screen.findByTestId("wecom-byo-bot-id"), "aibot_xyz");
+    await userEvent.type(screen.getByTestId("wecom-byo-secret"), "s3cr3t");
+    await userEvent.click(screen.getByTestId("wecom-byo-submit"));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("something the server said"),
+    );
+  });
+
+  // The bot's chat name reaches the server, and only when it was typed.
+  //
+  // WeCom delivers a group @-mention as literal text with no structured
+  // mention list, so a name containing a space ("Multica Bot") swallows the
+  // slash command typed after it. The name is the only way to tell where the
+  // mention ends — and it cannot be discovered, because the smart bot exposes
+  // no REST surface to ask. Left blank, the request omits it entirely so a
+  // re-install keeps whatever name the row already carries.
+  it("sends the bot's chat name when one is given, and omits it when not", async () => {
+    mockRegisterBYO.mockResolvedValue({ id: "i-1" });
+    renderUI(<WecomAgentBindButton agentId="agent-1" />);
+    await userEvent.click(screen.getByTestId("wecom-agent-connect"));
+    await userEvent.type(await screen.findByTestId("wecom-byo-bot-id"), "aib94");
+    await userEvent.type(screen.getByTestId("wecom-byo-secret"), "s3cret");
+    await userEvent.type(screen.getByTestId("wecom-byo-bot-name"), "  Multica Bot  ");
+    await userEvent.click(screen.getByTestId("wecom-byo-submit"));
+
+    await waitFor(() => expect(mockRegisterBYO).toHaveBeenCalled());
+    expect(mockRegisterBYO.mock.calls[0]?.[2].bot_name).toBe("Multica Bot");
+
+    cleanup();
+    mockRegisterBYO.mockClear();
+    mockRegisterBYO.mockResolvedValue({ id: "i-2" });
+    renderUI(<WecomAgentBindButton agentId="agent-2" />);
+    await userEvent.click(screen.getByTestId("wecom-agent-connect"));
+    await userEvent.type(await screen.findByTestId("wecom-byo-bot-id"), "aib95");
+    await userEvent.type(screen.getByTestId("wecom-byo-secret"), "s3cret");
+    await userEvent.click(screen.getByTestId("wecom-byo-submit"));
+
+    await waitFor(() => expect(mockRegisterBYO).toHaveBeenCalled());
+    expect(mockRegisterBYO.mock.calls[0]?.[2].bot_name).toBeUndefined();
   });
 
   it("shows the connected badge (not the CTA) when the agent has an active install", () => {

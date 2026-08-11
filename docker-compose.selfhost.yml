@@ -74,6 +74,7 @@ services:
       SMTP_PORT: ${SMTP_PORT:-25}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
       SMTP_TLS: ${SMTP_TLS:-}
       SMTP_TLS_INSECURE: ${SMTP_TLS_INSECURE:-false}
       SMTP_EHLO_NAME: ${SMTP_EHLO_NAME:-}
@@ -146,6 +147,17 @@ services:
       # subscribe credentials at connection time, and to seal the secret when
       # an installation is created from the WeCom settings tab.
       MULTICA_WECOM_SECRET_KEY: ${MULTICA_WECOM_SECRET_KEY:-}
+      # Comma-separated ranges the inbound media fetcher may dial even though
+      # they look reserved. Empty (the default) keeps the SSRF guard as strict
+      # as it ships; set it only behind a fake-IP proxy whose pool would
+      # otherwise get every attachment refused. See .env.example.
+      MULTICA_WECOM_MEDIA_ALLOW_CIDRS: ${MULTICA_WECOM_MEDIA_ALLOW_CIDRS:-}
+      # 1 = log every inbound and outbound WeCom frame, including the first
+      # 120 runes of each message body, so a real-device session can be
+      # checked against the server afterwards. Off unless set; turn it on only
+      # for a debugging session and unset it when that session ends, because
+      # what it records is user message content.
+      MULTICA_WECOM_TRACE: ${MULTICA_WECOM_TRACE:-}
     restart: unless-stopped
 
   frontend:
