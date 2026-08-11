@@ -666,6 +666,39 @@ func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) (
 	return items, nil
 }
 
+const updateTaskUsageCost = `-- name: UpdateTaskUsageCost :execrows
+UPDATE task_usage
+SET cost_usd_ticks = $4,
+    updated_at = now()
+WHERE task_id = $1
+  AND provider = $2
+  AND model = $3
+`
+
+type UpdateTaskUsageCostParams struct {
+	TaskID       pgtype.UUID `json:"task_id"`
+	Provider     string      `json:"provider"`
+	Model        string      `json:"model"`
+	CostUsdTicks pgtype.Int8 `json:"cost_usd_ticks"`
+}
+
+// Cost-only correction after a Cursor Dashboard reconcile. Must not touch
+// token counters — replaying them would double-count Prometheus CaptureTaskUsage
+// side effects on the full usage endpoint. Bumps updated_at so the hourly
+// rollup picks up the authoritative figure.
+func (q *Queries) UpdateTaskUsageCost(ctx context.Context, arg UpdateTaskUsageCostParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateTaskUsageCost,
+		arg.TaskID,
+		arg.Provider,
+		arg.Model,
+		arg.CostUsdTicks,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertTaskUsage = `-- name: UpsertTaskUsage :exec
 INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())

@@ -814,10 +814,10 @@ type cursorStreamEvent struct {
 	// The result event reports token counts only; cursor-agent's stream-json
 	// carries no per-turn cost (no `total_cost_usd`, no per-step `cost`). This
 	// was verified against the real CLI (2026.07.20, both stream-json and json
-	// output) and Cursor's CLI docs. So — unlike Grok, whose turn cost xAI
-	// reports authoritatively — Cursor spend is estimated downstream from the
-	// static rate table, never carried through here. Add a cost field only
-	// when a real payload proves the CLI emits one.
+	// output) and Cursor's CLI docs. Authoritative Cursor spend is attached
+	// later by the local daemon from Dashboard usage events in the desktop
+	// session. Until that reconcile succeeds, CostUSDTicks stays 0 here and
+	// the server falls back to the static rate table.
 	ResultText       string       `json:"result,omitempty"`
 	IsError          bool         `json:"is_error,omitempty"`
 	InputTokens      int64        `json:"inputTokens,omitempty"`

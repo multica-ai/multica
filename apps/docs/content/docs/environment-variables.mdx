@@ -197,6 +197,7 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Task polling interval when no wake event arrives |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat interval |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Concurrent task ceiling per daemon |
+| `MULTICA_CURSOR_DASHBOARD_USAGE` | empty | Set to `1` to reconcile cursor-agent costs from the local Cursor Dashboard session |
 | `MULTICA_AGENT_TIMEOUT` | `0` | Absolute time limit per run; `0` means no limit |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | Silence ceiling with no output and no tool execution |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | Silence ceiling for a single tool call |
@@ -208,6 +209,8 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Whether to restart into a `multica` binary replaced on disk out of band (`brew upgrade`, a re-download, a local build). Independent of `MULTICA_DAEMON_AUTO_UPDATE` |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for task working directories |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep task directories for debugging |
+
+Cursor Dashboard reconciliation is opt-in because it reads Cursor's local `state.vscdb` credential and calls an undocumented Dashboard API. The credential stays on the daemon machine; Multica receives only the matched cost and opaque hashes used to prevent duplicate attribution. Each task is queried at most three times. If the credential or API is unavailable, Multica keeps the normal static cost estimate.
 
 Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw is the exception: it has no `MULTICA_QWENPAW_MODEL`, because Multica never sends it a model — see [AI coding tools comparison](/providers#model-sources). Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
 

@@ -64,6 +64,7 @@ var preMigrationHooks = map[string]preMigrationHook{
 	"198_agent_task_attribution_strict_constraint_validate": runAttributionStrictHook,
 	"257_agent_task_queue_channel_media_pending_unique_v2":  cleanupInvalidConcurrentIndexHook("idx_one_pending_task_per_issue_agent_v2"),
 	"261_agent_task_queue_terminal_completed_at_v2":         cleanupInvalidConcurrentIndexHook("idx_agent_task_queue_terminal_completed_at_v2"),
+	"274_cursor_usage_event_claim_unique_index":             cleanupInvalidConcurrentIndexHook("cursor_usage_event_claim_account_occurrence_uidx"),
 }
 
 // cleanupInvalidConcurrentIndexHook removes an INVALID index left by an

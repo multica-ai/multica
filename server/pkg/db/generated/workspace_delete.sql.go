@@ -221,6 +221,9 @@ deleted_task_usage AS (
     DELETE FROM task_usage
     WHERE task_id IN (SELECT id FROM ws_tasks)
 ),
+deleted_cursor_usage_claim AS (
+    DELETE FROM cursor_usage_event_claim WHERE workspace_id = $1
+),
 deleted_task_messages AS (
     DELETE FROM task_message
     WHERE task_id IN (SELECT id FROM ws_tasks)
@@ -404,6 +407,10 @@ SET state = CASE
 WHERE channel_media_pending_object.workspace_id = $1
 `
 
+// No FK on cursor_usage_event_claim; clear account claim ledger with the
+// workspace so Cursor account ids and occurrence keys do not linger after
+// teardown. Writers take LockWorkspaceForChatSessionCreate (FOR KEY SHARE)
+// before insert so they cannot race this delete's FOR UPDATE snapshot.
 // Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
 // than the session set because that column exists precisely so this statement
 // does not have to join through chat_session, which it deletes in this same CTE.

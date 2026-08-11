@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
@@ -247,10 +248,21 @@ type TaskUsageEntry struct {
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 	// CostUSDTicks is the provider's own price for this usage, in 1e-10 USD.
-	// Omitted when the agent reports no cost, which is the common case — the
-	// server then leaves the column NULL and the client estimates from the
-	// pricing table instead. See agent.TokenUsage.CostUSDTicks.
+	// Only meaningful when CostUSDTicksPresent is true — a present zero is a
+	// real $0 bill (e.g. Cursor included-in-plan). When Present is false the
+	// server stores NULL and the client estimates from the pricing table.
+	// See agent.TokenUsage.CostUSDTicks.
 	CostUSDTicks int64 `json:"cost_usd_ticks,omitempty"`
+	// CostUSDTicksPresent marks CostUSDTicks as provider-authoritative.
+	CostUSDTicksPresent bool `json:"cost_usd_ticks_present,omitempty"`
+}
+
+// CursorUsageCostCorrection is a cost-only update matched from Cursor's
+// Dashboard. It must not replay token counters on the full usage endpoint.
+type CursorUsageCostCorrection struct {
+	Model          string   `json:"model"`
+	CostUSDTicks   int64    `json:"cost_usd_ticks"`
+	OccurrenceKeys []string `json:"occurrence_keys"`
 }
 
 // TaskResult is the outcome of executing a task.
@@ -274,4 +286,10 @@ type TaskResult struct {
 	// precisely when the abandoned id would otherwise stay selectable.
 	RetiredSessionID string           `json:"-"`
 	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+	// Cursor Dashboard cost reconcile must run only AFTER the initial
+	// ReportTaskUsage succeeds — otherwise a fast worker can write
+	// authoritative cost and then be overwritten by present=false.
+	ShouldReconcileCursorCost bool      `json:"-"`
+	CursorCostWindowStart     time.Time `json:"-"`
+	CursorCostWindowEnd       time.Time `json:"-"`
 }

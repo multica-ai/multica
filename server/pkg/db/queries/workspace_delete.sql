@@ -117,6 +117,13 @@ deleted_task_usage AS (
     DELETE FROM task_usage
     WHERE task_id IN (SELECT id FROM ws_tasks)
 ),
+-- No FK on cursor_usage_event_claim; clear account claim ledger with the
+-- workspace so Cursor account ids and occurrence keys do not linger after
+-- teardown. Writers take LockWorkspaceForChatSessionCreate (FOR KEY SHARE)
+-- before insert so they cannot race this delete's FOR UPDATE snapshot.
+deleted_cursor_usage_claim AS (
+    DELETE FROM cursor_usage_event_claim WHERE workspace_id = $1
+),
 deleted_task_messages AS (
     DELETE FROM task_message
     WHERE task_id IN (SELECT id FROM ws_tasks)

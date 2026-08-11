@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS cursor_usage_event_claim_account_occurrence_uidx;

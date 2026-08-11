@@ -399,6 +399,21 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
+// ReportCursorUsageCost persists authoritative Cursor cost without replaying
+// token counters or CaptureTaskUsage metrics. accountKey and occurrence_keys
+// must already be opaque digests from the daemon — never raw Cursor user ids
+// or event fingerprints. Keys are claimed server-side so multiple daemons
+// cannot attribute the same Dashboard event.
+func (c *Client) ReportCursorUsageCost(ctx context.Context, taskID, accountKey string, corrections []CursorUsageCostCorrection) error {
+	if len(corrections) == 0 {
+		return nil
+	}
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/usage/cost", taskID), map[string]any{
+		"account_key": accountKey,
+		"corrections": corrections,
+	}, nil, cursorUsageCostRetrySchedule)
+}
+
 func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string, sessionRolloutMissing bool, retiredSessionID string) error {
 	body := map[string]any{"error": errMsg}
 	if sessionID != "" {
@@ -835,6 +850,15 @@ var defaultTerminalRetrySchedule = []time.Duration{
 	16 * time.Second,
 	32 * time.Second,
 	64 * time.Second,
+}
+
+// Cursor cost correction is transactional and same-task idempotent, so replay
+// is safe when a response is lost or the server briefly returns 5xx. Keep this
+// bounded well inside cursorCostReconcileTimeout.
+var cursorUsageCostRetrySchedule = []time.Duration{
+	500 * time.Millisecond,
+	1 * time.Second,
+	2 * time.Second,
 }
 
 // skillBundleResolveRetrySchedule rides out brief transport blips on a single

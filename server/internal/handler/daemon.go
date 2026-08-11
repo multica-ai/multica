@@ -3588,17 +3588,29 @@ type TaskUsagePayload struct {
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 	// CostUSDTicks is the provider's own price for this usage in 1e-10 USD.
-	// Absent or 0 from every daemon that doesn't have one (older builds, and
-	// every provider except Grok today) — stored as NULL so the reader knows
-	// to fall back to rate-table estimation rather than reading a real $0.
+	// Only stored when CostUSDTicksPresent is true. Older daemons omit the
+	// present flag and only send positive ticks (Grok); absent/zero without
+	// the flag still means "unknown" → NULL → rate-table estimate.
 	CostUSDTicks int64 `json:"cost_usd_ticks"`
+	// CostUSDTicksPresent marks CostUSDTicks as provider-authoritative,
+	// including an authoritative $0 (Cursor included-in-plan).
+	CostUSDTicksPresent bool `json:"cost_usd_ticks_present"`
 }
 
 // authoritativeCostTicks converts a reported cost into the nullable column.
-// Only a positive figure is authoritative: 0 is what a daemon that knows
-// nothing about cost sends, and storing it would claim a genuine $0 spend and
-// suppress the estimate. Negative is nonsense from a malformed report.
-func authoritativeCostTicks(ticks int64) pgtype.Int8 {
+//
+// Compatibility:
+//   - present=true  → store ticks even when 0 (real included-in-plan $0)
+//   - present=false → legacy path: only positive ticks are authoritative;
+//     0 means "daemon did not report a cost" and must stay NULL so estimates
+//     are not suppressed. Negative is nonsense from a malformed report.
+func authoritativeCostTicks(ticks int64, present bool) pgtype.Int8 {
+	if present {
+		if ticks < 0 {
+			return pgtype.Int8{}
+		}
+		return pgtype.Int8{Int64: ticks, Valid: true}
+	}
 	if ticks <= 0 {
 		return pgtype.Int8{}
 	}
@@ -3650,7 +3662,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
-			CostUsdTicks:     authoritativeCostTicks(u.CostUSDTicks),
+			CostUsdTicks:     authoritativeCostTicks(u.CostUSDTicks, u.CostUSDTicksPresent),
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 			continue
@@ -3674,6 +3686,134 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 				"cache_read_ratio", float64(u.CacheReadTokens)/float64(totalInput),
 			)
 		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type cursorUsageCostCorrectionPayload struct {
+	Model          string   `json:"model"`
+	CostUSDTicks   int64    `json:"cost_usd_ticks"`
+	OccurrenceKeys []string `json:"occurrence_keys"`
+}
+
+// ReportCursorUsageCost applies authoritative Cursor cost without replaying
+// token counters or CaptureTaskUsage metrics. Occurrence keys are claimed
+// account-wide so multiple daemons cannot attribute the same Dashboard event.
+func (h *Handler) ReportCursorUsageCost(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+	_, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		AccountKey  string                             `json:"account_key"`
+		Corrections []cursorUsageCostCorrectionPayload `json:"corrections"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	accountKey := strings.TrimSpace(req.AccountKey)
+	if accountKey == "" || len(req.Corrections) == 0 {
+		writeError(w, http.StatusBadRequest, "account_key and corrections are required")
+		return
+	}
+	for i := range req.Corrections {
+		correction := &req.Corrections[i]
+		correction.Model = strings.TrimSpace(correction.Model)
+		if correction.Model == "" || correction.CostUSDTicks < 0 || len(correction.OccurrenceKeys) == 0 {
+			writeError(w, http.StatusBadRequest, "model, non-negative cost_usd_ticks, and occurrence_keys are required")
+			return
+		}
+		for j := range correction.OccurrenceKeys {
+			correction.OccurrenceKeys[j] = strings.TrimSpace(correction.OccurrenceKeys[j])
+			if correction.OccurrenceKeys[j] == "" {
+				writeError(w, http.StatusBadRequest, "occurrence_keys must be non-empty")
+				return
+			}
+		}
+	}
+
+	taskUUID := parseUUID(taskID)
+	workspaceUUID := parseUUID(workspaceID)
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		slog.Error("begin usage cost transaction failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to update usage cost")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Share the workspace delete/create lock protocol: cost claims carry
+	// workspace_id with no FK, so writers must take FOR KEY SHARE before
+	// insert or they can land after DeleteWorkspace's snapshot and orphan.
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(r.Context(), workspaceUUID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		slog.Error("lock workspace for usage cost failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to update usage cost")
+		return
+	}
+
+	for _, correction := range req.Corrections {
+		for _, key := range correction.OccurrenceKeys {
+			inserted, err := qtx.InsertCursorUsageEventClaim(r.Context(), db.InsertCursorUsageEventClaimParams{
+				AccountKey:    accountKey,
+				OccurrenceKey: key,
+				TaskID:        taskUUID,
+				WorkspaceID:   workspaceUUID,
+			})
+			if err != nil {
+				slog.Error("insert cursor usage claim failed", "task_id", taskID, "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to claim usage event")
+				return
+			}
+			if inserted == 1 {
+				continue
+			}
+			owner, err := qtx.GetCursorUsageEventClaimOwner(r.Context(), db.GetCursorUsageEventClaimOwnerParams{
+				AccountKey:    accountKey,
+				OccurrenceKey: key,
+			})
+			if err != nil {
+				slog.Error("load conflicting cursor usage claim failed", "task_id", taskID, "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to claim usage event")
+				return
+			}
+			if owner == taskUUID {
+				continue
+			}
+			writeError(w, http.StatusConflict, "usage event already claimed")
+			return
+		}
+
+		rows, err := qtx.UpdateTaskUsageCost(r.Context(), db.UpdateTaskUsageCostParams{
+			TaskID:       taskUUID,
+			Provider:     "cursor",
+			Model:        correction.Model,
+			CostUsdTicks: authoritativeCostTicks(correction.CostUSDTicks, true),
+		})
+		if err != nil {
+			slog.Error("update task usage cost failed", "task_id", taskID, "model", correction.Model, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to update usage cost")
+			return
+		}
+		if rows == 0 {
+			writeError(w, http.StatusConflict, "task usage row not found for cost correction")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Error("commit usage cost transaction failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to update usage cost")
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

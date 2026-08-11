@@ -459,6 +459,10 @@ type Daemon struct {
 
 	cancelFunc context.CancelFunc // set by Run(); called by triggerRestart
 	rootCtx    context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
+
+	// cursorCosts reconciles Cursor Dashboard authoritative spend after the
+	// task has already reported token usage and left the execution slot.
+	cursorCosts *cursorCostReconciler
 	// restartMu guards restartBinary. Two goroutines can reach triggerRestart —
 	// the server-triggered handleUpdate and the autoUpdateLoop — and
 	// trySelfReload reads RestartBinary() from the latter to avoid racing the
@@ -588,6 +592,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reconcile:                 newReconcileBroadcaster(),
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
+		cursorCosts:               newCursorCostReconciler(client, logger),
 	}
 	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
 	d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
@@ -1659,6 +1664,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	d.cancelFunc = cancel
 	d.rootCtx = ctx
+	if d.cursorCosts == nil {
+		d.cursorCosts = newCursorCostReconciler(d.client, d.logger)
+	}
+	d.cursorCosts.start(ctx)
 
 	// Bind health port early to detect another running daemon.
 	healthLn, err := d.listenHealth()
@@ -4732,6 +4741,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	if len(result.Usage) > 0 {
 		if usageErr := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); usageErr != nil {
 			taskLog.Warn("report task usage failed", "error", usageErr)
+		} else if result.ShouldReconcileCursorCost && d.cursorCosts != nil {
+			// Only after the initial present=false report lands — otherwise a
+			// fast cost correction can be upserted back to NULL.
+			d.cursorCosts.enqueue(cursorCostJob{
+				taskID: task.ID,
+				start:  result.CursorCostWindowStart,
+				end:    result.CursorCostWindowEnd,
+				usage:  append([]TaskUsageEntry(nil), result.Usage...),
+			})
 		}
 	}
 
@@ -6444,8 +6462,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
 			CostUSDTicks:     u.CostUSDTicks,
+			// Grok (and any future CLI that emits ticks inline) only reports a
+			// positive figure today; treat that as authoritative. Authoritative
+			// $0 arrives later via the Cursor Dashboard reconciler.
+			CostUSDTicksPresent: u.CostUSDTicks > 0,
 		})
 	}
+	// cursor-agent does not emit per-turn cost (see pkg/agent/cursor.go).
+	// Stash the reconcile window on the result; handleTask enqueues only AFTER
+	// the initial ReportTaskUsage succeeds so a fast worker cannot be
+	// overwritten by present=false.
+	cursorCostEnd := time.Now()
+	defer func() {
+		if provider != "cursor" || !needsCursorCostEnrichment(taskResult.Usage) {
+			return
+		}
+		taskResult.ShouldReconcileCursorCost = true
+		taskResult.CursorCostWindowStart = taskStart
+		taskResult.CursorCostWindowEnd = cursorCostEnd
+	}()
 
 	// MUL-5305: withhold a Codex session whose rollout never reached the per-issue
 	// store, for ANY terminal state — including `completed`, since a completed
