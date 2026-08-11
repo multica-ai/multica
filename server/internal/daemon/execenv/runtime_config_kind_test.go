@@ -127,9 +127,14 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		kindQuickCreate: true, kindChat: true,
 	}
 	issueKinds := map[taskKind]bool{kindIssue: true}
+	windowsKinds := map[taskKind]bool{}
+	if runtimeGOOS == "windows" {
+		windowsKinds = allKinds
+	}
 	checks := []sectionCheck{
 		{"# Multica Agent Runtime", allKinds},
 		{"## Background Task Safety", allKinds},
+		{"## Windows Text Encoding", windowsKinds},
 		{"## Agent Identity", allKinds},
 		{"## Available Commands", allKinds},
 		{"## Issue Body Formatting", allKinds},

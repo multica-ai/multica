@@ -11,6 +11,57 @@ import (
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
 
+// Windows PowerShell 5.1 decodes UTF-8 files without a BOM through the
+// machine's ANSI code page unless the command names UTF-8 explicitly. Keep the
+// read-side guardrail in every Windows runtime brief, independent of provider
+// and task kind, so repository and agent-authored text cannot turn into
+// mojibake before it reaches the model or transcript.
+//
+// Not parallel: mutates the package-level runtimeGOOS.
+func TestWindowsTextEncodingGuidanceAcrossTaskKindsAndProviders(t *testing.T) {
+	saved := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = saved })
+
+	providers := []string{"codex", "claude", "opencode"}
+	kinds := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{name: "issue", ctx: TaskContextForEnv{IssueID: "issue-1"}},
+		{name: "autopilot", ctx: TaskContextForEnv{AutopilotRunID: "run-1"}},
+		{name: "quick-create", ctx: TaskContextForEnv{QuickCreatePrompt: "create an issue"}},
+		{name: "chat", ctx: TaskContextForEnv{ChatSessionID: "chat-1"}},
+	}
+
+	runtimeGOOS = "windows"
+	for _, provider := range providers {
+		for _, kind := range kinds {
+			out := buildMetaSkillContent(provider, kind.ctx)
+			for _, want := range []string{
+				"## Windows Text Encoding",
+				"Get-Content -LiteralPath <path> -Raw -Encoding UTF8",
+				"bare `Get-Content`, `cat`, `gc`, or `type`",
+				"`chcp 65001`",
+				"`$OutputEncoding`",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("windows %s/%s brief missing %q\n---\n%s", provider, kind.name, want, out)
+				}
+			}
+		}
+	}
+
+	runtimeGOOS = "linux"
+	for _, provider := range providers {
+		for _, kind := range kinds {
+			out := buildMetaSkillContent(provider, kind.ctx)
+			if strings.Contains(out, "## Windows Text Encoding") {
+				t.Errorf("linux %s/%s brief contains Windows-only text encoding guidance", provider, kind.name)
+			}
+		}
+	}
+}
+
 // Sub-issue Creation section — after MUL-2538 the platform posts the
 // child-done parent notification itself, so the brief no longer carries
 // any parent-notification rule (per Bohan's call on PR #3055: delete the

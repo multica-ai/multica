@@ -29,9 +29,9 @@ import (
 //     Issue Metadata, Sub-issue, ...).
 //  2. Per-section prose compression — Available Commands, Issue
 //     Body Formatting, Metadata, Mentions, Sub-issue Creation,
-//     Comment Formatting, Always Use CLI, Background Task Safety, Task Initiator,
-//     Repositories, Output are all tightened. Every test-asserted phrase
-//     stays.
+//     Comment Formatting, Windows Text Encoding, Always Use CLI, Background
+//     Task Safety, Task Initiator, Repositories, Output are all tightened.
+//     Every test-asserted phrase stays.
 //
 // Background Task Safety is emitted by `writeBackgroundTaskSafetySlim`
 // below.
@@ -100,6 +100,23 @@ func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("- A repo's merge requirements — \"CI must be green before merge\", required reviews, branch protection — are GitHub's merge gate, NOT your delivery acceptance criteria, and do not license a wait.\n")
 	b.WriteString("- The one exception: when the trigger comment or the issue's acceptance criteria explicitly ask you for the CI result, that result IS the deliverable — wait for it as ONE foreground blocking call (`gh pr checks <pr> --watch`) inside this same turn and report the outcome. Nothing else re-opens this door.\n")
 	b.WriteString("- Never end a turn with a \"standing by\" / \"I'll report back when X finishes\" message — that becomes your final output and the task ends.\n\n")
+}
+
+// writeWindowsTextEncoding prevents a Windows PowerShell 5.1 read-side
+// encoding failure. UTF-8 files without a BOM are decoded through the machine's
+// ANSI code page when Get-Content receives no explicit encoding; by the time
+// that output reaches the agent adapter it is already valid-but-corrupted
+// Unicode, and some bytes may already have been replaced with '?'. The runtime
+// brief is the earliest boundary Multica controls for every provider and task
+// kind, so keep the rule here rather than trying to reverse mojibake in the
+// daemon, database, or UI.
+func writeWindowsTextEncoding(b *strings.Builder) {
+	if runtimeGOOS != "windows" {
+		return
+	}
+
+	b.WriteString("## Windows Text Encoding\n\n")
+	b.WriteString("On Windows PowerShell 5.1, repository, Multica-managed, and agent-authored text files may be UTF-8 without a BOM. Never read them with bare `Get-Content`, `cat`, `gc`, or `type`: PowerShell can decode the bytes through the machine's ANSI code page and turn non-ASCII text into mojibake before it reaches the model or transcript. Use `Get-Content -LiteralPath <path> -Raw -Encoding UTF8`; when `Select-String` reads a file directly, pass `-Encoding UTF8` there too. `chcp 65001`, `$OutputEncoding`, and `[Console]::OutputEncoding` affect console and native-process I/O, not how PowerShell 5.1 decodes files.\n\n")
 }
 
 // writeAgentIdentity emits the Agent Identity heading and (optionally) the
@@ -686,6 +703,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Section               | comment | assign | autopilot | quick_create | chat
 //	----------------------+---------+--------+-----------+--------------+------
 //	Available Commands    |   full  |  full  |   full    |   minimal    | full
+//	Windows Text Encoding |    △    |   △    |     △     |      △       |  △
 //	Issue Body Formatting |    ✓    |   ✓    |     ✓     |      ✓       |  ✓
 //	Comment Formatting    |    ✓    |   ✓    |     —     |      —       |  —
 //	Repositories          |    △    |   △    |     △     |      —       |  △
@@ -697,10 +715,10 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Mentions              |    ✓    |   ✓    |     —     |      —       |  —
 //	Attachments           |    ✓    |   ✓    |     —     |      —       |  —
 //
-// Always-on rows — Header, Background Task Safety, Agent Identity,
-// Requesting User, Task Initiator, Workspace Context, Connected Apps,
-// Workflow, Always Use CLI, Output — are shared by every kind and emitted
-// unconditionally (or gated by their own data preconditions).
+// Always-on rows — Header, Background Task Safety, Windows Text Encoding,
+// Agent Identity, Requesting User, Task Initiator, Workspace Context,
+// Connected Apps, Workflow, Always Use CLI, Output — are shared by every kind
+// and emitted unconditionally (or gated by their own data preconditions).
 func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 	kind := classifyTask(ctx)
@@ -711,6 +729,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	// the per-turn user message (daemon.BuildPrompt) instead. See MUL-5377.
 	writeHeader(&b)
 	writeBackgroundTaskSafetySlim(&b)
+	writeWindowsTextEncoding(&b)
 	writeAgentIdentity(&b, ctx)
 	writeRequestingUser(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
