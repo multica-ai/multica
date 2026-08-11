@@ -22,9 +22,15 @@ export function descriptionPreview(markdown: string): string {
       // punctuation. A backslash before anything else (a letter, a space) is a
       // literal backslash in prose and is left alone.
       .replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, "$1")
-      .replace(/!file\[[^\]]*\]\([^)]*\)/g, "")
-      .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      // The destination group tolerates one level of balanced parentheses,
+      // e.g. `(https://en.wikipedia.org/wiki/Foo_(bar))` or a nested link
+      // produced when a URL inside a link label gets autolinked, which
+      // serializes as `[label]([https://x](https://x))`. A naive `[^)]+`
+      // stops at the first `)` and leaves the outer one stranded in the
+      // preview text — do not simplify this back to `[^)]+`.
+      .replace(/!file\[[^\]]*\]\((?:[^()]|\([^()]*\))*\)/g, "")
+      .replace(/!\[[^\]]*\]\((?:[^()]|\([^()]*\))*\)/g, "")
+      .replace(/\[([^\]]+)\]\((?:[^()]|\([^()]*\))*\)/g, "$1")
       .replace(/[*_`~]+/g, "")
       .replace(/^[\s>#]+/gm, "")
       .replace(/\s+/g, " ")

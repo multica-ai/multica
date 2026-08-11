@@ -41,6 +41,24 @@ describe("descriptionPreview", () => {
     );
   });
 
+  // The editor autolinks a raw URL inside a link label, producing a nested
+  // link destination like `([https://x](https://x))`. A destination pattern
+  // that stops at the first `)` leaves the outer paren stranded in the
+  // preview.
+  it("unwraps a link whose destination is itself a nested link", () => {
+    expect(
+      descriptionPreview(
+        "This is **very** flaky and needs a \\[repro script\\]([https://example.com](https://example.com)) before we fix it.",
+      ),
+    ).toBe("This is very flaky and needs a repro script before we fix it.");
+  });
+
+  it("unwraps a link whose destination legitimately contains parentheses", () => {
+    expect(
+      descriptionPreview("See [wiki](https://en.wikipedia.org/wiki/Foo_(bar)) for details"),
+    ).toBe("See wiki for details");
+  });
+
   it("drops the backslashes from escaped emphasis and punctuation", () => {
     expect(descriptionPreview("it costs \\$5 \\*not\\* \\$10")).toBe("it costs $5 not $10");
   });
