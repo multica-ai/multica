@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -908,12 +910,14 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 	}
 }
 
-// TestExpireStaleQueuedTasks_RuntimeDrained pins NEX-38 decision one: a queued
-// task that expires while its runtime is in 'draining' (safe shutdown in
-// progress) is failed with 'runtime_drained' rather than 'queued_expired', so
-// the failure monitor and the user can tell "stranded by an intentional safe
-// shutdown" from generic queue expiry.
-func TestExpireStaleQueuedTasks_RuntimeDrained(t *testing.T) {
+// TestExpireStaleQueuedTasks_SkipsDrainingRuntime pins the corrected NEX-38
+// contract (CEO decision 2026-08-10): a queued task on a runtime still in
+// 'draining' must NOT be TTL-expired as 'runtime_drained' — the draining
+// runtime keeps claiming and completing its pre-boundary queued work, so the
+// task stays queued and claimable. Only once the runtime converges to
+// 'offline' (daemon lost / fully shut down) does the row become eligible for
+// generic 'queued_expired' expiry.
+func TestExpireStaleQueuedTasks_SkipsDrainingRuntime(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
@@ -977,28 +981,55 @@ func TestExpireStaleQueuedTasks_RuntimeDrained(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
 	}
-	if len(failed) != 1 {
-		t.Fatalf("expected exactly 1 expired task, got %d", len(failed))
-	}
-	if failed[0].ID.Bytes != parseUUIDBytes(taskID) {
-		t.Fatalf("expired the wrong task: got %x", failed[0].ID.Bytes)
+	// The draining-runtime queued task must NOT be expired: it stays queued
+	// and claimable (corrected NEX-38 contract).
+	for _, ft := range failed {
+		if ft.ID.Bytes == parseUUIDBytes(taskID) {
+			t.Fatal("draining-runtime queued task must NOT be TTL-expired; the draining runtime keeps claiming and completing it")
+		}
 	}
 
-	var status, reason, errText string
+	var status, reason string
 	if err := testPool.QueryRow(ctx, `
-		SELECT status, COALESCE(failure_reason, ''), COALESCE(error, '')
+		SELECT status, COALESCE(failure_reason, '')
 		FROM agent_task_queue WHERE id = $1
-	`, taskID).Scan(&status, &reason, &errText); err != nil {
+	`, taskID).Scan(&status, &reason); err != nil {
 		t.Fatalf("read drained task: %v", err)
 	}
-	if status != "failed" {
-		t.Fatalf("task: expected status=failed, got %q", status)
+	if status != "queued" {
+		t.Fatalf("task: expected status=queued (still claimable), got %q", status)
 	}
-	if reason != "runtime_drained" {
-		t.Fatalf("task: expected failure_reason=runtime_drained, got %q", reason)
+	if reason != "" {
+		t.Fatalf("task: expected no failure_reason, got %q", reason)
 	}
-	if !strings.Contains(errText, "draining") {
-		t.Fatalf("task: expected error to mention draining, got %q", errText)
+
+	// Once the runtime converges to offline, the same task IS TTL-expired as
+	// 'queued_expired' — the machine is gone, so the queued work is orphaned.
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET status = 'offline' WHERE id = $1`, runtimeID); err != nil {
+		t.Fatalf("converge draining runtime to offline: %v", err)
+	}
+	failed2, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+		TtlSecs:    3600.0,
+		MaxPerTick: 100,
+	})
+	if err != nil {
+		t.Fatalf("ExpireStaleQueuedTasks (offline runtime) failed: %v", err)
+	}
+	expired := false
+	for _, ft := range failed2 {
+		if ft.ID.Bytes == parseUUIDBytes(taskID) {
+			expired = true
+			break
+		}
+	}
+	if !expired {
+		t.Fatal("queued task on an offline runtime must be TTL-expired as queued_expired")
+	}
+	if err := testPool.QueryRow(ctx, `SELECT COALESCE(failure_reason, '') FROM agent_task_queue WHERE id = $1`, taskID).Scan(&reason); err != nil {
+		t.Fatalf("read reason: %v", err)
+	}
+	if reason != "queued_expired" {
+		t.Fatalf("offline-runtime task failure_reason = %q, want queued_expired", reason)
 	}
 }
 
@@ -1024,4 +1055,159 @@ func unhex(c byte) byte {
 		return c - 'A' + 10
 	}
 	return 0
+}
+
+// TestStaleDrainingRuntimeConvergesToOffline pins must-fix #2: a runtime that
+// entered 'draining' and then stopped heartbeating (daemon lost) must converge
+// to offline via the sweeper's stale-runtime path. Before this fix the sweeper
+// only considered status='online' candidates, so a lost draining daemon stayed
+// 'draining' forever and its orphaned tasks were never reconciled.
+func TestStaleDrainingRuntimeConvergesToOffline(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		VALUES ($1, $2, 'lost-draining-runtime', 'local', 'claude', 'draining', '', '{}'::jsonb, NULL, now() - interval '1 hour')
+		RETURNING id
+	`, testWorkspaceID, "lost-draining-daemon").Scan(&runtimeID); err != nil {
+		t.Fatalf("create stale draining runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	queries := db.New(testPool)
+	stale, err := queries.SelectStaleOnlineRuntimes(ctx, 600.0)
+	if err != nil {
+		t.Fatalf("SelectStaleOnlineRuntimes failed: %v", err)
+	}
+	found := false
+	for _, s := range stale {
+		if s.ID.Bytes == parseUUIDBytes(runtimeID) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("lost draining runtime must appear in stale-runtime candidates")
+	}
+
+	rows, err := queries.MarkRuntimesOfflineByIDs(ctx, db.MarkRuntimesOfflineByIDsParams{
+		Ids:          []pgtype.UUID{parseUUID(runtimeID)},
+		StaleSeconds: 600.0,
+	})
+	if err != nil {
+		t.Fatalf("MarkRuntimesOfflineByIDs failed: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 runtime flipped offline, got %d", len(rows))
+	}
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&status); err != nil {
+		t.Fatalf("read runtime status: %v", err)
+	}
+	if status != "offline" {
+		t.Fatalf("lost draining runtime status = %q, want offline", status)
+	}
+}
+
+// TestFreshDrainingRuntimeStaysDraining is the companion to the above: a
+// draining runtime that is still heartbeating (last_seen_at fresh) must NOT be
+// flipped offline by the stale sweep.
+func TestFreshDrainingRuntimeStaysDraining(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		VALUES ($1, $2, 'fresh-draining-runtime', 'local', 'claude', 'draining', '', '{}'::jsonb, NULL, now())
+		RETURNING id
+	`, testWorkspaceID, "fresh-draining-daemon").Scan(&runtimeID); err != nil {
+		t.Fatalf("create fresh draining runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	queries := db.New(testPool)
+	stale, err := queries.SelectStaleOnlineRuntimes(ctx, 600.0)
+	if err != nil {
+		t.Fatalf("SelectStaleOnlineRuntimes failed: %v", err)
+	}
+	for _, s := range stale {
+		if s.ID.Bytes == parseUUIDBytes(runtimeID) {
+			t.Fatal("fresh draining runtime must not be a stale candidate")
+		}
+	}
+	rows, err := queries.MarkRuntimesOfflineByIDs(ctx, db.MarkRuntimesOfflineByIDsParams{
+		Ids:          []pgtype.UUID{parseUUID(runtimeID)},
+		StaleSeconds: 600.0,
+	})
+	if err != nil {
+		t.Fatalf("MarkRuntimesOfflineByIDs failed: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("fresh draining runtime must not be flipped offline (stale predicate), got %d rows", len(rows))
+	}
+}
+
+// TestSweepRunningTaskSkippedWhenRuntimeDraining pins must-fix #3: a healthy
+// long-running task on a fresh 'draining' runtime must NOT be killed by the
+// running-task wall-clock backstop. The draining runtime is intentionally
+// allowed to finish in-flight work, so a fresh heartbeat proves it is still
+// alive and the wall clock must not fire (same guard as online).
+func TestSweepRunningTaskSkippedWhenRuntimeDraining(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	// Put the runtime into draining with a fresh heartbeat.
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE agent_runtime SET status = 'draining', last_seen_at = now()
+		WHERE id = (SELECT runtime_id FROM agent WHERE id = $1)
+	`, agentID); err != nil {
+		t.Fatalf("flip runtime to draining: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `
+			UPDATE agent_runtime SET status = 'online', last_seen_at = now()
+			WHERE id = (SELECT runtime_id FROM agent WHERE id = $1)
+		`, agentID)
+	})
+
+	// Wall clock alone would kill the 3h-old running task (RunningTimeoutSecs=1s),
+	// but the fresh draining runtime proves liveness, so the backstop must skip it.
+	queries := db.New(testPool)
+	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+		DispatchTimeoutSecs: 300.0,
+		RunningTimeoutSecs:  1.0,
+		RuntimeStaleSecs:    staleThresholdSeconds,
+	})
+	if err != nil {
+		t.Fatalf("FailStaleTasks failed: %v", err)
+	}
+	for _, ft := range failedTasks {
+		if ft.ID.Bytes == parseUUIDBytes(taskID) {
+			t.Fatal("healthy long-running task on a fresh draining runtime must NOT be swept (must-fix #3)")
+		}
+	}
+	var status string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT status FROM agent_task_queue WHERE id = $1`, taskID,
+	).Scan(&status); err != nil {
+		t.Fatalf("failed to query task status: %v", err)
+	}
+	if status != "running" {
+		t.Fatalf("expected task to stay 'running' on a fresh draining runtime, got %q", status)
+	}
 }

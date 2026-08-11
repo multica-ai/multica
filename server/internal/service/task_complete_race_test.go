@@ -243,6 +243,34 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 	}
 }
 
+// TestRetryEligible_AutopilotIncludedForRuntimeDrained pins the corrected
+// NEX-38 contract's retry carve-out: an autopilot task stranded by a drained
+// runtime is retryable, because the autopilot scheduler's own cadence does not
+// recover work queued against a runtime that is going away. Every other
+// autopilot failure stays non-retryable (autopilot has its own re-run
+// semantics).
+func TestRetryEligible_AutopilotIncludedForRuntimeDrained(t *testing.T) {
+	base := db.AgentTaskQueue{
+		Attempt:     1,
+		MaxAttempts: 2,
+		IssueID:     pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+	}
+
+	// Autopilot task, runtime_drained → retryable (the carve-out).
+	autopilot := base
+	autopilot.AutopilotRunID = pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	if !retryEligible("runtime_drained", autopilot) {
+		t.Fatal("autopilot runtime_drained task must be retryable (NEX-38 corrected contract)")
+	}
+
+	// Autopilot task, any other retryable reason → still excluded (no double-trigger).
+	for _, reason := range []string{"runtime_offline", "runtime_recovery", "timeout"} {
+		if retryEligible(reason, autopilot) {
+			t.Fatalf("autopilot task must not auto-retry for %q", reason)
+		}
+	}
+}
+
 func TestTaskFailureClassifiers(t *testing.T) {
 	cases := []struct {
 		reason       string

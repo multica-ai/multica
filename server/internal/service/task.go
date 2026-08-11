@@ -4209,13 +4209,22 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 
 // retryEligible reports whether a failed task qualifies for an automatic retry
 // attempt: an infrastructure-shaped failure_reason, remaining attempt budget,
-// not an autopilot run, and linked to an issue or chat session. Shared by
-// FailTask's in-transaction retry and the orphan sweeper's MaybeRetryFailedTask
-// so both agree on which failures re-run.
+// and linked to an issue or chat session. Shared by FailTask's in-transaction
+// retry and the orphan sweeper's MaybeRetryFailedTask so both agree on which
+// failures re-run.
+//
+// Autopilot tasks are excluded from auto-retry EXCEPT for 'runtime_drained'
+// (NEX-38 corrected contract): the autopilot scheduler owns its own re-run
+// cadence, but a task stranded by an intentional safe shutdown would otherwise
+// have NO recovery path at all — it is queued against a runtime that is going
+// away and consumes nothing useful. Retrying it lets the child be claimed by
+// whatever runtime hosts the agent once the drain settles (CreateRetryTask
+// re-resolves the runtime to the agent's current binding).
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
+	autopilotBlocked := t.AutopilotRunID.Valid && failureReason != "runtime_drained"
 	return retryableReasons[failureReason] &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
-		!t.AutopilotRunID.Valid &&
+		!autopilotBlocked &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid)
 }
 
