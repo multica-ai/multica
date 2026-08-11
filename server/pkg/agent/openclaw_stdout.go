@@ -79,14 +79,21 @@ func readOpenclawStdout(r io.Reader, idleGrace time.Duration) (buf []byte, cutSh
 		chunk := make([]byte, 32*1024)
 		for {
 			n, rerr := r.Read(chunk)
-			// A terminating Read may carry data and its error at once —
-			// io.Reader explicitly permits returning n > 0 with io.EOF, and a
-			// pipe whose last write and close land together does exactly that.
-			// Publishing the bytes and the end of the stream in one critical
-			// section keeps that a single observation: split across two locks,
-			// a poll landing in between sees a buffer that has just become
-			// parseable while atEOF is still false, and cuts short a stream
-			// that in fact ended cleanly.
+			// A terminating Read may carry data and its error at once:
+			// io.Reader permits returning n > 0 with io.EOF, and this function
+			// accepts any io.Reader. Publishing the bytes and the end of the
+			// stream in one critical section keeps that a single observation —
+			// split across two locks, a poll landing in between sees a buffer
+			// that has just become parseable while atEOF is still false, and
+			// reports a stream that in fact ended cleanly as cut short.
+			//
+			// os/exec's StdoutPipe is not one of those readers: *os.File
+			// reports the final bytes and the EOF as two adjacent reads, since
+			// only a zero-byte read is turned into io.EOF. Production
+			// therefore reaches this seam through the wider gap between those
+			// two reads, which still has to outlast idleGrace to fool the
+			// poll. The narrower race that does not need starvation at all is
+			// the one in the tick branch below.
 			if n > 0 || rerr != nil {
 				mu.Lock()
 				if n > 0 {

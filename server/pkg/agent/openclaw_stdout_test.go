@@ -416,12 +416,14 @@ func TestReadOpenclawStdoutWaitsForCompleteResult(t *testing.T) {
 	default:
 	}
 
-	// Complete the blob and report EOF in the same Read — the shape io.Reader
-	// permits and a pipe whose last write and close land together produces.
-	// readOpenclawStdout publishes those bytes and that EOF in one critical
-	// section, so no poll can observe the buffer as parseable-but-not-yet-ended:
-	// the outcome below is decided by the mechanism, not by how long each
-	// goroutine happens to be scheduled on a loaded runner.
+	// Complete the blob and report EOF in the same Read: the strictest shape
+	// io.Reader permits, and deliberately harsher than the os/exec StdoutPipe
+	// production reads, which splits the final bytes and the EOF across two
+	// adjacent reads. Collapsing them into one observation is what makes the
+	// assertion below deterministic — readOpenclawStdout publishes those bytes
+	// and that EOF in a single critical section, so no poll can catch the
+	// buffer parseable-but-not-yet-ended, whatever the runner's scheduling
+	// looks like.
 	released = true
 	close(r.releaseSuffix)
 
