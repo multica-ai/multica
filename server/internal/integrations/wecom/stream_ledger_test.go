@@ -49,6 +49,10 @@ import (
 func TestAPromiseIsNotKeptUntilTheWordsAreAccepted(t *testing.T) {
 	t.Parallel()
 	rig := newBubbleRig(t)
+	// The second attempt is this test's own, standing in for WeCom's
+	// redelivery. The subscriber's booked one is a different subject and would
+	// only make the refusal below report itself handled — see sayTheAnswer.
+	rig.out.retryAfter = -1
 	rig.ran(t, "REQ-1", 1, "task-1")
 
 	// Nine minutes pass with the run still going: the guard takes the bubble

@@ -204,6 +204,12 @@ func (r endingRetries) next(cause retryCause, base time.Duration, attempts int, 
 // It is NOT every failure. A server's errcode is an answer, and since
 // errFrameNotOnTheWire a socket write that failed is one too: the frame never
 // left. Both are repeatable. See deliveryCanBeRepeated.
+//
+// This is the notices' rule and not the answer's. A notice dropped here still
+// has a sweeper tick, a repeat on the bus or WeCom's own redelivery behind it,
+// which is what makes it affordable to answer "no" to a failure nobody has met
+// before. An answer has no publisher behind it at all, so it reads the question
+// from the other end — see answerRetryCause (outbound.go).
 func endingRetryCause(err error) (retryCause, bool) {
 	if errors.Is(err, errEndingDeferred) {
 		return retryDeferred, true

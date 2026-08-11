@@ -11,6 +11,7 @@ package wecom
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -23,14 +24,14 @@ import (
 // TestAnAnswerIsNotDeliveredOnWhatTheWaitLeftOver is the ordering the previous
 // round's fix created and did not close.
 //
-// A wait that LOSES comes back as errEndingDeferred and books a retry. A wait
-// that is WON costs the caller exactly as much and books nothing: the round is
-// consumed, the ledger hands the answer its turn, and the binding row, the
-// installation row and the ack all run on whatever the wait left — which after
-// a ten-second wait on a ten-second budget is nothing. Every one of them then
-// fails with a context error, which is neither a deferral nor a refusal, so the
-// subscriber returns it to a WARN and the answer is gone. chat:done fires once
-// and the completion lives nowhere this process can go back to.
+// A wait that LOSES comes back as errEndingDeferred. A wait that is WON costs
+// the caller exactly as much: the round is consumed, the ledger hands the answer
+// its turn, and the binding row, the installation row and the ack all run on
+// whatever the wait left — which after a ten-second wait on a ten-second budget
+// is nothing. Every one of them then fails with a context error against a round
+// already spent, so the words the retry would carry go out beside a spinner
+// nothing seals rather than into it. chat:done fires once and the completion
+// lives nowhere this process can go back to.
 //
 // What the asker is left with is the guard's "还在处理，完成后我再单独回复你" and
 // nothing behind it — the same screen as the deferral bug, one instant later.
@@ -447,7 +448,212 @@ func TestNoRetriesWithoutADelay(t *testing.T) {
 		t.Error("a manager with retries disabled booked one")
 	}
 	o := &Outbound{retryAfter: -1}
-	if o.bookAnswerRetry(bubbleSessionID(t), "task", "content", endingRetries{}.begin(time.Now())) {
+	if o.bookAnswerRetry(bubbleSessionID(t), "task", "content", endingRetries{}.begin(time.Now()), retryRefused) {
 		t.Error("a subscriber with retries disabled booked one")
+	}
+}
+
+// TestAnAnswerOnADeadSocketIsSealedIntoTheBubbleItLeft is the same window on
+// the one ending that has no publisher behind it whatsoever.
+//
+// The round keeps its bubble when both routes fail on a socket that took
+// nothing (bubbleSurvivedTheFailure), which is what lets the NEXT publisher
+// seal the spinner in place. There is no next publisher here. chat:done fires
+// once, the guard is refused a round whose run is over (refuseTakeLocked), and
+// the completion lives nowhere this process can go back to — so unless the
+// subscriber holding the answer comes back for that bubble itself, the answer
+// is gone and the spinner runs until the sweep retires it.
+//
+// The socket dies, the closing frame does not go and neither does the plain
+// message behind it, and the Supervisor reconnects. What the asker has to end
+// up with is "42" inside the bubble their question opened — once.
+func TestAnAnswerOnADeadSocketIsSealedIntoTheBubbleItLeft(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.out.retryAfter = 20 * time.Millisecond
+	rig.ran(t, "REQ-DEAD-ANSWER", 1, "task-1")
+
+	opened := rig.conn.streamFrames(t)
+	if len(opened) != 1 || opened[0]["finish"] != false {
+		t.Fatalf("the question opened %v, want one unfinished bubble", opened)
+	}
+	rig.conn.breakTheSocket()
+
+	handled := rig.answerErr(t, "42", "task-1")
+	next := rig.reconnect()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && len(said(t, next)) == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	if got := said(t, next); len(got) != 1 || got[0] != "42" {
+		t.Fatalf("after the socket came back the asker read %q, want [\"42\"] — both routes "+
+			"reached nobody, and the subscriber carrying the completion is the only publisher "+
+			"this round has left", got)
+	}
+	sealed := next.streamFrames(t)
+	if len(sealed) != 1 || sealed[0]["id"] != opened[0]["id"] || sealed[0]["finish"] != true {
+		t.Fatalf("the attempt that came back wrote %v, want one closing frame on stream %v — "+
+			"nothing reached the peer on the attempt that failed, so the round still had the "+
+			"handle that seals the spinner the asker is watching", sealed, opened[0]["id"])
+	}
+	if got := pushedTexts(t, next); len(got) != 0 {
+		t.Fatalf("the answer also went out as a new message (%q) — that is a second copy of it "+
+			"beside the bubble that already carries it", got)
+	}
+	if handled != nil {
+		t.Errorf("the chat:done reported %v while a booked attempt was carrying the answer; "+
+			"the bus has no redelivery, so the error is a WARN about work still in hand", handled)
+	}
+}
+
+// ---- and the rule that decides, rather than a list of failures it recognises ----
+
+// TestAnAnswerComesBackForAnOutcomeNobodyHasClassified is this round's actual
+// subject, stated once instead of one failure at a time.
+//
+// Four rounds were spent adding an error class to a list of outcomes worth
+// another attempt, and each of them was followed by the class that was not on
+// the list — a wait that expired, a wait that was WON with the budget spent, a
+// send that failed on a dead socket. A list of what may be repeated is not
+// closed under a failure nobody has met yet, and every gap in it costs the
+// asker the only copy of their answer.
+//
+// So the direction is the assertion. The last case here is an error value this
+// package has never produced and never will: whatever it turns out to mean, it
+// is not one of the two ack waits saying the words may be in front of somebody,
+// and the answer this subscriber is still holding comes back for the round.
+func TestAnAnswerComesBackForAnOutcomeNobodyHasClassified(t *testing.T) {
+	t.Parallel()
+	broken := errors.New("write tcp 10.0.0.2:52170->10.0.0.9:443: write: broken pipe")
+	cases := []struct {
+		name  string
+		err   error
+		cause retryCause
+		again bool
+		why   string
+	}{{
+		name: "the words landed", err: nil, cause: retryNone, again: false,
+		why: "the run is on told and a repeat is a second copy of the reply",
+	}, {
+		name: "nothing to say", err: errNothingToSay, cause: retryNone, again: false,
+		why: "the delivery declined on purpose; there is nothing to come back for",
+	}, {
+		name: "the words may be on the screen",
+		err:  errors.Join(errWordsMayBeOnScreen, errStreamAckTimeout, fmt.Errorf("%w: %w", errFrameNotOnTheWire, broken)),
+		why:  "the closing frame reached the wire and lost only its verdict",
+	}, {
+		name: "the wait outlasted the budget", err: errEndingDeferred, cause: retryDeferred, again: true,
+		why: "nothing was said and nothing recorded; the news is still this one's to deliver",
+	}, {
+		name: "the socket took nothing", err: fmt.Errorf("%w: %w", errFrameNotOnTheWire, broken),
+		cause: retryRefused, again: true,
+		why: "a truncated frame reaches no application, so the answer is on nobody's screen",
+	}, {
+		name: "no socket at all", err: errNoLiveConnection, cause: retryRefused, again: true,
+		why: "there was nothing to write to",
+	}, {
+		name: "the server refused the push", err: &wecomAPIError{Cmd: cmdSendMsg, Code: errcodeRefusedPush},
+		cause: retryRefused, again: true,
+		why: "an errcode is the server stating that it showed nobody anything",
+	}, {
+		name: "a row this delivery could not read", err: errors.New("wecom: load installation: connection refused"),
+		cause: retryRefused, again: true,
+		why: "the send never happened; nothing about the screen changed",
+	}, {
+		name: "an error class nobody has met", err: errors.New("wecom: something nobody has written yet"),
+		cause: retryRefused, again: true,
+		why: "unrecognised is not evidence the asker is reading anything, and the answer " +
+			"exists nowhere but in this subscriber's hands",
+	}}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			cause, again := answerRetryCause(c.err)
+			if again != c.again {
+				t.Fatalf("answerRetryCause(%v) came back again=%v, want %v — %s", c.err, again, c.again, c.why)
+			}
+			if cause != c.cause {
+				t.Errorf("cause = %v, want %v — the counts are kept apart so a chain of waits "+
+					"cannot leave a refused send with nothing to spend", cause, c.cause)
+			}
+		})
+	}
+}
+
+// TestAStreamFrameWithNoVerdictSaysTheWordsMayBeThere is the other half of what
+// the rule above rests on, and the half a deny-list cannot do without.
+//
+// Retrying by default is only safe while every outcome that could have put
+// words in front of somebody says so itself. Two can: the ack wait behind a
+// plain message (TestSendTextDistinguishesALostAckFromARefusal) and this one,
+// behind a stream frame. The frame is on the wire and only the verdict is
+// missing, so the bubble may be sealed with the answer already.
+func TestAStreamFrameWithNoVerdictSaysTheWordsMayBeThere(t *testing.T) {
+	t.Parallel()
+	conn := &silentConn{} // written, never answered
+	sender := newWSSender(conn, nil)
+	sender.ackTimeout = 20 * time.Millisecond
+
+	err := sender.respondStream(context.Background(), "REQ-1", "S-1", "the agent reply", true)
+	if !errors.Is(err, errStreamAckTimeout) {
+		t.Fatalf("a closing frame with no verdict reported %v, want errStreamAckTimeout", err)
+	}
+	if !errors.Is(err, errWordsMayBeOnScreen) {
+		t.Fatal("the frame went out and its verdict never came back, and the failure does not " +
+			"say so — every reader of it then treats a bubble that may already carry the " +
+			"answer as one that carries nothing, and says the answer again beside it")
+	}
+	if bubbleSurvivedTheFailure(err) {
+		t.Error("the round would be handed its bubble back for a frame that reached the wire — " +
+			"the attempt that comes next seals a second copy of the answer into it")
+	}
+}
+
+// TestAnAnswerNoRouteEvenStartedIsNotWrittenOffAsPossiblyDelivered is the same
+// direction one layer down, where the two routes are added together.
+//
+// A delivery is two sends and only the second one's error comes back whole, so
+// deliverAnswer has to say what the FIRST one did. Marking the pair "may be on
+// the screen" whenever the closing frame's failure is one it does not recognise
+// puts the same drop back: an outcome nobody has classified suppresses the
+// attempt, and the asker keeps the spinner.
+//
+// Here neither send starts. The caller's context is already gone, so the stream
+// frame gives up at respondStream's own entry check and the plain message gives
+// up at request's — before the writer, before the socket, with nothing on the
+// wire either time. That is not ambiguity about the screen, and the answer is
+// still this subscriber's to deliver.
+func TestAnAnswerNoRouteEvenStartedIsNotWrittenOffAsPossiblyDelivered(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ask(t, "REQ-NO-ROUTE", 1)
+	opened := len(rig.conn.streamFrames(t))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := rig.out.deliverAnswer(ctx, bubbleSessionID(t), roundTurn{
+		HasBubble: true,
+		Handle: streamHandle{
+			ReqID: "REQ-NO-ROUTE", StreamID: "S-1",
+			InstallationID: rig.instID, ChatID: "CHAT_1", ChatType: chatTypeSingleInt,
+		},
+	}, "42")
+
+	if err == nil {
+		t.Fatal("a delivery on a context that was already gone reported success")
+	}
+	if errors.Is(err, errWordsMayBeOnScreen) {
+		t.Fatalf("the attempt reported %v — neither send reached the writer, so nothing is on "+
+			"anybody's screen, and the mark is what stops this subscriber coming back for the "+
+			"only copy of the answer", err)
+	}
+	if _, again := answerRetryCause(err); !again {
+		t.Error("the answer was written off after an attempt that put nothing on the wire")
+	}
+	if now := len(rig.conn.streamFrames(t)); now != opened {
+		t.Errorf("%d stream frame(s) were written, want the %d the question opened — this test "+
+			"is about the sends that never started", now, opened)
 	}
 }

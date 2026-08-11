@@ -1273,10 +1273,11 @@ func (s *streamStore) takeAtLocked(key string, i int, ending roundEnding) (round
 // come, which for a run that has already ended is false; worse, saying it would
 // CONSUME the bubble, so the attempt this restore exists for would find nothing
 // to seal and would speak beside the spinner after all. What closes the bubble
-// instead is the publisher that comes back for the ending — a failure, a
-// cancellation and a settle each book one; an answer books only for a deferral
-// and takes whatever other publisher the run has. If none comes, the sweep
-// retires the round and hands the debt on. Caller holds s.mu.
+// instead is the publisher that comes back for the ending, and all four book
+// one: a failure, a cancellation, a settle, and the answer — which has to,
+// being the only publisher holding the words this round is being kept for
+// (sayTheAnswer). If none comes, the sweep retires the round and hands the debt
+// on. Caller holds s.mu.
 func (s *streamStore) putRoundBackLocked(p pendingEnding) {
 	p.entry.runEnded = true
 	p.entry.guard = nil

@@ -175,107 +175,163 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 }
 
 // answerRetryAfter is how long an answer the ledger handed back undelivered
-// waits before trying again, and answerRetryAttempts is how many times. Same
-// shape and the same numbers as the typing indicator's endingRetryAfter, and for
-// the same reason — what an attempt is waiting out is a delivery bounded by
-// streamCloseTimeout, and every attempt is over long inside roundMemory.
+// waits before trying again, and answerRetryAttempts is how many times EACH of
+// the two causes may do so. Same shape and the same numbers as the typing
+// indicator's endingRetryAfter, and for the same reason — what an attempt is
+// waiting out is a delivery bounded by streamCloseTimeout, and every attempt is
+// over long inside roundMemory.
 //
-// One cause books them here rather than two, so the three attempts fall at 15s,
-// 45s and 105s after the answer was first attempted and the chain is finished
-// inside two minutes. See sayTheAnswer for why a refused send is not the second
-// cause it is on the endings.
+// The delay doubles over both causes together, so a chain that meets only one
+// runs its three attempts 15s, 45s and 105s after the answer was first
+// attempted, and even a chain that meets both is finished inside sixteen
+// minutes. The counts are kept apart for the reason endingRetries states: one
+// shared counter lets a run that lost three waits arrive at a refused send with
+// nothing left to spend on it.
 const (
 	answerRetryAfter    = 15 * time.Second
 	answerRetryAttempts = 3
 )
 
-// sayTheAnswer puts one completion in the round that asked for it, and books
-// itself again when the ledger hands the answer back still undelivered.
+// sayTheAnswer puts one completion in the round that asked for it, and comes
+// back for it whenever the ledger hands the answer back still undelivered.
 //
 // The retry is what this subscriber owes the answer it is carrying. Nothing else
 // holds it: chat:done fires once, the completion is not persisted anywhere this
 // process can go back to, and every other publisher of this round's ending has
-// only an apology to offer. So the one outcome that must not end here is
-// errEndingDeferred — the wait for a delivery already speaking for this run ran
-// past the budget the bus handed this subscriber, which says nothing whatever
-// about whether the user has an answer.
+// only an apology to offer. The guard cannot even offer that — it is refused a
+// round whose run is over (refuseTakeLocked) — so an attempt that gives up here
+// is an answer nobody says, and a bubble nothing seals until the sweep retires
+// it.
 //
-// It is not a rare shape. The budget is taken at the top of handleEvent, before
-// the binding lookup and both origin reads, while the guard takes a fresh
-// streamCloseTimeout of its own when it fires: an answer that spent part of its
-// budget on those round trips can meet a guard that has just started sending
-// with all of its. Ordinary database latency is enough. And the guard is the
-// worst publisher to be waiting behind, because its words land and end nothing —
-// it files streamCopyStillWorking and the answer IS the separate reply that copy
-// has just promised.
+// So the default is to come back, and answerRetryCause names the one outcome
+// that stops it. That direction is the point rather than a preference. Four
+// rounds of this were spent adding an error class to a list of outcomes worth
+// another attempt, and each of them was followed by the class that was not on
+// the list: a wait that expired, a wait that was WON with the budget spent, a
+// send that failed on a dead socket. A list of what may be repeated is never
+// closed under a failure nobody has met yet, and every gap in it reads as
+// "drop the answer".
+//
+// Two shapes are worth naming for what they are, though both simply take the
+// default:
+//
+//   - errEndingDeferred. The wait for a delivery already speaking for this run
+//     ran past the budget the bus handed this subscriber, which says nothing
+//     whatever about whether the user has an answer. Not a rare shape either:
+//     the budget is taken at the top of handleEvent, before the binding lookup
+//     and both origin reads, while the guard takes a fresh streamCloseTimeout of
+//     its own when it fires, so ordinary database latency is enough to meet a
+//     guard that has just started sending with all of its. And the guard is the
+//     worst publisher to be waiting behind, because its words land and end
+//     nothing — it files streamCopyStillWorking, and the answer IS the separate
+//     reply that copy has just promised.
+//   - both routes failing on a socket that took neither. The ledger puts the
+//     round back on its list holding the bubble (endEnding), and this is the
+//     publisher that comes for it: the attempt behind the reconnect seals the
+//     spinner the asker is watching, in place, with the answer.
 //
 // The wait is not the only way the budget goes. Winning it costs the same time,
 // and what would be left for the binding row, the installation row and the ack
 // is then nothing — a delivery that fails on a context error with the round
-// already consumed and no deferral to book from. That one is fixed a layer down:
-// the ledger hands the delivery a budget of its own rather than the remainder
-// (deliveryBudget in stream_store.go), so this path never has to tell a context
-// error apart from a refusal.
-//
-// Everything else is the end of the matter for THIS subscriber. A delivery that
-// said nothing on purpose (errNothingToSay) is a completion nobody was owed; a
-// delivery that was refused is reported to the caller's WARN and leaves the
-// round to the ledger — owed its ending on the note, or back on the open list
-// with its bubble when the words provably reached nobody. Deliberately NOT
-// retried, unlike the endings in typing_indicator.go: an answer's first route is
-// the bubble, and a refused frame is already followed by the same words as a
-// plain message, so a third attempt is the one that prints the answer twice. See
-// deliverAnswer.
+// already consumed. That one is fixed a layer down: the ledger hands the
+// delivery a budget of its own rather than the remainder (deliveryBudget in
+// stream_store.go), so this path never has to tell a context error apart from a
+// refusal.
 //
 // WHAT A BOOKED RETRY COSTS. Returning nil once one is booked reports the
 // chat:done handled while this subscriber is still holding the answer. The
 // in-process bus has no redelivery, so returning an error instead would only add
-// a WARN — but for as long as the chain runs, up to about two minutes, the
-// answer exists nowhere but in a time.AfterFunc closure. A restart or a panic in
-// that window loses it with no log line and no metric, and chat:done does not
-// fire again.
+// a WARN — but for as long as the chain runs, the answer exists nowhere but in a
+// time.AfterFunc closure. A restart or a panic in that window loses it with no
+// log line and no metric, and chat:done does not fire again.
 func (o *Outbound) sayTheAnswer(ctx context.Context, sessionID pgtype.UUID, taskID, content string, retries endingRetries) error {
 	retries = retries.begin(time.Now())
 	_, err := o.rounds().sayEnding(ctx, sessionID, byTask(taskID), roundOver,
 		func(ctx context.Context, t roundTurn) (roundAddress, error) {
 			return o.deliverAnswer(ctx, sessionID, t, content)
 		})
-	switch {
-	case errors.Is(err, errEndingDeferred):
-		if o.bookAnswerRetry(sessionID, taskID, content, retries) {
-			return nil
-		}
-		// Out of attempts, or retries disabled. The answer is lost either way,
-		// and the caller's WARN is the only place that can say so.
-		return err
-	case errors.Is(err, errNothingToSay):
+	if err == nil || errors.Is(err, errNothingToSay) {
+		// Said, or deliberately not said. Either way nobody is owed anything
+		// this subscriber is still holding.
 		return nil
 	}
+	if cause, again := answerRetryCause(err); again &&
+		o.bookAnswerRetry(sessionID, taskID, content, retries, cause) {
+		return nil
+	}
+	// Out of attempts for this cause, or retries disabled. The answer is lost
+	// either way, and the caller's WARN is the only place that can say so.
 	return err
+}
+
+// answerRetryCause reads what the ledger handed back and says whether the answer
+// is still this subscriber's to deliver, and under which cause the next attempt
+// would be booked.
+//
+// It is a deny-list, and that is the whole of it. endingRetryCause, which the
+// typing indicator's notices go through, asks whether an outcome is one of the
+// failures this package knows to be safe to repeat; this asks whether it is the
+// one failure that is not. They agree on every failure either of them was
+// written for, and differ on the rest: a context that ran out ahead of a send, a
+// registry that answered "no socket" under a name of its own, and every class
+// nobody has produced yet. Each of those means nothing was shown to anybody, and
+// this one says so without having had to meet it first — which is the difference
+// between the two, because dropping the only copy of an answer on the strength
+// of an unrecognised value is how the last four rounds went.
+//
+// The notices keep the narrower rule deliberately. A failure or a cancellation
+// this manager drops still has a sweeper tick, a repeat on the bus or WeCom's
+// own redelivery behind it, and the words it would repeat are one sentence of
+// apology. An answer has no second publisher and the words are the reply itself.
+//
+// Three outcomes stop it, and only the third is a judgement call:
+//
+//   - nil. The words were accepted for sending and the run is on told.
+//   - errNothingToSay. A delivery that declined to speak on purpose — a session
+//     that is not WeCom's, an installation revoked between trigger and reply, an
+//     empty completion nobody was owed. There is nothing to come back for.
+//   - errWordsMayBeOnScreen. The answer may be in front of the asker right now,
+//     put there by a frame that reached the wire and lost only its verdict. A
+//     retry there is not a second attempt at delivery, it is a second copy of the
+//     reply — printed beside a bubble that already carries it, because the round
+//     was consumed and the repeat goes out as an ordinary message. Raised at the
+//     two ack waits that can leave words in front of somebody unseen (ws_sender.go)
+//     and carried up by deliverAnswer when the first of two routes ended that way.
+func answerRetryCause(err error) (retryCause, bool) {
+	switch {
+	case err == nil,
+		errors.Is(err, errNothingToSay),
+		errors.Is(err, errWordsMayBeOnScreen):
+		return retryNone, false
+	case errors.Is(err, errEndingDeferred):
+		return retryDeferred, true
+	}
+	return retryRefused, true
 }
 
 // bookAnswerRetry schedules another attempt at an answer, carrying the
 // completion with it, and reports whether it booked one.
 //
 // Bounded twice over, the same way the typing indicator's retries are:
-// answerRetryAttempts caps how many there are and the delay doubles, so the
-// three fall at 15s, 45s and 105s and the last is well inside roundMemory.
+// answerRetryAttempts caps each cause and the delay doubles over both of them
+// together, so a chain that meets only one cause falls at 15s, 45s and 105s and
+// even one that meets both is well inside roundMemory.
 //
 // Measured from the answer's FIRST attempt rather than from the one that just
-// deferred. An attempt spends its whole budget parked on the delivery it is
+// failed. An attempt can spend its whole budget parked on the delivery it is
 // waiting out before it defers, so a schedule measured from the end restarts its
 // clock after every wait: the same three attempts then land at 15s, 55s and
 // 125s. See endingRetries.next.
 //
-// The attempt takes a budget of its own because the caller's is what ran out,
-// and it goes back through sayEnding like any other publisher — an answer
+// The attempt takes a budget of its own because the caller's may be what ran
+// out, and it goes back through sayEnding like any other publisher — an answer
 // something else delivered in the meantime finds the run on told and says
-// nothing.
-func (o *Outbound) bookAnswerRetry(sessionID pgtype.UUID, taskID, content string, retries endingRetries) bool {
+// nothing, and one whose round was handed back finds the bubble and seals it.
+func (o *Outbound) bookAnswerRetry(sessionID pgtype.UUID, taskID, content string, retries endingRetries, cause retryCause) bool {
 	if o.retryAfter <= 0 {
 		return false
 	}
-	next, wait, ok := retries.next(retryDeferred, o.retryAfter, answerRetryAttempts, time.Now())
+	next, wait, ok := retries.next(cause, o.retryAfter, answerRetryAttempts, time.Now())
 	if !ok {
 		return false
 	}
@@ -346,15 +402,14 @@ func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t r
 		// whichever publisher comes next seals the spinner the user is watching
 		// instead of speaking beside it.
 		//
-		// Which publisher that is, is not this subscriber: an answer books a
-		// retry only for a deferral. What a restored round buys here is that a
-		// failure or a cancellation arriving afterwards writes into the bubble
-		// rather than under it. Not the guard, which is refused a round whose
-		// run is over (refuseTakeLocked) — its sentence promises a reply that is
-		// still coming, and this run has already answered. So when no other
-		// publisher turns up, the spinner stays until the sweep retires the
-		// round and files the debt, which is where it stood before the bubble
-		// was kept at all.
+		// Which publisher that is, is this subscriber: sayTheAnswer books an
+		// attempt for this outcome like any other it cannot place on the
+		// screen, and it is the only publisher that can, because it is the only
+		// one holding the answer. A failure or a cancellation arriving in the
+		// meantime writes into the same bubble; the guard does not, being
+		// refused a round whose run is over (refuseTakeLocked) — its sentence
+		// promises a reply that is still coming, and this run has already
+		// answered.
 		streamErr = err
 		content = text
 	}
@@ -378,13 +433,19 @@ func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t r
 		return t.Addr, o.senders.sendTextCtx(ctx, t.Addr.InstallationID, t.Addr.ChatID, t.Addr.ChatType, streamCopyNoReply)
 	}
 	addr, err := o.sendAsMessage(ctx, sessionID, content)
-	if err != nil && streamErr != nil && !deliveryCanBeRepeated(streamErr) {
-		// The closing frame's outcome is one this package cannot account for —
-		// an ack that never came back, a context that expired around the write —
-		// so the answer may be sealing the bubble this very moment. What the
-		// fallback came back with says nothing about that, and on its own it
-		// reads as "the user has nothing", which is how a round gets handed back
-		// for a later publisher to print the same answer into a second time.
+	if err != nil && errors.Is(streamErr, errWordsMayBeOnScreen) {
+		// The closing frame reached the wire and lost only its verdict, so the
+		// answer may be sealing the bubble this very moment. What the fallback
+		// came back with says nothing about that, and on its own it reads as
+		// "the user has nothing" — which is how a round gets handed back for a
+		// later publisher to print the same answer into a second time, and how
+		// the attempt this subscriber books becomes a second copy of the reply.
+		//
+		// Read as the mark the ack wait raised rather than as "an outcome not on
+		// the list of repeatable ones" (ws_sender.go). The two agree on every
+		// failure this package produces today; where they differ is a failure it
+		// does not, and that one is a send that never happened, not a send that
+		// might have.
 		return addr, errors.Join(errWordsMayBeOnScreen, streamErr, err)
 	}
 	return addr, err

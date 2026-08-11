@@ -517,6 +517,10 @@ func TestAWebRunsUndeliveredAnswerDoesNotBuyItTheRoomsVoice(t *testing.T) {
 func TestARoomRunsUndeliveredAnswerStaysOwedToItsAsker(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
+	// What the failed answer LEAVES is the subject, so the attempt it books is
+	// switched off: with one booked the refusal reports itself handled (see
+	// sayTheAnswer) and the line below would have nothing to read.
+	rig.out.retryAfter = -1
 	rig.askedInTheRoom(t, "task-1")
 	rig.ran(t, "REQ-1", 1, "task-1")
 

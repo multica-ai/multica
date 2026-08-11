@@ -152,8 +152,9 @@ func (s *wsSender) unlockWriter() { <-s.wmu }
 const ackTimeout = 5 * time.Second
 
 // errAckTimeout — the frame went out and no verdict came back. Distinct from a
-// refusal: the message may well have been delivered, so a caller retries at
-// its own risk rather than reporting failure.
+// refusal: the message may well have been delivered. request wraps it in
+// errWordsMayBeOnScreen for exactly that reason, so a caller weighing another
+// attempt reads the mark rather than this name.
 var errAckTimeout = errors.New("wecom: timed out waiting for the server verdict")
 
 // wecomAPIError is a refusal the server stated. Carrying the errcode rather
@@ -182,8 +183,9 @@ var (
 	errStreamBusy = errors.New("wecom: previous stream frame still unacked")
 
 	// errStreamAckTimeout — the frame went out and no verdict came back. The
-	// frame may well have landed, so callers weigh a possible duplicate
-	// against a possible silence rather than assuming failure.
+	// frame may well have landed, so respondStream wraps it in
+	// errWordsMayBeOnScreen: callers weigh a possible duplicate against a
+	// possible silence by reading that mark, not this name.
 	errStreamAckTimeout = errors.New("wecom: stream frame ack timed out")
 
 	// errStreamSuperseded — a frame was overtaken by the closing frame, either
@@ -214,17 +216,45 @@ var (
 	errFrameNotOnTheWire = errors.New("wecom: the frame did not reach the wire")
 
 	// errWordsMayBeOnScreen marks a failed delivery whose words this package
-	// cannot account for — an ack that never came back, a context that expired
-	// around the write — so the user may be reading what it is reporting as
-	// undelivered. A delivery made of two sends carries it when the FIRST of
-	// them ended that way and the second was cleanly refused — the second
-	// error alone would say the whole attempt is safe to repeat, and it is not.
-	// See deliveryCanBeRepeated.
+	// cannot account for, so the user may be reading what it is reporting as
+	// undelivered.
+	//
+	// Raised where the ambiguity happens: the two ack waits, one in request for
+	// a plain message and one in respondStream for a stream frame. Both sit
+	// BEHIND a write that finished, which is the whole of what they have to
+	// say — a frame is gone and only its verdict is missing. Every other way a
+	// send can fail is either ahead of a completed write or a refusal the
+	// server stated, and neither of those shows anybody anything. (The one
+	// failure raised behind a completed write that is NOT marked is
+	// errStreamSuperseded, and deliveryCanBeRepeated's own paragraph on it is
+	// the argument: a displaced waiter is never an ending's, so the words at
+	// stake were a placeholder rather than a reply.)
+	//
+	// Naming it at the wait rather than at the consumer is what makes the
+	// question closed. A consumer testing "is this one of the failures I know
+	// to be safe" answers no to an error class nobody has met yet and treats a
+	// send that never happened as a send that might have; a consumer testing
+	// for this mark answers no to the same class and treats it as what it is.
+	// It is the same argument writeLocked makes for errFrameNotOnTheWire, on
+	// the other side of the write.
+	//
+	// A delivery made of two sends carries it up when the FIRST of them ended
+	// that way and the second was cleanly refused — the second error alone
+	// would say the whole attempt is safe to repeat, and it is not. See
+	// deliverAnswer (outbound.go) and writeClosing (typing_indicator.go).
 	errWordsMayBeOnScreen = errors.New("wecom: the delivery may already have reached the user")
 )
 
 // deliveryCanBeRepeated reports whether a failed delivery is one this adapter
-// may simply say again.
+// can NAME as never having reached the user.
+//
+// Three readers, and one caller that deliberately is not among them. The ledger
+// asks this before handing a round's bubble back (bubbleSurvivedTheFailure), and
+// the typing indicator asks it twice — composing two sends in writeClosing, and
+// deciding a notice's retry in endingRetryCause. The answer's retry does not: it
+// asks the opposite question, whether this is the one failure that may be on the
+// screen, and answerRetryCause (outbound.go) states why the two directions are
+// not interchangeable on a reply nothing else holds.
 //
 // The distinction is not "did it error" — it is whether the words got to the
 // wire. write() takes the writer mutex and the socket deadline on
@@ -265,11 +295,12 @@ var (
 // waiter belongs to is always a frame with more of the turn behind it.
 //
 // What that costs is a retry on a delivery that did fail; what it buys is that
-// no retry in this package can duplicate a message. The endings a retry exists
-// for are the ones it still covers: a reconnect window returns
-// errFrameNotOnTheWire for as long as the read loop is still inside its own read
-// deadline and errNoLiveConnection once that loop has dropped the sender, and a
-// refusal returns the server's errcode.
+// no retry reading THIS can duplicate a message — and the answer's retry buys
+// the same thing from the other side, by suppressing on the mark those two ack
+// waits raise. The endings a retry exists for are the ones it still covers: a
+// reconnect window returns errFrameNotOnTheWire for as long as the read loop is
+// still inside its own read deadline and errNoLiveConnection once that loop has
+// dropped the sender, and a refusal returns the server's errcode.
 func deliveryCanBeRepeated(err error) bool {
 	if err == nil || errors.Is(err, errWordsMayBeOnScreen) {
 		return false
@@ -622,7 +653,13 @@ func (s *wsSender) deliverReply(env frameEnvelope) bool {
 
 // request writes one frame under a req_id of our own and waits for the whole
 // answer. A non-nil error is either a *wecomAPIError carrying the server's
-// errcode, errAckTimeout, or a transport failure.
+// errcode, an outcome the write never reached (a transport failure, a caller
+// out of time before the frame went), or a verdict that never came back.
+//
+// Only the last group is ambiguous about the user's screen, and it is marked
+// here rather than left to be recognised: past the write the frame is gone and
+// a message this bot pushed may be in the chat, whether the wait ended on the
+// ack timer or on the caller's own deadline. See errWordsMayBeOnScreen.
 func (s *wsSender) request(ctx context.Context, cmd string, body map[string]any) (json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -651,9 +688,9 @@ func (s *wsSender) request(ctx context.Context, cmd string, body map[string]any)
 		}
 		return res.body, nil
 	case <-timer.C:
-		return nil, errAckTimeout
+		return nil, fmt.Errorf("%w: %w", errWordsMayBeOnScreen, errAckTimeout)
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, fmt.Errorf("%w: %w", errWordsMayBeOnScreen, ctx.Err())
 	}
 }
 
@@ -662,6 +699,13 @@ func (s *wsSender) request(ctx context.Context, cmd string, body map[string]any)
 // write itself and the wait for the ack — because the callers here run on a bus
 // subscriber's own budget and none of those three is otherwise bounded by
 // anything the caller chose.
+//
+// Where ctx runs out decides what the caller is told, and the two answers are
+// not the same fact. Ahead of the write it comes back as the context error
+// itself: no frame went, so nothing was painted. Behind it there is a frame on
+// the wire and only its verdict missing, so both the ack timer and the caller's
+// deadline come back as errStreamAckTimeout marked errWordsMayBeOnScreen — the
+// bubble may be carrying these words this instant.
 //
 // reqID is not ours to choose: every frame of one stream must echo the req_id
 // of the aibot_msg_callback that opened the turn, or the server refuses it
@@ -705,10 +749,10 @@ func (s *wsSender) respondStream(ctx context.Context, reqID, streamID, content s
 		return nil
 	case <-timer.C:
 		s.cancelAck(reqID, w)
-		return errStreamAckTimeout
+		return fmt.Errorf("%w: %w", errWordsMayBeOnScreen, errStreamAckTimeout)
 	case <-ctx.Done():
 		s.cancelAck(reqID, w)
-		return errStreamAckTimeout
+		return fmt.Errorf("%w: %w", errWordsMayBeOnScreen, errStreamAckTimeout)
 	}
 }
 
