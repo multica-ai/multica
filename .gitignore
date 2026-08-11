@@ -47,6 +47,9 @@ server/migrate
 server/daemon
 server/multica
 
+# ZCode workspace metadata (local agent session/plan state, not source)
+.zcode/
+
 # Test artifacts
 test-results/
 apps/web/test-results/
