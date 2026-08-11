@@ -69,6 +69,11 @@ interface DesktopAPI {
       issueKey: string;
     }) => void,
   ) => () => void;
+  /** Listen for issue destinations delivered via deep link
+   *  (multica://<slug>/issues/<id>). Returns an unsubscribe function. */
+  onIssueOpen: (
+    callback: (payload: { slug: string; issueId: string }) => void,
+  ) => () => void;
   /** Listen for native macOS back/forward swipe gestures. Returns an unsubscribe function. */
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => () => void;
   /** Report the renderer's memory-router path for recovery diagnostics. */

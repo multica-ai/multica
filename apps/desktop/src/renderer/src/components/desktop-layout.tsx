@@ -28,6 +28,7 @@ import {
 } from "@/platform/navigation";
 import { TabBar } from "./tab-bar";
 import { TabContent } from "./tab-content";
+import { IssueDeepLinkBridge } from "./issue-deep-link-bridge";
 import { WindowOverlay } from "./window-overlay";
 
 const TOP_BAR_HEIGHT_CLASS = "h-12";
@@ -237,6 +238,7 @@ export function DesktopShell() {
           triggered by IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
         <DesktopInboxBridge />
+        <IssueDeepLinkBridge />
         <div className="flex h-screen bg-app-shell">
           <SidebarProvider className="flex-1 bg-app-shell">
             {slug && <GlobalShortcuts />}
