@@ -15,7 +15,8 @@ vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("./inbox-detail-label", () => ({ InboxDetailLabel: () => null }));
 
 // Import after mocks.
-import { InboxContextMenuProvider, type InboxRowActions } from "./inbox-context-menu";
+import { InboxContextMenuProvider } from "./inbox-context-menu";
+import type { InboxRowActions } from "./inbox-item-actions";
 import { InboxListItem } from "./inbox-list-item";
 
 const TEST_RESOURCES = { en: { inbox: enInbox } };
@@ -90,7 +91,7 @@ function renderRow({
       </InboxContextMenuProvider>,
     ),
   );
-  const row = screen.getByText(entry.title).closest("button");
+  const row = screen.getByText(entry.title).closest('[role="button"]');
   if (!row) throw new Error("inbox row button not found");
   return { rowActions, row };
 }
@@ -174,5 +175,78 @@ describe("inbox row context menu", () => {
     await screen.findByText("Archive");
 
     expect(screen.queryByText("Open in new tab")).toBeNull();
+  });
+});
+
+// A touch pointer has neither hover nor right-click, so the row's compact menu
+// is the only way in. It must therefore offer what right-click offers.
+describe("inbox row compact menu", () => {
+  const openMenu = () =>
+    fireEvent.click(screen.getByRole("button", { name: "Notification actions" }));
+
+  it("archives from the menu in the main view", async () => {
+    const onAction = vi.fn();
+    renderRow({ entry: item({ id: "inbox-3" }), actions: { onAction } });
+
+    openMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+
+    expect(onAction).toHaveBeenCalledWith("inbox-3");
+  });
+
+  it("toggles read state from the menu", async () => {
+    const onMarkUnread = vi.fn();
+    renderRow({ entry: item({ id: "inbox-7", read: true }), actions: { onMarkUnread } });
+
+    openMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Mark as unread" }));
+
+    expect(onMarkUnread).toHaveBeenCalledWith("inbox-7");
+  });
+
+  it("offers unarchive and drops the read toggle in the archived view", async () => {
+    renderRow({ entry: item({ read: true, archived: true }), view: "archived" });
+
+    openMenu();
+
+    expect(await screen.findByRole("menuitem", { name: "Unarchive" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Mark as unread" })).toBeNull();
+  });
+
+  it("opens the referenced issue in a new tab", async () => {
+    renderRow({ entry: item({ issue_id: "issue-9" }) });
+
+    openMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Open in new tab" }));
+
+    expect(navigationAdapter.openInNewTab).toHaveBeenCalledWith(
+      "/acme/issues/issue-9",
+      undefined,
+      { activate: true },
+    );
+  });
+
+  it("does not select the row when the menu opens", () => {
+    const onClick = vi.fn();
+    render(
+      wrap(
+        <InboxContextMenuProvider
+          view="inbox"
+          actions={{ onMarkRead: vi.fn(), onMarkUnread: vi.fn(), onAction: vi.fn() }}
+        >
+          <InboxListItem
+            item={item()}
+            view="inbox"
+            isSelected={false}
+            onClick={onClick}
+            onAction={vi.fn()}
+          />
+        </InboxContextMenuProvider>,
+      ),
+    );
+
+    openMenu();
+
+    expect(onClick).not.toHaveBeenCalled();
   });
 });
