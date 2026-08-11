@@ -33,6 +33,7 @@ export type HookEventType =
   | "before.wakeup.create"
   | "on.wakeup.fire_failure"
   | "before.issue.status_change"
+  | "before.issue.assigned"
   | "before.message.send"
   | "after.workflow.step_completed";
 
@@ -155,6 +156,7 @@ export const HOOK_EVENT_OPTIONS: ReadonlyArray<{ value: HookEventType; label: st
   { value: "before.wakeup.create", label: "Before wakeup is created", description: "Check a scheduled wakeup before it is saved." },
   { value: "on.wakeup.fire_failure", label: "When a wakeup fails", description: "React when a scheduled wakeup cannot start its work." },
   { value: "before.issue.status_change", label: "Before issue status changes", description: "Check an issue before its status is changed." },
+  { value: "before.issue.assigned", label: "Before an issue is handed to an agent", description: "Check an issue before work is started for the assigned agent." },
   { value: "before.message.send", label: "Before message is sent", description: "Check an outgoing message before delivery." },
   { value: "after.workflow.step_completed", label: "After workflow step completes", description: "React after a workflow finishes one step." },
   { value: "before.tool.call", label: "Before tool call", description: "Check a tool request before it runs.", advanced: true },

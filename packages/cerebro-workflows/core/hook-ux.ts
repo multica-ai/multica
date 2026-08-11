@@ -1,39 +1,46 @@
 import { createHookDraft, HOOK_EVENT_OPTIONS, HOOK_EVENT_TARGET_LABELS, type WorkflowHook } from "./hook-types";
 import { validateHook, type HookStepKey } from "./hook-validation";
 import { ACTION_CONFIGURATION, HOOK_ACTION_OPTIONS } from "./hook-action-config";
+import { HOOK_FIELD_CATALOG } from "./hook-field-catalog.generated";
 
 export { ACTION_CONFIGURATION, HOOK_ACTION_OPTIONS };
 export type { ActionDefinition, ActionFieldDefinition } from "./hook-action-config";
-
 export interface HookFieldDefinition {
   label: string;
   input: "text" | "number" | "boolean" | "select";
   options?: ReadonlyArray<{ value: string; label: string }>;
   sensitive?: boolean;
+  known?: boolean;
 }
+
+// Field definitions come from the server-owned field manifest (via the
+// generated catalog), so labels, input widgets, and sensitivity follow what
+// the gate for an event actually supplies. Fields the editor does not know
+// keep a generated label and are flagged unknown — honesty, not redaction.
+interface CatalogField {
+  readonly path: string;
+  readonly label: string;
+  readonly input: HookFieldDefinition["input"];
+  readonly options?: ReadonlyArray<{ readonly value: string; readonly label: string }>;
+  readonly sensitive?: boolean;
+}
+// The generated catalog is `as const`, which makes flatMap over its literal
+// tuple types un-unifiable — read it through a loose shape once, then map.
+type RawCatalog = { readonly common: readonly unknown[]; readonly events: ReadonlyArray<{ readonly fields: readonly unknown[] }> };
+const rawCatalog = HOOK_FIELD_CATALOG as unknown as RawCatalog;
+const catalogFields = [...rawCatalog.common, ...rawCatalog.events.flatMap((event) => event.fields)] as readonly CatalogField[];
+const FIELD_DEFINITIONS: Record<string, HookFieldDefinition> = Object.fromEntries(
+  catalogFields.map((field) => [field.path, { label: field.label, input: field.input, options: field.options, sensitive: field.sensitive, known: true as const }]),
+);
 
 export interface HookSummaryTarget { value: string; label: string }
 export type HookSummaryDirectory = Partial<Record<"agent" | "member" | "model" | "issue" | "project" | "workflow" | "session" | "squad" | "skill" | "artifact" | "eval", readonly HookSummaryTarget[]>>;
 
-const statusOptions = ["Backlog", "Todo", "In progress", "In review", "Done", "Blocked", "Cancelled"].map((label) => ({ value: label.toLowerCase().replaceAll(" ", "_"), label }));
-
-const FIELD_DEFINITIONS: Record<string, HookFieldDefinition> = {
-  "issue.status": { label: "Issue status", input: "select", options: statusOptions },
-  "issue.previous_status": { label: "Previous issue status", input: "select", options: statusOptions },
-  "actor.type": { label: "Actor type", input: "select", options: [{ value: "member", label: "Member" }, { value: "agent", label: "Agent" }, { value: "system", label: "System" }] },
-  attempt: { label: "Attempt number", input: "number" },
-  hook_depth: { label: "Hook depth", input: "number" },
-  continuation: { label: "Continuation registered", input: "boolean" },
-  "message.body": { label: "Message text", input: "text", sensitive: true },
-  "tool.name": { label: "Tool name", input: "text" },
-  "workflow.step": { label: "Workflow step", input: "text" },
-  model: { label: "Model", input: "text" },
-};
-
 export function fieldDefinition(field: string): HookFieldDefinition {
   return FIELD_DEFINITIONS[field] ?? {
     label: field.split(".").map((part) => part.replaceAll("_", " ")).join(" · ").replace(/^./, (value) => value.toUpperCase()),
-    input: field.endsWith(".id") ? "text" : "text",
+    input: "text",
+    known: false,
   };
 }
 
@@ -199,15 +206,15 @@ const conditionOperators: Record<string, string> = {
 function conditionSummary(condition: WorkflowHook["conditions"][number]): string {
   const definition = fieldDefinition(condition.field);
   const operator = conditionOperators[condition.operator] ?? condition.operator;
-  if (condition.operator === "exists" || condition.operator === "not_exists") return `${definition.label} ${operator}`;
-  // Redact free text and identifiers, not everything unfamiliar. The old rule
-  // hid the value of any field it did not recognise and of anything under
-  // "message.", so "was this comment written by an agent: yes" printed as
-  // <redacted> — and the search box then searched the word <redacted> instead
-  // of the values (FIR-4797).
-  const sensitive = definition.sensitive || /(?:^|\.)(?:body|content|id|prompt|reason|rubric|secret|token)(?:$|\.)/i.test(condition.field);
+  const unknown = definition.known === false ? " (unknown field)" : "";
+  if (condition.operator === "exists" || condition.operator === "not_exists") return `${definition.label} ${operator}${unknown}`;
+  // Known fields follow the manifest's sensitivity. Unknown fields fall back
+  // to the conservative free-text pattern — they are marked unknown, never
+  // silently redacted the way `<redacted>` used to borrow security semantics
+  // for fields the editor simply did not recognise (FIR-4797, FIR-4933).
+  const sensitive = definition.known ? Boolean(definition.sensitive) : /(?:^|\.)(?:body|content|id|prompt|reason|rubric|secret|token)(?:$|\.)/i.test(condition.field);
   const value = sensitive ? "<redacted>" : humanConditionValue(condition.value, definition);
-  return `${definition.label} ${operator} ${value}`;
+  return `${definition.label} ${operator} ${value}${unknown}`;
 }
 
 function humanConditionValue(value: string, definition: HookFieldDefinition): string {
@@ -244,13 +251,13 @@ function templateHook(patch: Partial<WorkflowHook>): WorkflowHook {
 
 export const HOOK_TEMPLATES: ReadonlyArray<{ id: string; title: string; description: string; hook: WorkflowHook }> = [
   { id: "scratch", title: "Start from scratch", description: "Build a hook one step at a time.", hook: createHookDraft() },
-  { id: "require-continuation", title: "Require a continuation before completion", description: "Stop tasks from ending without a clear next step.", hook: templateHook({ name: "Require a continuation", description: "Protects work from ending without a registered continuation.", events: ["before.task.complete"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "continuation", operator: "eq", value: "false" }], decision: "block", requirement: "Register a valid continuation before completing the task.", actions: [{ type: "audit.record", label: "Record audit event", config: { event: "continuation_required" } }] }) },
+  { id: "require-continuation", title: "Require a continuation before completion", description: "Stop tasks from ending without a clear next step.", hook: templateHook({ name: "Require a continuation", description: "Protects work from ending without a registered continuation.", events: ["before.task.complete"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "continuation.present", operator: "eq", value: "false" }], decision: "block", requirement: "Register a valid continuation before completing the task.", actions: [{ type: "audit.record", label: "Record audit event", config: { event: "continuation_required" } }] }) },
   // The attempt cap is load-bearing: without it a failing retry re-triggers the
   // same hook and the pair loops. Keep a condition on every recipe that starts
   // work in response to a failure.
   { id: "instruct-retry", title: "Tell the agent to try again instead of stopping it", description: "The run continues; on the first failure only, the same agent is started again with an instruction naming what to fix.", hook: templateHook({ name: "Instruct instead of stop", description: "Guides the agent that triggered the hook instead of blocking its work.", contract_rule: "A first failed attempt must be retried with the reason stated, not silently stopped.", contract_satisfy: "Read the instruction, fix what it names, and finish the work.", events: ["on.task.failure"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "attempt", operator: "lt", value: "2" }], decision: "allow", actions: [{ type: "agent.dispatch", label: "Instruct an agent", config: { agent_id: "event.agent", prompt: "Your last attempt stopped early. Read the failure reason on this issue, fix what it names, and continue the work." } }] }) },
   { id: "notify-task-failure", title: "Notify someone when a task fails", description: "Send an actionable notification after a task failure.", hook: templateHook({ name: "Notify on task failure", events: ["on.task.failure"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "attempt", operator: "gte", value: "1" }], decision: "allow", actions: [{ type: "member.notify", label: "Notify member", config: { title: "Task failed", message: "Review the failed task and choose the next action." } }] }) },
-  { id: "no-silent-failure", title: "No silent task failures", description: "When a run dies without a pending retry, post the reason and next step on the issue and mark it blocked.", hook: templateHook({ name: "No silent task failures", description: "Guarantees a failed run leaves a visible trail: a comment with the failure reason and next step, and a blocked status so the issue cannot die quietly.", events: ["on.task.failure"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "retry.pending", operator: "eq", value: "false" }], decision: "allow", actions: [{ type: "issue.comment", label: "Comment on issue", config: { body: "This run stopped before it could finish (reason: {{task.failure_reason}}, attempt {{task.attempt}} of {{task.max_attempts}}).\n\nNext step: review the run log for this task, then restart the work or reassign it. The issue is marked blocked until someone acts." } }, { type: "issue.status", label: "Set issue status", config: { status: "blocked" } }] }) },
+  { id: "no-silent-failure", title: "No silent task failures", description: "When a run exhausts its retries, post the reason and next step on the issue and mark it blocked.", hook: templateHook({ name: "No silent task failures", description: "Guarantees a failed run leaves a visible trail: a comment with the failure reason and next step, and a blocked status so the issue cannot die quietly.", events: ["on.task.failure"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "failure.attempt", operator: "gte", value: "$event.failure.max_attempts" }], decision: "allow", actions: [{ type: "issue.comment", label: "Comment on issue", config: { body: "This run stopped before it could finish (reason: {{task.failure_reason}}, attempt {{task.attempt}} of {{task.max_attempts}}).\n\nNext step: review the run log for this task, then restart the work or reassign it. The issue is marked blocked until someone acts." } }, { type: "issue.status", label: "Set issue status", config: { status: "blocked" } }] }) },
   { id: "wakeup-failure", title: "Record wakeup failures", description: "Keep a visible audit trail when a wakeup cannot fire.", hook: templateHook({ name: "Record wakeup failures", events: ["on.wakeup.fire_failure"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "attempt", operator: "gte", value: "1" }], decision: "allow", actions: [{ type: "audit.record", label: "Record audit event", config: { event: "wakeup_fire_failed" } }] }) },
   { id: "judge-completion", title: "Judge work before completion", description: "Require a judge agent to check a written rubric.", hook: templateHook({ name: "Judge completion", events: ["before.task.complete"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "issue.status", operator: "eq", value: "in_review" }], decision: "require", requirement: "The judge must approve the completion evidence.", actions: [{ type: "judge.gate", label: "Judge gate", config: { rubric: "Approve only when the outcome and verification evidence are complete." } }] }) },
   { id: "handoff-stalled", title: "Handoff stalled work", description: "Pass repeatedly failing work to a fresh agent session.", hook: templateHook({ name: "Handoff stalled work", events: ["on.task.failure"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "attempt", operator: "gte", value: "2" }], decision: "require", requirement: "Continue in a fresh session with full state.", actions: [{ type: "session.handoff", label: "Start Handoff", config: { start_new: true, summary: "The task is stalled after repeated failures.", done: "Preserve completed work and evidence.", remaining: "Diagnose the recurring failure and continue.", max_depth: 2 } }] }) },

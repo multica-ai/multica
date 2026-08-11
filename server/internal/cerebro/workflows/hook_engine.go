@@ -326,6 +326,7 @@ func hookConditionContext(event HookEvent) map[string]any {
 		"project":   map[string]any{"id": event.ProjectID},
 		"workflow":  map[string]any{"id": event.WorkflowID},
 		"agent":     map[string]any{"id": event.AgentID, "model": event.Model},
+		"actor":     map[string]any{"type": event.Actor.Type, "id": event.Actor.ID},
 		"issue":     map[string]any{"id": event.IssueID},
 		"session":   map[string]any{"id": event.SessionID},
 		"attempt":   event.Attempt, "no_progress": event.NoProgress, "hook_depth": event.HookDepth,

@@ -516,36 +516,49 @@ func (r *MemoryHookRepository) ReplayEvent(_ context.Context, workspaceID, event
 	return HookEvent{}, ErrHookEventNotFound
 }
 
+// Allowlist follows the canonical field manifest (hook_field_manifest.json):
+// every key a condition can match on is retained so journal replay and the
+// Test → publish evidence flow work. Content-bearing values (message text,
+// prompts, failure messages, tool output) stay out — they are sensitive and
+// never condition fields.
 var hookJournalContextAllowlist = map[string]map[string]struct{}{
-	"issue":    {"id": {}, "identifier": {}, "status": {}, "priority": {}},
-	"task":     {"id": {}, "status": {}, "outcome": {}},
-	"tool":     {"name": {}, "status": {}},
-	"wakeup":   {"id": {}, "status": {}},
-	"workflow": {"id": {}, "step": {}, "status": {}},
-	"session":  {"id": {}, "status": {}},
-	"agent":    {"id": {}, "model": {}},
-	"error":    {"code": {}, "kind": {}},
-	"message":  {"kind": {}, "channel": {}},
+	"issue":      {"id": {}, "identifier": {}, "status": {}, "priority": {}, "terminal": {}},
+	"task":       {"id": {}, "status": {}, "outcome": {}},
+	"tool":       {"name": {}, "status": {}, "error": {}},
+	"wakeup":     {"id": {}, "status": {}, "trigger_type": {}, "trigger_enabled": {}, "active_count": {}, "max_active": {}, "min_interval_seconds": {}, "seconds_until_fire": {}, "has_last_fire": {}, "seconds_after_last_fire": {}, "loop_limit_enabled": {}, "consecutive_without_progress": {}, "max_without_progress": {}, "since_member_reply": {}, "since_status_change": {}, "since_progress_update": {}, "since_pull_request_update": {}, "expected_continuation": {}},
+	"workflow":   {"id": {}, "step": {}, "status": {}, "phase_id": {}, "block_id": {}, "block_type": {}, "step_number": {}, "step_status": {}},
+	"session":    {"id": {}, "status": {}},
+	"agent":      {"id": {}, "model": {}},
+	"error":      {"code": {}, "kind": {}},
+	"message":    {"kind": {}, "channel": {}, "agent_authored": {}, "has_recipient": {}, "has_active_wakeup": {}, "promises_continuation": {}, "thread_required": {}, "correct_thread": {}, "required_parent_id": {}, "no_action": {}, "is_sub_issue": {}, "mentions_initiator": {}, "mentions_agent": {}, "posted_on_parent": {}},
+	"continuation": {"present": {}, "kind": {}, "evidence_id": {}},
+	"chain":      {"active": {}, "approved_for_done": {}},
+	"status":     {"from": {}, "to": {}},
+	"failure":    {"reason": {}, "attempt": {}, "max_attempts": {}, "consecutive_postpones": {}, "next_consecutive_postpone": {}},
+	"assignment": {"agent_id": {}, "reason": {}},
+	"actor":      {"type": {}, "id": {}},
+	"handoff":    {"root_comment_id": {}, "start_new": {}},
 }
 
 var hookJournalSectionsByEvent = map[HookEventType][]string{
 	HookBeforeSessionStart:   {"session", "agent", "issue"},
 	HookAfterSessionStart:    {"session", "agent", "issue"},
-	HookBeforeSessionEnd:     {"session", "agent", "issue"},
+	HookBeforeSessionEnd:     {"session", "agent", "issue", "handoff"},
 	HookAfterSessionEnd:      {"session", "agent", "issue"},
 	HookBeforePromptAssemble: {"session", "agent", "issue"},
 	HookBeforeToolCall:       {"tool", "session", "agent", "issue"},
 	HookAfterToolCall:        {"tool", "session", "agent", "issue"},
 	HookOnToolFailure:        {"tool", "error", "session", "agent", "issue"},
-	HookBeforeTaskComplete:   {"task", "workflow", "session", "agent", "issue"},
-	HookBeforeAgentStop:      {"task", "session", "agent", "issue"},
+	HookBeforeTaskComplete:   {"task", "workflow", "session", "agent", "issue", "continuation"},
+	HookBeforeAgentStop:      {"task", "session", "agent", "issue", "continuation"},
 	HookBeforeSubagentStart:  {"task", "session", "agent", "issue"},
 	HookAfterSubagentStop:    {"task", "session", "agent", "issue"},
 	HookOnError:              {"error", "task", "session", "agent", "issue"},
-	HookOnTaskFailure:        {"error", "task", "workflow", "session", "agent", "issue"},
+	HookOnTaskFailure:        {"error", "failure", "task", "workflow", "session", "agent", "issue"},
 	HookBeforeWakeupCreate:   {"wakeup", "session", "agent", "issue"},
-	HookOnWakeupFireFailure:  {"wakeup", "error", "session", "agent", "issue"},
-	HookBeforeIssueStatus:    {"issue", "session", "agent"},
+	HookOnWakeupFireFailure:  {"wakeup", "error", "failure", "session", "agent", "issue"},
+	HookBeforeIssueStatus:    {"issue", "session", "agent", "status", "chain"},
+	HookBeforeIssueAssigned:  {"assignment", "actor", "session", "agent", "issue"},
 	HookBeforeMessageSend:    {"message", "session", "agent", "issue"},
 	HookAfterWorkflowStep:    {"workflow", "task", "session", "agent", "issue"},
 }

@@ -49,7 +49,9 @@ describe("Hooks UX contract", () => {
   it("uses human labels and typed value metadata for filter fields", () => {
     expect(fieldDefinition("issue.status")).toMatchObject({ label: "Issue status", input: "select" });
     expect(fieldDefinition("attempt")).toMatchObject({ label: "Attempt number", input: "number" });
-    expect(fieldDefinition("continuation")).toMatchObject({ label: "Continuation registered", input: "boolean" });
+    expect(fieldDefinition("continuation.present")).toMatchObject({ label: "Continuation registered", input: "boolean" });
+    // Fields the suggestion list does not know are marked, not trusted.
+    expect(fieldDefinition("message.body")).toMatchObject({ known: false });
   });
 
   it("provides useful starter recipes plus a scratch option", () => {
@@ -83,7 +85,7 @@ describe("Hooks UX contract", () => {
   it("ships the no-silent-failure recipe guarding terminal task failures", () => {
     const recipe = HOOK_TEMPLATES.find((template) => template.id === "no-silent-failure");
     expect(recipe?.hook.events).toEqual(["on.task.failure"]);
-    expect(recipe?.hook.conditions).toEqual([{ field: "retry.pending", operator: "eq", value: "false" }]);
+    expect(recipe?.hook.conditions).toEqual([{ field: "failure.attempt", operator: "gte", value: "$event.failure.max_attempts" }]);
     const actionTypes = recipe?.hook.actions.map((action) => action.type);
     expect(actionTypes).toEqual(["issue.comment", "issue.status"]);
     expect(recipe?.hook.actions.at(1)?.config.status).toBe("blocked");
@@ -138,7 +140,9 @@ describe("Hooks UX contract", () => {
     };
 
     expect(describeHook(hook)).toContain("Unknown target");
-    expect(describeHook(hook)).toContain("Message text starts with <redacted>");
+    // message.body is not a field the server sends, so it is marked unknown —
+    // and its free-text value stays redacted.
+    expect(describeHook(hook)).toContain("starts with <redacted> (unknown field)");
     expect(describeHook(hook)).not.toContain("private-issue-id");
     expect(describeHook(hook)).not.toContain("private-agent-id");
     expect(describeHook(hook)).not.toContain("private message");
@@ -245,11 +249,18 @@ describe("The editor must not call a working hook broken (FIR-4797)", () => {
     expect(validateHook(guiding).valid).toBe(false);
   });
 
-  it("prints the value of an unfamiliar field instead of hiding it as redacted", () => {
+  it("prints the value of a known boolean field instead of hiding it as redacted", () => {
     const summary = describeHook(platformHook);
 
-    expect(summary).toContain("Message · agent authored is true");
+    expect(summary).toContain("Message · agent authored is Yes");
     expect(summary).not.toContain("<redacted>");
+    expect(summary).not.toContain("unknown field");
+  });
+
+  it("marks fields the server does not send as unknown (FIR-4933)", () => {
+    const futuristic = { ...platformHook, conditions: [{ field: "message.channel_id", operator: "eq", value: "chan-1" }] };
+
+    expect(describeHook(futuristic)).toContain("(unknown field)");
   });
 
   it("still hides free text and identifiers", () => {
