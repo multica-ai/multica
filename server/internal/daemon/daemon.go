@@ -485,26 +485,44 @@ type Daemon struct {
 	runningTasks      atomic.Int64
 	resourceWaitTasks atomic.Int64
 	ready             atomic.Bool // false until preflight completes; gates /health status (starting -> running)
+	// daemonState is the NEX-38 run state: running / draining / shutting_down.
+	// It is orthogonal to `ready`: a drained daemon is still fully started
+	// (ready=true) but refuses new claims. Draining is also persisted to
+	// <workspaces-root>/drain.json so a restart resumes draining (AC-13).
+	daemonState atomic.Int32
+	// finishThenStop arms the graceful drain auto-close: once draining and
+	// activeTasks==0 the drain monitor deregisters runtimes and stops the
+	// daemon (AC-4). Cleared by abortDrain.
+	finishThenStop atomic.Bool
 	// reloadPendingReason explains why a confirmed multica version change hasn't
 	// restarted the daemon yet (a task was running at the barrier check). Set
 	// and cleared by trySelfReload, read by /health. Diagnostic only.
 	reloadPendingReason atomic.Pointer[string]
+	// queuedTasksByRuntime caches the server-side queued task count per runtime,
+	// sourced from heartbeat acks while draining (design §7). Best-effort and
+	// diagnostic: it feeds /health's draining_queued_tasks. Guarded by
+	// queuedTasksMu.
+	queuedTasksMu        sync.Mutex
+	queuedTasksByRuntime map[string]int64
 
-	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
-	// microseconds it takes to make a decision; ClaimTask itself runs without
-	// the lock so a slow per-runtime claim cannot stall auto-update or any
-	// other poller.
+	// claimMu guards the claim-pause ref-count and claimsInFlight. It is held
+	// only for the microseconds it takes to make a decision; ClaimTask itself
+	// runs without the lock so a slow per-runtime claim cannot stall
+	// auto-update, drain, or any other poller.
 	//
-	// The pair is the auto-update path's barrier against the issue's
-	// requirement that "升级过程中如果有 task 进来，会延后升级而不是中断 task":
-	// runRuntimePoller refuses to call ClaimTask while pauseClaims is set, and
-	// tryAutoUpdate refuses to flip pauseClaims while any poller is mid-claim
+	// The ref-count replaces the single bool that used to back the auto-update
+	// barrier, so each holder (drain / server-update / below-minimum) owns its
+	// own refs and releasing one can never clear another's pause (NEX-38
+	// decision two). The barrier contract is unchanged: runRuntimePoller
+	// refuses to call ClaimTask while any ref is held, and tryAutoUpdate /
+	// tryBeginServerUpdate refuse to take a ref while any poller is mid-claim
 	// or any task is in handleTask. Together that closes the fetch-then-claim
 	// race where a new task slipping in during the release-metadata fetch
 	// would be cancelled by triggerRestart's root-ctx cancel.
-	claimMu        sync.Mutex
-	pauseClaims    bool // when true, the batch poller skips claiming
-	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
+	claimMu         sync.Mutex
+	claimPauseRefs  map[claimPauseHolder]int // per-holder refcount; empty map == no pause
+	claimPauseTotal int                      // redundant total, O(1) emptiness check
+	claimsInFlight  int                      // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
@@ -1706,6 +1724,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Re-enter draining from a previous run's marker BEFORE the first
+	// registration, so the register payload already reports draining instead
+	// of defaulting runtimes back to online (AC-13). restoreDrainState is a
+	// no-op when no marker exists.
+	d.restoreDrainState()
+
 	// Bind and serve the health port before the (potentially slow) preflight,
 	// so `daemon start` and the desktop see a live "starting" daemon instead
 	// of connection-refused while preflightAuth runs. preflightAuth's initial
@@ -1743,6 +1767,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
+	// Watches for a finish-then-stop drain completing (activeTasks==0) so the
+	// daemon can deregister and exit without the 30s stop cap (AC-4).
+	go d.drainMonitorLoop(ctx)
 
 	// Preflight succeeded and the background loops are up: the daemon has
 	// registered its runtimes and can now claim and run tasks. Flip /health
@@ -1750,7 +1777,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// readiness wait blocks on, so success is reported only after startup
 	// actually completed, not merely because the health port came up.
 	d.ready.Store(true)
-	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal); health now reporting ready")
+	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal, drain-monitor); health now reporting ready")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
 	return err
@@ -2176,7 +2203,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 			"name":    displayName,
 			"type":    r.name,
 			"version": r.version,
-			"status":  "online",
+			"status":  d.registrationStatus(),
 		})
 	}
 	return runtimes, belowMin, unavailable
@@ -2492,7 +2519,7 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 			"name":       displayName,
 			"type":       profile.ProtocolFamily,
 			"version":    version,
-			"status":     "online",
+			"status":     d.registrationStatus(),
 			"profile_id": profile.ID,
 		})
 	}
@@ -3562,6 +3589,11 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
+	// Cache the server-side queued task count (design §7) so /health can
+	// report draining_queued_tasks without a dedicated query. The server only
+	// populates QueuedTasks while the runtime is draining (nil otherwise), so
+	// an absent ack keeps the previous value.
+	d.recordQueuedTasks(runtimeID, resp.QueuedTasks)
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
@@ -4033,12 +4065,12 @@ func (d *Daemon) tryBeginServerUpdate(ctx context.Context) serverUpdateAcquireRe
 	}
 
 	d.claimMu.Lock()
-	if d.pauseClaims || d.activeTasks.Load() > 0 {
+	if d.claimPausedLocked() || d.activeTasks.Load() > 0 {
 		d.claimMu.Unlock()
 		d.updating.Store(false)
 		return serverUpdateRuntimeBusy
 	}
-	d.pauseClaims = true
+	d.acquireClaimPauseLocked(claimPauseServerUpdate)
 	d.claimMu.Unlock()
 
 	ticker := time.NewTicker(10 * time.Millisecond)
@@ -4050,7 +4082,7 @@ func (d *Daemon) tryBeginServerUpdate(ctx context.Context) serverUpdateAcquireRe
 				d.claimMu.Unlock()
 				return serverUpdateAcquired
 			}
-			d.pauseClaims = false
+			d.releaseClaimPauseLocked(claimPauseServerUpdate)
 			d.claimMu.Unlock()
 			d.updating.Store(false)
 			return serverUpdateRuntimeBusy
@@ -4059,7 +4091,7 @@ func (d *Daemon) tryBeginServerUpdate(ctx context.Context) serverUpdateAcquireRe
 
 		select {
 		case <-ctx.Done():
-			d.releaseClaimBarrier()
+			d.releaseClaimPause(claimPauseServerUpdate)
 			d.updating.Store(false)
 			return serverUpdateRuntimeBusy
 		case <-ticker.C:
@@ -4147,14 +4179,18 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 }
 
 // tryEnterClaim records the intent to call ClaimTask. Returns true if the
-// caller may proceed, false if the auto-update barrier is in effect. Every
-// successful call MUST be paired with an exitClaim() on every exit path —
-// either right after a failed/empty claim, or via the handleTask goroutine's
+// caller may proceed, false if a claim-pause holder that blocks claim entry
+// (auto-update barrier, below-minimum demotion) is in effect. Draining does
+// NOT block claim entry (NEX-38 corrected contract): a draining runtime keeps
+// claiming and completing its pre-boundary queued work; new work is rejected
+// server-side by AgentReadiness, so nothing post-boundary enters the queue.
+// Every successful call MUST be paired with an exitClaim() on every exit path
+// — either right after a failed/empty claim, or via the handleTask goroutine's
 // defer once the task is handed off.
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims {
+	if d.claimPausedForClaimsLocked() {
 		return false
 	}
 	d.claimsInFlight++
@@ -4169,34 +4205,37 @@ func (d *Daemon) exitClaim() {
 }
 
 // trySetClaimBarrier atomically pauses new ClaimTask calls if the daemon is
-// fully idle (no claims in flight, no tasks running). Returns true if the
-// caller now holds the barrier and must release it with releaseClaimBarrier
-// on every non-restart exit path; false if the daemon is busy and the caller
-// should defer to the next tick. Used by tryAutoUpdate to close the race
-// where a task slips in between the cheap pre-fetch idle check and the
-// actual upgrade kick-off.
+// fully idle (no claims in flight, no tasks running, no other holder paused).
+// Returns true if the caller now holds a server-update ref and must release it
+// with releaseClaimBarrier on every non-restart exit path; false if the daemon
+// is busy or already paused (e.g. draining) and the caller should defer to the
+// next tick. Used by tryAutoUpdate to close the race where a task slips in
+// between the cheap pre-fetch idle check and the actual upgrade kick-off.
 func (d *Daemon) trySetClaimBarrier() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	// Refuse when the barrier is already held. Without this the function silently
-	// double-acquires: two holders both believe they own it, and whichever
-	// finishes first releases it out from under the other. tryBeginServerUpdate
-	// makes the same check for the same reason.
-	if d.pauseClaims || d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
+	// Refuse when any holder is already paused or work is in flight. Without
+	// the "any holder" check the function silently double-acquires: two holders
+	// both believe they own the pause, and whichever finishes first releases it
+	// out from under the other. tryBeginServerUpdate makes the same check for
+	// the same reason. During drain the claimPaused() branch is what defers
+	// auto-update / demotion until the drain ends (decision two).
+	if d.claimPausedLocked() || d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
 		return false
 	}
-	d.pauseClaims = true
+	d.acquireClaimPauseLocked(claimPauseServerUpdate)
 	return true
 }
 
-// releaseClaimBarrier clears the auto-update claim barrier so pollers may
-// resume claiming. Called on failure paths only — a successful upgrade leaves
-// the barrier set because triggerRestart is about to take the process down
-// and clearing it would open a window for new claims during shutdown.
+// releaseClaimBarrier clears the caller's server-update claim-pause ref so
+// pollers may resume claiming. Called on failure paths only — a successful
+// upgrade leaves the ref held because triggerRestart is about to take the
+// process down and clearing it would open a window for new claims during
+// shutdown.
 func (d *Daemon) releaseClaimBarrier() {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	d.pauseClaims = false
+	d.releaseClaimPauseLocked(claimPauseServerUpdate)
 }
 
 // triggerRestart initiates a graceful daemon restart into the binary at

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -42,7 +43,25 @@ var daemonStartCmd = &cobra.Command{
 var daemonStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the running daemon",
-	RunE:  runDaemonStop,
+	Long: "Stop the daemon immediately. In-flight tasks are interrupted (up to the 30s\n" +
+		"shutdown window) and no new tasks are claimed.\n\n" +
+		"If you want running tasks to finish first, enter drain instead:\n" +
+		"  multica daemon drain --finish-then-stop",
+	RunE: runDaemonStop,
+}
+
+var daemonDrainCmd = &cobra.Command{
+	Use:   "drain",
+	Short: "Enter safe shutdown (drain): stop claiming tasks, let running ones finish",
+	Long: "Enter safe shutdown (drain). The daemon stops claiming new tasks while\n" +
+		"in-flight tasks run to completion.\n\n" +
+		"  multica daemon drain                 enter draining (safe shutdown)\n" +
+		"  multica daemon drain --abort         return to normal operation\n" +
+		"  multica daemon drain --finish-then-stop   shut down once running tasks finish\n\n" +
+		"Use --force to skip the confirmation shown when queued tasks would be\n" +
+		"stranded (pass it on non-interactive machines), and --wait to block until\n" +
+		"the state change completes.",
+	RunE: runDaemonDrain,
 }
 
 var daemonStatusCmd = &cobra.Command{
@@ -112,6 +131,11 @@ func init() {
 
 	daemonStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
+	daemonDrainCmd.Flags().Bool("abort", false, "Return to normal operation (cancel draining)")
+	daemonDrainCmd.Flags().Bool("finish-then-stop", false, "Shut the daemon down once running tasks finish")
+	daemonDrainCmd.Flags().Bool("force", false, "Skip the confirmation when queued tasks would be stranded")
+	daemonDrainCmd.Flags().Bool("wait", false, "Block until the requested state change completes")
+
 	// restart shares all the same flags as start
 	rf := daemonRestartCmd.Flags()
 	rf.Bool("foreground", false, "Run in the foreground instead of background")
@@ -138,6 +162,7 @@ func init() {
 
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
+	daemonCmd.AddCommand(daemonDrainCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonProbeRuntimesCmd)
@@ -1228,6 +1253,145 @@ func requestDaemonShutdown(healthPort int) error {
 	return nil
 }
 
+// --- daemon drain ---
+
+func runDaemonDrain(cmd *cobra.Command, _ []string) error {
+	profile := resolveProfile(cmd)
+	healthPort := healthPortForProfile(profile)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	health := checkDaemonHealthOnPort(ctx, healthPort)
+	if !daemonAlive(health) {
+		label := "Daemon"
+		if profile != "" {
+			label = fmt.Sprintf("Daemon [%s]", profile)
+		}
+		fmt.Fprintf(os.Stderr, "%s is not running.\n", label)
+		return nil
+	}
+
+	abort, _ := cmd.Flags().GetBool("abort")
+	finishThenStop, _ := cmd.Flags().GetBool("finish-then-stop")
+	force, _ := cmd.Flags().GetBool("force")
+	wait, _ := cmd.Flags().GetBool("wait")
+
+	action := "drain"
+	switch {
+	case abort:
+		action = "abort"
+	case finishThenStop:
+		action = "finish_then_stop"
+	}
+
+	// Entering drain — or arming finish-then-stop, which will shut the daemon
+	// down — strands queued tasks until they time out (they are not
+	// re-assigned). When the daemon reports queued tasks, confirm unless the
+	// caller passed --force (required on non-interactive machines). abort only
+	// returns to running and needs no confirmation.
+	if action != "abort" && !force {
+		if queued, ok := health["draining_queued_tasks"].(float64); ok && queued > 0 {
+			proceed, err := confirmDrainStranding(int64(queued))
+			if err != nil {
+				return err
+			}
+			if !proceed {
+				fmt.Fprintln(os.Stderr, "Drain cancelled.")
+				return nil
+			}
+		}
+	}
+
+	if err := requestDaemonDrain(healthPort, action); err != nil {
+		return fmt.Errorf("request daemon drain: %w", err)
+	}
+
+	if wait {
+		return waitForDaemonDrain(healthPort, action)
+	}
+	return nil
+}
+
+// requestDaemonDrain POSTs an action to the daemon's local /drain endpoint.
+// Actions: drain (enter safe shutdown), abort (return to running),
+// finish_then_stop (shut down once in-flight tasks complete). Like /shutdown,
+// the endpoint is bound to 127.0.0.1 only.
+func requestDaemonDrain(healthPort int, action string) error {
+	payload := fmt.Sprintf(`{"action":%q}`, action)
+	url := fmt.Sprintf("http://127.0.0.1:%d/drain", healthPort)
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// confirmDrainStranding prompts for a yes/no confirmation that draining may
+// proceed given queued tasks that will remain queued until they time out
+// (runtime_drained). Reads from stdin so non-interactive callers can pipe a
+// response or pass --force to skip.
+func confirmDrainStranding(queued int64) (bool, error) {
+	fmt.Fprintf(os.Stderr, "The daemon still has %d queued task(s) that will stay queued until they time out after shutdown.\n", queued)
+	fmt.Fprint(os.Stderr, "Continue with drain? [y/N] ")
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return false, fmt.Errorf("read confirmation: %w", err)
+	}
+	line = strings.ToLower(strings.TrimSpace(line))
+	return line == "y" || line == "yes", nil
+}
+
+// waitForDaemonDrain blocks until the daemon health endpoint reflects the
+// requested drain action: "draining" for drain, "running" for abort, or the
+// daemon disappearing after finish_then_stop. Bounded so a hung daemon cannot
+// wedge the CLI forever.
+func waitForDaemonDrain(healthPort int, action string) error {
+	const (
+		pollInterval = 500 * time.Millisecond
+		waitTimeout  = 5 * time.Minute
+	)
+	deadline := time.Now().Add(waitTimeout)
+	for time.Now().Before(deadline) {
+		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		health := checkDaemonHealthOnPort(hctx, healthPort)
+		hcancel()
+
+		state, _ := health["state"].(string)
+		switch action {
+		case "abort":
+			if state == "running" {
+				fmt.Fprintln(os.Stderr, "Daemon resumed normal operation.")
+				return nil
+			}
+		case "finish_then_stop":
+			if !daemonAlive(health) {
+				fmt.Fprintln(os.Stderr, "Daemon stopped after drain.")
+				return nil
+			}
+		default:
+			if state == "draining" {
+				fmt.Fprintln(os.Stderr, "Daemon is draining (not claiming new tasks).")
+				return nil
+			}
+		}
+		time.Sleep(pollInterval)
+	}
+	fmt.Fprintln(os.Stderr, "Timed out waiting for the drain state change; run 'multica daemon status' to check.")
+	return nil
+}
+
 // --- daemon status ---
 
 func runDaemonStatus(cmd *cobra.Command, _ []string) error {
@@ -1267,6 +1431,14 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 		label = fmt.Sprintf("Daemon [%s]", profile)
 	}
 
+	// Draining is a daemon run-state orthogonal to readiness (status): a
+	// drained daemon still reports status "running" but refuses new claims.
+	// Report it as its own state line, parallel to running/stopped.
+	if state, _ := health["state"].(string); state == "draining" {
+		printDaemonDrainingStatus(os.Stdout, label, health)
+		return nil
+	}
+
 	switch health["status"] {
 	case "running":
 		printDaemonStatusReport(os.Stdout, label, health)
@@ -1304,6 +1476,15 @@ func daemonStatusHealthPort(cmd *cobra.Command) (int, error) {
 	return port, nil
 }
 
+// printDaemonDrainingStatus renders the draining state line. Parallel to the
+// running/stopped status lines: the daemon reports how many tasks are still
+// executing while draining (draining_inflight_tasks) and how many queued tasks
+// will be stranded until they time out (draining_queued_tasks).
+func printDaemonDrainingStatus(w io.Writer, label string, health map[string]any) {
+	inflight, _ := health["draining_inflight_tasks"].(float64)
+	queued, _ := health["draining_queued_tasks"].(float64)
+	fmt.Fprintf(w, "%s: 准备关闭中（在跑任务 %d，排队任务 %d）\n", label, int64(inflight), int64(queued))
+}
 // printDaemonStatusReport renders a key/value summary of the daemon health
 // response. The value column is aligned to the widest label so the dynamic
 // "Daemon [profile]" row stays in step with the static rows below it.

@@ -53,6 +53,17 @@ type HealthResponse struct {
 	// older consumers see no change. Diagnostic only: nothing keys off it.
 	ReloadPendingReason string            `json:"reload_pending_reason,omitempty"`
 	Workspaces          []healthWorkspace `json:"workspaces"`
+	// State is the NEX-38 run state: "running", "draining", or "stopped". It is
+	// orthogonal to Status: a drained daemon is still ready (Status "running")
+	// but refuses new task claims.
+	State string `json:"state"`
+	// DrainingInflightTasks is the count of tasks still executing while
+	// draining (== ActiveTaskCount). DrainingQueuedTasks is the daemon's
+	// best-effort view of how many tasks the server still holds queued for its
+	// runtimes, cached from heartbeat acks (design §7). Both are read by the
+	// CLI / UI to describe the drain state (AC-8).
+	DrainingInflightTasks int64 `json:"draining_inflight_tasks"`
+	DrainingQueuedTasks   int64 `json:"draining_queued_tasks"`
 }
 
 type healthWorkspace struct {
@@ -127,12 +138,55 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			Agents:                agents,
 			SkippedAgents:         d.skippedAgentsSnapshot(),
 
-			ReloadPendingReason: d.reloadPending(),
-			Workspaces:          wsList,
+			ReloadPendingReason:   d.reloadPending(),
+			Workspaces:            wsList,
+			State:                 d.daemonStateString(),
+			DrainingInflightTasks: d.activeTasks.Load(),
+			DrainingQueuedTasks:   d.queuedTaskCount(),
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// drainRequest is the body of a POST /drain request.
+type drainRequest struct {
+	Action string `json:"action"`
+}
+
+// drainHandler implements the NEX-38 drain entry point used by the CLI and
+// desktop: drain / abort / finish_then_stop. Like /shutdown, the health
+// listener is bound to 127.0.0.1 only, so only local processes can reach it.
+func (d *Daemon) drainHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req drainRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		var err error
+		switch req.Action {
+		case "drain":
+			err = d.beginDrain()
+		case "abort":
+			err = d.abortDrain()
+		case "finish_then_stop":
+			err = d.finishDrainThenStop()
+		default:
+			http.Error(w, "invalid action (want drain, abort, or finish_then_stop)", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "state": d.daemonStateString()})
 	}
 }
 
@@ -150,6 +204,7 @@ func (d *Daemon) shutdownHandler() http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "shutting down"})
+		d.daemonState.Store(daemonStateShuttingDown)
 		if d.cancelFunc != nil {
 			// Cancel asynchronously so the response flushes first; otherwise
 			// srv.Close() races with the writer.
@@ -164,6 +219,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	mux.HandleFunc("/drain", d.drainHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 
 	srv := &http.Server{Handler: mux}

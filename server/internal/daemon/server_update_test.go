@@ -159,10 +159,7 @@ func waitForServerUpdateBarrier(t *testing.T, d *Daemon) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		d.claimMu.Lock()
-		paused := d.pauseClaims
-		d.claimMu.Unlock()
-		if paused {
+		if d.claimPaused() {
 			return
 		}
 		time.Sleep(time.Millisecond)
@@ -228,8 +225,8 @@ func TestHandleUpdateKeepsBarrierOnlyWhenRestartWasScheduled(t *testing.T) {
 			if got := d.updating.Load(); got != tt.wantUpdating {
 				t.Fatalf("updating = %v, want %v", got, tt.wantUpdating)
 			}
-			if got := d.pauseClaims; got != tt.wantClaimsPaused {
-				t.Fatalf("pauseClaims = %v, want %v", got, tt.wantClaimsPaused)
+			if got := d.claimPaused(); got != tt.wantClaimsPaused {
+				t.Fatalf("claims paused = %v, want %v", got, tt.wantClaimsPaused)
 			}
 			if got := restartCalls.Load(); got != tt.wantRestartCalls {
 				t.Fatalf("restart calls = %d, want %d", got, tt.wantRestartCalls)

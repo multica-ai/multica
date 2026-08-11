@@ -366,20 +366,26 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 // runtime over one is exactly the mistake refreshAgentAvailability's
 // one-directional rule exists to avoid.
 func (d *Daemon) demoteBelowMinimumRuntimes(ctx context.Context, belowMinimum map[string]string) {
-	// Serialize with task claiming the way the restart paths do: the barrier
-	// only sets when no claim is in flight and no task is running, so a
-	// runtime is never deregistered under a task that is still executing —
-	// the server's sweep would fail-and-retry that task while the local
-	// process keeps going, and an upgrade-back would revive the runtime ID
-	// into a genuine duplicate execution. A busy daemon defers to the next
-	// refresh tick; the too-old CLI keeps its runtimes a little longer, which
-	// is the pre-demotion status quo, not a new exposure.
-	if !d.trySetClaimBarrier() {
+	// Serialize with task claiming the way the restart paths do: the demotion
+	// ref only acquires when no claim is in flight, no task is running, and no
+	// other holder (drain, auto-update) is paused, so a runtime is never
+	// deregistered under a task that is still executing — the server's sweep
+	// would fail-and-retry that task while the local process keeps going, and
+	// an upgrade-back would revive the runtime ID into a genuine duplicate
+	// execution. During drain the claimPaused() branch defers the demotion; it
+	// is re-evaluated on the next refresh tick (decision two). A busy daemon
+	// defers to the next tick; the too-old CLI keeps its runtimes a little
+	// longer, which is the pre-demotion status quo, not a new exposure.
+	d.claimMu.Lock()
+	if d.claimPausedLocked() || d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
+		d.claimMu.Unlock()
 		d.logger.Info("defer below-minimum demotion: task or claim in flight",
 			"providers", belowMinimum)
 		return
 	}
-	defer d.releaseClaimBarrier()
+	d.acquireClaimPauseLocked(claimPauseDemotion)
+	d.claimMu.Unlock()
+	defer d.releaseClaimPause(claimPauseDemotion)
 
 	d.mu.Lock()
 	var demoted []string
