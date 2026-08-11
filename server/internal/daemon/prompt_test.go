@@ -611,6 +611,20 @@ func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 				"You cannot attach a file to it",
 			},
 		},
+		{
+			// WeCom is symmetric with Feishu: no upload, and the transcript
+			// reader serves its stored chat_message history.
+			name:        "wecom: no upload, has transcript history",
+			channelType: execenv.ChannelTypeWecom,
+			wantUpload:  false,
+			wantHistory: true,
+			wantPhrases: []string{
+				"WeCom",
+				"read it back with `multica chat history`",
+				"delivered to WeCom as text",
+				"You cannot attach a file to it",
+			},
+		},
 	}
 
 	for _, tc := range cases {
