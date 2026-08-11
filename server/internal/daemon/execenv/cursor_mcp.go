@@ -31,6 +31,12 @@ type cursorMcpConfigFile struct {
 	McpServers map[string]json.RawMessage `json:"mcpServers"`
 }
 
+type cursorStdioMcpApprovalServer struct {
+	Command json.RawMessage `json:"command"`
+	Args    json.RawMessage `json:"args,omitempty"`
+	Env     json.RawMessage `json:"env,omitempty"`
+}
+
 // prepareCursorMcpConfig writes the Cursor-native MCP sidecars for agents that
 // have an explicit managed mcp_config saved. A nil/null mcp_config means "let
 // Cursor behave normally", so no .cursor/mcp.json or CURSOR_DATA_DIR is created.
@@ -239,9 +245,9 @@ func cursorMcpApprovalKeys(projectRoot string, servers map[string]json.RawMessag
 
 	approvals := make([]string, 0, len(names))
 	for _, name := range names {
-		compact := &bytes.Buffer{}
-		if err := json.Compact(compact, servers[name]); err != nil {
-			return nil, fmt.Errorf("compact mcp_servers.%s: %w", name, err)
+		server, err := marshalCursorMcpApprovalServer(servers[name])
+		if err != nil {
+			return nil, fmt.Errorf("marshal mcp_servers.%s for cursor approval: %w", name, err)
 		}
 		pathJSON, err := json.Marshal(projectRoot)
 		if err != nil {
@@ -250,13 +256,37 @@ func cursorMcpApprovalKeys(projectRoot string, servers map[string]json.RawMessag
 		payload := []byte(`{"path":`)
 		payload = append(payload, pathJSON...)
 		payload = append(payload, []byte(`,"server":`)...)
-		payload = append(payload, compact.Bytes()...)
+		payload = append(payload, server...)
 		payload = append(payload, '}')
 
 		sum := sha256.Sum256(payload)
 		approvals = append(approvals, name+"-"+hex.EncodeToString(sum[:])[:16])
 	}
 	return approvals, nil
+}
+
+func marshalCursorMcpApprovalServer(raw json.RawMessage) ([]byte, error) {
+	compact := &bytes.Buffer{}
+	if err := json.Compact(compact, raw); err != nil {
+		return nil, err
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	command, isStdio := fields["command"]
+	if !isStdio {
+		return compact.Bytes(), nil
+	}
+
+	// Cursor parses stdio configs into command, args, and env fields before it
+	// computes approval keys, so the source JSON's object order must not leak in.
+	return json.Marshal(cursorStdioMcpApprovalServer{
+		Command: command,
+		Args:    fields["args"],
+		Env:     fields["env"],
+	})
 }
 
 func cursorProjectRoot(workDir string) string {
