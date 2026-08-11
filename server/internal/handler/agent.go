@@ -46,9 +46,15 @@ type AgentResponse struct {
 	// branch on this rather than on RuntimeID being falsy, and must not confuse
 	// it with a bound-but-offline runtime (a different user story: reconnect the
 	// machine vs. pick a new one).
-	RuntimeBound bool   `json:"runtime_bound"`
-	Name         string `json:"name"`
-	Description  string `json:"description"`
+	RuntimeBound bool `json:"runtime_bound"`
+	// RuntimeRoutable is the invocation gate exposed to clients. Pool Agents
+	// are routable before a concrete Runtime is assigned; fixed Agents remain
+	// routable only while bound.
+	RuntimeRoutable     bool            `json:"runtime_routable"`
+	RuntimeBindingMode  string          `json:"runtime_binding_mode"`
+	RuntimeRequirements json.RawMessage `json:"runtime_requirements"`
+	Name                string          `json:"name"`
+	Description         string          `json:"description"`
 	// Instructions is what this agent's owner wrote. For a system agent it
 	// holds only the workspace's own notes — the product half lives in
 	// SystemInstructions and is never stored on the row.
@@ -180,6 +186,9 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		WorkspaceID:              uuidToString(a.WorkspaceID),
 		RuntimeID:                uuidToString(a.RuntimeID),
 		RuntimeBound:             a.RuntimeID.Valid,
+		RuntimeRoutable:          service.IsAgentRoutable(a),
+		RuntimeBindingMode:       a.RuntimeBindingMode,
+		RuntimeRequirements:      json.RawMessage(a.RuntimeRequirements),
 		Name:                     a.Name,
 		Description:              a.Description,
 		Instructions:             a.Instructions,
@@ -294,11 +303,14 @@ type ProjectResourceData struct {
 type ConnectedAppData = runtimeapps.ConnectedApp
 
 type AgentTaskResponse struct {
-	ID          string `json:"id"`
-	AgentID     string `json:"agent_id"`
-	RuntimeID   string `json:"runtime_id"`
-	IssueID     string `json:"issue_id"`
-	WorkspaceID string `json:"workspace_id"`
+	ID                   string `json:"id"`
+	AgentID              string `json:"agent_id"`
+	RuntimeID            string `json:"runtime_id"`
+	RuntimeBindingMode   string `json:"runtime_binding_mode"`
+	WaitReason           string `json:"wait_reason"`
+	SessionAffinityState string `json:"session_affinity_state"`
+	IssueID              string `json:"issue_id"`
+	WorkspaceID          string `json:"workspace_id"`
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
 	// as `## Workspace Context` so every agent running in this workspace —
@@ -667,32 +679,36 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.HandoffNote.Valid {
 		handoffNote = t.HandoffNote.String
 	}
+	runtimeID, runtimeBindingMode, waitReason := taskRuntimeWire(t)
 	return AgentTaskResponse{
-		ID:                  uuidToString(t.ID),
-		AgentID:             uuidToString(t.AgentID),
-		RuntimeID:           uuidToString(t.RuntimeID),
-		IssueID:             uuidToString(t.IssueID),
-		WorkspaceID:         workspaceID,
-		Status:              t.Status,
-		Priority:            t.Priority,
-		DispatchedAt:        timestampToPtr(t.DispatchedAt),
-		StartedAt:           timestampToPtr(t.StartedAt),
-		CompletedAt:         timestampToPtr(t.CompletedAt),
-		Result:              result,
-		Error:               textToPtr(t.Error),
-		FailureReason:       failureReason,
-		Attempt:             t.Attempt,
-		MaxAttempts:         t.MaxAttempts,
-		ParentTaskID:        uuidToPtr(t.ParentTaskID),
-		IsLeaderTask:        t.IsLeaderTask,
-		CreatedAt:           timestampToString(t.CreatedAt),
-		TriggerCommentID:    uuidToPtr(t.TriggerCommentID),
-		CoalescedCommentIDs: uuidsToStrings(t.CoalescedCommentIds),
-		DeliveredCommentIDs: uuidStringsOrEmpty(t.DeliveredCommentIds),
-		TriggerSummary:      textToPtr(t.TriggerSummary),
-		HandoffNote:         handoffNote,
-		WorkDir:             workDir,
-		RelativeWorkDir:     relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
+		ID:                   uuidToString(t.ID),
+		AgentID:              uuidToString(t.AgentID),
+		RuntimeID:            runtimeID,
+		RuntimeBindingMode:   runtimeBindingMode,
+		WaitReason:           waitReason,
+		SessionAffinityState: t.SessionAffinityState,
+		IssueID:              uuidToString(t.IssueID),
+		WorkspaceID:          workspaceID,
+		Status:               t.Status,
+		Priority:             t.Priority,
+		DispatchedAt:         timestampToPtr(t.DispatchedAt),
+		StartedAt:            timestampToPtr(t.StartedAt),
+		CompletedAt:          timestampToPtr(t.CompletedAt),
+		Result:               result,
+		Error:                textToPtr(t.Error),
+		FailureReason:        failureReason,
+		Attempt:              t.Attempt,
+		MaxAttempts:          t.MaxAttempts,
+		ParentTaskID:         uuidToPtr(t.ParentTaskID),
+		IsLeaderTask:         t.IsLeaderTask,
+		CreatedAt:            timestampToString(t.CreatedAt),
+		TriggerCommentID:     uuidToPtr(t.TriggerCommentID),
+		CoalescedCommentIDs:  uuidsToStrings(t.CoalescedCommentIds),
+		DeliveredCommentIDs:  uuidStringsOrEmpty(t.DeliveredCommentIds),
+		TriggerSummary:       textToPtr(t.TriggerSummary),
+		HandoffNote:          handoffNote,
+		WorkDir:              workDir,
+		RelativeWorkDir:      relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 		// Surface task source so the UI can distinguish issue-linked tasks
 		// from chat-spawned or autopilot-spawned ones; all three may arrive
 		// with issue_id = "" once a task has no linked issue.
@@ -703,6 +719,14 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		// hydrated separately on user-facing surfaces (MUL-4302 §9).
 		Attribution: taskAttributionBase(t),
 	}
+}
+
+func taskRuntimeWire(task db.AgentTaskQueue) (runtimeID, mode, waitReason string) {
+	waitReason = ""
+	if task.WaitReason.Valid {
+		waitReason = task.WaitReason.String
+	}
+	return uuidToString(task.RuntimeID), task.RuntimeBindingMode, waitReason
 }
 
 // relativeWorkDir produces a privacy-safe display form of the daemon-reported

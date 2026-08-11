@@ -5995,11 +5995,19 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 // compatible with the payload map, while the realtime layer can route without
 // decoding it once per-resource fanout is enabled.
 func taskEvent(eventType, workspaceID string, task db.AgentTaskQueue, extra ...map[string]any) events.Event {
+	waitReason := ""
+	if task.WaitReason.Valid {
+		waitReason = task.WaitReason.String
+	}
 	payload := map[string]any{
-		"task_id":  util.UUIDToString(task.ID),
-		"agent_id": util.UUIDToString(task.AgentID),
-		"issue_id": util.UUIDToString(task.IssueID),
-		"status":   task.Status,
+		"task_id":                util.UUIDToString(task.ID),
+		"agent_id":               util.UUIDToString(task.AgentID),
+		"issue_id":               util.UUIDToString(task.IssueID),
+		"runtime_id":             util.UUIDToString(task.RuntimeID),
+		"runtime_binding_mode":   task.RuntimeBindingMode,
+		"status":                 task.Status,
+		"wait_reason":            waitReason,
+		"session_affinity_state": task.SessionAffinityState,
 	}
 	e := events.Event{
 		Type:        eventType,
