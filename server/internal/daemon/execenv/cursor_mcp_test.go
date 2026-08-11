@@ -27,7 +27,7 @@ func TestCursorMcpApprovalKeyMatchesCursorAgentWithReorderedStdioConfig(t *testi
 	t.Parallel()
 
 	keys, err := cursorMcpApprovalKeys("/tmp/work", map[string]json.RawMessage{
-		"fetch": json.RawMessage(`{"args":["mcp-server-fetch"],"command":"uvx","env":{"TOKEN":"x"}}`),
+		"fetch": json.RawMessage(`{ "args": [ "mcp-server-fetch" ], "command": "uvx", "env": { "TOKEN": "x" } }`),
 	})
 	if err != nil {
 		t.Fatalf("cursorMcpApprovalKeys: %v", err)
