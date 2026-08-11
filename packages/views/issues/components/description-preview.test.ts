@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { descriptionPreview } from "./board-card";
+import { descriptionPreview } from "./description-preview";
 
 const ATTACHMENT_ID = "0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b";
 const IMAGE = `![](/api/attachments/${ATTACHMENT_ID}/download)`;
