@@ -320,6 +320,12 @@ VALUES ($1, 'delete-test', 'workspace-delete', 10, 5)
 `, taskID); err != nil {
 		t.Fatalf("create workspace task usage: %v", err)
 	}
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO cursor_usage_event_claim (account_key, occurrence_key, task_id, workspace_id)
+VALUES ('cursor-acct-delete', 'occ-delete-1', $1, $2)
+`, taskID, wsID); err != nil {
+		t.Fatalf("create workspace cursor usage claim: %v", err)
+	}
 
 	var rollupRuntimeID, rollupAgentID string
 	if err := testPool.QueryRow(ctx, `SELECT gen_random_uuid(), gen_random_uuid()`).Scan(&rollupRuntimeID, &rollupAgentID); err != nil {
@@ -376,6 +382,7 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
 	}
 
 	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM cursor_usage_event_claim WHERE workspace_id = $1`, wsID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1`, wsID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM task_usage_hourly WHERE workspace_id = $1`, wsID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, runtimeProfileID)
@@ -425,6 +432,7 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
 	}
 
 	for _, table := range []string{
+		"cursor_usage_event_claim",
 		"task_usage_hourly_dirty",
 		"task_usage_hourly",
 		"runtime_profile",

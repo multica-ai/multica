@@ -488,6 +488,13 @@ type ContactSalesInquiry struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type CursorUsageEventClaim struct {
+	AccountKey    string      `json:"account_key"`
+	OccurrenceKey string      `json:"occurrence_key"`
+	TaskID        pgtype.UUID `json:"task_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+}
+
 type DaemonConnection struct {
 	ID              pgtype.UUID        `json:"id"`
 	AgentID         pgtype.UUID        `json:"agent_id"`

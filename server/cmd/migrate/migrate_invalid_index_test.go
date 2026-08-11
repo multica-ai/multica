@@ -261,6 +261,13 @@ func TestRunMigrationsRepairsInvalidTerminalCompletedAtIndex(t *testing.T) {
 	}
 }
 
+func TestCursorUsageClaimConcurrentIndexHookRegistered(t *testing.T) {
+	const version = "274_cursor_usage_event_claim_unique_index"
+	if preMigrationHooks[version] == nil {
+		t.Fatalf("production hook is not registered for %s", version)
+	}
+}
+
 func assertIndexValidity(t *testing.T, pool interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, schema, index string, want bool) {

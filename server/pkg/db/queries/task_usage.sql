@@ -17,6 +17,18 @@ DO UPDATE SET
     cost_usd_ticks = EXCLUDED.cost_usd_ticks,
     updated_at = now();
 
+-- name: UpdateTaskUsageCost :execrows
+-- Cost-only correction after a Cursor Dashboard reconcile. Must not touch
+-- token counters — replaying them would double-count Prometheus CaptureTaskUsage
+-- side effects on the full usage endpoint. Bumps updated_at so the hourly
+-- rollup picks up the authoritative figure.
+UPDATE task_usage
+SET cost_usd_ticks = sqlc.narg('cost_usd_ticks'),
+    updated_at = now()
+WHERE task_id = $1
+  AND provider = $2
+  AND model = $3;
+
 -- name: GetTaskUsage :many
 SELECT * FROM task_usage
 WHERE task_id = $1
