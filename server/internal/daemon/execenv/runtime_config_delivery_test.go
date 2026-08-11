@@ -152,13 +152,19 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 		// what makes the paragraph above a rule rather than a note. The
 		// byte-identity invariant cannot enforce it on its own: a denial
 		// written into the brief unconditionally is the same on both values of
-		// the verdict, so it renders one brief and passes. Only a phrase list
-		// catches it, and only if it names the wordings a denial actually
-		// arrives in.
+		// the verdict, so it renders one brief and passes.
+		//
+		// A phrase list cannot be the only guard either — it denies the
+		// wordings someone thought to name, and the next one will be worded
+		// differently. TestBriefChannelDeliveryCopyIsPlatformNeutral holds the
+		// same rule with no wording in it, by requiring every channel-backed
+		// brief to differ only in the platform it names. Keep both: that one
+		// catches any wording, these fail beside the copy being edited.
 		"chat_slack": {
 			mustHave: []string{
 				"Slack conversation depends on how this deployment is configured",
 				"the per-turn user message tells you",
+				"never report a file as delivered",
 			},
 			mustNot: []string{
 				"run `multica attachment upload",
@@ -171,6 +177,7 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 			mustHave: []string{
 				"Feishu/Lark conversation depends on how this deployment is configured",
 				"the per-turn user message tells you",
+				"never report a file as delivered",
 			},
 			mustNot: []string{
 				"run `multica attachment upload",
@@ -202,11 +209,24 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 					name, phrase, outputSection(out))
 			}
 		}
+		// mustNot is checked against the WHOLE brief, not just `## Output`: a
+		// denial is wrong wherever it is written, and scoping the search to
+		// the section it usually lands in would let the next one land
+		// somewhere else. The phrases are ordinary English, though, so a
+		// future section could match one legitimately — quote the text around
+		// the actual hit and say which section it was in, or the failure
+		// points a reader at an Output section the phrase may not be in.
 		for _, phrase := range want.mustNot {
-			if strings.Contains(out, phrase) {
-				t.Errorf("surface=%s: brief must NOT carry %q (wrong surface's delivery mechanism)\n--- Output section ---\n%s",
-					name, phrase, outputSection(out))
+			at := strings.Index(out, phrase)
+			if at < 0 {
+				continue
 			}
+			where := "in the `## Output` section"
+			if !strings.Contains(outputSection(out), phrase) {
+				where = "OUTSIDE the `## Output` section"
+			}
+			t.Errorf("surface=%s: brief must NOT carry %q — found %s\n--- context ---\n%s",
+				name, phrase, where, briefContext(out, at, len(phrase)))
 		}
 	}
 }
@@ -243,6 +263,51 @@ func TestBriefChannelDeliveryCopyIgnoresServerVerdict(t *testing.T) {
 		if got != delivering {
 			t.Errorf("brief for %q differs from chat_wecom — the server's per-turn file-delivery verdict reached the cached prefix (MUL-5377).\n%s",
 				name, firstBriefDiff(delivering, got))
+		}
+	}
+}
+
+// TestBriefChannelDeliveryCopyIsPlatformNeutral is the structural form of the
+// rule the phrase lists above state one wording at a time.
+//
+// A phrase list is open-ended by construction: it denies the wordings someone
+// thought to name, and a fifth wording passes. The rule underneath has no
+// wording in it — one channel-backed brief may differ from another ONLY in
+// which platform it names. Anything platform-specific past the name is either a
+// promise or a denial about the last hop, and the brief may carry neither,
+// because that hop is a deployment fact stated per turn (MUL-4899).
+//
+// So this substitutes the display name out and requires the briefs to be
+// byte-identical. A per-platform position fails here whatever words it is
+// written in. The phrase lists stay: they name the wordings, and they fail
+// beside the copy rather than on a whole-brief diff.
+//
+// A channel type added to channel_type.go belongs in the list below — the
+// constants are the only enumeration of them that exists.
+func TestBriefChannelDeliveryCopyIsPlatformNeutral(t *testing.T) {
+	t.Parallel()
+
+	neutralized := func(channelType string, delivers bool) string {
+		out := buildMetaSkillContent("claude", TaskContextForEnv{
+			ChatSessionID:            "c-1",
+			ChatChannelType:          channelType,
+			ChatChannelDeliversFiles: delivers,
+			AgentName:                "Eve",
+			AgentID:                  "eve-1",
+		})
+		return strings.ReplaceAll(out, ChannelDisplayName(channelType), "<CHANNEL>")
+	}
+
+	// Both verdicts, because the tempting place to write a denial is the
+	// branch someone believes cannot deliver today.
+	for _, delivers := range []bool{false, true} {
+		baseline := neutralized(ChannelTypeSlack, delivers)
+		for _, channelType := range []string{ChannelTypeFeishu, ChannelTypeWecom} {
+			got := neutralized(channelType, delivers)
+			if got != baseline {
+				t.Errorf("brief for channel %q (delivers=%v) differs from %q beyond the platform name — the brief took a position on one platform's file delivery, which is a per-turn deployment fact (MUL-4899, MUL-5377).\n%s",
+					channelType, delivers, ChannelTypeSlack, firstBriefDiff(baseline, got))
+			}
 		}
 	}
 }
@@ -311,6 +376,20 @@ func TestQuickActionsInstructionsAbsentFromAllChatBriefs(t *testing.T) {
 			t.Fatalf("brief (channel=%q) must not teach the in-band quick-actions syntax", ctx.ChatChannelType)
 		}
 	}
+}
+
+// briefContext quotes the brief around a match so a mustNot failure shows the
+// sentence that actually tripped it rather than a section it may not be in.
+func briefContext(brief string, at, length int) string {
+	lo := at - 200
+	if lo < 0 {
+		lo = 0
+	}
+	hi := at + length + 200
+	if hi > len(brief) {
+		hi = len(brief)
+	}
+	return brief[lo:hi]
 }
 
 // outputSection extracts the brief's `## Output` section for readable failures.
