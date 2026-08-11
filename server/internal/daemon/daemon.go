@@ -5139,6 +5139,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"qoderclicn": "Qoder CN",
 	"qwen":       "Qwen Code",
 	"qwenpaw":    "QwenPaw",
+	"zcode":      "ZCode",
 }
 
 func init() {

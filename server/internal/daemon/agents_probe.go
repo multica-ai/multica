@@ -249,5 +249,13 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
 		agents["qwenpaw"] = e
 	}
+	// ZCode (`zcode`) is the zcode-cli terminal client for the ZCode Desktop
+	// agent runtime. It runs headlessly via `zcode --prompt <text> --json`,
+	// emitting a single JSON summary per turn (not a streaming event protocol).
+	// It takes no model env var: the model is fixed by ~/.zcode/cli/config.json
+	// (model.main), so ExecOptions.Model is ignored — see ModelSelectionSupported.
+	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode", ""); ok {
+		agents["zcode"] = e
+	}
 	return agents
 }
