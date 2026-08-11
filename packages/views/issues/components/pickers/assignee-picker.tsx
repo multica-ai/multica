@@ -5,7 +5,7 @@ import { Lock, UserMinus } from "lucide-react";
 import type { Agent, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { isAgentRuntimeBound } from "@multica/core/agents";
+import { isAgentRunnable } from "@multica/core/agents";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -139,7 +139,7 @@ function AssigneePickerImpl({
     .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id));
   const runnableAgentIds = new Set(
     agents
-      .filter((agent) => !agent.archived_at && isAgentRuntimeBound(agent))
+      .filter((agent) => !agent.archived_at && isAgentRunnable(agent))
       .map((agent) => agent.id),
   );
 
@@ -225,8 +225,8 @@ function AssigneePickerImpl({
                   ? memberRole
                   : null,
             });
-            const runtimeBound = isAgentRuntimeBound(a);
-            const allowed = decision.allowed && runtimeBound;
+            const runtimeRunnable = isAgentRunnable(a);
+            const allowed = decision.allowed && runtimeRunnable;
             return (
               <PickerItem
                 key={a.id}
@@ -235,7 +235,7 @@ function AssigneePickerImpl({
                 tooltip={
                   !decision.allowed
                     ? decision.message
-                    : !runtimeBound
+                    : !runtimeRunnable
                       ? t(($) => $.pickers.assignee.agent_runtime_required)
                       : undefined
                 }

@@ -20,7 +20,9 @@ export interface IssueSurfaceActivity {
 
 function isQueuedTaskStatus(status: AgentTask["status"]) {
   return (
+    status === "waiting_runtime" ||
     status === "queued" ||
+	status === "deferred" ||
     status === "dispatched" ||
     status === "waiting_local_directory"
   );

@@ -91,7 +91,9 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
     () =>
       tasks.filter(
         (t) =>
+          t.status === "waiting_runtime" ||
           t.status === "queued" ||
+          t.status === "deferred" ||
           t.status === "dispatched" ||
           // Daemon-parked task on a busy local_directory — still active
           // (waiting on a path lock), not terminal. Surfacing it here is
@@ -287,7 +289,9 @@ export function IssueUsageTotal({
 // ─── Row visual config ─────────────────────────────────────────────────────
 
 const STATUS_TONE: Record<AgentTask["status"], string> = {
+  waiting_runtime: "text-warning",
   queued: "text-warning",
+  deferred: "text-warning",
   dispatched: "text-warning",
   // Same tone as queued/dispatched — visually "stopped" so users see the
   // task is parked, but distinguished by the status label.
@@ -339,7 +343,10 @@ export function ActiveTaskRow({
   // Transcript only meaningful once messages exist — pure-queued and
   // waiting_local_directory tasks haven't streamed any agent output yet.
   const showTranscript =
-    task.status !== "queued" && task.status !== "waiting_local_directory";
+    task.status !== "waiting_runtime" &&
+    task.status !== "queued" &&
+    task.status !== "deferred" &&
+    task.status !== "waiting_local_directory";
 
   const handleCancel = async () => {
     if (cancelling) return;

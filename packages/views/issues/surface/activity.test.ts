@@ -29,6 +29,7 @@ describe("deriveIssueSurfaceActivity", () => {
       task({ id: "queue-1", issue_id: "i-2", status: "queued" }),
       task({ id: "dispatch-1", issue_id: "i-2", status: "dispatched" }),
       task({ id: "wait-1", issue_id: "i-3", status: "waiting_local_directory" }),
+      task({ id: "pool-wait-1", issue_id: "i-5", status: "waiting_runtime" }),
       task({ id: "done-1", issue_id: "i-4", status: "completed" }),
       task({ id: "no-issue", issue_id: undefined, status: "running" }),
     ]);
@@ -46,6 +47,10 @@ describe("deriveIssueSurfaceActivity", () => {
       isWorking: false,
       isQueued: true,
     });
+	 expect(activity.activityByIssueId.get("i-5")).toMatchObject({
+		 isWorking: false,
+		 isQueued: true,
+	 });
     expect(activity.activityByIssueId.has("i-4")).toBe(false);
   });
 });
@@ -58,6 +63,7 @@ describe("selectIssueTasks", () => {
     task({ id: "other-run", issue_id: "i-2", status: "running" }),
     task({ id: "wait-1", issue_id: "i-3", status: "waiting_local_directory" }),
     task({ id: "dispatch-1", issue_id: "i-3", status: "dispatched" }),
+    task({ id: "pool-wait-1", issue_id: "i-3", status: "waiting_runtime" }),
     task({ id: "done-1", issue_id: "i-1", status: "completed" }),
     task({ id: "no-issue", issue_id: undefined, status: "running" }),
   ];
@@ -71,7 +77,11 @@ describe("selectIssueTasks", () => {
   it("treats dispatched and waiting_local_directory as queued", () => {
     const groups = selectIssueTasks(snapshot, "i-3");
     expect(groups.running).toEqual([]);
-    expect(groups.queued.map((t) => t.id)).toEqual(["wait-1", "dispatch-1"]);
+    expect(groups.queued.map((t) => t.id)).toEqual([
+	  "wait-1",
+	  "dispatch-1",
+	  "pool-wait-1",
+	]);
   });
 
   it("drops terminal statuses and tasks without an issue", () => {

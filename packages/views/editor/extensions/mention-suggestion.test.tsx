@@ -77,6 +77,8 @@ function fakeQc(data: {
     archived_at: string | null;
     runtime_id?: string;
     runtime_bound?: boolean;
+    runtime_binding_mode?: "fixed" | "pool";
+    runtime_routable?: boolean;
     visibility?: "workspace" | "private";
     owner_id?: string | null;
     permission_mode?: "private" | "public_to";
@@ -768,6 +770,41 @@ describe("createMentionSuggestion", () => {
         disabledReason: "agent_runtime_required",
       }),
     );
+  });
+
+  it("keeps a Pool-unbound squad leader selectable", () => {
+	const qc = fakeQc({
+	  agents: [
+		{
+		  id: "leader-pool",
+		  name: "Pool Leader",
+		  archived_at: null,
+		  runtime_id: "",
+		  runtime_bound: false,
+		  runtime_binding_mode: "pool",
+		  runtime_routable: true,
+		  visibility: "workspace",
+		  owner_id: null,
+		},
+	  ],
+	  squads: [
+		{
+		  id: "s-pool",
+		  name: "Pool Squad",
+		  archived_at: null,
+		  leader_id: "leader-pool",
+		},
+	  ],
+	});
+
+	const items = createMentionSuggestion(qc).items!(itemArgs("")) as MentionItem[];
+	expect(items).toContainEqual(
+	  expect.objectContaining({
+		type: "squad",
+		id: "s-pool",
+		disabledReason: undefined,
+	  }),
+	);
   });
 
   it("keeps squads discoverable while the agents cache is not ready", () => {

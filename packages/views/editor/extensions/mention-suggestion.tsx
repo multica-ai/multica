@@ -16,7 +16,7 @@ import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
-import { isAgentRuntimeBound } from "@multica/core/agents";
+import { isAgentRunnable } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import {
   isIssueDirectHit,
@@ -736,14 +736,14 @@ export function createMentionSuggestion(
         id: a.id,
         label: a.name,
         type: "agent" as const,
-        disabledReason: isAgentRuntimeBound(a)
+        disabledReason: isAgentRunnable(a)
           ? undefined
           : ("agent_runtime_required" as const),
       }));
     const activeAgentRuntimeBinding = new Map(
       agents
         .filter((agent) => !agent.archived_at)
-        .map((agent) => [agent.id, isAgentRuntimeBound(agent)]),
+        .map((agent) => [agent.id, isAgentRunnable(agent)]),
     );
 
     const squadItems: MentionItem[] = squads
