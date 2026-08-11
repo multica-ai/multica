@@ -350,8 +350,15 @@ func TestGetChatHistory_TranscriptPagesWithoutDuplicatesOrGaps(t *testing.T) {
 		if resp.Note != "" {
 			t.Fatalf("page %d unexpected note %q", page, resp.Note)
 		}
+		// Within a page the transcript is oldest-first.
+		prev := -1
 		for _, m := range resp.Messages {
 			seen = append(seen, m.Text)
+			n, _ := strconv.Atoi(strings.TrimPrefix(m.Text, "msg "))
+			if n <= prev {
+				t.Fatalf("page %d not oldest-first: %v", page, resp.Messages)
+			}
+			prev = n
 		}
 		if len(resp.Messages) < 3 {
 			// A short page is the last one: no cursor advertised.
@@ -366,22 +373,24 @@ func TestGetChatHistory_TranscriptPagesWithoutDuplicatesOrGaps(t *testing.T) {
 		before = resp.NextCursor
 	}
 
+	// The union of all pages is exactly the full transcript: no duplicates, no
+	// gaps. (Across pages the sequence is NOT monotonic — paging to older
+	// messages means each later page is older than the previous one.)
 	if len(seen) != total {
 		t.Fatalf("paged %d messages, want %d: %v", len(seen), total, seen)
 	}
-	// Oldest-first across pages, no duplicates.
 	dup := map[string]bool{}
-	prev := -1
-	for i, text := range seen {
+	for _, text := range seen {
 		if dup[text] {
-			t.Fatalf("duplicate message %q at position %d", text, i)
+			t.Fatalf("duplicate message %q across pages: %v", text, seen)
 		}
 		dup[text] = true
-		n, _ := strconv.Atoi(strings.TrimPrefix(text, "msg "))
-		if n <= prev {
-			t.Fatalf("messages not strictly oldest-first: %v", seen)
+	}
+	for i := 0; i < total; i++ {
+		want := "msg " + strconv.Itoa(i)
+		if !dup[want] {
+			t.Fatalf("missing %q across pages: %v", want, seen)
 		}
-		prev = n
 	}
 }
 
