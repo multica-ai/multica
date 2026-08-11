@@ -354,6 +354,16 @@ To roll back if an upgrade goes sideways:
 helm -n multica rollback multica
 ```
 
+> **Upgrading a WeCom-enabled backend with a rolling update? Do it at a low-traffic time, or roll over without overlap.** A WeCom answer that the previous release already delivered can be delivered a second time while old and new replicas are both running.
+>
+> The previous release wrote an agent's reply straight to the bot's WebSocket and recorded nothing. This release delivers through `channel_outbound_queue`, and its reconciler — the safety net for a replica that dies mid-handoff — reads "a finished task with no queue row" as "this reply never went out". Those two are indistinguishable from the new replica's point of view, so a reply an old replica has just delivered looks lost and is queued again. It is sent once more as soon as a new replica owns that bot's connection. WeCom messages cannot be unsent.
+>
+> The exposure is exactly the replies that complete between the moment the first new replica starts and the moment the last old replica stops — so it is bounded by how busy the bot is during the rollover, not by how long the queue has existed. Two things are **not** affected: everything from before the upgrade (the reconciler never scans further back than its own first start), and any rollover where old and new never run at the same time.
+>
+> - **Safest: roll over without overlap.** Scale the backend to zero, then up on the new image (`kubectl -n multica scale deploy/multica-backend --replicas=0`, upgrade, scale back). The Docker Compose path in this guide already behaves this way — `docker compose up -d` recreates the container rather than running both — so a Compose upgrade is not affected.
+> - **If you use a rolling update, pick a quiet window** and keep the overlap short. An idle bot has no in-flight replies to duplicate.
+> - **Rolling back leaves queued rows undrained.** The previous release does not know `channel_outbound_queue`, so anything queued sits there and is delivered when you roll forward again — which can surface an answer that is by then hours old, as there is no maximum row age yet. If you roll back and do not intend to roll forward soon, you can drop the pending rows (`DELETE FROM channel_outbound_queue WHERE channel_type = 'wecom' AND status = 'queued';`), accepting that any genuinely undelivered reply among them is lost.
+
 > **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** As of MUL-2957 the `migrate up` command runs an idempotent monthly-slice backfill automatically before applying migration `103`, so a clean upgrade is a single `helm upgrade` + backend rollout. If you are still on a pre-MUL-2957 binary or the auto-hook fails, run the standalone backfill against the same database the chart is using (`kubectl -n multica exec deploy/multica-backend -- ./backfill_task_usage_hourly --sleep-between-slices=2s`), then restart the backend deployment to re-apply migrations. See [Advanced Configuration → Usage Dashboard Rollup](SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup) for the full recovery flow.
 
 ### Tearing down
