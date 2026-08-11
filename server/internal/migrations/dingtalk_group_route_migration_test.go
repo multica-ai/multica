@@ -45,10 +45,10 @@ func TestDingTalkGroupRouteMigrationsUpDownAndCatalog(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"272_dingtalk_group_route.up.sql",
-		"273_dingtalk_group_route_installation_conversation_unique.up.sql",
-		"274_dingtalk_group_route_workspace_index.up.sql",
-		"275_dingtalk_group_route_id_unique.up.sql",
+		"273_dingtalk_group_route.up.sql",
+		"274_dingtalk_group_route_installation_conversation_unique.up.sql",
+		"275_dingtalk_group_route_workspace_index.up.sql",
+		"276_dingtalk_group_route_id_unique.up.sql",
 	} {
 		applyMigrationFile(t, ctx, conn.Conn(), name)
 	}
@@ -76,10 +76,10 @@ func TestDingTalkGroupRouteMigrationsUpDownAndCatalog(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"275_dingtalk_group_route_id_unique.down.sql",
-		"274_dingtalk_group_route_workspace_index.down.sql",
-		"273_dingtalk_group_route_installation_conversation_unique.down.sql",
-		"272_dingtalk_group_route.down.sql",
+		"276_dingtalk_group_route_id_unique.down.sql",
+		"275_dingtalk_group_route_workspace_index.down.sql",
+		"274_dingtalk_group_route_installation_conversation_unique.down.sql",
+		"273_dingtalk_group_route.down.sql",
 	} {
 		applyMigrationFile(t, ctx, conn.Conn(), name)
 	}
