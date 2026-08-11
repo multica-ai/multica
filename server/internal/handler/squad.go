@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -404,7 +405,7 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newLeaderRuntimeBound := true
+	newLeaderRoutable := true
 	if req.LeaderID != nil {
 		lid, ok := parseUUIDOrBadRequest(w, *req.LeaderID, "leader_id")
 		if !ok {
@@ -443,7 +444,7 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		params.LeaderID = lid
-		newLeaderRuntimeBound = newLeader.RuntimeID.Valid
+		newLeaderRoutable = service.IsAgentRoutable(newLeader)
 	}
 
 	updated, err := qtx.UpdateSquad(r.Context(), params)
@@ -452,7 +453,7 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var pausedAutopilots []db.Autopilot
-	if req.LeaderID != nil && !newLeaderRuntimeBound {
+	if req.LeaderID != nil && !newLeaderRoutable {
 		pausedAutopilots, err = qtx.PauseAutopilotsByUnrunnableSquad(r.Context(), squad.ID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update squad")
@@ -629,6 +630,10 @@ func deriveSquadMemberStatus(
 	return "offline"
 }
 
+func isSquadWorkingTaskStatus(status string) bool {
+	return status == "waiting_runtime" || status == "dispatched" || status == "running"
+}
+
 // ListSquadMemberStatus returns one entry per squad member with derived
 // status, the issues each agent member is currently running or waiting to run,
 // and the last observed runtime activity. The endpoint is read-only and
@@ -690,8 +695,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 		// working task may have no issue (chat / quick-create), so decide the
 		// bucket independently from whether an issue link can be rendered.
 		if row.TaskID.Valid {
-			if row.TaskStatus.Valid &&
-				(row.TaskStatus.String == "dispatched" || row.TaskStatus.String == "running") {
+			if row.TaskStatus.Valid && isSquadWorkingTaskStatus(row.TaskStatus.String) {
 				entry.hasWorkingTask = true
 			}
 

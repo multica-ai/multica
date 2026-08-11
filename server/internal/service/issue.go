@@ -620,11 +620,7 @@ func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) b
 	if err != nil {
 		return false
 	}
-	ready, _, err := AgentReadiness(ctx, s.Queries, agent)
-	if err != nil {
-		return false
-	}
-	return ready
+	return !agent.ArchivedAt.Valid && IsAgentRoutable(agent)
 }
 
 func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {
