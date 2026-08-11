@@ -1844,6 +1844,11 @@ func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
 		"chat":         {ChatSessionID: "chat-1", ChatChannelType: ChannelTypeSlack, AgentID: "a-1", AgentName: "Eve"},
 		"quick-create": {QuickCreatePrompt: "make an issue", AgentID: "a-1", AgentName: "Eve"},
 		"autopilot":    {AutopilotRunID: "run-1", AutopilotID: "ap-1", AgentID: "a-1", AgentName: "Eve"},
+		// WeCom is the channel a real deployment flips the file-delivery
+		// verdict on. The Slack row above catches the same leak today, but only
+		// because the brief's copy is channel-agnostic; scope that copy to
+		// WeCom alone and this is the row still holding the line.
+		"chat-wecom": {ChatSessionID: "chat-1", ChatChannelType: ChannelTypeWecom, AgentID: "a-1", AgentName: "Eve"},
 	}
 
 	// Per-run state that changes between turns of one resumed session.
@@ -1872,6 +1877,15 @@ func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
 				Provider: "composio", ServerName: "composio",
 				ToolkitSlug: "notion", ToolkitName: "Notion",
 			}}
+		}},
+		{"channel-delivers-files", func(c *TaskContextForEnv) {
+			// The server's file-delivery verdict arrives on every claim and is
+			// a deployment fact, not a session one: an upgrade that starts
+			// sending the field, or object storage being turned on or off,
+			// flips it under a session already running. Both halves of that
+			// flip must render the same brief, which is why the verdict is
+			// stated by the per-turn chat prompt and never here.
+			c.ChatChannelDeliversFiles = true
 		}},
 	}
 

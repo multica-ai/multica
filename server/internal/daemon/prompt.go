@@ -552,8 +552,14 @@ func buildChatPrompt(task Task) string {
 	// nobody and the agent must say so in words. The answer arrives on the
 	// claim; do not re-derive it from the channel type, do not collapse it back
 	// into "is there a channel at all", and do not collapse it into the HISTORY
-	// layer above, which is Slack-only and asks a different question. The
-	// brief's `## Output` section states the same policy.
+	// layer above, which is Slack-only and asks a different question.
+	//
+	// This is the ONLY place the verdict is stated. The brief's `## Output`
+	// section carries the web/mobile answer, which is fixed, and for a
+	// channel-backed chat points here instead of answering — the verdict flips
+	// under a resumed session, and the brief is the prompt-cache prefix
+	// (MUL-5377). So a channel chat learns how to deliver a file only from the
+	// line below, which means one must be emitted on every turn.
 	switch {
 	case task.ChatChannelType == "":
 		b.WriteString("\nTo include a file or image you produced in your reply, run `multica attachment upload <local-path>`. The file binds to your reply automatically and appears as an attachment card below it even if you paste nothing. The command also returns a `markdown` snippet you may paste on its own line to place the item where you want it (files render as a card, images inline).\n")

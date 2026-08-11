@@ -143,8 +143,17 @@ type TaskContextForEnv struct {
 	// it goes back to. It arrives on the claim and is used as given. False
 	// covers an old server that never sent it, a deployment with no storage,
 	// and every channel whose adapter does not perform the hop — all three of
-	// which want the same brief, the one that tells the agent to describe its
-	// file in words.
+	// which want the same instruction, the one telling the agent to describe
+	// its file in words.
+	//
+	// Carried here but deliberately NOT rendered into the brief. It is a
+	// per-turn value: a server upgrade that starts sending it, or object
+	// storage being turned on or off, flips it under a chat session that
+	// resumes across the change, and the brief is the prompt-cache prefix
+	// (MUL-5377). The agent-facing verdict is emitted by the per-turn chat
+	// prompt (daemon.buildChatPrompt) instead, and
+	// TestBriefByteIdenticalAcrossRunsForEveryKind is what keeps this field out
+	// of the brief.
 	ChatChannelDeliversFiles bool
 
 	AutopilotRunID          string // non-empty for autopilot run_only tasks

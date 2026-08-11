@@ -67,6 +67,10 @@ func AudienceOf(channelType, chatType string) ChatAudience {
 // reach this conversation. It is the delivery half of the two-layer channel
 // policy (MUL-4899).
 //
+// Its one caller is the per-turn chat prompt (daemon.buildChatPrompt). The
+// runtime brief must not call it: the answer changes turn to turn on one
+// resumed session, and the brief is the prompt-cache prefix (MUL-5377).
+//
 // serverSaysDelivers is the claim's chat_channel_delivers_files, and it is the
 // ONLY thing consulted for a channel-backed chat. The channel type is not, and
 // the temptation to answer from it is the defect this signature exists to
@@ -79,7 +83,8 @@ func AudienceOf(channelType, chatType string) ChatAudience {
 // Mixed versions land in the same place from the other direction: a daemon new
 // enough to know WeCom delivers files, talking to a server too old to perform
 // the hop, infers a capability that is not there. Both cases arrive as false
-// here, which is the brief that says to describe the file in words.
+// here, which is the per-turn instruction that says to describe the file in
+// words.
 //
 // Web / mobile chat is not answered here. It has no channel type at all and is
 // handled by its own branch, which points at the attachment card the browser

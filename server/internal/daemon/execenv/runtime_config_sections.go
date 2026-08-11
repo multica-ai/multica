@@ -707,24 +707,27 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 	case kindChat:
 		b.WriteString("This is a chat session. Your reply is delivered directly to the chat window the user is reading.\n\n")
 		// Two-layer channel policy (MUL-4899). This is the DELIVERY layer, and
-		// it has three answers. `attachment upload` binds a file to the Multica
-		// chat reply whatever the surface; the question is whether anything
-		// carries it the last hop. Web/mobile renders it as a card. A channel
-		// gets the upload guidance only where the SERVER reported, for this
-		// turn, that it performs the hop — the adapter fetches the bound file
-		// and this deployment has the storage to fetch it from. Everywhere else
-		// the upload reaches nobody and the agent is told to describe the file
-		// instead. The orthogonal HISTORY layer (which read commands exist) is
-		// Slack-only and lives in the per-turn chat prompt — do not collapse
-		// the two.
-		if ChannelCarriesFiles(ctx.ChatChannelType, ctx.ChatChannelDeliversFiles) {
-			// The "separate message" is worth stating: an agent told only that
-			// files work here writes "see the chart below" and then nothing
-			// appears below, because a picture cannot be embedded in an IM
-			// reply the way it can in the web chat.
-			fmt.Fprintf(b, "**Delivering files here:** run `multica attachment upload <local-path>` — it binds the file to your reply and Multica then sends it into the %s conversation as a separate message right after your text. That command is the ONLY way a file reaches the user; a path written into your reply text is not. Write your reply so it reads correctly with the file arriving after it, not inline.\n", ChannelDisplayName(ctx.ChatChannelType))
-		} else if ctx.ChatChannelType != "" {
-			fmt.Fprintf(b, "**Delivering files here:** this %s conversation is text-only — Multica cannot push a file you produced back into it. `multica attachment upload` does NOT apply: it binds to a Multica chat reply, which this is not. Say in words what you produced and where it can be obtained; never upload and then write as though the file arrived, and never link its local path.\n", ChannelDisplayName(ctx.ChatChannelType))
+		// the brief answers only the half that is stable for the whole session.
+		//
+		// `attachment upload` binds a file to the Multica chat reply whatever
+		// the surface; whether anything carries it the last hop is a property
+		// of the deployment — its object storage, and whether the server is new
+		// enough to report the hop at all. Both change under a session that
+		// resumes across the change, and this file is the prompt-cache prefix
+		// (MUL-5377), so rendering the verdict here made one resumed chat
+		// produce two different briefs. The verdict therefore lives in the
+		// per-turn chat prompt, which carries both branches
+		// (daemon.buildChatPrompt), and the copy below points at it.
+		// ctx.ChatChannelDeliversFiles must NOT be read from this file.
+		//
+		// Web/mobile chat keeps its own copy: it has no channel and no last hop
+		// to be uncertain about — the browser renders the bound file as a card.
+		//
+		// The orthogonal HISTORY layer (which read commands exist) is
+		// Slack-only and also lives in the per-turn chat prompt — do not
+		// collapse the two.
+		if ctx.ChatChannelType != "" {
+			fmt.Fprintf(b, "**Delivering files here:** whether Multica can push a file you produce into this %s conversation depends on how this deployment is configured, so it is stated per turn rather than here: the per-turn user message tells you, every turn. Follow what it says about files, and never report a file as delivered unless it told you how to deliver one.\n", ChannelDisplayName(ctx.ChatChannelType))
 		} else {
 			b.WriteString("**Delivering files here:** run `multica attachment upload <local-path>` — it binds the file to your reply and it renders as an attachment card. That command is the ONLY way a file reaches the user; a path written into your reply text is not.\n")
 		}

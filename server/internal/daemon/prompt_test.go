@@ -583,9 +583,10 @@ func TestBuildChatPromptNoNarrationOnEveryChannel(t *testing.T) {
 func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 	// Match the IMPERATIVE, not the bare command name. An IM prompt names
 	// `multica attachment upload` on purpose — to state that it does not apply
-	// here. That negation is the useful copy (the agent knows the command exists
-	// from the brief's Available Commands; silence would leave it guessing), so
-	// asserting on the bare name would forbid the very sentence we want.
+	// here. That negation is the useful copy (an agent carries the command over
+	// from every other surface, and the brief no longer names it for a
+	// channel-backed chat, so silence would leave it guessing), so asserting on
+	// the bare name would forbid the very sentence we want.
 	const uploadGuidance = "run `multica attachment upload <local-path>`"
 	const historyGuidance = "multica chat history"
 
