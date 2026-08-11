@@ -23,6 +23,21 @@ func TestCursorMcpApprovalKeyMatchesCursorAgent(t *testing.T) {
 	}
 }
 
+func TestCursorMcpApprovalKeyMatchesCursorAgentWithReorderedStdioConfig(t *testing.T) {
+	t.Parallel()
+
+	keys, err := cursorMcpApprovalKeys("/tmp/work", map[string]json.RawMessage{
+		"fetch": json.RawMessage(`{"args":["mcp-server-fetch"],"command":"uvx","env":{"TOKEN":"x"}}`),
+	})
+	if err != nil {
+		t.Fatalf("cursorMcpApprovalKeys: %v", err)
+	}
+	want := []string{"fetch-4c7232835349773b"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("approval keys = %v, want %v", keys, want)
+	}
+}
+
 func TestPrepareCursorMcpConfigWritesProjectConfigAndApprovals(t *testing.T) {
 	t.Parallel()
 
