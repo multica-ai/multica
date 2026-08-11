@@ -12,7 +12,7 @@ Comments only. This is not a visual editor.
 |---|---|
 | `static/review.js` | The widget. Vanilla JS, no build step, no secrets. |
 | `src/server.js` | Ingest service. Holds the `mul_` token, verifies review links. |
-| `bin/mint-review-link.js` | Issues a signed review link for a client. |
+| `cli/mint-review-link.js` | Issues a signed review link for a client. |
 | `projects.json` | Maps a project slug to its workspace, project and assignee. |
 
 ## How it fits together
@@ -59,7 +59,7 @@ or the daemon never picks it up. Point it at Tech Lead to route, or at a person.
 ## Issuing a review link
 
 ```bash
-node bin/mint-review-link.js ips "Jón at IPS" --days 30
+node cli/mint-review-link.js ips "Jón at IPS" --days 30
 ```
 
 Prints a link like `https://dart.flexmedia.is/?review=<token>`. Send it to the
