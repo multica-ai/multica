@@ -147,19 +147,37 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 		// never sees, and a brief holding the denial would keep denying it
 		// afterwards. Naming the platform still matters — the deferral has to
 		// be about THIS conversation.
+		//
+		// These two carry the SAME four denials the WeCom rows do, and that is
+		// what makes the paragraph above a rule rather than a note. The
+		// byte-identity invariant cannot enforce it on its own: a denial
+		// written into the brief unconditionally is the same on both values of
+		// the verdict, so it renders one brief and passes. Only a phrase list
+		// catches it, and only if it names the wordings a denial actually
+		// arrives in.
 		"chat_slack": {
 			mustHave: []string{
 				"Slack conversation depends on how this deployment is configured",
 				"the per-turn user message tells you",
 			},
-			mustNot: []string{"run `multica attachment upload", "conversation is text-only"},
+			mustNot: []string{
+				"run `multica attachment upload",
+				"separate message",
+				"conversation is text-only",
+				"does NOT apply",
+			},
 		},
 		"chat_feishu": {
 			mustHave: []string{
 				"Feishu/Lark conversation depends on how this deployment is configured",
 				"the per-turn user message tells you",
 			},
-			mustNot: []string{"run `multica attachment upload", "conversation is text-only"},
+			mustNot: []string{
+				"run `multica attachment upload",
+				"separate message",
+				"conversation is text-only",
+				"does NOT apply",
+			},
 		},
 		"autopilot": {
 			mustHave: []string{"this surface is text-only"},

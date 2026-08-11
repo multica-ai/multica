@@ -289,8 +289,11 @@ type Handler struct {
 	// channelFileDelivery names the channel types that can, IN THIS
 	// DEPLOYMENT, carry a file the agent produced the last hop into the
 	// conversation. It answers the claim response's
-	// chat_channel_delivers_files, which the agent's brief turns into either
-	// "run `multica attachment upload`" or "describe the file in words".
+	// chat_channel_delivers_files, which the agent's PER-TURN prompt turns into
+	// either "run `multica attachment upload`" or "describe the file in words"
+	// (daemon/prompt.go). Not the brief: the brief is the prompt cache prefix and
+	// this is a per-turn verdict, so stating it there made one session render two
+	// briefs (MUL-5377).
 	//
 	// It is a deployment fact, not a property of the channel type, and that
 	// distinction is the whole reason it lives here. Whether the file arrives
