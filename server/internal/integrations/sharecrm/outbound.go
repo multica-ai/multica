@@ -106,12 +106,25 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	return nil
 }
 
+// eventContent extracts the deliverable text from an EventChatDone payload
+// (typed, or its map form after a serialization round trip) or an
+// EventTaskFailed payload. Empty means stay silent.
+//
+// For task-failed the text mirrors the web transcript's failure chat_message:
+// the broadcast's `error` field carries the same redacted failure text and is
+// omitted while an auto-retry is pending (the retry attempt reports its own
+// outcome), so error-present means deliverable. retry_pending must silence
+// even if a mixed-version publisher accidentally includes an error string
+// (same guard as dingtalk/outbound.go).
 func eventContent(e events.Event) string {
 	switch p := e.Payload.(type) {
 	case protocol.ChatDonePayload:
 		return p.Content
 	case map[string]any:
 		if e.Type == protocol.EventTaskFailed {
+			if retryPending, _ := p["retry_pending"].(bool); retryPending {
+				return ""
+			}
 			if s, _ := p["error"].(string); s != "" {
 				return "⚠️ " + s
 			}
