@@ -84,7 +84,13 @@ export function DingTalkTab() {
   });
   const installations = data?.installations ?? [];
   const configured = data?.configured === true;
-  const { data: groupRouteData, isLoading: routesLoading } = useQuery({
+  const {
+    data: groupRouteData,
+    isLoading: routesLoading,
+    isError: routesError,
+    isFetching: routesFetching,
+    refetch: retryGroupRoutes,
+  } = useQuery({
     ...dingtalkGroupRoutesOptions(wsId),
     enabled: configured && !!wsId,
   });
@@ -197,6 +203,28 @@ export function DingTalkTab() {
                 <p className="text-body text-muted-foreground">
                   {t(($) => $.dingtalk.loading)}
                 </p>
+              </CardContent>
+            </Card>
+          ) : routesError ? (
+            <Card>
+              <CardContent className="space-y-3" role="alert">
+                <div className="space-y-1">
+                  <p className="text-body font-medium">
+                    {t(($) => $.dingtalk.group_routes_error_title)}
+                  </p>
+                  <p className="text-caption text-muted-foreground">
+                    {t(($) => $.dingtalk.group_routes_error_description)}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={routesFetching}
+                  onClick={() => void retryGroupRoutes()}
+                >
+                  {t(($) => $.dingtalk.group_routes_retry)}
+                </Button>
               </CardContent>
             </Card>
           ) : groupRoutes.length === 0 ? (

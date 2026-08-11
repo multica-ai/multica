@@ -24,6 +24,8 @@ export const dingtalkGroupRoutesOptions = (wsId: string) =>
     queryFn: () => api.listDingTalkGroupRoutes(wsId),
     enabled: !!wsId,
     // Group discovery is driven by DingTalk Stream callbacks rather than an
-    // HTTP mutation, so poll lightly while the settings panel is open.
-    refetchInterval: 5_000,
+    // HTTP mutation, so poll lightly while the settings panel is open. Stop
+    // after a failed retry cycle: a persistent server error must require an
+    // explicit user retry instead of producing another request every 5s.
+    refetchInterval: (query) => (query.state.status === "error" ? false : 5_000),
   });
