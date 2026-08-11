@@ -30,6 +30,8 @@ import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useT } from "../../i18n";
 
+const BOARD_DESCRIPTION_PREVIEW_MAX_LENGTH = 300;
+
 function formatDate(date: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
@@ -40,7 +42,7 @@ function formatDate(date: string): string {
 // without this the bare HTML comment survives every remaining pass and becomes
 // visible preview text. Exported for tests.
 export function descriptionPreview(markdown: string): string {
-  return stripChannelMediaMarkers(markdown)
+  const preview = stripChannelMediaMarkers(markdown)
     .replace(/!file\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
@@ -48,6 +50,15 @@ export function descriptionPreview(markdown: string): string {
     .replace(/^[\s>#]+/gm, "")
     .replace(/\s+/g, " ")
     .trim();
+
+  if (preview.length <= BOARD_DESCRIPTION_PREVIEW_MAX_LENGTH) return preview;
+
+  const maxContentLength = BOARD_DESCRIPTION_PREVIEW_MAX_LENGTH - 1;
+  const lastCodeUnit = preview.charCodeAt(maxContentLength - 1);
+  const endsOnHighSurrogate = lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff;
+  const safeEnd = endsOnHighSurrogate ? maxContentLength - 1 : maxContentLength;
+
+  return `${preview.slice(0, safeEnd).trimEnd()}…`;
 }
 
 /** Stops event from bubbling to Link/drag handlers */
