@@ -71,7 +71,8 @@
     "model": "모델",
     "created": "생성일",
     "owner": "소유자",
-    "access": "접근 권한"
+    "access": "접근 권한",
+    "a2a": "Agent 호출"
   },
   "row": {
     "you": "나",
@@ -639,6 +640,32 @@
     "owner_only_readonly": "이 에이전트를 실행할 수 있는 대상은 소유자만 변경할 수 있습니다.",
     "members_empty": "선택할 워크스페이스 구성원이 없습니다",
     "composio_switch_hint": "참고 — 이 에이전트에는 Composio 앱이 활성화되어 있습니다. 공유하면 접근 권한이 있는 모든 사람이 이 에이전트를 통해 해당 앱을 사용할 수 있습니다."
+  },
+  "a2a": {
+    "section_title": "Agent 호출 (A2A)",
+    "section_hint": "사람을 거치지 않고 이 에이전트를 직접 호출할 수 있는 에이전트를 선택합니다.",
+    "tooltip": "Agent 호출 · 이 에이전트를 호출할 수 있는 대상",
+    "trigger_not_enabled": "미사용",
+    "trigger_any_agent": "모든 에이전트",
+    "trigger_squad_leaders": "스쿼드 리더",
+    "trigger_specific_agents": "지정 에이전트",
+    "trigger_specific_agents_count": "에이전트 {{count}}개",
+    "scope_labels": {
+      "any_agent": "모든 에이전트",
+      "squad_leaders": "스쿼드 리더",
+      "specific_agents": "지정 에이전트"
+    },
+    "not_enabled_title": "미사용",
+    "not_enabled_desc": "에이전트가 이 에이전트를 직접 호출할 수 없습니다. 현재 규칙을 유지합니다.",
+    "any_agent_title": "모든 에이전트",
+    "any_agent_desc": "워크스페이스의 모든 에이전트가 이 에이전트를 호출할 수 있습니다.",
+    "squad_leaders_title": "스쿼드 리더",
+    "squad_leaders_desc": "스쿼드를 이끄는 에이전트만 이 에이전트를 호출할 수 있습니다.",
+    "specific_agents_title": "지정 에이전트",
+    "specific_agents_desc": "선택한 에이전트만 이 에이전트를 호출할 수 있습니다.",
+    "agents_empty": "워크스페이스에 다른 에이전트가 없습니다",
+    "specific_required": "저장 전에 에이전트를 하나 이상 선택하세요.",
+    "owner_only_readonly": "이 에이전트를 호출할 수 있는 에이전트는 소유자만 변경할 수 있습니다."
   },
   "profile_card": {
     "unavailable": "에이전트를 사용할 수 없습니다",

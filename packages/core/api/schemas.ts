@@ -1491,6 +1491,17 @@ export const AgentInvocationTargetsSchema = z
   .array(AgentInvocationTargetSchema)
   .default([]);
 
+// Independent A2A invocation axis (NEX-24). `A2aInvocationModeSchema` is a
+// lenient enum: a future server-side mode (or a legacy empty string) degrades
+// to `"default"` (not enabled = status-quo fail-closed) rather than failing
+// the parse — forward compatibility with zero behavior change. Grants default
+// to `[]` so a missing whitelist reads as "no specific agents granted".
+export const A2aInvocationModeSchema = z
+  .enum(["default", "any_agent", "squad_leaders", "specific_agents"])
+  .catch("default");
+
+export const A2aInvocationGrantsSchema = z.array(z.string()).default([]);
+
 // `agent` is a full Agent record — schematising every field would duplicate
 // a 50-field interface and bit-rot fast. We keep it loose and require only
 // `id`, the one field the create-from-template flow consumes (used to
@@ -1501,6 +1512,8 @@ const MinimalAgentSchema = z.object({
   id: z.string(),
   permission_mode: AgentPermissionModeSchema.optional(),
   invocation_targets: AgentInvocationTargetsSchema.optional(),
+  a2a_invocation_mode: A2aInvocationModeSchema.optional(),
+  a2a_invocation_grants: A2aInvocationGrantsSchema.optional(),
 }).loose();
 
 export const CreateAgentFromTemplateResponseSchema = z.object({

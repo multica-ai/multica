@@ -519,3 +519,28 @@ func (h *Handler) enrichAgentResponseWithA2A(ctx context.Context, resp *AgentRes
 	applyA2AInvocationToResponse(resp, resp.A2aInvocationMode, grants)
 	return nil
 }
+
+// loadA2AInvocationGrantsByAgent batch-loads every A2A specific_agents
+// whitelist row for the given agents (NEX-24), keyed by agent id — the list
+// endpoint equivalent of loadInvocationTargetsByAgent. Returns ok=false on a
+// DB error so the caller can fail the whole list rather than serving
+// half-populated responses.
+func (h *Handler) loadA2AInvocationGrantsByAgent(ctx context.Context, agents []db.Agent) (map[string][]db.AgentInvocationGrant, bool) {
+	ids := make([]pgtype.UUID, 0, len(agents))
+	for _, a := range agents {
+		ids = append(ids, a.ID)
+	}
+	out := make(map[string][]db.AgentInvocationGrant, len(agents))
+	if len(ids) == 0 {
+		return out, true
+	}
+	rows, err := h.Queries.ListAgentInvocationGrantsByAgentIDs(ctx, ids)
+	if err != nil {
+		return nil, false
+	}
+	for _, row := range rows {
+		aid := uuidToString(row.AgentID)
+		out[aid] = append(out[aid], row)
+	}
+	return out, true
+}

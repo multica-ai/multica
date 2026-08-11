@@ -16,7 +16,9 @@ import type {
 } from "@multica/core/types";
 import {
   type AgentActivity,
+  a2aGrantCount,
   agentRunCounts30dOptions,
+  effectiveA2aInvocationScope,
   effectiveAccessScope,
   isAgentRuntimeBound,
   useWorkspaceActivityMap,
@@ -87,7 +89,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 // the documented exception to the single-line management-list rule.
 const GRID_COLS =
   "grid-cols-[0.75rem_minmax(120px,1fr)_var(--agc-status-mobile)_1.75rem_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--agc-status-desktop)_var(--agc-owner)_var(--agc-access)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem_0.75rem]";
+  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--agc-status-desktop)_var(--agc-owner)_var(--agc-access)_var(--agc-a2a)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem_0.75rem]";
 
 // Two-line rows; the virtualizer's fixed-size contract.
 const ROW_HEIGHT = 64;
@@ -101,6 +103,8 @@ const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
   owner: 144,
   // Fits the longest label "Specific people" (~120px incl. padding).
   access: 132,
+  // Fits the longest A2A summary "Specific agents (N)" (~150px incl. padding).
+  a2a: 150,
   runtime: 144,
   lastActive: 120,
   runs: 88,
@@ -109,9 +113,9 @@ const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
 };
 
 // Fixed tracks (edges 12+12, checkbox 16, name min 200, kebab 28) plus the
-// 11 gap-x-3 gaps between the wide template's 12 tracks (zero-width tracks
+// 12 gap-x-3 gaps between the wide template's 13 tracks (zero-width tracks
 // still carry gaps).
-const FIXED_TRACKS_WIDTH = 268 + 11 * 12;
+const FIXED_TRACKS_WIDTH = 268 + 12 * 12;
 
 function columnTrackVars(
   isVisible: (key: AgentColumnKey) => boolean,
@@ -129,6 +133,7 @@ function columnTrackVars(
     "--agc-status-desktop": width("status"),
     "--agc-owner": width("owner"),
     "--agc-access": width("access"),
+    "--agc-a2a": width("a2a"),
     "--agc-runtime": width("runtime"),
     "--agc-lastactive": width("lastActive"),
     "--agc-runs": width("runs"),
@@ -514,6 +519,48 @@ export function AccessCell({ row }: { row: AgentListRow }) {
   );
 }
 
+// A2A invocation scope summary (NEX-24) — the orthogonal agent-caller axis,
+// derived via the same pattern as AccessCell. Follows the squad-members
+// summary approach: only agents that opted in show a non-default label, so
+// rows without an A2A grant (mode `default` or absent) read as "—" instead of
+// adding column noise.
+export function A2aAccessCell({ row }: { row: AgentListRow }) {
+  const { t } = useT("agents");
+  const mode = row.agent.a2a_invocation_mode;
+  const grants = row.agent.a2a_invocation_grants;
+  const scope = useMemo(() => effectiveA2aInvocationScope(mode), [mode]);
+  const grantCount = useMemo(
+    () => a2aGrantCount(mode, grants),
+    [mode, grants],
+  );
+  if (scope === "disabled") {
+    return (
+      <ListGridCell className="hidden @2xl:flex">
+        <span className="text-caption text-faint-foreground">—</span>
+      </ListGridCell>
+    );
+  }
+  const label = t(($) =>
+    scope === "any_agent"
+      ? $.a2a.scope_labels.any_agent
+      : scope === "squad_leaders"
+        ? $.a2a.scope_labels.squad_leaders
+        : $.a2a.scope_labels.specific_agents,
+  );
+  return (
+    <ListGridCell className="hidden gap-1 @2xl:flex">
+      <span className="min-w-0 truncate text-caption text-muted-foreground">
+        {label}
+      </span>
+      {grantCount > 0 ? (
+        <span className="shrink-0 rounded bg-muted px-1 text-micro tabular-nums font-medium text-muted-foreground">
+          {grantCount}
+        </span>
+      ) : null}
+    </ListGridCell>
+  );
+}
+
 function RuntimeCell({ row }: { row: AgentListRow }) {
   const { t } = useT("agents");
   if (!isAgentRuntimeBound(row.agent)) {
@@ -635,6 +682,13 @@ function AgentListHeader({
       ) : (
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
       )}
+      {isColVisible("a2a") ? (
+        <ListGridHeaderCell className="hidden @2xl:flex">
+          {t(($) => $.columns.a2a)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+      )}
       {isColVisible("runtime") ? (
         <ListGridHeaderCell className="hidden @2xl:flex">
           {t(($) => $.columns.runtime)}
@@ -717,6 +771,9 @@ function LoadingSkeleton() {
           <Skeleton className="h-3 w-14" />
         </ListGridHeaderCell>
         <ListGridHeaderCell className="hidden @2xl:flex">
+          <Skeleton className="h-3 w-14" />
+        </ListGridHeaderCell>
+        <ListGridHeaderCell className="hidden @2xl:flex">
           <Skeleton className="h-3 w-10" />
         </ListGridHeaderCell>
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
@@ -745,6 +802,9 @@ function LoadingSkeleton() {
           </ListGridCell>
           <ListGridCell className="hidden @2xl:flex">
             <Skeleton className="h-3 w-16" />
+          </ListGridCell>
+          <ListGridCell className="hidden @2xl:flex">
+            <Skeleton className="h-3 w-14" />
           </ListGridCell>
           <ListGridCell className="hidden @2xl:flex">
             <Skeleton className="h-3 w-12" />
@@ -1125,6 +1185,11 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       )}
                       {isColVisible("access") ? (
                         <AccessCell row={row} />
+                      ) : (
+                        <ListGridCell className="hidden px-0 @2xl:flex" />
+                      )}
+                      {isColVisible("a2a") ? (
+                        <A2aAccessCell row={row} />
                       ) : (
                         <ListGridCell className="hidden px-0 @2xl:flex" />
                       )}

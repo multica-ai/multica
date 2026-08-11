@@ -47,6 +47,9 @@ import {
   SquadSchema,
   TimelineEntriesSchema,
   UserSchema,
+  A2aInvocationModeSchema,
+  A2aInvocationGrantsSchema,
+  CreateAgentFromTemplateResponseSchema,
 } from "./schemas";
 import { IssueViewSchema, IssueViewListSchema } from "./schemas";
 import { parseWithFallback } from "./schema";
@@ -1361,5 +1364,107 @@ describe("WeCom installation schemas", () => {
       { endpoint: "POST /api/wecom/binding/redeem" },
     );
     expect(redeem).toEqual(EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// A2A invocation axis (NEX-24)
+//
+// Four-value model: `default | any_agent | squad_leaders | specific_agents`.
+// The mode is a lenient enum: an unrecognised future value (or a legacy empty
+// string) degrades to "default" (not enabled = status-quo fail-closed) instead
+// of failing the parse ¡ª forward compatibility with zero behavior change.
+// Grants default to [] so a missing whitelist reads as "no specific agents
+// granted". The from-template minimal agent carries these fields so the create
+// flow can round-trip a well-formed A2A shape.
+// ---------------------------------------------------------------------------
+
+describe("A2aInvocationModeSchema", () => {
+  it("parses the four enum values", () => {
+    expect(A2aInvocationModeSchema.parse("default")).toBe("default");
+    expect(A2aInvocationModeSchema.parse("any_agent")).toBe("any_agent");
+    expect(A2aInvocationModeSchema.parse("squad_leaders")).toBe("squad_leaders");
+    expect(A2aInvocationModeSchema.parse("specific_agents")).toBe("specific_agents");
+  });
+
+  it("catches an unrecognised (future) mode to the default", () => {
+    expect(A2aInvocationModeSchema.parse("future_mode")).toBe("default");
+  });
+
+  it("catches a legacy empty string to the default (old model voided)", () => {
+    expect(A2aInvocationModeSchema.parse("")).toBe("default");
+  });
+
+  it("catches a non-string mode to the default", () => {
+    expect(A2aInvocationModeSchema.parse(42)).toBe("default");
+    expect(A2aInvocationModeSchema.parse(null)).toBe("default");
+  });
+});
+
+describe("A2aInvocationGrantsSchema", () => {
+  it("parses a string array", () => {
+    expect(A2aInvocationGrantsSchema.parse(["a-1", "a-2"])).toEqual([
+      "a-1",
+      "a-2",
+    ]);
+  });
+
+  it("defaults a missing whitelist to []", () => {
+    expect(A2aInvocationGrantsSchema.parse(undefined)).toEqual([]);
+  });
+});
+
+describe("CreateAgentFromTemplateResponseSchema A2A passthrough", () => {
+  it("round-trips a specific_agents whitelist on the minimal agent", () => {
+    const parsed = CreateAgentFromTemplateResponseSchema.parse({
+      agent: {
+        id: "agent-1",
+        a2a_invocation_mode: "specific_agents",
+        a2a_invocation_grants: ["a-1", "a-2"],
+      },
+      imported_skill_ids: [],
+      reused_skill_ids: [],
+    });
+    expect(parsed.agent.a2a_invocation_mode).toBe("specific_agents");
+    expect(parsed.agent.a2a_invocation_grants).toEqual(["a-1", "a-2"]);
+  });
+
+  it("degrades an unrecognised A2A mode on the minimal agent to default", () => {
+    const parsed = CreateAgentFromTemplateResponseSchema.parse({
+      agent: { id: "agent-1", a2a_invocation_mode: 42 },
+      imported_skill_ids: [],
+      reused_skill_ids: [],
+    });
+    expect(parsed.agent.a2a_invocation_mode).toBe("default");
+  });
+
+  it("falls back to the empty agent when the A2A grants field is malformed", () => {
+    // The minimal agent's grants field is array-typed; a malformed (non-array)
+    // value fails the whole agent parse, so the create-from-template flow
+    // degrades to the empty fallback (the agent may already exist server-side).
+    const parsed = parseWithFallback(
+      {
+        agent: { id: "agent-1", a2a_invocation_grants: "nope" },
+        imported_skill_ids: [],
+        reused_skill_ids: [],
+      },
+      CreateAgentFromTemplateResponseSchema,
+      { agent: { id: "" }, imported_skill_ids: [], reused_skill_ids: [] },
+      { endpoint: "POST /api/agents/from-template" },
+    );
+    expect(parsed.agent.id).toBe("");
+  });
+
+  it("defaults missing A2A fields to a safe shape (no crash on legacy backend)", () => {
+    const parsed = CreateAgentFromTemplateResponseSchema.parse({
+      agent: { id: "agent-1" },
+      imported_skill_ids: [],
+      reused_skill_ids: [],
+    });
+    // Mode stays absent (older backend) while grants fall back to [] via the
+    // schema default ¡ª both shapes are safe for consumers.
+    expect(parsed.agent.a2a_invocation_mode).toBeUndefined();
+    expect(parsed.agent.a2a_invocation_grants).toEqual([]);
   });
 });

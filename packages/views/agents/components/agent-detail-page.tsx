@@ -372,6 +372,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           runtime={runtime}
           owner={owner}
           runtimes={runtimes}
+          agents={agents}
           members={members}
           onUpdate={handleUpdate}
           currentUserId={currentUser?.id ?? null}

@@ -72,7 +72,8 @@
     "model": "Model",
     "created": "Created",
     "owner": "Owner",
-    "access": "Access"
+    "access": "Access",
+    "a2a": "Agent calls"
   },
   "row": {
     "you": "You",
@@ -752,6 +753,32 @@
     "owner_only_readonly": "Only the agent owner can change who can run this agent.",
     "members_empty": "No workspace members to choose from",
     "composio_switch_hint": "Heads up — this agent has Composio apps enabled. Sharing it lets everyone with access use those apps through this agent."
+  },
+  "a2a": {
+    "section_title": "Agent calls (A2A)",
+    "section_hint": "Choose which agents can invoke this agent directly, without a human in the loop.",
+    "tooltip": "Agent calls · who may invoke this agent",
+    "trigger_not_enabled": "Not enabled",
+    "trigger_any_agent": "Any agent",
+    "trigger_squad_leaders": "Squad leaders",
+    "trigger_specific_agents": "Specific agents",
+    "trigger_specific_agents_count": "{{count}} agents",
+    "scope_labels": {
+      "any_agent": "Any agent",
+      "squad_leaders": "Squad leaders",
+      "specific_agents": "Specific agents"
+    },
+    "not_enabled_title": "Not enabled",
+    "not_enabled_desc": "Agents can't invoke this agent directly; current rules stay as-is.",
+    "any_agent_title": "Any agent",
+    "any_agent_desc": "Every agent in the workspace can invoke this agent.",
+    "squad_leaders_title": "Squad leaders",
+    "squad_leaders_desc": "Only agents that lead a squad can invoke this agent.",
+    "specific_agents_title": "Specific agents",
+    "specific_agents_desc": "Only the agents you select can invoke this agent.",
+    "agents_empty": "No other agents in this workspace",
+    "specific_required": "Select at least one agent before saving.",
+    "owner_only_readonly": "Only the agent owner can change which agents can call this agent."
   },
   "profile_card": {
     "unavailable": "Agent unavailable",

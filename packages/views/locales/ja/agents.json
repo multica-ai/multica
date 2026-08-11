@@ -63,7 +63,8 @@
     "model": "モデル",
     "created": "作成日時",
     "owner": "オーナー",
-    "access": "アクセス"
+    "access": "アクセス",
+    "a2a": "Agent 呼び出し"
   },
   "row": {
     "you": "あなた",
@@ -631,6 +632,32 @@
     "owner_only_readonly": "このエージェントを実行できる相手は、オーナーのみが変更できます。",
     "members_empty": "選択できるワークスペースメンバーがいません",
     "composio_switch_hint": "ご注意 — このエージェントは Composio アプリが有効です。共有すると、アクセス権を持つ全員がこのエージェントを通じてこれらのアプリを利用できます。"
+  },
+  "a2a": {
+    "section_title": "Agent 呼び出し（A2A）",
+    "section_hint": "人間を介さずに、このエージェントを直接呼び出せるエージェントを選択します。",
+    "tooltip": "Agent 呼び出し · このエージェントを呼び出せる相手",
+    "trigger_not_enabled": "未設定",
+    "trigger_any_agent": "すべてのエージェント",
+    "trigger_squad_leaders": "スクワッドリーダー",
+    "trigger_specific_agents": "指定エージェント",
+    "trigger_specific_agents_count": "{{count}} エージェント",
+    "scope_labels": {
+      "any_agent": "すべてのエージェント",
+      "squad_leaders": "スクワッドリーダー",
+      "specific_agents": "指定エージェント"
+    },
+    "not_enabled_title": "未設定",
+    "not_enabled_desc": "エージェントはこのエージェントを直接呼び出せません。現在のルールを維持します。",
+    "any_agent_title": "すべてのエージェント",
+    "any_agent_desc": "ワークスペース内のすべてのエージェントがこのエージェントを呼び出せます。",
+    "squad_leaders_title": "スクワッドリーダー",
+    "squad_leaders_desc": "スクワッドを率いるエージェントのみがこのエージェントを呼び出せます。",
+    "specific_agents_title": "指定エージェント",
+    "specific_agents_desc": "選択したエージェントのみがこのエージェントを呼び出せます。",
+    "agents_empty": "ワークスペースに他のエージェントがありません",
+    "specific_required": "保存する前にエージェントを少なくとも 1 つ選択してください。",
+    "owner_only_readonly": "このエージェントを呼び出せる相手は、オーナーのみが変更できます。"
   },
   "profile_card": {
     "unavailable": "エージェントを利用できません",

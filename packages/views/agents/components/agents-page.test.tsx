@@ -102,6 +102,12 @@ vi.mock("@multica/core/agents", () => ({
     return "specific-people";
   },
   ALL_ACCESS_SCOPES: ["workspace", "specific-people", "owner-only"],
+  effectiveA2aInvocationScope: (mode: unknown) => {
+    if (mode === "any_agent" || mode === "squad_leaders" || mode === "specific_agents") return mode;
+    return "disabled";
+  },
+  a2aGrantCount: (mode: unknown, grants: unknown) =>
+    mode === "specific_agents" ? (Array.isArray(grants) ? grants.length : 0) : 0,
 }));
 
 vi.mock("@multica/core/agents/stores", () => ({

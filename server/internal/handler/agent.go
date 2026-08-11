@@ -899,6 +899,13 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
 		return
 	}
+	// Batch-load the A2A specific_agents whitelists alongside the invocation
+	// targets (NEX-24) so the list summary can show what the owner granted.
+	grantsByAgent, ok := h.loadA2AInvocationGrantsByAgent(r.Context(), agents)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to load agent A2A invocation grants")
+		return
+	}
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
 		targets := targetsByAgent[uuidToString(a.ID)]
@@ -909,6 +916,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		}
 		resp := h.agentToResponse(a)
 		applyInvocationTargetsToResponse(&resp, targets)
+		applyA2AInvocationToResponse(&resp, resp.A2aInvocationMode, grantsByAgent[uuidToString(a.ID)])
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
 		}
@@ -958,6 +966,13 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := h.agentToResponse(agent)
 	if !h.enrichAgentResponseWithTargetsHTTP(w, r, &resp, agent.ID) {
+		return
+	}
+	// The A2A invocation axis rides the same detail response as the
+	// invocation targets (NEX-24): the detail picker needs the current
+	// specific_agents whitelist to render what the owner already granted.
+	if err := h.enrichAgentResponseWithA2A(r.Context(), &resp, agent.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent A2A invocation grants")
 		return
 	}
 	// Use the summary query (no `content` column) — the embedded

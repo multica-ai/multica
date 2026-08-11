@@ -146,6 +146,7 @@ function renderPane(
             runtime={runtimes[0] ?? null}
             owner={null}
             runtimes={runtimes}
+            agents={[]}
             members={[]}
             onUpdate={vi.fn().mockResolvedValue(undefined)}
             canEdit={canEdit}

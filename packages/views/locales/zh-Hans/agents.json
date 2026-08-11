@@ -71,7 +71,8 @@
     "model": "模型",
     "created": "创建时间",
     "owner": "Owner",
-    "access": "访问权限"
+    "access": "访问权限",
+    "a2a": "Agent 调用"
   },
   "row": {
     "you": "你",
@@ -738,6 +739,32 @@
     "owner_only_readonly": "只有该智能体的所有者可以更改谁能调用它。",
     "members_empty": "没有可选择的工作区成员",
     "composio_switch_hint": "提示——该智能体已启用 Composio 应用。共享后，所有获得访问权限的人都可以通过该智能体使用这些应用。"
+  },
+  "a2a": {
+    "section_title": "Agent 调用（A2A）",
+    "section_hint": "选择哪些智能体可以直接调用该智能体，无需人工参与。",
+    "tooltip": "Agent 调用 · 谁可以调用该智能体",
+    "trigger_not_enabled": "未启用",
+    "trigger_any_agent": "所有智能体",
+    "trigger_squad_leaders": "小队队长",
+    "trigger_specific_agents": "指定智能体",
+    "trigger_specific_agents_count": "{{count}} 个智能体",
+    "scope_labels": {
+      "any_agent": "所有智能体",
+      "squad_leaders": "小队队长",
+      "specific_agents": "指定智能体"
+    },
+    "not_enabled_title": "未启用",
+    "not_enabled_desc": "智能体不能直接调用该智能体；保持现有规则不变。",
+    "any_agent_title": "所有智能体",
+    "any_agent_desc": "工作区中的每个智能体都可以调用该智能体。",
+    "squad_leaders_title": "小队队长",
+    "squad_leaders_desc": "只有领导小队的智能体可以调用该智能体。",
+    "specific_agents_title": "指定智能体",
+    "specific_agents_desc": "只有你选择的智能体可以调用该智能体。",
+    "agents_empty": "工作区中没有其他智能体",
+    "specific_required": "保存前请至少选择一个智能体。",
+    "owner_only_readonly": "只有智能体的所有者可以更改哪些智能体可以调用它。"
   },
   "profile_card": {
     "unavailable": "智能体不可用",

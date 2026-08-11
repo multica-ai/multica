@@ -27,6 +27,25 @@ export type AgentVisibility = "workspace" | "private";
 
 export type AgentPermissionMode = "private" | "public_to";
 
+// ---------------------------------------------------------------------------
+// Agent invocation permissions — A2A axis (NEX-24)
+//
+// `a2a_invocation_mode` is an INDEPENDENT, owner-authored opt-in that ONLY
+// widens the invoke gate for AGENT callers (never system), orthogonal to the
+// `permission_mode` / member-visibility axis above. `default` is the stored
+// default and means "not enabled": agent callers with no top-of-chain human
+// originator keep the status-quo fail-closed behavior. Grants only matter
+// for `specific_agents`. There is deliberately NO empty-string value — the
+// four-value enum is the whole legal space, and unknown values degrade to
+// `default` for forward compatibility.
+// ---------------------------------------------------------------------------
+
+export type A2aInvocationMode =
+  | "default"
+  | "any_agent"
+  | "squad_leaders"
+  | "specific_agents";
+
 /**
  * A single invocation grant on an agent. `target_id` is `null` for the
  * workspace target (the grant covers every workspace member); it carries the
@@ -519,6 +538,23 @@ export interface Agent {
    * private agent). See `AgentInvocationTarget`.
    */
   invocation_targets: AgentInvocationTarget[];
+  /**
+   * Independent A2A invocation axis (NEX-24), orthogonal to `permission_mode`.
+   * It ONLY governs agent callers (system is never affected):
+   *   - `"default"` — not enabled; agent callers keep the status-quo
+   *     fail-closed behavior
+   *   - `"any_agent"` — every agent principal may invoke
+   *   - `"squad_leaders"` — only agents that lead a squad may invoke
+   *   - `"specific_agents"` — only the agents in `a2a_invocation_grants`
+   * Older backends omit the field; treat `undefined` as `"default"`.
+   */
+  a2a_invocation_mode?: A2aInvocationMode;
+  /**
+   * The `specific_agents` whitelist (grantee agent ids). Only meaningful when
+   * `a2a_invocation_mode === "specific_agents"`. Older backends omit the
+   * field; treat `undefined` as `[]`.
+   */
+  a2a_invocation_grants?: string[];
   status: AgentStatus;
   max_concurrent_tasks: number;
   model: string;
@@ -602,6 +638,16 @@ export interface CreateAgentRequest {
   permission_mode?: AgentPermissionMode;
   /** Invocation grants — see `AgentInvocationTargetInput`. */
   invocation_targets?: AgentInvocationTargetInput[];
+  /**
+   * Independent A2A invocation axis (NEX-24). Absent = not enabled (the
+   * backend defaults the column to `default` = status-quo fail-closed). On
+   * create the caller is always the owner, so the axis is accepted
+   * unconditionally.
+   */
+  a2a_invocation_mode?: A2aInvocationMode;
+  /** The `specific_agents` whitelist (grantee agent ids). Only effect when
+   *  `a2a_invocation_mode === "specific_agents"`. */
+  a2a_invocation_grants?: string[];
   max_concurrent_tasks?: number;
   model?: string;
   /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
@@ -727,6 +773,16 @@ export interface CreateAgentFromTemplateRequest {
   permission_mode?: AgentPermissionMode;
   /** Invocation grants — see `AgentInvocationTargetInput`. */
   invocation_targets?: AgentInvocationTargetInput[];
+  /**
+   * Independent A2A invocation axis (NEX-24). Absent = not enabled (the
+   * backend defaults the column to `default` = status-quo fail-closed). On
+   * create the caller is always the owner, so the axis is accepted
+   * unconditionally.
+   */
+  a2a_invocation_mode?: A2aInvocationMode;
+  /** The `specific_agents` whitelist (grantee agent ids). Only effect when
+   *  `a2a_invocation_mode === "specific_agents"`. */
+  a2a_invocation_grants?: string[];
   max_concurrent_tasks?: number;
   /** Optional overrides applied to the template before creation. nil/omit
    *  uses the template's own value. */
@@ -806,6 +862,17 @@ export interface UpdateAgentRequest {
   permission_mode?: AgentPermissionMode;
   /** Invocation grants — see `AgentInvocationTargetInput`. */
   invocation_targets?: AgentInvocationTargetInput[];
+  /**
+   * Independent A2A invocation axis (NEX-24). Tri-state contract mirroring
+   * `permission_mode`: field omitted → no change; `"default"` → clear the
+   * axis back to status-quo fail-closed; a value → set. OWNER-ONLY write — a
+   * non-owner submitting a real change is 403 (no-op resubmits are
+   * tolerated).
+   */
+  a2a_invocation_mode?: A2aInvocationMode;
+  /** The `specific_agents` whitelist (grantee agent ids); only has effect
+   *  when the (effective) mode is `specific_agents`. */
+  a2a_invocation_grants?: string[];
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;

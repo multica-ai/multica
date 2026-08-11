@@ -123,6 +123,8 @@ interface AgentOverviewPaneProps {
   runtime: AgentRuntime | null;
   owner: MemberWithUser | null;
   runtimes: AgentRuntime[];
+  /** Workspace agents — passed through to the A2A invocation picker. */
+  agents: Agent[];
   members: MemberWithUser[];
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   currentUserId?: string | null;
@@ -143,6 +145,7 @@ export function AgentOverviewPane({
   runtime,
   owner,
   runtimes,
+  agents,
   members,
   onUpdate,
   currentUserId,
@@ -461,6 +464,7 @@ export function AgentOverviewPane({
                   {effectiveView === "access" && (
                     <AgentAccessSettings
                       agent={agent}
+                      agents={agents}
                       members={members}
                       currentUserId={currentUserId ?? null}
                       onDirtyChange={setActiveDirty}

@@ -5,7 +5,7 @@ import { render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
-import { AccessCell, type AgentListRow } from "./agents-page";
+import { AccessCell, A2aAccessCell, type AgentListRow } from "./agents-page";
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
@@ -116,5 +116,58 @@ describe("AccessCell", () => {
     const row = makeRow({ permission_mode: undefined as unknown as never, invocation_targets: [] });
     renderCell(row);
     expect(screen.getByText("Owner only")).toBeInTheDocument();
+  });
+});
+
+function renderA2aCell(row: AgentListRow) {
+  return render(
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <table>
+        <tbody>
+          <tr>
+            <A2aAccessCell row={row} />
+          </tr>
+        </tbody>
+      </table>
+    </I18nProvider>,
+  );
+}
+
+describe("A2aAccessCell (NEX-24)", () => {
+  it("renders an em dash when the A2A axis is the default (not enabled)", () => {
+    renderA2aCell(makeRow({ a2a_invocation_mode: "default" }));
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("renders an em dash when the mode is missing (legacy backend)", () => {
+    renderA2aCell(makeRow({}));
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("renders 'Any agent' for any_agent", () => {
+    renderA2aCell(makeRow({ a2a_invocation_mode: "any_agent" }));
+    expect(screen.getByText("Any agent")).toBeInTheDocument();
+  });
+
+  it("renders 'Squad leaders' for squad_leaders", () => {
+    renderA2aCell(makeRow({ a2a_invocation_mode: "squad_leaders" }));
+    expect(screen.getByText("Squad leaders")).toBeInTheDocument();
+  });
+
+  it("renders 'Specific agents' with the grant count for specific_agents", () => {
+    renderA2aCell(
+      makeRow({
+        a2a_invocation_mode: "specific_agents",
+        a2a_invocation_grants: ["a-1", "a-2"],
+      }),
+    );
+    expect(screen.getByText("Specific agents")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
+  it("renders 'Specific agents' without a count badge when grants are absent", () => {
+    renderA2aCell(makeRow({ a2a_invocation_mode: "specific_agents" }));
+    expect(screen.getByText("Specific agents")).toBeInTheDocument();
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
   });
 });

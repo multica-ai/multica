@@ -70,6 +70,7 @@ export type AgentColumnKey =
   | "status"
   | "owner"
   | "access"
+  | "a2a"
   | "runtime"
   | "lastActive"
   | "runs"
