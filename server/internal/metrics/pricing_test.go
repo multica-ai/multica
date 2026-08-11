@@ -184,8 +184,9 @@ func TestPriceForModelAliasGrok(t *testing.T) {
 
 // TestPriceForModelAliasMinimaxM3 pins the MiniMax-M3 row to its current
 // published rates (input $0.60, output $2.40, cache read $0.12 = 0.2x input).
-// M3 has no listed cache-write charge. The alias must resolve M3 without
-// borrowing the older M2.7 row, and M2.7 must keep its own distinct rates.
+// M3 has no separate cache-write rate, so writes mirror input. The alias must
+// resolve M3 without borrowing the older M2.7 row, and M2.7 must keep its own
+// distinct rates.
 func TestPriceForModelAliasMinimaxM3(t *testing.T) {
 	cases := []struct {
 		model string
@@ -193,15 +194,15 @@ func TestPriceForModelAliasMinimaxM3(t *testing.T) {
 	}{
 		{
 			model: "minimax-m3",
-			want:  ModelPrice{Provider: "minimax", Model: "m3", InputPerM: 0.6, CacheReadPerM: 0.12, CacheWritePerM: 0, OutputPerM: 2.4},
+			want:  ModelPrice{Provider: "minimax", Model: "m3", InputPerM: 0.6, CacheReadPerM: 0.12, CacheWritePerM: 0.6, OutputPerM: 2.4},
 		},
 		{
 			model: "codebuddy/minimax-m3",
-			want:  ModelPrice{Provider: "minimax", Model: "m3", InputPerM: 0.6, CacheReadPerM: 0.12, CacheWritePerM: 0, OutputPerM: 2.4},
+			want:  ModelPrice{Provider: "minimax", Model: "m3", InputPerM: 0.6, CacheReadPerM: 0.12, CacheWritePerM: 0.6, OutputPerM: 2.4},
 		},
 		{
 			model: "MiniMax-M3",
-			want:  ModelPrice{Provider: "minimax", Model: "m3", InputPerM: 0.6, CacheReadPerM: 0.12, CacheWritePerM: 0, OutputPerM: 2.4},
+			want:  ModelPrice{Provider: "minimax", Model: "m3", InputPerM: 0.6, CacheReadPerM: 0.12, CacheWritePerM: 0.6, OutputPerM: 2.4},
 		},
 		// The older M2.7 row must stay separate and keep its distinct rates.
 		{

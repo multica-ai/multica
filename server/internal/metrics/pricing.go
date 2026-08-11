@@ -52,10 +52,10 @@ var modelPrices = map[string]ModelPrice{
 	"anthropic:claude-haiku-4.5":  {Provider: "anthropic", Model: "claude-haiku-4.5", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 5.00},
 	"deepseek:v4-pro":             {Provider: "deepseek", Model: "v4-pro", InputPerM: 1.74, CacheReadPerM: 0.0145, CacheWritePerM: 1.74, OutputPerM: 3.48},
 	"deepseek:v4-flash":           {Provider: "deepseek", Model: "v4-flash", InputPerM: 0.56, CacheReadPerM: 0.0112, CacheWritePerM: 0.56, OutputPerM: 1.12},
-	// MiniMax-M3 (api.minimax.io): input $0.60, output $2.40, cache read $0.12
-	// (0.2x input). MiniMax does not list a separate cache-write charge for M3,
-	// so leave CacheWritePerM at zero rather than inferring one.
-	"minimax:m3":              {Provider: "minimax", Model: "m3", InputPerM: 0.60, CacheReadPerM: 0.12, CacheWritePerM: 0, OutputPerM: 2.40},
+	// MiniMax-M3 (platform.minimax.io): input $0.60, output $2.40, cache read
+	// $0.12 (0.2x input). MiniMax lists no separate cache-write rate, so writes
+	// mirror the input rate instead of being treated as free.
+	"minimax:m3":              {Provider: "minimax", Model: "m3", InputPerM: 0.60, CacheReadPerM: 0.12, CacheWritePerM: 0.60, OutputPerM: 2.40},
 	"minimax:m2.7":            {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
 	"minimax:m2.7-highspeed":  {Provider: "minimax", Model: "m2.7-highspeed", InputPerM: 0.60, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 2.40},
 	"google:gemini-3-flash":   {Provider: "google", Model: "gemini-3-flash", InputPerM: 0.50, CacheReadPerM: 0.05, CacheWritePerM: 0.50, OutputPerM: 3.00},
