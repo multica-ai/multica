@@ -37,6 +37,9 @@ const (
 	// runtimeGCBatchSize bounds the number of independent Runtime teardown
 	// transactions attempted by one existing 30-second sweeper tick.
 	runtimeGCBatchSize = 32
+	// commentFollowupSweepBatchSize bounds durable Issue-comment replay work per
+	// existing sweeper tick.
+	commentFollowupSweepBatchSize int32 = 64
 	// dispatchTimeoutSeconds fails tasks stuck in 'dispatched' beyond this.
 	// The dispatched→running transition should be near-instant, so 5 minutes
 	// means something went wrong (e.g. StartTask API call failed silently).
@@ -108,8 +111,22 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			sweepDeferredChatFinalizations(ctx, queries, taskSvc)
 			sweepRuntimePool(ctx, taskSvc)
+			sweepCommentFollowups(ctx, taskSvc)
 			gcRuntimes(ctx, runtimeHandler)
 		}
+	}
+}
+
+type commentFollowupProcessor interface {
+	ProcessCommentFollowups(context.Context, int32) error
+}
+
+func sweepCommentFollowups(ctx context.Context, processor commentFollowupProcessor) {
+	if processor == nil {
+		return
+	}
+	if err := processor.ProcessCommentFollowups(ctx, commentFollowupSweepBatchSize); err != nil {
+		slog.Warn("comment follow-up sweep failed", "error", err)
 	}
 }
 

@@ -78,6 +78,9 @@ type TaskService struct {
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
 	analyticsContextOrder []string
+
+	commentFollowupMu     sync.Mutex
+	commentFollowupCursor commentFollowupCursor
 }
 
 // PoolPlacementRequest is the immutable input used to resolve a Pool Task's

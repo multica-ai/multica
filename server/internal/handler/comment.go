@@ -2175,6 +2175,19 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 	// round 3). The comment row persists; a later trigger/edit can still cover it.
 	slog.Warn("comment trigger enqueue did not converge; reporting non-success",
 		"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID))
+	if err := h.TaskService.PersistCommentFollowup(
+		ctx,
+		issue.ID,
+		trigger.Agent.ID,
+		triggerCommentID,
+		getHeadSha().String,
+	); err != nil {
+		slog.Error("persist uncovered comment follow-up failed",
+			"issue_id", uuidToString(issue.ID),
+			"agent_id", uuidToString(trigger.Agent.ID),
+			"comment_id", uuidToString(triggerCommentID),
+			"error", err)
+	}
 	return DispatchBlocked, ReasonInternalError
 }
 
@@ -2503,7 +2516,15 @@ func (h *Handler) propagateUncoveredCommentObligation(ctx context.Context, issue
 		// The slot is still occupied; its occupant may have changed state between
 		// the steps above, so re-observe and try again.
 	}
-	return false
+	if err := h.TaskService.PersistCommentFollowup(ctx, issue.ID, trigger.Agent.ID, commentID, headSha.String); err != nil {
+		slog.Error("propagate comment obligation: persist durable follow-up failed",
+			"issue_id", uuidToString(issue.ID),
+			"agent_id", uuidToString(trigger.Agent.ID),
+			"comment_id", uuidToString(commentID),
+			"error", err)
+		return false
+	}
+	return true
 }
 
 // logCommentEnqueueFailure logs a failed comment-trigger enqueue. A benign
