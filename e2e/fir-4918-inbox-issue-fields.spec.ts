@@ -16,6 +16,8 @@ import { loginAsDefault, createTestApi } from "./helpers";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.PORT || "8080"}`;
 
+const FLAGS = ["cerebro_inbox_dynamic", "cerebro_references", "cerebro_inbox_rounds"];
+
 let api: TestApiClient;
 
 test.beforeEach(async () => {
@@ -24,13 +26,15 @@ test.beforeEach(async () => {
 });
 
 test.afterEach(async () => {
+  // Feature flags are workspace-wide rows that api.cleanup() does not track, and
+  // the E2E suite shares one database — leaving `cerebro_inbox_dynamic` on would
+  // change which inbox every later spec renders.
+  for (const flag of FLAGS) await api.setWorkspaceFeatureFlag(flag, false);
   await api.cleanup();
 });
 
 test("issue opened from the Dynamic inbox shows References and Rounds", async ({ page }) => {
-  await api.setWorkspaceFeatureFlag("cerebro_inbox_dynamic", true);
-  await api.setWorkspaceFeatureFlag("cerebro_references", true);
-  await api.setWorkspaceFeatureFlag("cerebro_inbox_rounds", true);
+  for (const flag of FLAGS) await api.setWorkspaceFeatureFlag(flag, true);
 
   const title = "FIR-4918 inbox field parity";
   const issue = await api.createIssue(title);
