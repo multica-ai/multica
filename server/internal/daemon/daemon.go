@@ -4179,15 +4179,18 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 }
 
 // tryEnterClaim records the intent to call ClaimTask. Returns true if the
-// caller may proceed, false if any claim-pause holder (auto-update barrier,
-// drain, below-minimum demotion) is in effect. Every successful call MUST be
-// paired with an exitClaim() on every exit path — either right after a
-// failed/empty claim, or via the handleTask goroutine's defer once the task is
-// handed off.
+// caller may proceed, false if a claim-pause holder that blocks claim entry
+// (auto-update barrier, below-minimum demotion) is in effect. Draining does
+// NOT block claim entry (NEX-38 corrected contract): a draining runtime keeps
+// claiming and completing its pre-boundary queued work; new work is rejected
+// server-side by AgentReadiness, so nothing post-boundary enters the queue.
+// Every successful call MUST be paired with an exitClaim() on every exit path
+// — either right after a failed/empty claim, or via the handleTask goroutine's
+// defer once the task is handed off.
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.claimPausedLocked() {
+	if d.claimPausedForClaimsLocked() {
 		return false
 	}
 	d.claimsInFlight++

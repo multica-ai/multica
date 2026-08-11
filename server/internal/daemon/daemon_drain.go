@@ -92,6 +92,19 @@ func (d *Daemon) claimPausedLocked() bool {
 	return d.claimPauseTotal > 0
 }
 
+// claimPausedForClaimsLocked reports whether the CLAIM ENTRY path is blocked.
+// The drain holder deliberately does NOT block claims (NEX-38 corrected
+// contract, CEO decision 2026-08-10): a draining runtime keeps claiming and
+// completing its pre-boundary queued work — new triggers are rejected
+// server-side by AgentReadiness, so the queue only ever holds work accepted
+// before the drain boundary. Only the server-update / below-minimum holders
+// pause claim entry. trySetClaimBarrier and tryBeginServerUpdate still
+// consult claimPausedLocked() (which INCLUDES drain) so auto-update and
+// demotion continue to defer while a drain is in effect.
+func (d *Daemon) claimPausedForClaimsLocked() bool {
+	return d.claimPauseTotal-d.claimPauseRefs[claimPauseDrain] > 0
+}
+
 // beginDrain puts the daemon into draining: it stops claiming new tasks while
 // in-flight tasks run to completion. The marker is persisted BEFORE the
 // in-memory state flips (AC-13), so a crash mid-drain still restores draining
@@ -194,11 +207,16 @@ func (d *Daemon) restoreDrainState() {
 }
 
 // drainMonitorLoop watches for the finish-then-stop trigger: when the daemon is
-// draining, finish-then-stop is armed, and no task is in flight, it deregisters
-// the runtimes and cancels the root context so Run returns (AC-4). Because
-// activeTasks is already zero, the poll loop's shutdown window passes instantly
-// and nothing is interrupted. The ordinary stop path (/shutdown immediate
-// cancel + pollLoop 30s cap) is untouched (AC-5).
+// draining, finish-then-stop is armed, and BOTH the in-flight count and the
+// server-side queued count (cached from heartbeat acks) reach zero, it
+// deregisters the runtimes and cancels the root context so Run returns
+// (AC-4). The daemon keeps claiming during drain, so it drains the queue
+// itself; waiting on the queued count as well as active tasks ensures it only
+// exits once every pre-boundary accepted task has been claimed and completed
+// (NEX-38 corrected contract). Because activeTasks is already zero, the poll
+// loop's shutdown window passes instantly and nothing is interrupted. The
+// ordinary stop path (/shutdown immediate cancel + pollLoop 30s cap) is
+// untouched (AC-5).
 func (d *Daemon) drainMonitorLoop(ctx context.Context) {
 	ticker := time.NewTicker(drainMonitorInterval)
 	defer ticker.Stop()
@@ -210,10 +228,10 @@ func (d *Daemon) drainMonitorLoop(ctx context.Context) {
 			if d.daemonState.Load() != daemonStateDraining || !d.finishThenStop.Load() {
 				continue
 			}
-			if d.activeTasks.Load() != 0 {
+			if d.activeTasks.Load() != 0 || d.queuedTaskCount() != 0 {
 				continue
 			}
-			d.logger.Info("drain complete: no in-flight tasks; deregistering runtimes and stopping")
+			d.logger.Info("drain complete: no in-flight or queued tasks; deregistering runtimes and stopping")
 			d.deregisterRuntimes()
 			d.daemonState.Store(daemonStateShuttingDown)
 			if d.cancelFunc != nil {

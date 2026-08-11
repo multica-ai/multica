@@ -39,12 +39,17 @@ func TestBeginDrain_StateClaimPauseAndPersistence(t *testing.T) {
 		t.Fatalf("daemonState = %d, want draining (%d)", got, daemonStateDraining)
 	}
 	if !d.claimPaused() {
-		t.Fatal("claims must be paused after beginDrain")
+		t.Fatal("claims must be pause-signaled after beginDrain (defers auto-update/demotion)")
 	}
-	// AC-2: the batch poller must refuse to claim while draining.
-	if d.tryEnterClaim() {
-		t.Fatal("tryEnterClaim must refuse while draining")
+	// AC-2 corrected contract (CEO 2026-08-10): the batch poller must KEEP
+	// claiming while draining so pre-boundary queued work is claimed and
+	// completed. The drain ref defers auto-update/demotion (decision two) but
+	// does not block claim entry — only the server-update / below-minimum
+	// holders do.
+	if !d.tryEnterClaim() {
+		t.Fatal("tryEnterClaim must succeed while draining (draining keeps claiming queued work)")
 	}
+	d.exitClaim()
 	// AC-13: the marker must be persisted on disk.
 	data, err := os.ReadFile(d.drainFilePath())
 	if err != nil {
@@ -140,11 +145,14 @@ func TestRestoreDrainState_ResumesDrainingOnRestart(t *testing.T) {
 			t.Fatalf("restored daemonState = %d, want draining (%d)", got, daemonStateDraining)
 		}
 		if !restarted.claimPaused() {
-			t.Fatal("restored daemon must hold the drain claim-pause ref")
+			t.Fatal("restored daemon must hold the drain claim-pause ref (defers auto-update/demotion)")
 		}
-		if restarted.tryEnterClaim() {
-			t.Fatal("restored daemon must refuse claims")
+		// Corrected contract: a restored draining daemon keeps claiming queued
+		// work — the drain ref does not block claim entry.
+		if !restarted.tryEnterClaim() {
+			t.Fatal("restored daemon must accept claims (draining keeps claiming queued work)")
 		}
+		restarted.exitClaim()
 		if got := restarted.registrationStatus(); got != "draining" {
 			t.Fatalf("registrationStatus = %q, want draining", got)
 		}
@@ -240,8 +248,23 @@ func TestDrainMonitor_StopsWhenIdleAndArmed(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// Task completes -> the monitor should deregister + cancel on the next tick.
+	// Corrected contract (CEO 2026-08-10): even with no in-flight task, the
+	// monitor must keep waiting while the server still holds queued work for
+	// the draining runtimes — pre-boundary queued tasks must be claimed and
+	// completed before shutdown (AC-4 extended).
 	d.activeTasks.Store(0)
+	d.recordQueuedTasks("rt-1", intPtr(2))
+	deadline = time.Now().Add(2500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if cancelCalls.Load() != 0 {
+			t.Fatal("monitor cancelled the daemon while queued tasks remained")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Both in-flight and queued counts reach zero -> the monitor should
+	// deregister + cancel on the next tick.
+	d.recordQueuedTasks("rt-1", intPtr(0))
 	waitUntil(t, 3*time.Second, func() bool { return cancelCalls.Load() == 1 })
 
 	select {
