@@ -13,7 +13,8 @@
     "mark_read": "읽음으로 표시",
     "mark_unread": "읽지 않음으로 표시",
     "archive": "보관",
-    "unarchive": "보관 해제"
+    "unarchive": "보관 해제",
+    "open_in_new_tab": "새 탭에서 열기"
   },
   "list": {
     "empty": "알림이 없습니다",

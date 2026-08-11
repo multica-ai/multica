@@ -897,6 +897,55 @@ func TestCreateWorktreeExcludesCodebuddySidecars(t *testing.T) {
 	}
 }
 
+// TestCreateWorktreeDoesNotExcludeReasonixProjectConfig guards the layering
+// that makes a `reasonix.toml` exclude wrong. The daemon writes that file at
+// the WorkDir, and a managed checkout is a directory *inside* the WorkDir, so
+// this exclude list — which only reaches the checkout's .git/info/exclude —
+// could never hide the daemon's copy. All it would do is make a project config
+// an agent legitimately creates inside the repository invisible to git status
+// for every provider.
+func TestCreateWorktreeDoesNotExcludeReasonixProjectConfig(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Reasonix",
+		TaskID:      "reasonix-exclude-test",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	// The daemon's sidecar is a sibling of the checkout, not a file in it.
+	if filepath.Dir(result.Path) != workDir {
+		t.Fatalf("checkout %q is not a child of the work dir %q", result.Path, workDir)
+	}
+	if strings.Contains(gitInfoExclude(t, result.Path), "reasonix.toml") {
+		t.Fatalf("reasonix.toml is excluded inside the checkout, hiding a project config the agent may create:\n%s", gitInfoExclude(t, result.Path))
+	}
+
+	configPath := filepath.Join(result.Path, "reasonix.toml")
+	if err := os.WriteFile(configPath, []byte("[permissions]\n"), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	// git check-ignore exits 1 when the path is NOT ignored — the outcome this
+	// test wants, so the agent can still commit the file it wrote.
+	cmd := exec.Command("git", "-C", result.Path, "check-ignore", "-q", "reasonix.toml")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("git ignores a repository reasonix.toml created inside the checkout")
+	}
+}
+
 func gitInfoExclude(t *testing.T, worktreePath string) string {
 	t.Helper()
 	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-dir")

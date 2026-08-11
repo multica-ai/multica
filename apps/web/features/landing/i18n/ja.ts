@@ -118,7 +118,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           {
             title: "初回起動時に自動検出",
             description:
-              "Multica は Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DevEco Code、Grok、Hermes、Kimi、Kiro CLI、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI という20種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
+              "Multica は Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DevEco Code、Grok、Hermes、Kimi、Kiro CLI、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI という21種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
           },
         ],
       },
@@ -139,7 +139,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           title: "CLI をインストールしてマシンを接続",
           description:
-            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、20種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DevEco Code、Grok、Hermes、Kimi、Kiro CLI、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
+            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、21種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DevEco Code、Grok、Hermes、Kimi、Kiro CLI、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
         },
         {
           title: "最初のエージェントを作成",
@@ -193,7 +193,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica はどのコーディングエージェントに対応していますか?",
           answer:
-            "Multica は、Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DevEco Code、Grok、Hermes、Kimi、Kiro CLI、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI の20種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。オープンソースなので、独自のバックエンドを追加することもできます。",
+            "Multica は、Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DevEco Code、Grok、Hermes、Kimi、Kiro CLI、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI の21種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。オープンソースなので、独自のバックエンドを追加することもできます。",
         },
         {
           question: "セルフホストが必須ですか、それともクラウド版もありますか?",
@@ -269,6 +269,75 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         fixes: "バグ修正",
       },
       entries: [
+        {
+          version: "0.4.23",
+          date: "2026-08-11",
+          title: "WeCom の写真とファイル、Reasonix の思考レベル、ブラウザー風の履歴移動",
+          changes: [],
+          features: [
+            "WeCom のボットに送った写真、ファイル、動画がエージェントに届きます。",
+            "Reasonix のエージェントで、思考の深さを選べます。",
+            "Cmd+[ と Cmd+] で、見てきたページを前後にたどれます。",
+          ],
+          improvements: [
+            "新しいサブ Issue は、親と同じプロジェクトと担当者で始まります。",
+            "Codex のタスクが使うディスク容量が大きく減ります。",
+            "たくさんのタスクをまとめて取り消す操作が速くなりました。",
+            "DingTalk の設定に DingTalk 自身の印が付きます。",
+            "エージェントがコメントに返信するとき、ほかの人を巻き込みません。",
+          ],
+          fixes: [
+            "Hermes のエージェントが、タスクをまたいで記憶を保ちます。",
+            "Reasonix のタスクが、誰も答えられない質問で止まりません。",
+            "Claude の長いコンテキストのモデルでも、選んだ思考の深さが残ります。",
+            "ワークスペースの削除が「Deleting…」のまま止まりません。",
+            "タスクを取り消すと、チャネルの入力中表示も止まります。",
+            "エディターの添付ファイルがまたダウンロードできます。",
+            "同じ Issue コマンドを二度送っても、ファイルが二重に上がりません。",
+            "Issue を別のワークスペースのプロジェクトへ移せなくなりました。",
+            "送信や停止のあとも、入力欄のフォーカスが残ります。",
+            "エージェントの詳細に空のメニューが出ません。",
+            "とても長い Issue やプロジェクトの名前が、行を崩しません。",
+            "セルフホストでも、設定した差出人アドレスからメールが届きます。",
+          ],
+        },
+        {
+          version: "0.4.22",
+          date: "2026-08-10",
+          title: "保存できる Issue ビュー、Oh-My-Pi ランタイム、WeCom の音声メモ",
+          changes: [],
+          features: [
+            "よく使う絞り込みをビューとして保存し、Issue 一覧の上から切り替えられます。",
+            "ビューはワークスペースで共有され、並び順とレイアウトは各自のまま残ります。",
+            "Oh-My-Pi でもエージェントを動かせます。",
+            "WeCom に送った音声メモが、テキストとしてエージェントに届きます。",
+            "Kimi と Pi のエージェントで、思考の深さを選べます。",
+            "Multica のどのリンクでも、Cmd/Ctrl または中クリックで新しいタブに開けます。",
+            "WeCom につながらないとき、拒否されたのか届かないのかをページが示します。",
+          ],
+          improvements: [
+            "サインアップの直後に、Mika の最初のメッセージがすぐ表示されます。",
+            "保存したビューは昇順と降順を選べます。",
+            "新しい Issue のプロジェクト タグはワンクリックで外れ、前回の選択も残りません。",
+            "チャネルで /new や /issue だけを送ったとき、結果をはっきり伝えます。",
+            "WeCom からのメッセージに WeCom 自身の印が付きます。",
+            "エージェントが、自分を動かしているランタイムの状態とディスク使用量を確認できます。",
+          ],
+          fixes: [
+            "受信トレイのタブに戻ったとき、読んでいた位置が保たれます。",
+            "チャットをアーカイブすると、後ろに並んでいた作業もまとめて取り消されます。",
+            "WeCom で同じ /issue を二度送っても、重複ではなく正直な返事が返ります。",
+            "WeCom のグループで、すべてのスラッシュ コマンドが使えます。",
+            "ダイレクト チャットの Codex セッションが、続きから再開します。",
+            "Windows の OpenClaw エージェントが設定を読めるようになりました。",
+            "続けて何通も送っても、そのうちの一通が抜け落ちません。",
+            "Lark から保存した画像とファイルの名前が正しく残ります。",
+            "セルフホストのサーバー アドレスを間違えると、白い画面ではなく明確なエラーが出ます。",
+            "WeCom の連携リンクが何度も作られたり、他の人に取られたりしません。",
+            "ビューのタブが収まらないときだけ、その他ボタンが出ます。",
+            "サイドバーの折りたたみ状態と設定のナビゲーションの動きがそろいました。",
+          ],
+        },
         {
           version: "0.4.21",
           date: "2026-08-07",

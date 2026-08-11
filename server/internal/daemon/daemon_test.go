@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -339,11 +340,12 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			"MULTICA_LLM_API_KEY=daemon-secret",
 		}
 		agentEnv := map[string]string{
-			"CUSTOM_ACCESS_TOKEN": "agent-secret",
-			"CUSTOM_FLAG":         "enabled",
-			"UNAUTHORIZED_TOKEN":  "daemon-secret",
-			"MULTICA_SERVER_URL":  "https://task.example",
-			"MULTICA_TOKEN":       "mat_task",
+			"CUSTOM_ACCESS_TOKEN":      "agent-secret",
+			"CUSTOM_FLAG":              "enabled",
+			"UNAUTHORIZED_TOKEN":       "daemon-secret",
+			"MULTICA_TASK_CONFIG_ROOT": "/task/multica-config",
+			"MULTICA_SERVER_URL":       "https://task.example",
+			"MULTICA_TOKEN":            "mat_task",
 		}
 		agentCustomEnv := map[string]string{
 			"CUSTOM_ACCESS_TOKEN": "agent-secret",
@@ -357,7 +359,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			t.Fatalf("read config.toml: %v", err)
 		}
 		config := string(data)
-		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
+		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_TASK_CONFIG_ROOT", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
 			if !strings.Contains(config, want) {
 				t.Errorf("config.toml missing %q:\n%s", want, config)
 			}
@@ -401,9 +403,10 @@ func TestCodexTaskShellEnvInheritsRealHome(t *testing.T) {
 	// What runTask layers on top for a Codex task: task identity plus the
 	// task-scoped CODEX_HOME, and — since MUL-5578 — no HOME/XDG entry.
 	explicit := map[string]string{
-		"CODEX_HOME":         codexHome,
-		"MULTICA_TOKEN":      "mat_task",
-		"MULTICA_SERVER_URL": "https://task.example",
+		"CODEX_HOME":               codexHome,
+		"MULTICA_TASK_CONFIG_ROOT": "/task/multica-config",
+		"MULTICA_TOKEN":            "mat_task",
+		"MULTICA_SERVER_URL":       "https://task.example",
 	}
 
 	if err := configureCodexTaskShellEnvironment("codex", codexHome, inherited, explicit, nil, slog.Default()); err != nil {
@@ -434,6 +437,9 @@ func TestCodexTaskShellEnvInheritsRealHome(t *testing.T) {
 	// CODEX_HOME is the one home-shaped variable the daemon does own.
 	if !slices.Contains(include, "CODEX_HOME") {
 		t.Errorf("include_only missing CODEX_HOME, got %v", include)
+	}
+	if !slices.Contains(include, "MULTICA_TASK_CONFIG_ROOT") {
+		t.Errorf("include_only missing MULTICA_TASK_CONFIG_ROOT, got %v", include)
 	}
 }
 
@@ -502,6 +508,56 @@ func TestTaskScopedAuthToken(t *testing.T) {
 				t.Fatalf("taskScopedAuthToken() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
+	t.Parallel()
+
+	const (
+		fakeToken      = "mat_task_environment_sentinel"
+		taskRoot       = "/task/private-multica-config"
+		workspacesRoot = "/daemon/multica_workspaces_staging"
+	)
+	task := Task{
+		ID:          "task-test",
+		AgentID:     "agent-test",
+		WorkspaceID: "workspace-test",
+	}
+	env := taskMulticaEnvironment(task, "agent-name", fakeToken, taskRoot, workspacesRoot, "https://task.example", 19514, 3, "/task/tmp")
+
+	want := map[string]string{
+		"MULTICA_TOKEN":                fakeToken,
+		"MULTICA_TASK_CONFIG_ROOT":     taskRoot,
+		"MULTICA_TASK_WORKSPACES_ROOT": workspacesRoot,
+		"MULTICA_SERVER_URL":           "https://task.example",
+		"MULTICA_DAEMON_PORT":          "19514",
+		"MULTICA_WORKSPACE_ID":         "workspace-test",
+		"MULTICA_AGENT_NAME":           "agent-name",
+		"MULTICA_AGENT_ID":             "agent-test",
+		"MULTICA_TASK_ID":              "task-test",
+		"MULTICA_TASK_SLOT":            "3",
+		"TMPDIR":                       "/task/tmp",
+		"TMP":                          "/task/tmp",
+		"TEMP":                         "/task/tmp",
+	}
+	if !maps.Equal(env, want) {
+		t.Fatalf("taskMulticaEnvironment() = %#v, want %#v", env, want)
+	}
+
+	layerCustomEnvAndHermesHome(env, map[string]string{
+		"MULTICA_TASK_CONFIG_ROOT":     "/owner/config",
+		"MULTICA_TASK_WORKSPACES_ROOT": "/owner/multica_workspaces",
+		"MULTICA_TOKEN":                "mul_owner_sentinel",
+	}, "", nil)
+	if env["MULTICA_TASK_CONFIG_ROOT"] != taskRoot {
+		t.Fatalf("custom env replaced task config root: %q", env["MULTICA_TASK_CONFIG_ROOT"])
+	}
+	if env[TaskWorkspacesRootEnv] != workspacesRoot {
+		t.Fatalf("custom env replaced task workspaces root: %q", env[TaskWorkspacesRootEnv])
+	}
+	if env["MULTICA_TOKEN"] != fakeToken {
+		t.Fatal("custom env replaced task-scoped token")
 	}
 }
 
@@ -1928,10 +1984,10 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 // store guard initialised — enough to exercise the reserve-vs-mark protocol.
 func newCodexStoreGuardDaemon() *Daemon {
 	d := &Daemon{
-		activeCodexStores:   map[string]int{},
-		deletingCodexStores: map[string]bool{},
+		activeStores:   map[string]int{},
+		deletingStores: map[string]bool{},
 	}
-	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
+	d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
 	return d
 }
 
@@ -1943,13 +1999,13 @@ func TestCodexStoreGuard_MarkBeforeReserveBlocksDeletion(t *testing.T) {
 	d := newCodexStoreGuardDaemon()
 	const store = "/stores/agent/issue"
 
-	d.markActiveCodexStore(store)
-	if _, ok := d.reserveCodexStoreForDeletion(store); ok {
+	d.markActiveStore(store)
+	if _, ok := d.reserveStoreForDeletion(store); ok {
 		t.Fatal("reserve must refuse a store a live task already holds")
 	}
-	d.unmarkActiveCodexStore(store)
+	d.unmarkActiveStore(store)
 
-	commit, ok := d.reserveCodexStoreForDeletion(store)
+	commit, ok := d.reserveStoreForDeletion(store)
 	if !ok {
 		t.Fatal("reserve should succeed once the store is inactive")
 	}
@@ -1964,20 +2020,20 @@ func TestCodexStoreGuard_ReserveBlocksMarkUntilCommit(t *testing.T) {
 	d := newCodexStoreGuardDaemon()
 	const store = "/stores/agent/issue"
 
-	commit, ok := d.reserveCodexStoreForDeletion(store)
+	commit, ok := d.reserveStoreForDeletion(store)
 	if !ok {
 		t.Fatal("reserve should succeed on an inactive store")
 	}
 
 	marked := make(chan struct{})
 	go func() {
-		d.markActiveCodexStore(store)
+		d.markActiveStore(store)
 		close(marked)
 	}()
 
 	select {
 	case <-marked:
-		t.Fatal("markActiveCodexStore must block while the store is reserved for deletion")
+		t.Fatal("markActiveStore must block while the store is reserved for deletion")
 	case <-time.After(100 * time.Millisecond):
 	}
 
@@ -1986,10 +2042,10 @@ func TestCodexStoreGuard_ReserveBlocksMarkUntilCommit(t *testing.T) {
 	select {
 	case <-marked:
 	case <-time.After(2 * time.Second):
-		t.Fatal("markActiveCodexStore must proceed after the reservation is committed")
+		t.Fatal("markActiveStore must proceed after the reservation is committed")
 	}
 	// The store is now active, so a fresh reserve must be refused.
-	if _, ok := d.reserveCodexStoreForDeletion(store); ok {
+	if _, ok := d.reserveStoreForDeletion(store); ok {
 		t.Fatal("store must be active after the blocked mark proceeds")
 	}
 }
@@ -2001,15 +2057,15 @@ func TestCodexStoreGuard_SecondReserveRefusedWhileDeleting(t *testing.T) {
 	d := newCodexStoreGuardDaemon()
 	const store = "/stores/agent/issue"
 
-	commit, ok := d.reserveCodexStoreForDeletion(store)
+	commit, ok := d.reserveStoreForDeletion(store)
 	if !ok {
 		t.Fatal("first reserve should succeed")
 	}
-	if _, ok := d.reserveCodexStoreForDeletion(store); ok {
+	if _, ok := d.reserveStoreForDeletion(store); ok {
 		t.Fatal("a second reserve must be refused while a removal is in flight")
 	}
 	commit()
-	commit2, ok := d.reserveCodexStoreForDeletion(store)
+	commit2, ok := d.reserveStoreForDeletion(store)
 	if !ok {
 		t.Fatal("reserve should succeed again after the prior removal committed")
 	}
@@ -2634,7 +2690,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 		})
 	}
 
-	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "reasonix", "kiro", "qoder", "qoderclicn", "traecli", "pi", "openclaw"}
+	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "reasonix", "kiro", "qoder", "qoderclicn", "traecli", "pi", "omp", "openclaw"}
 	for _, provider := range detectable {
 		t.Run(provider+" does not retry", func(t *testing.T) {
 			t.Parallel()

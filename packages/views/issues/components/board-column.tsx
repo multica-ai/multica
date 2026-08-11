@@ -20,6 +20,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
+import { useViewBaseline } from "../surface/view-baseline-context";
 import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
@@ -113,6 +114,10 @@ export const BoardColumn = memo(function BoardColumn({
   const cfg = status ? STATUS_CONFIG[status] : null;
   const { setNodeRef, isOver } = useDroppable({ id: group.id });
   const viewStoreApi = useViewStoreApi();
+  // A status fixed by the open saved view cannot be hidden from the board —
+  // that would silently strip one of the view's own conditions.
+  const viewBaseline = useViewBaseline();
+  const statusFixedByView = !!status && viewBaseline?.status.has(status) === true;
   const { t } = useT("issues");
 
   // Resolve IDs to Issue objects, preserving parent-provided order
@@ -202,7 +207,11 @@ export const BoardColumn = memo(function BoardColumn({
                     }
                   />
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
+                    <DropdownMenuItem
+                      disabled={statusFixedByView}
+                      title={statusFixedByView ? t(($) => $.filters.in_view) : undefined}
+                      onClick={() => viewStoreApi.getState().hideStatus(status)}
+                    >
                       <EyeOff className="size-3.5" />
                       {t(($) => $.board.hide_column)}
                     </DropdownMenuItem>

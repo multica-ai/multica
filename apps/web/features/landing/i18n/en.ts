@@ -116,7 +116,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 20 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 21 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 20 supported coding tools (Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 21 supported coding tools (Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -192,7 +192,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 20 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
+          "Multica supports 21 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -293,6 +293,75 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.4.23",
+        date: "2026-08-11",
+        title: "WeCom photos and files, Reasonix thinking levels, and browser-style history navigation",
+        changes: [],
+        features: [
+          "Photos, files and videos sent to your WeCom bot now reach your agents.",
+          "Reasonix agents can now be set to think harder or faster.",
+          "Cmd+[ and Cmd+] step back and forward through the pages you visited.",
+        ],
+        improvements: [
+          "A new sub-issue starts in the same project, with the same assignee as its parent.",
+          "Codex tasks now take far less disk space on the machine running them.",
+          "Cancelling many tasks at once now finishes faster.",
+          "The DingTalk settings page now carries DingTalk's own mark.",
+          "An agent replying to your comment no longer pulls other people into the thread.",
+        ],
+        fixes: [
+          "Hermes agents now remember what they learned, task after task.",
+          "Reasonix tasks no longer stop to ask a question nobody is there to answer.",
+          "Claude's long-context models keep the thinking level you picked.",
+          "Deleting a workspace no longer sits on \"Deleting…\" forever.",
+          "Cancelling a run now stops the typing indicator in your channel.",
+          "Attachments in the editor download again.",
+          "Sending the same Issue command twice no longer uploads its files again.",
+          "An Issue can no longer be moved into another workspace's project.",
+          "The composer keeps focus after you send or stop a message.",
+          "Agent details no longer show an empty menu.",
+          "A very long Issue or project name no longer breaks the line it sits in.",
+          "Self-hosted setups now send email from the address you configured.",
+        ],
+      },
+      {
+        version: "0.4.22",
+        date: "2026-08-10",
+        title: "Saved Issue views, the Oh-My-Pi runtime, and WeCom voice notes",
+        changes: [],
+        features: [
+          "Save the filters you use most as a view, then switch between them from the top of your Issue list.",
+          "A view is shared across the workspace, while sorting and layout stay personal to you.",
+          "Oh-My-Pi can now run your agents as well.",
+          "Voice notes sent in WeCom now reach your agents as text.",
+          "Kimi and Pi agents can now be set to think harder or faster.",
+          "Cmd/Ctrl+click or middle-click any link in Multica to open it in a new tab.",
+          "When WeCom cannot connect, the page now says whether it was refused or simply unreachable.",
+        ],
+        improvements: [
+          "Signing up now lands you on Mika's opening message right away.",
+          "A saved view can be sorted ascending or descending.",
+          "The project tag on a new Issue clears in one click, and no longer remembers your last project.",
+          "A bare /new or /issue in a channel now tells you exactly what happened.",
+          "Messages from WeCom now carry WeCom's own mark instead of a generic bubble.",
+          "Agents can now check the status and disk usage of the runtime hosting them.",
+        ],
+        fixes: [
+          "Coming back to the inbox tab keeps your reading position instead of jumping to the top.",
+          "Archiving a chat now cancels the work still queued behind it.",
+          "Sending the same /issue twice in WeCom gets an honest answer instead of a duplicate.",
+          "Every slash command now works in a WeCom group.",
+          "Codex sessions in direct chat now pick up where they left off.",
+          "OpenClaw agents on Windows now find your config.",
+          "Sending several messages in a row no longer drops one of them.",
+          "Images and files saved from Lark keep correct names.",
+          "A wrong self-hosted server address now shows a clear error instead of a blank page.",
+          "WeCom binding links are no longer minted over and over, or claimed by someone else.",
+          "The view bar only shows a more button when the tabs actually overflow.",
+          "The sidebar's collapsed state and the settings navigation now behave consistently.",
+        ],
+      },
       {
         version: "0.4.21",
         date: "2026-08-07",

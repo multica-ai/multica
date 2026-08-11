@@ -118,7 +118,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 20개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 21개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -193,7 +193,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 20개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 21개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -268,6 +268,75 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.4.23",
+          date: "2026-08-11",
+          title: "WeCom 사진과 파일, Reasonix 사고 강도, 브라우저식 기록 이동",
+          changes: [],
+          features: [
+            "WeCom 봇에 보낸 사진, 파일, 동영상이 에이전트에게 전달됩니다.",
+            "Reasonix 에이전트의 사고 강도를 고를 수 있어요.",
+            "Cmd+[ 와 Cmd+] 로 지나온 페이지를 앞뒤로 오갈 수 있어요.",
+          ],
+          improvements: [
+            "새 하위 Issue는 상위와 같은 프로젝트, 같은 담당자로 시작합니다.",
+            "Codex 작업이 쓰는 디스크 용량이 크게 줄었어요.",
+            "여러 작업을 한꺼번에 취소하는 동작이 빨라졌습니다.",
+            "DingTalk 설정에 DingTalk 자체 표시가 붙습니다.",
+            "에이전트가 댓글에 답할 때 다른 사람을 끌어들이지 않습니다.",
+          ],
+          fixes: [
+            "Hermes 에이전트가 작업이 끝나도 기억을 그대로 유지합니다.",
+            "Reasonix 작업이 아무도 답할 수 없는 질문에서 멈추지 않습니다.",
+            "Claude의 긴 컨텍스트 모델도 고른 사고 강도를 유지합니다.",
+            "워크스페이스 삭제가 「Deleting…」에서 멈춰 있지 않습니다.",
+            "작업을 취소하면 채널의 입력 중 표시도 함께 멈춥니다.",
+            "에디터의 첨부 파일을 다시 내려받을 수 있어요.",
+            "같은 Issue 명령을 두 번 보내도 파일이 중복으로 올라가지 않습니다.",
+            "Issue를 다른 워크스페이스의 프로젝트로 옮길 수 없습니다.",
+            "메시지를 보내거나 멈춘 뒤에도 입력창 포커스가 남습니다.",
+            "에이전트 상세에 빈 메뉴가 나오지 않습니다.",
+            "아주 긴 Issue나 프로젝트 이름이 줄을 망가뜨리지 않습니다.",
+            "셀프호스팅에서도 설정한 발신 주소로 메일이 나갑니다.",
+          ],
+        },
+        {
+          version: "0.4.22",
+          date: "2026-08-10",
+          title: "저장하는 Issue 뷰, Oh-My-Pi 런타임, WeCom 음성 메모",
+          changes: [],
+          features: [
+            "자주 쓰는 필터를 뷰로 저장해 두고, Issue 목록 위에서 바로 전환할 수 있어요.",
+            "뷰는 워크스페이스에서 함께 쓰고, 정렬과 배치는 각자 따로 남습니다.",
+            "Oh-My-Pi로도 에이전트를 돌릴 수 있어요.",
+            "WeCom에 보낸 음성 메모가 텍스트로 에이전트에게 전달됩니다.",
+            "Kimi와 Pi 에이전트의 사고 강도를 고를 수 있어요.",
+            "Multica의 어떤 링크든 Cmd/Ctrl 또는 가운데 클릭으로 새 탭에서 열 수 있어요.",
+            "WeCom에 연결되지 않을 때, 거부된 것인지 닿지 않는 것인지 페이지가 알려 줍니다.",
+          ],
+          improvements: [
+            "가입을 마치면 Mika의 첫 메시지가 바로 보입니다.",
+            "저장한 뷰를 오름차순이나 내림차순으로 정렬할 수 있어요.",
+            "새 Issue의 프로젝트 태그를 한 번에 지울 수 있고, 지난 선택도 남지 않습니다.",
+            "채널에서 /new나 /issue만 보내면 결과를 분명하게 알려 줍니다.",
+            "WeCom에서 온 메시지에 WeCom 자체 표시가 붙습니다.",
+            "에이전트가 자신을 돌리는 런타임의 상태와 디스크 사용량을 확인할 수 있어요.",
+          ],
+          fixes: [
+            "받은 항목 탭으로 돌아와도 읽던 위치가 그대로 남습니다.",
+            "채팅을 보관하면 뒤에 줄 서 있던 작업도 함께 취소됩니다.",
+            "WeCom에서 같은 /issue를 두 번 보내도 중복이 아니라 분명한 답을 받습니다.",
+            "WeCom 그룹에서 모든 슬래시 명령이 동작합니다.",
+            "다이렉트 채팅의 Codex 세션이 이어서 계속됩니다.",
+            "Windows의 OpenClaw 에이전트가 설정을 찾습니다.",
+            "메시지를 연달아 보내도 그중 하나가 빠지지 않습니다.",
+            "Lark에서 저장한 이미지와 파일의 이름이 어긋나지 않습니다.",
+            "셀프호스팅 서버 주소를 잘못 넣으면 빈 화면 대신 분명한 오류가 나옵니다.",
+            "WeCom 연동 링크가 반복해서 만들어지거나 다른 사람에게 넘어가지 않습니다.",
+            "뷰 탭이 넘칠 때만 더보기 버튼이 나옵니다.",
+            "사이드바 접힘 상태와 설정 내비게이션의 동작이 맞춰졌어요.",
+          ],
+        },
         {
           version: "0.4.21",
           date: "2026-08-07",

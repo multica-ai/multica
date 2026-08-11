@@ -516,6 +516,15 @@ type SetChatSessionArchivedRequest struct {
 // reviving this archived one. Unarchive deliberately does NOT recreate the
 // binding: if later traffic already forked a new session, that session owns the
 // channel now, and restoring the old binding would steal it back.
+//
+// Severing that binding is what makes archiving a bound session cancel its
+// in-flight tasks: the adapter still holds the chat id, so a turn that survives
+// the archive answers into a group room the session no longer belongs to. That
+// cancel is therefore scoped to sessions that HAD a binding. Archiving a
+// web-only chat leaves its tasks alone — it is the reversible organizing action
+// the UI presents (no confirmation, unarchive undoes it), and the destructive
+// counterpart is the Stop button, which cancels through CancelTaskByUser and
+// gives the user their typed prompt back.
 func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -552,7 +561,58 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Rows cancelled inside the tx, broadcast after it commits. nil when the
+	// request unarchives and nil for a web-only chat; BroadcastCancelledTasks
+	// is a no-op on an empty slice.
+	var cancelled []db.AgentTaskQueue
+
 	if req.Archived {
+		// Read the binding BEFORE the delete below, which is what erases the
+		// evidence: after it runs there is no way to tell a session that was
+		// on a channel from one that never was.
+		_, bindingErr := qtx.GetChannelChatSessionBindingBySessionAny(r.Context(), session.ID)
+		switch {
+		case bindingErr == nil:
+			// Bound, and the delete below is about to drop that binding.
+			// ClaimAgentTask does not read chat_session.status, so a task
+			// queued before the archive stays claimable after it: the daemon
+			// runs a turn on a conversation the user closed, spending runtime
+			// and quota and writing assistant messages into an archived chat.
+			// The binding is gone by then, so the brief describes the run as a
+			// private web chat — the misattribution the history note below
+			// exists to prevent — while the outbound senders, which resolve
+			// their destination through that same deleted row, have no route
+			// left to deliver on. Cancel in the same tx that drops the
+			// binding, as DeleteChatSession does.
+			//
+			// The query is not limited to never-started work: it also matches
+			// dispatched, running, waiting_local_directory and deferred, which
+			// is why the returned rows have to reach the post-commit broadcast
+			// below rather than being discarded.
+			cancelled, err = qtx.CancelAgentTasksByChatSession(r.Context(), session.ID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to cancel queued tasks for the archived session")
+				return
+			}
+		case errors.Is(bindingErr, pgx.ErrNoRows):
+			// A web-only chat has no room, no adapter and nowhere for a late
+			// answer to land, so there is nothing here to protect anyone from
+			// and archiving stays what the UI already says it is: the
+			// reversible "put it away" step that unarchive undoes, offered
+			// with no confirmation, with hard delete available only after it.
+			// Cancelling would also destroy the user's typed prompt — the Stop
+			// button cancels through CancelTaskByUser, which hands the prompt
+			// back (cancelled_chat_message.restore_to_input, or a durable
+			// chat_draft_restore row), and CancelAgentTasksByChatSession does
+			// neither.
+		default:
+			// We cannot tell whether this session was bound. Carrying on would
+			// silently skip the cancel and reopen the bug above, so fail the
+			// archive rather than guess; the caller can retry.
+			slog.Warn("read chat session channel binding failed", "session_id", sessionID, "error", bindingErr)
+			writeError(w, http.StatusInternalServerError, "failed to read chat session channel binding")
+			return
+		}
 		if err := qtx.DeleteChannelChatSessionBindingBySession(r.Context(), session.ID); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to clear chat session channel binding")
 			return
@@ -564,6 +624,15 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to commit chat session update")
 		return
 	}
+
+	// Post-commit broadcasts, same as DeleteChatSession: subscribers should
+	// never observe events for a tx that didn't actually persist. This is the
+	// call that captures the cancellation and revokes the tasks' mat_ tokens,
+	// reconciles each agent off 'working', emits task:cancelled so other
+	// clients drop the row instead of showing it queued until the next
+	// refresh, and wakes the runtime so a queued successor is claimed now
+	// rather than at the daemon's next poll.
+	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, cancelled)
 
 	resolvedSessionID := uuidToString(updated.ID)
 	status := updated.Status
@@ -687,7 +756,11 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 
 	// Post-commit broadcasts. Subscribers should never observe events for a
 	// tx that didn't actually persist.
-	h.TaskService.BroadcastCancelledTasks(r.Context(), cancelled)
+	//
+	// The workspace has to come from the session we just deleted: the tasks were
+	// cancelled and returned before the delete, so they still carry its id, but
+	// the row they would be resolved through is gone by now.
+	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, cancelled)
 
 	resolvedSessionID := uuidToString(session.ID)
 	h.publishChat(protocol.EventChatSessionDeleted, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionDeletedPayload{

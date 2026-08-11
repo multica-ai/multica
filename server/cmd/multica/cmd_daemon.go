@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -151,6 +152,9 @@ type daemonRuntimeProbe struct {
 }
 
 func runDaemonProbeRuntimes(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("daemon probe-runtimes"); err != nil {
+		return err
+	}
 	cfg, err := daemon.LoadConfig(daemon.Overrides{
 		Profile:       resolveProfile(cmd),
 		AllowNoAgents: true,
@@ -279,6 +283,143 @@ func healthPortForProfile(profile string) int {
 	return daemon.DefaultHealthPort + 1 + (h % 1000)
 }
 
+// unknownProfileError reports an explicitly named --profile that has no
+// directory under ~/.multica/profiles. It carries the known profile names so
+// both the text and JSON renderings can list them without re-reading the disk.
+type unknownProfileError struct {
+	Profile string
+	Known   []string
+}
+
+func (e *unknownProfileError) Error() string {
+	if len(e.Known) == 0 {
+		// The command is left unquoted so the shell-quoted profile name below
+		// stays the only quoting in the line and the hint pastes cleanly.
+		return fmt.Sprintf("unknown profile %q: no named profiles exist yet.\nCreate one with: multica login --profile %s", e.Profile, shellQuoteArg(e.Profile))
+	}
+	return fmt.Sprintf("unknown profile %q\nKnown profiles: %s", e.Profile, strings.Join(e.Known, ", "))
+}
+
+// jsonPayload renders the error for `--output json`. Known stays a non-nil
+// slice so the field marshals as [] rather than null.
+func (e *unknownProfileError) jsonPayload() map[string]any {
+	known := e.Known
+	if known == nil {
+		known = []string{}
+	}
+	return map[string]any{
+		"status":         "unknown_profile",
+		"profile":        e.Profile,
+		"known_profiles": known,
+	}
+}
+
+// profileConfigFileName is the file whose presence marks a directory under the
+// profiles root as an actual profile rather than just a parent of one. Kept in
+// step with cli.CLIConfigPathForProfile.
+const profileConfigFileName = "config.json"
+
+// profileExists reports whether an explicitly named profile has state on disk.
+//
+// The name is resolved through the same path logic the config layer uses
+// rather than matched against a flat directory listing, because a profile name
+// may contain separators: `multica --profile team/dev config set ...` creates
+// ~/.multica/profiles/team/dev. Matching against top-level entries would
+// reject that profile while offering its parent "team" as a suggestion.
+func profileExists(profile string) (bool, error) {
+	dir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return false, err
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return info.IsDir(), nil
+}
+
+// knownProfiles lists the profiles that exist on disk, sorted by name, for use
+// as suggestions after a name misses. A profile is a directory under the
+// profiles root holding a config.json, at any depth — requiring that file is
+// what keeps a bare parent directory such as "team" out of a list where every
+// entry is meant to be directly usable as --profile.
+//
+// A missing profiles root is not an error: it just means no named profile has
+// been created yet, the common case for a default-profile-only user.
+func knownProfiles() ([]string, error) {
+	root, err := profilesRootDir()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0)
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// An unreadable subtree costs us suggestions, not correctness:
+			// skip it so the rest of the list still reaches the user.
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || d.Name() != profileConfigFileName {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, filepath.Dir(path))
+		if relErr != nil || rel == "." {
+			return nil
+		}
+		names = append(names, filepath.ToSlash(rel))
+		return nil
+	})
+	if walkErr != nil {
+		if os.IsNotExist(walkErr) {
+			return nil, nil
+		}
+		return nil, walkErr
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// requireKnownProfile rejects an explicitly named profile that does not exist.
+//
+// healthPortForProfile hashes ANY string into a port, so without this check a
+// mistyped --profile probes a port nothing is bound to and the command reports
+// a flat "stopped" — indistinguishable from a daemon that is genuinely not
+// running, even while the correctly-named daemon serves happily on another
+// port (#6694). Failing loudly with the known names turns that dead end into a
+// one-glance fix.
+//
+// The default profile is never validated: it owns ~/.multica directly, has no
+// entry under profiles/, and is always legitimate.
+//
+// Callers must invoke this AFTER their daemon-managed-task guard
+// (requireHumanLocalCommand, or daemonStatusHealthPort for status). Listing the
+// profiles root inside a task would disclose the Owner's profile names, which
+// those guards exist to prevent.
+func requireKnownProfile(profile string) error {
+	if profile == "" {
+		return nil
+	}
+	exists, err := profileExists(profile)
+	if err != nil {
+		return fmt.Errorf("resolve profile %q: %w", profile, err)
+	}
+	if exists {
+		return nil
+	}
+	// Only now is the listing worth its disk walk, and only now can it be
+	// wrong in a way the user sees.
+	names, err := knownProfiles()
+	if err != nil {
+		return fmt.Errorf("list profiles: %w", err)
+	}
+	return &unknownProfileError{Profile: profile, Known: names}
+}
+
 // --- daemon start ---
 
 // daemonExecutable resolves the binary to spawn as the background daemon
@@ -309,6 +450,9 @@ func requireDaemonAuth(profile string) error {
 }
 
 func runDaemonStart(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("daemon start"); err != nil {
+		return err
+	}
 	foreground, _ := cmd.Flags().GetBool("foreground")
 	if foreground {
 		return runDaemonForeground(cmd)
@@ -947,7 +1091,13 @@ func requireDaemonRestartPreflight(cmd *cobra.Command, profile string) error {
 }
 
 func runDaemonRestart(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("daemon restart"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
+	if err := requireKnownProfile(profile); err != nil {
+		return err
+	}
 	healthPort := healthPortForProfile(profile)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -993,7 +1143,13 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 // --- daemon stop ---
 
 func runDaemonStop(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("daemon stop"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
+	if err := requireKnownProfile(profile); err != nil {
+		return err
+	}
 	healthPort := healthPortForProfile(profile)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -1076,14 +1232,32 @@ func requestDaemonShutdown(healthPort int) error {
 
 func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	profile := resolveProfile(cmd)
-	healthPort := healthPortForProfile(profile)
+	healthPort, err := daemonStatusHealthPort(cmd)
+	if err != nil {
+		return err
+	}
+	output, _ := cmd.Flags().GetString("output")
+
+	// Safe to list profiles here: daemonStatusHealthPort already rejected an
+	// explicit --profile inside a daemon-managed task.
+	if err := requireKnownProfile(profile); err != nil {
+		var unknown *unknownProfileError
+		if output == "json" && errors.As(err, &unknown) {
+			// Keep stdout a single valid JSON document. The non-zero exit
+			// carries the failure, so errSilent suppresses the stderr copy.
+			if printErr := cli.PrintJSON(os.Stdout, unknown.jsonPayload()); printErr != nil {
+				return printErr
+			}
+			return errSilent
+		}
+		return err
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
 
-	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, health)
 	}
@@ -1102,6 +1276,32 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
 	}
 	return nil
+}
+
+// daemonStatusHealthPort resolves which daemon `status` should probe. Outside a
+// task that is the --profile-derived port. Inside a managed task it is the
+// daemon-injected MULTICA_DAEMON_PORT and nothing else: healthPortForProfile
+// hashes whatever profile name the caller passes, so deriving the port there
+// would let a task report on a daemon that is not the one hosting it — and for
+// a task hosted by a named-profile daemon it would silently probe the default
+// daemon instead. A missing port fails closed rather than guessing.
+func daemonStatusHealthPort(cmd *cobra.Command) (int, error) {
+	profile := resolveProfile(cmd)
+	if !inDaemonManagedExecutionContext() {
+		return healthPortForProfile(profile), nil
+	}
+	if profile != "" {
+		return 0, fmt.Errorf("daemon status --profile is not available inside a daemon-managed task")
+	}
+	raw := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_PORT"))
+	if raw == "" {
+		return 0, fmt.Errorf("daemon status inside a daemon-managed task requires the daemon-injected MULTICA_DAEMON_PORT")
+	}
+	port, err := strconv.Atoi(raw)
+	if err != nil || port <= 0 {
+		return 0, fmt.Errorf("invalid MULTICA_DAEMON_PORT %q inside a daemon-managed task", raw)
+	}
+	return port, nil
 }
 
 // printDaemonStatusReport renders a key/value summary of the daemon health
@@ -1145,7 +1345,13 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 // --- daemon logs ---
 
 func runDaemonLogs(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("daemon logs"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
+	if err := requireKnownProfile(profile); err != nil {
+		return err
+	}
 	logPath := daemonLogPathForProfile(profile)
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {
 		return fmt.Errorf("no log file found at %s\nThe daemon may not have been started in background mode", logPath)
@@ -1338,6 +1544,7 @@ func resolveDaemonDisableSignal(flagValue bool, envName string, cfgValue bool) b
 // --- daemon disk-usage ---
 
 func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
+	taskContext := inDaemonManagedExecutionContext()
 	profile := resolveProfile(cmd)
 	rootOverride, _ := cmd.Flags().GetString("workspaces-root")
 	byWorkspace, _ := cmd.Flags().GetBool("by-workspace")
@@ -1346,6 +1553,11 @@ func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 	output, _ := cmd.Flags().GetString("output")
 	allProfiles, _ := cmd.Flags().GetBool("all-profiles")
 
+	if taskContext {
+		if err := checkTaskDiskUsageScope(profile, rootOverride, allProfiles); err != nil {
+			return err
+		}
+	}
 	if byWorkspace && byTask {
 		return fmt.Errorf("--by-workspace and --by-task are mutually exclusive")
 	}
@@ -1360,7 +1572,7 @@ func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 		return runDaemonDiskUsageAggregate(cmd, byWorkspace, top, output)
 	}
 
-	workspacesRoot, err := daemon.ResolveWorkspacesRoot(profile, rootOverride)
+	workspacesRoot, err := resolveDiskUsageRoot(taskContext, profile, rootOverride)
 	if err != nil {
 		return fmt.Errorf("resolve workspaces root: %w", err)
 	}
@@ -1371,7 +1583,9 @@ func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 	}
 	// Resolve before --top trims the slice: the batch endpoint costs the same
 	// either way, and the JSON consumer sees statuses for everything it gets.
-	if diskUsageNeedsParentStatus(byWorkspace, output) {
+	// Skipped in a task: the fetcher authenticates with the Owner profile's
+	// stored token, which a task must not borrow, so the column stays blank.
+	if !taskContext && diskUsageNeedsParentStatus(byWorkspace, output) {
 		fillDiskUsageParentStatuses(cmd, profile, &report)
 	}
 
@@ -1391,12 +1605,48 @@ func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 
 	if byWorkspace {
 		printDiskUsageWorkspaceTable(os.Stdout, report)
-		printDiskUsageOtherRootsHint(os.Stdout, report, profile, rootOverride)
+		printDiskUsageOtherRootsHint(os.Stdout, report, profile, rootOverride, taskContext)
 		return nil
 	}
 	printDiskUsageTaskTable(os.Stdout, report)
-	printDiskUsageOtherRootsHint(os.Stdout, report, profile, rootOverride)
+	printDiskUsageOtherRootsHint(os.Stdout, report, profile, rootOverride, taskContext)
 	return nil
+}
+
+// checkTaskDiskUsageScope keeps a managed task's disk-usage view inside the
+// daemon root that hosts it. Each rejected input widens the report past that
+// boundary: --all-profiles enumerates ~/.multica/profiles and discloses the
+// Owner's profile names, while --workspaces-root and --profile aim the scan at
+// a directory this daemon does not manage.
+func checkTaskDiskUsageScope(profile, rootOverride string, allProfiles bool) error {
+	switch {
+	case allProfiles:
+		return fmt.Errorf("daemon disk-usage --all-profiles is not available inside a daemon-managed task")
+	case rootOverride != "":
+		return fmt.Errorf("daemon disk-usage --workspaces-root is not available inside a daemon-managed task")
+	case profile != "":
+		return fmt.Errorf("daemon disk-usage --profile is not available inside a daemon-managed task")
+	}
+	return nil
+}
+
+// resolveDiskUsageRoot picks the directory to scan. A managed task reads the
+// daemon-injected root only: ResolveWorkspacesRoot falls back to a $HOME- and
+// profile-derived default, which for a task hosted by a named-profile daemon
+// resolves to the default root and reports a tree the task has nothing to do
+// with. Failing closed on a missing value keeps that guess out of the output.
+func resolveDiskUsageRoot(taskContext bool, profile, rootOverride string) (string, error) {
+	if !taskContext {
+		return daemon.ResolveWorkspacesRoot(profile, rootOverride)
+	}
+	root := strings.TrimSpace(os.Getenv(daemon.TaskWorkspacesRootEnv))
+	if root == "" {
+		return "", fmt.Errorf("daemon-managed task requires the daemon-injected workspaces root in %s", daemon.TaskWorkspacesRootEnv)
+	}
+	if !filepath.IsAbs(root) {
+		return "", fmt.Errorf("%s must be an absolute path", daemon.TaskWorkspacesRootEnv)
+	}
+	return filepath.Clean(root), nil
 }
 
 // diskUsageNeedsParentStatus reports whether this invocation renders per-task
@@ -1677,8 +1927,15 @@ func printDiskUsageWorkspaceTable(w io.Writer, report daemon.DiskUsageReport) {
 // app's `desktop-<host>` root behind a non-empty default root. It fires
 // whenever such roots exist (empty current root or not); the only opt-out is an
 // explicit --workspaces-root, where the user already chose exactly what to scan.
-func printDiskUsageOtherRootsHint(w io.Writer, report daemon.DiskUsageReport, profile, rootOverride string) {
+func printDiskUsageOtherRootsHint(w io.Writer, report daemon.DiskUsageReport, profile, rootOverride string, taskContext bool) {
 	if rootOverride != "" {
+		return
+	}
+	// The suggestions are built by listing ~/.multica/profiles, so printing
+	// them inside a task would disclose the Owner's profile names — exactly
+	// what rejecting --all-profiles prevents — and every command they suggest
+	// is rejected there anyway.
+	if taskContext {
 		return
 	}
 	suggestions := diskUsageProfileSuggestions(profile, report.WorkspacesRoot)

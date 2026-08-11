@@ -344,6 +344,13 @@ import {
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  IssueViewSchema,
+  IssueViewListSchema,
+  IssueViewPreferenceSchema,
+  EMPTY_ISSUE_VIEW_PREFERENCE,
+  type IssueView,
+  type IssueViewPreference,
+  type CreateIssueViewRequest,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -3035,9 +3042,96 @@ export class ApiClient {
     });
   }
 
+  // Saved issue views (MUL-4796). Responses go through zod so installed
+  // desktop builds survive backend drift; a malformed list degrades to []
+  // (selector shows only built-ins) rather than blanking the page.
+  async listIssueViews(params: {
+    scope_type: string;
+    scope_id?: string | null;
+  }): Promise<IssueView[]> {
+    const qs = new URLSearchParams({ scope_type: params.scope_type });
+    if (params.scope_id) qs.set("scope_id", params.scope_id);
+    const raw = await this.fetch<unknown>(`/api/issue-views?${qs.toString()}`);
+    return parseWithFallback(raw, IssueViewListSchema, [], {
+      endpoint: "GET /api/issue-views",
+    });
+  }
+
+  async createIssueView(data: CreateIssueViewRequest): Promise<IssueView | null> {
+    const raw = await this.fetch<unknown>("/api/issue-views", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    // null fallback: the create itself succeeded server-side; a response we
+    // cannot parse must not crash the dialog — callers refetch the list.
+    return parseWithFallback(raw, IssueViewSchema.nullable(), null, {
+      endpoint: "POST /api/issue-views",
+    });
+  }
+
+  async updateIssueView(
+    id: string,
+    data: {
+      name?: string;
+      visibility?: "private" | "workspace";
+      scope_variant?: string | null;
+      query?: Record<string, unknown>;
+      display?: Record<string, unknown>;
+      expected_revision: number;
+    },
+  ): Promise<IssueView | null> {
+    const raw = await this.fetch<unknown>(`/api/issue-views/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueViewSchema.nullable(), null, {
+      endpoint: "PATCH /api/issue-views/{id}",
+    });
+  }
+
+  async getIssueView(id: string): Promise<IssueView | null> {
+    const raw = await this.fetch<unknown>(`/api/issue-views/${id}`);
+    return parseWithFallback(raw, IssueViewSchema.nullable(), null, {
+      endpoint: "GET /api/issue-views/{id}",
+    });
+  }
+
+  async deleteIssueView(id: string): Promise<void> {
+    await this.fetch(`/api/issue-views/${id}`, { method: "DELETE" });
+  }
+
+  async getIssueViewPreference(params: {
+    scope_type: string;
+    scope_id?: string | null;
+  }): Promise<IssueViewPreference> {
+    const qs = new URLSearchParams({ scope_type: params.scope_type });
+    if (params.scope_id) qs.set("scope_id", params.scope_id);
+    const raw = await this.fetch<unknown>(`/api/issue-view-preferences?${qs.toString()}`);
+    return parseWithFallback(raw, IssueViewPreferenceSchema, EMPTY_ISSUE_VIEW_PREFERENCE, {
+      endpoint: "GET /api/issue-view-preferences",
+    });
+  }
+
+  async putIssueViewPreference(data: {
+    scope_type: string;
+    scope_id?: string | null;
+    prefs: { hidden: string[]; order: string[] };
+  }): Promise<IssueViewPreference> {
+    const raw = await this.fetch<unknown>("/api/issue-view-preferences", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueViewPreferenceSchema, EMPTY_ISSUE_VIEW_PREFERENCE, {
+      endpoint: "PUT /api/issue-view-preferences",
+    });
+  }
+
   // Pins
   async listPins(): Promise<PinnedItem[]> {
-    return this.fetch("/api/pins");
+    // include=view is the capability opt-in: the server withholds view pins
+    // from clients that don't declare support (old builds treated any
+    // non-issue pin as a project pin and auto-deleted it on 404).
+    return this.fetch("/api/pins?include=view");
   }
 
   async createPin(data: CreatePinRequest): Promise<PinnedItem> {

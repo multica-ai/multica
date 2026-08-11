@@ -211,6 +211,62 @@ export const EMPTY_RESOURCE_LABELS_RESPONSE: ResourceLabelsResponse = {
   labels: [],
 };
 
+// Saved issue views (MUL-4796). `query`/`display` are opaque definition
+// blobs interpreted client-side per `definition_version` — keep them as
+// loose records so newer servers can add fields freely. `scope_type` /
+// `visibility` stay lenient strings; downstream code uses explicit `===`
+// comparisons and default branches per the API-compat rules.
+export const IssueViewSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  owner_id: z.string().default(""),
+  name: z.string().default(""),
+  scope_type: z.string().default("workspace"),
+  scope_id: z.string().nullish(),
+  scope_variant: z.string().nullish(),
+  visibility: z.string().default("private"),
+  definition_version: z.number().default(1),
+  query: z.record(z.string(), z.unknown()).default({}),
+  display: z.record(z.string(), z.unknown()).default({}),
+  revision: z.number().default(1),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export type IssueView = z.infer<typeof IssueViewSchema>;
+
+export const IssueViewListSchema = z.array(IssueViewSchema);
+
+export const IssueViewPreferenceSchema = z.object({
+  scope_type: z.string().default("workspace"),
+  scope_id: z.string().nullish(),
+  prefs: z.object({
+    hidden: z.array(z.string()).default([]),
+    order: z.array(z.string()).default([]),
+  }).loose().default({ hidden: [], order: [] }),
+  updated_at: z.string().default(""),
+}).loose();
+
+export type IssueViewPreference = z.infer<typeof IssueViewPreferenceSchema>;
+
+export const EMPTY_ISSUE_VIEW_PREFERENCE: IssueViewPreference = {
+  scope_type: "workspace",
+  scope_id: null,
+  prefs: { hidden: [], order: [] },
+  updated_at: "",
+};
+
+export interface CreateIssueViewRequest {
+  name: string;
+  scope_type: "workspace" | "my" | "project";
+  scope_id?: string | null;
+  scope_variant?: "assigned" | "created" | "involved" | "any" | "members" | "agents" | null;
+  visibility: "private" | "workspace";
+  definition_version: number;
+  query: Record<string, unknown>;
+  display: Record<string, unknown>;
+}
+
 // Custom property definitions. `type` stays a lenient string so newer server
 // types don't break installed clients; UI narrows with isKnownPropertyType.
 export const IssuePropertySchema = z.object({

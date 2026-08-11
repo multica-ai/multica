@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -124,9 +125,21 @@ func (h *Handler) chatHistorySession(w http.ResponseWriter, r *http.Request) (pg
 func (h *Handler) respondChatHistory(w http.ResponseWriter, r *http.Request, sessionID pgtype.UUID, page channel.HistoryPage, err error) {
 	if err != nil {
 		if errors.Is(err, slack.ErrNoSlackSession) {
+			// One read of the binding, two derived fields. Reading it twice
+			// lets an archive land between them and produce a response whose
+			// channel_type names a platform while its note says there is no
+			// channel.
+			channelType, bindingErr := h.sessionChannelType(r.Context(), sessionID)
+			if bindingErr != nil {
+				slog.Error("chat session channel binding read failed", append(logger.RequestAttrs(r),
+					"error", bindingErr, "chat_session_id", uuidToString(sessionID))...)
+				writeError(w, http.StatusInternalServerError, "failed to read chat session channel binding")
+				return
+			}
 			writeJSON(w, http.StatusOK, ChatChannelHistoryResponse{
-				Messages: []channel.HistoryMessage{},
-				Note:     "This conversation is not connected to a chat channel, so there is no channel history to read.",
+				ChannelType: channelType,
+				Messages:    []channel.HistoryMessage{},
+				Note:        noHistoryNote(channelType),
 			})
 			return
 		}
@@ -173,4 +186,46 @@ func parseHistoryLimit(raw string) int {
 		return 0
 	}
 	return n
+}
+
+// noHistoryNote explains an empty read in terms the agent can act on. It is a
+// pure function of the channel type its caller already resolved, so the note
+// and the response's channel_type cannot disagree.
+//
+// The reader is Slack-only, so every other platform lands here — and the note
+// said "this conversation is not connected to a chat channel", which for a
+// WeCom, Lark or DingTalk session is simply false. An agent told it is in a
+// web-only conversation reasons differently about who can see its answer than
+// one told it is in a group whose backlog it cannot read, and that is a
+// difference worth not lying about.
+func noHistoryNote(channelType string) string {
+	if channelType == "" {
+		return "This conversation is not connected to a chat channel, so there is no channel history to read."
+	}
+	return "This conversation is on " + channelType + ", whose backlog this server cannot read. You can see the messages addressed to you in this session, but not the rest of the room."
+}
+
+// sessionChannelType names the platform behind a session, or "" when there is
+// none. Channel-agnostic on purpose: a per-platform lookup here would go blind
+// the next time a channel is added, which is exactly how the note above came
+// to be wrong.
+//
+// Only "no such row" means "no channel". Any other failure is us being unable
+// to tell, and answering "" there hands the agent the very note this change
+// removes — a WeCom or Lark session told it is web-only, on a 200, because a
+// connection blipped. The caller reports that rather than guessing, the same
+// way the archive path refuses to guess about the same read.
+func (h *Handler) sessionChannelType(ctx context.Context, sessionID pgtype.UUID) (string, error) {
+	if h.Queries == nil || !sessionID.Valid {
+		return "", nil
+	}
+	binding, err := h.Queries.GetChannelChatSessionBindingBySessionAny(ctx, sessionID)
+	switch {
+	case err == nil:
+		return binding.ChannelType, nil
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", nil
+	default:
+		return "", err
+	}
 }

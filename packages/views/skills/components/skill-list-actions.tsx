@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Check,
   ChevronRight,
+  ExternalLink,
   Loader2,
   MoreHorizontal,
   Plus,
@@ -16,6 +17,7 @@ import { toast } from "sonner";
 import type { Agent, SkillSummary } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -48,6 +50,7 @@ import {
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { useIntentNavigate } from "../../navigation";
 import type { SkillRow } from "./skills-page";
 
 // Shared context the row kebab and the batch toolbar both need. Assembled
@@ -520,6 +523,9 @@ export function SkillRowActions({
   ctx: SkillActionsContext;
 }) {
   const { t } = useT("skills");
+  const { t: tCommon } = useT("common");
+  const paths = useWorkspacePaths();
+  const intentNavigate = useIntentNavigate();
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -541,6 +547,19 @@ export function SkillRowActions({
           }
         />
         <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuItem
+            onClick={() =>
+              intentNavigate(
+                paths.skillDetail(row.skill.id),
+                "foreground-tab",
+                row.skill.name,
+              )
+            }
+          >
+            <ExternalLink className="size-3.5" />
+            {tCommon(($) => $.navigation.open_in_new_tab)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setAddOpen(true)}>
             <Plus className="size-3.5" />
             {t(($) => $.actions.add_to_agent)}

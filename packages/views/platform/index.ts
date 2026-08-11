@@ -17,5 +17,7 @@ export {
   ScrollRestorationProvider,
   useRestoredScrollOffset,
   useRestoredScrollRef,
+  useRestoredViewState,
+  useViewStateWriter,
   type ScrollRestorationAdapter,
 } from "./scroll-restoration";

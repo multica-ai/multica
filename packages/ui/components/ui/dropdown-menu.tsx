@@ -23,13 +23,14 @@ function DropdownMenuContent({
   alignOffset = 0,
   side = "bottom",
   sideOffset = 4,
+  anchor,
   className,
   onClick,
   ...props
 }: MenuPrimitive.Popup.Props &
   Pick<
     MenuPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset"
+    "align" | "alignOffset" | "side" | "sideOffset" | "anchor"
   >) {
   // Stop click events from bubbling out of the menu. Base UI portals the
   // popup so DOM is detached, but React's synthetic event system still
@@ -44,6 +45,7 @@ function DropdownMenuContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
+        anchor={anchor}
       >
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"

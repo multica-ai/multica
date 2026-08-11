@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { api } from "@multica/core/api";
@@ -585,5 +586,26 @@ describe("AgentTranscriptDialog", () => {
     ]);
 
     expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
+  });
+
+  // The run-details provider row used to carry its own name map. Pointing it at
+  // the shared runtime formatter is right for every provider except Claude,
+  // whose runtime-list name is "Claude" while this diagnostic row has always
+  // said "Claude Code" — and whose legacy `claude-code` slug title-cases into
+  // "Claude-code". Both aliases are pinned here so the next cleanup keeps them.
+  it.each([
+    ["claude", "Claude Code"],
+    ["claude-code", "Claude Code"],
+    // Everything outside the alias table defers to the shared runtime
+    // formatter, so a new provider needs no edit here.
+    ["omp", "Oh-My-Pi"],
+  ])("names a %s run %s in the run details", async (provider, expected) => {
+    const user = userEvent.setup();
+    vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor(provider)]);
+
+    renderDialog(items, { task: { ...baseTask, runtime_id: "runtime-1" } });
+
+    await user.click(await screen.findByRole("button", { name: "Run details" }));
+    expect(await screen.findByText(expected)).toBeInTheDocument();
   });
 });

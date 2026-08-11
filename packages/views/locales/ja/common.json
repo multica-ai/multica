@@ -105,5 +105,8 @@
     "error_already_bound": "この WeCom ID は別の Multica ユーザーにリンクされています。アカウントの移行には明示的な解除が必要です。",
     "error_not_member": "サインインしている Multica アカウントはこのワークスペースのメンバーではありません。",
     "error_unknown": "問題が発生しました。もう一度試し、それでも解決しない場合はワークスペース管理者にお問い合わせください。"
+  },
+  "navigation": {
+    "open_in_new_tab": "新しいタブで開く"
   }
 }

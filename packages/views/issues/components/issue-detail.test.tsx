@@ -349,6 +349,11 @@ vi.mock("@multica/core/issues/stores", async () => ({
   ...(await vi.importActual<
     typeof import("@multica/core/issues/stores/sub-issue-display-store")
   >("@multica/core/issues/stores/sub-issue-display-store")),
+  // Real store, in-memory (no localStorage): backs the sub-issues section's
+  // collapsed state.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/sub-issues-collapse-store")
+  >("@multica/core/issues/stores/sub-issues-collapse-store")),
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
       const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };

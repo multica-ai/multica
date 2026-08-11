@@ -274,6 +274,11 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			cwd = "."
 		}
 
+		// sessionResult is whichever of session/new or session/resume produced
+		// this session. It carries the configOptions that the effort step
+		// below reads, so both branches have to keep hold of it.
+		var sessionResult json.RawMessage
+
 		if opts.ResumeSessionID != "" {
 			// Per ACP Session Setup, session/resume accepts mcpServers and
 			// the runtime re-connects them as part of the resume. Without
@@ -300,6 +305,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 				}
 				return
 			}
+			sessionResult = result
 			var changed bool
 			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
 			if changed {
@@ -319,6 +325,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
+			sessionResult = result
 			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
 				finalStatus = "failed"
@@ -371,6 +378,19 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			}
 			b.cfg.Logger.Info("reasonix session model set", "model", opts.Model)
 		}
+
+		// 3b. Apply a persisted thinking override through whichever effort
+		// option this session advertises. Unlike set_model above this must NOT
+		// fail the task: an effort we could not apply still runs the prompt at
+		// the runtime's own default, which is a degraded result rather than a
+		// wrong one. The helper logs what actually took effect.
+		//
+		// sessionResult stops describing the live session once set_model runs
+		// above, because reasonix derives the effort catalog from the current
+		// model and returns nothing from set_model. Say so, so the helper
+		// trusts the runtime's answer over a stale advertised list.
+		applyACPEffortOption(runCtx, c.request, "reasonix", b.cfg.Logger,
+			sessionID, sessionResult, opts.ThinkingLevel, opts.Model == "")
 
 		// 4. Send the prompt and wait for PromptResponse. Reasonix loads
 		// AGENTS.md from cwd, so the daemon deliberately does not duplicate the

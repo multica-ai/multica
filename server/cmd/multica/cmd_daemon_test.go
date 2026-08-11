@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"text/template"
@@ -46,6 +47,26 @@ func TestDaemonAlive(t *testing.T) {
 	// A response with no status key at all (e.g. malformed) is not alive.
 	if daemonAlive(map[string]any{}) {
 		t.Errorf("daemonAlive(no status) = true, want false")
+	}
+}
+
+func TestDaemonLocalCommandsFailClosedInTaskContext(t *testing.T) {
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	cases := map[string]func() error{
+		"probe-runtimes": func() error { return runDaemonProbeRuntimes(daemonProbeRuntimesCmd, nil) },
+		"start":          func() error { return runDaemonStart(daemonStartCmd, nil) },
+		"restart":        func() error { return runDaemonRestart(daemonRestartCmd, nil) },
+		"stop":           func() error { return runDaemonStop(daemonStopCmd, nil) },
+		"logs":           func() error { return runDaemonLogs(daemonLogsCmd, nil) },
+	}
+	for name, run := range cases {
+		err := run()
+		if err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+			t.Fatalf("daemon %s error = %v, want task-context guard", name, err)
+		}
 	}
 }
 
@@ -604,7 +625,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsProfilesWithTasks(t *testing.T) {
 	var out bytes.Buffer
 	printDiskUsageOtherRootsHint(&out, daemon.DiskUsageReport{
 		WorkspacesRoot: filepath.Join(home, "multica_workspaces"),
-	}, "", "")
+	}, "", "", false)
 
 	got := out.String()
 	if !strings.Contains(got, "Other workspace roots contain task directories:") {
@@ -646,7 +667,7 @@ func TestPrintDiskUsageOtherRootsHintFiresWhenCurrentRootNonEmpty(t *testing.T) 
 	printDiskUsageOtherRootsHint(&out, daemon.DiskUsageReport{
 		WorkspacesRoot: filepath.Join(home, "multica_workspaces"),
 		TotalTaskCount: 7, // current root is NOT empty
-	}, "", "")
+	}, "", "", false)
 
 	got := out.String()
 	if !strings.Contains(got, "multica --profile desktop-host daemon disk-usage") {
@@ -664,7 +685,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsDefaultFromNamedProfile(t *testing.
 	var out bytes.Buffer
 	printDiskUsageOtherRootsHint(&out, daemon.DiskUsageReport{
 		WorkspacesRoot: filepath.Join(home, "multica_workspaces_named"),
-	}, "named", "")
+	}, "named", "", false)
 
 	got := out.String()
 	if !strings.Contains(got, "multica daemon disk-usage  #") {
@@ -683,7 +704,7 @@ func TestPrintDiskUsageOtherRootsHintSkipsExplicitRootOverride(t *testing.T) {
 	var out bytes.Buffer
 	printDiskUsageOtherRootsHint(&out, daemon.DiskUsageReport{
 		WorkspacesRoot: filepath.Join(home, "custom-root"),
-	}, "", filepath.Join(home, "custom-root"))
+	}, "", filepath.Join(home, "custom-root"), false)
 
 	if got := out.String(); got != "" {
 		t.Fatalf("hint output = %q, want no hint for explicit root override", got)
@@ -823,5 +844,92 @@ func TestVersionTemplateMatchesDaemonProbe(t *testing.T) {
 		t.Fatalf("daemon.ParseSelfVersion(%q) = %q, want the build version %q — "+
 			"the --version template and the auto-reload probe have diverged",
 			rendered.String(), got, version)
+	}
+}
+
+// `daemon status` is allowed inside a task, but only against the daemon that
+// hosts it. healthPortForProfile hashes whatever --profile it is handed, so a
+// task must take the port the daemon injected instead of re-deriving one:
+// re-deriving reports the default daemon when the task is actually hosted by a
+// named-profile daemon, and lets a task probe an unrelated one on purpose.
+func TestDaemonStatusHealthPortInTaskContext(t *testing.T) {
+	const injectedPort = 19601
+
+	t.Run("outside a task derives the port from the profile", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		clearDaemonTaskEnv(t)
+
+		got, err := daemonStatusHealthPort(testCmd())
+		if err != nil {
+			t.Fatalf("daemonStatusHealthPort: %v", err)
+		}
+		if want := healthPortForProfile(""); got != want {
+			t.Fatalf("health port = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("inside a task uses the injected port", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		clearDaemonTaskEnv(t)
+		t.Setenv("MULTICA_TASK_ID", "task-test")
+		t.Setenv("MULTICA_DAEMON_PORT", strconv.Itoa(injectedPort))
+
+		got, err := daemonStatusHealthPort(testCmd())
+		if err != nil {
+			t.Fatalf("daemonStatusHealthPort: %v", err)
+		}
+		if got != injectedPort {
+			t.Fatalf("health port = %d, want the injected %d", got, injectedPort)
+		}
+		if got == healthPortForProfile("") {
+			t.Fatal("injected port collided with the profile-derived port; the test proves nothing")
+		}
+	})
+
+	t.Run("inside a task rejects --profile", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		clearDaemonTaskEnv(t)
+		t.Setenv("MULTICA_TASK_ID", "task-test")
+		t.Setenv("MULTICA_DAEMON_PORT", strconv.Itoa(injectedPort))
+
+		cmd := &cobra.Command{}
+		cmd.Flags().String("profile", "", "")
+		if err := cmd.Flags().Set("profile", "staging"); err != nil {
+			t.Fatalf("set profile flag: %v", err)
+		}
+		_, err := daemonStatusHealthPort(cmd)
+		if err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+			t.Fatalf("error = %v, want a --profile rejection", err)
+		}
+	})
+
+	t.Run("inside a task fails closed on a missing or invalid port", func(t *testing.T) {
+		for name, value := range map[string]string{"missing": "", "invalid": "not-a-port", "zero": "0"} {
+			t.Run(name, func(t *testing.T) {
+				t.Chdir(t.TempDir())
+				clearDaemonTaskEnv(t)
+				t.Setenv("MULTICA_TASK_ID", "task-test")
+				t.Setenv("MULTICA_DAEMON_PORT", value)
+
+				if _, err := daemonStatusHealthPort(testCmd()); err == nil {
+					t.Fatalf("MULTICA_DAEMON_PORT=%q resolved a port, want fail closed", value)
+				}
+			})
+		}
+	})
+}
+
+// clearDaemonTaskEnv drops every daemon-injected marker so a subtest starts
+// from a known context and can opt back in to exactly the ones it needs.
+func clearDaemonTaskEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"MULTICA_AGENT_ID",
+		"MULTICA_TASK_ID",
+		"MULTICA_DAEMON_PORT",
+		"MULTICA_TASK_CONFIG_ROOT",
+		daemon.TaskWorkspacesRootEnv,
+	} {
+		t.Setenv(key, "")
 	}
 }

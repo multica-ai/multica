@@ -15,6 +15,7 @@ import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssuesScope } from "@multica/core/issues/stores";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -119,9 +120,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       });
     }
   }, [project?.id, project?.title, project?.description, project?.icon, project?.status, recordRecentContext, wsId]);
+  const issueTab = useIssuesScope(`project:${projectId}`);
   const issueScope = useMemo(
-    () => ({ type: "project" as const, projectId }),
-    [projectId],
+    () => ({ type: "project" as const, projectId, actorKind: issueTab }),
+    [projectId, issueTab],
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));

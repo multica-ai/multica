@@ -1,4 +1,12 @@
-import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
+import {
+  cloneElement,
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -135,7 +143,9 @@ vi.mock("@multica/core/paths", () => ({
   }),
 }));
 
-vi.mock("../navigation", () => ({
+// Mocked at the context module rather than the barrel so <AppLink> stays the
+// real component and its click contract is what the test exercises.
+vi.mock("../navigation/context", () => ({
   useNavigation: () => ({ push: mockNavigationPush }),
 }));
 
@@ -228,9 +238,22 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
   DropdownMenuTrigger: ({ render }: { render: ReactNode }) => <>{render}</>,
   DropdownMenuContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuItem: ({ children, onClick }: any) => (
-    <button type="button" onClick={onClick}>{children}</button>
-  ),
+  // `render` mirrors Base UI: an item can BE another element (an <AppLink>).
+  // The real Item gives that element role="button", which the queries match.
+  DropdownMenuItem: ({
+    children,
+    onClick,
+    render,
+  }: {
+    children: ReactNode;
+    onClick?: () => void;
+    render?: ReactElement<{ role?: string; children?: ReactNode }>;
+  }) =>
+    render ? (
+      cloneElement(render, { role: "button" }, children)
+    ) : (
+      <button type="button" onClick={onClick}>{children}</button>
+    ),
   DropdownMenuSeparator: () => null,
 }));
 

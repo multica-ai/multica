@@ -3,7 +3,7 @@
 import { ChevronRight, FileText, MessageSquare } from "lucide-react";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { cn } from "@multica/ui/lib/utils";
-import { useNavigation } from "../../navigation";
+import { AppLink, useBackOrReplace, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { AgentCreateShell } from "./create-shell";
 import { withSquadParam } from "./squad-param";
@@ -17,6 +17,7 @@ export function ChooseCreateMethodPage() {
   const { t } = useT("agents");
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
+  const backOrReplace = useBackOrReplace();
   const squadId = navigation.searchParams.get("squad");
 
   return (
@@ -27,16 +28,12 @@ export function ChooseCreateMethodPage() {
           : t(($) => $.creation_studio.title)
       }
       step={t(($) => $.creation_studio.step_choose)}
-      onBack={() => navigation.push(paths.agents())}
+      onBack={() => backOrReplace(paths.agents())}
     >
       <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-10">
         <CreateMethodChooser
-          onBlank={() =>
-            navigation.push(withSquadParam(paths.newAgentManual(), squadId))
-          }
-          onAI={() =>
-            navigation.push(withSquadParam(paths.newAgentAi(), squadId))
-          }
+          blankHref={withSquadParam(paths.newAgentManual(), squadId)}
+          aiHref={withSquadParam(paths.newAgentAi(), squadId)}
         />
       </main>
     </AgentCreateShell>
@@ -44,11 +41,11 @@ export function ChooseCreateMethodPage() {
 }
 
 export function CreateMethodChooser({
-  onBlank,
-  onAI,
+  blankHref,
+  aiHref,
 }: {
-  onBlank: () => void;
-  onAI: () => void;
+  blankHref: string;
+  aiHref: string;
 }) {
   const { t } = useT("agents");
   const modes = [
@@ -56,13 +53,13 @@ export function CreateMethodChooser({
       icon: FileText,
       title: t(($) => $.creation_studio.modes.blank.title),
       description: t(($) => $.creation_studio.modes.blank.description),
-      action: onBlank,
+      href: blankHref,
     },
     {
       icon: MessageSquare,
       title: t(($) => $.creation_studio.modes.ai.title),
       description: t(($) => $.creation_studio.modes.ai.description),
-      action: onAI,
+      href: aiHref,
       recommended: true,
     },
   ];
@@ -81,11 +78,10 @@ export function CreateMethodChooser({
       </div>
       <div className="mx-auto mt-9 grid max-w-3xl gap-4 md:grid-cols-2">
           {modes.map(
-            ({ icon: Icon, title, description, action, recommended }) => (
-              <button
+            ({ icon: Icon, title, description, href, recommended }) => (
+              <AppLink
                 key={title}
-                type="button"
-                onClick={action}
+                href={href}
                 className={cn(
                   "group relative flex min-h-56 flex-col items-start rounded-xl border bg-card p-5 text-left",
                   "transition-[border-color,background-color,transform] hover:-translate-y-0.5 hover:border-primary/40 hover:bg-accent/30",
@@ -112,7 +108,7 @@ export function CreateMethodChooser({
                     aria-hidden="true"
                   />
                 </span>
-              </button>
+              </AppLink>
           ),
         )}
       </div>

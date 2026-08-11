@@ -33,6 +33,8 @@ import (
 const (
 	agentOfflineText  = "⚠️ The agent is offline right now. Your message was received and will be handled once it's back online."
 	agentArchivedText = "⚠️ This agent has been archived and can't respond. Please contact your workspace admin."
+	freshPendingText  = "✅ Fresh start ready. Your next chat message will run without previous context."
+	issueUsageText    = "Please include an issue title. Use:\n\n`/issue <title>`\n`[description]` (optional)"
 )
 
 // bindingMinter is the binding-token surface the replier needs.
@@ -115,6 +117,16 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 	case engine.OutcomeAgentArchived:
 		if err := r.post(ctx, inst, msg, agentArchivedText); err != nil {
 			r.logger.WarnContext(ctx, "slack replier: archived notice failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeFreshPending:
+		if err := r.post(ctx, inst, msg, freshPendingText); err != nil {
+			r.logger.WarnContext(ctx, "slack replier: fresh-start confirmation failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeIssueUsage:
+		if err := r.post(ctx, inst, msg, issueUsageText); err != nil {
+			r.logger.WarnContext(ctx, "slack replier: issue usage reply failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeIngested:

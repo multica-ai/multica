@@ -164,6 +164,24 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
+	// Saved views follow the private-quick-action rule above: a departed
+	// member's PRIVATE views are invisible to everyone left yet still count
+	// against quota, and a re-invite must not resurrect them. Shared views
+	// stay — they are workspace furniture other members may rely on. The
+	// per-user view-bar preferences are meaningless without the member.
+	if err := qtx.DeletePrivateIssueViewsByOwner(ctx, db.DeletePrivateIssueViewsByOwnerParams{
+		WorkspaceID: workspaceID,
+		OwnerID:     userID,
+	}); err != nil {
+		return empty, err
+	}
+	if err := qtx.DeleteIssueViewPreferencesByUser(ctx, db.DeleteIssueViewPreferencesByUserParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
 	// issue_subscriber carries no FK either (same MUL-3515 rule as the two
 	// prunes above), and MUL-5483 gave agents a path that writes member
 	// subscriber rows on their own initiative. Dropping them in this tx is what
@@ -225,7 +243,10 @@ func (h *Handler) publishRevocation(ctx context.Context, result revocationResult
 	// subscribers see "task cancelled" before the parent agent disappears
 	// from active lists, matching the order ArchiveAgent uses.
 	if h.TaskService != nil && len(result.CancelledTasks) > 0 {
-		h.TaskService.BroadcastCancelledTasks(ctx, result.CancelledTasks)
+		// Revocation only archives agents, so a per-task lookup would still
+		// resolve here; the workspace is passed for the same reason as
+		// everywhere else — it is known, and it is the one being revoked.
+		h.TaskService.BroadcastCancelledTasks(ctx, workspaceIDStr, result.CancelledTasks)
 	}
 
 	for _, agent := range result.ArchivedAgents {
