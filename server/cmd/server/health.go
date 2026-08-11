@@ -36,6 +36,7 @@ type serverHealth struct {
 	cacheTTL           time.Duration
 	refreshMu          sync.Mutex
 	cache              atomic.Pointer[cachedReadiness]
+	livenessCache      atomic.Pointer[cachedLiveness]
 }
 
 type cachedReadiness struct {
@@ -44,8 +45,24 @@ type cachedReadiness struct {
 	expiresAt  time.Time
 }
 
+type cachedLiveness struct {
+	response   liveResponse
+	statusCode int
+	expiresAt  time.Time
+}
+
 type liveResponse struct {
-	Status string `json:"status"`
+	Status string     `json:"status"`
+	Checks liveChecks `json:"checks"`
+}
+
+// liveChecks reports the liveness of individual hard dependencies. DB is the
+// only one: every request path needs postgres, so a dead DB means /health must
+// not report ok — otherwise orchestrators keep routing traffic to a node that
+// cannot serve (false-green). The field mirrors readinessChecks so /health and
+// /readyz share a consistent shape.
+type liveChecks struct {
+	DB string `json:"db"`
 }
 
 type readinessResponse struct {
@@ -68,8 +85,73 @@ func newServerHealth(pool *pgxpool.Pool) *serverHealth {
 	}
 }
 
-func (h *serverHealth) liveHandler(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, liveResponse{Status: "ok"})
+func (h *serverHealth) liveHandler(w http.ResponseWriter, r *http.Request) {
+	resp, status := h.liveness(r.Context())
+	writeJSON(w, status, resp)
+}
+
+// liveness evaluates /health. The database is a hard dependency: every
+// application request path needs postgres, so /health must surface DB failure
+// rather than returning an unconditional ok. A dead DB makes the node
+// un-routable, and a 200 here is the false-green the old static handler
+// produced — orchestrators kept sending traffic to a node that could not
+// serve. We reuse the same cached-readiness machinery as /readyz so a
+// postgres outage does not multiply into one live ping per request.
+func (h *serverHealth) liveness(parent context.Context) (liveResponse, int) {
+	// Cache so a postgres outage (or a healthy DB) is not re-checked on every
+	// hit; /health is polled frequently by orchestrators and probes.
+	now := time.Now()
+	if cached := h.loadCachedLiveness(now); cached != nil {
+		return cached.response, cached.statusCode
+	}
+
+	h.refreshMu.Lock()
+	defer h.refreshMu.Unlock()
+
+	now = time.Now()
+	if cached := h.loadCachedLiveness(now); cached != nil {
+		return cached.response, cached.statusCode
+	}
+
+	resp, status := h.computeLiveness(parent)
+	h.livenessCache.Store(&cachedLiveness{
+		response:   resp,
+		statusCode: status,
+		expiresAt:  now.Add(h.cacheTTL),
+	})
+	return resp, status
+}
+
+func (h *serverHealth) loadCachedLiveness(now time.Time) *cachedLiveness {
+	cached := h.livenessCache.Load()
+	if cached == nil || !now.Before(cached.expiresAt) {
+		return nil
+	}
+	return cached
+}
+
+func (h *serverHealth) computeLiveness(parent context.Context) (liveResponse, int) {
+	resp := liveResponse{
+		Status: "ok",
+		Checks: liveChecks{DB: "ok"},
+	}
+
+	if h.db == nil {
+		resp.Status = "error"
+		resp.Checks.DB = "error"
+		return resp, http.StatusServiceUnavailable
+	}
+
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+	defer cancel()
+
+	if err := h.db.Ping(ctx); err != nil {
+		resp.Status = "error"
+		resp.Checks.DB = "error"
+		return resp, http.StatusServiceUnavailable
+	}
+
+	return resp, http.StatusOK
 }
 
 func (h *serverHealth) readyHandler(w http.ResponseWriter, r *http.Request) {

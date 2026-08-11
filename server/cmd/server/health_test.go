@@ -44,6 +44,110 @@ func (r stubRow) Scan(dest ...any) error {
 	return nil
 }
 
+func TestServerHealthLiveHandlerDBPingFailure(t *testing.T) {
+	// The old liveHandler returned an unconditional {"status":"ok"} 200 — a
+	// postgres outage was a false-green. /health must now ping the DB and
+	// report 503 so orchestrators stop routing traffic to an un-routable node.
+	db := &stubReadinessDB{pingErr: errors.New("db unavailable")}
+	h := &serverHealth{
+		db:                 db,
+		requiredMigrations: []string{"056_example"},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	h.liveHandler(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+
+	var resp liveResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "error" {
+		t.Fatalf("status = %q, want %q", resp.Status, "error")
+	}
+	if resp.Checks.DB != "error" {
+		t.Fatalf("db check = %q, want %q", resp.Checks.DB, "error")
+	}
+}
+
+func TestServerHealthLiveHandlerDBOK(t *testing.T) {
+	db := &stubReadinessDB{}
+	h := &serverHealth{
+		db:                 db,
+		requiredMigrations: []string{"056_example"},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	h.liveHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp liveResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "ok" {
+		t.Fatalf("status = %q, want %q", resp.Status, "ok")
+	}
+	if resp.Checks.DB != "ok" {
+		t.Fatalf("db check = %q, want %q", resp.Checks.DB, "ok")
+	}
+}
+
+func TestServerHealthLiveHandlerNilDB(t *testing.T) {
+	// A nil pool (DB never configured) must not panic and must report 503
+	// rather than the old static ok.
+	h := &serverHealth{
+		db:                 nil,
+		requiredMigrations: []string{"056_example"},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	h.liveHandler(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+
+	var resp liveResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Checks.DB != "error" {
+		t.Fatalf("db check = %q, want %q", resp.Checks.DB, "error")
+	}
+}
+
+func TestServerHealthLivenessCachesResult(t *testing.T) {
+	db := &stubReadinessDB{}
+	h := &serverHealth{
+		db:                 db,
+		requiredMigrations: []string{"056_example"},
+		cacheTTL:           time.Minute,
+	}
+
+	resp1, status1 := h.liveness(context.Background())
+	resp2, status2 := h.liveness(context.Background())
+
+	if status1 != http.StatusOK || status2 != http.StatusOK {
+		t.Fatalf("expected cached liveness status 200, got %d and %d", status1, status2)
+	}
+	if resp1.Status != "ok" || resp2.Status != "ok" {
+		t.Fatalf("expected cached liveness status ok, got %q and %q", resp1.Status, resp2.Status)
+	}
+	if got := db.pingCalls.Load(); got != 1 {
+		t.Fatalf("Ping calls = %d, want 1", got)
+	}
+}
+
 func TestServerHealthReadyHandlerDBPingFailure(t *testing.T) {
 	db := &stubReadinessDB{pingErr: errors.New("db unavailable")}
 	h := &serverHealth{
