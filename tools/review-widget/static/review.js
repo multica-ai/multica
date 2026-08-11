@@ -15,11 +15,16 @@
 (function () {
 	'use strict';
 
-	if (window.__multicaReview) return; // guard against double-injection
-	window.__multicaReview = true;
+	// `document.currentScript` is null when the tag is appended dynamically
+	// (which is how SvelteKit-style loaders inject it), so fall back to finding
+	// our own tag by src. Without this the ingest URL is never read and the
+	// widget exits silently after setting the guard below.
+	var script =
+		document.currentScript ||
+		document.querySelector('script[data-ingest]') ||
+		document.querySelector('script[src*="review.js"]');
 
-	var script = document.currentScript;
-	var INGEST = (script && script.dataset.ingest) || '';
+	var INGEST = (script && script.dataset && script.dataset.ingest) || '';
 	var TOKEN = new URLSearchParams(location.search).get('review');
 
 	if (!TOKEN) return; // no token, no widget — silent no-op
@@ -27,6 +32,11 @@
 		console.warn('[multica-review] no data-ingest URL configured');
 		return;
 	}
+
+	// Set the double-injection guard only once we know we are actually going to
+	// run. Setting it earlier makes a bailed-out load poison later retries.
+	if (window.__multicaReview) return;
+	window.__multicaReview = true;
 
 	// ---------------------------------------------------------------- state
 	var state = {

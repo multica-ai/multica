@@ -1,0 +1,27 @@
+[Unit]
+Description=Multica client review widget — ingest service
+Documentation=file:///home/godfinns/Work/multica-client-review-widget/tools/review-widget/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/godfinns/Work/multica-client-review-widget/tools/review-widget
+EnvironmentFile=/home/godfinns/Work/multica-client-review-widget/tools/review-widget/.env
+ExecStart=/usr/bin/node src/server.js
+Restart=on-failure
+RestartSec=5
+
+# The service holds a mul_ token and the review-link signing secret, and is
+# reachable from the public internet through the tunnel. Keep it boxed in.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/godfinns/Work/multica-client-review-widget/tools/review-widget
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=default.target
