@@ -13,6 +13,8 @@ export type ShortcutActionId =
   | "findInIssue"
   | "openThreadNav"
   | "send"
+  | "goBack"
+  | "goForward"
   | "goInbox"
   | "goChat"
   | "goMyIssues"
@@ -101,6 +103,13 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     allowInEditable: true,
   },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
+  // Browser-style history navigation (Mod+[ / Mod+]). Neither bracket is
+  // app-owned (PRIMARY_RESERVED_KEYS) nor browser-owned
+  // (BROWSER_ONLY_PRIMARY_RESERVED_KEYS), so both are recordable on every
+  // platform and runtime. `allowInEditable` is false so the chord never steps
+  // away from the page while the caret sits in an input, textarea, or editor.
+  { id: "goBack", category: "navigation", defaultShortcut: primary("["), allowInEditable: false },
+  { id: "goForward", category: "navigation", defaultShortcut: primary("]"), allowInEditable: false },
   { id: "goInbox", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goChat", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goMyIssues", category: "navigation", defaultShortcut: null, allowInEditable: false },

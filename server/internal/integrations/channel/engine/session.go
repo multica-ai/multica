@@ -55,7 +55,7 @@ type SessionQueries interface {
 	LinkAttachmentsToChatMessage(ctx context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error)
 	ClaimChannelMediaPendingObjectsForBind(ctx context.Context, arg db.ClaimChannelMediaPendingObjectsForBindParams) ([]string, error)
 	TouchChatSession(ctx context.Context, id pgtype.UUID) error
-	GetMostRecentUserChatMessage(ctx context.Context, chatSessionID pgtype.UUID) (db.ChatMessage, error)
+	MarkChannelChatSessionPendingFresh(ctx context.Context, chatSessionID pgtype.UUID) (bool, error)
 	UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error
 	MarkChannelInboundDedupProcessed(ctx context.Context, arg db.MarkChannelInboundDedupProcessedParams) (int64, error)
 }
@@ -107,8 +107,8 @@ func (a dbSessionQueries) ClaimChannelMediaPendingObjectsForBind(ctx context.Con
 func (a dbSessionQueries) TouchChatSession(ctx context.Context, id pgtype.UUID) error {
 	return a.q.TouchChatSession(ctx, id)
 }
-func (a dbSessionQueries) GetMostRecentUserChatMessage(ctx context.Context, chatSessionID pgtype.UUID) (db.ChatMessage, error) {
-	return a.q.GetMostRecentUserChatMessage(ctx, chatSessionID)
+func (a dbSessionQueries) MarkChannelChatSessionPendingFresh(ctx context.Context, chatSessionID pgtype.UUID) (bool, error) {
+	return a.q.MarkChannelChatSessionPendingFresh(ctx, chatSessionID)
 }
 func (a dbSessionQueries) UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error {
 	return a.q.UpdateChannelChatSessionBindingReplyTarget(ctx, arg)
@@ -283,6 +283,7 @@ type AppendInput struct {
 	ThreadID            string
 	ClaimToken          pgtype.UUID
 	MediaPendingSeconds float64
+	ForceFresh          bool
 }
 
 // BindMediaInput links already-uploaded media to either an /issue target or a
@@ -303,9 +304,9 @@ type BindMediaInput struct {
 	MediaRefs            []channel.MediaRef
 }
 
-// channelCommandMessageKind marks a visible user turn handled synchronously by
-// Router. It remains an ordinary public message, but the task batch seal omits
-// it so the agent cannot execute the command again on a later turn.
+// channelCommandMessageKind marks a durable control-plane turn handled
+// synchronously by Router. Public Chat projections omit it, and the task batch
+// seal does too so the agent cannot execute the command again on a later turn.
 const channelCommandMessageKind = "channel_command"
 
 // AppendUserMessage writes the user message into the chat_session (touching it
@@ -322,21 +323,11 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	defer tx.Rollback(ctx)
 	qtx := s.q.WithTx(tx)
 
-	// Parse before the insert so the bare-`/issue` previous-message fallback
-	// queries the message set that does NOT yet include this message.
 	commandSource := in.CommandText
 	if commandSource == "" {
 		commandSource = in.Body
 	}
 	cmd, _ := ParseIssueCommand(commandSource)
-	if cmd != nil && cmd.Title == "" {
-		prev, err := qtx.GetMostRecentUserChatMessage(ctx, in.SessionID)
-		if err == nil {
-			cmd.Title = titleFromPreviousMessage(prev.Content)
-		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return AppendResult{}, fmt.Errorf("previous message lookup: %w", err)
-		}
-	}
 
 	// channel_ingested is the immutable provenance the cancel path gates on:
 	// it must be stamped in the same transaction as the message so no later
@@ -354,6 +345,11 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	}
 	if err := qtx.TouchChatSession(ctx, in.SessionID); err != nil {
 		return AppendResult{}, fmt.Errorf("touch chat session: %w", err)
+	}
+	if in.ForceFresh {
+		if _, err := qtx.MarkChannelChatSessionPendingFresh(ctx, in.SessionID); err != nil {
+			return AppendResult{}, fmt.Errorf("mark pending fresh: %w", err)
+		}
 	}
 
 	// Record the latest trigger so the decoupled outbound patcher can thread
@@ -390,6 +386,15 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 		return AppendResult{}, fmt.Errorf("commit: %w", err)
 	}
 	return AppendResult{MessageID: msg.ID, IssueCommand: cmd, DedupMarked: markedInTx}, nil
+}
+
+// MarkPendingFresh persists a bare `/new` command. Non-bare `/new` messages
+// mark the same flag inside AppendUserMessage's transaction instead.
+func (s *ChatSession) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
+	if _, err := s.q.MarkChannelChatSessionPendingFresh(ctx, sessionID); err != nil {
+		return fmt.Errorf("mark pending fresh: %w", err)
+	}
+	return nil
 }
 
 // BindMediaRefs creates attachment rows owned by IssueID when present, otherwise

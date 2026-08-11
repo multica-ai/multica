@@ -136,13 +136,14 @@ export function AgentDetailInspector({
     (model: string) =>
       update(
         buildModelChangeUpdate({
+          provider: runtime?.provider ?? "",
           model,
           thinkingLevel: agent.thinking_level ?? "",
           serviceTier: agent.service_tier ?? "",
           catalog: modelCatalog,
         }),
       ),
-    [agent.service_tier, agent.thinking_level, modelCatalog, update],
+    [agent.service_tier, agent.thinking_level, modelCatalog, runtime?.provider, update],
   );
 
   return (
@@ -290,6 +291,7 @@ export function AgentDetailInspector({
             label={t(($) => $.inspector.prop_speed)}
             runtimeId={agent.runtime_id}
             runtimeOnline={!!isOnline}
+            provider={runtime?.provider ?? ""}
             model={agent.model ?? ""}
             value={agent.service_tier ?? ""}
             canEdit={canEdit}

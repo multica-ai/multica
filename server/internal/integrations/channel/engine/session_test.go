@@ -58,9 +58,9 @@ type fakeSessionQueries struct {
 	reconcilerOwnedKeys   map[string]bool
 	issueLookupErr        error
 
-	prevMessage      *string // GetMostRecentUserChatMessage result; nil → ErrNoRows
-	markRows         int64   // MarkChannelInboundDedupProcessed result
-	createBindingErr error   // simulate a unique violation on create
+	markRows         int64 // MarkChannelInboundDedupProcessed result
+	pendingFresh     bool
+	createBindingErr error // simulate a unique violation on create
 	raceWinner       pgtype.UUID
 }
 
@@ -159,11 +159,9 @@ func (f *fakeSessionQueries) TouchChatSession(context.Context, pgtype.UUID) erro
 	return nil
 }
 
-func (f *fakeSessionQueries) GetMostRecentUserChatMessage(context.Context, pgtype.UUID) (db.ChatMessage, error) {
-	if f.prevMessage != nil {
-		return db.ChatMessage{Content: *f.prevMessage}, nil
-	}
-	return db.ChatMessage{}, pgx.ErrNoRows
+func (f *fakeSessionQueries) MarkChannelChatSessionPendingFresh(context.Context, pgtype.UUID) (bool, error) {
+	f.pendingFresh = true
+	return true, nil
 }
 
 func (f *fakeSessionQueries) UpdateChannelChatSessionBindingReplyTarget(context.Context, db.UpdateChannelChatSessionBindingReplyTargetParams) error {
@@ -661,17 +659,39 @@ func TestBindMediaRefs_MissingIssueRollsBackAndClearsPendingMarker(t *testing.T)
 	}
 }
 
-func TestAppendUserMessage_BareIssueUsesPreviousMessage(t *testing.T) {
+func TestAppendUserMessage_BareIssueKeepsTitleEmpty(t *testing.T) {
 	f := newFake()
-	prev := "Make the export button work"
-	f.prevMessage = &prev
 	s := newTestSession(f)
 	res, err := s.AppendUserMessage(context.Background(), AppendInput{SessionID: uid(1), Body: "/issue", MessageID: "m2"})
 	if err != nil {
 		t.Fatalf("AppendUserMessage: %v", err)
 	}
-	if res.IssueCommand == nil || res.IssueCommand.Title != "Make the export button work" {
-		t.Errorf("bare /issue should fall back to previous message title: %+v", res.IssueCommand)
+	if res.IssueCommand == nil || res.IssueCommand.Title != "" {
+		t.Errorf("bare /issue must remain titleless for the Router usage result: %+v", res.IssueCommand)
+	}
+}
+
+func TestAppendUserMessage_FreshMessagePersistsPendingIntent(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	if _, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Body: "start over", MessageID: "m2", ForceFresh: true,
+	}); err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if !f.pendingFresh {
+		t.Fatal("fresh message did not persist pending intent in the append transaction")
+	}
+}
+
+func TestMarkPendingFresh_BareCommandPersistsIntent(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	if err := s.MarkPendingFresh(context.Background(), uid(1)); err != nil {
+		t.Fatalf("MarkPendingFresh: %v", err)
+	}
+	if !f.pendingFresh {
+		t.Fatal("bare fresh command did not persist pending intent")
 	}
 }
 

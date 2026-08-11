@@ -45,11 +45,15 @@ describe("IssueChip", () => {
     });
   });
 
-  it("caps the chip to its parent container and truncates the title", () => {
+  it("caps the chip against both its content and its container, and truncates the title", () => {
     render(<IssueChip issueId="issue-1" />);
 
     const chip = screen.getByText("MUL-3405").closest(".issue-mention");
-    expect(chip).toHaveClass("min-w-0", "max-w-full");
+    // 18rem bounds the chip against a long title so it cannot dominate a line
+    // of prose (#6732); 100% keeps it inside a narrow parent such as a chat
+    // bubble. ProjectChip carries the identical cap — see its own test.
+    expect(chip).toHaveClass("min-w-0");
+    expect(chip).toHaveClass("max-w-[min(18rem,100%)]");
     expect(screen.getByText("A very long issue title that should stay inside a narrow chat bubble"))
       .toHaveClass("min-w-0", "truncate");
   });

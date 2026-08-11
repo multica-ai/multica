@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/service"
@@ -65,10 +66,12 @@ func cleanupSessionTasks(t *testing.T, sessionID string) {
 	})
 }
 
-// TestStartMikaOnboarding_EnqueuesOneHiddenKickoff covers the endpoint's whole
-// reason to exist: one product-authored opening turn that the runtime receives
-// as a normal chat input batch but the member never sees as a bubble.
-func TestStartMikaOnboarding_EnqueuesOneHiddenKickoff(t *testing.T) {
+// TestStartMikaOnboarding_WritesTheOpeningWithoutRunningAnAgent covers the
+// endpoint's whole reason to exist after MUL-5827: the member's first message
+// from Mika is already final when this call returns, and no agent ran to
+// produce it. The hidden kickoff is written alongside it, unowned, waiting for
+// the member's first real send to adopt it.
+func TestStartMikaOnboarding_WritesTheOpeningWithoutRunningAnAgent(t *testing.T) {
 	agentID := markAsMika(t, createHandlerTestAgent(t, "Mika", nil))
 	sessionID := createHandlerTestChatSession(t, agentID)
 	cleanupSessionTasks(t, sessionID)
@@ -78,28 +81,70 @@ func TestStartMikaOnboarding_EnqueuesOneHiddenKickoff(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	resp := decodeStartMikaOnboarding(t, w)
-	if !resp.Started || resp.TaskID == "" {
-		t.Fatalf("expected a started kickoff with a task id, got %+v", resp)
+	if !resp.Started || resp.MessageID == "" {
+		t.Fatalf("expected a started opening with a message id, got %+v", resp)
 	}
 
-	var role, content, kind string
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT role, content, message_kind FROM chat_message WHERE chat_session_id = $1`, sessionID,
-	).Scan(&role, &content, &kind); err != nil {
-		t.Fatalf("load kickoff message: %v", err)
-	}
-	if role != "user" {
-		t.Fatalf("kickoff must be stored as a user input batch, got role %q", role)
-	}
-	if kind != protocol.ChatMessageKindOnboardingKickoff {
-		t.Fatalf("kickoff message_kind = %q, want %q", kind, protocol.ChatMessageKindOnboardingKickoff)
-	}
-	if content == "" {
-		t.Fatal("kickoff must carry the product-authored prompt for the runtime")
+	// Nothing is enqueued: this is the runtime cold start the change removes.
+	if tasks := countSessionTasks(t, sessionID); tasks != 0 {
+		t.Fatalf("the opening must not enqueue any task, got %d", tasks)
 	}
 
-	// The member-facing transcript stays empty: the kickoff is carrier, not
-	// conversation.
+	type row struct {
+		role    string
+		kind    string
+		content string
+		hasTask bool
+	}
+	rows, err := testPool.Query(context.Background(),
+		`SELECT role, message_kind, content, task_id IS NOT NULL
+		   FROM chat_message WHERE chat_session_id = $1
+		  ORDER BY created_at ASC, id ASC`, sessionID)
+	if err != nil {
+		t.Fatalf("load onboarding rows: %v", err)
+	}
+	defer rows.Close()
+	var got []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.role, &r.kind, &r.content, &r.hasTask); err != nil {
+			t.Fatalf("scan onboarding row: %v", err)
+		}
+		got = append(got, r)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected the kickoff and the opening, got %d row(s): %+v", len(got), got)
+	}
+
+	// Order is load-bearing: both rows are written in one transaction, so a
+	// shared now() would let the kickoff sort last and become the session's
+	// "last message" — which buildChatLastMessage reports as none at all.
+	kickoff, opening := got[0], got[1]
+	if kickoff.role != "user" || kickoff.kind != protocol.ChatMessageKindOnboardingKickoff {
+		t.Fatalf("first row must be the hidden kickoff, got %+v", kickoff)
+	}
+	if kickoff.hasTask {
+		t.Error("the kickoff must be written unowned; the member's first send adopts it")
+	}
+	if kickoff.content == "" {
+		t.Error("the kickoff must carry the product-authored context for the runtime")
+	}
+	if opening.role != "assistant" || opening.kind != protocol.ChatMessageKindOnboardingOpening {
+		t.Fatalf("second row must be the opening, got %+v", opening)
+	}
+	if opening.hasTask {
+		t.Error("no agent produced the opening, so it must carry no task id")
+	}
+	if !strings.Contains(opening.content, "Multica") {
+		t.Errorf("the opening does not read like the product copy: %q", opening.content)
+	}
+	// The kickoff quotes the opening — that is what stops Mika greeting twice.
+	if !strings.Contains(kickoff.content, opening.content) {
+		t.Errorf("the kickoff must quote the opening the member already read:\n%s", kickoff.content)
+	}
+
+	// The member sees exactly one bubble: the opening. The kickoff is carrier,
+	// not conversation.
 	listReq := withChatTestWorkspaceCtx(t, withURLParam(
 		newRequest("GET", "/api/chat/sessions/"+sessionID+"/messages", nil),
 		"sessionId", sessionID,
@@ -113,13 +158,41 @@ func TestStartMikaOnboarding_EnqueuesOneHiddenKickoff(t *testing.T) {
 	if err := json.Unmarshal(listW.Body.Bytes(), &visible); err != nil {
 		t.Fatalf("decode visible messages: %v", err)
 	}
-	if len(visible) != 0 {
-		t.Fatalf("expected the kickoff to be hidden from the transcript, got %d message(s)", len(visible))
+	if len(visible) != 1 {
+		t.Fatalf("expected only the opening to be visible, got %d message(s)", len(visible))
+	}
+	if visible[0].MessageKind != protocol.ChatMessageKindOnboardingOpening {
+		t.Fatalf("visible message kind = %q, want the opening (starter cards key on it)", visible[0].MessageKind)
+	}
+}
+
+// TestStartMikaOnboarding_OpeningFollowsTheRequestedLanguage pins the one
+// personalization the template does branch on.
+func TestStartMikaOnboarding_OpeningFollowsTheRequestedLanguage(t *testing.T) {
+	agentID := markAsMika(t, createHandlerTestAgent(t, "Mika", nil))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	cleanupSessionTasks(t, sessionID)
+
+	if w := startMikaOnboarding(t, sessionID, map[string]any{"language": "zh"}); w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var content string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT content FROM chat_message
+		  WHERE chat_session_id = $1 AND message_kind = $2`,
+		sessionID, protocol.ChatMessageKindOnboardingOpening,
+	).Scan(&content); err != nil {
+		t.Fatalf("load opening: %v", err)
+	}
+	if !strings.Contains(content, "工作区") {
+		t.Fatalf("zh request produced a non-Chinese opening: %q", content)
 	}
 }
 
 // TestStartMikaOnboarding_IsIdempotent is the retry / double-submit guarantee
-// the handler documents: a second call must not enqueue a second opening turn.
+// the handler documents: a second call must not write a second opening — which
+// would greet the member twice in their own transcript.
 func TestStartMikaOnboarding_IsIdempotent(t *testing.T) {
 	agentID := markAsMika(t, createHandlerTestAgent(t, "Mika", nil))
 	sessionID := createHandlerTestChatSession(t, agentID)
@@ -129,9 +202,6 @@ func TestStartMikaOnboarding_IsIdempotent(t *testing.T) {
 	if first.Code != http.StatusCreated {
 		t.Fatalf("first call: expected 201, got %d: %s", first.Code, first.Body.String())
 	}
-	if tasks := countSessionTasks(t, sessionID); tasks != 1 {
-		t.Fatalf("after first call: expected 1 task, got %d", tasks)
-	}
 
 	second := startMikaOnboarding(t, sessionID, map[string]any{"language": "zh"})
 	if second.Code != http.StatusOK {
@@ -140,8 +210,8 @@ func TestStartMikaOnboarding_IsIdempotent(t *testing.T) {
 	if resp := decodeStartMikaOnboarding(t, second); resp.Started {
 		t.Fatalf("second call must report started=false, got %+v", resp)
 	}
-	if tasks := countSessionTasks(t, sessionID); tasks != 1 {
-		t.Fatalf("after retry: expected still 1 task, got %d", tasks)
+	if tasks := countSessionTasks(t, sessionID); tasks != 0 {
+		t.Fatalf("a retry must not enqueue work, got %d task(s)", tasks)
 	}
 
 	var messages int
@@ -150,8 +220,8 @@ func TestStartMikaOnboarding_IsIdempotent(t *testing.T) {
 	).Scan(&messages); err != nil {
 		t.Fatalf("count messages: %v", err)
 	}
-	if messages != 1 {
-		t.Fatalf("after retry: expected still 1 kickoff message, got %d", messages)
+	if messages != 2 {
+		t.Fatalf("after retry: expected still the kickoff plus one opening, got %d", messages)
 	}
 }
 

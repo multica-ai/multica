@@ -28,11 +28,15 @@
 // shared channel engine? Keep this adapter building — and loop in the code
 // owners for anything that changes WeCom-visible behavior.
 //
-// Known limits of the first version, both deliberate: inbound handling is
-// text-only (other message types get a short "text only" receipt), and outbound
-// delivery requires a SINGLE backend replica, because the only send path is the
-// in-process WebSocket in sendersRegistry while EventChatDone dispatches on the
-// in-process events.Bus. See SELF_HOSTING.md.
+// Inbound handles text, the transcript WeCom returns for a voice note,
+// photos, files, videos and 图文混排 (media_ingest.go downloads and decrypts
+// what a callback points at); a kind it cannot read still gets a short
+// receipt.
+//
+// Known limit, deliberate: outbound delivery requires a SINGLE backend
+// replica, because the only send path is the in-process WebSocket in
+// sendersRegistry while EventChatDone dispatches on the in-process
+// events.Bus. See SELF_HOSTING.md.
 package wecom
 
 import (
@@ -85,6 +89,17 @@ type Installation struct {
 	// distinct from the token/EncodingAESKey used by callback-mode bots
 	// (which we do not use). Rotated via re-install.
 	SecretEncrypted []byte
+
+	// BotDisplayName is what the bot is called in a chat. A WeCom group
+	// mention arrives as literal text — "@Multica Bot /new 重新分析" — with no
+	// structured mention list anywhere in the payload, so recognising where
+	// the mention ends is the only way a name containing a space does not
+	// swallow the command after it.
+	//
+	// Optional. Empty falls back to the whitespace heuristic in
+	// stripLeadingMentions, which is correct for a single-word name and is
+	// what every existing installation gets.
+	BotDisplayName string
 }
 
 // InstallationCredentials is the plaintext-bearing view the WebSocket
@@ -103,6 +118,12 @@ type installConfig struct {
 	AppID           string `json:"app_id"`
 	BotID           string `json:"bot_id"`
 	SecretEncrypted []byte `json:"secret_encrypted"`
+
+	// BotDisplayName is the bot's name as it appears in a chat, used only to
+	// recognise its own @-mention (ws_frame.go). Optional and absent on every
+	// existing row; absent means the whitespace heuristic, which is what the
+	// adapter did before this field existed.
+	BotDisplayName string `json:"bot_display_name,omitempty"`
 }
 
 // encodeInstallConfig marshals an Installation's config-bearing fields into
@@ -115,6 +136,7 @@ func encodeInstallConfig(inst Installation) ([]byte, error) {
 		AppID:           inst.BotID,
 		BotID:           inst.BotID,
 		SecretEncrypted: inst.SecretEncrypted,
+		BotDisplayName:  inst.BotDisplayName,
 	})
 }
 
@@ -136,5 +158,6 @@ func installationFromRow(row db.ChannelInstallation) (Installation, error) {
 		Status:          InstallationStatus(row.Status),
 		BotID:           cfg.BotID,
 		SecretEncrypted: cfg.SecretEncrypted,
+		BotDisplayName:  cfg.BotDisplayName,
 	}, nil
 }

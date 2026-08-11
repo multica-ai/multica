@@ -220,10 +220,8 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
 
     const expectedSort = { sort_by: "priority", sort_direction: "desc" } as const;
-    const expectedFilter = { project_id: "p1" };
 
     expect(result.current.scopeKey).toBe("project:p1");
-    expect(result.current.filter).toEqual(expectedFilter);
     expect(result.current.sort).toEqual(expectedSort);
     expect(result.current.tableQuerySpec).toEqual(
       expect.objectContaining({
@@ -304,9 +302,6 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
 
     expect(result.current.scopeKey).toBe("workspace:all");
-    expect(result.current.filter).toEqual({});
-    expect(result.current.loadMoreScope).toBeUndefined();
-    expect(result.current.loadMoreFilter).toBeUndefined();
     expect(result.current.tableQuerySpec.scope).toEqual({
       kind: "workspace",
     });
@@ -370,12 +365,7 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
-
-    const expectedFilter = { assignee_id: "user-1" };
     expect(result.current.scopeKey).toBe("my:user-1:assigned");
-    expect(result.current.filter).toEqual(expectedFilter);
-    expect(result.current.loadMoreScope).toBe("assigned");
-    expect(result.current.loadMoreFilter).toEqual(expectedFilter);
     expect(result.current.tableQuerySpec.scope).toEqual({
       kind: "my",
       relation: "assigned",
@@ -398,12 +388,7 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
-
-    const expectedFilter = { assignee_id: "agent-1" };
     expect(result.current.scopeKey).toBe("actor:agent:agent-1:assigned");
-    expect(result.current.filter).toEqual(expectedFilter);
-    expect(result.current.loadMoreScope).toBe("actor:agent:agent-1:assigned");
-    expect(result.current.loadMoreFilter).toEqual(expectedFilter);
     expect(result.current.tableQuerySpec.scope).toEqual({
       kind: "assignee",
       actor: { type: "agent", id: "agent-1" },

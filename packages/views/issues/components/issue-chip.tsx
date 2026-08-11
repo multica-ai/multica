@@ -7,13 +7,23 @@ import { StatusIcon } from "./status-icon";
 
 /**
  * Compact, presentation-only representation of an issue —
- * `<StatusIcon> <identifier> <title>`, bordered, capped at the container width
- * (`max-w-full`) with the title truncating to an ellipsis. As an atomic inline
- * box it wraps to the next line as a unit when it doesn't fit at the current
- * position; the ellipsis only kicks in once a whole line can't hold it. The cap
- * lives here (single source of truth) — wrappers must NOT add their own flex
- * container around it, or a percentage cap gets dropped during the wrapper's
- * intrinsic sizing and the clickable box diverges from the truncated chip.
+ * `<StatusIcon> <identifier> <title>`, bordered, with the title truncating to
+ * an ellipsis once the chip hits its width cap.
+ *
+ * The cap is `min(18rem, 100%)` — two limits doing two different jobs:
+ *   - `18rem` bounds the chip against the *content*, so a long title can never
+ *     grow the chip wide enough to dominate a line of prose. Without it a chip
+ *     is an atomic inline box that wraps to the next line as a unit whenever it
+ *     doesn't fit at the current position, leaving a ragged gap on the line
+ *     above — the reference-dense-prose problem from #6732.
+ *   - `100%` bounds it against the *container*, keeping the chip inside narrow
+ *     parents such as a chat bubble.
+ * `ProjectChip` carries the identical cap; the two must not drift.
+ *
+ * The cap lives here (single source of truth) — wrappers must NOT add their own
+ * flex container around it, or a percentage cap gets dropped during the
+ * wrapper's intrinsic sizing and the clickable box diverges from the truncated
+ * chip.
  *
  * This is the single source of truth for the "issue-mention card" look.
  * It is intentionally **not** a link or button: callers wrap it in whatever
@@ -34,7 +44,7 @@ export interface IssueChipProps {
 }
 
 const BASE_CLASS =
-  "issue-mention inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-caption";
+  "issue-mention inline-flex min-w-0 max-w-[min(18rem,100%)] items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-caption";
 
 export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps) {
   const wsId = useWorkspaceId();

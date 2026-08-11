@@ -105,5 +105,8 @@
     "error_already_bound": "This WeCom identity is already linked to a different Multica user. Account transfers must go through an explicit unbind first.",
     "error_not_member": "You're signed in to a Multica account that isn't a member of this workspace.",
     "error_unknown": "Something went wrong. Try again, and if the problem persists, contact the workspace admin."
+  },
+  "navigation": {
+    "open_in_new_tab": "Open in new tab"
   }
 }

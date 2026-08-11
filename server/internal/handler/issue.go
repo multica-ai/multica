@@ -3019,6 +3019,19 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+				ID:          projectUUID,
+				WorkspaceID: prevIssue.WorkspaceID,
+			}); err != nil {
+				if !isNotFound(err) {
+					slog.Error("update issue: validate project scope",
+						append(logger.RequestAttrs(r), "project_id", uuidToString(projectUUID), "error", err)...)
+					writeError(w, http.StatusInternalServerError, "failed to validate project")
+					return
+				}
+				writeError(w, http.StatusBadRequest, "project not found in this workspace")
+				return
+			}
 			params.ProjectID = projectUUID
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
@@ -3480,6 +3493,31 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The batch shares one project_id, so it is checked once here rather than
+	// per issue, and rejected instead of skipped like the per-item guards in
+	// the loop: a foreign project invalidates the whole request.
+	batchProjectID := pgtype.UUID{Valid: false}
+	if _, ok := rawUpdates["project_id"]; ok && req.Updates.ProjectID != nil {
+		projectUUID, ok := parseUUIDOrBadRequest(w, *req.Updates.ProjectID, "project_id")
+		if !ok {
+			return
+		}
+		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          projectUUID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			if !isNotFound(err) {
+				slog.Error("batch update issues: validate project scope",
+					append(logger.RequestAttrs(r), "project_id", uuidToString(projectUUID), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to validate project")
+				return
+			}
+			writeError(w, http.StatusBadRequest, "project not found in this workspace")
+			return
+		}
+		batchProjectID = projectUUID
+	}
+
 	updated := 0
 	// Children that transitioned into a terminal status this batch, collected so
 	// the parent/stage notification is evaluated once against the final state
@@ -3605,15 +3643,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if _, ok := rawUpdates["project_id"]; ok {
-			if req.Updates.ProjectID != nil {
-				projectUUID, err := util.ParseUUID(*req.Updates.ProjectID)
-				if err != nil {
-					continue
-				}
-				params.ProjectID = projectUUID
-			} else {
-				params.ProjectID = pgtype.UUID{Valid: false}
-			}
+			// Resolved before the loop; an explicit null stays invalid and clears.
+			params.ProjectID = batchProjectID
 		}
 		if _, ok := rawUpdates["stage"]; ok {
 			if req.Updates.Stage != nil {

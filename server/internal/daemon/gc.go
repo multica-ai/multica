@@ -57,15 +57,19 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 
 // gcStats accumulates byte counts and per-pattern hit counts for one GC cycle.
 type gcStats struct {
-	cleaned             int            // whole task dirs removed (issue done/cancelled)
-	orphaned            int            // whole task dirs removed (no meta / unreachable issue)
-	skipped             int            // task dirs left untouched
-	artifactDirs        int            // task dirs that had at least one artifact reclaimed
-	artifactRemoved     int            // count of removed artifact subdirs
-	storesReclaimed     int            // per-issue Codex session stores reclaimed past their TTL
-	repoCachesReclaimed int            // bare repo caches under .repos evicted past their TTL
-	bytesReclaimed      int64          // total bytes freed in this cycle
-	byPattern           map[string]int // configured basename or managed path label -> reclaim count
+	cleaned         int // whole task dirs removed (issue done/cancelled)
+	orphaned        int // whole task dirs removed (no meta / unreachable issue)
+	skipped         int // task dirs left untouched
+	artifactDirs    int // task dirs that had at least one artifact reclaimed
+	artifactRemoved int // count of removed artifact subdirs
+	storesReclaimed int // per-conversation Codex session stores reclaimed past their TTL
+	// hermesMemoryStoresReclaimed is counted separately from storesReclaimed:
+	// the two stores hold different things on different TTLs, so folding them
+	// into one number would make either figure unreadable for an operator.
+	hermesMemoryStoresReclaimed int            // per-agent Hermes memory stores reclaimed past their TTL
+	repoCachesReclaimed         int            // bare repo caches under .repos evicted past their TTL
+	bytesReclaimed              int64          // total bytes freed in this cycle
+	byPattern                   map[string]int // configured basename or managed path label -> reclaim count
 }
 
 // runGC performs a single GC scan across all workspace directories.
@@ -104,12 +108,21 @@ func (d *Daemon) runGC(ctx context.Context) {
 	// Reclaim per-issue Codex session stores idle past their TTL. These live
 	// under the shared ~/.codex home (outside WorkspacesRoot) so resume survives
 	// the task GC, which means they need their own bounded lifecycle (MUL-4424).
-	if storesRemoved, storeBytes := execenv.PruneCodexSessionStores(d.cfg.Profile, d.cfg.GCCodexSessionTTL, time.Now(), d.reserveCodexStoreForDeletion, d.logger); storesRemoved > 0 {
+	if storesRemoved, storeBytes := execenv.PruneCodexSessionStores(d.cfg.Profile, d.cfg.GCCodexSessionTTL, time.Now(), d.reserveStoreForDeletion, d.logger); storesRemoved > 0 {
 		stats.storesReclaimed += storesRemoved
 		stats.bytesReclaimed += storeBytes
 	}
 
-	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.repoCachesReclaimed > 0 {
+	// Same for per-agent Hermes memory stores: they outlive the task by design
+	// (that is what fixes #6638), so a deleted agent's memory needs its own
+	// bounded lifecycle. Retention is much longer than the Codex one — these are
+	// a few markdown files, and reclaiming them is user-visible amnesia.
+	if storesRemoved, storeBytes := execenv.PruneHermesMemoryStores(d.cfg.Profile, d.cfg.GCHermesMemoryTTL, time.Now(), d.reserveStoreForDeletion, d.logger); storesRemoved > 0 {
+		stats.hermesMemoryStoresReclaimed += storesRemoved
+		stats.bytesReclaimed += storeBytes
+	}
+
+	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 {
 		d.logger.Info("gc: cycle complete",
 			"cleaned", stats.cleaned,
 			"orphaned", stats.orphaned,
@@ -117,6 +130,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 			"artifact_dirs", stats.artifactDirs,
 			"artifact_removed", stats.artifactRemoved,
 			"codex_session_stores_reclaimed", stats.storesReclaimed,
+			"hermes_memory_stores_reclaimed", stats.hermesMemoryStoresReclaimed,
 			"repo_caches_reclaimed", stats.repoCachesReclaimed,
 			"bytes_reclaimed", stats.bytesReclaimed,
 			"by_pattern", stats.byPattern,
@@ -637,6 +651,20 @@ func (d *Daemon) cleanTaskDir(taskDir string) {
 	}
 }
 
+// linkedDirModes are the mode bits that mark a directory entry as a link to
+// content the task does not own. Every task-directory walk that deletes or
+// measures must refuse to descend through them: the per-task codex-home links
+// the user's real skills, Codex session store and plugin cache into itself, so
+// descending would put the GC inside the user's home.
+//
+// ModeSymlink alone is not enough on Windows. createDirLink falls back to a
+// directory junction (mklink /J) when os.Symlink is denied — no Developer Mode
+// — and since Go 1.23 os.Lstat reports a junction as ModeDir|ModeIrregular
+// with no ModeSymlink bit, while its DirEntry still answers IsDir() == true.
+// A ModeSymlink-only check therefore lets filepath.WalkDir walk straight into
+// the link target.
+const linkedDirModes = os.ModeSymlink | os.ModeIrregular
+
 // cleanTaskArtifacts walks taskDir and deletes every directory whose basename
 // matches one of patterns, plus exact daemon-managed artifact paths. Returns
 // (removedCount, bytesReclaimed, perPattern).
@@ -645,9 +673,9 @@ func (d *Daemon) cleanTaskDir(taskDir string) {
 //   - patterns are basename-only; entries with a path separator are dropped.
 //   - .git subtrees are never descended into, so the agent's git history stays
 //     intact even if a pattern would otherwise match.
-//   - symlinks are skipped entirely — neither the link nor its target is
-//     touched, so a malicious or stale link can't redirect the GC outside the
-//     workdir.
+//   - linked directories are skipped entirely — neither the link nor its
+//     target is touched, so a malicious or stale link can't redirect the GC
+//     outside the workdir. See linkedDirModes for what counts as a link.
 //   - every removal target is verified to live inside taskDir, so a tampered
 //     .gc_meta.json can't trick the daemon into deleting outside its sandbox.
 func (d *Daemon) cleanTaskArtifacts(taskDir string, patterns []string) (removed int, bytes int64, perPattern map[string]int) {
@@ -684,13 +712,13 @@ func (d *Daemon) cleanTaskArtifactsMatching(taskDir string, matcher artifactMatc
 		if entry.Name() == ".git" {
 			return filepath.SkipDir
 		}
-		// Refuse to follow symlinked directories. WalkDir reports them as type
+		// Refuse to follow linked directories. WalkDir reports them as type
 		// Dir on some platforms; lstat to be sure.
 		info, statErr := os.Lstat(path)
 		if statErr != nil {
 			return nil
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
+		if info.Mode()&linkedDirModes != 0 {
 			return filepath.SkipDir
 		}
 		pattern, ok := matcher.matchDirectory(absRoot, path, entry)
@@ -716,12 +744,20 @@ func (d *Daemon) cleanTaskArtifactsMatching(taskDir string, matcher artifactMatc
 }
 
 // dirSize returns the total size of all regular files under root, in bytes.
+// Linked content is not counted: os.RemoveAll would drop the link and leave
+// the target, so counting it would overstate what a removal reclaims.
 // Non-fatal: errors during the walk are ignored so callers can report a
 // best-effort byte count without aborting the whole GC cycle.
 func dirSize(root string) int64 {
 	var total int64
 	_ = filepath.WalkDir(root, func(_ string, entry os.DirEntry, err error) error {
 		if err != nil {
+			return nil
+		}
+		if entry.Type()&linkedDirModes != 0 {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if entry.IsDir() {

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -431,5 +433,39 @@ func TestServerHostIsLocal(t *testing.T) {
 				t.Errorf("serverHostIsLocal(%q) = %v, want %v", tc.server, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSetupCommandsFailClosedInTaskContext(t *testing.T) {
+	ownerHome := t.TempDir()
+	t.Setenv("HOME", ownerHome)
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	ownerPath := filepath.Join(ownerHome, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ownerBytes := []byte("{\n  \"server_url\": \"https://owner.invalid\",\n  \"token\": \"mul_owner_sentinel\"\n}\n")
+	if err := os.WriteFile(ownerPath, ownerBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, run := range map[string]func() error{
+		"cloud":     func() error { return runSetupCloud(setupCmd, nil) },
+		"self-host": func() error { return runSetupSelfHost(setupSelfHostCmd, nil) },
+	} {
+		err := run()
+		if err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+			t.Fatalf("setup %s error = %v, want task-context guard", name, err)
+		}
+	}
+	after, err := os.ReadFile(ownerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(ownerBytes) {
+		t.Fatalf("owner config content changed: got %q", after)
 	}
 }

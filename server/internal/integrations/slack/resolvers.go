@@ -332,6 +332,10 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 	})
 }
 
+func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
+	return r.session.MarkPendingFresh(ctx, sessionID)
+}
+
 func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
 	_, _, replyThread := slackSessionRouting(p.Message)
 	commandText := p.Message.CommandText
@@ -348,6 +352,7 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 		ThreadID:            replyThread,
 		ClaimToken:          p.ClaimToken,
 		MediaPendingSeconds: p.MediaPendingSeconds,
+		ForceFresh:          p.Message.ForceFresh,
 	})
 }
 

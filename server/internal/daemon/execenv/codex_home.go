@@ -70,7 +70,7 @@ type CodexHomeOptions struct {
 	// ONLY this issue's rollouts — never the machine's whole ~/.codex/sessions.
 	// See prepareCodexSessionsDir (MUL-4424).
 	IsLocalDirectory bool
-	// SessionStoreKey is a stable, per-(agent, issue) relative path segment that
+	// SessionStoreKey is a stable, per-(agent, issue-or-chat) relative path that
 	// identifies this task's persistent Codex sessions store. It survives across
 	// task IDs (unlike the task-scoped envRoot the GC reclaims) so a follow-up
 	// run resumes the same thread. Empty when no stable key is available (e.g. a
@@ -388,27 +388,30 @@ func codexSessionStoreNamespace(profile string) string {
 	return "p_" + hex.EncodeToString(sum[:])
 }
 
-// codexSessionStoreKey builds the per-(profile, agent, issue) key for a task's
-// persistent Codex sessions store. The agent/issue IDs are server-issued UUIDs;
-// all three segments are sanitized to bare path segments defensively so a
-// malformed value can never escape the store root. Returns "" when there is no
-// issue to key on (the store is issue-scoped), leaving sessions/ task-local.
-func codexSessionStoreKey(profile, agentID, issueID string) string {
-	issue := sanitizeCodexPathSegment(issueID)
-	if issue == "" {
-		return ""
+// codexSessionStoreKey builds a profile-and-task key for persistent Codex
+// sessions. Issue IDs retain their existing path;
+// direct chats use a prefixed chat_session_id so the two namespaces cannot
+// collide. Returns "" when neither stable identifier is available.
+func codexSessionStoreKey(profile string, task TaskContextForEnv) string {
+	storeID := sanitizePathSegment(task.IssueID)
+	if storeID == "" {
+		chatID := sanitizePathSegment(task.ChatSessionID)
+		if chatID == "" {
+			return ""
+		}
+		storeID = "chat_" + chatID
 	}
-	agent := sanitizeCodexPathSegment(agentID)
+	agent := sanitizePathSegment(task.AgentID)
 	if agent == "" {
 		agent = "_"
 	}
-	return filepath.Join(codexSessionStoreNamespace(profile), agent, issue)
+	return filepath.Join(codexSessionStoreNamespace(profile), agent, storeID)
 }
 
-// sanitizeCodexPathSegment reduces s to the characters a UUID uses (hex plus
+// sanitizePathSegment reduces s to the characters a UUID uses (hex plus
 // dashes/underscores), dropping everything else so the result is always a single
 // safe path segment — no separators, no "..", no drive letters.
-func sanitizeCodexPathSegment(s string) string {
+func sanitizePathSegment(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch {
@@ -665,13 +668,13 @@ func touchCodexSessionStore(storeDir string, logger *slog.Logger) {
 	}
 }
 
-// CodexSessionStorePath returns the per-issue Codex session store directory for
-// (profile, agentID, issueID) on the shared home, or "" when there is no stable
-// key. The daemon marks this path in-use for the duration of a task so
+// CodexSessionStorePath returns the per-conversation Codex session store on the
+// shared home, or "" when there is no stable issue or chat key. The daemon
+// marks this path in-use for the duration of a task so
 // PruneCodexSessionStores never reclaims a store mid-mount, closing the
 // stat→remove race the mtime refresh alone cannot (MUL-4424).
-func CodexSessionStorePath(profile, agentID, issueID string) string {
-	key := codexSessionStoreKey(profile, agentID, issueID)
+func CodexSessionStorePath(profile string, task TaskContextForEnv) string {
+	key := codexSessionStoreKey(profile, task)
 	if key == "" {
 		return ""
 	}

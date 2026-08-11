@@ -28,10 +28,17 @@ const MEDIUM_ONLY: RuntimeModel = {
 
 const CATALOG = [FAST_HIGH, PLAIN, MEDIUM_ONLY];
 
+const CLAUDE_MEDIUM_ONLY: RuntimeModel = {
+  id: "claude-sonnet-4-6",
+  label: "Claude Sonnet 4.6",
+  thinking: { supported_levels: [{ value: "medium", label: "Medium" }] },
+};
+
 describe("buildModelChangeUpdate (MUL-5390)", () => {
   it("clears overrides the new model does not advertise", () => {
     expect(
       buildModelChangeUpdate({
+        provider: "codex",
         model: "gpt-5.4-mini",
         thinkingLevel: "high",
         serviceTier: "priority",
@@ -47,6 +54,7 @@ describe("buildModelChangeUpdate (MUL-5390)", () => {
   it("keeps overrides the new model still supports", () => {
     expect(
       buildModelChangeUpdate({
+        provider: "codex",
         model: "gpt-5.6-sol",
         thinkingLevel: "high",
         serviceTier: "priority",
@@ -58,6 +66,7 @@ describe("buildModelChangeUpdate (MUL-5390)", () => {
   it("clears only the unsupported half", () => {
     expect(
       buildModelChangeUpdate({
+        provider: "codex",
         model: "gpt-5.5",
         thinkingLevel: "high",
         serviceTier: "priority",
@@ -72,6 +81,7 @@ describe("buildModelChangeUpdate (MUL-5390)", () => {
   it("leaves overrides untouched when the catalog is not authoritative", () => {
     expect(
       buildModelChangeUpdate({
+        provider: "codex",
         model: "gpt-5.4-mini",
         thinkingLevel: "high",
         serviceTier: "priority",
@@ -83,6 +93,7 @@ describe("buildModelChangeUpdate (MUL-5390)", () => {
   it("leaves overrides untouched for an unresolvable runtime-default model", () => {
     expect(
       buildModelChangeUpdate({
+        provider: "codex",
         model: "",
         thinkingLevel: "high",
         serviceTier: "priority",
@@ -94,6 +105,7 @@ describe("buildModelChangeUpdate (MUL-5390)", () => {
   it("leaves overrides untouched for a model missing from the catalog", () => {
     expect(
       buildModelChangeUpdate({
+        provider: "codex",
         model: "custom-local-build",
         thinkingLevel: "high",
         serviceTier: "priority",
@@ -102,9 +114,25 @@ describe("buildModelChangeUpdate (MUL-5390)", () => {
     ).toEqual({ model: "custom-local-build" });
   });
 
+  it("clears an unsupported override on a context-tagged Claude model", () => {
+    expect(
+      buildModelChangeUpdate({
+        provider: "claude",
+        model: "claude-sonnet-4-6[1m]",
+        thinkingLevel: "xhigh",
+        serviceTier: "",
+        catalog: [CLAUDE_MEDIUM_ONLY],
+      }),
+    ).toEqual({
+      model: "claude-sonnet-4-6[1m]",
+      thinking_level: "",
+    });
+  });
+
   it("never sends a clear when nothing is set", () => {
     expect(
       buildModelChangeUpdate({
+        provider: "codex",
         model: "gpt-5.4-mini",
         thinkingLevel: "",
         serviceTier: "",

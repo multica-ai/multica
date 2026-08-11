@@ -119,7 +119,7 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 | `avatar_url` | `agent.avatar_url` | none; an explicit non-empty value is preserved, while omitted/empty creates a random `emoji:<glyph>` avatar | catalog/listing UI only — NOT the runtime prompt |
 | `runtime_id` | `agent.runtime_id` (nullable) | required at create (400) + must resolve to a runtime in this workspace | selects runtime/provider; `NULL` means unbound — see below |
 | `model` | `agent.model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |
-| `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum; unknown literal → 400. A runtime with no reasoning control (e.g. `hermes`) rejects EVERY non-empty value and says so — that 400 is a capability answer, not a bad token | daemon; empty = runtime default |
+| `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum/safe-token gate; unknown literal → 400. Pi accepts only `off|minimal|low|medium|high|xhigh|max`, then the daemon checks the selected model's RPC-discovered subset. ACP runtimes that advertise an effort selector in `session/new` (currently `reasonix`) take the safe-token path and are checked against the discovered catalog by the daemon; that catalog covers only the model the discovery session was on, so other models show no picker until per-model probing exists. A runtime with no reasoning control (e.g. `hermes`) rejects EVERY non-empty value and says so — that 400 is a capability answer, not a bad token | daemon; empty = runtime default |
 | `service_tier` | `agent.service_tier` (nullable) | Codex-only safe token; other providers reject; exact model/tier pair checked by daemon | daemon → Codex app-server; empty = local Codex config |
 | `custom_args` | `agent.custom_args` (JSON array) | JSON shape checked CLI-side; server stores as-is | daemon (extra CLI switches); defaults to `[]` |
 | `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
@@ -142,22 +142,26 @@ to 6 while an explicitly supplied 0 is rejected; on update, omission preserves
 the current value. The CLI performs the same range check before sending create
 or update requests.
 
-`thinking_level` is validated only at the provider level: fixed-catalog
-providers reject an unrecognized literal, while dynamic-catalog providers such
-as Codex/OpenCode accept a syntactically safe token. A value unsupported for
-the chosen model is NOT rejected here — the daemon checks its local model
-catalog at execution time, logs a warning, and omits the incompatible override.
+`thinking_level` is validated only at the provider level: fixed-vocabulary
+providers reject an unrecognized literal, while dynamic-vocabulary providers
+such as Codex/OpenCode accept a syntactically safe token. Pi's provider-level
+vocabulary is fixed (`off|minimal|low|medium|high|xhigh|max`), but its exact
+supported subset is model-specific and discovered from the local Pi RPC model
+catalog. A value unsupported for the chosen model is NOT rejected here — the
+daemon checks its local model catalog at execution time, logs a warning, and
+omits the incompatible override.
 
 Set it from the CLI with `--thinking-level` on `agent create` and `agent
 update`, mirroring `--model`: the flag is a thin pass-through to the top-level
 `thinking_level` field, and on update an empty string (`--thinking-level ""`)
 clears it back to the runtime default. The CLI deliberately does not enumerate
 the valid levels — they are runtime/model-specific (Claude currently uses
-`low|medium|high|xhigh|max`; Codex values are discovered from the runtime's
-model catalog). It forwards the token, the server applies the provider's
-fixed-enum or safe-token gate, and the daemon performs the exact model/level
-check. A runtime whose provider has no thinking concept rejects any non-empty
-value with a 400.
+`low|medium|high|xhigh|max`; Pi uses
+`off|minimal|low|medium|high|xhigh|max`; Codex values are discovered from the
+runtime's model catalog). It forwards the token, the server applies the
+provider's fixed-enum or safe-token gate, and the daemon performs the exact
+model/level check. A runtime whose provider has no thinking concept rejects any
+non-empty value with a 400.
 
 `service_tier` is the matching first-class Codex speed control. Set it with
 `--service-tier <catalog-id>` on create/update; use `--service-tier ""` on
@@ -173,7 +177,9 @@ explicit model fail closed because the effective config.toml model is unknown.
 `custom_args` are raw provider CLI args. The CLI help notes that some providers
 (codex app-server, openclaw) reject `--model` inside `custom_args` — but that is
 documented CLI guidance, not a server-enforced invariant; nothing in the create
-handler inspects `custom_args` for a model flag.
+handler inspects `custom_args` for a model flag. Pi is stricter at invocation
+time: `--thinking` in `custom_args` is filtered because the first-class
+`thinking_level` field owns that flag and must be the only source of its value.
 
 ## Env & secrets
 

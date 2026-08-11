@@ -408,6 +408,25 @@ jobs:
         # silently as "ok".
         run: go test ./internal/daemon/repocache -v -run '^(TestIsolatedCheckoutIsCommittableOnWindows|TestIsolatedCheckoutAcrossVolumesOnWindows)$' -count=1 -timeout=5m
 
+      - name: Test Windows directory-junction link safety
+        working-directory: server
+        # MUL-6000: the per-task codex-home links the user's real skills into
+        # the task directory instead of copying them. On Windows that link is a
+        # directory junction whenever os.Symlink is denied (no Developer Mode),
+        # and a junction is the one link shape a ModeSymlink check misses:
+        # since Go 1.23 os.Lstat reports it as ModeDir|ModeIrregular with no
+        # ModeSymlink bit, while its DirEntry still answers IsDir() == true, so
+        # filepath.WalkDir descends into the target. Two claims about Windows
+        # itself cannot be made on ubuntu: that the per-task skills wipe
+        # (os.RemoveAll) drops the junction rather than the user's files, and
+        # that the GC's artifact sweep and size accounting refuse to walk
+        # through one. The tests call mklink /J directly so the junction shape
+        # is exercised even on a runner where symlinks are permitted.
+        # -v so a skip is visible instead of passing silently as "ok".
+        run: |
+          go test ./internal/daemon/execenv -v -run '^(TestSeedUserCodexSkills|TestHydrateCodexSkills)' -count=1 -timeout=5m
+          go test ./internal/daemon -v -run '^(TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction|TestTaskSize_DoesNotCountDirectoryJunction)$' -count=1 -timeout=5m
+
       - name: Build Windows CLI helper entrypoint
         working-directory: server
         run: go build ./cmd/multica

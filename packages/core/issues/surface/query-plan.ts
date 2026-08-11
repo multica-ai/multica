@@ -1,50 +1,39 @@
 import type { CreateIssueRequest } from "../../types";
-import type {
-  AssigneeGroupedIssuesFilter,
-  MyIssuesFilter,
-} from "../queries";
+import type { MyIssuesFilter } from "../queries";
 import {
+  assigneeTypesForActorKind,
   issueScopeKey,
   UnsupportedIssueScopeError,
   type IssueScope,
 } from "./scope";
 
-export type IssueSurfaceQueryPlan =
-  | {
-      kind: "workspace";
-      scopeKey: string;
-      queryScope: undefined;
-      queryFilter: MyIssuesFilter;
-      groupedScopeFilter: AssigneeGroupedIssuesFilter;
-      loadMoreScope: undefined;
-      loadMoreFilter: undefined;
-      userId: undefined;
-      createDefaults: Partial<CreateIssueRequest>;
-    }
-  | {
-      kind: "scoped";
-      scopeKey: string;
-      queryScope: string;
-      queryFilter: MyIssuesFilter;
-      groupedScopeFilter: AssigneeGroupedIssuesFilter;
-      loadMoreScope: string;
-      loadMoreFilter: MyIssuesFilter;
-      userId?: string;
-      createDefaults: Partial<CreateIssueRequest>;
-    };
+/**
+ * The scope's non-Table residue. Row membership for every list-shaped mode
+ * (table, list, board, swimlane) is compiled into an IssueTableQuerySpec by
+ * the surface controller and answered by the server-owned Table channel —
+ * this plan only carries what that channel does not cover:
+ *
+ * - `scopeKey`: the surface's cache/persistence identity.
+ * - `queryFilter`: the scope as legacy list-API params, consumed solely by
+ *   the Gantt projection (whose scheduled-only window is not expressible in
+ *   the Table spec).
+ * - `createDefaults`: what a new issue created on this surface inherits.
+ */
+export interface IssueSurfaceQueryPlan {
+  scopeKey: string;
+  queryFilter: MyIssuesFilter;
+  createDefaults: Partial<CreateIssueRequest>;
+}
 
-function myRelationPlan(
+function buildMyRelationPlan(
   scope: Extract<IssueScope, { type: "my" }>,
-): Pick<
-  Extract<IssueSurfaceQueryPlan, { kind: "scoped" }>,
-  "queryScope" | "queryFilter" | "userId" | "createDefaults"
-> {
+  scopeKey: string,
+): IssueSurfaceQueryPlan {
   switch (scope.relation) {
     case "assigned":
       return {
-        queryScope: "assigned",
+        scopeKey,
         queryFilter: { assignee_id: scope.userId },
-        userId: undefined,
         createDefaults: {
           assignee_type: "member",
           assignee_id: scope.userId,
@@ -52,25 +41,18 @@ function myRelationPlan(
       };
     case "created":
       return {
-        queryScope: "created",
+        scopeKey,
         queryFilter: { creator_id: scope.userId },
-        userId: undefined,
         createDefaults: {},
       };
     case "involved":
       return {
-        queryScope: "agents",
+        scopeKey,
         queryFilter: { involves_user_id: scope.userId },
-        userId: undefined,
         createDefaults: {},
       };
     case "all":
-      return {
-        queryScope: "all",
-        queryFilter: {},
-        userId: scope.userId,
-        createDefaults: {},
-      };
+      return { scopeKey, queryFilter: {}, createDefaults: {} };
   }
 }
 
@@ -81,79 +63,32 @@ export function buildIssueSurfaceQueryPlan(
 
   switch (scope.type) {
     case "workspace": {
-      // Members/Agents tabs are server-filtered scoped lists — assignee_types
-      // is a real API param on both the list and grouped endpoints, so each
-      // tab gets its own cache entry with correct per-status totals and
-      // load-more pagination. Only the unfiltered "all" tab uses the shared
-      // workspace list cache.
-      if (scope.actorKind === "members" || scope.actorKind === "agents") {
-        const queryFilter: MyIssuesFilter =
-          scope.actorKind === "members"
-            ? { assignee_types: ["member"] }
-            : { assignee_types: ["agent", "squad"] };
-        return {
-          kind: "scoped",
-          scopeKey,
-          queryScope: scopeKey,
-          queryFilter,
-          groupedScopeFilter: queryFilter,
-          loadMoreScope: scopeKey,
-          loadMoreFilter: queryFilter,
-          userId: undefined,
-          createDefaults: {},
-        };
-      }
+      const assigneeTypes = assigneeTypesForActorKind(scope.actorKind);
       return {
-        kind: "workspace",
         scopeKey,
-        queryScope: undefined,
-        queryFilter: {},
-        groupedScopeFilter: {},
-        loadMoreScope: undefined,
-        loadMoreFilter: undefined,
-        userId: undefined,
+        queryFilter: assigneeTypes ? { assignee_types: assigneeTypes } : {},
         createDefaults: {},
       };
     }
     case "project": {
-      const queryFilter = { project_id: scope.projectId };
+      const assigneeTypes = assigneeTypesForActorKind(scope.actorKind);
       return {
-        kind: "scoped",
         scopeKey,
-        queryScope: scopeKey,
-        queryFilter,
-        groupedScopeFilter: queryFilter,
-        loadMoreScope: scopeKey,
-        loadMoreFilter: queryFilter,
-        userId: undefined,
+        queryFilter: assigneeTypes
+          ? { project_id: scope.projectId, assignee_types: assigneeTypes }
+          : { project_id: scope.projectId },
         createDefaults: { project_id: scope.projectId },
       };
     }
-    case "my": {
-      const plan = myRelationPlan(scope);
+    case "my":
+      return buildMyRelationPlan(scope, scopeKey);
+    case "actor":
       return {
-        kind: "scoped",
         scopeKey,
-        ...plan,
-        groupedScopeFilter: plan.queryFilter,
-        loadMoreScope: plan.queryScope,
-        loadMoreFilter: plan.queryFilter,
-      };
-    }
-    case "actor": {
-      const queryFilter =
-        scope.relation === "assigned"
-          ? { assignee_id: scope.actorId }
-          : { creator_id: scope.actorId };
-      return {
-        kind: "scoped",
-        scopeKey,
-        queryScope: scopeKey,
-        queryFilter,
-        groupedScopeFilter: queryFilter,
-        loadMoreScope: scopeKey,
-        loadMoreFilter: queryFilter,
-        userId: undefined,
+        queryFilter:
+          scope.relation === "assigned"
+            ? { assignee_id: scope.actorId }
+            : { creator_id: scope.actorId },
         createDefaults:
           scope.relation === "assigned"
             ? {
@@ -162,7 +97,6 @@ export function buildIssueSurfaceQueryPlan(
               }
             : {},
       };
-    }
     case "team":
       throw new UnsupportedIssueScopeError(scope, "issue surface query plan");
   }

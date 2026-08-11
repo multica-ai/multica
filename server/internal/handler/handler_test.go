@@ -3857,10 +3857,11 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 	}
 }
 
-// TestNestedMemberReplyWithMemberParentFallsBackToAssignee verifies that a
-// nested reply whose direct parent is human-owned does not route to a sibling
-// agent reply. It falls through to the issue assignee instead.
-func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T) {
+// TestNestedMemberReplyUnderMemberSkipsAssigneeFallback verifies that a nested
+// reply whose direct parent is human-owned neither routes to a sibling agent
+// reply nor falls back to the issue assignee. A sibling agent comment alone
+// does not establish a conversation owner for the member-authored root.
+func TestNestedMemberReplyUnderMemberSkipsAssigneeFallback(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -3948,8 +3949,8 @@ func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T)
 	if nested.ParentID == nil || *nested.ParentID != humanParentID {
 		t.Fatalf("stored nested reply parent_id should keep direct parent %s, got %v", humanParentID, nested.ParentID)
 	}
-	if got := countAssigneeQueued(); got != 1 {
-		t.Fatalf("plain nested human reply should fall back to assignee; got %d queued tasks", got)
+	if got := countAssigneeQueued(); got != 0 {
+		t.Fatalf("plain nested human reply queued assignee tasks = %d, want 0", got)
 	}
 }
 

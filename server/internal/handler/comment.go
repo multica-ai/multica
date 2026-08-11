@@ -2679,6 +2679,12 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 			}
 			return triggers, nil
 		}
+		// A plain member-to-member reply must not start the issue assignee just
+		// because the thread has no agent owner. Explicit mentions and existing
+		// conversation owners were already resolved above.
+		if parentComment.AuthorType == "member" {
+			return nil, nil
+		}
 	}
 
 	if trigger, ok := h.routeAssigneeFallback(ctx, issue, actorType, actorID, opts); ok {

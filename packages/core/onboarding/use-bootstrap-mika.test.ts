@@ -53,7 +53,7 @@ beforeEach(() => {
   });
   mocks.startMikaOnboarding.mockResolvedValue({
     started: true,
-    task_id: "task-1",
+    message_id: "message-1",
     created_at: "2026-01-01T00:00:00Z",
   });
 });
@@ -76,7 +76,7 @@ describe("bootstrapMika", () => {
     );
     expect(mocks.startMikaOnboarding).toHaveBeenCalledWith(
       "session-1",
-      { language: "en", returning: false },
+      { language: "en" },
       "venus",
     );
     expect(result.agent.id).toBe("agent-1");
@@ -92,16 +92,14 @@ describe("bootstrapMika", () => {
     expect(mocks.updateAgent).not.toHaveBeenCalled();
   });
 
-  it("tells the server when the member has onboarded before", async () => {
-    await bootstrapMika({ ...input, returning: true });
+  it("sends nothing about the member's other workspaces", async () => {
+    await bootstrapMika(input);
 
-    // Creating a second workspace should not re-teach the product; the flag
-    // is what lets Mika compress the introduction to one line.
-    expect(mocks.startMikaOnboarding).toHaveBeenCalledWith(
-      "session-1",
-      { language: "en", returning: true },
-      "venus",
-    );
+    // Every workspace onboards from scratch. A member's second workspace may
+    // carry entirely different work and collaborators, so its opening is built
+    // from this workspace's own inputs and nothing else.
+    const [, payload] = mocks.startMikaOnboarding.mock.calls[0]!;
+    expect(Object.keys(payload)).toEqual(["language"]);
   });
 
   // The session is now resolved server-side under an advisory lock. Listing

@@ -77,10 +77,6 @@
     "sticky_comment_bar": {
       "title": "Sticky comment bar",
       "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
-    },
-    "issue_link_new_tab": {
-      "title": "Open issue links in new tab",
-      "hint": "Issue links in descriptions, comments, and chat open in a new tab instead of navigating in place."
     }
   },
   "shortcuts": {
@@ -120,6 +116,8 @@
       "findInIssue": { "label": "Find in issue", "description": "Search within the open issue detail." },
       "openThreadNav": { "label": "Open thread navigator", "description": "List, search, and jump between the comment threads of the open issue." },
       "send": { "label": "Send", "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog." },
+      "goBack": { "label": "Go back", "description": "Navigate back through history, like a browser." },
+      "goForward": { "label": "Go forward", "description": "Navigate forward through history, like a browser." },
       "goInbox": { "label": "Go to Inbox", "description": "Open the workspace inbox." },
       "goChat": { "label": "Go to Chat", "description": "Open workspace chat." },
       "goMyIssues": { "label": "Go to My Issues", "description": "Open issues assigned to you." },
@@ -727,7 +725,7 @@
   },
   "wecom": {
     "section_title": "WeCom",
-    "page_description": "Connect each Multica Agent to its own WeCom smart bot. Members message the bot in WeCom and the Agent replies through a long WebSocket connection — no public callback URL is required.",
+    "page_description": "Connect each Multica Agent to its own WeCom (企业微信) smart bot. Members can DM the bot, @ it in groups, and type /issue to spin up a new Multica issue. The Agent replies over a long WebSocket connection, so no public callback URL is required.",
     "not_enabled_title": "WeCom integration not enabled",
     "not_enabled_description_prefix": "Set",
     "not_enabled_description_suffix": "on the server to enable WeCom smart-bot installations.",
@@ -759,10 +757,20 @@
     "byo_bot_id_placeholder": "e.g. aibot_xxxxxxxxxxxxxxxx",
     "byo_secret_label": "Long-connection secret",
     "byo_secret_placeholder": "Paste the secret shown once in the console",
+    "byo_bot_name_label": "Bot name in chat (optional)",
+    "byo_bot_name_placeholder": "e.g. Multica Bot",
+    "byo_bot_name_hint": "Only needed if the name has a space in it, so the bot can tell its own @-mention apart from the command typed after it. To change it later — including after renaming the bot in the WeCom console — disconnect this bot and connect it again.",
     "byo_submit": "Connect",
     "byo_submitting": "Connecting…",
     "byo_cancel": "Cancel",
     "byo_success_toast": "WeCom bot connected",
+    "byo_conflict_same_workspace": "This bot is already connected to another Agent in this workspace. Disconnect it there first, then connect it here.",
+    "byo_conflict_archived_agent": "This bot is connected to an archived Agent in this workspace. Restore that Agent, or disconnect its bot, before connecting it here.",
+    "byo_conflict_other_workspace": "This bot is already connected to a different Multica workspace. Disconnect it there before connecting it here.",
+    "byo_rejected": "Could not connect the bot. Check the Bot ID and secret from the WeCom admin console, and that it is a smart bot with the long connection enabled.",
+    "byo_credentials_rejected": "WeCom rejected this Bot ID and secret. Check both on the WeCom admin console, and that it is a smart bot with the long connection enabled.",
+    "byo_credentials_unverifiable": "Couldn't reach WeCom to verify this bot. Your credentials were not changed — try again in a moment.",
+    "byo_install_failed": "Couldn't save this bot — something went wrong on our side. Your credentials were not changed; try again, and contact support if it keeps failing.",
     "byo_failed_toast": "Could not connect the WeCom bot"
   },
   "repositories": {

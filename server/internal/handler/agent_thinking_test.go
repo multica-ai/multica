@@ -99,6 +99,56 @@ func TestCreateAgent_ThinkingLevel_ValidationConsistency(t *testing.T) {
 	})
 }
 
+func TestCreateAgent_PiThinkingLevelValidation(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	piRuntimeID := createPiProviderRuntime(t)
+	t.Cleanup(func() {
+		testPool.Exec(ctx,
+			`DELETE FROM agent WHERE workspace_id = $1 AND name LIKE 'pi-thinking-%'`,
+			testWorkspaceID,
+		)
+	})
+
+	t.Run("native max value succeeds", func(t *testing.T) {
+		body := map[string]any{
+			"name":                 "pi-thinking-max",
+			"runtime_id":           piRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"thinking_level":       "max",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("Pi thinking_level=max: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		if resp["thinking_level"] != "max" {
+			t.Fatalf("Pi thinking_level response = %v, want max", resp["thinking_level"])
+		}
+	})
+
+	t.Run("non-Pi token is rejected", func(t *testing.T) {
+		body := map[string]any{
+			"name":                 "pi-thinking-ultra",
+			"runtime_id":           piRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"thinking_level":       "ultra",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("Pi thinking_level=ultra: expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+}
+
 func TestAgentServiceTierValidationAndTriState(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -376,6 +426,7 @@ func TestUpdateAgent_RuntimeSwitch_ClearsKnownIncompatibleModel(t *testing.T) {
 
 	ctx := context.Background()
 	claudeRuntimeID := createClaudeProviderRuntime(t)
+	secondClaudeRuntimeID := createClaudeProviderRuntime(t)
 	codexRuntimeID := createCodexProviderRuntime(t)
 
 	t.Cleanup(func() {
@@ -433,6 +484,24 @@ func TestUpdateAgent_RuntimeSwitch_ClearsKnownIncompatibleModel(t *testing.T) {
 		_ = json.NewDecoder(w.Body).Decode(&resp)
 		if resp["model"] != "gpt-5.5" {
 			t.Errorf("expected exact target model preserved, got %v", resp["model"])
+		}
+	})
+
+	t.Run("runtime-only switch keeps context-tagged target model", func(t *testing.T) {
+		agentID := createAgentOnRuntimeWithModel(t, "runtime-model-switch-context-tag", claudeRuntimeID, "claude-opus-5[1m]")
+		body := map[string]any{
+			"runtime_id": secondClaudeRuntimeID,
+		}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 preserving context-tagged Claude model, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		if resp["model"] != "claude-opus-5[1m]" {
+			t.Errorf("expected context-tagged Claude model preserved, got %v", resp["model"])
 		}
 	})
 
@@ -583,6 +652,26 @@ func createHermesProviderRuntime(t *testing.T) string {
 	`, testWorkspaceID, "Hermes Thinking Runtime", "Hermes thinking-level test runtime", testUserID).Scan(&runtimeID)
 	if err != nil {
 		t.Fatalf("create hermes runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	return runtimeID
+}
+
+func createPiProviderRuntime(t *testing.T) string {
+	t.Helper()
+	var runtimeID string
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, last_seen_at, owner_id
+		)
+		VALUES ($1, NULL, $2, 'cloud', 'pi', 'online', $3, '{}'::jsonb, now(), $4)
+		RETURNING id
+	`, testWorkspaceID, "Pi Thinking Runtime", "Pi thinking-level test runtime", testUserID).Scan(&runtimeID)
+	if err != nil {
+		t.Fatalf("create pi runtime: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)

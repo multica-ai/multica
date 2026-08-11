@@ -43,6 +43,8 @@ Step-by-step guides:
 
 Channel messages that don't @-mention the Bot never trigger the agent and are not added to its conversation context.
 
+Ordinary messages follow this flow. `/issue` is a command, not a chat turn: Multica posts the result back to the originating platform but does not add the command to Multica Chat. Slack's native slash command continues through its separate asynchronous issue-creation flow.
+
 ## Session isolation
 
 - Feishu/Lark separates sessions by chat; later messages in the same chat continue the same session.

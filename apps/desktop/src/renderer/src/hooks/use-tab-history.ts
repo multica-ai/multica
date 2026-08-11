@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useTabStore, useActiveTabHistory } from "@/stores/tab-store";
 
 /**
@@ -25,4 +25,59 @@ export function useTabHistory() {
   }, []);
 
   return { canGoBack, canGoForward, goBack, goForward };
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
+/**
+ * Keyboard and mouse back/forward for the active tab's history:
+ * Cmd/Ctrl+←/→ (browser convention), plus mouse side buttons 3/4. The
+ * Cmd/Ctrl+[ / ] chords are handled by the shared shortcut registry
+ * (packages/core/shortcuts via <GlobalShortcuts>) instead, so they stay
+ * rebindable and identical on web and desktop. The renderer's mouseup is the
+ * ONE cross-platform source for side buttons — the main process deliberately
+ * does not forward `app-command` (Windows/Linux emit both, which would
+ * double-navigate).
+ */
+export function useNavigationInputBindings() {
+  const { goBack, goForward } = useTabHistory();
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || e.altKey || e.shiftKey) return;
+      // Cmd/Ctrl+[ and +] are intentionally NOT handled here: they are
+      // registered as goBack/goForward in packages/core/shortcuts and driven
+      // by <GlobalShortcuts>, so both web and desktop share one rebindable
+      // binding. Handling the brackets here too would double-navigate on
+      // desktop (DesktopShell mounts both this window listener and the
+      // document-level GlobalShortcuts), which only shows up on a history
+      // stack of 3+ because stepHistory clamps at the ends.
+      const back = e.key === "ArrowLeft";
+      const forward = e.key === "ArrowRight";
+      if (!back && !forward) return;
+      // In editable contexts these chords belong to the text field:
+      // cmd+arrow moves the caret to the line edge, cmd+bracket indents.
+      if (isEditableTarget(e.target)) return;
+      e.preventDefault();
+      if (back) goBack();
+      else goForward();
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      if (e.button === 3) goBack();
+      else goForward();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [goBack, goForward]);
 }

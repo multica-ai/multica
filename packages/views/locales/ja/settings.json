@@ -77,10 +77,6 @@
     "sticky_comment_bar": {
       "title": "コメントバーを固定",
       "hint": "タスクのページをスクロールしても、コメントバーを常に下部に固定します。"
-    },
-    "issue_link_new_tab": {
-      "title": "タスクリンクを新しいタブで開く",
-      "hint": "説明・コメント・チャット内のタスクリンクを、その場で移動せず新しいタブで開きます。"
     }
   },
   "shortcuts": {
@@ -120,6 +116,8 @@
       "findInIssue": { "label": "タスク内を検索", "description": "開いているタスクの詳細を検索します。" },
       "openThreadNav": { "label": "スレッドナビゲーターを開く", "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。" },
       "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログでタスクを作成します。" },
+      "goBack": { "label": "戻る", "description": "ブラウザーのように履歴を戻ります。" },
+      "goForward": { "label": "進む", "description": "ブラウザーのように履歴を進みます。" },
       "goInbox": { "label": "受信トレイへ移動", "description": "ワークスペースの受信トレイを開きます。" },
       "goChat": { "label": "チャットへ移動", "description": "ワークスペースのチャットを開きます。" },
       "goMyIssues": { "label": "自分のタスクへ移動", "description": "自分に割り当てられたタスクを開きます。" },
@@ -726,7 +724,7 @@
   },
   "wecom": {
     "section_title": "WeCom",
-    "page_description": "各 Multica エージェントを専用の WeCom スマートボットに接続します。WebSocket ロングコネクションで受信するため、公開コールバック URL は不要です。",
+    "page_description": "各 Multica エージェントを専用の WeCom (企业微信) スマートボットに接続します。メンバーはボットに DM を送り、グループで @ メンションし、/issue と入力して Multica タスクを作成できます。WebSocket ロングコネクションで応答するため、公開コールバック URL は不要です。",
     "not_enabled_title": "WeCom 連携が有効化されていません",
     "not_enabled_description_prefix": "サーバー側で",
     "not_enabled_description_suffix": "を設定すると WeCom スマートボットのインストールが有効になります。",
@@ -758,10 +756,20 @@
     "byo_bot_id_placeholder": "例: aibot_xxxxxxxxxxxxxxxx",
     "byo_secret_label": "ロングコネクション Secret",
     "byo_secret_placeholder": "管理コンソールに一度だけ表示される Secret を貼り付けます",
+    "byo_bot_name_label": "チャットでのボット名（任意）",
+    "byo_bot_name_placeholder": "例: Multica Bot",
+    "byo_bot_name_hint": "名前にスペースが含まれる場合のみ必要です。自分宛ての @ メンションと、その後に入力されたコマンドを区別するために使います。あとから変更するとき（WeCom 管理コンソールで改名した場合を含む）は、いったん接続を解除してから接続し直してください。",
     "byo_submit": "接続",
     "byo_submitting": "接続中…",
     "byo_cancel": "キャンセル",
     "byo_success_toast": "WeCom ボットを接続しました",
+    "byo_conflict_same_workspace": "このボットはこのワークスペースの別のエージェントに接続済みです。先にそちらで切断してから、ここに接続してください。",
+    "byo_conflict_archived_agent": "このボットはこのワークスペースのアーカイブ済みエージェントに接続されています。そのエージェントを復元するか、ボットを切断してから接続してください。",
+    "byo_conflict_other_workspace": "このボットは別の Multica ワークスペースに接続済みです。先にそちらで切断してから接続してください。",
+    "byo_rejected": "ボットを接続できませんでした。WeCom 管理コンソールの Bot ID とシークレット、および長時間接続が有効なスマートボットであることを確認してください。",
+    "byo_credentials_rejected": "WeCom がこの Bot ID とシークレットを拒否しました。WeCom 管理コンソールで両方を確認し、長時間接続が有効なスマートボットであることもご確認ください。",
+    "byo_credentials_unverifiable": "WeCom に接続できず、このボットを検証できませんでした。認証情報は変更されていません。少し時間をおいてもう一度お試しください。",
+    "byo_install_failed": "ボットを保存できませんでした。こちら側の問題です。認証情報は変更されていません。もう一度お試しいただき、続くようならサポートにご連絡ください。",
     "byo_failed_toast": "WeCom ボットを接続できませんでした"
   },
   "repositories": {

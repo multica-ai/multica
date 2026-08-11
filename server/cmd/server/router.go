@@ -174,9 +174,12 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 type RouterOptions struct {
 	HTTPMetrics     *obsmetrics.HTTPMetrics
 	BusinessMetrics *obsmetrics.BusinessMetrics
-	DaemonHub       *daemonws.Hub
-	DaemonWakeup    service.TaskWakeupNotifier
-	FeatureFlags    *featureflag.Service
+	// WecomMetrics is the WeCom adapter's health sink. Nil discards every
+	// counter, which is what a deployment with /metrics turned off gets.
+	WecomMetrics *obsmetrics.WecomMetrics
+	DaemonHub    *daemonws.Hub
+	DaemonWakeup service.TaskWakeupNotifier
+	FeatureFlags *featureflag.Service
 	// HeartbeatScheduler, when non-nil, replaces the default synchronous
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
@@ -695,10 +698,26 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				wecom.RegisterWecom(channelRegistry, wecom.ChannelDeps{
 					Credentials: credsResolver,
 					Senders:     wecomSenders,
+					Metrics:     wecomMetricsOrNil(opts.WecomMetrics),
 					Logger:      slog.Default(),
 				})
+				// Inbound media: a callback carries a pre-signed COS url and
+				// a per-url key, so the resolver needs no WeCom credential —
+				// only somewhere durable to put the bytes. Without an object
+				// store there is nothing to point an attachment at, so the
+				// resolver is left nil and attachments stay as their
+				// placeholder text. Same nil-guard as DingTalk above.
+				var wecomMedia engine.MediaResolver
+				if store != nil {
+					wecomMedia = wecom.NewMediaResolver(
+						store,
+						engine.NewDBMediaIntentLedger(queries),
+						wecomSenders,
+						slog.Default(),
+					)
+				}
 				channelRouter.Register(wecom.TypeWecom, wecom.NewResolverSet(
-					wecomStore, wecomSession, wecomReplier,
+					wecomStore, wecomSession, wecomReplier, wecomMedia,
 				))
 
 				// EventChatDone subscriber: pushes the agent's chat reply
@@ -707,6 +726,30 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// the agent's reply lands only in Multica's web UI — the
 				// user in WeCom sees no response.
 				wecom.NewOutbound(queries, wecomSenders, slog.Default()).Register(bus)
+
+				// Ranges the media fetcher may dial despite looking reserved.
+				// Empty by default, which leaves the SSRF guard exactly as
+				// strict as it ships. A deployment behind a fake-IP proxy
+				// needs it: there, every public hostname resolves into the
+				// proxy's pool (198.18.0.0/15 is the common one), so WeCom's
+				// own COS host is indistinguishable from a metadata endpoint
+				// by address alone and every attachment is refused.
+				if raw := strings.TrimSpace(os.Getenv("MULTICA_WECOM_MEDIA_ALLOW_CIDRS")); raw != "" {
+					for _, err := range wecom.SetMediaAllowedPrefixes(strings.Split(raw, ",")) {
+						slog.Error("wecom: ignoring malformed media allow cidr", "error", err)
+					}
+					slog.Warn("wecom: media guard has an operator allow-list; those ranges are reachable by a URL WeCom supplies",
+						"cidrs", raw)
+				}
+
+				// Frame tracing: off unless an operator asks for it. It
+				// records a bounded prefix of message text, so the fact that
+				// it is on has to be visible in the log it is writing into —
+				// otherwise a session gets left switched on and nobody
+				// notices message content accumulating.
+				if wecom.SetTrace(os.Getenv("MULTICA_WECOM_TRACE") == "1") {
+					slog.Warn("wecom: frame tracing ON — records message text; unset MULTICA_WECOM_TRACE when done")
+				}
 
 				slog.Info("wecom integration enabled (smart bot, long connection)")
 				// SINGLE-REPLICA CONSTRAINT: WeCom outbound (agent replies +
@@ -1438,6 +1481,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/{itemType}/{itemId}", h.DeletePin)
 			})
 
+			// Saved issue views (MUL-4796).
+			r.Get("/api/issue-view-preferences", h.GetIssueViewPreference)
+			r.Put("/api/issue-view-preferences", h.PutIssueViewPreference)
+			r.Route("/api/issue-views", func(r chi.Router) {
+				r.Get("/", h.ListIssueViews)
+				r.Post("/", h.CreateIssueView)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetIssueViewByID)
+					r.Patch("/", h.UpdateIssueView)
+					r.Delete("/", h.DeleteIssueView)
+				})
+			})
+
 			// Attachments
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
 			// /api/attachments/{id}/download is registered in the
@@ -1877,4 +1933,15 @@ func composioCallbackBaseURL(publicURL string) string {
 		return publicURL
 	}
 	return appURLFromEnv()
+}
+
+// wecomMetricsOrNil keeps a typed nil out of the adapter's interface field.
+// A *WecomMetrics that is nil still satisfies wecom.Metrics, so assigning it
+// directly would give the adapter a non-nil interface holding a nil pointer —
+// and the first counter call would panic on a deployment with /metrics off.
+func wecomMetricsOrNil(m *obsmetrics.WecomMetrics) wecom.Metrics {
+	if m == nil {
+		return nil
+	}
+	return m
 }

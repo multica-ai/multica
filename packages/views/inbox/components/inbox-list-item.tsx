@@ -12,6 +12,8 @@ import { InboxDetailLabel } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useInboxContextMenu } from "./inbox-context-menu";
 import { useT } from "../../i18n";
+import { paths, useWorkspaceSlug } from "@multica/core/paths";
+import { resolveClickIntent, useIntentNavigate } from "../../navigation";
 
 // Hook returning a localized relative-time formatter — the i18n equivalent
 // of the previous static `timeAgo` function. Returning a function (rather
@@ -48,6 +50,15 @@ export function InboxListItem({
   const { t } = useT("inbox");
   const timeAgo = useTimeAgo();
   const openContextMenu = useInboxContextMenu();
+  // Null-safe slug (not useWorkspacePaths, which throws): the row renders in
+  // tests and could render outside a workspace route; without a slug the
+  // modifier-click affordance simply stays off.
+  const slug = useWorkspaceSlug();
+  const issueHref =
+    slug && item.issue_id
+      ? paths.workspace(slug).issueDetail(item.issue_id)
+      : null;
+  const intentNavigate = useIntentNavigate();
   const displayTitle = getInboxDisplayTitle(item);
   const isArchivedView = view === "archived";
   // Archiving deliberately leaves `read` untouched so unarchiving restores the
@@ -63,7 +74,23 @@ export function InboxListItem({
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(e) => {
+        // Plain click keeps the master-detail selection; a modifier click on
+        // a row that references an issue opens that issue as its own tab.
+        if (issueHref) {
+          const intent = resolveClickIntent(e);
+          if (intent !== "push") {
+            intentNavigate(issueHref, intent);
+            return;
+          }
+        }
+        onClick();
+      }}
+      onAuxClick={(e) => {
+        if (e.defaultPrevented || e.button !== 1 || !issueHref) return;
+        e.preventDefault();
+        intentNavigate(issueHref, "background-tab");
+      }}
       // Right-click opens the list's shared menu (mark read/unread, archive).
       // `select-none` mirrors what Base UI's own trigger used to merge in, so
       // right-clicking a row never starts a text selection.

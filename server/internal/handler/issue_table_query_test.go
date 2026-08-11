@@ -168,6 +168,48 @@ func TestIssueTableExplicitEmptyAssigneesMatchesNone(t *testing.T) {
 	}
 }
 
+func TestIssueTableProjectScopeAssigneeTypes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	spec := issueTableQuerySpec{
+		Scope: issueTableScope{
+			Kind:          "project",
+			ProjectID:     "00000000-0000-0000-0000-000000000001",
+			AssigneeTypes: []string{"agent", "squad"},
+		},
+		Sort: issueTableSortRequest{Field: "position", Direction: "asc"},
+	}
+
+	w := httptest.NewRecorder()
+	compiled, ok := testHandler.compileIssueTableQuery(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		spec,
+	)
+	if !ok {
+		t.Fatalf("compile failed: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(compiled.where, "i.project_id") {
+		t.Fatalf("project predicate missing: %q", compiled.where)
+	}
+	if !strings.Contains(compiled.where, "i.assignee_type = ANY") {
+		t.Fatalf("assignee-type narrowing missing on project scope: %q", compiled.where)
+	}
+
+	bad := spec
+	bad.Scope.AssigneeTypes = []string{"martian"}
+	w = httptest.NewRecorder()
+	if _, ok := testHandler.compileIssueTableQuery(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		bad,
+	); ok {
+		t.Fatal("invalid assignee_types must be rejected on project scope")
+	}
+}
+
 func TestIssueTableWorkingIssueIDsAreExplicitAndAssigneeIndependent(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
