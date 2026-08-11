@@ -2,12 +2,14 @@ package slack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/slack-go/slack"
 
@@ -44,10 +46,22 @@ type reactionAPI interface {
 // the last moment it is certainly resolvable: it is reachable from the session's
 // channel_chat_session_binding, and a session delete drops that row while the
 // cancel it triggers is still on its way to this manager.
+// configSnapshot is the installation's encrypted config as it stood when the
+// reaction was added, for the one case where the id is no longer enough: a
+// runtime teardown deletes the installation inside the same transaction that
+// cancels the tasks (handler/runtime.go,
+// DeleteChannelInstallationsBySystemRuntimeAgents), so by the time the cancel
+// reaches Clear there is no row to resolve.
+//
+// A FALLBACK, never the primary — a live lookup picks up a credential rotation
+// between add and clear and a snapshot cannot, so it is used only when the row
+// is gone. It holds the same encrypted blob the database holds; the bot token
+// is still decrypted only for the life of the clear.
 type typingState struct {
 	ChannelID      string
 	MessageTS      string
 	InstallationID pgtype.UUID
+	configSnapshot []byte
 }
 
 // TypingIndicatorQueries is the narrow DB surface the manager needs to resolve
@@ -118,7 +132,7 @@ func (m *TypingIndicatorManager) Add(ctx context.Context, inst db.ChannelInstall
 	}
 	key := util.UUIDToString(sessionID)
 	m.mu.Lock()
-	m.states[key] = append(m.states[key], typingState{ChannelID: channelID, MessageTS: messageTS, InstallationID: inst.ID})
+	m.states[key] = append(m.states[key], typingState{ChannelID: channelID, MessageTS: messageTS, InstallationID: inst.ID, configSnapshot: inst.Config})
 	m.mu.Unlock()
 }
 
@@ -155,7 +169,7 @@ func (m *TypingIndicatorManager) Clear(ctx context.Context, sessionID pgtype.UUI
 		api, resolved := apis[instKey]
 		if !resolved {
 			var err error
-			api, err = m.apiForInstallation(ctx, s.InstallationID)
+			api, err = m.apiForInstallation(ctx, s.InstallationID, s.configSnapshot)
 			if err != nil {
 				m.log.Warn("slack typing indicator: resolve installation for clear failed",
 					"chat_session_id", key, "installation_id", instKey, "err", err)
@@ -175,15 +189,24 @@ func (m *TypingIndicatorManager) Clear(ctx context.Context, sessionID pgtype.UUI
 // apiForInstallation loads an installation row and turns its encrypted config
 // into a reaction client. The decrypted bot token exists only for the life of
 // this call.
-func (m *TypingIndicatorManager) apiForInstallation(ctx context.Context, id pgtype.UUID) (reactionAPI, error) {
+func (m *TypingIndicatorManager) apiForInstallation(ctx context.Context, id pgtype.UUID, snapshot []byte) (reactionAPI, error) {
+	config := snapshot
 	inst, err := m.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          id,
 		ChannelType: string(TypeSlack),
 	})
-	if err != nil {
+	switch {
+	case err == nil:
+		config = inst.Config
+	case errors.Is(err, pgx.ErrNoRows) && len(snapshot) > 0:
+		// The row is gone, which on this path means the runtime teardown
+		// deleted it in the transaction that cancelled these tasks. The
+		// reaction it added is still on the message and the snapshot is the
+		// only thing left that can take it off.
+	default:
 		return nil, fmt.Errorf("lookup installation: %w", err)
 	}
-	creds, err := decodeCredentials(inst.Config, m.decrypt)
+	creds, err := decodeCredentials(config, m.decrypt)
 	if err != nil {
 		return nil, fmt.Errorf("decode credentials: %w", err)
 	}

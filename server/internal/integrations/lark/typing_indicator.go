@@ -2,11 +2,13 @@ package lark
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -29,6 +31,22 @@ type TypingIndicatorState struct {
 	MessageID      string
 	ReactionID     string
 	InstallationID pgtype.UUID
+
+	// installSnapshot is the installation row as it stood when the reaction was
+	// added, kept for the one case where the id is no longer enough: a runtime
+	// teardown deletes the installation inside the same transaction that
+	// cancels the tasks (handler/runtime.go,
+	// DeleteChannelInstallationsBySystemRuntimeAgents), so by the time the
+	// cancel reaches Clear there is no row to resolve.
+	//
+	// It is a FALLBACK, never the primary. A live lookup picks up a credential
+	// rotation between add and clear; a snapshot cannot, so it is consulted
+	// only when the row is genuinely gone.
+	//
+	// It does not weaken "no decrypted secret lives in the state map": what is
+	// held here is the same encrypted blob the database holds, and
+	// DecryptAppSecret still runs at clear time.
+	installSnapshot Installation
 }
 
 // TypingIndicatorQueries is the narrow DB surface the manager needs.
@@ -117,9 +135,10 @@ func (m *TypingIndicatorManager) Add(ctx context.Context, inst Installation, cha
 	key := uuidString(chatSessionID)
 	m.mu.Lock()
 	m.states[key] = append(m.states[key], &TypingIndicatorState{
-		MessageID:      messageID,
-		ReactionID:     reactionID,
-		InstallationID: inst.ID,
+		MessageID:       messageID,
+		ReactionID:      reactionID,
+		InstallationID:  inst.ID,
+		installSnapshot: inst,
 	})
 	m.mu.Unlock()
 
@@ -141,7 +160,11 @@ func (m *TypingIndicatorManager) Add(ctx context.Context, inst Installation, cha
 // session's tasks, and the task:cancelled events that reach the Patcher are
 // broadcast after that transaction commits. A binding lookup would miss, and
 // since the state has already been taken here, there would be nothing left to
-// clear from. Installation rows survive the session.
+// clear from. Installation rows survive a session delete.
+//
+// They do NOT survive a runtime teardown, which deletes them in the same
+// transaction — so each state also carries the installation as it stood at add
+// time, consulted only when the row is gone. See TypingIndicatorState.
 func (m *TypingIndicatorManager) Clear(ctx context.Context, chatSessionID pgtype.UUID) {
 	key := uuidString(chatSessionID)
 	m.mu.Lock()
@@ -166,7 +189,7 @@ func (m *TypingIndicatorManager) Clear(ctx context.Context, chatSessionID pgtype
 		instKey := uuidString(s.InstallationID)
 		creds, seen := resolved[instKey]
 		if !seen {
-			creds = m.credentialsForInstallation(ctx, key, s.InstallationID)
+			creds = m.credentialsForInstallation(ctx, key, s.InstallationID, s.installSnapshot)
 			resolved[instKey] = creds
 		}
 		if creds == nil {
@@ -197,9 +220,21 @@ func (m *TypingIndicatorManager) Clear(ctx context.Context, chatSessionID pgtype
 // secret. Nil means the clear cannot proceed for that installation; the reason
 // is already logged. The decrypted secret exists only from here on, never in the
 // state map.
-func (m *TypingIndicatorManager) credentialsForInstallation(ctx context.Context, sessionKey string, id pgtype.UUID) *InstallationCredentials {
+func (m *TypingIndicatorManager) credentialsForInstallation(ctx context.Context, sessionKey string, id pgtype.UUID, snapshot Installation) *InstallationCredentials {
 	inst, err := m.queries.GetLarkInstallation(ctx, id)
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, pgx.ErrNoRows) && snapshot.ID.Valid:
+		// The row is gone, which on this path means the runtime teardown
+		// deleted it in the transaction that cancelled these tasks. The
+		// reaction it added is still on the message and this is the only thing
+		// left that can take it off.
+		m.log.Debug("lark typing indicator: installation gone, clearing from the snapshot taken at add time",
+			"chat_session_id", sessionKey,
+			"installation_id", uuidString(id),
+		)
+		inst = snapshot
+	default:
 		m.log.Warn("lark typing indicator: failed to lookup installation for clear",
 			"chat_session_id", sessionKey,
 			"installation_id", uuidString(id),

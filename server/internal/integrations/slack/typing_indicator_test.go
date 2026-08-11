@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -293,5 +294,83 @@ func TestTypingIndicator_ClearsOnCancelOfATaskThatReadsAsAWebRun(t *testing.T) {
 	}
 	if fr.removed[0].Channel != "C1" || fr.removed[0].Timestamp != ts {
 		t.Errorf("cleared the wrong message: %+v, want C1/%s", fr.removed[0], ts)
+	}
+}
+
+// A runtime teardown deletes the installation inside the transaction that
+// cancels its tasks, so by the time the cancel reaches Clear the row the
+// credentials come from is gone. The reaction is still on the message and the
+// state has already been taken off the map, so the snapshot taken at add time
+// is the only thing left that can remove it.
+//
+// The reviewer's repro, kept as the test.
+func TestTypingIndicator_TeardownDeletedInstallationStillClears(t *testing.T) {
+	sessionID := uid(7)
+	q := &fakeOutboundQueries{
+		inst: db.ChannelInstallation{ID: uid(1), Status: "active", Config: slackInstallConfigJSON()},
+	}
+	fr := &fakeReactor{}
+	m := newTestTyping(q, fr)
+
+	ts := freshTS()
+	m.Add(context.Background(), db.ChannelInstallation{ID: uid(1), Config: slackInstallConfigJSON()}, sessionID, "C1", ts)
+	if len(fr.added) != 1 {
+		t.Fatalf("setup: the reaction should be on the message; added = %d", len(fr.added))
+	}
+
+	// The teardown transaction has committed: the installation is gone.
+	q.instErr = pgx.ErrNoRows
+
+	bus := events.New()
+	m.Register(bus)
+	bus.Publish(events.Event{
+		Type:          protocol.EventTaskCancelled,
+		TaskID:        util.UUIDToString(uid(9)),
+		ChatSessionID: util.UUIDToString(sessionID),
+		Payload: map[string]any{
+			"task_id":         util.UUIDToString(uid(9)),
+			"chat_session_id": util.UUIDToString(sessionID),
+			"status":          "cancelled",
+		},
+	})
+
+	if len(fr.removed) != 1 {
+		t.Fatalf("the runtime was torn down and its tasks cancelled, but the reaction is still on C1/%s "+
+			"with nothing left to take it off (removes = %d)", ts, len(fr.removed))
+	}
+}
+
+// The snapshot must not shadow a live row: a credential rotation between add and
+// clear is picked up by the lookup, and a snapshot used unconditionally would
+// clear through the app's old secret.
+func TestTypingIndicator_ALiveInstallationIsPreferredOverTheSnapshot(t *testing.T) {
+	sessionID := uid(7)
+	q := &fakeOutboundQueries{
+		inst: db.ChannelInstallation{ID: uid(1), Status: "active", Config: slackInstallConfigJSON()},
+	}
+	fr := &fakeReactor{}
+	m := newTestTyping(q, fr)
+
+	m.Add(context.Background(), db.ChannelInstallation{ID: uid(1), Config: slackInstallConfigJSON()}, sessionID, "C1", freshTS())
+
+	// A lookup error that is NOT "the row is gone" must still refuse: it says
+	// nothing about whether the installation exists.
+	q.instErr = errors.New("connection reset")
+
+	bus := events.New()
+	m.Register(bus)
+	bus.Publish(events.Event{
+		Type:          protocol.EventTaskCancelled,
+		TaskID:        util.UUIDToString(uid(9)),
+		ChatSessionID: util.UUIDToString(sessionID),
+		Payload: map[string]any{
+			"task_id":         util.UUIDToString(uid(9)),
+			"chat_session_id": util.UUIDToString(sessionID),
+			"status":          "cancelled",
+		},
+	})
+
+	if len(fr.removed) != 0 {
+		t.Fatalf("a transient lookup failure fell back to the snapshot; removes = %d", len(fr.removed))
 	}
 }
