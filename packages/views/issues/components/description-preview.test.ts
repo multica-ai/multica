@@ -25,4 +25,30 @@ describe("descriptionPreview", () => {
       descriptionPreview("# Title\n\n**bold** text and [a link](https://example.com)"),
     ).toBe("Title bold text and a link");
   });
+
+  // The editor serializes link brackets escaped. Without unescaping first, the
+  // link rule leaves the leading `\` untouched and captures the trailing one,
+  // so the preview reads `\repro script\`.
+  it("unwraps a link whose brackets the editor escaped", () => {
+    expect(descriptionPreview("See \\[repro script\\](https://example.com)")).toBe(
+      "See repro script",
+    );
+  });
+
+  it("still unwraps a link written without escapes", () => {
+    expect(descriptionPreview("See [repro script](https://example.com)")).toBe(
+      "See repro script",
+    );
+  });
+
+  it("drops the backslashes from escaped emphasis and punctuation", () => {
+    expect(descriptionPreview("it costs \\$5 \\*not\\* \\$10")).toBe("it costs $5 not $10");
+  });
+
+  // A backslash before a letter is not a Markdown escape, so prose keeps it.
+  it("leaves a literal backslash in prose alone", () => {
+    expect(descriptionPreview("open C:\\Users\\zain to continue")).toBe(
+      "open C:\\Users\\zain to continue",
+    );
+  });
 });
