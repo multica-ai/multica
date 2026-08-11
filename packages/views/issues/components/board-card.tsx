@@ -119,7 +119,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const priorityLabel = t(($) => $.priority[issue.priority]);
   const priorityIconNode = showPriority ? (
     canEdit ? (
-      <PickerWrapper>
+      <PickerWrapper className="flex">
         <PriorityPicker
           priority={issue.priority}
           onUpdate={handleUpdate}
@@ -127,7 +127,7 @@ export const BoardCardContent = memo(function BoardCardContent({
             <button
               type="button"
               aria-label={priorityLabel}
-              className="inline-flex items-center justify-center rounded hover:bg-muted/60"
+              className="inline-flex size-5 shrink-0 items-center justify-center rounded hover:bg-muted/60"
             >
               <PriorityIcon priority={issue.priority} />
             </button>
@@ -135,7 +135,10 @@ export const BoardCardContent = memo(function BoardCardContent({
         />
       </PickerWrapper>
     ) : (
-      <span aria-label={priorityLabel} className="inline-flex items-center justify-center">
+      <span
+        aria-label={priorityLabel}
+        className="inline-flex size-5 shrink-0 items-center justify-center"
+      >
         <PriorityIcon priority={issue.priority} />
       </span>
     )
@@ -244,7 +247,7 @@ export const BoardCardContent = memo(function BoardCardContent({
             <div className="ml-auto flex shrink-0 items-center gap-2">
               {showStartDate && (
                 canEdit ? (
-                  <PickerWrapper className="shrink-0">
+                  <PickerWrapper className="flex shrink-0">
                     <StartDatePicker
                       startDate={issue.start_date}
                       onUpdate={handleUpdate}
@@ -265,7 +268,7 @@ export const BoardCardContent = memo(function BoardCardContent({
               )}
               {showDueDate && (
                 canEdit ? (
-                  <PickerWrapper className="shrink-0">
+                  <PickerWrapper className="flex shrink-0">
                     <DueDatePicker
                       dueDate={issue.due_date}
                       onUpdate={handleUpdate}
@@ -365,6 +368,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
       >
         <AppLink
           href={p.issueDetail(issue.id)}
+          newTabTitle={issue.identifier}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
         >
           <BoardCardContent

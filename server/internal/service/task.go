@@ -1559,8 +1559,8 @@ var ErrChatQuickActionsStale = errors.New("chat quick actions: refresh target is
 // quota-spending pass (MUL-5149).
 var ErrChatQuickActionsBusy = errors.New("chat quick actions: session busy")
 
-// ErrChatSessionArchived signals that a direct-chat send lost a race with
-// archiving the session and therefore must not persist a new turn.
+// ErrChatSessionArchived signals that a send or a debounced channel flush lost
+// a race with archiving the session and therefore must not persist a new turn.
 var ErrChatSessionArchived = errors.New("chat task: session archived")
 
 // EnqueueChatTask creates a task-owned input batch for a chat session. Channel
@@ -1570,9 +1570,9 @@ var ErrChatSessionArchived = errors.New("chat task: session archived")
 //
 // Errors split into two layers:
 //
-//   - Productizable rejections (agent archived, no runtime) return
-//     the sentinel errors above. Callers (e.g. the Lark dispatcher)
-//     can errors.Is them to decide a user-visible outcome.
+//   - Productizable rejections (agent archived, no runtime, session
+//     archived) return the sentinel errors above. Callers (e.g. the Lark
+//     dispatcher) can errors.Is them to decide a user-visible outcome.
 //
 //   - Infrastructure failures (DB load / insert errors) are wrapped
 //     as ordinary errors. The caller should treat them as retryable
@@ -1625,6 +1625,45 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+	// Refuse to enqueue onto a session that has been archived, the same guard
+	// the direct-send path takes. This is the one enqueue path with a delay in
+	// front of it: the channel run trigger is debounced by
+	// DefaultChatRunBatchWindow, so the message is persisted immediately and
+	// the task row is only created here, up to a window later. An archive
+	// committing inside that window cancels the tasks it can see — there are
+	// none yet — and drops the channel binding, and without this check the
+	// flush then inserts a fresh task on a conversation the user closed.
+	// ClaimAgentTask does not read chat_session.status either, so the daemon
+	// would run it: quota and runtime spent on a closed conversation, new
+	// assistant turns written into an archived chat, the agent flipped back to
+	// 'working', and the brief describing the run as a private web chat
+	// because the binding is already gone.
+	//
+	// The lock is what makes the check hold — the caller's copy of the session
+	// was loaded before the transaction opened and can already be stale, the
+	// same reason the send path re-reads the agent under its lock. It is
+	// deliberately FOR NO KEY UPDATE rather than the send path's FOR UPDATE;
+	// see LockChatSessionForEnqueue for why the channel path cannot afford to
+	// block the inbound appends FOR UPDATE would. Taken as the transaction's
+	// first statement, so the chat_session -> agent_task_queue order is
+	// unchanged and no new deadlock edge appears.
+	currentSession, err := qtx.LockChatSessionForEnqueue(ctx, chatSession.ID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("lock chat session: %w", err)
+	}
+	if currentSession.Status != "active" {
+		return db.AgentTaskQueue{}, ErrChatSessionArchived
+	}
+	// Lock the channel binding only after the chat_session lock above. The
+	// append path touches chat_session before binding as well, so this order
+	// avoids an ABBA edge while keeping pending fresh in the enqueue transaction.
+	pendingFresh, err := qtx.LockChannelChatSessionPendingFresh(ctx, chatSession.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return db.AgentTaskQueue{}, fmt.Errorf("lock channel pending fresh: %w", err)
+	}
+	if err == nil && pendingFresh {
+		forceFreshSession = true
+	}
 	mediaPendingUntil, err := qtx.GetChannelMediaPendingUntil(ctx, chatSession.ID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -1675,6 +1714,11 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		task = corrected
 	case !errors.Is(err, pgx.ErrNoRows):
 		return db.AgentTaskQueue{}, fmt.Errorf("defer chat task for sealed pending media: %w", err)
+	}
+	if pendingFresh {
+		if err := qtx.ClearChannelChatSessionPendingFresh(ctx, chatSession.ID); err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("clear channel pending fresh: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("commit chat task enqueue: %w", err)
@@ -2113,11 +2157,35 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 	}
 	for _, t := range cancelled {
 		s.captureTaskCancelled(ctx, t)
-		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+	}
+	// Reconcile once per distinct agent instead of once per cancelled row:
+	// cancelling an issue often stops several tasks owned by the same agent,
+	// and each reconcile is a DB write plus a status broadcast. Matches
+	// CancelTasksForAgent's single-reconcile shape (D#3319).
+	for _, agentID := range distinctAgentIDs(cancelled) {
+		s.ReconcileAgentStatus(ctx, agentID)
 	}
 	s.notifyTasksFinished(cancelled)
 	return nil
+}
+
+// distinctAgentIDs returns each agent id appearing in the cancelled rows once,
+// preserving first-seen order. Bulk cancellations frequently stop several tasks
+// owned by the same agent; reconciling per distinct agent (rather than per row)
+// collapses the redundant RefreshAgentStatusFromTasks writes and status
+// broadcasts down to one per agent without changing the final agent status.
+func distinctAgentIDs(cancelled []db.AgentTaskQueue) []pgtype.UUID {
+	seen := make(map[pgtype.UUID]struct{}, len(cancelled))
+	ids := make([]pgtype.UUID, 0, len(cancelled))
+	for _, t := range cancelled {
+		if _, dup := seen[t.AgentID]; dup {
+			continue
+		}
+		seen[t.AgentID] = struct{}{}
+		ids = append(ids, t.AgentID)
+	}
+	return ids
 }
 
 // CancelTasksForAgent cancels every active task belonging to an agent
@@ -2154,8 +2222,13 @@ func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID
 	}
 	for _, t := range cancelled {
 		s.captureTaskCancelled(ctx, t)
-		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+	}
+	// Reconcile once per distinct agent instead of once per cancelled row: an
+	// edited/deleted trigger comment can cancel several tasks owned by the same
+	// agent, and each reconcile is a DB write plus a status broadcast (D#3319).
+	for _, agentID := range distinctAgentIDs(cancelled) {
+		s.ReconcileAgentStatus(ctx, agentID)
 	}
 	s.notifyTasksFinished(cancelled)
 	return cancelled, nil
@@ -2165,11 +2238,23 @@ func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID
 // task:cancelled for every row. Callers must invoke this AFTER committing the
 // cancellation so subscribers don't observe a "cancelled" event for a row
 // that the tx might still roll back.
-func (s *TaskService) BroadcastCancelledTasks(ctx context.Context, cancelled []db.AgentTaskQueue) {
+//
+// workspaceID comes from the caller instead of being resolved per task, because
+// the transaction these callers have just committed can delete the row the
+// resolution would read. A chat task's workspace is reached through its
+// chat_session, and both DeleteChatSession and the runtime teardown remove that
+// session — the teardown by deleting the system agent it hangs off. Afterwards
+// ResolveTaskWorkspaceID finds nothing and returns "", and publishTaskEvent
+// drops an event with no workspace before it reaches the bus: the rows are
+// cancelled, nobody is told, and every queue view and channel indicator keeps
+// showing a run that no longer exists. Each caller already knows the workspace
+// — it is the one whose session, member or runtime is being torn down — so the
+// lookup is not needed and cannot fail.
+func (s *TaskService) BroadcastCancelledTasks(ctx context.Context, workspaceID string, cancelled []db.AgentTaskQueue) {
 	for _, t := range cancelled {
 		s.captureTaskCancelled(ctx, t)
 		s.ReconcileAgentStatus(ctx, t.AgentID)
-		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+		s.publishTaskEvent(protocol.EventTaskCancelled, workspaceID, t)
 	}
 	s.notifyTasksFinished(cancelled)
 }

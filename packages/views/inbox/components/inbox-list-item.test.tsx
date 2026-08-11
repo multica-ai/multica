@@ -1,6 +1,9 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { WorkspaceSlugProvider } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
+import { NavigationProvider } from "../../navigation";
+import type { NavigationAdapter } from "../../navigation";
 import { InboxListItem } from "./inbox-list-item";
 
 vi.mock("../../issues/components", () => ({ StatusIcon: () => null }));
@@ -62,15 +65,38 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
   };
 }
 
-function renderRow(props: { item: InboxItem; view: "inbox" | "archived" }) {
+function makeAdapter(
+  overrides: Partial<NavigationAdapter> = {},
+): NavigationAdapter {
+  return {
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    pathname: "/",
+    searchParams: new URLSearchParams(),
+    getShareableUrl: (p) => p,
+    ...overrides,
+  };
+}
+
+function renderRow(props: {
+  item: InboxItem;
+  view: "inbox" | "archived";
+  adapter?: NavigationAdapter;
+  onClick?: () => void;
+}) {
   return render(
-    <InboxListItem
-      item={props.item}
-      view={props.view}
-      isSelected={false}
-      onClick={vi.fn()}
-      onAction={vi.fn()}
-    />,
+    <WorkspaceSlugProvider slug="acme">
+      <NavigationProvider value={props.adapter ?? makeAdapter()}>
+        <InboxListItem
+          item={props.item}
+          view={props.view}
+          isSelected={false}
+          onClick={props.onClick ?? vi.fn()}
+          onAction={vi.fn()}
+        />
+      </NavigationProvider>
+    </WorkspaceSlugProvider>,
   );
 }
 
@@ -135,5 +161,67 @@ describe("InboxListItem issue activity", () => {
     });
 
     expect(queryByTestId("issue-agent-activity")).toBeNull();
+  });
+});
+
+describe("InboxListItem link semantics", () => {
+  it("plain click keeps the master-detail selection and does not navigate", () => {
+    const onClick = vi.fn();
+    const push = vi.fn();
+    renderRow({ item: item(), view: "inbox", onClick, adapter: makeAdapter({ push }) });
+
+    fireEvent.click(screen.getByTestId("actor-avatar").closest("button")!);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("cmd-click opens the referenced issue in a background tab (desktop)", () => {
+    const onClick = vi.fn();
+    const openInNewTab = vi.fn();
+    renderRow({
+      item: item(),
+      view: "inbox",
+      onClick,
+      adapter: makeAdapter({ openInNewTab }),
+    });
+
+    fireEvent.click(screen.getByTestId("actor-avatar").closest("button")!, {
+      metaKey: true,
+    });
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/issues/issue-1", undefined);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("middle click opens the referenced issue in a background tab", () => {
+    const openInNewTab = vi.fn();
+    renderRow({ item: item(), view: "inbox", adapter: makeAdapter({ openInNewTab }) });
+
+    const row = screen.getByTestId("actor-avatar").closest("button")!;
+    const event = new MouseEvent("auxclick", {
+      bubbles: true,
+      button: 1,
+      cancelable: true,
+    });
+    row.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/issues/issue-1", undefined);
+  });
+
+  it("cmd-click on a row without an issue falls back to plain selection", () => {
+    const onClick = vi.fn();
+    const openInNewTab = vi.fn();
+    renderRow({
+      item: item({ issue_id: null }),
+      view: "inbox",
+      onClick,
+      adapter: makeAdapter({ openInNewTab }),
+    });
+
+    fireEvent.click(screen.getByTestId("actor-avatar").closest("button")!, {
+      metaKey: true,
+    });
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(openInNewTab).not.toHaveBeenCalled();
   });
 });

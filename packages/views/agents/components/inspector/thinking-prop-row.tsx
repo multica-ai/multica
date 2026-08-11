@@ -8,6 +8,7 @@ import { PropRow } from "../../../common/prop-row";
 import { SettingsRow } from "../../../settings/components/settings-layout";
 import { useT } from "../../../i18n";
 import { ThinkingPicker } from "./thinking-picker";
+import { findModelCapabilityEntry } from "./model-capability";
 
 /**
  * Thinking row for the agent inspector. Hidden when the active model has
@@ -116,7 +117,7 @@ function pickModelEntry(
   model: string,
   provider: string,
 ): RuntimeModel | undefined {
-  if (model) return models.find((m) => m.id === model);
+  if (model) return findModelCapabilityEntry(models, model, provider);
   // Empty model = "follow the runtime's own default". For codex that default
   // comes from the local config.toml and can be any installed model, so we
   // must NOT preview the flagged Default entry's effort catalog — gpt-5.6-sol

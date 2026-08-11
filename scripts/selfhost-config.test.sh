@@ -32,7 +32,7 @@ tmp_env="$(mktemp)"
 tmp_dir="$(mktemp -d)"
 trap 'rm -f "$tmp_env"; rm -rf "$tmp_dir"' EXIT
 sed 's/^FRONTEND_PORT=.*/FRONTEND_PORT=3100/' .env.example >"$tmp_env"
-printf '\nBACKEND_PORT=9100\n' >>"$tmp_env"
+printf '\nBACKEND_PORT=9100\nSMTP_FROM_EMAIL=multica@example.com\n' >>"$tmp_env"
 
 config="$(
   docker compose \
@@ -46,6 +46,7 @@ require_config "$config" 'published: "9100"'
 require_config "$config" 'FRONTEND_ORIGIN: http://localhost:3100'
 require_config "$config" 'GOOGLE_REDIRECT_URI: http://localhost:3100/auth/callback'
 require_config "$config" 'MULTICA_APP_URL: http://localhost:3100'
+require_config "$config" 'SMTP_FROM_EMAIL: multica@example.com'
 
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then

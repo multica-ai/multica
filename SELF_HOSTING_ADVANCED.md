@@ -172,7 +172,7 @@ Turn it on for a debugging session and unset it when the session ends. Before
 you do:
 
 - **It is read at boot, so changing it needs a backend restart** — `docker compose -f docker-compose.selfhost.yml up -d backend`. There is no runtime toggle. While it is on, the backend logs a warning on every startup saying so.
-- **Anyone who can read the backend's logs can read the traced message text.** That is a wider audience than the WeCom chat it came from: your `docker logs` / journald / log shipper, and whoever administers them. Binding tokens and other `token=…` parameters are redacted and the smart-bot secret is never read, but user message content is not.
+- **Anyone who can read the backend's logs can read the traced message text.** That is a wider audience than the WeCom chat it came from: your `docker logs` / journald / log shipper, and whoever administers them. The smart-bot secret is never read, and `token=` / `access_token=` / `code=` parameters are redacted out of message text — but user message content is not, and **an attachment's `Content-Disposition` and the filename read out of it are written verbatim**, up to 2048 runes and past the redactor. That line exists to show exactly how the storage backend encoded a name, and a redacted or truncated copy of it answers nothing; it also means an attachment's filename reaches your logs as sent.
 - **Retention is your log stack's, not the application's.** The backend writes to stderr and keeps nothing itself, so how long the traced text survives is whatever your Docker logging driver or shipper is set to. If that is "forever", decide about it before enabling rather than after.
 
 Each outbound frame produces two lines that share a `seq`: `dir=out` when it is

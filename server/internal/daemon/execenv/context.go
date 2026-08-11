@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"gopkg.in/yaml.v3"
 )
 
@@ -333,6 +334,11 @@ func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (stri
 // (removeReusedManagedSkillDirs) needs the bare path with no side effects so
 // it can match the managed skill roots the prior manifest recorded.
 func skillsDirPath(workDir, provider string) string {
+	// Built-in runtime identities (e.g. "omp") declare their skills dir in
+	// the descriptor; resolve generically before the protocol-family switch.
+	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
+		return filepath.Join(workDir, desc.SkillsDir)
+	}
 	switch provider {
 	case "claude":
 		// Claude Code natively discovers skills from .claude/skills/ in the workdir.

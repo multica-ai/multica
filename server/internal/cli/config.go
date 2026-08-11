@@ -6,9 +6,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-const defaultCLIConfigPath = ".multica/config.json"
+const (
+	defaultCLIConfigPath = ".multica/config.json"
+
+	// TaskConfigRootEnv points daemon-managed CLI invocations at a private,
+	// per-task Multica config directory. It is deliberately Multica-specific:
+	// phase-one hardening keeps the real HOME/XDG environment available to
+	// provider tooling while preventing implicit Owner-profile discovery.
+	TaskConfigRootEnv = "MULTICA_TASK_CONFIG_ROOT"
+)
 
 // CLIConfig holds persistent CLI settings.
 type CLIConfig struct {
@@ -192,28 +201,78 @@ func CLIConfigPath() (string, error) {
 // CLIConfigPathForProfile returns the config file path for the given profile.
 // An empty profile returns the default path (~/.multica/config.json).
 // A named profile returns ~/.multica/profiles/<name>/config.json.
+// When TaskConfigRootEnv is set by the daemon, the same profile layout is
+// rooted directly below that private task directory instead of the user's home.
 func CLIConfigPathForProfile(profile string) (string, error) {
-	home, err := os.UserHomeDir()
+	root, taskLocal, err := multicaConfigRoot()
 	if err != nil {
 		return "", fmt.Errorf("resolve CLI config path: %w", err)
 	}
-	if profile == "" {
-		return filepath.Join(home, defaultCLIConfigPath), nil
+	if taskLocal {
+		if err := validateTaskLocalProfile(profile); err != nil {
+			return "", fmt.Errorf("resolve CLI config path: %w", err)
+		}
 	}
-	return filepath.Join(home, ".multica", "profiles", profile, "config.json"), nil
+	if profile == "" {
+		if taskLocal {
+			return filepath.Join(root, "config.json"), nil
+		}
+		return filepath.Join(root, defaultCLIConfigPath), nil
+	}
+	if taskLocal {
+		return filepath.Join(root, "profiles", profile, "config.json"), nil
+	}
+	return filepath.Join(root, ".multica", "profiles", profile, "config.json"), nil
 }
 
 // ProfileDir returns the base directory for a profile's state files (pid, log).
 // An empty profile returns ~/.multica/. A named profile returns ~/.multica/profiles/<name>/.
+// Task invocations resolve the equivalent paths below TaskConfigRootEnv.
 func ProfileDir(profile string) (string, error) {
-	home, err := os.UserHomeDir()
+	root, taskLocal, err := multicaConfigRoot()
 	if err != nil {
 		return "", fmt.Errorf("resolve profile dir: %w", err)
 	}
-	if profile == "" {
-		return filepath.Join(home, ".multica"), nil
+	if taskLocal {
+		if err := validateTaskLocalProfile(profile); err != nil {
+			return "", fmt.Errorf("resolve profile dir: %w", err)
+		}
 	}
-	return filepath.Join(home, ".multica", "profiles", profile), nil
+	if profile == "" {
+		if taskLocal {
+			return root, nil
+		}
+		return filepath.Join(root, ".multica"), nil
+	}
+	if taskLocal {
+		return filepath.Join(root, "profiles", profile), nil
+	}
+	return filepath.Join(root, ".multica", "profiles", profile), nil
+}
+
+func multicaConfigRoot() (root string, taskLocal bool, err error) {
+	if rawRoot := strings.TrimSpace(os.Getenv(TaskConfigRootEnv)); rawRoot != "" {
+		root := filepath.Clean(rawRoot)
+		if !filepath.IsAbs(root) {
+			return "", false, fmt.Errorf("%s must be an absolute path", TaskConfigRootEnv)
+		}
+		return root, true, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false, err
+	}
+	return home, false, nil
+}
+
+func validateTaskLocalProfile(profile string) error {
+	if profile == "" {
+		return nil
+	}
+	if profile == "." || profile == ".." || filepath.IsAbs(profile) || strings.ContainsAny(profile, `/\\`) || filepath.Clean(profile) != profile {
+		return fmt.Errorf("invalid task-local Multica profile name %q", profile)
+	}
+	return nil
 }
 
 // LoadCLIConfig reads the CLI config from disk (default profile).
@@ -253,8 +312,30 @@ func SaveCLIConfigForProfile(cfg CLIConfig, profile string) error {
 		return err
 	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dirMode := os.FileMode(0o755)
+	if strings.TrimSpace(os.Getenv(TaskConfigRootEnv)) != "" {
+		dirMode = 0o700
+	}
+	if err := os.MkdirAll(dir, dirMode); err != nil {
 		return fmt.Errorf("create CLI config directory: %w", err)
+	}
+	if dirMode == 0o700 {
+		root, _, err := multicaConfigRoot()
+		if err != nil {
+			return fmt.Errorf("resolve task-local CLI config root: %w", err)
+		}
+		for current := dir; ; current = filepath.Dir(current) {
+			if err := os.Chmod(current, 0o700); err != nil {
+				return fmt.Errorf("restrict task-local CLI config directory: %w", err)
+			}
+			if current == root {
+				break
+			}
+			parent := filepath.Dir(current)
+			if parent == current {
+				return fmt.Errorf("task-local CLI config directory %q escapes root %q", dir, root)
+			}
+		}
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

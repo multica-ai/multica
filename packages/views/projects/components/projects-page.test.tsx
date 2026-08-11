@@ -303,9 +303,9 @@ describe("ProjectsPage compact row navigation", () => {
 
     expect(middleClick.defaultPrevented).toBe(true);
     expect(openInNewTab).toHaveBeenCalledTimes(3);
-    expect(openInNewTab).toHaveBeenNthCalledWith(1, "/test-workspace/projects/project-1");
-    expect(openInNewTab).toHaveBeenNthCalledWith(2, "/test-workspace/projects/project-1");
-    expect(openInNewTab).toHaveBeenNthCalledWith(3, "/test-workspace/projects/project-1");
+    expect(openInNewTab).toHaveBeenNthCalledWith(1, "/test-workspace/projects/project-1", "Launch Plan");
+    expect(openInNewTab).toHaveBeenNthCalledWith(2, "/test-workspace/projects/project-1", "Launch Plan");
+    expect(openInNewTab).toHaveBeenNthCalledWith(3, "/test-workspace/projects/project-1", "Launch Plan");
     expect(push).not.toHaveBeenCalled();
   });
 

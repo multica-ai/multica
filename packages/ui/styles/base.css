@@ -257,6 +257,16 @@ html[data-sidebar-resizing="true"] * {
   user-select: none !important;
 }
 
+/* Row drag-and-drop shares the same cursor contract: while a dnd-kit drag
+ * is active the grabbing cursor must survive the pointer leaving the drag
+ * handle and win over descendants' own cursor declarations (including the
+ * preflight `cursor: pointer` on buttons the pointer crosses mid-drag). */
+html[data-dnd-dragging="true"],
+html[data-dnd-dragging="true"] * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
 [data-sidebar-resizing="true"] [data-slot="sidebar-gap"],
 [data-sidebar-resizing="true"] [data-slot="sidebar-container"] {
   transition: none !important;

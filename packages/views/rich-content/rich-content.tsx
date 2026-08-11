@@ -48,7 +48,11 @@ import {
   markdownSanitizeSchema,
   markdownUrlTransform,
 } from "@multica/ui/markdown";
-import { useAppOrigin } from "../navigation";
+import {
+  resolveClickIntent,
+  useAppOrigin,
+  useOptionalNavigation,
+} from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectMentionCard } from "../projects/components/project-mention-card";
@@ -200,6 +204,11 @@ function unfurlableEntityLink(
 function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   const slug = useWorkspaceSlug();
   const appOrigin = useAppOrigin();
+  // Platform probe only: `openInNewTab` present means desktop, where native
+  // anchor behavior is a dead end and every click must be intercepted. Absent
+  // (web), modified clicks are left to the browser — the only way to get a
+  // real background tab.
+  const desktopTabs = !!useOptionalNavigation()?.openInNewTab;
 
   if (href?.startsWith("slash://skill/")) {
     return <span className="slash-command">{children}</span>;
@@ -235,8 +244,22 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
     <a
       href={href}
       onClick={(e) => {
+        if (!href) {
+          e.preventDefault();
+          return;
+        }
+        if (!desktopTabs && (e.metaKey || e.ctrlKey || e.shiftKey)) return;
         e.preventDefault();
-        if (href) openLink(href, slug, appOrigin);
+        openLink(href, slug, appOrigin, resolveClickIntent(e));
+      }}
+      onAuxClick={(e) => {
+        if (e.button !== 1 || !href) return;
+        // Web: native middle click on a real anchor already opens a
+        // background tab. Desktop: the native window-open request dead-ends
+        // (denied, then dropped by the http/https allowlist), so route it.
+        if (!desktopTabs) return;
+        e.preventDefault();
+        openLink(href, slug, appOrigin, "background-tab");
       }}
     >
       {children}

@@ -39,7 +39,7 @@ A plain comment (containing no @ at all) is routed by discussion context:
 
 1. Replying to an agent's comment hands it to that agent.
 2. Replying inside a discussion an agent already participates in keeps that discussion's agent.
-3. Otherwise it goes to the issue's agent assignee; when the assignee is a squad, the leader handles it.
+3. A top-level comment that matches neither case goes to the issue's agent assignee; when the assignee is a squad, the leader handles it. A plain reply directly to a member does not fall back to the assignee; @-mention an agent or squad explicitly when you want one to join.
 
 When a comment explicitly @-mentions other targets (including members), the assignee fallback no longer applies.
 

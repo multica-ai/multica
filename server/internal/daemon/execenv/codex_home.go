@@ -393,25 +393,25 @@ func codexSessionStoreNamespace(profile string) string {
 // direct chats use a prefixed chat_session_id so the two namespaces cannot
 // collide. Returns "" when neither stable identifier is available.
 func codexSessionStoreKey(profile string, task TaskContextForEnv) string {
-	storeID := sanitizeCodexPathSegment(task.IssueID)
+	storeID := sanitizePathSegment(task.IssueID)
 	if storeID == "" {
-		chatID := sanitizeCodexPathSegment(task.ChatSessionID)
+		chatID := sanitizePathSegment(task.ChatSessionID)
 		if chatID == "" {
 			return ""
 		}
 		storeID = "chat_" + chatID
 	}
-	agent := sanitizeCodexPathSegment(task.AgentID)
+	agent := sanitizePathSegment(task.AgentID)
 	if agent == "" {
 		agent = "_"
 	}
 	return filepath.Join(codexSessionStoreNamespace(profile), agent, storeID)
 }
 
-// sanitizeCodexPathSegment reduces s to the characters a UUID uses (hex plus
+// sanitizePathSegment reduces s to the characters a UUID uses (hex plus
 // dashes/underscores), dropping everything else so the result is always a single
 // safe path segment — no separators, no "..", no drive letters.
-func sanitizeCodexPathSegment(s string) string {
+func sanitizePathSegment(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch {

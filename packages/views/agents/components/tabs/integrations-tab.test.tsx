@@ -171,6 +171,12 @@ describe("IntegrationsTab", () => {
     expect(screen.getByTestId("slack-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
   });
 
+  it("renders the DingTalk brand mark in the DingTalk integration card", () => {
+    renderTab(<IntegrationsTab agent={agent} />);
+    const section = screen.getByText("DingTalk").closest("section");
+    expect(section?.querySelector('[data-testid="dingtalk-mark"].h-5.w-5')).toBeTruthy();
+  });
+
   it("shows the coming-soon notice when the install transport is not wired", () => {
     installationsRef.current = {
       installations: [],

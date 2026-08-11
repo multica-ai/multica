@@ -250,6 +250,48 @@ describe("useIssueActions", () => {
     });
   });
 
+  it("openCreateSubIssue seeds the parent's project and assignee so the sub-issue inherits them", () => {
+    const parentIssue = {
+      ...mockIssue,
+      project_id: "project-1",
+      assignee_type: "agent",
+      assignee_id: "agent-1",
+    } as Issue;
+    const { result } = renderHook(() => useIssueActions(parentIssue), { wrapper });
+
+    act(() => {
+      result.current.openCreateSubIssue();
+    });
+
+    expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", {
+      parent_issue_id: "issue-1",
+      parent_issue_identifier: "TES-1",
+      project_id: "project-1",
+      assignee_type: "agent",
+      assignee_id: "agent-1",
+    });
+  });
+
+  it("openCreateSubIssue omits assignee when the parent has none", () => {
+    const parentIssue = {
+      ...mockIssue,
+      project_id: "project-1",
+      assignee_type: null,
+      assignee_id: null,
+    } as Issue;
+    const { result } = renderHook(() => useIssueActions(parentIssue), { wrapper });
+
+    act(() => {
+      result.current.openCreateSubIssue();
+    });
+
+    expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", {
+      parent_issue_id: "issue-1",
+      parent_issue_identifier: "TES-1",
+      project_id: "project-1",
+    });
+  });
+
   it("removeParent clears parent_issue_id and stage in one write, never via the run-confirm modal", () => {
     const childIssue = {
       ...mockIssue,

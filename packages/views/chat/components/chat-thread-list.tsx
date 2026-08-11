@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { pendingChatTasksOptions, chatKeys, sortChatSessions } from "@multica/core/chat/queries";
@@ -27,6 +28,7 @@ import {
 import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { resolveClickIntent, useOptionalNavigation } from "../../navigation";
 import { createLogger } from "@multica/core/logger";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useT } from "../../i18n";
@@ -88,6 +90,17 @@ export function ChatThreadList({
 }) {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
+  // Null-safe slug (not useWorkspacePaths, which throws): the list renders in
+  // tests outside a workspace route; without a slug the web modifier-click
+  // affordance simply stays off.
+  const slug = useWorkspaceSlug();
+  const sessionHref = (sessionId: string) =>
+    slug ? `${paths.workspace(slug).chat()}?session=${sessionId}` : null;
+  // Optional: the list renders bare in tests; without an adapter the web
+  // modifier-click affordance stays off (desktop keeps selection anyway).
+  const navigation = useOptionalNavigation();
+  const openInNewTab = navigation?.openInNewTab;
+  const getShareableUrl = navigation?.getShareableUrl;
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
   // Split the flat cache locally: active chats fill the default history view,
@@ -247,9 +260,36 @@ export function ChatThreadList({
         key={session.id}
         aria-current={isCurrent ? "true" : undefined}
         tabIndex={0}
-        onClick={() => {
-          if (isConfirmingAction) return;
+        onClick={(e) => {
+          if (isConfirmingAction || e.defaultPrevented) return;
+          // Plain click keeps the master-detail selection. On web, a modifier
+          // click opens the session as its own browser tab. Desktop tabs
+          // dedupe chat by pathname (a session is view state, not a subject —
+          // see tab-store resourceKey), so a second chat tab cannot exist
+          // there; modifier clicks keep the selection behavior instead.
+          const href = sessionHref(session.id);
+          if (
+            href &&
+            getShareableUrl &&
+            !openInNewTab &&
+            resolveClickIntent(e) !== "push"
+          ) {
+            window.open(
+              getShareableUrl(href),
+              "_blank",
+              "noopener,noreferrer",
+            );
+            return;
+          }
           onSelectSession(session);
+        }}
+        onAuxClick={(e) => {
+          if (isConfirmingAction || e.defaultPrevented || e.button !== 1) return;
+          if (openInNewTab) return; // desktop: no second chat tab exists
+          const href = sessionHref(session.id);
+          if (!href || !getShareableUrl) return;
+          e.preventDefault();
+          window.open(getShareableUrl(href), "_blank", "noopener,noreferrer");
         }}
         onKeyDown={(e) => {
           if (isConfirmingAction) return;

@@ -285,6 +285,26 @@ type Handler struct {
 	// production, which gets the real handshake probe; tests inject a fake so
 	// the install path runs without a socket.
 	WecomCredentialProbe wecom.CredentialProbe
+
+	// channelFileDelivery names the channel types that can, IN THIS
+	// DEPLOYMENT, carry a file the agent produced the last hop into the
+	// conversation. It answers the claim response's
+	// chat_channel_delivers_files, which the agent's brief turns into either
+	// "run `multica attachment upload`" or "describe the file in words".
+	//
+	// It is a deployment fact, not a property of the channel type, and that
+	// distinction is the whole reason it lives here. Whether the file arrives
+	// takes TWO things: an adapter that goes back for the bound attachment,
+	// and object storage for it to go back to. The first is a property of the
+	// code, the second of the configuration, and only the process that wired
+	// both knows the conjunction. A daemon that answers this from the channel
+	// type alone promises delivery a storage-less deployment cannot perform.
+	//
+	// Written once at boot by DeclareChannelFileDelivery (cmd/server/router.go,
+	// in the same branch that passes the storage to the adapter, so the two
+	// cannot drift), read-only from then on. Nil means no channel delivers
+	// files, which is what a deployment with no storage configured gets.
+	channelFileDelivery map[string]bool
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in
@@ -535,6 +555,45 @@ func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName s
 		uuids[i] = u
 	}
 	return uuids, true
+}
+
+// DeclareChannelFileDelivery records that this deployment can put a file the
+// agent produced into a channelType conversation. Call it at boot, from the
+// same branch that gives the adapter what it needs to perform the delivery —
+// the point is that one condition produces both the capability and the claim
+// it is announced under, so a deployment cannot end up promising a hop it does
+// not have.
+//
+// Not safe to call once the server is serving: the map it writes is read
+// without a lock by every task claim.
+func (h *Handler) DeclareChannelFileDelivery(channelType string) {
+	if channelType == "" {
+		return
+	}
+	if h.channelFileDelivery == nil {
+		h.channelFileDelivery = map[string]bool{}
+	}
+	h.channelFileDelivery[channelType] = true
+}
+
+// channelDeliversFiles answers chat_channel_delivers_files for one claim.
+//
+// The default is false in every direction that is not an explicit declaration:
+// a channel nobody declared, a deployment with no object storage, an adapter
+// that was never wired. False is the safe answer because of what the two
+// answers cost. False when the file could have travelled loses a delivery the
+// agent then describes in words. True when it cannot has the agent write "the
+// chart is attached" into a room where nothing is attached, and the reader is
+// left hunting for it.
+//
+// Web chat (empty channel type) is not answered here. It has no adapter and no
+// last hop to have — the browser renders the attachment card off the same bind
+// — and the prompt handles it in its own branch.
+func (h *Handler) channelDeliversFiles(channelType string) bool {
+	if channelType == "" {
+		return false
+	}
+	return h.channelFileDelivery[channelType]
 }
 
 // publish sends a domain event through the event bus.

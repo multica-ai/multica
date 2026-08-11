@@ -8,7 +8,10 @@ import { useT } from "../../i18n";
 
 /**
  * Compact presentational representation of a project —
- * `<emoji> <title>`, bordered, truncating to max-w-72. Mirror of IssueChip.
+ * `<emoji> <title>`, bordered, truncating once it hits its width cap. Mirror of
+ * IssueChip, including the `min(18rem, 100%)` cap — see that file for why the
+ * content limit and the container limit are both needed. The two chips share
+ * one rendering contract and must not drift.
  *
  * Not a link / button: callers wrap it in whatever interactive shell they
  * need. Pure UI — data is queried internally so callers can pass just an id.
@@ -22,7 +25,7 @@ export interface ProjectChipProps {
 }
 
 const BASE_CLASS =
-  "project-chip inline-flex items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-caption max-w-72";
+  "project-chip inline-flex min-w-0 max-w-[min(18rem,100%)] items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-caption";
 
 export function ProjectChip({
   projectId,
@@ -46,7 +49,7 @@ export function ProjectChip({
     return (
       <span className={cls}>
         <ProjectIcon size="md" />
-        <span className="text-muted-foreground truncate">
+        <span className="min-w-0 truncate text-muted-foreground">
           {fallbackLabel ?? t(($) => $.chip.fallback_label)}
         </span>
       </span>
@@ -56,7 +59,7 @@ export function ProjectChip({
   return (
     <span className={cls}>
       <ProjectIcon project={project} size="md" />
-      <span className="text-foreground truncate">{project.title}</span>
+      <span className="min-w-0 truncate text-foreground">{project.title}</span>
     </span>
   );
 }

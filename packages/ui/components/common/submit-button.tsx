@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { PointerEvent, ReactNode } from "react";
 import { ArrowUp, Loader2, Square } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -39,6 +39,11 @@ interface SubmitButtonProps {
   stopAriaLabel?: string;
 }
 
+/** Keep the composer focused so Send and Stop do not dismiss Android's keyboard. */
+function keepFocusInComposer(event: PointerEvent<HTMLButtonElement>) {
+  event.preventDefault();
+}
+
 function SubmitButton({
   onClick,
   disabled,
@@ -56,6 +61,7 @@ function SubmitButton({
       <Button
         size="icon-sm"
         className="rounded-full"
+        onPointerDown={keepFocusInComposer}
         onClick={onStop}
         aria-label={stopAriaLabel}
       >
@@ -77,6 +83,7 @@ function SubmitButton({
       disabled={disabled || loading || busy}
       aria-disabled={busy || undefined}
       aria-busy={loading || busy || undefined}
+      onPointerDown={keepFocusInComposer}
       onClick={onClick}
       aria-label={ariaLabel}
     >
