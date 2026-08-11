@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -235,6 +236,15 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// makes model selection session-scoped, restore a discovery helper
 		// here modelled on discoverTraecliModels.
 		return Catalog{Models: []Model{}}, nil
+	case "zcode":
+		// ZCode has no command-line model override; the model is fixed by
+		// ~/.zcode/cli/config.json (model.main). Read that config so the UI
+		// can display the configured catalog, even though selection is a
+		// no-op at turn time (see ModelSelectionSupported). Falls back to an
+		// empty list (manual entry) when the config is missing or unreadable.
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
+			return discovered(discoverZcodeModels(ctx, executablePath))
+		})
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
@@ -268,6 +278,13 @@ func ModelSelectionSupported(providerType string) bool {
 		// unsupported — the runtime uses whatever model is configured in
 		// the agent profile. If QwenPaw makes model selection session-scoped
 		// upstream, this can be reverted to `true`.
+		return false
+	case "zcode":
+		// ZCode has no command-line --model flag; the model is fixed by
+		// ~/.zcode/cli/config.json (`model.main`). Advertising a selectable
+		// picker would show a knob that silently does nothing, so opt out —
+		// the UI renders a disabled "Managed by runtime" field instead. The
+		// catalog returned by ListModels is display-only.
 		return false
 	default:
 		return true
@@ -2522,4 +2539,92 @@ func codebuddyStaticModels() []Model {
 		{ID: "gpt-5.5", Label: "GPT 5.5", Provider: "openai"},
 		{ID: "deepseek-v3-2-volc-ioa", Label: "Deepseek V3 2 Volc IOA", Provider: "deepseek"},
 	}
+}
+
+// discoverZcodeModels reads the zcode CLI config at ~/.zcode/cli/config.json and
+// returns the configured providers' models as a catalog. zcode (zcode-cli) is a
+// terminal client for the ZCode Desktop agent runtime; it has no
+// command-line model override and no `models` subcommand, so its config file is
+// the only source of the available provider/model set. An empty catalog
+// (missing config, parse error) degrades to manual model entry in the UI — the
+// runtime keeps running on whatever model.main the config selects.
+//
+// The executablePath argument is accepted for signature parity with the other
+// discovery helpers but unused: zcode's catalog is independent of which binary
+// is on PATH.
+func discoverZcodeModels(ctx context.Context, executablePath string) ([]Model, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return []Model{}, nil
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".zcode", "cli", "config.json"))
+	if err != nil {
+		return []Model{}, nil
+	}
+	return parseZcodeModels(data)
+}
+
+// parseZcodeModels parses the ~/.zcode/cli/config.json provider map. The config
+// shape (from zcode-cli) is:
+//
+//	{
+//	  "provider": {
+//	    "<providerKey>": {
+//	      "name": "<Display Name>",
+//	      "models": { "<modelKey>": { "name": "<Model Label>" }, ... }
+//	    },
+//	    ...
+//	  },
+//	  "model": { "main": "<providerKey>/<modelKey>" }
+//	}
+//
+// Each provider/model pair becomes a Model whose ID is the qualified
+// `<providerKey>/<modelKey>` selector (the same form `model.main` uses), so the
+// UI can highlight the active model. Provider is carried through for grouping.
+// Entries are sorted by provider then model for stable display.
+func parseZcodeModels(data []byte) ([]Model, error) {
+	var cfg struct {
+		Provider map[string]struct {
+			Name   string `json:"name"`
+			Models map[string]struct {
+				Name string `json:"name"`
+			} `json:"models"`
+		} `json:"provider"`
+		Model struct {
+			Main string `json:"main"`
+		} `json:"model"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return []Model{}, nil
+	}
+	var models []Model
+	for providerKey, provider := range cfg.Provider {
+		for modelKey, model := range provider.Models {
+			if strings.TrimSpace(modelKey) == "" {
+				continue
+			}
+			selector := providerKey + "/" + modelKey
+			label := strings.TrimSpace(model.Name)
+			if label == "" {
+				label = selector
+			}
+			providerLabel := strings.TrimSpace(provider.Name)
+			if providerLabel == "" {
+				providerLabel = providerKey
+			}
+			models = append(models, Model{
+				ID:       selector,
+				Label:    label,
+				Provider: providerLabel,
+				Default:  selector == cfg.Model.Main,
+			})
+		}
+	}
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].Provider != models[j].Provider {
+			return models[i].Provider < models[j].Provider
+		}
+		return models[i].ID < models[j].ID
+	})
+	return models, nil
 }
