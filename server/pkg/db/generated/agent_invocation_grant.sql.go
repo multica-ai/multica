@@ -130,7 +130,7 @@ ORDER BY grantee_agent_id ASC
 `
 
 // A2A invocation whitelist (NEX-24). Rows back agents whose
-// a2a_invocation_mode = 'specific_agents'. See migration 266.
+// a2a_invocation_mode = 'specific_agents'. See migration 274.
 func (q *Queries) ListAgentInvocationGrants(ctx context.Context, agentID pgtype.UUID) ([]AgentInvocationGrant, error) {
 	rows, err := q.db.Query(ctx, listAgentInvocationGrants, agentID)
 	if err != nil {

@@ -1,5 +1,5 @@
 -- A2A invocation whitelist (NEX-24). Rows back agents whose
--- a2a_invocation_mode = 'specific_agents'. See migration 266.
+-- a2a_invocation_mode = 'specific_agents'. See migration 274.
 
 -- name: ListAgentInvocationGrants :many
 SELECT * FROM agent_invocation_grant
