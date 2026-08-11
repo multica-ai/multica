@@ -33,10 +33,10 @@
 // what a callback points at); a kind it cannot read still gets a short
 // receipt.
 //
-// Known limit, deliberate: outbound delivery requires a SINGLE backend
-// replica, because the only send path is the in-process WebSocket in
-// sendersRegistry while EventChatDone dispatches on the in-process
-// events.Bus. See SELF_HOSTING.md.
+// Outbound no longer requires a single backend replica. The send path is still
+// the in-process WebSocket in sendersRegistry, but replies reach it through
+// channel_outbound_queue: any replica enqueues, and the one holding the bot's
+// connection lease drains. See channel/outbox.
 package wecom
 
 import (

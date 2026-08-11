@@ -363,9 +363,16 @@ type InboundMessage struct {
 	// envelope's Text field is populated from this.
 	Content string `json:"content,omitempty"`
 
-	// ReqID is the frame req_id the server sent this message with. We
-	// keep it so a future aibot_respond_msg (5s window) can echo it back;
-	// iteration 1 uses aibot_send_msg unconditionally and does not need it.
+	// ReqID is the frame req_id the server sent this message with. An
+	// aibot_respond_msg — the in-window reply — has to echo it; this adapter
+	// does not send one, and keeps the id so a caller that does can.
+	//
+	// There is no short window on it. Replies are allowed for 24 hours after the
+	// callback, and the id is not tied to the connection that received it: a
+	// stream opened on one connection took a refresh and a closing frame from a
+	// second one, measured against a live bot. The bounds that do apply are the
+	// stream's own lifetime (see errcodeStreamExpired) and 846605 for an id the
+	// server does not recognise.
 	ReqID string `json:"req_id,omitempty"`
 
 	// Media lists the attachments to fetch, in the order the user sent them.
@@ -617,6 +624,11 @@ func subscribeBody(botID, secret string) map[string]any {
 // content. aibot_send_msg's supported msgtypes are markdown and
 // template_card only — text is NOT accepted on this cmd (contrast
 // aibot_respond_msg, which does accept text). We therefore ship as
+// msgTypeMarkdown is the only aibot msgtype the adapter writes. It is also
+// what lands in channel_outbound_queue.msg_type, so the queue records what
+// wire form a row was enqueued as rather than assuming one at send time.
+const msgTypeMarkdown = "markdown"
+
 // markdown; the WeCom client renders plain text through the markdown
 // path without any special escaping. chatType is 1 for single, 2 for
 // group.
@@ -630,7 +642,7 @@ func sendMsgTextBody(chatID string, chatType int, content string) (map[string]an
 	return map[string]any{
 		"chatid":    chatID,
 		"chat_type": chatType,
-		"msgtype":   "markdown",
+		"msgtype":   msgTypeMarkdown,
 		"markdown":  map[string]string{"content": content},
 	}, nil
 }

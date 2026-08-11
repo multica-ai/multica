@@ -29,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/outbox"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -93,6 +94,9 @@ type wecomChannel struct {
 	// through mx(), which substitutes the no-op sink for a channel built
 	// without one.
 	metrics Metrics
+	// outbox wires the durable outbound queue consumer Connect runs for the
+	// life of the connection. Zero value disables it.
+	outbox OutboxDeps
 }
 
 var _ channel.Channel = (*wecomChannel)(nil)
@@ -196,6 +200,15 @@ func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 	if c.senders != nil && c.installationID.Valid {
 		c.senders.set(c.installationID, sender)
 		defer c.senders.clear(c.installationID, sender)
+	}
+
+	// Outbound queue consumer. Started only now — after subscribe succeeded and
+	// the sender is discoverable — because a claimed row can only be delivered
+	// over a live authenticated socket, and claiming one earlier would just
+	// push it into backoff. Torn down with the connection so the next lease
+	// holder's consumer picks the queue up.
+	if stopOutbox := c.startOutboxConsumer(ctx, log); stopOutbox != nil {
+		defer stopOutbox()
 	}
 
 	// Heartbeat — WeCom kills silent sockets past ~90s. We ping every 30s
@@ -352,6 +365,60 @@ func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 // outcome: a replica that cannot keep up should hand the bot to one that can,
 // not quietly discard the messages it could not reach.
 const callbackQueueDepth = 64
+
+// startOutboxConsumer launches the outbound queue consumer for this
+// installation and returns a stop function that waits for it to exit, or nil
+// when no outbox is wired.
+//
+// The wake channel is registered per connection and unregistered on exit: a
+// producer nudging an installation whose socket just died should find no
+// listener rather than a channel nobody drains.
+func (c *wecomChannel) startOutboxConsumer(ctx context.Context, log *slog.Logger) func() {
+	if c.outbox.Queries == nil || !c.installationID.Valid {
+		return nil
+	}
+	installationID := util.UUIDToString(c.installationID)
+
+	var wake <-chan struct{}
+	if c.outbox.Wake != nil {
+		wake = c.outbox.Wake.Register(installationID)
+	}
+
+	consumer, err := outbox.NewConsumer(outbox.ConsumerConfig{
+		InstallationID: installationID,
+		ChannelType:    channelTypeWecom,
+		Queries:        c.outbox.Queries,
+		Sender:         newQueueSender(c.senders),
+		Rate:           c.outbox.Rate,
+		Wake:           wake,
+		Logger:         log,
+		Metrics:        c.outbox.Metrics,
+	})
+	if err != nil {
+		// A misconfigured consumer must not take the inbound loop down with
+		// it: inbound still works, and replies fall to the reconciler once the
+		// wiring is fixed.
+		log.Warn("wecom: outbound queue consumer not started", "error", err)
+		if c.outbox.Wake != nil {
+			c.outbox.Wake.Unregister(installationID)
+		}
+		return nil
+	}
+
+	consumerCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		consumer.Run(consumerCtx)
+	}()
+	return func() {
+		cancel()
+		<-done
+		if c.outbox.Wake != nil {
+			c.outbox.Wake.Unregister(installationID)
+		}
+	}
+}
 
 // subscribe sends the aibot_subscribe frame and waits (up to
 // subscribeTimeout) for the server's ack. The ack shape is a frame with
@@ -550,13 +617,23 @@ func (c *wecomChannel) pingLoop(ctx context.Context, sender *wsSender, log *slog
 }
 
 // Send is the outbound Channel entry the engine calls with a normalized
-// OutboundMessage. Iteration 1 always uses aibot_send_msg (WeCom's
-// "proactive push" cmd) rather than aibot_respond_msg — send_msg has no 5s
-// deadline and works regardless of whether the message ever ties back to a
-// specific inbound frame. The one caveat is chat_type: aibot_send_msg needs
-// to know whether the ChatID is a single-user id or a group id. We piggy-
-// back on the length heuristic used by internal-customer-service (chat ids
-// are ≥33 chars, userids are shorter), which is stable in practice.
+// OutboundMessage. It always uses aibot_send_msg (WeCom's "proactive push"
+// cmd) rather than aibot_respond_msg, because a normalized OutboundMessage
+// carries a chat id and no callback req_id — there is nothing here to reply
+// in-window to.
+//
+// An earlier version of this comment justified the choice with a 5-second
+// deadline on aibot_respond_msg. That is not a rule: 5 seconds applies to
+// aibot_respond_welcome_msg and aibot_respond_update_msg, and a reply to a
+// message callback is allowed for 24 hours
+// (https://developer.work.weixin.qq.com/document/path/101463).
+//
+// What aibot_send_msg does require is that the user has already written to the
+// bot in that conversation; an unsolicited push to a chat nobody has messaged
+// is refused. The other caveat is chat_type: aibot_send_msg needs to know
+// whether the ChatID is a single-user id or a group id. We piggy-back on the
+// length heuristic used by internal-customer-service (chat ids are ≥33 chars,
+// userids are shorter), which is stable in practice.
 //
 // The Channel is not the primary outbound path in the multica engine — the
 // EventChatDone subscriber and the OutboundReplier handle most sends — but
@@ -609,6 +686,29 @@ type ChannelDeps struct {
 
 	// WSURL overrides DefaultWSURL. Same test-only intent as Dialer.
 	WSURL string
+
+	// Outbox wires the durable outbound queue consumer each Connect starts.
+	// The zero value disables it, which is what inbound-only tests want.
+	Outbox OutboxDeps
+}
+
+// OutboxDeps bundles what a wecomChannel needs to drain
+// channel_outbound_queue while it holds the connection.
+//
+// The consumer's lifetime is deliberately the connection's, not the process's:
+// a row can only be written over a live socket, so a consumer without one has
+// nothing to do but burn claim attempts and push rows into backoff.
+type OutboxDeps struct {
+	// Queries is the generated-query surface. Nil disables the consumer.
+	Queries outbox.ConsumerStore
+
+	// Wake is the shared registry producers nudge. Nil falls back to polling.
+	Wake *outbox.WakeRegistry
+
+	// Rate is the optional per-target admission gate. Nil admits every row.
+	Rate outbox.RateGate
+
+	Metrics outbox.Metrics
 }
 
 // RegisterWecom registers the per-installation wecom smart-bot Factory so
@@ -654,6 +754,7 @@ func newWecomFactory(deps ChannelDeps) channel.Factory {
 			logger:         logger,
 			senders:        deps.Senders,
 			metrics:        orNopMetrics(deps.Metrics),
+			outbox:         deps.Outbox,
 		}, nil
 	}
 }

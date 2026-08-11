@@ -344,6 +344,7 @@ func main() {
 	var samplerPool *pgxpool.Pool
 	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
 	var wecomMetrics *obsmetrics.WecomMetrics
+	var channelOutboxMetrics *obsmetrics.ChannelOutboxMetrics
 	if metricsConfig.Enabled() {
 		// Build a dedicated tiny pool for the BusinessSamplerCollector
 		// so a stalled scrape can never starve business traffic. If the
@@ -373,6 +374,7 @@ func main() {
 		businessMetrics = metricsRegistry.Business
 		channelMediaMetrics = metricsRegistry.ChannelMedia
 		wecomMetrics = metricsRegistry.Wecom
+		channelOutboxMetrics = metricsRegistry.ChannelOutbox
 		// Forward inbound daemon WS frames into the per-kind counter so
 		// dashboards can split heartbeat / unknown / invalid traffic.
 		if daemonHub != nil {
@@ -460,6 +462,18 @@ func main() {
 	if h.ChannelMediaReconciler != nil {
 		h.ChannelMediaReconciler.Metrics = channelMediaMetrics
 		go h.ChannelMediaReconciler.Run(sweepCtx)
+	}
+
+	// Outbound queue reconcilers: one per channel on the durable outbound
+	// queue. Each rescues replies whose producing replica died before
+	// enqueueing them, and owns the queue's retention purge. Independent
+	// workers, and independent of the WS supervisor — the cursor lease elects a
+	// single scanner across replicas, so every replica may start one.
+	if h.ChannelOutboxMetrics != nil {
+		h.ChannelOutboxMetrics.Set(channelOutboxMetrics)
+	}
+	for _, reconciler := range h.ChannelOutboxReconcilers {
+		go reconciler.Run(sweepCtx)
 	}
 
 	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
