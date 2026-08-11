@@ -16,10 +16,19 @@ import (
 )
 
 const (
-	agentOfflineText   = "⚠️ The agent is offline, so this message won't be processed automatically."
-	agentArchivedText  = "⚠️ This agent has been archived and can't respond. Please contact your workspace admin."
+	agentOfflineText  = "⚠️ The agent is offline, so this message won't be processed automatically."
+	agentArchivedText = "⚠️ This agent has been archived and can't respond. Please contact your workspace admin."
 	issueNotMemberText = "You're not a member of this Multica workspace, so I can't file an issue for you. Ask a workspace admin to invite you, then send the command again."
 	issueDisabledText  = "This ShareCRM bot isn't connected to Multica (or was disconnected). Ask a workspace admin to reconnect it."
+	// bare /new confirmation (MUL-5873 / engine OutcomeFreshPending).
+	freshPendingText = "✅ Fresh start ready. Your next chat message will run without previous context."
+	// bare /issue usage (MUL-5873 / engine OutcomeIssueUsage). ShareCRM is
+	// text-first so there is no media-with-title variant.
+	issueUsageText = "Please include an issue title. Use:\n\n`/issue <title>`\n\n`[description]` (optional)"
+	// bindingLinkAlreadySentText is posted when the mint throttle reuses a
+	// live link (MUL-5880). Only the hash was stored, so we cannot rebuild a
+	// URL — point the user at the earlier 1:1 message.
+	bindingLinkAlreadySentText = "👋 The binding link was already sent above — please open it to finish linking."
 )
 
 type bindingMinter interface {
@@ -90,6 +99,16 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			r.logger.WarnContext(ctx, "sharecrm replier: archived notice failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
+	case engine.OutcomeFreshPending:
+		if err := r.post(ctx, inst, msg, freshPendingText); err != nil {
+			r.logger.WarnContext(ctx, "sharecrm replier: fresh-start confirmation failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeIssueUsage:
+		if err := r.post(ctx, inst, msg, issueUsageText); err != nil {
+			r.logger.WarnContext(ctx, "sharecrm replier: issue usage reply failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	case engine.OutcomeIngested:
 		if res.IssueID.Valid {
 			text := issueCreatedText(res)
@@ -148,6 +167,11 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	token, err := r.binding.Mint(ctx, inst.WorkspaceID, inst.ID, sender)
 	if err != nil {
 		return fmt.Errorf("mint binding token: %w", err)
+	}
+	// Throttle reused a live link: only its hash was stored, so there is no
+	// URL to rebuild — point the user at the earlier 1:1 message.
+	if token.Reused {
+		return r.post(ctx, inst, msg, bindingLinkAlreadySentText)
 	}
 	bindURL := r.appURL + r.bindingPath + "?token=" + url.QueryEscape(token.Raw)
 	// ShareCRM is plain text — no markdown link syntax. Only delivered in 1:1.
