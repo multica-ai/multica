@@ -285,8 +285,14 @@ async function handle(req, res) {
 			const data = await multica(`/api/issues?${qs}`);
 			const issues = Array.isArray(data) ? data : data?.issues || data?.data || [];
 
+			// Cancelled work is not something the client should still see pinned
+			// to the page — it reads as "you ignored me" rather than "we decided
+			// against this". Done stays visible so they can see what was fixed.
+			const HIDDEN = new Set(['cancelled']);
+
 			const pins = issues
 				.filter((i) => typeof i.description === 'string' && i.description.includes(REVIEW_MARKER))
+				.filter((i) => !HIDDEN.has(i.status))
 				.map((i) => {
 					const sel = /Element: `([^`]+)`/.exec(i.description || '');
 					const pg = /Page: (\S+)/.exec(i.description || '');
