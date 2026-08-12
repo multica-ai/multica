@@ -10,22 +10,28 @@ export type LatexFormula = {
 export type ExtractedLatex = {
   markdown: string;
   formulas: LatexFormula[];
+  tokenPrefix?: string;
 };
 
 type Range = { start: number; end: number };
 
-const TOKEN_START = "\uE000multica-latex-";
 const TOKEN_END = "\uE001";
-const TOKEN_RE = /\uE000multica-latex-(\d+)\uE001/g;
 
-/** CommonMark code ranges, including nested/list and streaming fences. */
-function codeRanges(source: string): Range[] {
-  const ranges: Range[] = [];
+/** Source ranges that CommonMark parsed as actual text or code. */
+function markdownRanges(source: string): { text: Range[]; code: Range[] } {
+  const text: Range[] = [];
+  const code: Range[] = [];
   const collect = (node: Root | Content) => {
     if (node.type === "code" || node.type === "inlineCode") {
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
-      if (start != null && end != null) ranges.push({ start, end });
+      if (start != null && end != null) code.push({ start, end });
+      return;
+    }
+    if (node.type === "text") {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (start != null && end != null) text.push({ start, end });
       return;
     }
     if ("children" in node) {
@@ -33,7 +39,10 @@ function codeRanges(source: string): Range[] {
     }
   };
   collect(fromMarkdown(source));
-  return ranges.sort((a, b) => a.start - b.start);
+  return {
+    text: text.sort((a, b) => a.start - b.start),
+    code: code.sort((a, b) => a.start - b.start),
+  };
 }
 
 function rangeAt(ranges: readonly Range[], offset: number): Range | undefined {
@@ -106,11 +115,12 @@ function isSingleSlash(source: string, offset: number): boolean {
 function findClosingDelimiter(
   source: string,
   start: number,
+  end: number,
   closing: ")" | "]",
   protectedRanges: readonly Range[],
 ): number {
   let offset = start;
-  while (offset < source.length - 1) {
+  while (offset < end - 1) {
     const protectedRange = rangeAt(protectedRanges, offset);
     if (protectedRange) {
       offset = protectedRange.end;
@@ -127,66 +137,88 @@ function findClosingDelimiter(
   return -1;
 }
 
+function uniqueTokenPrefix(source: string): string {
+  let namespace = 0;
+  let prefix: string;
+  do {
+    prefix = `\uE000multica-latex-${namespace}-`;
+    namespace++;
+  } while (source.includes(prefix));
+  return prefix;
+}
+
+function tokenPattern(prefix: string): RegExp {
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`${escaped}(\\d+)${TOKEN_END}`, "g");
+}
+
 /**
  * Replace supported LaTeX pairs with Markdown-opaque tokens before parsing.
  *
  * A token is emitted only after its closing delimiter exists. This makes the
  * streaming path monotonic: partial `\(` / `\[` input stays source text, then
- * upgrades once the matching `\)` / `\]` arrives. Code and existing dollar
- * math are protected, while doubled backslashes remain deliberately literal.
+ * upgrades once the matching `\)` / `\]` arrives. Only source ranges parsed
+ * as mdast text are eligible, so HTML attributes, link destinations, code and
+ * other non-text fields stay untouched. Existing dollar math is protected and
+ * doubled backslashes remain deliberately literal.
  */
 export function extractLatexDelimiters(source: string): ExtractedLatex {
   if (!source || (!source.includes("\\(") && !source.includes("\\["))) {
     return { markdown: source, formulas: [] };
   }
 
-  const code = codeRanges(source);
-  const protectedRanges = [...code, ...dollarMathRanges(source, code)].sort(
-    (a, b) => a.start - b.start,
-  );
+  const ranges = markdownRanges(source);
+  const protectedRanges = [
+    ...ranges.code,
+    ...dollarMathRanges(source, ranges.code),
+  ].sort((a, b) => a.start - b.start);
+  const prefix = uniqueTokenPrefix(source);
   const formulas: LatexFormula[] = [];
   let markdown = "";
   let copiedThrough = 0;
-  let offset = 0;
 
-  while (offset < source.length - 1) {
-    const protectedRange = rangeAt(protectedRanges, offset);
-    if (protectedRange) {
-      offset = protectedRange.end;
-      continue;
-    }
-    if (!isSingleSlash(source, offset)) {
-      offset++;
-      continue;
-    }
+  for (const textRange of ranges.text) {
+    let offset = Math.max(textRange.start, copiedThrough);
+    while (offset < textRange.end - 1) {
+      const protectedRange = rangeAt(protectedRanges, offset);
+      if (protectedRange) {
+        offset = protectedRange.end;
+        continue;
+      }
+      if (!isSingleSlash(source, offset)) {
+        offset++;
+        continue;
+      }
 
-    const opener = source[offset + 1];
-    if (opener !== "(" && opener !== "[") {
-      offset++;
-      continue;
-    }
-    const closing = findClosingDelimiter(
-      source,
-      offset + 2,
-      opener === "(" ? ")" : "]",
-      protectedRanges,
-    );
-    if (closing === -1) {
-      offset += 2;
-      continue;
-    }
+      const opener = source[offset + 1];
+      if (opener !== "(" && opener !== "[") {
+        offset++;
+        continue;
+      }
+      const closing = findClosingDelimiter(
+        source,
+        offset + 2,
+        textRange.end,
+        opener === "(" ? ")" : "]",
+        protectedRanges,
+      );
+      if (closing === -1) {
+        offset += 2;
+        continue;
+      }
 
-    const value = source.slice(offset + 2, closing);
-    markdown += source.slice(copiedThrough, offset);
-    markdown += `${TOKEN_START}${formulas.length}${TOKEN_END}`;
-    formulas.push({ kind: opener === "(" ? "inline" : "display", value });
-    copiedThrough = closing + 2;
-    offset = copiedThrough;
+      const value = source.slice(offset + 2, closing);
+      markdown += source.slice(copiedThrough, offset);
+      markdown += `${prefix}${formulas.length}${TOKEN_END}`;
+      formulas.push({ kind: opener === "(" ? "inline" : "display", value });
+      copiedThrough = closing + 2;
+      offset = copiedThrough;
+    }
   }
 
   if (formulas.length === 0) return { markdown: source, formulas };
   markdown += source.slice(copiedThrough);
-  return { markdown, formulas };
+  return { markdown, formulas, tokenPrefix: prefix };
 }
 
 type MathNode = {
@@ -240,13 +272,17 @@ function mathNode(formula: LatexFormula): MathNode {
   };
 }
 
-function splitTokens(text: Text, formulas: readonly LatexFormula[]): Content[] {
-  TOKEN_RE.lastIndex = 0;
+function splitTokens(
+  text: Text,
+  formulas: readonly LatexFormula[],
+  pattern: RegExp,
+): Content[] {
+  pattern.lastIndex = 0;
   const nodes: Content[] = [];
   let copiedThrough = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = TOKEN_RE.exec(text.value)) !== null) {
+  while ((match = pattern.exec(text.value)) !== null) {
     const index = Number(match[1]);
     const formula = formulas[index];
     if (!formula) continue;
@@ -264,14 +300,18 @@ function splitTokens(text: Text, formulas: readonly LatexFormula[]): Content[] {
   return nodes;
 }
 
-function lowerTokens(parent: Parent | Root, formulas: readonly LatexFormula[]) {
+function lowerTokens(
+  parent: Parent | Root,
+  formulas: readonly LatexFormula[],
+  pattern: RegExp,
+) {
   for (const child of parent.children) {
     if (child.type === "text") continue;
-    if ("children" in child) lowerTokens(child as Parent, formulas);
+    if ("children" in child) lowerTokens(child as Parent, formulas, pattern);
   }
 
   parent.children = parent.children.flatMap((child) =>
-    child.type === "text" ? splitTokens(child, formulas) : [child],
+    child.type === "text" ? splitTokens(child, formulas, pattern) : [child],
   );
 
   // Display math is a block. When its token appeared beside prose in one
@@ -306,8 +346,10 @@ function lowerTokens(parent: Parent | Root, formulas: readonly LatexFormula[]) {
 
 /** Lower opaque extraction tokens into the mdast math nodes remark-math owns. */
 export const remarkLatexDelimiters: Plugin<
-  [{ formulas: readonly LatexFormula[] }],
+  [{ formulas: readonly LatexFormula[]; tokenPrefix?: string }],
   Root
-> = ({ formulas }) => {
-  return (tree) => lowerTokens(tree, formulas);
+> = ({ formulas, tokenPrefix }) => {
+  if (!tokenPrefix) return;
+  const pattern = tokenPattern(tokenPrefix);
+  return (tree) => lowerTokens(tree, formulas, pattern);
 };

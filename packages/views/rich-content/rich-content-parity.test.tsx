@@ -615,4 +615,23 @@ describe("LaTeX delimiter parity across the five surfaces", () => {
 
     expect(container.querySelector(".katex")).not.toBeNull();
   });
+
+  it("preserves non-text fields and collision-shaped user content", () => {
+    const userToken = "\uE000multica-latex-0\uE001";
+    const content = [
+      String.raw`<span title="\(attribute\)">plain</span>`,
+      String.raw`[target](https://example.com/\(literal\))`,
+      `${userToken} and ${String.raw`\(x\)`}`,
+    ].join("\n\n");
+    const { container } = render(<ReadonlyContent content={content} />);
+
+    expect(container.querySelector("span[title]")?.getAttribute("title")).toBe(
+      String.raw`\(attribute\)`,
+    );
+    expect(container.querySelector("a")?.getAttribute("href")).toBe(
+      "https://example.com/(literal)",
+    );
+    expect(container.textContent).toContain(userToken);
+    expect(container.querySelectorAll(".katex")).toHaveLength(1);
+  });
 });

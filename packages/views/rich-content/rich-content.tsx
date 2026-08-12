@@ -531,13 +531,16 @@ export const RichContent = memo(function RichContent({
   >(
     () => [
       [remarkMath, { singleDollarTextMath: false }],
-      [remarkLatexDelimiters, { formulas: latex.formulas }],
+      [
+        remarkLatexDelimiters,
+        { formulas: latex.formulas, tokenPrefix: latex.tokenPrefix },
+      ],
       remarkBreaks,
       [remarkGfm, { singleTilde: false }],
       remarkCjkFriendly,
       remarkRepairCjkStrongTrailingWhitespace,
     ],
-    [latex.formulas],
+    [latex.formulas, latex.tokenPrefix],
   );
 
   // Derived from the SAME string handed to ReactMarkdown, so offsets line up

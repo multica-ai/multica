@@ -81,4 +81,26 @@ describe("extractLatexDelimiters", () => {
       formulas: [],
     });
   });
+
+  it("ignores delimiters in HTML attributes and Markdown link destinations", () => {
+    const markdown = [
+      String.raw`<span title="\(attribute\)">plain</span>`,
+      String.raw`[target](https://example.com/\(literal\))`,
+    ].join("\n\n");
+
+    expect(extractLatexDelimiters(markdown)).toEqual({
+      markdown,
+      formulas: [],
+    });
+  });
+
+  it("never reuses a placeholder token found in user content", () => {
+    const userToken = "\uE000multica-latex-0\uE001";
+    const result = extractLatexDelimiters(
+      `${userToken} and ${String.raw`\(x\)`}`,
+    );
+
+    expect(result.formulas).toEqual([{ kind: "inline", value: "x" }]);
+    expect(result.markdown.split(userToken)).toHaveLength(2);
+  });
 });
