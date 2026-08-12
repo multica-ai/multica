@@ -71,6 +71,10 @@ import { Attachment as AttachmentRenderer } from "../editor/attachment";
 import { computeClosedFenceOffsets } from "./streaming-fence";
 import { remarkRepairCjkStrongTrailingWhitespace } from "./cjk-emphasis";
 import {
+  extractLatexDelimiters,
+  remarkLatexDelimiters,
+} from "./latex-delimiters";
+import {
   CodeBlockShell,
   RichFenceBlock,
   StaticCodeBody,
@@ -462,14 +466,6 @@ const COMPONENTS: Partial<Components> = {
 // `satisfies` rather than a cast: the plugin lists are still checked against
 // react-markdown's own option types, so a bad plugin tuple fails here instead of
 // being silenced.
-const REMARK_PLUGINS = [
-  [remarkMath, { singleDollarTextMath: false }],
-  remarkBreaks,
-  [remarkGfm, { singleTilde: false }],
-  remarkCjkFriendly,
-  remarkRepairCjkStrongTrailingWhitespace,
-] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
-
 const REHYPE_PLUGINS = [
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],
@@ -517,12 +513,31 @@ export const RichContent = memo(function RichContent({
   // late config arrival reprocesses exactly once.
   const cdnDomain = useConfigStore((s) => s.cdnDomain);
 
+  const latex = useMemo(() => extractLatexDelimiters(content), [content]);
+
   const processed = useMemo(
     () =>
       highlightToHtml(
-        preprocessMarkdown(content, { cdnDomain, autolinkIssueIdentifiers: true }),
+        preprocessMarkdown(latex.markdown, {
+          cdnDomain,
+          autolinkIssueIdentifiers: true,
+        }),
       ),
-    [content, cdnDomain],
+    [latex.markdown, cdnDomain],
+  );
+
+  const remarkPlugins = useMemo<
+    NonNullable<ReactMarkdownOptions["remarkPlugins"]>
+  >(
+    () => [
+      [remarkMath, { singleDollarTextMath: false }],
+      [remarkLatexDelimiters, { formulas: latex.formulas }],
+      remarkBreaks,
+      [remarkGfm, { singleTilde: false }],
+      remarkCjkFriendly,
+      remarkRepairCjkStrongTrailingWhitespace,
+    ],
+    [latex.formulas],
   );
 
   // Derived from the SAME string handed to ReactMarkdown, so offsets line up
@@ -544,7 +559,7 @@ export const RichContent = memo(function RichContent({
     () => (
       <ClosedFenceContext.Provider value={closedFences}>
         <ReactMarkdown
-          remarkPlugins={REMARK_PLUGINS}
+          remarkPlugins={remarkPlugins}
           rehypePlugins={REHYPE_PLUGINS}
           urlTransform={markdownUrlTransform}
           components={COMPONENTS}
@@ -553,7 +568,7 @@ export const RichContent = memo(function RichContent({
         </ReactMarkdown>
       </ClosedFenceContext.Provider>
     ),
-    [processed, closedFences],
+    [processed, closedFences, remarkPlugins],
   );
 
   return (

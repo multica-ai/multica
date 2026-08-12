@@ -501,3 +501,118 @@ describe("semantic parity beyond Mermaid", () => {
     expect(mermaidRenderMock).not.toHaveBeenCalled();
   });
 });
+
+const LATEX_FIXTURE = [
+  String.raw`Inline \(E=mc^2\).`,
+  "",
+  String.raw`\[`,
+  String.raw`\begin{aligned}`,
+  String.raw`a & = b + c \\`,
+  String.raw`d & = e + f`,
+  String.raw`\end{aligned}`,
+  String.raw`\]`,
+  "",
+  String.raw`\[\begin{pmatrix}1 & 2 \\ 3 & 4\end{pmatrix}\]`,
+  "",
+  "Existing $$x^2$$ and prices $120 / $85.",
+].join("\n");
+
+function expectLatexRendered(container: HTMLElement) {
+  expect(container.querySelectorAll(".katex").length).toBe(4);
+  expect(container.querySelectorAll(".katex-display").length).toBe(2);
+  expect(container.textContent).toContain("prices $120 / $85");
+}
+
+describe("LaTeX delimiter parity across the five surfaces", () => {
+  it("renders in an Issue description", () => {
+    const { container } = render(<ReadonlyContent content={LATEX_FIXTURE} />);
+    expectLatexRendered(container);
+  });
+
+  it("renders in a Comment", () => {
+    const { container } = render(
+      <ReadonlyContent content={LATEX_FIXTURE} attachments={[]} />,
+    );
+    expectLatexRendered(container);
+  });
+
+  it("renders in a Chat user message", () => {
+    const client = makeClient();
+    const { container } = render(
+      withClient(
+        <ChatMessageList
+          messages={[userMessage(LATEX_FIXTURE)] as never}
+          pendingTask={null}
+          availability={undefined}
+        />,
+        client,
+      ),
+    );
+    expectLatexRendered(container);
+  });
+
+  it("renders in a persisted Chat assistant message", () => {
+    const client = makeClient();
+    seedTimeline(client, LATEX_FIXTURE);
+    const { container } = render(
+      withClient(
+        <ChatMessageList
+          messages={[assistantMessage(LATEX_FIXTURE)] as never}
+          pendingTask={null}
+          availability={undefined}
+        />,
+        client,
+      ),
+    );
+    expectLatexRendered(container);
+  });
+
+  it("renders completed formulas in a live Chat assistant row", () => {
+    const client = makeClient();
+    seedTimeline(client, LATEX_FIXTURE);
+    const { container } = render(
+      withClient(
+        <ChatMessageList
+          messages={[]}
+          pendingTask={{ task_id: TASK_ID, status: "running" } as never}
+          availability={undefined}
+        />,
+        client,
+      ),
+    );
+    expectLatexRendered(container);
+  });
+
+  it("keeps an incomplete live delimiter as source until it closes", () => {
+    const client = makeClient();
+    const partial = String.raw`Working: \(x + y`;
+    seedTimeline(client, partial);
+    const { container, rerender } = render(
+      withClient(
+        <ChatMessageList
+          messages={[]}
+          pendingTask={{ task_id: TASK_ID, status: "running" } as never}
+          availability={undefined}
+        />,
+        client,
+      ),
+    );
+
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container.textContent).toContain("Working: (x + y");
+
+    seedTimeline(client, `${partial}\\)`);
+    rerender(
+      withClient(
+        <ChatMessageList
+          messages={[]}
+          pendingTask={{ task_id: TASK_ID, status: "running" } as never}
+          availability={undefined}
+        />,
+        client,
+      ),
+    );
+
+    expect(container.querySelector(".katex")).not.toBeNull();
+  });
+});
