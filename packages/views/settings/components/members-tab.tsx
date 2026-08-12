@@ -563,25 +563,30 @@ export function MembersTab() {
                   <span className="text-body text-muted-foreground shrink-0">{t(($) => $.members.expiry_field)}</span>
                   <Select
                     items={[
-                      { value: "24", label: "24 hours" },
-                      { value: "168", label: "7 days" },
-                      { value: "720", label: "30 days" },
-                      { value: "0", label: "Never" },
+                      { value: "24", label: t(($) => $.members.expiry_24h) },
+                      { value: "168", label: t(($) => $.members.expiry_7d) },
+                      { value: "720", label: t(($) => $.members.expiry_30d) },
+                      { value: "0", label: t(($) => $.members.expiry_never) },
                     ]}
                     value={shareLinkExpiry}
                     onValueChange={(v) => v && setShareLinkExpiry(v)}
                   >
                     <SelectTrigger size="sm">
                       <SelectValue>{() => {
-                        const opts: Record<string, string> = { "24": "24 hours", "168": "7 days", "720": "30 days", "0": "Never" };
+                        const opts: Record<string, string> = {
+                          "24": t(($) => $.members.expiry_24h),
+                          "168": t(($) => $.members.expiry_7d),
+                          "720": t(($) => $.members.expiry_30d),
+                          "0": t(($) => $.members.expiry_never),
+                        };
                         return opts[shareLinkExpiry] || shareLinkExpiry;
                       }}</SelectValue>
                     </SelectTrigger>
                     <SelectContent className="min-w-0">
-                      <SelectItem value="24">24 hours</SelectItem>
-                      <SelectItem value="168">7 days</SelectItem>
-                      <SelectItem value="720">30 days</SelectItem>
-                      <SelectItem value="0">Never</SelectItem>
+                      <SelectItem value="24">{t(($) => $.members.expiry_24h)}</SelectItem>
+                      <SelectItem value="168">{t(($) => $.members.expiry_7d)}</SelectItem>
+                      <SelectItem value="720">{t(($) => $.members.expiry_30d)}</SelectItem>
+                      <SelectItem value="0">{t(($) => $.members.expiry_never)}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

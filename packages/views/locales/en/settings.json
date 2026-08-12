@@ -1060,6 +1060,10 @@
     "toast_share_link_revoked": "Share link revoked",
     "toast_share_link_revoke_failed": "Failed to revoke share link",
     "toast_share_link_copied": "Link copied",
-    "toast_share_link_copy_failed": "Failed to copy link"
+    "toast_share_link_copy_failed": "Failed to copy link",
+    "expiry_24h": "24 hours",
+    "expiry_7d": "7 days",
+    "expiry_30d": "30 days",
+    "expiry_never": "Never"
   }
 }

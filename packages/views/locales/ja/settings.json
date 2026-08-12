@@ -1059,6 +1059,10 @@
     "toast_share_link_revoked": "共有リンクを取り消しました",
     "toast_share_link_revoke_failed": "共有リンクの取り消しに失敗しました",
     "toast_share_link_copied": "リンクをコピーしました",
-    "toast_share_link_copy_failed": "リンクのコピーに失敗しました"
+    "toast_share_link_copy_failed": "リンクのコピーに失敗しました",
+    "expiry_24h": "24時間",
+    "expiry_7d": "7日",
+    "expiry_30d": "30日",
+    "expiry_never": "無期限"
   }
 }

@@ -808,7 +808,11 @@
     "toast_share_link_revoked": "공유 링크가 취소되었습니다",
     "toast_share_link_revoke_failed": "공유 링크 취소에 실패했습니다",
     "toast_share_link_copied": "링크가 복사되었습니다",
-    "toast_share_link_copy_failed": "링크 복사에 실패했습니다"
+    "toast_share_link_copy_failed": "링크 복사에 실패했습니다",
+    "expiry_24h": "24시간",
+    "expiry_7d": "7일",
+    "expiry_30d": "30일",
+    "expiry_never": "무기한"
   },
   "lark": {
     "section_title": "Lark",

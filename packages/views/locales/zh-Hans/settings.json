@@ -1059,6 +1059,10 @@
     "toast_share_link_revoked": "分享链接已撤销",
     "toast_share_link_revoke_failed": "撤销分享链接失败",
     "toast_share_link_copied": "链接已复制",
-    "toast_share_link_copy_failed": "复制链接失败"
+    "toast_share_link_copy_failed": "复制链接失败",
+    "expiry_24h": "24 小时",
+    "expiry_7d": "7 天",
+    "expiry_30d": "30 天",
+    "expiry_never": "永久有效"
   }
 }
