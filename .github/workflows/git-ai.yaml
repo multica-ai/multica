@@ -13,6 +13,4 @@ jobs:
   git-ai:
     if: github.event.pull_request.merged == true
     uses: g2crowd/gh-actions/.github/workflows/ai-attribution.yml@main
-    with:
-      git-ai-version: v1.6.15
     secrets: inherit
