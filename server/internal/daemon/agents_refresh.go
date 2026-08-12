@@ -129,7 +129,7 @@ func (d *Daemon) agents() map[string]AgentEntry {
 
 // setSkippedAgents replaces the diagnostic "discovered but not registered" set
 // reported on /health. Called at the end of every registration round with the
-// providers that round dropped.
+// providers that round could not launch or rejected as below minimum.
 //
 // Purely diagnostic, and deliberately so: it is last-writer-wins across every
 // goroutine that probes, so nothing may steer behavior off it. A caller that
@@ -150,6 +150,43 @@ func (d *Daemon) skippedAgentsSnapshot() map[string]string {
 	}
 	out := make(map[string]string, len(d.skippedAgents))
 	for name, reason := range d.skippedAgents {
+		out[name] = reason
+	}
+	return out
+}
+
+// setAgentWarnings replaces the non-fatal provider diagnostics from the latest
+// registration round. These providers remain online; the map only explains the
+// metadata probe that degraded their registration.
+func (d *Daemon) setAgentWarnings(warnings map[string]string) {
+	d.agentWarningsMu.Lock()
+	defer d.agentWarningsMu.Unlock()
+	d.agentWarnings = warnings
+}
+
+func (d *Daemon) setAgentWarning(provider, reason string) {
+	d.agentWarningsMu.Lock()
+	defer d.agentWarningsMu.Unlock()
+	if d.agentWarnings == nil {
+		d.agentWarnings = make(map[string]string)
+	}
+	d.agentWarnings[provider] = reason
+}
+
+func (d *Daemon) clearAgentWarning(provider string) {
+	d.agentWarningsMu.Lock()
+	defer d.agentWarningsMu.Unlock()
+	delete(d.agentWarnings, provider)
+}
+
+func (d *Daemon) agentWarningsSnapshot() map[string]string {
+	d.agentWarningsMu.RLock()
+	defer d.agentWarningsMu.RUnlock()
+	if len(d.agentWarnings) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(d.agentWarnings))
+	for name, reason := range d.agentWarnings {
 		out[name] = reason
 	}
 	return out

@@ -387,6 +387,23 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 	return detectCLIVersion(ctx, executablePath)
 }
 
+// VersionProbeTimeoutError reports that an executable was found but its
+// `--version` process did not finish within the probe budget. It unwraps to
+// context.DeadlineExceeded so callers can use either typed diagnostics or the
+// standard timeout classification.
+type VersionProbeTimeoutError struct {
+	ExecutablePath string
+	Timeout        time.Duration
+}
+
+func (e *VersionProbeTimeoutError) Error() string {
+	return fmt.Sprintf("detect version for %s: timed out after %s", e.ExecutablePath, e.Timeout)
+}
+
+func (e *VersionProbeTimeoutError) Unwrap() error {
+	return context.DeadlineExceeded
+}
+
 // launchHeaders maps each supported agent type to the user-visible skeleton
 // that the daemon spawns before any custom_args are appended. This is
 // intentionally minimal — only the command + subcommand (or a short mode

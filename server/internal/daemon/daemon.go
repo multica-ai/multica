@@ -378,12 +378,19 @@ type Daemon struct {
 	agentsAvailable atomic.Pointer[map[string]AgentEntry]
 
 	// skippedAgents records why a discovered provider did not make it into the
-	// last registration round (version undetectable, below minimum). Purely
+	// last registration round (executable unavailable, below minimum). Purely
 	// diagnostic: surfaced on /health so the UI can tell "not installed" apart
 	// from "installed but dropped", instead of silently showing nothing
 	// (MUL-5439). Guarded by skippedAgentsMu.
 	skippedAgentsMu sync.RWMutex
 	skippedAgents   map[string]string // provider -> human-readable reason
+
+	// agentWarnings records a non-fatal provider problem from the latest probe
+	// round. Unlike skippedAgents, these providers remain registered because the
+	// executable is present and only optional metadata (currently its version)
+	// could not be read. Guarded by agentWarningsMu and surfaced on /health.
+	agentWarningsMu sync.RWMutex
+	agentWarnings   map[string]string // provider -> human-readable reason
 
 	// demotedProviders remembers the built-in providers whose version was
 	// CONFIRMED below the minimum supported one and whose runtimes
@@ -603,6 +610,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentVersions:             make(map[string]string),
 		skippedAgents:             make(map[string]string),
+		agentWarnings:             make(map[string]string),
 		resolvedPaths:             make(map[string]healedAgent),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
@@ -850,27 +858,27 @@ type healedAgent struct {
 //     second-guessed even if PATH now points elsewhere.
 //   - Pinned Path gone and no live heal -> re-resolve entry.Command once
 //     (preserving the ~/.multica/hooks exclusion and the login-shell fallback).
-//     Before adopting the re-resolved binary it is version-detected and run
-//     through the same minimum-version gate registration applies. This
-//     reproduces exactly what a daemon restart would resolve, so it is no less
-//     safe than the documented restart workaround — only automatic.
-//   - Re-resolution fails, the candidate can't be version-detected, or it is
-//     below the minimum supported version -> entry is returned unchanged so the
-//     candidate is never launched and the downstream error still surfaces.
+//     A detected version is run through the same minimum-version gate as
+//     registration. If version detection itself fails but the replacement is
+//     still executable, adopt it with the last known (possibly empty) version:
+//     a live path with unknown metadata is preferable to a deleted path.
+//   - Re-resolution fails or a detected version is below the supported minimum
+//     -> entry is returned unchanged so the rejected candidate is not launched.
 func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string) {
 	resolved, version, _ := d.resolveAgentEntryWithHeal(ctx, provider, entry)
 	return resolved, version
 }
 
-// healOutcome is what one self-heal attempt concluded. At most one half is
-// meaningful: adopted names a binary that cleared the same gates registration
-// applies, while rejected carries the typed verdict for a candidate that was
-// found and version-detected but refused for being below the minimum supported
-// version. rejected is nil unless the verdict is genuine — it is only ever set
-// from a *agent.BelowMinimumError, which by construction carries a version
-// that parsed.
+// healOutcome is what one self-heal attempt concluded. adopted names the live
+// replacement path; warning accompanies it only when the path was adopted with
+// an unknown/last-known version after its probe failed. rejected carries the
+// typed verdict for a candidate that was found and version-detected but refused
+// for being below the minimum supported version. rejected is nil unless the
+// verdict is genuine — it is only ever set from a *agent.BelowMinimumError,
+// which by construction carries a version that parsed.
 type healOutcome struct {
 	adopted  healedAgent
+	warning  error
 	rejected *agent.BelowMinimumError
 }
 
@@ -919,10 +927,12 @@ func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string,
 }
 
 // healAgentPath re-resolves command for provider and, if a usable binary is
-// found, records it and returns it. "Usable" means: it resolves, its version
-// can be detected, and that version meets the same minimum-version gate
-// registration enforces. Path and version are published together under
-// resolvedPathsMu so any observer of the path also sees the matching version;
+// found, records it and returns it. "Usable" means it resolves and is still
+// executable; when its version can be detected, that version must also meet the
+// same minimum-version gate registration enforces. If the version probe fails,
+// the last known (possibly empty) version is retained and the degraded state is
+// reported through agent_warnings. Path and version are published together
+// under resolvedPathsMu so any observer of the path also sees the paired version;
 // the shared d.agentVersion cache is refreshed too, for registration hygiene.
 // It returns a zero adopted pair when nothing usable was found, so the caller
 // keeps the (stale) pinned entry and the candidate is never launched. Runs
@@ -953,9 +963,23 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 	// registration path applies (MUL-4486 review).
 	version, err := detectAgentVersion(ctx, newPath)
 	if err != nil {
-		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
-			"provider", provider, "command", command, "new_path", newPath, "error", err)
-		return healOutcome{}
+		// The command resolved before the probe, but an upgrade can still remove
+		// it while `--version` is running. Only adopt a candidate that remains
+		// launchable after the failed probe; otherwise keep the ordinary missing
+		// executable failure instead of caching another dead path.
+		if !agentExecutablePresent(newPath) {
+			d.logger.Warn("re-resolved agent executable disappeared during version detection; keeping pinned path",
+				"provider", provider, "command", command, "new_path", newPath, "error", err)
+			return healOutcome{}
+		}
+		version = d.agentVersion(provider)
+		adopted := d.rememberHealedAgent(provider, newPath, version)
+		reason := versionProbeFailureReason(err)
+		d.setAgentWarning(provider, reason)
+		d.logger.Warn("re-resolved agent executable has no fresh version; adopting live path",
+			"provider", provider, "command", command, "new_path", newPath,
+			"version", version, "warning", reason)
+		return healOutcome{adopted: adopted, warning: err}
 	}
 	if err := checkAgentMinVersion(provider, version); err != nil {
 		var tooOld *agent.BelowMinimumError
@@ -973,24 +997,27 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 		return healOutcome{rejected: tooOld}
 	}
 
-	adopted := healedAgent{path: newPath, version: version}
-	// Publish path + version atomically: any reader that sees the new path in
-	// resolveAgentEntry gets the matching version out of the same struct value.
+	adopted := d.rememberHealedAgent(provider, newPath, version)
+	d.clearAgentWarning(provider)
+
+	d.logger.Info("re-resolved agent executable after pinned path vanished (in-place upgrade)",
+		"provider", provider, "command", command, "new_path", newPath, "version", version)
+	return healOutcome{adopted: adopted}
+}
+
+// rememberHealedAgent publishes a replacement path and its best-known version
+// as one pair. The version may be empty when the executable is live but its
+// metadata probe failed; later successful probes refresh both caches.
+func (d *Daemon) rememberHealedAgent(provider, path, version string) healedAgent {
+	adopted := healedAgent{path: path, version: version}
 	d.resolvedPathsMu.Lock()
 	if d.resolvedPaths == nil {
 		d.resolvedPaths = make(map[string]healedAgent)
 	}
 	d.resolvedPaths[provider] = adopted
 	d.resolvedPathsMu.Unlock()
-	// Keep the registration version cache fresh too. The task path reads the
-	// version returned alongside the resolved path (above), not this map, so its
-	// staleness can never gate a launch — this is hygiene for the registration
-	// report and any future d.agentVersion reader.
 	d.setAgentVersion(provider, version)
-
-	d.logger.Info("re-resolved agent executable after pinned path vanished (in-place upgrade)",
-		"provider", provider, "command", command, "new_path", newPath, "version", version)
-	return healOutcome{adopted: adopted}
+	return adopted
 }
 
 func (d *Daemon) notifyRuntimeSetChanged() {
@@ -1967,20 +1994,23 @@ const (
 )
 
 // probeBuiltinRuntime resolves and version-detects one built-in provider,
-// retrying a fast failure up to runtimeVersionProbeAttempts times. The verdict
-// tells the caller how to treat a drop: builtinProbeUnavailable means the
-// version could not be read (or not understood) — transient, leave whatever is
-// registered alone — while builtinProbeBelowMinimum is a confirmed too-old
-// verdict the caller may demote on. See builtinProbeVerdict.
+// retrying a fast failure up to runtimeVersionProbeAttempts times. A live
+// executable whose version stays unreadable returns builtinProbeOK with a
+// diagnostic and its last known (possibly empty) version. The other verdicts
+// tell the caller how to treat an actual drop: builtinProbeUnavailable means no
+// executable can currently be launched (or the round was cancelled) — leave
+// whatever was registered alone — while builtinProbeBelowMinimum is a confirmed
+// too-old verdict the caller may demote on. See builtinProbeVerdict.
 //
-// The second return value is a short human-readable reason when the verdict is
-// not OK. It is surfaced on /health as skipped_agents so a user can tell "CLI
-// not installed" apart from "CLI installed but dropped at registration", which
-// was previously only visible in the daemon log (MUL-5439).
+// The second return value is a short human-readable diagnostic. For a non-OK
+// verdict it is surfaced on /health as skipped_agents; for an OK fallback it is
+// surfaced as agent_warnings so the runtime remains online without hiding the
+// failed metadata probe.
 func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) (string, string, builtinProbeVerdict) {
 	var (
-		lastErr  error
-		attempts int
+		lastErr      error
+		lastResolved = entry
+		attempts     int
 	)
 	for attempts < runtimeVersionProbeAttempts {
 		if attempts > 0 {
@@ -2012,6 +2042,16 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 		// fixes: the upgrade that removed the old path may not have published
 		// the new one yet on the first attempt.
 		resolved, _, heal := d.resolveAgentEntryWithHeal(ctx, name, entry)
+		lastResolved = resolved
+		if heal.warning != nil {
+			lastErr = heal.warning
+			if attempts < runtimeVersionProbeAttempts && time.Since(startedAt) < runtimeVersionProbeRetryWindow {
+				d.logger.Debug("re-resolved agent version probe failed; retrying",
+					"name", name, "attempt", attempts, "error", heal.warning)
+				continue
+			}
+			break
+		}
 		// The pinned path is gone and the binary its command resolves to now is
 		// too old. Unlike the direct case below, this verdict is about whatever
 		// PATH resolves to at this instant — and the pinned path vanishing is
@@ -2083,12 +2123,36 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 		d.logger.Debug("agent version detected", "name", name, "version", version, "path", resolved.Path)
 		return version, "", builtinProbeOK
 	}
-	d.logger.Warn("skip registering runtime", "name", name, "attempts", attempts, "error", lastErr)
-	reason := "version detection failed"
-	if lastErr != nil {
-		reason = fmt.Sprintf("version detection failed: %v", lastErr)
+	reason := versionProbeFailureReason(lastErr)
+	// A version is optional metadata. If the path is still executable, keep the
+	// runtime online with its last known version (or blank on first startup) and
+	// expose the failed probe as a provider warning. Only a path that disappeared
+	// or a version explicitly proven below minimum is unavailable.
+	if ctx.Err() == nil && agentExecutablePresent(lastResolved.Path) {
+		version := d.agentVersion(name)
+		// Record even an empty first-known value. hasDetectedAgentVersions uses
+		// map membership to start the periodic refresh loop; without this marker,
+		// a daemon whose first probe failed would register successfully but never
+		// retry and replace the unknown version after the CLI recovers.
+		d.setAgentVersion(name, version)
+		d.logger.Warn("agent version unavailable; registering live executable with last known version",
+			"name", name, "path", lastResolved.Path, "version", version,
+			"attempts", attempts, "warning", reason)
+		return version, reason, builtinProbeOK
 	}
+	d.logger.Warn("skip registering runtime", "name", name, "attempts", attempts, "error", lastErr)
 	return "", reason, builtinProbeUnavailable
+}
+
+func versionProbeFailureReason(err error) string {
+	if err == nil {
+		return "version detection failed"
+	}
+	var timeout *agent.VersionProbeTimeoutError
+	if errors.As(err, &timeout) {
+		return fmt.Sprintf("version probe timed out: %v", timeout)
+	}
+	return fmt.Sprintf("version detection failed: %v", err)
 }
 
 // detectBuiltinRuntimes version-detects every configured built-in agent CLI and
@@ -2106,11 +2170,10 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 // well inside the UI's scanning window.
 //
 // Each probe still self-heals a vanished pinned path (MUL-4486) and re-detects
-// the live version — nothing is cached on the Daemon, so an in-place CLI
-// upgrade is still reported with its current version. A provider whose version
-// stays undetectable across probeBuiltinRuntime's bounded attempts, or which is
-// below the minimum supported version, is logged and skipped, exactly as the
-// serial loop did.
+// the live version. An executable whose version stays undetectable across the
+// bounded attempts is registered with its last known (possibly empty) version
+// and reported in agent_warnings. Only an unavailable executable or one with a
+// version confirmed below the supported minimum is omitted.
 //
 // The result describes the machine, not a workspace, so a caller registering a
 // batch of workspaces at once calls this ONCE and passes the payload to
@@ -2125,8 +2188,8 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 // probe — and demoting a runtime is not a decision to make on another round's
 // evidence.
 //
-// The third return value is THIS round's unavailable providers (version could
-// not be read), provider to reason. Callers that treat a register response as
+// The third return value is THIS round's unavailable providers (no executable
+// could be launched), provider to reason. Callers that treat a register response as
 // AUTHORITATIVE for a workspace's whole runtime set (the runtime_gone recovery
 // and the profile drift refresh, via applyRegisterResponseInPlace) must
 // preserve these providers' existing runtimes: they are absent from the
@@ -2148,6 +2211,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 		skipped     = map[string]string{}
 		belowMin    = map[string]string{}
 		unavailable = map[string]string{}
+		warnings    = map[string]string{}
 		g           errgroup.Group
 	)
 	g.SetLimit(runtimeVersionProbeConcurrency)
@@ -2167,6 +2231,9 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 				return nil
 			}
 			mu.Lock()
+			if reason != "" {
+				warnings[name] = reason
+			}
 			results = append(results, detected{name: name, version: version})
 			mu.Unlock()
 			return nil
@@ -2180,6 +2247,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 	// diagnostic honest: a provider that registered successfully this round must
 	// not stay listed as skipped.
 	d.setSkippedAgents(skipped)
+	d.setAgentWarnings(warnings)
 
 	// Source iteration (a map) and parallel completion order are both
 	// nondeterministic; sort by provider so the registration payload is stable
@@ -2257,9 +2325,9 @@ func (d *Daemon) registerRuntimesForWorkspaceLocked(ctx context.Context, workspa
 // registration payload must NOT be read as "this workspace should stop hosting
 // them", keyed by provider.
 //
-// Unavailable is the obvious half: the version could not be read, which is
-// transient, so dropping the rows would tear a working runtime down over one
-// failed probe.
+// Unavailable is the obvious half: no executable could be launched in this
+// round (or the round was cancelled), which can be transient, so dropping the
+// rows would tear a previously working runtime down over one failed probe.
 //
 // Below-minimum is the half that is easy to get wrong, because the verdict IS
 // confirmed — a version was read and rejected. What is missing on these paths is

@@ -1107,7 +1107,8 @@ func cleanupMcpConfigTemp(path string) {
 var detectVersionTimeout = 10 * time.Second
 
 func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
+	parentCtx := ctx
+	ctx, cancel := context.WithTimeout(parentCtx, detectVersionTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, execPath, "--version")
@@ -1120,6 +1121,12 @@ func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 	cmd.WaitDelay = 2 * time.Second
 	data, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded && parentCtx.Err() == nil {
+			return "", &VersionProbeTimeoutError{
+				ExecutablePath: execPath,
+				Timeout:        detectVersionTimeout,
+			}
+		}
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)
 	}
 	return extractVersionLine(string(data)), nil

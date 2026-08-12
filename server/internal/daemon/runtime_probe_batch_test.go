@@ -700,6 +700,68 @@ func TestDetectBuiltinRuntimes_DoesNotRetrySlowProbe(t *testing.T) {
 	}
 }
 
+// TestDetectBuiltinRuntimes_RegistersLiveExecutableWhenVersionProbeFails covers
+// the restart half of GH #6452. Version metadata is optional evidence; a path
+// that still resolves to an executable must remain dispatchable even when its
+// `--version` command is temporarily unreadable.
+func TestDetectBuiltinRuntimes_RegistersLiveExecutableWhenVersionProbeFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("exec-bit stub layout is POSIX-specific")
+	}
+	fx := newBatchFixture(t)
+	stubProbeRetry(t, time.Millisecond, time.Second)
+	d := fx.daemon
+	executable := filepath.Join(t.TempDir(), "claude")
+	writeExecStub(t, executable)
+	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: executable}}
+	fx.setProbeErr(func(string, int) error { return errors.New("version probe timed out") })
+
+	runtimes, belowMin, unavailable := d.detectBuiltinRuntimes(context.Background())
+
+	if len(runtimes) != 1 || runtimes[0]["type"] != "claude" {
+		t.Fatalf("detected runtimes = %v, want claude kept online", runtimes)
+	}
+	if runtimes[0]["version"] != "" {
+		t.Errorf("version = %q, want unknown/empty", runtimes[0]["version"])
+	}
+	if len(belowMin) != 0 || len(unavailable) != 0 {
+		t.Errorf("belowMin=%v unavailable=%v, want no dropped provider", belowMin, unavailable)
+	}
+	if !d.hasDetectedAgentVersions() {
+		t.Fatal("unknown initial version was not cached; periodic refresh would never retry it")
+	}
+
+	rec := httptest.NewRecorder()
+	d.healthHandler(time.Now())(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	var health map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &health); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	warnings, ok := health["agent_warnings"].(map[string]any)
+	if !ok || warnings["claude"] == "" {
+		t.Fatalf("agent_warnings = %v, want claude probe failure", health["agent_warnings"])
+	}
+
+	fx.setProbeErr(nil)
+	d.detectBuiltinRuntimes(context.Background())
+	if got := d.agentWarningsSnapshot(); len(got) != 0 {
+		t.Fatalf("agent warnings after successful reprobe = %v, want cleared", got)
+	}
+}
+
+func TestVersionProbeFailureReasonDistinguishesTimeout(t *testing.T) {
+	timeout := &agent.VersionProbeTimeoutError{
+		ExecutablePath: "/fake/claude",
+		Timeout:        10 * time.Second,
+	}
+	if got := versionProbeFailureReason(timeout); !strings.HasPrefix(got, "version probe timed out:") {
+		t.Fatalf("timeout reason = %q, want explicit timeout classification", got)
+	}
+	if got := versionProbeFailureReason(errors.New("exit status 1")); !strings.HasPrefix(got, "version detection failed:") {
+		t.Fatalf("ordinary failure reason = %q, want generic detection classification", got)
+	}
+}
+
 // vanishedPinnedPath lays out the MUL-4486 shape a probe retry has to reckon
 // with: a stable command name that resolves on PATH to a runnable stub, plus
 // the pinned absolute path an in-place upgrade already deleted. It returns the
@@ -743,16 +805,16 @@ func countingVersionProbe(t *testing.T, answer func(path string) (string, error)
 // slow-probe guard honest about where an attempt's time actually goes. When the
 // pinned path has vanished, resolveAgentEntry runs its own version probe on the
 // re-resolved candidate (MUL-4486) — which can burn the full 10s timeout on its
-// own. Timing only the outer probe would read the attempt as a fast failure
-// (the stale path fails instantly), retry, and pay the slow self-heal a second
-// time — exactly the doubled worst case the guard exists to prevent.
+// own. The failed probe must be carried out of the heal: probing that same live
+// replacement again would double the registration delay before the unknown-
+// version fallback can keep it online.
 func TestDetectBuiltinRuntimes_DoesNotRetryWhenSelfHealBurnsTheWindow(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PATH/exec-bit stub layout is POSIX-specific")
 	}
 	const probeWindow = 20 * time.Millisecond
 	stubProbeRetry(t, time.Millisecond, probeWindow)
-	missing, _ := vanishedPinnedPath(t)
+	missing, healed := vanishedPinnedPath(t)
 	probes := countingVersionProbe(t, func(path string) (string, error) {
 		if path == missing {
 			// The stale pinned path is gone: this fails immediately.
@@ -766,11 +828,11 @@ func TestDetectBuiltinRuntimes_DoesNotRetryWhenSelfHealBurnsTheWindow(t *testing
 	d := freshDaemon("")
 	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: missing, Command: "codex"}}
 
-	if runtimes, _, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
-		t.Fatalf("detected %v, want none", runtimes)
+	if runtimes, _, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 1 || runtimes[0]["type"] != "codex" {
+		t.Fatalf("detected %v, want codex kept online from healed path %q", runtimes, healed)
 	}
-	if got := probes.Load(); got != 2 {
-		t.Errorf("ran %d version probes, want 2 (one self-heal + one outer probe); the retry window must cover the whole attempt, not just the outer probe", got)
+	if got := probes.Load(); got != 1 {
+		t.Errorf("ran %d version probes, want 1 (the timed-out self-heal probe must not be repeated)", got)
 	}
 }
 

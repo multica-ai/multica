@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -132,6 +133,50 @@ func TestResolveAgentEntry_SelfHealsAfterInPlaceUpgrade(t *testing.T) {
 	t.Setenv("PATH", filepath.Join(root, "empty"))
 	if got, ver := d.resolveAgentEntry(ctx, "codex", entry); got.Path != v2 || ver != "0.144.3" {
 		t.Fatalf("cached self-heal not reused: got (%q, %q), want (%q, %q)", got.Path, ver, v2, "0.144.3")
+	}
+}
+
+// TestResolveAgentEntry_AdoptsLiveReplacementWhenVersionProbeFails reproduces
+// GH #6452: Homebrew deletes the pinned Caskroom path, publishes the replacement,
+// then Gatekeeper wedges the replacement's first `--version` invocation. A live
+// executable with a temporarily unreadable version must win over a pinned path
+// that no longer exists. The last known version stays paired with the replacement
+// until a later refresh can detect its real version.
+func TestResolveAgentEntry_AdoptsLiveReplacementWhenVersionProbeFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink/exec-bit layout is POSIX-specific")
+	}
+
+	root := t.TempDir()
+	stableBin := filepath.Join(root, "bin")
+	t.Setenv("PATH", stableBin)
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+
+	v1 := installVersionedCodex(t, root, "0.144.1", stableBin)
+	d := newSelfHealTestDaemon()
+	d.setAgentVersion("codex", "0.144.1")
+	entry := AgentEntry{Path: v1, Command: "codex"}
+
+	if err := os.RemoveAll(filepath.Join(root, "Caskroom", "codex", "0.144.1")); err != nil {
+		t.Fatalf("remove v1 tree: %v", err)
+	}
+	v2 := installVersionedCodex(t, root, "0.144.3", stableBin)
+
+	origDetect := detectAgentVersion
+	detectAgentVersion = func(context.Context, string) (string, error) {
+		return "", errors.New("version probe timed out")
+	}
+	t.Cleanup(func() { detectAgentVersion = origDetect })
+
+	got, version := d.resolveAgentEntry(context.Background(), "codex", entry)
+	if got.Path != v2 {
+		t.Fatalf("self-heal kept deleted path %q, want live replacement %q", got.Path, v2)
+	}
+	if version != "0.144.1" {
+		t.Fatalf("fallback version = %q, want last known 0.144.1", version)
+	}
+	if cached := d.resolvedPaths["codex"]; cached.path != v2 || cached.version != "0.144.1" {
+		t.Fatalf("cached heal = %+v, want {%q, %q}", cached, v2, "0.144.1")
 	}
 }
 

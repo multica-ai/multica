@@ -162,6 +162,28 @@ func TestPrintDaemonStatusExplainsDeferredRestart(t *testing.T) {
 	}
 }
 
+func TestPrintDaemonStatusShowsAgentWarnings(t *testing.T) {
+	t.Parallel()
+
+	health := map[string]any{
+		"status": "running",
+		"pid":    float64(1234),
+		"uptime": "1m",
+		"agent_warnings": map[string]any{
+			"codex":  "version detection failed: exit 1",
+			"claude": "version probe timed out after 10s",
+		},
+	}
+
+	var out bytes.Buffer
+	printDaemonStatusReport(&out, "Daemon", health)
+	got := out.String()
+	want := "claude: version probe timed out after 10s; codex: version detection failed: exit 1"
+	if !strings.Contains(got, want) {
+		t.Fatalf("daemon status output = %q, want sorted agent warnings %q", got, want)
+	}
+}
+
 // TestPrintDaemonStatusOmitsVersionWhenMissing pins the back-compat contract:
 // when the daemon doesn't report cli_version (older daemon paired with a newer
 // CLI) or reports an empty string, the CLI must skip the line entirely instead

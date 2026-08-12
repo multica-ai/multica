@@ -61,7 +61,7 @@ type HealthResponse struct {
 	RepoCheckoutWaiters   int      `json:"repo_checkout_waiters,omitempty"`
 	Agents                []string `json:"agents"`
 	// SkippedAgents maps a provider that WAS discovered on this machine to the
-	// reason the last registration round dropped it (version undetectable,
+	// reason the last registration round dropped it (executable unavailable or
 	// below the minimum supported version). Purely diagnostic, and omitted when
 	// empty so older consumers see no change.
 	//
@@ -69,6 +69,10 @@ type HealthResponse struct {
 	// render as an absent runtime, which is what made GH #6077 unactionable for
 	// the reporter (MUL-5439).
 	SkippedAgents map[string]string `json:"skipped_agents,omitempty"`
+	// AgentWarnings maps providers that remain registered to a non-fatal probe
+	// problem. This makes an unknown/last-known version fallback visible without
+	// falsely reporting the runtime as offline.
+	AgentWarnings map[string]string `json:"agent_warnings,omitempty"`
 	// ReloadPendingReason explains why the daemon has confirmed a multica
 	// version change on disk but hasn't restarted into it yet — it was busy at
 	// the last barrier check and will retry when idle. Omitted when empty, so
@@ -160,6 +164,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			ResourceWaitTaskCount: d.resourceWaitTasks.Load(),
 			Agents:                agents,
 			SkippedAgents:         d.skippedAgentsSnapshot(),
+			AgentWarnings:         d.agentWarningsSnapshot(),
 
 			ReloadPendingReason: d.reloadPending(),
 			Workspaces:          wsList,
