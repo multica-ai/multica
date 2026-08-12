@@ -31,6 +31,8 @@ func (f *fakeChatSession) EnsureSession(_ context.Context, in engine.EnsureSessi
 	return binderUUID(42), nil
 }
 
+func (f *fakeChatSession) MarkPendingFresh(context.Context, pgtype.UUID) error { return nil }
+
 func (f *fakeChatSession) AppendUserMessage(_ context.Context, in engine.AppendInput) (engine.AppendResult, error) {
 	f.appendIn = in
 	return engine.AppendResult{}, nil
@@ -126,19 +128,19 @@ func TestFeishuSessionBinder_AppendUsesUnenrichedCommandBody(t *testing.T) {
 	f := &fakeChatSession{}
 	b := &feishuSessionBinder{session: f}
 
-	// Raw carries the original lark InboundMessage; CommandBody is the user's
-	// un-enriched text used for /issue parsing (Body has quoted context inlined).
-	raw, _ := json.Marshal(InboundMessage{CommandBody: "/issue Real intent"})
+	// CommandText is the user's un-enriched text used for /issue parsing while
+	// Text contains the body after quoted context is inlined.
 	if _, err := b.AppendMessage(context.Background(), engine.AppendParams{
 		SessionID:      binderUUID(1),
 		Sender:         binderUUID(7),
 		InstallationID: binderUUID(2),
 		ClaimToken:     binderUUID(9),
 		Message: channel.InboundMessage{
-			MessageID: "om_1",
-			Text:      "> quoted context\n/issue Real intent",
-			Source:    channel.Source{ChatID: "oc", ThreadID: "th_1"},
-			Raw:       raw,
+			MessageID:   "om_1",
+			Text:        "> quoted context\n/issue Real intent",
+			CommandText: "/issue Real intent",
+			ForceFresh:  true,
+			Source:      channel.Source{ChatID: "oc", ThreadID: "th_1"},
 		},
 	}); err != nil {
 		t.Fatalf("AppendMessage: %v", err)
@@ -146,12 +148,12 @@ func TestFeishuSessionBinder_AppendUsesUnenrichedCommandBody(t *testing.T) {
 
 	got := f.appendIn
 	if got.CommandText != "/issue Real intent" {
-		t.Errorf("CommandText must be the un-enriched CommandBody from Raw, got %q", got.CommandText)
+		t.Errorf("CommandText must be the normalized un-enriched text, got %q", got.CommandText)
 	}
 	if got.Body != "> quoted context\n/issue Real intent" {
 		t.Errorf("Body must be the (enriched) Message.Text, got %q", got.Body)
 	}
-	if got.MessageID != "om_1" || got.ThreadID != "th_1" || got.SessionID != binderUUID(1) ||
+	if got.MessageID != "om_1" || got.ThreadID != "th_1" || !got.ForceFresh || got.SessionID != binderUUID(1) ||
 		got.Sender != binderUUID(7) || got.InstallationID != binderUUID(2) || got.ClaimToken != binderUUID(9) {
 		t.Errorf("append mapping wrong: %+v", got)
 	}
@@ -162,16 +164,19 @@ func TestFeishuSessionBinder_BindMediaMapping(t *testing.T) {
 	b := &feishuSessionBinder{session: f}
 	ref := channel.MediaRef{Type: channel.MsgTypeImage, StorageURL: "https://cdn.example.test/image.png"}
 	if err := b.BindMedia(context.Background(), engine.BindMediaParams{
-		MessageID:   binderUUID(4),
-		SessionID:   binderUUID(1),
-		WorkspaceID: binderUUID(2),
-		Sender:      binderUUID(7),
-		MediaRefs:   []channel.MediaRef{ref},
+		MessageID:        binderUUID(4),
+		SessionID:        binderUUID(1),
+		WorkspaceID:      binderUUID(2),
+		Sender:           binderUUID(7),
+		IssueID:          binderUUID(8),
+		IssueCommandText: "/issue Real intent",
+		Body:             "[Image]",
+		MediaRefs:        []channel.MediaRef{ref},
 	}); err != nil {
 		t.Fatalf("BindMedia: %v", err)
 	}
 	got := f.mediaIn
-	if got.MessageID != binderUUID(4) || got.SessionID != binderUUID(1) || got.WorkspaceID != binderUUID(2) || got.Sender != binderUUID(7) || len(got.MediaRefs) != 1 || got.MediaRefs[0] != ref {
+	if got.MessageID != binderUUID(4) || got.SessionID != binderUUID(1) || got.WorkspaceID != binderUUID(2) || got.Sender != binderUUID(7) || got.IssueID != binderUUID(8) || got.IssueCommandText != "/issue Real intent" || got.Body != "[Image]" || len(got.MediaRefs) != 1 || got.MediaRefs[0] != ref {
 		t.Fatalf("media mapping wrong: %+v", got)
 	}
 }

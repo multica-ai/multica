@@ -136,6 +136,65 @@ func parseBoolEnv(raw string) (bool, error) {
 	}
 }
 
+// awsEndpointDomains are the parent domains AWS serves S3 from. VPC, dualstack
+// and FIPS hostnames all live under them, as does the China partition.
+var awsEndpointDomains = []string{"amazonaws.com", "amazonaws.com.cn"}
+
+// usesAWSEndpoint reports whether uploads go to real AWS S3 — either the
+// default endpoint or an explicitly configured AWS one. The match is on the
+// host label boundary, so "notamazonaws.com" and "s3.amazonaws.com.evil.net"
+// are correctly treated as third-party endpoints.
+func (s *S3Storage) usesAWSEndpoint() bool {
+	if s.endpointURL == "" {
+		return true
+	}
+	host := endpointHostname(s.endpointURL)
+	for _, domain := range awsEndpointDomains {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// endpointHostname extracts the comparable hostname from a configured
+// endpoint: lowercased, without the port, and without a trailing root dot.
+// A value written without a scheme is retried as an https URL, since
+// url.Parse otherwise reads the whole thing as a path.
+func endpointHostname(endpointURL string) string {
+	parsed, err := url.Parse(endpointURL)
+	if err != nil {
+		return ""
+	}
+	if parsed.Hostname() == "" {
+		parsed, err = url.Parse("https://" + endpointURL)
+		if err != nil {
+			return ""
+		}
+	}
+	return strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+}
+
+// uploadChecksumOptions returns the per-request options for the buffered
+// upload path. The SDK defaults RequestChecksumCalculation to WhenSupported,
+// which sends the body as aws-chunked with a CRC32 trailer; Aliyun OSS and
+// Tencent COS do not implement that encoding and reject the request outright.
+//
+// Downgrading to WhenRequired drops the trailer, but it also drops the
+// client-side checksum entirely, so it is applied only to non-AWS endpoints.
+// Real AWS S3 accepts the trailer today, and buckets carrying a default Object
+// Lock retention actually require a checksum, so those requests are left
+// exactly as the SDK built them — including any AWS_REQUEST_CHECKSUM_CALCULATION
+// the operator configured.
+func (s *S3Storage) uploadChecksumOptions() []func(*s3.Options) {
+	if s.usesAWSEndpoint() {
+		return nil
+	}
+	return []func(*s3.Options){func(opts *s3.Options) {
+		opts.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+	}}
+}
+
 // storageClass returns the appropriate S3 storage class.
 // Custom endpoints (e.g. MinIO) only support STANDARD; real AWS defaults to INTELLIGENT_TIERING.
 func (s *S3Storage) storageClass() types.StorageClass {
@@ -281,7 +340,7 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		ContentDisposition: aws.String(ContentDisposition(contentType, filename)),
 		CacheControl:       aws.String("max-age=432000,public"),
 		StorageClass:       s.storageClass(),
-	})
+	}, s.uploadChecksumOptions()...)
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}

@@ -23,16 +23,23 @@ const chatTitleGenTimeout = 20 * time.Second
 // chatTitleSystemPrompt instructs the model to condense the opening of a
 // conversation into a short, language-matched title. The rules mirror the
 // acceptance criteria in MUL-4295: no quotes, no trailing punctuation, no
-// "标题：" / "Title:" prefix, follow the conversation's language. sanitizeChatTitle
-// re-applies these rules defensively in case the model ignores them.
+// label prefix, follow the conversation's language. sanitizeChatTitle re-applies
+// these rules defensively in case the model ignores them.
+//
+// This text names no language and contains no CJK, deliberately. A prompt that
+// spells out a specific language — even only as a formatting example — reads as
+// permission to answer in it, which is how quick actions ended up emitting
+// Chinese pills for English conversations (MUL-5689). The label prefixes this
+// used to enumerate are still stripped for real by chatTitleLabelPrefixes,
+// which is where that guarantee belongs.
 const chatTitleSystemPrompt = `You write a very short title that summarizes the topic of a chat conversation, given the user's opening message.
 
 Rules:
 - Output ONLY the title text — nothing else, no explanation.
 - Keep it short: a few words, ideally under 8, never a full sentence.
-- Write the title in the SAME language as the user's message (Chinese input → Chinese title, English input → English title).
+- Write the title in the SAME language as the user's message, and in no other.
 - Do NOT wrap the title in quotes or brackets.
-- Do NOT prefix it with "Title:", "标题：", or similar.
+- Do NOT prefix it with a label such as "Title:", in any language.
 - Do NOT end with a period or any trailing punctuation.`
 
 // maybeGenerateChatTitleAsync kicks off best-effort LLM title generation for a

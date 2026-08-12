@@ -29,7 +29,7 @@ import {
 import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useNavigation } from "../../navigation";
+import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
 
 /**
@@ -52,7 +52,6 @@ export function ChatSessionHeader({
 }) {
   const { t } = useT("chat");
   const wsPaths = useWorkspacePaths();
-  const { push } = useNavigation();
   const updateSession = useUpdateChatSession();
   const deleteSession = useDeleteChatSession();
   const setArchived = useSetChatSessionArchived();
@@ -84,10 +83,6 @@ export function ChatSessionHeader({
     const trimmed = draft.trim();
     if (!trimmed || trimmed === session.title) return;
     updateSession.mutate({ sessionId: session.id, title: trimmed });
-  };
-
-  const viewProfile = () => {
-    if (agent) push(wsPaths.agentDetail(agent.id));
   };
 
   const doDelete = () => {
@@ -160,7 +155,9 @@ export function ChatSessionHeader({
             {t(($) => $.header.rename)}
           </DropdownMenuItem>
           {agent && (
-            <DropdownMenuItem onClick={viewProfile}>
+            <DropdownMenuItem
+              render={<AppLink href={wsPaths.agentDetail(agent.id)} />}
+            >
               <UserRound className="h-4 w-4" />
               {t(($) => $.header.view_profile)}
             </DropdownMenuItem>

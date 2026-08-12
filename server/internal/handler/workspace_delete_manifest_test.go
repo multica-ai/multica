@@ -21,6 +21,7 @@ const (
 var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"activity_log":                    workspaceDelete,
 	"agent":                           workspaceDelete,
+	"agent_builder_draft":             workspaceDelete,
 	"agent_invocation_target":         workspaceDelete,
 	"agent_runtime":                   workspaceDelete,
 	"agent_skill":                     workspaceDelete,
@@ -60,6 +61,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"github_pull_request_check_suite": workspaceDelete,
 	"inbox_item":                      workspaceDelete,
 	"issue":                           workspaceDelete,
+	"issue_view":                      workspaceDelete,
+	"issue_view_preference":           workspaceDelete,
 	"issue_dependency":                workspaceDelete,
 	"issue_label":                     workspaceDelete,
 	"issue_property":                  workspaceDelete,

@@ -89,6 +89,8 @@ vi.mock("../../navigation", () => ({
     </a>
   ),
   useNavigation: () => ({ push: vi.fn(), pathname: "/" }),
+  resolveClickIntent: () => "push",
+  useIntentNavigate: () => () => {},
 }));
 
 vi.mock("@multica/core/paths", async () => {

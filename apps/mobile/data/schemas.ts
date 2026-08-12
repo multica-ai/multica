@@ -294,11 +294,30 @@ export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
 
 export const EMPTY_CHAT_MESSAGE_LIST: ChatMessage[] = [];
 
-// All fields optional — server returns an empty object when no in-flight task.
+const ChatQueuedTaskSchema = z.object({
+  task_id: z.string(),
+  status: z.string().default("queued"),
+  created_at: z.string().default(""),
+  message_id: z.string().optional(),
+  content: z.string().optional(),
+}).loose();
+
+const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
+  tasks.flatMap((task) => {
+    const parsed = ChatQueuedTaskSchema.safeParse(task);
+    return parsed.success ? [parsed.data] : [];
+  }),
+);
+
+// All root fields are optional — server returns an empty object when no
+// task is in flight. Ignore malformed queue rows without discarding a valid
+// head, matching packages/core/api/schemas.ts.
 export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
   task_id: z.string().optional(),
   status: z.string().optional(),
   created_at: z.string().optional(),
+  supports_queue: z.boolean().optional(),
+  queued_tasks: ChatQueuedTasksSchema.optional(),
 }).loose();
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
@@ -306,6 +325,8 @@ export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
   message_id: z.string(),
   task_id: z.string(),
+  supports_queue: z.boolean().optional(),
+  queued: z.boolean().optional().catch(undefined),
   created_at: z.string().default(""),
 }).loose();
 
@@ -586,6 +607,7 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   runtime_id: z.string().default(""),
+  runtime_bound: z.boolean().optional(),
   name: z.string().default(""),
   description: z.string().default(""),
   instructions: z.string().default(""),

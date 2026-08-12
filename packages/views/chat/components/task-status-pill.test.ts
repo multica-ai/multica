@@ -1,7 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { pickStageKeys } from "./task-status-pill";
+import { effectiveTaskStatus, pickStageKeys } from "./task-status-pill";
 
 describe("pickStageKeys", () => {
+  it("returns retrying while a deferred chat retry waits for backoff", () => {
+    expect(pickStageKeys("deferred", [], "offline")).toEqual({ stageKey: "retrying" });
+  });
+
+  it("keeps deferred authoritative over task messages from the earlier attempt", () => {
+    expect(
+      effectiveTaskStatus("deferred", [
+        {
+          task_id: "task-1",
+          issue_id: "",
+          seq: 1,
+          type: "thinking",
+          created_at: "2026-07-01T00:00:00Z",
+        },
+      ]),
+    ).toBe("deferred");
+  });
+
   it("returns queued when status is queued and agent is online", () => {
     expect(pickStageKeys("queued", [], "online")).toEqual({ stageKey: "queued" });
   });

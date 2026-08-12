@@ -234,8 +234,33 @@ func TestWorkingOnIssuesSkillCoversIssueLoopContracts(t *testing.T) {
 		"include the PR URL when a PR exists",
 		"Closes MUL-2759",
 		"--status backlog",
-		"pr_url",
+		// The only sanctioned pr_url reference is the negative compatibility
+		// warning about pre-existing data — not a write recommendation
+		// (MUL-5442 owner ruling: no curated key vocabulary).
+		"`pr_url` metadata (which can be",
 		"references/working-on-issues-source-map.md",
+		// MUL-5442: the brief's Sub-issue Creation section is now a one-line
+		// map pointing here. These anchors are the demoted playbook — if they
+		// leave the skill, the brief pointer dangles.
+		"`todo` starts work now, `backlog` parks it",
+		"`--stage <N>`",
+		"when a whole stage finishes",
+		"multica issue status <child-id> todo",
+		// MUL-5442: the brief's Issue Metadata section defers the full
+		// write discipline here. Every relocated ban is anchored
+		// individually — both defining categories AND each example —
+		// so no single item or category boundary can be dropped while
+		// the brief still points at this skill (round-3 review).
+		"Never store secrets, tokens, or API keys",
+		"Not metadata: logs or summaries",
+		"bookkeeping such as timestamps",
+		"attempt counts, or agent IDs",
+		"other single-run details",
+		"files touched and investigation notes",
+		"belong in the result comment",
+		// Owner ruling: metadata is deliberately free-form custom state;
+		// the platform curates no key vocabulary.
+		"the platform curates no vocabulary",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(body, want) {
@@ -244,6 +269,13 @@ func TestWorkingOnIssuesSkillCoversIssueLoopContracts(t *testing.T) {
 	}
 
 	mustNotContain := []string{
+		// A curated key list is the "recommended fields" concept the owner
+		// ruled out on MUL-5442 — it must not creep back into the skill
+		// that loads exactly when an agent is about to write metadata.
+		"High-signal keys",
+		"reuse these names so queries stay consistent",
+		"scratchpad for run state",
+		"(`pr_url`, `waiting_on`",
 		"Start from the trigger, not from memory",
 		"multica issue get <issue-id> --output json",
 		"multica issue metadata list <issue-id> --output json",
@@ -404,10 +436,30 @@ func TestSquadsSkillCoversLeaderRoutingContract(t *testing.T) {
 		"mention://squad/<squad-id>",
 		"recording squad activity",
 		"references/squad-source-map.md",
+		// The debugging quick-start must stay a bounded two-step read
+		// (MUL-5442): a roots-only scan alone never returns reply bodies,
+		// where mention triggers and failure reasons usually live — and it
+		// must not regress to a --recent bulk pull either.
+		"--roots-only --summary",
+		"--thread <thread-id> --tail 30",
+		"scan the roots first, then open the threads",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(body, want) {
 			t.Errorf("squads skill missing %q", want)
+		}
+	}
+
+	// MUL-5696: no unbounded comment pull anywhere in the skill. #6347 fixed
+	// the quick start's `--recent 10` but missed a second unbounded
+	// `issue comment list` in the CLI section; both shapes contradict the
+	// brief's "two bounded reads, never one bulk pull" doctrine.
+	for _, banned := range []string{
+		"multica issue comment list <issue-id> --output json",
+		"--recent 10",
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("squads skill carries the unbounded comment read %q (MUL-5696)", banned)
 		}
 	}
 
@@ -477,6 +529,11 @@ func TestRuntimesAndReposSkillCoversClaimAndCheckoutChain(t *testing.T) {
 		"local_directory",
 		"Runtime and repo commands affect active agent execution",
 		"references/runtimes-and-repos-source-map.md",
+		// An agent reads this to know whether its checkout can be committed to.
+		// Codex on Linux and Windows gets task-local Git metadata; every other
+		// runtime gets a linked worktree (multica-ai/multica#2925, #6449).
+		"Linux and Windows Codex",
+		"task-local Git metadata",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(body, want) {

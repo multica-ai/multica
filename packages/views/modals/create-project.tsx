@@ -448,7 +448,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   {leadType && leadId ? (
                     <>
                       <ActorAvatar actorType={leadType} actorId={leadId} size="sm" showStatusDot />
-                      <span>{leadLabel}</span>
+                      <span className="truncate">{leadLabel}</span>
                     </>
                   ) : (
                     <span className="text-muted-foreground">{t(($) => $.create_project.lead)}</span>

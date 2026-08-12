@@ -9,7 +9,7 @@ import type { Agent, AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import {
   useDeleteRuntime,
-  useArchiveAgentsAndDeleteRuntime,
+  useUnbindAgentsAndDeleteRuntime,
 } from "@multica/core/runtimes/mutations";
 import {
   agentListOptions,
@@ -35,7 +35,12 @@ import { isSelfHealingRuntime } from "../utils";
 // deletion across the list-page kebab and the detail-page Diagnostics
 // card. It runs in two modes that share the same shell — light when no
 // agents are bound (matches the legacy "are you sure" prompt) and
-// cascade when active agents would be archived as part of the delete.
+// cascade when active agents would be unbound as part of the delete.
+//
+// "Unbound" is the load-bearing word (MUL-5559): the agents are kept, with
+// their instructions, chats and task history, and only lose their runtime —
+// they cannot run until bound to another one. The dialog used to say those
+// agents would be "archived" while the server hard-deleted them.
 //
 // Mode is decided dynamically:
 //   1. Initial: peek at the cached agent list and pick light vs cascade
@@ -115,7 +120,7 @@ export function DeleteRuntimeDialog({
   }, [open, cachedActiveAgents]);
 
   const lightMutation = useDeleteRuntime(wsId);
-  const cascadeMutation = useArchiveAgentsAndDeleteRuntime(wsId);
+  const cascadeMutation = useUnbindAgentsAndDeleteRuntime(wsId);
 
   const handleConfirm = async () => {
     setSubmitting(true);

@@ -1,20 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { IssueMentionCard } from "./issue-mention-card";
 import { NavigationProvider } from "../../navigation";
 import type { NavigationAdapter } from "../../navigation";
-
-const { issueLinkState } = vi.hoisted(() => ({
-  issueLinkState: { openInNewTab: true, setOpenInNewTab: vi.fn() },
-}));
-
-vi.mock("@multica/core/issues/stores", () => {
-  const useIssueLinkStore = (
-    selector?: (s: typeof issueLinkState) => unknown,
-  ) => (selector ? selector(issueLinkState) : issueLinkState);
-  useIssueLinkStore.getState = () => issueLinkState;
-  return { useIssueLinkStore };
-});
 
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
@@ -51,45 +39,40 @@ function renderCard(adapter: NavigationAdapter) {
 }
 
 describe("IssueMentionCard", () => {
-  beforeEach(() => {
-    issueLinkState.openInNewTab = true;
-  });
-
-  it("with the new-tab preference on (default), plain click opens a foreground new tab and does not push", () => {
-    const push = vi.fn();
-    const openInNewTab = vi.fn();
-    renderCard(makeAdapter({ push, openInNewTab }));
-
+  it("renders a real anchor with no target — a chip click navigates in place", () => {
+    renderCard(makeAdapter());
     const anchor = screen.getByTestId("issue-chip").closest("a");
-    expect(anchor).toHaveAttribute("target", "_blank");
-
-    fireEvent.click(screen.getByTestId("issue-chip"));
-    expect(openInNewTab).toHaveBeenCalledWith("/acme/issues/issue-1", "MUL-7", {
-      activate: true,
-    });
-    expect(push).not.toHaveBeenCalled();
-  });
-
-  it("with the preference off, plain click navigates in place", () => {
-    issueLinkState.openInNewTab = false;
-    const push = vi.fn();
-    const openInNewTab = vi.fn();
-    renderCard(makeAdapter({ push, openInNewTab }));
-
-    const anchor = screen.getByTestId("issue-chip").closest("a");
+    expect(anchor).toHaveAttribute("href", "/acme/issues/issue-1");
     expect(anchor).not.toHaveAttribute("target");
+  });
+
+  it("plain click pushes in place", () => {
+    const push = vi.fn();
+    const openInNewTab = vi.fn();
+    renderCard(makeAdapter({ push, openInNewTab }));
 
     fireEvent.click(screen.getByTestId("issue-chip"));
     expect(push).toHaveBeenCalledWith("/acme/issues/issue-1");
     expect(openInNewTab).not.toHaveBeenCalled();
   });
 
-  it("with the preference on but no adapter openInNewTab (web), leaves the click to the browser's native target=_blank handling", () => {
+  it("cmd-click opens a background tab labeled with the issue identifier (desktop)", () => {
+    const push = vi.fn();
+    const openInNewTab = vi.fn();
+    renderCard(makeAdapter({ push, openInNewTab }));
+
+    fireEvent.click(screen.getByTestId("issue-chip"), { metaKey: true });
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/issues/issue-1", "MUL-7");
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("cmd-click without an adapter (web) is left to the browser's native background-tab handling", () => {
     const push = vi.fn();
     renderCard(makeAdapter({ push }));
 
     const defaultNotPrevented = fireEvent.click(
       screen.getByTestId("issue-chip"),
+      { metaKey: true },
     );
     expect(defaultNotPrevented).toBe(true);
     expect(push).not.toHaveBeenCalled();

@@ -691,7 +691,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		ActorType:   "agent",
 		ActorID:     util.UUIDToString(leader.ID),
 		Payload: map[string]any{
-			"issue": issueToMap(issue, prefix),
+			"issue": IssueToMap(issue, prefix),
 		},
 	})
 	s.captureIssueCreatedFromAutopilot(ap, run, issue, leader.ID)
@@ -1266,6 +1266,12 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 func agentReadinessReasonCode(agent db.Agent) dispatch.ReasonCode {
 	if agent.ArchivedAt.Valid {
 		return dispatch.ReasonTargetUnavailable
+	}
+	// No runtime bound at all is a different user story from a runtime that is
+	// merely offline: nothing will ever pick the work up, and the fix is to bind
+	// the agent to a runtime (MUL-5559).
+	if !agent.RuntimeID.Valid {
+		return dispatch.ReasonAgentRuntimeRequired
 	}
 	return dispatch.ReasonRuntimeOffline
 }

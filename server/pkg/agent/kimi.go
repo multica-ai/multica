@@ -1,12 +1,16 @@
 package agent
 
 import (
-	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -119,6 +123,12 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	// agent_message_chunk type; the tracker keeps only the post-tool-call block
 	// for Result.Output while retaining the full text for error detection.
 	var deliverable acpDeliverableTracker
+	// streamingCurrentTurn gates all session updates so that history replay
+	// (Kimi sends full prior-turn transcripts on session/resume, and may
+	// flush queued chunks before our session/prompt response streams) is
+	// dropped instead of duplicating the previous answer into output. We
+	// flip it to true only after session/prompt is sent.
+	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
 	activity := make(chan struct{}, 1)
@@ -129,6 +139,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		stdin:        stdin,
 		pending:      make(map[int]*pendingRPC),
 		pendingTools: make(map[string]*pendingToolCall),
+		acceptNotification: func(string) bool {
+			return streamingCurrentTurn.Load()
+		},
 		onActivity: func() {
 			select {
 			case activity <- struct{}{}:
@@ -136,6 +149,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			}
 		},
 		onMessage: func(msg Message) {
+			if !streamingCurrentTurn.Load() {
+				return
+			}
 			// hermesClient.handleToolCallStart has already mapped
 			// the raw ACP title via hermesToolNameFromTitle — which
 			// covers lowercase hermes-style titles ("read:", "patch
@@ -151,6 +167,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
+			if !streamingCurrentTurn.Load() {
+				return
+			}
 			select {
 			case promptDone <- result:
 			default:
@@ -162,8 +181,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -213,7 +231,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// advertise. See the matching comment in hermes.go for the why —
 		// shipping an http/sse entry to a stdio-only runtime tanks the
 		// whole session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kimi", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kimi", b.cfg)
 
 		// 2. Create or resume a session.
 		cwd := opts.Cwd
@@ -311,6 +329,44 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			b.cfg.Logger.Info("kimi session model set", "model", opts.Model)
 		}
 
+		// 3b. Apply a persisted thinking override through Kimi's native ACP
+		// config option before prompting. As with other providers, a configuration
+		// failure does not block the task: the prompt goes out either way, and the
+		// warnings below are the only record that the level shown in the UI may not
+		// be the level in effect. Which level that is depends on how the call
+		// failed. If the request itself fails, the session keeps whatever it had
+		// beforehand — the CLI's own setting on a fresh session, the previous
+		// turn's level on a resumed one. If Kimi answers but confirms a different
+		// value, the session sits at that value. If it answers without a `thinking`
+		// currentValue at all, we cannot tell which level is in effect.
+		if opts.ThinkingLevel != "" {
+			configResult, err := c.request(runCtx, "session/set_config_option", map[string]any{
+				"sessionId": sessionID,
+				"configId":  "thinking",
+				"value":     opts.ThinkingLevel,
+			})
+			if err != nil {
+				b.cfg.Logger.Warn("kimi rejected the thinking level request; sending the prompt anyway",
+					"requested_level", opts.ThinkingLevel,
+					"effective_level", "unchanged",
+					"error", err,
+				)
+			} else {
+				effectiveLevel, confirmed := acpConfigOptionCurrentValue(configResult, "thinking")
+				if !confirmed || effectiveLevel != opts.ThinkingLevel {
+					if !confirmed {
+						effectiveLevel = "unknown"
+					}
+					b.cfg.Logger.Warn("kimi did not confirm the requested thinking level; sending the prompt anyway",
+						"requested_level", opts.ThinkingLevel,
+						"effective_level", effectiveLevel,
+					)
+				} else {
+					b.cfg.Logger.Info("kimi session thinking level confirmed", "level", effectiveLevel)
+				}
+			}
+		}
+
 		// 4. Build the prompt content. If we have a system prompt, prepend it.
 		userText := prompt
 		if opts.SystemPrompt != "" {
@@ -318,6 +374,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		// 5. Send the prompt and wait for PromptResponse.
+		streamingCurrentTurn.Store(true)
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
@@ -356,10 +413,12 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					finalStatus = "aborted"
 					finalError = "kimi cancelled the prompt"
 				}
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usageMu.Unlock()
+				// kimi-code 0.33.0 sends no usage at all on this path,
+				// so this is inert today; it exists so a future
+				// kimi that does populate the ACP result is billed
+				// correctly instead of silently dropping cache or cost
+				// fields. scanKimiSessionUsage below is the live path.
+				c.mergeUsage(pr.usage)
 			default:
 			}
 			waitForACPNotificationQuiescence(runCtx, activity, readerDone, acpNotificationQuietTime, kimiReaderDrainGrace)
@@ -375,6 +434,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// Ensure the stderr copier has drained before consulting the
 		// provider-error sniffer; see hermes.go for the failure mode.
 		<-stderrDone
+		streamingCurrentTurn.Store(false)
 
 		finalOutput, providerErrorOutput := deliverable.result()
 
@@ -388,17 +448,49 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// stays visible.
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
+		u := c.accumulatedUsage()
+
+		// Fallback: kimi-code 0.33.0 exports no token counters over ACP.
+		// Its session/prompt result carries only stopReason, and its
+		// `usage_update` notification carries only {used,size} — context
+		// window occupancy, not billing. Verified against the CLI Multica's
+		// own onboarding installs. Without this scan every kimi task lands
+		// on the usage dashboard with no row at all (MUL-5773 / #6448).
+		//
+		// The counters do exist in kimi's per-session wire log, so read
+		// them from there, the same way codex.go falls back to Codex
+		// rollouts. Bound by sessionID so a concurrent kimi session is
+		// never billed to this task.
+		fallbackModel := opts.Model
+		if fallbackModel == "" {
+			fallbackModel = "unknown"
+		}
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
-			if model == "" {
-				model = "unknown"
+		if acpTokenUsagePresent(u) {
+			usageMap = map[string]TokenUsage{fallbackModel: u}
+		} else {
+			// Keyed per model by the scan itself: a task whose subagent
+			// or compaction step ran on a different model must not have
+			// that model's tokens priced at the main model's rate.
+			usageMap = scanKimiSessionUsage(kimiUsageScan{
+				startTime:     startTime,
+				kimiHome:      b.cfg.Env["KIMI_CODE_HOME"],
+				sessionID:     sessionID,
+				resumed:       opts.ResumeSessionID != "",
+				fallbackModel: fallbackModel,
+			})
+			// A future Kimi build may expose provider cost before it exposes
+			// token buckets over ACP. Preserve that cost alongside the current
+			// wire-log fallback instead of dropping either source.
+			if u.CostUSDTicks > 0 {
+				modelUsage := usageMap[fallbackModel]
+				modelUsage.CostUSDTicks = u.CostUSDTicks
+				if usageMap == nil {
+					usageMap = make(map[string]TokenUsage)
+				}
+				usageMap[fallbackModel] = modelUsage
 			}
-			usageMap = map[string]TokenUsage{model: u}
 		}
 
 		resCh <- Result{
@@ -460,4 +552,214 @@ func kimiToolNameFromTitle(title string) string {
 
 	// Fallback: snake_case the title so the UI gets a stable identifier.
 	return strings.ReplaceAll(lower, " ", "_")
+}
+
+// kimiUsageRecordType is the wire-log entry kimi-code writes after every LLM
+// call. Its sibling `step.end` loop event repeats the same numbers, so only
+// this type may be summed — counting both double-bills every turn.
+const kimiUsageRecordType = "usage.record"
+
+// kimiWireUsage is one `usage.record` entry from a kimi session wire log.
+//
+// The buckets are mutually exclusive: on a verified two-turn session the
+// records read {inputOther:4844, inputCacheRead:17664, output:22} and
+// {inputOther:272, inputCacheRead:22272, output:22}, and each turn's three
+// fields sum exactly to the `used` figure kimi reports over ACP (22530 and
+// 22566). So `inputOther` is uncached input only and maps straight onto
+// TokenUsage.InputTokens with no cached-prefix subtraction — unlike the ACP
+// `inputTokens` case excludeACPCachedInput exists to correct.
+type kimiWireUsage struct {
+	Type string `json:"type"`
+	// Time is the record's epoch-millisecond write time. It is what keeps a
+	// resumed session from being billed twice: kimi appends to the same wire
+	// log across resumes, so the file still holds the previous task's
+	// records.
+	Time  int64  `json:"time"`
+	Model string `json:"model"`
+	Usage struct {
+		InputOther         int64 `json:"inputOther"`
+		Output             int64 `json:"output"`
+		InputCacheRead     int64 `json:"inputCacheRead"`
+		InputCacheCreation int64 `json:"inputCacheCreation"`
+	} `json:"usage"`
+}
+
+// kimiUsageScan parameterises a wire-log scan.
+type kimiUsageScan struct {
+	startTime time.Time
+	kimiHome  string
+	sessionID string
+	// resumed marks a turn that continued an existing kimi session. Those
+	// append to the wire log the previous task already billed, so records are
+	// filtered by their own timestamp, not just by the file's mtime.
+	resumed bool
+	// fallbackModel keys records that carry no model of their own.
+	fallbackModel string
+}
+
+// scanKimiSessionUsage returns the usage kimi-code recorded for this session,
+// bucketed by the model that produced each record.
+//
+// Records are per-LLM-call and incremental, never cumulative: a verified
+// two-step turn logged one record per `llm.request`, with the second call's
+// uncached input far below the first's as the prefix moved into cache. So the
+// total for a task is the plain sum over every record in the session.
+//
+// Subagent turns get their own `agents/<name>/wire.jsonl` and may run a
+// different model, which is why the result is a map rather than one total:
+// billing only `agents/main` would drop delegated work, and folding every
+// agent into one model name would price it wrong.
+func scanKimiSessionUsage(scan kimiUsageScan) map[string]TokenUsage {
+	root := kimiSessionRoot(scan.kimiHome)
+	if root == "" {
+		return nil
+	}
+
+	usage := make(map[string]TokenUsage)
+	// Some filesystems round mtimes down to whole seconds. Compare against a
+	// cutoff at the same precision so a log written during this turn is not
+	// discarded before its authoritative per-record timestamps are checked.
+	mtimeCutoff := scan.startTime.Truncate(time.Second)
+	for _, path := range kimiSessionWireLogs(root, scan.sessionID) {
+		// A wire log clearly untouched since before the turn began belongs to
+		// an earlier run of a resumed session. The record-level filter below
+		// remains the authority at the turn boundary.
+		if info, err := os.Stat(path); err != nil || info.ModTime().Before(mtimeCutoff) {
+			continue
+		}
+		accumulateKimiWireUsage(usage, path, scan)
+	}
+	if len(usage) == 0 {
+		return nil
+	}
+	return usage
+}
+
+// kimiSessionWireLogs returns the wire logs belonging to sessionID.
+//
+// kimi names the session directory with the ACP session id verbatim
+// (`<root>/<workspace>/<sessionID>/agents/<name>/wire.jsonl`), so the session
+// is addressed by exact path rather than by globbing every session and
+// filtering after: session history only grows, and this runs on the billing
+// path at the end of every task. Building the path also keeps the agent's
+// session id out of a glob pattern, where a `*` or `[` would be read as a
+// wildcard — as would one in a custom KIMI_CODE_HOME.
+func kimiSessionWireLogs(root, sessionID string) []string {
+	sessionID = strings.TrimSpace(sessionID)
+	// Guard the path join: the id comes from the agent.
+	if sessionID == "" || sessionID == "." || sessionID == ".." ||
+		strings.ContainsRune(sessionID, '/') || strings.ContainsRune(sessionID, os.PathSeparator) {
+		return nil
+	}
+
+	workspaces, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	for _, workspace := range workspaces {
+		if !workspace.IsDir() {
+			continue
+		}
+		agentsDir := filepath.Join(root, workspace.Name(), sessionID, "agents")
+		agents, err := os.ReadDir(agentsDir)
+		if err != nil {
+			continue
+		}
+		for _, agent := range agents {
+			if !agent.IsDir() {
+				continue
+			}
+			paths = append(paths, filepath.Join(agentsDir, agent.Name(), "wire.jsonl"))
+		}
+	}
+	return paths
+}
+
+// accumulateKimiWireUsage adds one wire log's records into usage, keyed by the
+// model each record names. A malformed or truncated line is skipped rather
+// than failing the scan: the log is appended to live, so the tail can be a
+// partial write, and reporting the records we could read beats reporting
+// nothing.
+func accumulateKimiWireUsage(usage map[string]TokenUsage, path string, scan kimiUsageScan) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	scanner := newAgentStreamScanner(file)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if !bytes.Contains(line, []byte(kimiUsageRecordType)) {
+			continue
+		}
+		var record kimiWireUsage
+		if err := json.Unmarshal(line, &record); err != nil || record.Type != kimiUsageRecordType {
+			continue
+		}
+		if !kimiWireRecordInTurn(record.Time, scan.startTime, scan.resumed) {
+			continue
+		}
+		model := record.Model
+		if model == "" {
+			model = scan.fallbackModel
+		}
+		total := usage[model]
+		total.InputTokens += record.Usage.InputOther
+		total.OutputTokens += record.Usage.Output
+		total.CacheReadTokens += record.Usage.InputCacheRead
+		total.CacheWriteTokens += record.Usage.InputCacheCreation
+		usage[model] = total
+	}
+}
+
+// kimiWireRecordInTurn reports whether a usage record belongs to the turn that
+// started at startTime.
+//
+// kimi-code 0.33.0 stamps every usage record, so the untimed case is only a
+// guard against a future format change. There it errs toward billing on a
+// fresh session (whose records are all ours anyway) and toward dropping on a
+// resume, where counting an untimed record risks charging a user twice for
+// tokens the earlier task already reported.
+func kimiWireRecordInTurn(recordTimeMillis int64, startTime time.Time, resumed bool) bool {
+	if recordTimeMillis <= 0 {
+		return !resumed
+	}
+	if startTime.IsZero() {
+		return true
+	}
+	return recordTimeMillis >= startTime.UnixMilli()
+}
+
+// kimiSessionRoot resolves kimi's session directory: an explicitly configured
+// home first, then the ambient KIMI_CODE_HOME, then ~/.kimi-code. Mirrors
+// codexSessionRoot.
+//
+// The env lookup is not redundant with cfg.Env: the kimi subprocess inherits
+// os.Environ() via buildEnv, so a KIMI_CODE_HOME exported to the daemon
+// relocates kimi's sessions without ever appearing in cfg.Env. Reading only
+// cfg.Env would leave the scan looking in ~/.kimi-code while kimi wrote
+// somewhere else. The stat check keeps a home without a sessions directory
+// from disabling the scan.
+func kimiSessionRoot(kimiHome string) string {
+	if kimiHome = strings.TrimSpace(kimiHome); kimiHome == "" {
+		kimiHome = strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
+	}
+	if kimiHome != "" {
+		dir := filepath.Join(kimiHome, "sessions")
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Join(home, ".kimi-code", "sessions")
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		return dir
+	}
+	return ""
 }

@@ -45,6 +45,8 @@ import {
 } from "@/data/stores/mention-draft-store";
 import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
 import { THEME } from "@/lib/theme";
+import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { cn } from "@/lib/utils";
 
 const AVATAR_SIZE = 36;
 
@@ -71,6 +73,15 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const runnableAgentIds = useMemo(
+    () =>
+      new Set(
+        agents
+          .filter((agent) => !agent.archived_at && isAgentRuntimeBound(agent))
+          .map((agent) => agent.id),
+      ),
+    [agents],
+  );
   const listRef = useScrollToTopOnChange(query);
   const { colorScheme } = useColorScheme();
   const checkColor =
@@ -215,10 +226,18 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
             </View>
           );
         }
+        const needsRuntime =
+          (item.kind === "agent" && !isAgentRuntimeBound(item.agent)) ||
+          (item.kind === "squad" &&
+            !runnableAgentIds.has(item.squad.leader_id));
         return (
           <Pressable
+            disabled={needsRuntime}
             onPress={() => pick(item)}
-            className="flex-row items-center gap-3 px-4 py-3 active:bg-secondary"
+            className={cn(
+              "flex-row items-center gap-3 px-4 py-3 active:bg-secondary",
+              needsRuntime && "opacity-50",
+            )}
           >
             {item.kind === "all" ? (
               <View
@@ -269,9 +288,13 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
               </Text>
             )}
             {item.kind === "agent" ? (
-              <Text className="text-sm text-muted-foreground">Agent</Text>
+              <Text className="text-sm text-muted-foreground">
+                {isAgentRuntimeBound(item.agent) ? "Agent" : "Needs runtime"}
+              </Text>
             ) : item.kind === "squad" ? (
-              <Text className="text-sm text-muted-foreground">Squad</Text>
+              <Text className="text-sm text-muted-foreground">
+                {needsRuntime ? "Leader needs runtime" : "Squad"}
+              </Text>
             ) : null}
             {isSelected(item) ? (
               <Ionicons name="checkmark" size={20} color={checkColor} />

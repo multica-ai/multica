@@ -11,10 +11,6 @@ import {
   type RendererRouteContextInput,
 } from "../shared/renderer-route-context";
 import {
-  DIAGNOSTICS_CONTROL_CHANNEL,
-  type DiagnosticsControl,
-} from "../shared/diagnostics-control";
-import {
   isNavigationGesture,
   NAVIGATION_GESTURE_CHANNEL,
   type NavigationGesture,
@@ -206,10 +202,6 @@ const desktopAPI = {
   /** Report the renderer's memory-router path for recovery diagnostics. */
   setRendererRouteContext: (context: RendererRouteContextInput) =>
     ipcRenderer.send(RENDERER_ROUTE_CONTEXT_CHANNEL, context),
-  /** Publish the server-driven diagnostics flags. The main process starts
-   *  fail-closed and only enables hang stack capture once this says so. */
-  setDiagnosticsControl: (control: DiagnosticsControl) =>
-    ipcRenderer.send(DIAGNOSTICS_CONTROL_CHANNEL, control),
   /** Open the OS folder picker and return the chosen absolute path. */
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("local-directory:pick", defaultPath),

@@ -133,6 +133,107 @@ func TestFormatErrorValidationUsesServerMessage(t *testing.T) {
 	}
 }
 
+// TestFormatErrorConflictUsesServerMessage pins GH #6264: a 409 body carries a
+// hand-written fix ("reply under this comment", "a skill with that name
+// exists"), and the generic conflict template actively misdirects by telling
+// the caller to retry. The server message must reach the user by default, with
+// no --debug required.
+func TestFormatErrorConflictUsesServerMessage(t *testing.T) {
+	withLang(t, "en_US.UTF-8")
+	httpErr := &HTTPError{
+		Method:     "POST",
+		Path:       "/api/issues/abc/comments",
+		StatusCode: 409,
+		Body:       `{"error":"parent_id 11111111-1111-1111-1111-111111111111 is not a comment this task may reply under; set parent_id (--parent) to 22222222-2222-2222-2222-222222222222 or a coalesced comment id"}`,
+	}
+	wrapped := fmt.Errorf("add comment: %w", httpErr)
+
+	got := FormatError(wrapped, false)
+	if !strings.Contains(got, "set parent_id (--parent) to 22222222-2222-2222-2222-222222222222") {
+		t.Errorf("expected server conflict message surfaced, got %q", got)
+	}
+	// The retry advice is what sent agents into multi-hour loops; it must not
+	// be what they see when the server already named the fix.
+	if strings.Contains(got, "Re-fetch the latest state") {
+		t.Errorf("generic retry template should be replaced by the server message, got %q", got)
+	}
+	if strings.Contains(got, "/api/issues/abc/comments") {
+		t.Errorf("user message leaked the request path: %q", got)
+	}
+}
+
+func TestFormatErrorConflictChineseLocale(t *testing.T) {
+	withLang(t, "zh_CN.UTF-8")
+	httpErr := &HTTPError{StatusCode: 409, Body: `{"error":"a skill with this name already exists"}`}
+	got := FormatError(httpErr, false)
+	if !strings.Contains(got, "请求冲突：") || !strings.Contains(got, "a skill with this name already exists") {
+		t.Errorf("expected Chinese conflict prefix with server message, got %q", got)
+	}
+}
+
+// TestFormatErrorConflictFallsBackToGenericTemplate is the safety half: only a
+// JSON body with a known message field is surfaced, so an HTML error page or a
+// proxy response never gets dumped at the user.
+func TestFormatErrorConflictFallsBackToGenericTemplate(t *testing.T) {
+	withLang(t, "en_US.UTF-8")
+	for _, body := range []string{
+		`<html><body>409 Conflict</body></html>`,
+		`{"code":"runtime_has_active_agents"}`,
+		``,
+	} {
+		got := FormatError(&HTTPError{StatusCode: 409, Body: body}, false)
+		if !strings.Contains(got, "Re-fetch the latest state") {
+			t.Errorf("body %q: expected generic conflict template, got %q", body, got)
+		}
+		if body != "" && strings.Contains(got, body) {
+			t.Errorf("body %q: raw body leaked into user message %q", body, got)
+		}
+	}
+}
+
+// TestExtractServerMessagePrefersProseOverMachineCode covers the endpoints that
+// put a stable code in "error" and the sentence in "message" (issue-table
+// cursor responses). The sentence is what helps a person.
+func TestExtractServerMessagePrefersProseOverMachineCode(t *testing.T) {
+	got := extractServerMessage(`{"error":"cursor_query_mismatch","message":"cursor does not belong to this table branch"}`)
+	if got != "cursor does not belong to this table branch" {
+		t.Errorf("expected the prose message, got %q", got)
+	}
+
+	// With no sentence available the code is still better than nothing.
+	if got := extractServerMessage(`{"error":"cursor_query_mismatch"}`); got != "cursor_query_mismatch" {
+		t.Errorf("expected the bare code as fallback, got %q", got)
+	}
+
+	// Prose in a language without ASCII spaces must not be mistaken for a code.
+	if got := extractServerMessage(`{"error":"该名称已被占用"}`); got != "该名称已被占用" {
+		t.Errorf("expected non-ASCII prose preserved, got %q", got)
+	}
+}
+
+// TestFormatErrorValidationPrefersProseOverMachineCode pins an intentional
+// behavior change that rides along with the conflict fix: the prose preference
+// lives in the shared extractor, so a 400/422 whose "error" holds a machine code
+// now shows its "message" instead of the code. Only the issue-table endpoints
+// are shaped this way and none of them is reachable from the CLI today, but the
+// change is deliberate and should fail loudly if someone reverts it by accident.
+func TestFormatErrorValidationPrefersProseOverMachineCode(t *testing.T) {
+	withLang(t, "en_US.UTF-8")
+	got := FormatError(&HTTPError{
+		StatusCode: 422,
+		Body:       `{"error":"unsupported_group","code":"group_kind_unsupported","message":"This group type is not supported."}`,
+	}, false)
+	if !strings.Contains(got, "This group type is not supported.") {
+		t.Errorf("expected the prose message, got %q", got)
+	}
+
+	// A validation body carrying only a code is unchanged.
+	only := FormatError(&HTTPError{StatusCode: 422, Body: `{"error":"title_is_required"}`}, false)
+	if !strings.Contains(only, "title_is_required") {
+		t.Errorf("code-only validation body should still surface the code, got %q", only)
+	}
+}
+
 func TestFormatErrorDebugIncludesRawChain(t *testing.T) {
 	withLang(t, "en_US.UTF-8")
 	httpErr := &HTTPError{Method: "GET", Path: "/api/issues/abc", StatusCode: 404, Body: `{"error":"not found"}`}

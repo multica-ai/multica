@@ -206,6 +206,7 @@
       "add_file": "New file",
       "mode_aria": "File view",
       "mode_preview": "Preview",
+      "mode_edit": "Edit",
       "mode_raw": "Plain text"
     }
   },
@@ -328,6 +329,7 @@
     "no_files": "No files",
     "actions": {
       "label": "Actions for {{path}}",
+      "edit": "Edit",
       "rename": "Rename",
       "delete": "Delete"
     }

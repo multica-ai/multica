@@ -13,6 +13,7 @@ const PATHS = ["SKILL.md", "references/api.md", "notes.txt"];
 
 function makeActions(overrides: Partial<FileTreeActions> = {}): FileTreeActions {
   return {
+    onEdit: vi.fn(),
     validatePath: () => "",
     onRename: vi.fn(),
     onDelete: vi.fn(),
@@ -30,7 +31,7 @@ describe("FileTree row actions", () => {
     expect(screen.queryByRole("button", { name: /notes\.txt/ })).toBeNull();
   });
 
-  it("withholds them from the reserved file, which owns the skill's content", async () => {
+  it("withholds rename and delete from the reserved file, but not edit", async () => {
     await renderWithI18n(
       <FileTree
         filePaths={PATHS}
@@ -40,11 +41,57 @@ describe("FileTree row actions", () => {
       />,
     );
 
+    await userEvent.click(screen.getByRole("button", { name: /SKILL\.md/ }));
+
     // Deleting or renaming SKILL.md is refused by the server, so the row must
-    // not present it as available.
-    const rows = screen.getAllByRole("tab");
-    const skillMd = rows.find((row) => row.textContent === "SKILL.md")!;
-    expect(skillMd.parentElement!.querySelector("[aria-label]")).toBeNull();
+    // not present either as available. Editing it is ordinary, so the row
+    // keeps that one rather than losing the menu wholesale.
+    expect(
+      await screen.findByRole("menuitem", { name: /编辑|Edit/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /重命名|Rename/ })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /删除|Delete/ })).toBeNull();
+  });
+
+  it("edits the row acted on", async () => {
+    const onEdit = vi.fn();
+    await renderWithI18n(
+      <FileTree
+        filePaths={PATHS}
+        selectedPath="SKILL.md"
+        onSelect={vi.fn()}
+        actions={makeActions({ onEdit })}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /notes\.txt/ }));
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: /编辑|Edit/ }),
+    );
+
+    expect(onEdit).toHaveBeenCalledWith("notes.txt");
+  });
+
+  it("keeps the menu trigger's widened hit area inside the trigger", async () => {
+    await renderWithI18n(
+      <FileTree
+        filePaths={PATHS}
+        selectedPath="SKILL.md"
+        onSelect={vi.fn()}
+        actions={makeActions()}
+      />,
+    );
+
+    // MUL-5654: the trigger widens its hit area with an absolutely positioned
+    // `after:-inset-1`. Drop `relative` and that pseudo-element resolves
+    // against the row instead, covering it end to end and swallowing every
+    // click on the file name — the row stops selecting and opens this menu.
+    // jsdom has no layout or hit testing, so the class pairing is the part a
+    // unit test can hold; the behaviour itself needs a real browser.
+    // The name button carries role="tab", so a "button" match is the trigger.
+    const trigger = screen.getByRole("button", { name: /notes\.txt/ });
+    expect(trigger.className).toContain("after:absolute");
+    expect(trigger.className).toContain("relative");
   });
 
   it("deletes the row acted on, not whichever file happens to be open", async () => {

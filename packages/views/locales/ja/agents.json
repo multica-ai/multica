@@ -1,7 +1,7 @@
 {
   "page": {
     "title": "エージェント",
-    "tagline": "イシューを引き受け、コメントし、ステータスを更新する AI チームメイトです。",
+    "tagline": "タスクを引き受け、コメントし、ステータスを更新する AI チームメイトです。",
     "learn_more": "詳細はこちら →",
     "new_agent": "新規エージェント",
     "search_placeholder": "エージェントを検索...",
@@ -40,7 +40,7 @@
   },
   "empty": {
     "title": "まだエージェントがいません",
-    "description": "チームメイトと同じように、エージェントを作成してイシューを割り当てましょう。ローカルエージェントは自分のマシンで、クラウドエージェントは Multica のランタイムで実行されます。"
+    "description": "チームメイトと同じように、エージェントを作成してタスクを割り当てましょう。ローカルエージェントは自分のマシンで、クラウドエージェントは Multica のランタイムで実行されます。"
   },
   "no_matches": {
     "title": "一致する結果なし",
@@ -68,11 +68,12 @@
   "row": {
     "you": "あなた",
     "archived": "アーカイブ済み",
+    "needs_runtime": "ランタイム未設定",
     "no_description": "説明なし",
     "fallback_runtime_cloud": "クラウド",
     "fallback_runtime_local": "ローカル",
     "actions_aria": "行の操作",
-    "task_count_other": "{{count}} 件のタスク"
+    "task_count_other": "{{count}} 件の作業"
   },
   "activity_tooltip": {
     "created_today": "今日作成",
@@ -83,7 +84,7 @@
     "failed_suffix": " · {{count}} 回失敗（{{percent}}%）"
   },
   "row_actions": {
-    "cancel_all_tasks": "すべてのタスクをキャンセル",
+    "cancel_all_tasks": "すべての作業をキャンセル",
     "duplicate": "複製",
     "restore": "復元",
     "archive": "アーカイブ",
@@ -97,20 +98,20 @@
     "archive_failed_toast": "エージェントをアーカイブできませんでした",
     "agent_restored_toast": "エージェントを復元しました",
     "restore_failed_toast": "エージェントを復元できませんでした",
-    "no_tasks_to_cancel_toast": "キャンセルできるアクティブなタスクがありません",
-    "cancelled_tasks_toast_other": "タスク {{count}} 件をキャンセルしました",
-    "cancel_failed_toast": "タスクをキャンセルできませんでした",
-    "cancel_dialog_title": "\"{{name}}\" のすべてのタスクをキャンセルしますか？",
-    "cancel_dialog_no_tasks": "キャンセルできるアクティブなタスクがありません。",
+    "no_tasks_to_cancel_toast": "キャンセルできるアクティブな作業がありません",
+    "cancelled_tasks_toast_other": "作業 {{count}} 件をキャンセルしました",
+    "cancel_failed_toast": "作業をキャンセルできませんでした",
+    "cancel_dialog_title": "\"{{name}}\" のすべての作業をキャンセルしますか？",
+    "cancel_dialog_no_tasks": "キャンセルできるアクティブな作業がありません。",
     "cancel_dialog_running_other": "実行中 {{count}} 件",
     "cancel_dialog_queued_other": "待機中 {{count}} 件",
-    "cancel_dialog_impact_other": "{{summary}} のタスクがキャンセルされます。",
-    "cancel_dialog_running_note": " 実行中のタスクが完全に停止するまで最大5秒かかる場合があります。",
-    "cancel_dialog_irreversible": " キャンセルしたタスクは再開できません。",
+    "cancel_dialog_impact_other": "{{summary}} の作業がキャンセルされます。",
+    "cancel_dialog_running_note": " 実行中の作業が完全に停止するまで最大5秒かかる場合があります。",
+    "cancel_dialog_irreversible": " キャンセルした作業は再開できません。",
     "cancel_dialog_keep": "そのままにする",
-    "cancel_dialog_confirm": "すべてのタスクをキャンセル",
+    "cancel_dialog_confirm": "すべての作業をキャンセル",
     "archive_dialog_title": "\"{{name}}\" をアーカイブしますか？",
-    "archive_dialog_description": "このエージェントは割り当てやメンションができなくなり、アクティブなタスクはすべてキャンセルされます。履歴はすべて保持され、後で復元できます。",
+    "archive_dialog_description": "このエージェントは割り当てやメンションができなくなり、アクティブな作業はすべてキャンセルされます。履歴はすべて保持され、後で復元できます。",
     "archive_dialog_cancel": "キャンセル",
     "archive_dialog_confirm": "アーカイブ"
   },
@@ -123,6 +124,8 @@
     "no_access_hint": "この非公開エージェントは、エージェントのオーナーまたはワークスペースの admin のみが閲覧できます。",
     "try_again": "再試行",
     "archived_banner": "このエージェントはアーカイブされています。割り当てやメンションはできません。",
+    "runtime_required_banner": "このエージェントの設定と履歴は保持されていますが、実行するにはランタイムを設定する必要があります。",
+    "bind_runtime": "ランタイムを設定",
     "restore": "復元",
     "archive_dialog_title": "エージェントをアーカイブしますか？",
     "archive_dialog_description": "\"{{name}}\" がアーカイブされます。割り当てやメンションはできなくなりますが、履歴はすべて保持されます。後で復元できます。",
@@ -137,6 +140,7 @@
     "restore_failed_toast": "エージェントを復元できませんでした",
     "dm": "DM",
     "dm_no_permission_toast": "このエージェントとチャットする権限がありません。",
+    "runtime_required_toast": "このエージェントを実行する前にランタイムを設定してください。",
     "assign_work": "作業を割り当てる",
     "more_actions_aria": "エージェントの操作",
     "updated": "{{when}}に更新"
@@ -145,7 +149,7 @@
     "section_profile": "プロフィール",
     "section_profile_hint": "ワークスペース内でのエージェントの表示を管理します。",
     "section_execution": "実行設定",
-    "section_execution_hint": "ランタイム、モデル、思考レベル、速度、同時タスク数を設定します。",
+    "section_execution_hint": "ランタイム、モデル、思考レベル、速度、同時作業数を設定します。",
     "section_access": "アクセス",
     "section_access_hint": "このエージェントと接続済み機能を利用できる相手を管理します。",
     "section_properties": "プロパティ",
@@ -189,8 +193,8 @@
     "trigger_label": "追加"
   },
   "pickers": {
-    "concurrency_tooltip": "同時実行数 · 最大 {{value}} 件の同時タスク",
-    "concurrency_range": "最大同時タスク数（{{min}}–{{max}}）",
+    "concurrency_tooltip": "同時実行数 · 最大 {{value}} 件の同時作業",
+    "concurrency_range": "最大同時作業数（{{min}}–{{max}}）",
     "runtime_none": "ランタイムなし",
     "runtime_tooltip": "ランタイム · {{name}} · {{status}}",
     "runtime_tooltip_none": "ランタイム · 未選択",
@@ -239,7 +243,7 @@
     "page_navigation_aria": "エージェントページ",
     "section_navigation_aria": "エージェントセクション",
     "activity": "アクティビティ",
-    "tasks": "タスク",
+    "tasks": "作業",
     "instructions": "指示",
     "skills": "スキル",
     "environment": "環境",
@@ -325,9 +329,16 @@
       "unsaved_changes": "保存していない変更"
     },
     "instructions": {
-      "intro": "すべてのタスクで使用する System Prompt を設定します。Markdown に対応しています。",
+      "intro": "すべての作業で使用する System Prompt を設定します。Markdown に対応しています。",
       "system_prompt_label": "System Prompt",
-      "placeholder": "このエージェントの役割、専門分野、作業スタイルを定義してください。\n\n# 例\nあなたは React と TypeScript を専門とするフロントエンドエンジニアです。\n\n## 作業スタイル\n- 小さく焦点を絞った PR を作成する — 論理的な変更ごとに1コミット\n- 継承よりコンポジションを優先する\n- 新しいコンポーネントには必ずユニットテストを追加する\n\n## 制約\n- 明示的な承認なしに shared/ の型を変更しない\n- features/ の既存のコンポーネントパターンに従う"
+      "placeholder": "このエージェントの役割、専門分野、作業スタイルを定義してください。\n\n# 例\nあなたは React と TypeScript を専門とするフロントエンドエンジニアです。\n\n## 作業スタイル\n- 小さく焦点を絞った PR を作成する — 論理的な変更ごとに1コミット\n- 継承よりコンポジションを優先する\n- 新しいコンポーネントには必ずユニットテストを追加する\n\n## 制約\n- 明示的な承認なしに shared/ の型を変更しない\n- features/ の既存のコンポーネントパターンに従う",
+      "system_layer_label": "Multica が管理",
+      "system_layer_hint": "Multica のリリースごとに更新されます。編集はできず、下に書いた内容が上書きされることもありません。",
+      "system_layer_show": "表示",
+      "system_layer_hide": "隠す",
+      "workspace_notes_label": "ワークスペースの補足",
+      "workspace_notes_intro": "チームのコンテキストや好みを下に追加してください。Multica がこのエージェント向けに管理している指示の上に適用されます。Markdown が使えます。",
+      "workspace_notes_placeholder": "このエージェントが常に知っておくべきことを書きます。\n\n# 例\nメインリポジトリは github.com/acme/platform です。\nチャットが日本語でも、タスクは英語で書いてください。\n金曜日はデプロイしません。"
     },
     "env": {
       "intro_readonly": "エージェントプロセスの起動時に注入されます。値の読み取りや編集ができるのはワークスペースのオーナーと admin のみで、すべての表示と編集はワークスペースの監査ログに記録されます。",
@@ -335,6 +346,8 @@
       "intro_prefix": "エージェントプロセスの起動時に注入されます（例: ",
       "intro_separator": ", ",
       "intro_suffix": "）。",
+      "paste_hint": "KEY=value 形式の行をキー欄に貼り付けると、複数の環境変数を追加できます。",
+      "paste_invalid_toast": "貼り付けた環境変数を解析できませんでした",
       "key_placeholder": "KEY",
       "value_placeholder": "value",
       "show_value_aria": "値を表示",
@@ -380,7 +393,7 @@
       "runtime_disabled_badge": "ランタイムで無効",
       "runtime_overridden_badge": "Multica で上書き",
       "runtime_title": "ランタイムから継承",
-      "runtime_hint": "{{runtime}} から自動検出し、タスク開始時にローカルで統合します。URL、ヘッダー、コマンド、環境変数はマシン外に送信されません。",
+      "runtime_hint": "{{runtime}} から自動検出し、作業開始時にローカルで統合します。URL、ヘッダー、コマンド、環境変数はマシン外に送信されません。",
       "refresh_action": "更新",
       "runtime_missing": "継承 MCP サーバーを検出するには、ローカルランタイムを割り当ててください。",
       "runtime_offline": "ローカルランタイムはオフラインです。再接続すると更新できます。",
@@ -434,7 +447,7 @@
       "delete_action": "Server を削除",
       "invalid_json": "無効な JSON: {{error}}",
       "save_failed_toast": "MCP config を保存できませんでした",
-      "redacted_title": "設定済み — 現在の表示では非表示",
+      "redacted_title": "設定済み — あなたには非表示",
       "redacted_hint": "この config を読み取れるのは、エージェントのオーナーまたはワークスペースの admin のみです。"
     },
     "composio_mcp": {
@@ -525,7 +538,7 @@
     "activity": {
       "status": {
         "queued": "待機中",
-        "dispatched": "送信済み",
+        "dispatched": "ディスパッチ済み",
         "waiting_local_directory": "ディレクトリ待機中",
         "running": "実行中",
         "completed": "成功",
@@ -536,7 +549,7 @@
       "section_last_30d": "過去30日",
       "section_recent": "最近の作業",
       "subtitle_no_active": "アクティブな作業なし",
-      "subtitle_active_other": "アクティブなタスク {{count}} 件",
+      "subtitle_active_other": "アクティブな作業 {{count}} 件",
       "subtitle_performance": "パフォーマンス",
       "subtitle_no_recent": "まだ完了した作業はありません",
       "subtitle_recent_progress": "{{total}} 回の実行中 {{shown}} 回",
@@ -552,23 +565,23 @@
       "avg_duration_label": "平均時間",
       "failed_count": "{{count}} 回失敗",
       "failed_label": "失敗",
-      "source_issue": "イシュー",
+      "source_issue": "タスク",
       "source_chat": "チャット",
       "source_autopilot": "オートパイロット",
       "source_untracked": "未追跡",
       "source_quick_create": "クイック作成",
-      "source_creating_issue": "イシューを作成中",
+      "source_creating_issue": "タスクを作成中",
       "source_chat_session": "チャットセッション",
       "source_autopilot_run": "オートパイロット実行",
-      "issue_short_fallback": "イシュー {{prefix}}...",
+      "issue_short_fallback": "タスク {{prefix}}...",
       "triggered_by": "トリガーした人",
-      "open_issue_aria": "イシューを開く",
-      "open_issue_tooltip": "イシューを開く",
+      "open_issue_aria": "タスクを開く",
+      "open_issue_tooltip": "タスクを開く",
       "transcript_tooltip": "トランスクリプトを表示",
-      "cancel_task_aria": "タスクをキャンセル",
-      "cancel_task_tooltip": "タスクをキャンセル",
+      "cancel_task_aria": "作業をキャンセル",
+      "cancel_task_tooltip": "作業をキャンセル",
       "cancelling_tooltip": "キャンセル中...",
-      "cancel_failed_toast": "タスクをキャンセルできませんでした",
+      "cancel_failed_toast": "作業をキャンセルできませんでした",
       "started_prefix": "{{when}} に開始",
       "dispatched_prefix": "{{when}} にディスパッチ",
       "queued_prefix": "{{when}} に待機開始"
@@ -633,7 +646,7 @@
   },
   "live_peek": {
     "current_issue_label": "現在の作業",
-    "no_current_issue": "タスクなし",
+    "no_current_issue": "作業なし",
     "last_activity_label": "最終アクセス",
     "no_recent_activity": "最近のアクティビティなし",
     "failed_indicator": "失敗"
@@ -651,7 +664,7 @@
     "copy_filtered": "フィルター結果をコピー",
     "copied": "コピーしました",
     "waiting_events": "イベントを待機中...",
-    "antigravity_live_unavailable": "Antigravity は現在、リアルタイム実行イベントを提供していません。タスク完了後に実行記録を確認できます。",
+    "antigravity_live_unavailable": "Antigravity は現在、リアルタイム実行イベントを提供していません。作業完了後に実行記録を確認できます。",
     "no_data": "記録された実行データがありません。",
     "sort_label": "並び替え",
     "sort_chronological": "古い順",
@@ -675,7 +688,7 @@
     "status_waiting": "待機中",
     "trigger_initial": "初回実行",
     "trigger_comment": "コメントから",
-    "trigger_autopilot": "Autopilot",
+    "trigger_autopilot": "オートパイロット",
     "trigger_retry": "再試行",
     "trigger_chat": "チャットから",
     "trigger_quick_create": "クイック作成",
@@ -691,11 +704,17 @@
     "copy_workdir": "作業ディレクトリをコピー",
     "close": "閉じる",
     "fact_created": "作成 {{time}}",
-    "fact_took": "所要 {{duration}}"
+    "fact_took": "所要 {{duration}}",
+    "details_input": "入力",
+    "details_output": "出力",
+    "details_cache_read": "キャッシュ読み取り",
+    "details_cache_write": "キャッシュ書き込み",
+    "details_cost": "費用",
+    "usage_chip_title": "この実行のトークンと推定費用"
   },
   "task_failure": {
     "agent_error": "エージェント実行エラー",
-    "timeout": "タスクがタイムアウトしました",
+    "timeout": "作業がタイムアウトしました",
     "runtime_offline": "デーモンがオフライン",
     "runtime_recovery": "デーモンが再起動しました",
     "manual": "ユーザーがキャンセルしました"
@@ -736,11 +755,10 @@
     "back": "戻る",
     "eyebrow": "エージェント作成",
     "choose_title": "どの方法で始めますか？",
-    "choose_description": "すべて自分で設定するか、実績のあるテンプレートを調整するか、必要なものを説明して会話から作成できます。",
+    "choose_description": "すべて自分で設定するか、必要なものを説明して会話から作成できます。",
     "recommended": "おすすめ",
     "continue": "続ける",
     "step_choose": "開始方法を選択",
-    "step_template": "テンプレートを選択",
     "step_configure": "確認して設定",
     "step_ai": "会話で作成",
     "modes": {
@@ -757,21 +775,12 @@
         "description": "期待する成果を説明すると、Agent Builder が重要な質問を行い、下書きをリアルタイムで作成します。"
       }
     },
-    "templates": {
-      "search": "テンプレートを検索…",
-      "search_label": "エージェントテンプレートを検索",
-      "empty": "検索に一致するテンプレートはありません。",
-      "select_hint": "テンプレートを選択して、指示とスキルをプレビューします。",
-      "skills": "含まれるスキル",
-      "instructions": "指示",
-      "use": "このテンプレートを使用"
-    },
     "sections": {
       "identity": "基本情報",
       "identity_hint": "識別しやすい名前と簡潔な目的を設定します。",
       "behavior": "動作と機能",
       "behavior_hint": "動作方法を定義し、利用できるワークスペースのスキルを追加します。",
-      "execution": "実行環境",
+      "execution": "実行設定",
       "execution_hint": "エージェントを実行する場所を選び、必要に応じてランタイムの既定モデル・思考レベル・速度を変更します。",
       "access": "アクセス",
       "access_hint": "このエージェントを実行できるユーザーを設定します。後から変更できます。"
@@ -826,7 +835,17 @@
     "creating": "エージェントを作成中…",
     "create_failed": "エージェントを作成できませんでした。",
     "name_conflict": "同じ名前のエージェントがすでに存在します。",
-    "created": "{{name}} を作成しました"
+    "created": "{{name}} を作成しました",
+    "drafts": {
+      "title": "下書き",
+      "untitled": "無題の下書き",
+      "discard": "作成を破棄",
+      "discard_confirm": "会話と右側の設定は完全に削除されます。",
+      "discard_title": "この作成を破棄しますか？",
+      "discard_cancel": "編集を続ける",
+      "banner": "未完了の下書きが {{count}} 件あります",
+      "pick_hint": "続きを選んでください。"
+    }
   },
   "actions": {
     "selected_other": "{{count}} 件選択中",

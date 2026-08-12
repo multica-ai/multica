@@ -8,6 +8,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { WSClient } from "../api/ws-client";
 import { defaultStorage } from "../platform/storage";
 import { issueKeys } from "../issues/queries";
+import { chatKeys } from "../chat/queries";
 import { workspaceWorkingAgentsKeys } from "../agents/queries";
 import { workspaceKeys } from "../workspace/queries";
 import {
@@ -199,6 +200,68 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(["chat", "messages-page"]);
     expect(calls).toContainEqual(["chat", "pending-task"]);
     expect(calls).toContainEqual(["task-messages"]);
+  });
+
+  it("invalidates per-chat-session caches after an established ws reconnects", () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const reconnect = vi.mocked(ws.onReconnect).mock.calls[0]?.[0];
+    expect(reconnect).toBeDefined();
+
+    invalidateSpy.mockClear();
+    reconnect!();
+
+    const calls = invalidateSpy.mock.calls.map((call: [{ queryKey?: unknown }, ...unknown[]]) => call[0].queryKey);
+    expect(calls).toContainEqual(chatKeys.messagesAll());
+    expect(calls).toContainEqual(chatKeys.messagesPageAll());
+    expect(calls).toContainEqual(chatKeys.pendingTaskAll());
+  });
+
+  it("invalidates one issue attachment cache after detached channel media binds", () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const attachmentChanged = vi
+      .mocked(ws.on)
+      .mock.calls.find(([event]) => event === "issue_attachments:changed")?.[1];
+    expect(attachmentChanged).toBeDefined();
+
+    (attachmentChanged as (payload: unknown) => void)({ issue_id: "issue-1" });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: issueKeys.attachments("issue-1"),
+    });
+  });
+});
+
+describe("useRealtimeSync — queued chat promotion", () => {
+  it("refetches the transcript when a queued prompt starts running", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const ws = createMockWs();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    renderHook(() => useRealtimeSync(ws, createStores()), {
+      wrapper: createWrapper(qc),
+    });
+    const dispatch = vi
+      .mocked(ws.on)
+      .mock.calls.find(([event]) => event === "task:dispatch")?.[1];
+    expect(dispatch).toBeDefined();
+
+    invalidate.mockClear();
+    (dispatch as (payload: unknown) => void)({
+      task_id: "task-follow-up",
+      chat_session_id: "session-1",
+    });
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: chatKeys.messages("session-1"),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: chatKeys.messagesPage("session-1"),
+    });
   });
 });
 

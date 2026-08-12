@@ -123,7 +123,8 @@ func installationCredentialsFor(inst Installation, resolver CredentialsResolver)
 // channelMessageFromLark normalizes a decoded Feishu InboundMessage into the
 // cross-platform channel.InboundMessage. The original struct is stashed in Raw
 // so the Feishu resolvers can read the platform-specific fields (app_id,
-// event_type, command body, create time) the envelope does not carry.
+// event_type, create time) the envelope does not carry. CommandBody maps to
+// the normalized CommandText field because command classification is shared.
 func channelMessageFromLark(lm InboundMessage) channel.InboundMessage {
 	raw, _ := json.Marshal(lm)
 	var reply *channel.ReplyCtx
@@ -135,6 +136,7 @@ func channelMessageFromLark(lm InboundMessage) channel.InboundMessage {
 		MessageID:      lm.MessageID,
 		Type:           channelMsgType(lm.MessageType),
 		Text:           lm.Body,
+		CommandText:    lm.CommandBody,
 		ReplyTo:        reply,
 		AddressedToBot: lm.AddressedToBot,
 		ForceFresh:     lm.ForceFreshSession,

@@ -122,11 +122,13 @@ func buildInbound(e slackevents.EventsAPIEvent, p buildInboundParams, mentionRe 
 	if p.threadTS != "" && p.threadTS != p.ts {
 		reply = &channel.ReplyCtx{MessageID: p.threadTS, RootID: p.threadTS}
 	}
+	text := cleanText(p.text, mentionRe)
 	return channel.InboundMessage{
 		EventID:        p.ts,
 		MessageID:      p.ts,
 		Type:           channel.MsgTypeText,
-		Text:           cleanText(p.text, mentionRe),
+		Text:           text,
+		CommandText:    text,
 		ReplyTo:        reply,
 		AddressedToBot: p.addressed,
 		Source: channel.Source{

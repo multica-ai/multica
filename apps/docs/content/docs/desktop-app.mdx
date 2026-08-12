@@ -70,7 +70,15 @@ Updates are distributed per OS and CPU architecture:
 
 ## Connecting to a self-hosted instance
 
-Desktop connects to Multica Cloud by default. To connect to a self-hosted instance, create `~/.multica/desktop.json` in your home directory:
+Desktop connects to Multica Cloud by default. To connect to a self-hosted instance, create `desktop.json` inside the `.multica` directory of your home directory:
+
+| Platform | Path |
+| --- | --- |
+| macOS | `/Users/<you>/.multica/desktop.json` |
+| Linux | `/home/<you>/.multica/desktop.json` |
+| Windows | `C:\Users\<you>\.multica\desktop.json` |
+
+These are the default locations — if your home directory has been moved or redirected, use its actual path.
 
 ```json
 {
@@ -78,6 +86,10 @@ Desktop connects to Multica Cloud by default. To connect to a self-hosted instan
   "apiUrl": "https://api.example.com"
 }
 ```
+
+<Callout type="warning">
+This is **not** the CLI's `~/.multica/config.json`, and the key names differ: the CLI uses `server_url`, Desktop uses `apiUrl`. Desktop never reads the CLI's config — it manages a separate daemon profile under `~/.multica/profiles/desktop-<host>/`. Editing `config.json` does not change which server Desktop connects to.
+</Callout>
 
 `apiUrl` is the backend's public address; it is required and must use `http` or `https`. The other two URLs can be omitted — Desktop derives them automatically:
 
@@ -99,11 +111,37 @@ Usually `apiUrl` alone is enough. Override explicitly only when the derivation d
 }
 ```
 
-Restart Desktop after saving. If the file exists but the JSON, version, or URLs are invalid, the app shows a configuration error and does not fall back to Cloud automatically. Delete the file and restart to return to the default Cloud configuration.
+Restart Desktop after saving — the file is read once at startup. The two failure modes look different, which is the fastest way to tell them apart:
+
+- **File not found** (wrong directory, or a filename that isn't exactly `desktop.json`) — Desktop uses the default Cloud configuration and shows no error. So if Desktop still reports a Cloud address and no configuration error, the file is not where Desktop is looking.
+- **File found but invalid** JSON, version, or URLs — Desktop shows a configuration error and does not fall back to Cloud.
+
+Delete the file and restart to return to the default Cloud configuration.
 
 <Callout type="warning">
 Desktop can only connect to addresses reachable from both the browser and the executing machine. If a remote self-hosted instance doesn't use HTTPS or doesn't proxy WebSocket, Desktop can't establish a connection; see the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access) for the full configuration.
 </Callout>
+
+### Windows: check the filename and encoding
+
+Two Windows editor defaults silently produce a file Desktop can't use:
+
+- **Notepad appends `.txt`.** Saving as `desktop.json` can produce `desktop.json.txt`, which Desktop treats as not found. Turn on file name extensions in Explorer, or pick *All files* in the save dialog. To see the real filename, run `Get-ChildItem "$env:USERPROFILE\.multica" -Filter "desktop.json*"` in PowerShell — the `Name` column must read exactly `desktop.json`.
+- **PowerShell redirection writes UTF-16 or a BOM.** `> desktop.json` and `Out-File` can produce an encoding that fails to parse, which surfaces as a configuration error.
+
+To avoid both, create the file from PowerShell in one step:
+
+```powershell
+$dir = "$env:USERPROFILE\.multica"
+New-Item -ItemType Directory -Force $dir | Out-Null
+$json = @'
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}
+'@
+[System.IO.File]::WriteAllText("$dir\desktop.json", $json)
+```
 
 ## Windows Defender flags Multica as a virus
 

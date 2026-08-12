@@ -194,6 +194,7 @@
       "add_file": "新規ファイル",
       "mode_aria": "ファイル表示",
       "mode_preview": "プレビュー",
+      "mode_edit": "編集",
       "mode_raw": "プレーンテキスト"
     }
   },
@@ -315,6 +316,7 @@
     "no_files": "ファイルなし",
     "actions": {
       "label": "{{path}} の操作",
+      "edit": "編集",
       "rename": "名前を変更",
       "delete": "削除"
     }

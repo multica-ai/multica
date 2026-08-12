@@ -54,6 +54,13 @@ type Agent struct {
 	ServiceTier           pgtype.Text `json:"service_tier"`
 }
 
+type AgentBuilderDraft struct {
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Draft         []byte             `json:"draft"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 // Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).
 type AgentInvocationTarget struct {
 	ID         pgtype.UUID        `json:"id"`
@@ -195,6 +202,7 @@ type Autopilot struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	AssigneeType       string             `json:"assignee_type"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
+	PauseReason        pgtype.Text        `json:"pause_reason"`
 }
 
 type AutopilotCollaborator struct {
@@ -286,6 +294,7 @@ type ChannelChatSessionBinding struct {
 	LastThreadID   pgtype.Text        `json:"last_thread_id"`
 	Config         []byte             `json:"config"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	PendingFresh   bool               `json:"pending_fresh"`
 }
 
 type ChannelInboundAudit struct {
@@ -718,6 +727,32 @@ type IssueVcsPullRequest struct {
 	LinkedByType  pgtype.Text        `json:"linked_by_type"`
 	LinkedByID    pgtype.UUID        `json:"linked_by_id"`
 	LinkedAt      pgtype.Timestamptz `json:"linked_at"`
+}
+
+type IssueView struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	OwnerID           pgtype.UUID        `json:"owner_id"`
+	Name              string             `json:"name"`
+	ScopeType         string             `json:"scope_type"`
+	ScopeID           pgtype.UUID        `json:"scope_id"`
+	ScopeVariant      pgtype.Text        `json:"scope_variant"`
+	Visibility        string             `json:"visibility"`
+	DefinitionVersion int32              `json:"definition_version"`
+	Query             []byte             `json:"query"`
+	Display           []byte             `json:"display"`
+	Revision          int32              `json:"revision"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type IssueViewPreference struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	ScopeType   string             `json:"scope_type"`
+	ScopeID     pgtype.UUID        `json:"scope_id"`
+	Prefs       []byte             `json:"prefs"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type LarkBindingToken struct {

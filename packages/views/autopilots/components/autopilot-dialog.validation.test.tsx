@@ -21,7 +21,13 @@ vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: (wsId: string) => ({
     queryKey: ["agents", wsId],
     queryFn: async () => [
-      { id: "agent-1", name: "Scout", description: "Researches things", archived_at: null },
+      {
+        id: "agent-1",
+        name: "Scout",
+        description: "Researches things",
+        archived_at: null,
+        runtime_id: "runtime-1",
+      },
     ],
   }),
   squadListOptions: (wsId: string) => ({

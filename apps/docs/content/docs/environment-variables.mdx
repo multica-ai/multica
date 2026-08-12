@@ -205,10 +205,11 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server startup handshake ceiling |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
+| `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Whether to restart into a `multica` binary replaced on disk out of band (`brew upgrade`, a re-download, a local build). Independent of `MULTICA_DAEMON_AUTO_UPDATE` |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for task working directories |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep task directories for debugging |
 
-Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for four tools: Claude Code, Codex, CodeBuddy, and Qwen Code. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, and `MULTICA_QWEN_ARGS`. For example:
+Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw is the exception: it has no `MULTICA_QWENPAW_MODEL`, because Multica never sends it a model — see [AI coding tools comparison](/providers#model-sources). Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -243,6 +244,7 @@ Supported keys:
 | `codex_handshake_timeout` | `30s` | Codex app-server handshake ceiling |
 | `disable_auto_update` | follows environment | `true` turns auto-update off; `false` clears the local override and returns to the env var or default |
 | `auto_update_check_interval` | `6h` | Update check interval |
+| `disable_auto_reload` | follows environment | `true` stops the daemon following a binary replaced on disk; `false` clears the local override. Resolved separately from `disable_auto_update` |
 
 A few value rules:
 

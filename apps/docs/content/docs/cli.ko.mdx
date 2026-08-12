@@ -154,7 +154,7 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
-활성 에이전트가 계속 연결된 런타임을 삭제하면 명령이 기본적으로 거부됩니다. `multica runtime delete <id> --cascade`는 연결된 에이전트도 함께 보관하고 활성 태스크를 취소합니다.
+활성 에이전트가 계속 연결된 런타임을 삭제하면 명령이 기본적으로 거부됩니다. `multica runtime delete <id> --cascade`는 에이전트의 런타임 연결을 해제하고 설정과 기록을 보존하며 활성 태스크를 취소합니다.
 
 실행 메커니즘과 사용자 지정 profile은 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
 
@@ -279,7 +279,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `stop` / `status` / `restart` | 중지, 상태 확인, 다시 시작(`restart`와 `start`의 flag가 같음) | |
 | | `logs` | 데몬 로그 확인 | `--follow`, `--lines` |
 | | `disk-usage` | 로컬 디스크 사용량 확인 | `--by-workspace`, `--by-task`, `--top` |
-| `runtime` | `list/usage/activity/update/rename/delete` | 런타임 확인 및 관리 | `delete`: `--cascade`(연결된 에이전트도 보관하고 해당 태스크 취소) |
+| `runtime` | `list/usage/activity/update/rename/delete` | 런타임 확인 및 관리 | `delete`: `--cascade`(연결된 에이전트의 런타임을 해제하고 데이터를 보존하며 태스크 취소) |
 | | `profile list/create/update/delete` | 사용자 지정 런타임 profile 관리 | |
 | | `profile set-path/unset-path <profile-id>` | 로컬 실행 파일 경로 고정(로컬에만 적용되고 서버에 업로드되지 않음) | |
 

@@ -432,16 +432,24 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		where = append(where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Filters.Priorities))))
 	}
 
-	switch spec.Scope.Kind {
-	case "workspace":
+	// Workspace and project scopes share the optional assignee-type
+	// narrowing (the Members/Agents tabs above both surfaces).
+	appendAssigneeTypes := func() bool {
 		for _, actorType := range spec.Scope.AssigneeTypes {
 			if !isIssueActorType(actorType) {
 				writeError(w, http.StatusBadRequest, "invalid scope.assignee_types")
-				return issueTableSQL{}, false
+				return false
 			}
 		}
 		if len(spec.Scope.AssigneeTypes) > 0 {
 			where = append(where, fmt.Sprintf("i.assignee_type = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Scope.AssigneeTypes))))
+		}
+		return true
+	}
+	switch spec.Scope.Kind {
+	case "workspace":
+		if !appendAssigneeTypes() {
+			return issueTableSQL{}, false
 		}
 	case "project":
 		projectID, err := util.ParseUUID(spec.Scope.ProjectID)
@@ -450,6 +458,9 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			return issueTableSQL{}, false
 		}
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectID)))
+		if !appendAssigneeTypes() {
+			return issueTableSQL{}, false
+		}
 	case "assignee":
 		if spec.Scope.Actor == nil {
 			writeError(w, http.StatusBadRequest, "scope.actor is required")

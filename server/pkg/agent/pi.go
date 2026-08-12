@@ -1,24 +1,37 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
 // piBackend implements Backend by spawning the Pi CLI in non-interactive
 // JSON mode (`pi -p --mode json --session <path>`) and parsing its event
 // stream on stdout.
+//
+// It also backs the "omp" (oh-my-pi) provider — omp is a separate CLI
+// (https://omp.sh) that is a drop-in fork of pi and speaks the same JSON
+// event protocol. The daemon probes a separate `omp` binary and registers
+// it under the "omp" key; piBackend uses defaultExecutable so the fallback
+// binary name matches the provider key (pi → "pi", omp → "omp") when
+// cfg.ExecutablePath is empty.
 type piBackend struct {
-	cfg Config
+	cfg               Config
+	defaultExecutable string
+	// providerLabel is the human-facing name used in log messages and error
+	// strings ("pi" or "omp"). Defaults to "pi" when empty so existing callers
+	// that construct piBackend directly (tests) keep their original output.
+	providerLabel string
 }
 
 var (
@@ -174,13 +187,27 @@ func isPiToolNameByte(b byte) bool {
 }
 
 func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+	label := b.providerLabel
+	if label == "" {
+		label = "pi"
+	}
+	// Pi trims piped stdin before building its initial message. Reject an empty
+	// task here so whitespace-only input cannot turn into a successful process
+	// with no turn, no output, and an empty session.
+	if strings.TrimSpace(prompt) == "" {
+		return nil, fmt.Errorf("%s prompt must not be empty", label)
+	}
+
 	execName := b.cfg.ExecutablePath
+	if execName == "" {
+		execName = b.defaultExecutable
+	}
 	if execName == "" {
 		execName = "pi"
 	}
 	lookedUp, err := exec.LookPath(execName)
 	if err != nil {
-		return nil, fmt.Errorf("pi executable not found at %q: %w", execName, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", label, execName, err)
 	}
 
 	timeout := opts.Timeout
@@ -192,17 +219,17 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	if sessionPath == "" {
 		p, err := newPiSessionPath()
 		if err != nil {
-			return nil, fmt.Errorf("pi session path: %w", err)
+			return nil, fmt.Errorf("%s session path: %w", label, err)
 		}
 		sessionPath = p
 	}
 	if err := ensurePiSessionFile(sessionPath); err != nil {
-		return nil, fmt.Errorf("pi session file: %w", err)
+		return nil, fmt.Errorf("%s session file: %w", label, err)
 	}
 
 	runCtx, cancel := runContext(ctx, timeout)
 
-	args := buildPiArgs(prompt, sessionPath, opts, b.cfg.Logger)
+	args := buildPiArgs(sessionPath, opts, b.cfg.Logger)
 	argv0, cmdArgs := choosePiInvocation(execName, lookedUp, args, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
@@ -217,37 +244,49 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("pi stdout pipe: %w", err)
+		return nil, fmt.Errorf("%s stdout pipe: %w", label, err)
 	}
-	// Attach an explicit stdin pipe so we can close it ourselves. Pi reads
-	// its prompt from argv (positional, see buildPiArgs) and never expects
-	// interactive input, but when the parent leaves cmd.Stdin nil and the
-	// daemon is run under systemd, Pi has been observed to block in its
-	// event loop awaiting stdin events instead of progressing to "done"
-	// (#2188). Closing the pipe immediately after Start delivers an
-	// explicit EOF on a FIFO, which unblocks Pi's readable side.
+	// Pi reads piped stdin to EOF as its initial prompt in print/JSON mode.
+	// Keeping user-controlled text off argv prevents the npm PowerShell shim
+	// from re-tokenising embedded quotes into CLI flags on Windows (#6457).
+	// The explicit close remains part of the #2188 contract too: under systemd,
+	// Pi has been observed to wait indefinitely when stdin never reaches EOF.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("pi stdin pipe: %w", err)
+		return nil, fmt.Errorf("%s stdin pipe: %w", label, err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[pi:stderr] ")
+	var closeStdinOnce sync.Once
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
+	cmd.Stderr = newLogWriter(b.cfg.Logger, "["+label+":stderr] ")
 
 	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
+		closeStdin()
 		cancel()
-		return nil, fmt.Errorf("start pi: %w", err)
+		return nil, fmt.Errorf("start %s: %w", label, err)
 	}
-	_ = stdin.Close()
 
-	b.cfg.Logger.Info("pi started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info(label+" started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	// Close stdout when the context is cancelled so scanner.Scan() unblocks.
+	// Write concurrently with stdout consumption. A large prompt can fill the
+	// stdin pipe while the child fills stdout; serialising those operations can
+	// deadlock both processes. Closing stdin signals the end of Pi's prompt.
+	writeErrCh := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(stdin, prompt)
+		closeStdin()
+		writeErrCh <- err
+	}()
+
+	// Close both pipes when the context is cancelled. Closing stdin releases a
+	// writer blocked on a child that stopped reading; closing stdout releases the
+	// stream scanner.
 	go func() {
 		<-runCtx.Done()
+		closeStdin()
 		_ = stdout.Close()
 	}()
 
@@ -262,10 +301,9 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		var finalError string
 		usage := make(map[string]TokenUsage)
 
-		scanner := bufio.NewScanner(stdout)
 		// Pi message_update events can be large (they embed the full message
-		// partial on each delta), so give the scanner generous headroom.
-		scanner.Buffer(make([]byte, 0, 1024*1024), 32*1024*1024)
+		// partial on each delta); the shared stream bound covers that.
+		scanner := newAgentStreamScanner(stdout)
 		var textBuffer strings.Builder
 
 		for scanner.Scan() {
@@ -352,7 +390,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					if evt.FinalError != "" {
 						finalError = evt.FinalError
 					} else {
-						finalError = "pi exhausted automatic retries"
+						finalError = label + " exhausted automatic retries"
 					}
 				}
 			}
@@ -365,18 +403,25 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		waitErr := cmd.Wait()
 		duration := time.Since(startTime)
 
+		// Wait closes the process pipes, so a prompt write still blocked when the
+		// child exited has returned by now. The writer sends exactly once.
+		writeErr := <-writeErrCh
+
 		if runCtx.Err() == context.DeadlineExceeded {
 			finalStatus = "timeout"
-			finalError = fmt.Sprintf("pi timed out after %s", timeout)
+			finalError = fmt.Sprintf("%s timed out after %s", label, timeout)
 		} else if runCtx.Err() == context.Canceled {
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
 		} else if waitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("pi exited with error: %v", waitErr)
+			finalError = fmt.Sprintf("%s exited with error: %v", label, waitErr)
+		} else if writeErr != nil && finalStatus == "completed" {
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("%s prompt write failed: %v", label, writeErr)
 		}
 
-		b.cfg.Logger.Info("pi finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info(label+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		resCh <- Result{
 			Status:     finalStatus,
@@ -476,25 +521,86 @@ func decodePiResult(raw json.RawMessage) string {
 // overridden by user-configured custom_args. Overriding these would
 // break the daemon↔Pi communication protocol.
 var piBlockedArgs = map[string]blockedArgMode{
-	"-p":        blockedStandalone, // non-interactive mode
-	"--print":   blockedStandalone, // alias for -p
-	"--mode":    blockedWithValue,  // "json" event stream protocol
-	"--session": blockedWithValue,  // daemon manages the session path
+	"-p":         blockedStandalone, // non-interactive mode
+	"--print":    blockedStandalone, // alias for -p
+	"--mode":     blockedWithValue,  // "json" event stream protocol
+	"--session":  blockedWithValue,  // daemon manages the session path
+	"--thinking": blockedWithValue,  // owned by agent.thinking_level
+}
+
+// piCustomArgModes mirrors Pi 0.83's built-in parser closely enough to
+// distinguish option values from positional messages. Unknown long flags are
+// extension flags and may take one optional value; unknown short flags are left
+// intact so Pi can report them as it did before.
+var piCustomArgModes = map[string]blockedArgMode{
+	"--help":                 blockedStandalone,
+	"-h":                     blockedStandalone,
+	"--version":              blockedStandalone,
+	"-v":                     blockedStandalone,
+	"--continue":             blockedStandalone,
+	"-c":                     blockedStandalone,
+	"--resume":               blockedStandalone,
+	"-r":                     blockedStandalone,
+	"--provider":             blockedWithValue,
+	"--model":                blockedWithValue,
+	"--api-key":              blockedWithValue,
+	"--system-prompt":        blockedWithValue,
+	"--append-system-prompt": blockedWithValue,
+	"--name":                 blockedWithValue,
+	"-n":                     blockedWithValue,
+	"--no-session":           blockedStandalone,
+	"--session-id":           blockedWithValue,
+	"--fork":                 blockedWithValue,
+	"--session-dir":          blockedWithValue,
+	"--models":               blockedWithValue,
+	"--no-tools":             blockedStandalone,
+	"-nt":                    blockedStandalone,
+	"--no-builtin-tools":     blockedStandalone,
+	"-nbt":                   blockedStandalone,
+	"--tools":                blockedWithValue,
+	"-t":                     blockedWithValue,
+	"--exclude-tools":        blockedWithValue,
+	"-xt":                    blockedWithValue,
+	"--thinking":             blockedWithValue,
+	"--export":               blockedWithValue,
+	"--extension":            blockedWithValue,
+	"-e":                     blockedWithValue,
+	"--no-extensions":        blockedStandalone,
+	"-ne":                    blockedStandalone,
+	"--skill":                blockedWithValue,
+	"--prompt-template":      blockedWithValue,
+	"--theme":                blockedWithValue,
+	"--no-skills":            blockedStandalone,
+	"-ns":                    blockedStandalone,
+	"--no-prompt-templates":  blockedStandalone,
+	"-np":                    blockedStandalone,
+	"--no-themes":            blockedStandalone,
+	"--no-context-files":     blockedStandalone,
+	"-nc":                    blockedStandalone,
+	"--list-models":          blockedOptionalValue,
+	"--verbose":              blockedStandalone,
+	"--approve":              blockedStandalone,
+	"-a":                     blockedStandalone,
+	"--no-approve":           blockedStandalone,
+	"-na":                    blockedStandalone,
+	"--offline":              blockedStandalone,
 }
 
 // buildPiArgs assembles the argv for a one-shot Pi invocation.
 //
 // Flags:
 //
-//	-p                          non-interactive mode (prompt is positional)
+//	-p                          non-interactive mode (prompt arrives on stdin)
 //	--mode json                 emit one JSON event per line on stdout
 //	--session <path>            session log file (created upfront, reused on resume)
 //	--provider <name>           provider, when Model is "provider/id"
 //	--model <id>                model identifier
+//	--thinking <level>          per-agent reasoning level override
 //
-// Custom args appended before the positional prompt. The prompt is a
-// positional argument and must be last.
-func buildPiArgs(prompt, sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
+// The prompt is deliberately absent from argv. Pi reads a non-TTY stdin in
+// print/JSON mode; using that supported path prevents Windows PowerShell's npm
+// shim from re-tokenising prompt content into options.
+func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
 		"-p",
 		"--mode", "json",
@@ -511,6 +617,9 @@ func buildPiArgs(prompt, sessionPath string, opts ExecOptions, logger *slog.Logg
 			args = append(args, "--model", model)
 		}
 	}
+	if opts.ThinkingLevel != "" {
+		args = append(args, "--thinking", opts.ThinkingLevel)
+	}
 	// Note: we intentionally do NOT pass --tools here. Omitting it lets
 	// Pi use its full tool registry, including user-installed extension
 	// tools. Passing --tools acts as a restrictive allowlist that
@@ -521,9 +630,66 @@ func buildPiArgs(prompt, sessionPath string, opts ExecOptions, logger *slog.Logg
 	// Pi loads the per-task AGENTS.md the daemon writes into the workdir, so
 	// inlining the same runtime brief would duplicate it on every turn.
 	// Verified against Pi 0.67.2 (MUL-5392).
-	args = append(args, filterCustomArgs(opts.CustomArgs, piBlockedArgs, logger)...)
-	args = append(args, prompt)
+	args = append(args, filterPiCustomArgs(opts.CustomArgs, logger)...)
 	return args
+}
+
+// filterPiCustomArgs removes @file and positional message inputs from
+// custom_args. Once the task prompt is delivered on stdin, Pi concatenates the
+// first positional message to stdin with no separator. Keeping those tokens
+// would silently mutate or replace the task prompt. Option values remain
+// supported, including values for extension-provided --long flags.
+func filterPiCustomArgs(args []string, logger *slog.Logger) []string {
+	args = filterCustomArgs(args, piBlockedArgs, logger)
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "@") {
+			if logger != nil {
+				logger.Warn("custom_args: Pi file input would alter the stdin task prompt, skipping")
+			}
+			continue
+		}
+		if !strings.HasPrefix(arg, "-") {
+			if logger != nil {
+				logger.Warn("custom_args: Pi positional input would alter the stdin task prompt, skipping")
+			}
+			continue
+		}
+
+		flag := arg
+		hasInlineValue := false
+		if idx := strings.Index(arg, "="); idx > 0 {
+			flag = arg[:idx]
+			hasInlineValue = true
+		}
+		filtered = append(filtered, arg)
+		if hasInlineValue {
+			continue
+		}
+
+		mode, known := piCustomArgModes[flag]
+		if !known {
+			if strings.HasPrefix(flag, "--") {
+				mode = blockedOptionalValue
+			} else {
+				continue
+			}
+		}
+		switch mode {
+		case blockedWithValue:
+			if i+1 < len(args) {
+				filtered = append(filtered, args[i+1])
+				i++
+			}
+		case blockedOptionalValue:
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") && !strings.HasPrefix(args[i+1], "@") {
+				filtered = append(filtered, args[i+1])
+				i++
+			}
+		}
+	}
+	return filtered
 }
 
 // splitPiModel parses a "provider/model" string into its parts. Plain

@@ -66,6 +66,8 @@ vi.mock("../../navigation", () => ({
     </a>
   ),
   useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  resolveClickIntent: () => "push",
+  useIntentNavigate: () => () => {},
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -82,6 +84,7 @@ vi.mock("@multica/core/issues/config", () => ({
     cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
   },
   PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
+  PRIORITY_DISPLAY_ORDER: ["none", "urgent", "high", "medium", "low"],
   PRIORITY_CONFIG: {
     urgent: { label: "Urgent", bars: 4, color: "text-destructive" },
     high: { label: "High", bars: 3, color: "text-warning" },
@@ -91,20 +94,10 @@ vi.mock("@multica/core/issues/config", () => ({
   },
 }));
 
-const mockLoadMore = vi.fn();
-const loadMoreResult = {
-  total: 0,
-  loaded: 0,
-  hasMore: false,
-  isLoading: false,
-  loadMore: mockLoadMore,
-};
 vi.mock("@multica/core/issues/mutations", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/issues/mutations")>();
   return {
     ...actual,
-    useLoadMoreByStatus: () => loadMoreResult,
-    useLoadMoreByAssigneeGroup: () => loadMoreResult,
   };
 });
 

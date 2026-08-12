@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -97,6 +98,64 @@ func seedSessionPersistenceFixture(t *testing.T, pool *pgxpool.Pool) sessionPers
 	return f
 }
 
+func TestChannelIssueCommandIsExcludedFromLaterChatTaskBatch(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
+
+	command, err := session.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: fixture.sessionID, Sender: fixture.userID,
+		Body: "/issue handled once", CommandText: "/issue handled once",
+	})
+	if err != nil {
+		t.Fatalf("append command: %v", err)
+	}
+	ordinary, err := session.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: fixture.sessionID, Sender: fixture.userID,
+		Body: "next question", CommandText: "next question",
+	})
+	if err != nil {
+		t.Fatalf("append ordinary message: %v", err)
+	}
+
+	var agentID, runtimeID pgtype.UUID
+	if err := pool.QueryRow(context.Background(), `
+		SELECT cs.agent_id, a.runtime_id
+		FROM chat_session cs
+		JOIN agent a ON a.id = cs.agent_id
+		WHERE cs.id = $1`, fixture.sessionID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("load task routing: %v", err)
+	}
+	var taskID pgtype.UUID
+	if err := pool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, completed_at)
+		VALUES ($1, $2, $3, 'completed', now()) RETURNING id`, agentID, runtimeID, fixture.sessionID).Scan(&taskID); err != nil {
+		t.Fatalf("create chat task: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	if err := db.New(pool).LinkUnownedChannelChatMessagesToTask(context.Background(), db.LinkUnownedChannelChatMessagesToTaskParams{
+		TaskID: taskID, ChatSessionID: fixture.sessionID,
+	}); err != nil {
+		t.Fatalf("seal chat input: %v", err)
+	}
+
+	var commandOwner, ordinaryOwner pgtype.UUID
+	if err := pool.QueryRow(context.Background(), `SELECT task_id FROM chat_message WHERE id = $1`, command.MessageID).Scan(&commandOwner); err != nil {
+		t.Fatalf("load command owner: %v", err)
+	}
+	if err := pool.QueryRow(context.Background(), `SELECT task_id FROM chat_message WHERE id = $1`, ordinary.MessageID).Scan(&ordinaryOwner); err != nil {
+		t.Fatalf("load ordinary owner: %v", err)
+	}
+	if commandOwner.Valid {
+		t.Fatalf("handled command was linked to a later task: %v", commandOwner)
+	}
+	if ordinaryOwner != taskID {
+		t.Fatalf("ordinary message owner = %v, want %v", ordinaryOwner, taskID)
+	}
+}
+
 func TestBindMediaRefs_PersistsAndLinksAttachmentToDurableMessage(t *testing.T) {
 	pool := sessionPersistenceTestDB(t)
 	fixture := seedSessionPersistenceFixture(t, pool)
@@ -153,6 +212,474 @@ func TestBindMediaRefs_PersistsAndLinksAttachmentToDurableMessage(t *testing.T) 
 	}
 	if !channelIngested {
 		t.Fatal("channel append must stamp channel_ingested for the cancel-path provenance gate")
+	}
+}
+
+func TestBindMediaRefs_IssueAttachmentSurvivesChatSessionDeletion(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
+	ctx := context.Background()
+
+	appendRes, err := session.AppendUserMessage(ctx, AppendInput{
+		SessionID:           fixture.sessionID,
+		Sender:              fixture.userID,
+		Body:                "/issue Fix broken layout [Image]",
+		MediaPendingSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'Fix broken layout', 'todo', 'none', 'member', $2, 1)
+		RETURNING id
+	`, fixture.workspaceID, fixture.userID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	const key = "workspaces/ws/lark/issue-image"
+	const url = "https://cdn.example.test/issue-image"
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, key, url, "pending")
+	if err := session.BindMediaRefs(ctx, BindMediaInput{
+		MessageID:   appendRes.MessageID,
+		SessionID:   fixture.sessionID,
+		WorkspaceID: fixture.workspaceID,
+		Sender:      fixture.userID,
+		IssueID:     issueID,
+		MediaRefs: []channel.MediaRef{{
+			Type:       channel.MsgTypeImage,
+			StorageKey: key,
+			StorageURL: url,
+			Filename:   "issue-image.png",
+			MimeType:   "image/png",
+			SizeBytes:  3,
+		}},
+	}); err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+	if _, exists := pendingMediaObjectState(t, pool, key); exists {
+		t.Fatal("issue bind must clear the intent row in the same transaction")
+	}
+
+	var attachmentID, gotIssueID pgtype.UUID
+	var chatSessionID, chatMessageID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT id, issue_id, chat_session_id, chat_message_id
+		FROM attachment
+		WHERE workspace_id = $1 AND url = $2
+	`, fixture.workspaceID, url).Scan(&attachmentID, &gotIssueID, &chatSessionID, &chatMessageID); err != nil {
+		t.Fatalf("load issue attachment: %v", err)
+	}
+	if gotIssueID != issueID || chatSessionID.Valid || chatMessageID.Valid {
+		t.Fatalf("attachment ownership = issue:%v session:%v message:%v", gotIssueID, chatSessionID, chatMessageID)
+	}
+	var description string
+	if err := pool.QueryRow(ctx, `SELECT description FROM issue WHERE id = $1`, issueID).Scan(&description); err != nil {
+		t.Fatalf("load issue description: %v", err)
+	}
+	wantDescription := channelmedia.Block(uuidString(attachmentID), "issue-image.png", true)
+	if description != wantDescription {
+		t.Fatalf("issue description = %q, want %q", description, wantDescription)
+	}
+
+	if _, err := pool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, fixture.sessionID); err != nil {
+		t.Fatalf("delete chat session: %v", err)
+	}
+	var remaining int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attachment WHERE id = $1 AND issue_id = $2`, attachmentID, issueID).Scan(&remaining); err != nil {
+		t.Fatalf("count issue attachment after chat deletion: %v", err)
+	}
+	if remaining != 1 {
+		t.Fatalf("issue attachment rows after chat deletion = %d, want 1", remaining)
+	}
+}
+
+func TestBindMediaRefs_EmptyRefsCreateNoAttachmentAndClearPending(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.Type("dingtalk"), SessionTitles{})
+	ctx := context.Background()
+
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'Existing issue', 'todo', 'none', 'member', $2, 1)
+		RETURNING id
+	`, fixture.workspaceID, fixture.userID).Scan(&issueID); err != nil {
+		t.Fatalf("create existing issue: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO attachment (
+			workspace_id, issue_id, uploader_type, uploader_id,
+			filename, url, content_type, size_bytes
+		) VALUES ($1, $2, 'member', $3, 'original.png',
+			'https://cdn.example.test/original-issue-image', 'image/png', 3)
+	`, fixture.workspaceID, issueID, fixture.userID); err != nil {
+		t.Fatalf("create original issue attachment: %v", err)
+	}
+	appendRes, err := session.AppendUserMessage(ctx, AppendInput{
+		SessionID:           fixture.sessionID,
+		Sender:              fixture.userID,
+		Body:                "/issue Existing issue\n[Image]",
+		CommandText:         "/issue Existing issue",
+		MediaPendingSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("append duplicate issue command: %v", err)
+	}
+
+	if err := session.BindMediaRefs(ctx, BindMediaInput{
+		MessageID:   appendRes.MessageID,
+		SessionID:   fixture.sessionID,
+		WorkspaceID: fixture.workspaceID,
+		Sender:      fixture.userID,
+		Body:        "/issue Existing issue\n[Image]",
+	}); err != nil {
+		t.Fatalf("finalize duplicate issue media: %v", err)
+	}
+
+	var issueAttachmentCount, workspaceAttachmentCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attachment WHERE issue_id = $1`, issueID).Scan(&issueAttachmentCount); err != nil {
+		t.Fatalf("count existing issue attachments: %v", err)
+	}
+	if issueAttachmentCount != 1 {
+		t.Fatalf("existing issue attachment rows = %d, want unchanged count 1", issueAttachmentCount)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attachment WHERE workspace_id = $1`, fixture.workspaceID).Scan(&workspaceAttachmentCount); err != nil {
+		t.Fatalf("count workspace attachments: %v", err)
+	}
+	if workspaceAttachmentCount != 1 {
+		t.Fatalf("workspace attachment rows = %d, want no new rows beyond the original", workspaceAttachmentCount)
+	}
+	var mediaPendingUntil pgtype.Timestamptz
+	if err := pool.QueryRow(ctx, `SELECT channel_media_pending_until FROM chat_message WHERE id = $1`, appendRes.MessageID).Scan(&mediaPendingUntil); err != nil {
+		t.Fatalf("load duplicate command media marker: %v", err)
+	}
+	if mediaPendingUntil.Valid {
+		t.Fatalf("duplicate command kept media pending until %v", mediaPendingUntil.Time)
+	}
+}
+
+func TestBindMediaRefs_MaterializesIssueImagesInOriginalRichTextOrder(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.Type("dingtalk"), SessionTitles{})
+	ctx := context.Background()
+	body := "/issue explain below questions\nWhat is this?\n[Image]\nAnd what is this?\n[Image]"
+	commandText := "/issue explain below questions\nWhat is this?And what is this?"
+	base := issueDescriptionFromCommandBody(body, commandText, "")
+
+	appendRes, err := session.AppendUserMessage(ctx, AppendInput{
+		SessionID:           fixture.sessionID,
+		Sender:              fixture.userID,
+		Body:                body,
+		CommandText:         commandText,
+		MediaPendingSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, description, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'explain below questions', $2, 'todo', 'none', 'member', $3, 4)
+		RETURNING id
+	`, fixture.workspaceID, base, fixture.userID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	const firstKey = "workspaces/ws/dingtalk/issue-first"
+	const secondKey = "workspaces/ws/dingtalk/issue-second"
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, firstKey, "https://cdn.example.test/issue-first", "pending")
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, secondKey, "https://cdn.example.test/issue-second", "pending")
+	if err := session.BindMediaRefs(ctx, BindMediaInput{
+		MessageID:            appendRes.MessageID,
+		SessionID:            fixture.sessionID,
+		WorkspaceID:          fixture.workspaceID,
+		Sender:               fixture.userID,
+		IssueID:              issueID,
+		IssueDescriptionBase: pgtype.Text{String: base, Valid: true},
+		IssueCommandText:     commandText,
+		Body:                 body,
+		MediaRefs: []channel.MediaRef{
+			{
+				Type: channel.MsgTypeImage, StorageKey: firstKey, StorageURL: "https://cdn.example.test/issue-first",
+				Filename: "first.png", MimeType: "image/png", InlinePlaceholder: "[Image]", InlineIndex: 0,
+			},
+			{
+				Type: channel.MsgTypeImage, StorageKey: secondKey, StorageURL: "https://cdn.example.test/issue-second",
+				Filename: "second.png", MimeType: "image/png", InlinePlaceholder: "[Image]", InlineIndex: 1,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT filename, id::text
+		FROM attachment
+		WHERE issue_id = $1
+	`, issueID)
+	if err != nil {
+		t.Fatalf("list issue attachments: %v", err)
+	}
+	defer rows.Close()
+	ids := map[string]string{}
+	for rows.Next() {
+		var filename, id string
+		if err := rows.Scan(&filename, &id); err != nil {
+			t.Fatalf("scan issue attachment: %v", err)
+		}
+		ids[filename] = id
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate issue attachments: %v", err)
+	}
+
+	var description string
+	if err := pool.QueryRow(ctx, `SELECT description FROM issue WHERE id = $1`, issueID).Scan(&description); err != nil {
+		t.Fatalf("load issue description: %v", err)
+	}
+	want := "What is this?\n" + channelmedia.Block(ids["first.png"], "first.png", true) +
+		"\nAnd what is this?\n" + channelmedia.Block(ids["second.png"], "second.png", true)
+	if description != want {
+		t.Fatalf("issue description = %q, want %q", description, want)
+	}
+}
+
+func TestMaterializeIssueChannelMediaMarkdownPreservesEditedDescription(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	ctx := context.Background()
+
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, description, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'Keep description', 'Reproduction steps', 'todo', 'none', 'member', $2, 2)
+		RETURNING id
+	`, fixture.workspaceID, fixture.userID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	const markdown = "![](/api/attachments/22222222-2222-4222-8222-222222222222/download)"
+	issue, err := db.New(pool).MaterializeIssueChannelMediaMarkdown(ctx, db.MaterializeIssueChannelMediaMarkdownParams{
+		ID:              issueID,
+		WorkspaceID:     fixture.workspaceID,
+		BaseDescription: pgtype.Text{String: "creation base", Valid: true},
+		Description:     "inline layout",
+		Markdown:        pgtype.Text{String: markdown, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeIssueChannelMediaMarkdown: %v", err)
+	}
+	want := "Reproduction steps\n\n" + markdown
+	if !issue.Description.Valid || issue.Description.String != want {
+		t.Fatalf("issue description = %#v, want %q", issue.Description, want)
+	}
+}
+
+func TestMaterializeIssueChannelMediaMarkdownReplacesUnchangedBase(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	ctx := context.Background()
+
+	const base = "What is this?\n[Image]\nAnd what is this?\n[Image]"
+	const composed = "What is this?\n![](first)\n\nAnd what is this?\n![](second)"
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, description, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'Keep layout', $2, 'todo', 'none', 'member', $3, 3)
+		RETURNING id
+	`, fixture.workspaceID, base, fixture.userID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	issue, err := db.New(pool).MaterializeIssueChannelMediaMarkdown(ctx, db.MaterializeIssueChannelMediaMarkdownParams{
+		ID:              issueID,
+		WorkspaceID:     fixture.workspaceID,
+		BaseDescription: pgtype.Text{String: base, Valid: true},
+		Description:     composed,
+		Markdown:        pgtype.Text{String: "fallback", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeIssueChannelMediaMarkdown: %v", err)
+	}
+	if !issue.Description.Valid || issue.Description.String != composed {
+		t.Fatalf("issue description = %#v, want %q", issue.Description, composed)
+	}
+}
+
+func TestIssueDeleteLockPreventsLateMediaBindFromOrphaningObject(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
+	ctx := context.Background()
+
+	appendRes, err := session.AppendUserMessage(ctx, AppendInput{
+		SessionID:           fixture.sessionID,
+		Sender:              fixture.userID,
+		Body:                "/issue Delete while binding [Image]",
+		MediaPendingSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'Delete while binding', 'todo', 'none', 'member', $2, 2)
+		RETURNING id`, fixture.workspaceID, fixture.userID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	const key = "workspaces/ws/lark/delete-race-image"
+	const url = "https://cdn.example.test/delete-race-image"
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, key, url, "pending")
+
+	deleteTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin delete transaction: %v", err)
+	}
+	defer deleteTx.Rollback(ctx)
+	deleteQueries := db.New(pool).WithTx(deleteTx)
+	if _, err := deleteQueries.LockIssueForDelete(ctx, db.LockIssueForDeleteParams{
+		ID: issueID, WorkspaceID: fixture.workspaceID,
+	}); err != nil {
+		t.Fatalf("lock issue for delete: %v", err)
+	}
+
+	bindTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin bind transaction: %v", err)
+	}
+	defer bindTx.Rollback(ctx)
+	var bindPID int32
+	if err := bindTx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&bindPID); err != nil {
+		t.Fatalf("load bind backend pid: %v", err)
+	}
+	bindResult := make(chan error, 1)
+	go func() {
+		_, lockErr := db.New(pool).WithTx(bindTx).LockIssueForChannelMediaBind(context.Background(), db.LockIssueForChannelMediaBindParams{
+			ID: issueID, WorkspaceID: fixture.workspaceID,
+		})
+		bindResult <- lockErr
+	}()
+
+	blocked := false
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if err := pool.QueryRow(ctx, `SELECT cardinality(pg_blocking_pids($1)) > 0`, bindPID).Scan(&blocked); err != nil {
+			t.Fatalf("inspect bind lock wait: %v", err)
+		}
+		if blocked {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !blocked {
+		t.Fatal("media bind did not block behind the delete lock")
+	}
+
+	urls, err := deleteQueries.ListAttachmentURLsByIssueOrComments(ctx, issueID)
+	if err != nil {
+		t.Fatalf("list attachment URLs under delete lock: %v", err)
+	}
+	if len(urls) != 0 {
+		t.Fatalf("attachment URLs before blocked bind = %v, want none", urls)
+	}
+	if err := deleteQueries.DeleteIssue(ctx, db.DeleteIssueParams{ID: issueID, WorkspaceID: fixture.workspaceID}); err != nil {
+		t.Fatalf("delete issue: %v", err)
+	}
+	if err := deleteTx.Commit(ctx); err != nil {
+		t.Fatalf("commit issue delete: %v", err)
+	}
+
+	select {
+	case err := <-bindResult:
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("bind lock after delete = %v, want no target row", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("media bind stayed blocked after delete commit")
+	}
+	if state, exists := pendingMediaObjectState(t, pool, key); !exists || state != "pending" {
+		t.Fatalf("intent after delete-first race = (%q, %v), want preserved pending", state, exists)
+	}
+	var attachmentCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attachment WHERE url = $1`, url).Scan(&attachmentCount); err != nil {
+		t.Fatalf("count leaked attachment rows: %v", err)
+	}
+	if attachmentCount != 0 {
+		t.Fatalf("attachment rows after delete-first race = %d, want 0", attachmentCount)
+	}
+}
+
+func TestBindMediaRefs_MaterializesInlineImagesInOriginalOrder(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
+	body := "[Image]\n这是啥?\n[Image]\n这又是啥?"
+	appendRes, err := session.AppendUserMessage(context.Background(), AppendInput{
+		SessionID:           fixture.sessionID,
+		Sender:              fixture.userID,
+		Body:                body,
+		MediaPendingSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, "workspaces/ws/dingtalk/first", "https://cdn.example.test/first", "pending")
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, "workspaces/ws/dingtalk/second", "https://cdn.example.test/second", "pending")
+	err = session.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID:   appendRes.MessageID,
+		SessionID:   fixture.sessionID,
+		WorkspaceID: fixture.workspaceID,
+		Sender:      fixture.userID,
+		Body:        body,
+		MediaRefs: []channel.MediaRef{
+			{
+				Type: channel.MsgTypeImage, StorageKey: "workspaces/ws/dingtalk/first",
+				StorageURL: "https://cdn.example.test/first", Filename: "first.png", MimeType: "image/png",
+				InlinePlaceholder: "[Image]", InlineIndex: 0,
+			},
+			{
+				Type: channel.MsgTypeImage, StorageKey: "workspaces/ws/dingtalk/second",
+				StorageURL: "https://cdn.example.test/second", Filename: "second.png", MimeType: "image/png",
+				InlinePlaceholder: "[Image]", InlineIndex: 1,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+
+	var stored string
+	if err := pool.QueryRow(context.Background(), `SELECT content FROM chat_message WHERE id = $1`, appendRes.MessageID).Scan(&stored); err != nil {
+		t.Fatalf("load message content: %v", err)
+	}
+	rows, err := pool.Query(context.Background(), `
+		SELECT filename, id::text
+		FROM attachment
+		WHERE chat_message_id = $1
+		ORDER BY filename`, appendRes.MessageID)
+	if err != nil {
+		t.Fatalf("load attachment ids: %v", err)
+	}
+	defer rows.Close()
+	ids := map[string]string{}
+	for rows.Next() {
+		var filename, id string
+		if err := rows.Scan(&filename, &id); err != nil {
+			t.Fatalf("scan attachment: %v", err)
+		}
+		ids[filename] = id
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate attachments: %v", err)
+	}
+	want := "![](/api/attachments/" + ids["first.png"] + "/download)\n这是啥?\n" +
+		"![](/api/attachments/" + ids["second.png"] + "/download)\n这又是啥?"
+	if stored != want {
+		t.Fatalf("stored inline body = %q, want %q", stored, want)
 	}
 }
 

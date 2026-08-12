@@ -424,6 +424,107 @@ func TestDashboardRunTimeDailyBucketsByViewerTimezone(t *testing.T) {
 	}
 }
 
+// TestDashboardRunTimeCountsCancelledRuns pins the fix for the run-time
+// rollups dropping every run the user stopped mid-flight. CancelAgentTask
+// accepts a 'running' task, so a cancelled row can carry both started_at and
+// completed_at — real agent occupancy, and real tokens the cost rollup
+// charges for regardless of status. The old `status IN ('completed','failed')`
+// filter zeroed that time, so Time/Tasks and Cost/Tokens summed different
+// task populations on the same dashboard.
+//
+// Also asserts the other half of the contract: a run cancelled while still
+// queued (started_at NULL) must stay out, since it never occupied an agent.
+func TestDashboardRunTimeCountsCancelledRuns(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'run-time cancelled test', $2, 'member',
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// Baseline before inserting, so a shared fixture DB with pre-existing
+	// rows can't make the deltas below pass or fail spuriously.
+	baseSeconds, baseTasks, baseCancelled := readAgentRunTime(t, agentID)
+
+	// Stopped 15 minutes into the run: started_at and completed_at both set.
+	var cancelledTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
+		VALUES ($1, $2, $3, 'cancelled', now() - interval '15 minutes', now(), now())
+		RETURNING id
+	`, agentID, issueID, runtimeID).Scan(&cancelledTaskID); err != nil {
+		t.Fatalf("insert cancelled task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, cancelledTaskID) })
+
+	// Cancelled from the queue: never started, so it must not contribute.
+	var queuedCancelID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
+		VALUES ($1, $2, $3, 'cancelled', NULL, now(), now())
+		RETURNING id
+	`, agentID, issueID, runtimeID).Scan(&queuedCancelID); err != nil {
+		t.Fatalf("insert queue-cancelled task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, queuedCancelID) })
+
+	gotSeconds, gotTasks, gotCancelled := readAgentRunTime(t, agentID)
+
+	// 15 minutes of occupancy, from exactly one of the two rows.
+	if delta := gotSeconds - baseSeconds; delta < 890 || delta > 910 {
+		t.Errorf("total_seconds delta = %d, want ~900 (15m from the stopped run only)", delta)
+	}
+	if delta := gotTasks - baseTasks; delta != 1 {
+		t.Errorf("task_count delta = %d, want 1 (the queue-cancelled run must not count)", delta)
+	}
+	if delta := gotCancelled - baseCancelled; delta != 1 {
+		t.Errorf("cancelled_count delta = %d, want 1", delta)
+	}
+}
+
+// readAgentRunTime returns (total_seconds, task_count, cancelled_count) for
+// one agent from GetDashboardAgentRunTime. Zeroes when the agent has no row.
+func readAgentRunTime(t *testing.T, agentID string) (int64, int32, int32) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	testHandler.GetDashboardAgentRunTime(w, newRequest("GET", "/api/dashboard/agent-runtime?days=10&tz=UTC", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var rows []struct {
+		AgentID        string `json:"agent_id"`
+		TotalSeconds   int64  `json:"total_seconds"`
+		TaskCount      int32  `json:"task_count"`
+		CancelledCount int32  `json:"cancelled_count"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+		t.Fatalf("decode agent run time: %v", err)
+	}
+	for _, r := range rows {
+		if r.AgentID == agentID {
+			return r.TotalSeconds, r.TaskCount, r.CancelledCount
+		}
+	}
+	return 0, 0, 0
+}
+
 // TestRollupTaskUsageHourlyIdempotentAndWatermark covers two pipeline
 // invariants the deleted runtime_rollup_test.go used to guard for the
 // legacy daily rollup: (1) re-running the window function over the same

@@ -45,6 +45,11 @@ import type {
   ChatMessage,
   ChatPendingTask,
 } from "@multica/core/types";
+import {
+  enqueuePendingChatTask,
+  hideQueuedChatMessages,
+  removePendingChatTask,
+} from "@multica/core/chat/pending";
 import { api } from "@/data/api";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -68,6 +73,10 @@ import {
 } from "@/data/stores/chat-drafts-store";
 import { useChatSessionPickerStore } from "@/data/stores/chat-session-picker-store";
 import { useChatSessionRealtime } from "@/data/realtime/use-chat-session-realtime";
+import {
+  invalidatePendingTask,
+  seedAcceptedPendingTask,
+} from "@/data/realtime/chat-ws-updaters";
 import { canAssignAgent } from "@/lib/can-assign-agent";
 import { useWorkspaceAgentAvailability } from "@/lib/workspace-agent-availability";
 import { useAgentPresence } from "@/lib/use-agent-presence";
@@ -79,7 +88,9 @@ import { ChatComposer } from "@/components/chat/chat-composer";
 import { AgentPickerSheet } from "@/components/chat/agent-picker-sheet";
 import { NoAgentBanner } from "@/components/chat/no-agent-banner";
 import { OfflineBanner } from "@/components/chat/offline-banner";
+import { RuntimeRequiredBanner } from "@/components/chat/runtime-required-banner";
 import { useChatSelectStore } from "@/data/chat-select-store";
+import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
 
 export default function ChatTab() {
   const qc = useQueryClient();
@@ -131,6 +142,7 @@ export default function ChatTab() {
   const { data: pendingTask } = useQuery(
     pendingChatTaskOptions(activeSessionId),
   );
+  const visibleMessages = hideQueuedChatMessages(messages, pendingTask);
   // Live execution trace for the in-flight task. `task:message` WS events
   // append rows to this same cache key via `appendTaskMessage`, so the
   // list/pill stay in sync without a polling fetch. `enabled` is gated by
@@ -176,6 +188,8 @@ export default function ChatTab() {
   const presenceAvailability =
     presenceDetail === "loading" ? undefined : presenceDetail.availability;
   const isArchived = activeSession?.status === "archived";
+  const runtimeBound =
+    currentAgent !== null && isAgentRuntimeBound(currentAgent);
   const sending = !!pendingTask?.task_id;
 
   // ── Drafts ─────────────────────────────────────────────────────────────
@@ -245,6 +259,13 @@ export default function ChatTab() {
       options: { clearDraft?: boolean } = {},
     ) => {
       if (!currentAgent) return;
+      if (!runtimeBound) {
+        Alert.alert(
+          "Runtime required",
+          "Bind a runtime to this agent on web or desktop before sending a message.",
+        );
+        return;
+      }
 
       const isNewSession = !activeSessionId;
       const sessionId = await ensureSession(content);
@@ -259,14 +280,25 @@ export default function ChatTab() {
         task_id: null,
         created_at: sentAt,
       };
+      const optimisticTaskId = `optimistic-${optimistic.id}`;
       qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
         old ? [...old, optimistic] : [optimistic],
       );
-      qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
-        task_id: `optimistic-${optimistic.id}`,
-        status: "queued",
-        created_at: sentAt,
-      });
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(sessionId),
+        (old) =>
+          enqueuePendingChatTask(
+            old,
+            {
+              task_id: optimisticTaskId,
+              status: "queued",
+              created_at: sentAt,
+              message_id: optimistic.id,
+              content,
+            },
+            Boolean(old?.task_id),
+          ),
+      );
       if (isNewSession) {
         promoteNewDraft(sessionId);
         setActiveSessionId(sessionId);
@@ -276,10 +308,30 @@ export default function ChatTab() {
         const result = await api.sendChatMessage(sessionId, content, {
           attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
         });
-        qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
+        // Replace the local bubble before reconciling pending state. When the
+        // server says this is a follow-up, its real message id lets the shared
+        // queue filter hide it immediately instead of waiting for the refetch.
+        qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
+          old?.map((message) =>
+            message.id === optimistic.id
+              ? {
+                  ...message,
+                  id: result.message_id,
+                  task_id: result.task_id,
+                  created_at: result.created_at,
+                }
+              : message,
+          ),
+        );
+        seedAcceptedPendingTask(qc, {
+          chat_session_id: sessionId,
           task_id: result.task_id,
-          status: "queued",
           created_at: result.created_at,
+          message_id: result.message_id,
+          content,
+          optimistic_task_id: optimisticTaskId,
+          supports_queue: result.supports_queue,
+          queued: result.queued,
         });
         qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
         if (options.clearDraft !== false) {
@@ -289,13 +341,17 @@ export default function ChatTab() {
         qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
           old ? old.filter((m) => m.id !== optimistic.id) : old,
         );
-        qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+        qc.setQueryData<ChatPendingTask>(
+          chatKeys.pendingTask(sessionId),
+          (old) => removePendingChatTask(old, optimisticTaskId),
+        );
         throw err;
       }
     },
     [
       activeSessionId,
       currentAgent,
+      runtimeBound,
       ensureSession,
       qc,
       promoteNewDraft,
@@ -306,11 +362,18 @@ export default function ChatTab() {
   // ── Cancel in-flight ───────────────────────────────────────────────────
   const handleStop = useCallback(() => {
     if (!pendingTask?.task_id || !activeSessionId) return;
-    qc.setQueryData(chatKeys.pendingTask(activeSessionId), {});
-    void api.cancelTaskById(pendingTask.task_id).catch(() => {
-      // Silent — task may have already terminated server-side.
-    });
-  }, [pendingTask?.task_id, activeSessionId, qc]);
+    if (pendingTask.status === "queued") return;
+    const taskId = pendingTask.task_id;
+    const sessionId = activeSessionId;
+    qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), (old) =>
+      removePendingChatTask(old, taskId),
+    );
+    void api.cancelTaskById(taskId)
+      .catch(() => {
+        // Silent — task may have already terminated server-side.
+      })
+      .finally(() => invalidatePendingTask(qc, sessionId));
+  }, [pendingTask?.task_id, pendingTask?.status, activeSessionId, qc]);
 
   // ── Header / sheet actions ─────────────────────────────────────────────
   const handleNewChat = useCallback(() => {
@@ -359,13 +422,18 @@ export default function ChatTab() {
 
   // ── Composer disabled-state ────────────────────────────────────────────
   const disabled =
-    !currentAgent || availability === "none" || isArchived === true;
+    !currentAgent ||
+    availability === "none" ||
+    isArchived === true ||
+    !runtimeBound;
   const disabledReason = !currentAgent
     ? "No agent selected"
     : availability === "none"
       ? "No agents in this workspace"
       : isArchived
         ? "This chat is archived"
+        : !runtimeBound
+          ? "Agent needs a runtime"
         : undefined;
 
   return (
@@ -398,7 +466,7 @@ export default function ChatTab() {
         className="flex-1"
       >
         <ChatMessageList
-          messages={messages}
+          messages={visibleMessages}
           loading={messagesLoading}
           hasSessions={sessions.length > 0}
           agentName={currentAgent?.name}
@@ -411,16 +479,21 @@ export default function ChatTab() {
           liveTaskMessages={liveTaskMessages}
           availability={presenceAvailability}
         />
-        <OfflineBanner
-          agentName={currentAgent?.name}
-          availability={presenceAvailability}
-        />
+        {runtimeBound ? (
+          <OfflineBanner
+            agentName={currentAgent?.name}
+            availability={presenceAvailability}
+          />
+        ) : currentAgent ? (
+          <RuntimeRequiredBanner agentName={currentAgent.name} />
+        ) : null}
         <ChatComposer
           value={draft}
           onChangeText={(next) => setDraft(draftKey, next)}
           onSend={handleSend}
           onStop={handleStop}
           sending={sending}
+          allowStop={pendingTask?.status !== "queued"}
           disabled={disabled}
           disabledReason={disabledReason}
         />

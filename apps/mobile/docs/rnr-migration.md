@@ -1,6 +1,6 @@
 # RNR migration — design, alternatives, and three-phase rollout
 
-**Status**: Phase 0 (research & docs) — complete. Phase 1 (base infrastructure) — not started.
+**Status**: Phase 0 (research & docs) — complete. Phase 1 (base infrastructure) — complete: `global.css` CSS variables, `tailwind.config.js` `darkMode: "class"` + `hsl(var(--))` mappings, `lib/theme.ts`, `lib/use-color-scheme.ts`, `components.json`, `ThemeProvider` + `PortalHost` in `app/_layout.tsx`, and the Settings → Appearance picker are all shipped. Phase 2 (canary component) — not started.
 
 **Audience**: anyone touching `apps/mobile/components/ui/` or adding new UI to the mobile app. Read this once; refer to `apps/mobile/CLAUDE.md` "UI components & theming" for the durable rules.
 
@@ -8,13 +8,15 @@
 
 ## 1. Why this doc exists
 
-The mobile baseline (`apps/mobile/CLAUDE.md`) has named **react-native-reusables (RNR)** as the shadcn equivalent since SDK 55 was bootstrapped. RNR was never actually installed. As a result:
+> **Baseline note.** Everything in this section describes the state **before Phase 1**, which is the problem this migration was written to solve. Phase 1 has since shipped — see the Status line above and §6. The theming half of this list is fixed; the component half is not.
 
-- `apps/mobile/components/ui/` contains **21 hand-written components, ~1,379 lines**, all built from raw `<View/Text/Pressable/Modal>`.
-- `apps/mobile/components/` contains **18 hand-written sheet/modal files**, all copying the same shape (`Modal transparent fade` + hand-drawn backdrop). CLAUDE.md Lesson 6 (lines 250–269) already documents that this pattern is wrong for most content and has produced a series of bugs (keyboard squashing, `maxHeight` clipping FlatLists, `useSafeAreaInsets` returning 0 inside `Modal`).
-- There is no dark/light theming infrastructure. `tailwind.config.js` uses hard-coded hex values; `global.css` has only the three `@tailwind` directives; no CSS variables, no `darkMode`, no theme switcher.
+The mobile baseline (`apps/mobile/CLAUDE.md`) has named **react-native-reusables (RNR)** as the shadcn equivalent since SDK 55 was bootstrapped. RNR was never actually installed. As a result, at the time of writing:
 
-This doc records why we are migrating to RNR, what alternatives we evaluated, and how the migration is sequenced.
+- `apps/mobile/components/ui/` contained **21 hand-written components, ~1,379 lines**, all built from raw `<View/Text/Pressable/Modal>`. *(Still true — Phase 2/3 work.)*
+- `apps/mobile/components/` contained **18 hand-written sheet/modal files**, all copying the same shape (`Modal transparent fade` + hand-drawn backdrop). CLAUDE.md Lesson 6 already documents that this pattern is wrong for most content and has produced a series of bugs (keyboard squashing, `maxHeight` clipping FlatLists, `useSafeAreaInsets` returning 0 inside `Modal`). *(Partly resolved — `sheet-shell.tsx` is deleted and long-list/form sheets are now Expo Router `formSheet` routes.)*
+- There was no dark/light theming infrastructure: `tailwind.config.js` used hard-coded hex values, `global.css` had only the three `@tailwind` directives, and there were no CSS variables, no `darkMode`, and no theme switcher. **✅ Resolved in Phase 1** — `global.css` now defines `:root` / `.dark:root` variable blocks, `tailwind.config.js` sets `darkMode: "class"` with `hsl(var(--))` mappings, and Settings → Appearance switches Light / Dark / System.
+
+This doc records why we migrated to RNR, what alternatives we evaluated, and how the migration is sequenced.
 
 ## 2. Alternatives considered
 
@@ -184,14 +186,14 @@ app/_layout.tsx             reads persisted preference at startup,
 
 ### 5.2 Token strategy
 
-The current `tailwind.config.js` has hard-coded hex values for ~20 semantic tokens (`background`, `foreground`, `card`, `primary`, …). These become CSS variables under `:root` (light) and `.dark:root` (dark) in `global.css`. Tailwind config switches to `hsl(var(--background))` etc.
+**Shipped in Phase 1.** The pre-Phase-1 `tailwind.config.js` carried hard-coded hex values for ~20 semantic tokens (`background`, `foreground`, `card`, `primary`, …). Those are now CSS variables under `:root` (light) and `.dark:root` (dark) in `global.css`, and the Tailwind config resolves them through `hsl(var(--background))` and friends.
 
-Dark mode colors are not in the current config and need to be authored. Two options:
+Dark-mode colours did not exist in the old config and had to be authored. Two options were considered:
 
-1. **Use shadcn's neutral-base dark palette** (`--background: 0 0% 3.9%`, etc., per RNR's default install) — fastest, gets us a working dark mode immediately, may need a second pass for brand alignment.
+1. **Use shadcn's neutral-base dark palette** (`--background: 0 0% 3.9%`, etc., per RNR's default install) — fastest, gets a working dark mode immediately, may need a second pass for brand alignment.
 2. **Author dark mode by hand** mirroring the web/desktop dark theme — slower, but stays visually consistent with desktop.
 
-Phase 1 starts with **option 1** (shadcn default dark palette) for velocity. A later pass can tune to match desktop's `packages/ui/styles/tokens.css` dark theme once the infrastructure is proven.
+Phase 1 took **option 1** (shadcn default dark palette) for velocity. A later pass can tune it to match desktop's `packages/ui/styles/tokens.css` dark theme now that the infrastructure is proven.
 
 Multica-specific tokens not in shadcn's default (`brand`, `brand-foreground`, `success`, `warning`, `info`, `priority`, `code-surface`) get their own CSS variables in both `:root` and `.dark:root`, mapped through `tailwind.config.js` the same way.
 
@@ -211,36 +213,36 @@ When the user picks `system`, we call `setColorScheme('system')` (NativeWind v4 
 - [x] Inspect current mobile state (`tailwind.config.js`, `global.css`, `app/_layout.tsx`, `metro.config.js`, `babel.config.js`)
 - [x] Update `apps/mobile/CLAUDE.md` with the new UI & theming rules
 - [x] Write this migration doc
-- [ ] **User verification gate**
+- [x] **User verification gate**
 
-### Phase 1 — base infrastructure
+### Phase 1 — base infrastructure — ✅ complete
 
 Goal: install RNR scaffolding without touching a single existing component. Verification = app builds and runs identically to before; theme switcher in settings works end-to-end.
 
-Checklist:
+Every item below shipped. The checklist is kept as the record of what Phase 1 covered:
 
-1. **Add dependencies** (per RNR manual install Step 3):
+1. ✅ **Add dependencies** (per RNR manual install Step 3):
    - `npx expo install tailwindcss-animate class-variance-authority clsx tailwind-merge @rn-primitives/portal`
    - Confirm `class-variance-authority`, `clsx`, `tailwind-merge`, `@rn-primitives/slot` are already present (they are) — only `tailwindcss-animate` and `@rn-primitives/portal` are new.
-2. **Update `metro.config.js`** to set `inlineRem: 16` on `withNativeWind(...)`.
-3. **Rewrite `global.css`** with `:root` and `.dark:root` CSS variable blocks (light + dark palettes including Multica's custom tokens).
-4. **Rewrite `tailwind.config.js`** to use `hsl(var(--...))` mappings, set `darkMode: 'class'`, register `tailwindcss-animate` plugin, add `hairlineWidth()` border width. Keep mobile-specific overrides (`borderRadius`, custom tokens).
-5. **Create `lib/theme.ts`** — TS mirror of CSS variables + `NAV_THEME` for React Navigation.
-6. **Create `lib/use-color-scheme.ts`** — wraps NativeWind's `useColorScheme()`, loads/persists preference from `expo-secure-store` on mount, exposes `{ colorScheme, isDarkColorScheme, setColorScheme }`.
-7. **Create `components.json`** with the standard RNR configuration (`style: "new-york"`, paths, aliases pointing at `@/components`, `@/lib/utils`).
-8. **Update `app/_layout.tsx`**:
+2. ✅ **Update `metro.config.js`** to set `inlineRem: 16` on `withNativeWind(...)`.
+3. ✅ **Rewrite `global.css`** with `:root` and `.dark:root` CSS variable blocks (light + dark palettes including Multica's custom tokens).
+4. ✅ **Rewrite `tailwind.config.js`** to use `hsl(var(--...))` mappings, set `darkMode: 'class'`, register `tailwindcss-animate` plugin, add `hairlineWidth()` border width. Keep mobile-specific overrides (`borderRadius`, custom tokens).
+5. ✅ **Create `lib/theme.ts`** — TS mirror of CSS variables + `NAV_THEME` for React Navigation.
+6. ✅ **Create `lib/use-color-scheme.ts`** — wraps NativeWind's `useColorScheme()`, loads/persists preference from `expo-secure-store` on mount, exposes `{ colorScheme, isDarkColorScheme, setColorScheme }`.
+7. ✅ **Create `components.json`** with the standard RNR configuration (`style: "new-york"`, paths, aliases pointing at `@/components`, `@/lib/utils`).
+8. ✅ **Update `app/_layout.tsx`**:
    - Read persisted theme preference (sync read from secure-store at module init or first effect; default `system`).
    - Apply it via `setColorScheme(...)` before children render.
    - Wrap `Stack` in `ThemeProvider(NAV_THEME[isDarkColorScheme ? 'dark' : 'light'])` from `@react-navigation/native`.
    - Mount `<PortalHost />` from `@rn-primitives/portal` as the last child of providers.
-9. **Settings → Appearance picker**: add an "Appearance" `SectionGroup` to `app/(app)/[workspace]/more/settings.tsx` with three rows (Light / Dark / System), calling `setColorScheme(mode)` + persisting. UI mirrors the existing `WorkspaceRow` pattern; no new dependencies.
-10. **Verify**: app builds; all existing screens render unchanged in light mode; toggle Dark → backgrounds invert + text inverts; toggle System → matches the simulator's OS appearance; kill app, reopen → preference persisted.
+9. ✅ **Settings → Appearance picker**: add an "Appearance" `SectionGroup` to `app/(app)/[workspace]/more/settings.tsx` with three rows (Light / Dark / System), calling `setColorScheme(mode)` + persisting. UI mirrors the existing `WorkspaceRow` pattern; no new dependencies.
+10. ✅ **Verify**: app builds; all existing screens render unchanged in light mode; toggle Dark → backgrounds invert + text inverts; toggle System → matches the simulator's OS appearance; kill app, reopen → preference persisted.
 
 **Phase 1 does NOT replace any existing component.** Buttons, inputs, sheets are still the hand-written versions. The dark mode "works" against the existing hex-derived semantic tokens because we are simply remapping them through CSS variables — the same `bg-background` class now resolves to a CSS variable that has two values instead of one.
 
-**Risk**: components that style with hard-coded hex (e.g. `<Ionicons color="#71717a">`, `bg-[#fafafa]`) will not respond to theme change. Phase 1 includes a grep sweep for `#[0-9a-fA-F]{3,6}` in `components/` and `app/` — every hit is either (a) replaceable with a token now, or (b) flagged for Phase 3 with a `TODO(rnr-migration):` comment.
+**Residual risk (carried into Phase 3)**: components that style with hard-coded hex (e.g. `<Ionicons color="#71717a">`, `bg-[#fafafa]`) do not respond to theme change. Phase 1 included a grep sweep for `#[0-9a-fA-F]{3,6}` in `components/` and `app/`; each hit was either replaced with a token or flagged for Phase 3 with a `TODO(rnr-migration):` comment.
 
-### Phase 2 — first component (canary)
+### Phase 2 — first component (canary) — not started
 
 Goal: prove the migration mechanics on the simplest non-trivial component before doing 20 of them.
 

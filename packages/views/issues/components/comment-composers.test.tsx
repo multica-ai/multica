@@ -5,17 +5,33 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import type { Attachment } from "@multica/core/types";
 import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { renderWithI18n } from "../../test/i18n";
 import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
+
+/** Shape of ContentEditor's `quickActionMenu` prop, as the composers pass it. */
+type QuickActionMenuProp = {
+  getQuickActions?: () => { id: string; name: string; description?: string }[];
+  renderQuickAction?: (quickActionId: string) => Promise<string>;
+  onRenderError?: (error: unknown) => void;
+};
 
 // Uploads now flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181). Tests drive uploads by
 // mocking that call directly rather than the old `uploadWithToast` hook.
 const apiUploadFile = vi.hoisted(() => vi.fn());
+const apiListWorkspaces = vi.hoisted(() => vi.fn());
+const apiListQuickActions = vi.hoisted(() => vi.fn());
+const apiRenderQuickAction = vi.hoisted(() => vi.fn());
 const uploadWithToast = vi.hoisted(() => vi.fn());
 const editorDefaultValues = vi.hoisted(() => ({
   values: [] as Array<string | undefined>,
+}));
+// The `/` quick-action menu is wired through a ContentEditor prop, so the mock
+// editor records it — that prop being absent is exactly the MUL-5588 bug.
+const editorQuickActionMenu = vi.hoisted(() => ({
+  last: undefined as QuickActionMenuProp | undefined,
 }));
 // Observability + failure control for the write-back insert path (MUL-5181):
 // `insertMarkdownAtEnd` returns false while the (simulated) Tiptap instance
@@ -38,7 +54,12 @@ const editorUploadSignal = vi.hoisted(
 let mockUploadIdSeq = 0;
 
 vi.mock("@multica/core/api", () => ({
-  api: { uploadFile: apiUploadFile },
+  api: {
+    uploadFile: apiUploadFile,
+    listWorkspaces: apiListWorkspaces,
+    listQuickActions: apiListQuickActions,
+    renderQuickAction: apiRenderQuickAction,
+  },
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", async () => ({
@@ -87,6 +108,7 @@ vi.mock("../../editor", async () => ({
       onUploadingChange,
       onSubmit,
       onReady,
+      quickActionMenu,
     }: {
       defaultValue?: string;
       onUpdate?: (markdown: string) => void;
@@ -95,10 +117,12 @@ vi.mock("../../editor", async () => ({
       onUploadingChange?: (uploading: boolean) => void;
       onSubmit?: () => void;
       onReady?: () => void;
+      quickActionMenu?: QuickActionMenuProp;
     },
     ref: Ref<unknown>,
   ) {
     editorDefaultValues.values.push(defaultValue);
+    editorQuickActionMenu.last = quickActionMenu;
     editorUploadSignal.notify = onUploadingChange;
     const valueRef = useRef(defaultValue ?? "");
     // Mirrors the real editor's `uploading` node attrs: the placeholder exists
@@ -233,18 +257,102 @@ function getSubmitButton(container: HTMLElement): HTMLButtonElement {
 beforeEach(() => {
   uploadWithToast.mockReset();
   apiUploadFile.mockReset();
+  apiListWorkspaces.mockReset();
+  apiListQuickActions.mockReset();
+  apiRenderQuickAction.mockReset();
   insertMarkdownSpy.mockReset();
   insertPlaceholderSpy.mockReset();
   insertMarkdownBehavior.succeed = true;
   localStorage.clear();
   useCommentComposerStore.setState({ sticky: true });
+  // The composer's pinning (and the height cap that follows it) is viewport
+  // dependent, so a narrow-viewport test must not leak into the next one.
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
   // The draft store is a module singleton — a draft left by a previous test
   // (e.g. the failed-send case) would trip the composers' draft-direct-mount
   // path and hide the shell the next test expects.
   useCommentDraftStore.setState({ drafts: {} });
   editorDefaultValues.values = [];
+  editorQuickActionMenu.last = undefined;
   focusCalls.focused = 0;
   focusCalls.blurred = 0;
+});
+
+// ---------------------------------------------------------------------------
+// Quick action `/` menu (MUL-5588)
+// ---------------------------------------------------------------------------
+
+describe("quick action `/` menu", () => {
+  const workspace = { id: "ws-1", slug: "acme", name: "Acme" };
+
+  function renderInWorkspace(ui: ReactNode) {
+    apiListWorkspaces.mockResolvedValue([workspace]);
+    apiListQuickActions.mockResolvedValue({
+      quick_actions: [
+        { id: "qa-1", name: "review", description: "Ask for a review", status: "active" },
+        { id: "qa-2", name: "retired", description: "", status: "archived" },
+      ],
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        {/* useQuickActionMenu resolves the workspace from the slug context; without
+            it the catalog query stays disabled and every menu reads as empty. */}
+        <WorkspaceSlugProvider slug="acme">{ui}</WorkspaceSlugProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  // Both composers post to the same issue, so `/` must offer the same catalog in
+  // both. The reply box shipped without the prop entirely (MUL-5588): its menu
+  // listed only the built-in `/note` while the top-level composer listed the
+  // workspace's quick actions.
+  const composers = [
+    {
+      name: "top-level comment composer",
+      shell: "comment-composer-shell" as const,
+      element: <CommentInput issueId="issue-1" onSubmit={vi.fn().mockResolvedValue(true)} />,
+    },
+    {
+      name: "thread reply composer",
+      shell: "reply-composer-shell" as const,
+      element: (
+        <ReplyInput
+          issueId="issue-1"
+          parentId="comment-1"
+          avatarType="member"
+          avatarId="user-1"
+          onSubmit={vi.fn().mockResolvedValue(true)}
+        />
+      ),
+    },
+  ];
+
+  for (const composer of composers) {
+    it(`offers the workspace's active quick actions in the ${composer.name}`, async () => {
+      renderInWorkspace(composer.element);
+      activateComposer(composer.shell);
+
+      await waitFor(() => {
+        expect(editorQuickActionMenu.last?.getQuickActions?.()).toEqual([
+          { id: "qa-1", name: "review", description: "Ask for a review" },
+        ]);
+      });
+    });
+
+    it(`binds quick action rendering to this issue in the ${composer.name}`, async () => {
+      apiRenderQuickAction.mockResolvedValue("rendered body");
+      renderInWorkspace(composer.element);
+      activateComposer(composer.shell);
+
+      await waitFor(() => {
+        expect(editorQuickActionMenu.last?.renderQuickAction).toBeTypeOf("function");
+      });
+      await editorQuickActionMenu.last?.renderQuickAction?.("qa-1");
+
+      expect(apiRenderQuickAction).toHaveBeenCalledWith("issue-1", "qa-1");
+    });
+  }
 });
 
 describe("comment composers", () => {
@@ -987,6 +1095,18 @@ describe("sticky composer preference", () => {
 
   it("lets the editor grow when the preference is off", () => {
     useCommentComposerStore.setState({ sticky: false });
+    renderCommentInput();
+
+    activateComposer("comment-composer-shell");
+    expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
+  });
+
+  // The cap only earns its keep while the composer is pinned: it stops a long
+  // draft from swallowing the timeline it floats over. Below the mobile
+  // breakpoint nothing is pinned (see `useStickyComposer`), so a capped
+  // composer would just be a scroll-inside-a-scroll for no reason.
+  it("lets the editor grow below the mobile breakpoint, where nothing is pinned", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     renderCommentInput();
 
     activateComposer("comment-composer-shell");

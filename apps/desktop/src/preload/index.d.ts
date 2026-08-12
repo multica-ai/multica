@@ -2,7 +2,6 @@ import { ElectronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
-import type { DiagnosticsControl } from "../shared/diagnostics-control";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
   DesktopWindowContext,
@@ -74,8 +73,6 @@ interface DesktopAPI {
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => () => void;
   /** Report the renderer's memory-router path for recovery diagnostics. */
   setRendererRouteContext: (context: RendererRouteContextInput) => void;
-  /** Publish server-driven diagnostics flags; main stays fail-closed until then. */
-  setDiagnosticsControl: (control: DiagnosticsControl) => void;
   /** Open the OS folder picker and return the chosen absolute path.
    *  Used by the Project settings "Add local directory" flow. */
   pickDirectory: (

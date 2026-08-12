@@ -294,7 +294,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	}
 	prefix := ws.IssuePrefix
 	if prefix == "" {
-		prefix = generateIssuePrefix(ws.Name)
+		prefix = issuePrefixForWorkspace(ws)
 	}
 	// Recompute close_intent on the first terminal transition, then freeze it
 	// for later terminal updates whose raw provider action is non-terminal

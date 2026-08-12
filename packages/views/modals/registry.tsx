@@ -1,7 +1,6 @@
 "use client";
 
 import { useModalStore } from "@multica/core/modals";
-import { CreateWorkspaceModal } from "./create-workspace";
 import { CreateIssueDialog } from "./create-issue-dialog";
 import { CreateProjectModal } from "./create-project";
 import { CreateSquadModal } from "./create-squad";
@@ -17,8 +16,6 @@ export function ModalRegistry() {
   const close = useModalStore((s) => s.close);
 
   switch (modal) {
-    case "create-workspace":
-      return <CreateWorkspaceModal onClose={close} />;
     // Both modal types open the same shell so the in-modal mode switch is
     // instant — only the inner panel swaps, the Dialog Root stays mounted.
     case "create-issue":

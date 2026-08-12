@@ -34,7 +34,7 @@ export function ProjectDueDatePicker({
       onChange={(v) => onUpdate({ due_date: v })}
       icon={<CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />}
       placeholder={t(($) => $.detail.prop_due_date)}
-      clearLabel={t(($) => $.detail.clear_date)}
+      emptyLabel={t(($) => $.detail.no_due_date)}
       highlightOverdue
       triggerRender={triggerRender}
       align={align}

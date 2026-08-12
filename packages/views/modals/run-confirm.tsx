@@ -20,6 +20,9 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { runtimeListOptions, readRuntimeCliVersion, handoffSupported } from "@multica/core/runtimes";
+import { useShortcut, shortcutMatchesEvent, isPlainShortcut } from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useT } from "../i18n";
 
 const MAX_HANDOFF_NOTE = 2000;
@@ -79,6 +82,7 @@ export function RunConfirmModal({
 }) {
   const { t } = useT("modals");
   const { getActorName } = useActorName();
+  const sendShortcut = useShortcut("send");
   const d = (data ?? {}) as RunConfirmData;
   const issueIds = d.issueIds ?? [];
 
@@ -164,6 +168,35 @@ export function RunConfirmModal({
     }
   };
 
+  /**
+   * The configured `send` chord confirms the assignment, the same chord that
+   * creates from the issue composer (MUL-5694).
+   *
+   * Bound on the dialog, not on the note box, because the chord means "run the
+   * primary action" no matter which control has focus — and the note box is
+   * not always where focus is. An old runtime disables it, which hands initial
+   * focus to the footer instead, and that is precisely where the keycap on the
+   * confirm button would otherwise be advertising a dead key.
+   */
+  const onDialogKeyDown = (e: React.KeyboardEvent) => {
+    // A held chord submits once, and the Enter that commits an IME
+    // composition is the user picking a candidate, never a confirmation.
+    if (e.defaultPrevented || e.repeat || isImeComposing(e)) return;
+    if (!shortcutMatchesEvent(sendShortcut, e.nativeEvent)) return;
+    // Only a BARE Enter activates a focused button (Chromium fires no click
+    // for ⌘/Ctrl+Enter), so a `send` remapped to plain Enter is the one case
+    // where confirming here too would double-write — and on "Don't start yet"
+    // the two writes would disagree about suppress_run. Every chord form
+    // reaches the footer as a dead key without us, so it must not be skipped.
+    const activatesFocusedButton =
+      isPlainShortcut(sendShortcut, "Enter") &&
+      e.target instanceof HTMLElement &&
+      e.target.closest("button") !== null;
+    if (activatesFocusedButton) return;
+    e.preventDefault();
+    void submit(false);
+  };
+
   // States the action, not a prediction: the assignment is certain, the run is
   // conditional, so the copy names no run count.
   const headline: ReactNode = boldName(
@@ -179,7 +212,7 @@ export function RunConfirmModal({
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v && !submitting) onClose(); }}>
-      <DialogContent>
+      <DialogContent onKeyDown={onDialogKeyDown}>
         <DialogHeader>
           <DialogTitle>{t(($) => $.run_confirm.title_assign)}</DialogTitle>
           <DialogDescription>{headline}</DialogDescription>
@@ -212,7 +245,24 @@ export function RunConfirmModal({
             {pendingAction === "suppress" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.dont_start)}
           </Button>
           <Button type="button" disabled={submitting} onClick={() => submit(false)}>
-            {pendingAction === "go" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.confirm_assign)}
+            {pendingAction === "go" ? (
+              <Spinner className="size-4" />
+            ) : (
+              <>
+                {t(($) => $.run_confirm.confirm_assign)}
+                {/* Decorative: the accessible name stays "Confirm assignment",
+                    not "Confirm assignment Command Enter". Absent when `send`
+                    is unbound. */}
+                {sendShortcut ? (
+                  <ShortcutKeycaps
+                    shortcut={sendShortcut}
+                    decorative
+                    className="ml-1"
+                    keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
+                  />
+                ) : null}
+              </>
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

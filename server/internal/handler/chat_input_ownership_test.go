@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -59,6 +60,16 @@ func markTaskRunning(t *testing.T, ctx context.Context, taskID string) {
 	}
 }
 
+func insertTaskTranscriptRow(t *testing.T, ctx context.Context, taskID string) {
+	t.Helper()
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_message (task_id, seq, type, content)
+		VALUES ($1, 1, 'text', 'partial output')
+	`, taskID); err != nil {
+		t.Fatalf("insert task transcript row: %v", err)
+	}
+}
+
 func completeResult(t *testing.T, output string) []byte {
 	t.Helper()
 	b, err := json.Marshal(TaskCompleteRequest{Output: output})
@@ -66,6 +77,18 @@ func completeResult(t *testing.T, output string) []byte {
 		t.Fatalf("marshal complete result: %v", err)
 	}
 	return b
+}
+
+func assertChatTranscriptContents(t *testing.T, messages []db.ChatMessage, want []string) {
+	t.Helper()
+	if len(messages) != len(want) {
+		t.Fatalf("transcript length = %d, want %d: %+v", len(messages), len(want), messages)
+	}
+	for i, content := range want {
+		if messages[i].Content != content {
+			t.Fatalf("transcript[%d] = %q, want %q; transcript=%+v", i, messages[i].Content, content, messages)
+		}
+	}
 }
 
 // TestDirectChat_TaskOwnsItsOwnInputBatch is the core input-boundary contract
@@ -103,6 +126,225 @@ func TestDirectChat_TaskOwnsItsOwnInputBatch(t *testing.T) {
 	claimed2 := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if claimed2.ChatMessage != "还有青岛" {
 		t.Fatalf("second claim must deliver ONLY the second owned message; got %q", claimed2.ChatMessage)
+	}
+}
+
+// TestDirectChat_ClaimKeepsQueuedTurnsPairedWithReplies covers the follow-up
+// transcript regression from MUL-5751. The idle positional head is visible
+// before claim, while later queued user rows remain hidden. When a predecessor
+// settles, its reply and the newly-visible follow-up must become atomically
+// ordered during the completion-to-claim window; claiming that already-visible
+// head must not move it again. The same server-authoritative order must drive
+// both the legacy full list and every cursor page.
+func TestDirectChat_ClaimKeepsQueuedTurnsPairedWithReplies(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, runtimeID, daemonID := setupDirectChatSession(t, ctx, "queued transcript order")
+
+	t1 := sendDirectChat(t, ctx, agentID, sessionID, "user A")
+	t2 := sendDirectChat(t, ctx, agentID, sessionID, "user B")
+	t3 := sendDirectChat(t, ctx, agentID, sessionID, "user C")
+
+	inputABeforeClaim, err := testHandler.Queries.ListChatInputMessages(ctx, parseUUID(t1))
+	if err != nil || len(inputABeforeClaim) != 1 {
+		t.Fatalf("load A input before claim: messages=%+v err=%v", inputABeforeClaim, err)
+	}
+	transcript, err := testHandler.Queries.ListChatMessages(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("list transcript before claiming A: %v", err)
+	}
+	assertChatTranscriptContents(t, transcript, []string{"user A"})
+
+	claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	inputAAfterClaim, err := testHandler.Queries.ListChatInputMessages(ctx, parseUUID(t1))
+	if err != nil || len(inputAAfterClaim) != 1 {
+		t.Fatalf("load A input after claim: messages=%+v err=%v", inputAAfterClaim, err)
+	}
+	if !inputAAfterClaim[0].CreatedAt.Time.Equal(inputABeforeClaim[0].CreatedAt.Time) {
+		t.Fatalf("claim moved already-visible A from %s to %s", inputABeforeClaim[0].CreatedAt.Time, inputAAfterClaim[0].CreatedAt.Time)
+	}
+	markTaskRunning(t, ctx, t1)
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t1), completeResult(t, "assistant A"), "", "", false, ""); err != nil {
+		t.Fatalf("complete turn A: %v", err)
+	}
+	transcript, err = testHandler.Queries.ListChatMessages(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("list transcript before claiming B: %v", err)
+	}
+	assertChatTranscriptContents(t, transcript, []string{"user A", "assistant A", "user B"})
+
+	queuedBeforeClaim, err := testHandler.Queries.GetAgentTask(ctx, parseUUID(t2))
+	if err != nil {
+		t.Fatalf("load queued turn B: %v", err)
+	}
+	inputBBeforeClaim, err := testHandler.Queries.ListChatInputMessages(ctx, parseUUID(t2))
+	if err != nil || len(inputBBeforeClaim) != 1 {
+		t.Fatalf("load B input before claim: messages=%+v err=%v", inputBBeforeClaim, err)
+	}
+	claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	claimedAfter, err := testHandler.Queries.GetAgentTask(ctx, parseUUID(t2))
+	if err != nil {
+		t.Fatalf("load claimed turn B: %v", err)
+	}
+	if !claimedAfter.CreatedAt.Time.Equal(queuedBeforeClaim.CreatedAt.Time) {
+		t.Fatalf("claim changed task queue created_at from %s to %s", queuedBeforeClaim.CreatedAt.Time, claimedAfter.CreatedAt.Time)
+	}
+	inputBAfterClaim, err := testHandler.Queries.ListChatInputMessages(ctx, parseUUID(t2))
+	if err != nil || len(inputBAfterClaim) != 1 {
+		t.Fatalf("load B input after claim: messages=%+v err=%v", inputBAfterClaim, err)
+	}
+	if !inputBAfterClaim[0].CreatedAt.Time.Equal(inputBBeforeClaim[0].CreatedAt.Time) {
+		t.Fatalf("claim moved already-visible B from %s to %s", inputBBeforeClaim[0].CreatedAt.Time, inputBAfterClaim[0].CreatedAt.Time)
+	}
+
+	transcript, err = testHandler.Queries.ListChatMessages(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("list transcript after claiming B: %v", err)
+	}
+	assertChatTranscriptContents(t, transcript, []string{"user A", "assistant A", "user B"})
+
+	// Lost claim responses are re-delivered from dispatched without creating a
+	// new transcript turn. Refreshing dispatched_at must not move user B again.
+	inputBeforeReclaim, err := testHandler.Queries.ListChatInputMessages(ctx, parseUUID(t2))
+	if err != nil || len(inputBeforeReclaim) != 1 {
+		t.Fatalf("load B input before reclaim: messages=%+v err=%v", inputBeforeReclaim, err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET dispatched_at = now() - interval '1 hour',
+		    prepare_lease_expires_at = now() - interval '1 minute'
+		WHERE id = $1
+	`, t2); err != nil {
+		t.Fatalf("age B dispatch for reclaim: %v", err)
+	}
+	reclaimed, err := testHandler.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
+		RuntimeID:         parseUUID(runtimeID),
+		ClaimRecoverySecs: 0,
+		PrepareLeaseSecs:  60,
+	})
+	if err != nil {
+		t.Fatalf("reclaim B dispatch: %v", err)
+	}
+	if uuidToString(reclaimed.ID) != t2 {
+		t.Fatalf("reclaimed task = %s, want %s", uuidToString(reclaimed.ID), t2)
+	}
+	inputAfterReclaim, err := testHandler.Queries.ListChatInputMessages(ctx, parseUUID(t2))
+	if err != nil || len(inputAfterReclaim) != 1 {
+		t.Fatalf("load B input after reclaim: messages=%+v err=%v", inputAfterReclaim, err)
+	}
+	if !inputAfterReclaim[0].CreatedAt.Time.Equal(inputBeforeReclaim[0].CreatedAt.Time) {
+		t.Fatalf("stale reclaim moved B from %s to %s", inputBeforeReclaim[0].CreatedAt.Time, inputAfterReclaim[0].CreatedAt.Time)
+	}
+
+	markTaskRunning(t, ctx, t2)
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t2), completeResult(t, "assistant B"), "", "", false, ""); err != nil {
+		t.Fatalf("complete turn B: %v", err)
+	}
+	transcript, err = testHandler.Queries.ListChatMessages(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("list transcript before claiming C: %v", err)
+	}
+	assertChatTranscriptContents(t, transcript, []string{"user A", "assistant A", "user B", "assistant B", "user C"})
+
+	claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	transcript, err = testHandler.Queries.ListChatMessages(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("list transcript after claiming C: %v", err)
+	}
+	assertChatTranscriptContents(t, transcript, []string{"user A", "assistant A", "user B", "assistant B", "user C"})
+
+	markTaskRunning(t, ctx, t3)
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t3), completeResult(t, "assistant C"), "", "", false, ""); err != nil {
+		t.Fatalf("complete turn C: %v", err)
+	}
+	transcript, err = testHandler.Queries.ListChatMessages(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("list completed transcript: %v", err)
+	}
+	want := []string{"user A", "assistant A", "user B", "assistant B", "user C", "assistant C"}
+	assertChatTranscriptContents(t, transcript, want)
+
+	// Rebuild the same transcript from two-message cursor pages, detecting both
+	// missing rows and duplicate ids while crossing every turn boundary.
+	var before *ChatMessagesCursorResponse
+	var paged []string
+	seen := map[string]bool{}
+	for {
+		params := url.Values{"limit": {"2"}}
+		if before != nil {
+			params.Set("before_created_at", before.CreatedAt)
+			params.Set("before_id", before.ID)
+		}
+		page := fetchChatMessagesPageForTest(t, sessionID, params)
+		contents := make([]string, 0, len(page.Messages))
+		for _, message := range page.Messages {
+			if seen[message.ID] {
+				t.Fatalf("cursor pagination returned duplicate message %s", message.ID)
+			}
+			seen[message.ID] = true
+			contents = append(contents, message.Content)
+		}
+		paged = append(contents, paged...)
+		if !page.HasMore {
+			break
+		}
+		if page.NextCursor == nil {
+			t.Fatal("page has_more without next_cursor")
+		}
+		before = page.NextCursor
+	}
+	if len(paged) != len(want) {
+		t.Fatalf("paged transcript length = %d, want %d: %v", len(paged), len(want), paged)
+	}
+	for i, content := range want {
+		if paged[i] != content {
+			t.Fatalf("paged transcript[%d] = %q, want %q; transcript=%v", i, paged[i], content, paged)
+		}
+	}
+}
+
+// Retry tasks inherit the original chat_input_task_id and must never make the
+// already-visible root user turn look new again when the child is claimed.
+func TestDirectChat_RetryClaimDoesNotMoveOriginalInput(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "retry transcript order")
+	rootID := sendDirectChat(t, ctx, agentID, sessionID, "retry me")
+	inputBefore, err := testHandler.Queries.ListChatInputMessages(ctx, parseUUID(rootID))
+	if err != nil || len(inputBefore) != 1 {
+		t.Fatalf("load root input: messages=%+v err=%v", inputBefore, err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'failed', failure_reason = 'agent_error', completed_at = now()
+		WHERE id = $1
+	`, rootID); err != nil {
+		t.Fatalf("fail root task: %v", err)
+	}
+	retry, err := testHandler.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: parseUUID(rootID)})
+	if err != nil {
+		t.Fatalf("create retry task: %v", err)
+	}
+	if !retry.ChatInputTaskID.Valid || uuidToString(retry.ChatInputTaskID) != rootID {
+		t.Fatalf("retry input owner = %s, want root %s", uuidToString(retry.ChatInputTaskID), rootID)
+	}
+	claimed, err := testHandler.TaskService.ClaimTask(ctx, parseUUID(agentID))
+	if err != nil || claimed == nil {
+		t.Fatalf("claim retry task: task=%+v err=%v", claimed, err)
+	}
+	if uuidToString(claimed.ID) != uuidToString(retry.ID) {
+		t.Fatalf("claimed task = %s, want retry %s", uuidToString(claimed.ID), uuidToString(retry.ID))
+	}
+	inputAfter, err := testHandler.Queries.ListChatInputMessages(ctx, parseUUID(rootID))
+	if err != nil || len(inputAfter) != 1 {
+		t.Fatalf("reload root input: messages=%+v err=%v", inputAfter, err)
+	}
+	if !inputAfter[0].CreatedAt.Time.Equal(inputBefore[0].CreatedAt.Time) {
+		t.Fatalf("retry claim moved root input from %s to %s", inputBefore[0].CreatedAt.Time, inputAfter[0].CreatedAt.Time)
 	}
 }
 
@@ -276,6 +518,91 @@ func TestFailTask_ChatRetryInheritsInputOwnerAndPriority(t *testing.T) {
 	if len(owned) != 1 || owned[0].Content != "root question" {
 		t.Fatalf("retry child must read the root input batch; got %+v", msgContents(owned))
 	}
+}
+
+// A non-retried failure is an assistant outcome just like a normal completion.
+// The failure row and the next queued head must commit in transcript order so
+// the successor cannot be claimed or rendered before the failure it follows.
+func TestFailTask_ChatFailureKeepsNextTurnAfterOutcome(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "failed turn order")
+	t1 := sendDirectChat(t, ctx, agentID, sessionID, "user A")
+	sendDirectChat(t, ctx, agentID, sessionID, "user B")
+	markTaskRunning(t, ctx, t1)
+
+	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(t1), "assistant failure", "", "", "agent_error.unknown", false, ""); err != nil {
+		t.Fatalf("fail turn A: %v", err)
+	}
+	transcript, err := testHandler.Queries.ListChatMessages(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("list failed-turn transcript: %v", err)
+	}
+	assertChatTranscriptContents(t, transcript, []string{"user A", "assistant failure", "user B"})
+}
+
+// Cancellation finalization intentionally happens after the cancellation
+// transaction (#5219), so this test pins the eventual transcript order rather
+// than claiming cursor stability during that post-commit window. When output
+// is already durable, finalization is synchronous and the visible result must
+// still pair the cancelled turn with Stopped. before exposing its successor.
+func TestCancelTask_ChatStoppedKeepsNextTurnAfterOutcome(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "cancelled turn order")
+	t1 := sendDirectChat(t, ctx, agentID, sessionID, "user A")
+	sendDirectChat(t, ctx, agentID, sessionID, "user B")
+	markTaskRunning(t, ctx, t1)
+	insertTaskTranscriptRow(t, ctx, t1)
+
+	if _, err := testHandler.TaskService.CancelTaskWithResult(ctx, parseUUID(t1), service.CancelTaskOptions{ClientSupportsDraftRestore: true}); err != nil {
+		t.Fatalf("cancel turn A: %v", err)
+	}
+	transcript, err := testHandler.Queries.ListChatMessages(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("list synchronously cancelled transcript: %v", err)
+	}
+	assertChatTranscriptContents(t, transcript, []string{"user A", "Stopped.", "user B"})
+}
+
+// A started task with no durable output defers its empty/non-empty judgment
+// until the daemon ack or sweeper. During that intentional transient, the next
+// queued turn can be visible at its enqueue position. Once late output lands,
+// deferred finalization must produce the same stable final order as the
+// synchronous path.
+func TestCancelTask_DeferredStoppedKeepsNextTurnAfterOutcome(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "deferred cancelled turn order")
+	t1 := sendDirectChat(t, ctx, agentID, sessionID, "user A")
+	sendDirectChat(t, ctx, agentID, sessionID, "user B")
+	markTaskRunning(t, ctx, t1)
+
+	if _, err := testHandler.TaskService.CancelTaskWithResult(ctx, parseUUID(t1), service.CancelTaskOptions{ClientSupportsDraftRestore: true}); err != nil {
+		t.Fatalf("cancel turn A: %v", err)
+	}
+	transcript, err := testHandler.Queries.ListChatMessages(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("list deferred cancellation transient: %v", err)
+	}
+	assertChatTranscriptContents(t, transcript, []string{"user A", "user B"})
+
+	// Simulate output flushed after the cancellation commit, then settle the
+	// deferred marker as the daemon acknowledgement or sweeper would.
+	insertTaskTranscriptRow(t, ctx, t1)
+	testHandler.TaskService.FinalizeDeferredCancelledChat(ctx, parseUUID(t1))
+
+	transcript, err = testHandler.Queries.ListChatMessages(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("list deferred cancelled transcript: %v", err)
+	}
+	assertChatTranscriptContents(t, transcript, []string{"user A", "Stopped.", "user B"})
 }
 
 // ---- helpers ----

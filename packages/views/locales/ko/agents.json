@@ -1,7 +1,7 @@
 {
   "page": {
     "title": "에이전트",
-    "tagline": "이슈를 맡고, 댓글을 남기고, 상태를 업데이트하는 AI 팀원입니다.",
+    "tagline": "태스크를 맡고, 댓글을 남기고, 상태를 업데이트하는 AI 팀원입니다.",
     "learn_more": "자세히 보기 →",
     "new_agent": "새 에이전트",
     "search_placeholder": "에이전트 검색...",
@@ -40,7 +40,7 @@
   },
   "empty": {
     "title": "아직 에이전트가 없습니다",
-    "description": "팀원에게 하듯 에이전트를 만들고 이슈를 할당하세요. 로컬 에이전트는 내 기기에서, 클라우드 에이전트는 Multica 런타임에서 실행됩니다."
+    "description": "팀원에게 하듯 에이전트를 만들고 태스크를 할당하세요. 로컬 에이전트는 내 기기에서, 클라우드 에이전트는 Multica 런타임에서 실행됩니다."
   },
   "no_matches": {
     "title": "일치하는 결과 없음",
@@ -71,16 +71,17 @@
     "model": "모델",
     "created": "생성일",
     "owner": "소유자",
-    "access": "액세스"
+    "access": "접근 권한"
   },
   "row": {
     "you": "나",
     "archived": "보관됨",
+    "needs_runtime": "런타임 필요",
     "no_description": "설명 없음",
     "fallback_runtime_cloud": "클라우드",
     "fallback_runtime_local": "로컬",
     "actions_aria": "행 작업",
-    "task_count_other": "태스크 {{count}}개"
+    "task_count_other": "작업 {{count}}개"
   },
   "activity_tooltip": {
     "created_today": "오늘 생성됨",
@@ -131,6 +132,8 @@
     "no_access_hint": "비공개 에이전트는 에이전트 소유자 또는 워크스페이스 관리자만 볼 수 있습니다.",
     "try_again": "다시 시도",
     "archived_banner": "보관된 에이전트입니다. 할당하거나 멘션할 수 없습니다.",
+    "runtime_required_banner": "이 에이전트의 설정과 기록은 보존되었지만 실행하려면 런타임을 연결해야 합니다.",
+    "bind_runtime": "런타임 연결",
     "restore": "복원",
     "archive_dialog_title": "에이전트를 보관할까요?",
     "archive_dialog_description": "\"{{name}}\"이(가) 보관됩니다. 할당하거나 멘션할 수 없지만 기록은 유지됩니다. 나중에 복원할 수 있습니다.",
@@ -145,6 +148,7 @@
     "restore_failed_toast": "에이전트를 복원하지 못했습니다",
     "dm": "DM",
     "dm_no_permission_toast": "이 에이전트와 채팅할 권한이 없습니다.",
+    "runtime_required_toast": "이 에이전트를 실행하기 전에 런타임을 연결하세요.",
     "assign_work": "작업 할당",
     "more_actions_aria": "에이전트 작업",
     "updated": "{{when}} 업데이트됨"
@@ -335,7 +339,14 @@
     "instructions": {
       "intro": "모든 작업에 사용할 System Prompt를 설정하세요. Markdown을 지원합니다.",
       "system_prompt_label": "System Prompt",
-      "placeholder": "이 에이전트의 역할, 전문성, 작업 방식을 정의하세요.\n\n# 예시\n당신은 React와 TypeScript에 특화된 프런트엔드 엔지니어입니다.\n\n## 작업 방식\n- 작고 집중된 PR을 작성합니다. 논리적 변경 단위마다 커밋 하나를 사용합니다\n- 상속보다 조합을 선호합니다\n- 새 컴포넌트에는 항상 단위 테스트를 추가합니다\n\n## 제약\n- 명시적인 승인 없이 shared/ 타입을 수정하지 않습니다\n- features/의 기존 컴포넌트 패턴을 따릅니다"
+      "placeholder": "이 에이전트의 역할, 전문성, 작업 방식을 정의하세요.\n\n# 예시\n당신은 React와 TypeScript에 특화된 프런트엔드 엔지니어입니다.\n\n## 작업 방식\n- 작고 집중된 PR을 작성합니다. 논리적 변경 단위마다 커밋 하나를 사용합니다\n- 상속보다 조합을 선호합니다\n- 새 컴포넌트에는 항상 단위 테스트를 추가합니다\n\n## 제약\n- 명시적인 승인 없이 shared/ 타입을 수정하지 않습니다\n- features/의 기존 컴포넌트 패턴을 따릅니다",
+      "system_layer_label": "Multica가 관리",
+      "system_layer_hint": "Multica 릴리스마다 업데이트됩니다. 편집할 수 없으며, 아래에 작성한 내용은 절대 덮어쓰이지 않습니다.",
+      "system_layer_show": "보기",
+      "system_layer_hide": "접기",
+      "workspace_notes_label": "워크스페이스 메모",
+      "workspace_notes_intro": "팀의 컨텍스트와 선호를 아래에 추가하세요. Multica가 이 에이전트를 위해 관리하는 지침 위에 적용됩니다. Markdown을 지원합니다.",
+      "workspace_notes_placeholder": "이 에이전트가 항상 알아야 할 내용을 적으세요.\n\n# 예시\n메인 저장소는 github.com/acme/platform입니다.\n채팅은 한국어로 해도 태스크는 영어로 작성하세요.\n금요일에는 배포하지 않습니다."
     },
     "env": {
       "intro_readonly": "에이전트 프로세스가 시작될 때 주입됩니다. 워크스페이스 소유자와 관리자만 값을 읽거나 수정할 수 있으며, 모든 공개와 수정은 워크스페이스 감사 로그에 기록됩니다.",
@@ -343,6 +354,8 @@
       "intro_prefix": "에이전트 프로세스가 시작될 때 주입됩니다(예: ",
       "intro_separator": ", ",
       "intro_suffix": ").",
+      "paste_hint": "키 필드에 KEY=value 형식의 줄을 붙여넣으면 여러 환경 변수를 추가할 수 있습니다.",
+      "paste_invalid_toast": "붙여넣은 환경 변수를 파싱할 수 없습니다",
       "key_placeholder": "KEY",
       "value_placeholder": "value",
       "show_value_aria": "값 표시",
@@ -442,7 +455,7 @@
       "delete_action": "Server 삭제",
       "invalid_json": "잘못된 JSON: {{error}}",
       "save_failed_toast": "MCP config를 저장하지 못했습니다",
-      "redacted_title": "설정됨 - 현재 보기에서는 숨김",
+      "redacted_title": "설정됨 — 보기에서 숨김",
       "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다."
     },
     "composio_mcp": {
@@ -533,7 +546,7 @@
     "activity": {
       "status": {
         "queued": "대기 중",
-        "dispatched": "전달됨",
+        "dispatched": "디스패치됨",
         "waiting_local_directory": "디렉터리 대기 중",
         "running": "실행 중",
         "completed": "성공",
@@ -560,18 +573,18 @@
       "avg_duration_label": "평균 소요 시간",
       "failed_count": "{{count}}회 실패",
       "failed_label": "실패",
-      "source_issue": "이슈",
+      "source_issue": "태스크",
       "source_chat": "채팅",
       "source_autopilot": "오토파일럿",
       "source_untracked": "추적 안 됨",
       "source_quick_create": "빠른 생성",
-      "source_creating_issue": "이슈 생성 중",
+      "source_creating_issue": "태스크 생성 중",
       "source_chat_session": "채팅 세션",
       "source_autopilot_run": "오토파일럿 실행",
-      "issue_short_fallback": "이슈 {{prefix}}...",
+      "issue_short_fallback": "태스크 {{prefix}}...",
       "triggered_by": "트리거한 사람",
-      "open_issue_aria": "이슈 열기",
-      "open_issue_tooltip": "이슈 열기",
+      "open_issue_aria": "태스크 열기",
+      "open_issue_tooltip": "태스크 열기",
       "transcript_tooltip": "트랜스크립트 보기",
       "cancel_task_aria": "작업 취소",
       "cancel_task_tooltip": "작업 취소",
@@ -683,7 +696,7 @@
     "status_waiting": "대기 중",
     "trigger_initial": "최초 실행",
     "trigger_comment": "댓글에서",
-    "trigger_autopilot": "Autopilot",
+    "trigger_autopilot": "오토파일럿",
     "trigger_retry": "재시도",
     "trigger_chat": "채팅에서",
     "trigger_quick_create": "빠른 생성",
@@ -699,7 +712,13 @@
     "copy_workdir": "작업 디렉터리 복사",
     "close": "닫기",
     "fact_created": "생성 {{time}}",
-    "fact_took": "소요 {{duration}}"
+    "fact_took": "소요 {{duration}}",
+    "details_input": "입력",
+    "details_output": "출력",
+    "details_cache_read": "캐시 읽기",
+    "details_cache_write": "캐시 쓰기",
+    "details_cost": "비용",
+    "usage_chip_title": "이 실행의 토큰 및 예상 비용"
   },
   "task_failure": {
     "agent_error": "에이전트 실행 오류",
@@ -719,7 +738,7 @@
     "filter_active_count_other": "필터 {{count}}개",
     "clear_filters": "필터 지우기",
     "section_availability": "가용성",
-    "section_access": "액세스",
+    "section_access": "접근 권한",
     "section_runtime": "런타임",
     "display": "표시",
     "sort_by": "정렬",
@@ -736,11 +755,10 @@
     "back": "뒤로",
     "eyebrow": "에이전트 만들기",
     "choose_title": "어떻게 시작하시겠어요?",
-    "choose_description": "모든 항목을 직접 설정하거나, 검증된 템플릿을 수정하거나, 필요한 내용을 설명하고 대화로 만들 수 있습니다.",
+    "choose_description": "모든 항목을 직접 설정하거나, 필요한 내용을 설명하고 대화로 만들 수 있습니다.",
     "recommended": "추천",
     "continue": "계속",
     "step_choose": "시작 방법 선택",
-    "step_template": "템플릿 선택",
     "step_configure": "검토 및 설정",
     "step_ai": "대화로 만들기",
     "modes": {
@@ -757,21 +775,12 @@
         "description": "원하는 결과를 설명하면 Agent Builder가 핵심 질문을 하고 실시간 초안을 준비합니다."
       }
     },
-    "templates": {
-      "search": "템플릿 검색…",
-      "search_label": "에이전트 템플릿 검색",
-      "empty": "검색과 일치하는 템플릿이 없습니다.",
-      "select_hint": "템플릿을 선택하여 지침과 스킬을 미리 확인하세요.",
-      "skills": "포함된 스킬",
-      "instructions": "지침",
-      "use": "이 템플릿 사용"
-    },
     "sections": {
       "identity": "기본 정보",
       "identity_hint": "알아보기 쉬운 이름과 간결한 목적을 지정하세요.",
       "behavior": "동작 및 기능",
       "behavior_hint": "작업 방식을 정의하고 사용할 워크스페이스 스킬을 추가하세요.",
-      "execution": "실행",
+      "execution": "실행 설정",
       "execution_hint": "에이전트를 실행할 위치를 선택하고 필요하면 런타임 기본 모델, 추론 수준, 속도를 변경하세요.",
       "access": "접근 권한",
       "access_hint": "이 에이전트를 실행할 수 있는 사용자를 설정합니다. 나중에 변경할 수 있습니다."
@@ -826,7 +835,17 @@
     "creating": "에이전트 만드는 중…",
     "create_failed": "에이전트를 만들지 못했습니다.",
     "name_conflict": "같은 이름의 에이전트가 이미 있습니다.",
-    "created": "{{name}}을(를) 만들었습니다"
+    "created": "{{name}}을(를) 만들었습니다",
+    "drafts": {
+      "title": "초안",
+      "untitled": "제목 없는 초안",
+      "discard": "생성 취소",
+      "discard_confirm": "대화와 오른쪽 설정이 영구적으로 삭제됩니다.",
+      "discard_title": "이 생성을 취소할까요?",
+      "discard_cancel": "계속 편집",
+      "banner": "미완료 초안이 {{count}}개 있습니다",
+      "pick_hint": "이어서 진행할 항목을 선택하세요."
+    }
   },
   "actions": {
     "selected_other": "{{count}}개 선택됨",

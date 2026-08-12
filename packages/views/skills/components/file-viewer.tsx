@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { parseFrontmatter } from "@multica/core/skills/frontmatter";
 import { RichContent } from "../../rich-content";
@@ -30,21 +30,44 @@ export function FileViewer({
   content,
   mode,
   readOnly,
+  autoFocus,
   onChange,
+  onFocusHandled,
 }: {
   path: string;
   content: string;
   mode: FileMode;
   readOnly: boolean;
+  /** Set by "Edit": put the caret in this file's editor once it renders. */
+  autoFocus?: boolean;
   onChange: (content: string) => void;
+  /** Called once the caret has landed, so the request is not replayed. */
+  onFocusHandled?: () => void;
 }) {
   const { t } = useT("skills");
   const isMd = isMarkdownPath(path);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
 
   const body = useMemo(
     () => (isMd ? parseFrontmatter(content).body : content),
     [content, isMd],
   );
+
+  // The caller flips the mode to raw in the same update that raises this flag,
+  // so by the time the effect runs the textarea below is mounted. Focusing
+  // through a request the page owns — rather than `autoFocus` on the element —
+  // is what makes "Edit" work on the file that is ALREADY open: that path
+  // changes no key, mounts nothing, and would never re-run a mount-only focus.
+  useEffect(() => {
+    if (autoFocus !== true) return;
+    const el = editorRef.current;
+    if (!el) return;
+    el.focus();
+    // Caret at the top. Jumping to the end of a multi-thousand-character
+    // reference file would scroll away the content the user just clicked.
+    el.setSelectionRange(0, 0);
+    onFocusHandled?.();
+  }, [autoFocus, onFocusHandled]);
 
   // Non-markdown files have nothing to preview; they are always raw.
   if (isMd && mode === "preview") {
@@ -64,6 +87,7 @@ export function FileViewer({
 
   return (
     <Textarea
+      ref={editorRef}
       value={content}
       readOnly={readOnly}
       onChange={(e) => onChange(e.target.value)}

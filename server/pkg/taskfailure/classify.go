@@ -81,6 +81,7 @@ func Classify(rawError string) Reason {
 		"prompt is too long",
 		"context size has been exceeded",
 	),
+		containsAny(lower, contextWindowExceededWitnesses...),
 		// SQL had `%token%limit%` — ILIKE wildcard between tokens. We
 		// approximate with both substrings present, which catches
 		// "token limit", "tokens per minute limit", etc., without the
@@ -177,9 +178,22 @@ func Classify(rawError string) Reason {
 	//    Note this only catches deadlines that arrive as a bare string;
 	//    callers holding the error value should classify structurally
 	//    instead (see taskRunFailureReason in daemon/daemon.go).
+	//    "opencode stream ended" is the shared prefix of every failure the
+	//    OpenCode terminal-signal guard raises (pkg/agent/opencode.go): a step
+	//    left open at EOF, a continuation that never started, and a run that
+	//    ended on a step with no text, no tool call and no reported usage.
+	//    All three mean the same thing — the provider stream died and
+	//    `opencode run` still exited 0 — which is this bucket by definition,
+	//    and being resume-safe the retry continues the truncated session
+	//    instead of redoing the work. Before this they landed in
+	//    agent_error.process_failure (the word "signal" in "terminal signal"
+	//    matching rule 13 by accident) and agent_error.unknown respectively;
+	//    neither is on the retry allowlist, so a transient cut ended the task
+	//    outright and max_attempts never applied (#6522).
 	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
 	case containsAny(lower,
 		"stream disconnected",
+		opencodeStreamEndedPrefix,
 		"connection closed",
 		"mid-response",
 		"error sending request",
@@ -254,6 +268,37 @@ func Classify(rawError string) Reason {
 	return ReasonAgentUnknown
 }
 
+// contextWindowExceededWitnesses are the two wordings for an overflow reported
+// on the RESPONSE rather than as a 400 on the request: the provider accepts the
+// call and ends the turn with stop_reason "model_context_window_exceeded", which
+// Claude Code 2.1.x surfaces verbatim as "API Error: The model has reached its
+// context window limit." (GH #6360). Both are matched so a backend forwarding
+// the raw stop reason classifies the same way as one forwarding the CLI's copy.
+//
+// Neither carries "token" nor any of rule 1's other phrases, so before this the
+// failure landed in agent_error.unknown — a reason no resume blacklist covers,
+// which left the over-full session pinned as the resume pointer and made every
+// later comment on that issue replay the same overflow.
+//
+// Each is an unambiguous witness on its own, which is what lets
+// NormalizeDaemonReason reuse them to upgrade an older daemon's catchall
+// server-side. Matched against pre-lowercased text.
+// Mirror these substrings into the MUL-1949 offline backfill SQL.
+//
+// terminal_reason=prompt_too_long joins them for GH #6402: it is the structured
+// enum value Claude Code puts on the result frame when the turn ended because
+// the context window is full, and the daemon quotes it verbatim into the error
+// it reports (see claudeTerminalReasonFailure in pkg/agent/claude.go). Being an
+// enum token rather than prose, it is at least as unambiguous as the two above
+// — no free-form provider message produces it by accident — so a run classified
+// from it lands in context_overflow even when the CLI's accompanying copy is
+// empty or reworded between releases.
+var contextWindowExceededWitnesses = []string{
+	"context window limit",
+	"model_context_window_exceeded",
+	TerminalReasonPromptTooLong,
+}
+
 // legacySkillBundlePrefix is the exact wrapper a pre-MUL-5370 daemon put on a
 // failed skill-bundle download. It is an unambiguous witness: no other code
 // path ever produced it, and a current daemon writes "skill bundle
@@ -272,6 +317,45 @@ var legacySkillBundleReasons = map[string]bool{
 	"agent_error":                      true,
 }
 
+// legacyContextOverflowReasons are the buckets an older daemon lands the
+// response-side context overflow in: agent_error.unknown from its own
+// classifier (its rule 1 predates contextWindowExceededWitnesses) and the
+// pre-MUL-1949 coarse agent_error.
+//
+// Deliberately narrower than legacySkillBundleReasons. A refined reason means
+// the old daemon matched an earlier rule on the same text — process_failure on
+// a crash marker, provider_network on a stream cut — and that says more about
+// what actually ended the run than a witness appearing somewhere in the same
+// blob does. Upgrading those would discard information; leaving them alone
+// costs at most the pre-existing behaviour.
+var legacyContextOverflowReasons = map[string]bool{
+	string(ReasonAgentUnknown): true,
+	"agent_error":              true,
+}
+
+// opencodeStreamEndedPrefix opens every failure the OpenCode terminal-signal
+// guard raises (pkg/agent/opencode.go). Exactly one code path emits it, and it
+// is a PREFIX of the whole error rather than a phrase somewhere inside it, so
+// its presence identifies the failure outright.
+const opencodeStreamEndedPrefix = "opencode stream ended"
+
+// legacyOpencodeStreamEndedReasons are the buckets a daemon predating rule 7's
+// entry lands these errors in: process_failure for the two "terminal signal"
+// variants, whose word "signal" its rule 13 matches by accident, unknown for
+// anything its rules miss, and the pre-MUL-1949 coarse agent_error.
+//
+// Wider than legacyContextOverflowReasons on purpose, and the witness is why.
+// That rule leaves refined reasons alone because a phrase appearing somewhere
+// in an error blob says less than the bucket an earlier rule already picked.
+// Here the witness is the guard's own message from its first character, so the
+// old bucket cannot be describing some other, better-identified cause — it is
+// the same failure under a label that predates knowing what it was.
+var legacyOpencodeStreamEndedReasons = map[string]bool{
+	string(ReasonAgentProcessFailure): true,
+	string(ReasonAgentUnknown):        true,
+	"agent_error":                     true,
+}
+
 // NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
 // onto the taxonomy this server understands, using the raw error text as the
 // witness. It returns the reason unchanged when nothing applies.
@@ -284,13 +368,37 @@ var legacySkillBundleReasons = map[string]bool{
 // generic copy. Recognising the wire shape an old daemon produces closes that
 // gap the moment the server deploys.
 //
-// This is a boundary compatibility shim, not internal fallback logic: it can
-// be deleted once no daemon old enough to emit legacySkillBundlePrefix is
-// still reporting.
+// This is a boundary compatibility shim, not internal fallback logic: each rule
+// can be deleted once no daemon old enough to produce its wire shape is still
+// reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
 	if legacySkillBundleReasons[reason] &&
 		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {
 		return ReasonSkillBundleUnavailable
+	}
+	// GH #6360: the same mixed-version gap, on a failure where waiting for
+	// every host to update is more expensive. A daemon whose rule 1 predates
+	// contextWindowExceededWitnesses reports the catchall, and the catchall is
+	// on no resume blacklist — so the over-full session stays pinned as the
+	// resume pointer and every later comment on that issue replays the same
+	// overflow. One un-upgraded host means a permanently stuck (agent, issue)
+	// pair, not just a missing label; upgrading here retires the session the
+	// moment the server deploys.
+	if legacyContextOverflowReasons[reason] &&
+		containsAny(strings.ToLower(rawError), contextWindowExceededWitnesses...) {
+		return ReasonAgentContextOverflow
+	}
+	// #6522: the same gap once more. Rule 7 only decides where these land when
+	// THIS server classifies them, and it classifies only when the daemon sent
+	// no reason at all. An installed daemon predating that entry reports a
+	// non-empty agent_error.process_failure instead, which the empty-reason
+	// branch in FailTask deliberately skips — so the run stays off the retry
+	// allowlist on exactly the un-upgraded hosts most likely to be hitting a
+	// flaky provider. Upgrading here makes the retry work the moment the server
+	// deploys, without waiting on the daemon fleet.
+	if legacyOpencodeStreamEndedReasons[reason] &&
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawError)), opencodeStreamEndedPrefix) {
+		return ReasonAgentProviderNetwork
 	}
 	return Reason(reason)
 }

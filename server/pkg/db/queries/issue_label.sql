@@ -61,12 +61,13 @@ DELETE FROM skill_to_label WHERE skill_id = $1;
 -- Workspace-wide cleanup lives in DeleteWorkspace so it is atomic with that
 -- workspace's existing multi-table teardown.
 
--- name: DeleteAgentLabelAssignmentsByRuntime :exec
--- Runtime teardown hard-deletes every agent bound to the runtime (archived and
--- system; active agents are refused by a 409 guard). Clear their label links by
--- runtime so none survive the agent hard-delete.
+-- name: DeleteAgentLabelAssignmentsBySystemRuntimeAgents :exec
+-- Runtime teardown hard-deletes the system agents bound to the runtime (user
+-- agents are unbound and kept since MUL-5559). Clear only those agents' label
+-- links so none survive the agent hard-delete — a surviving unbound agent must
+-- keep its labels.
 DELETE FROM agent_to_label
-WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1);
+WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system');
 
 -- name: AttachLabelToIssue :exec
 -- Workspace-guarded INSERT: the WHERE EXISTS clauses ensure both the issue

@@ -14,6 +14,7 @@ import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useCommentUploads } from "./use-comment-uploads";
+import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,6 +58,10 @@ function ReplyInput({
   const composerRef = useRef<HTMLDivElement>(null);
   // See CommentInput — replying mid-upload posts without the file.
   const uploadGate = useUploadGate(editorRef);
+  // Quick actions in the `/` menu — same catalog and same insert-don't-run
+  // behavior as the top-level composer. A reply posts to the same issue, so
+  // `/` has to offer the same thing here (MUL-5588).
+  const quickActionMenu = useQuickActionMenu(issueId);
   // If a draft key is provided, hydrate from store on mount (defaultValue is
   // the only injection point on ContentEditorRef) and flush on every onUpdate.
   const [initialDraft] = useState(() =>
@@ -246,6 +251,7 @@ function ReplyInput({
             attachments={pendingAttachments}
             enableSlashCommands
             slashCommandMode="command"
+            quickActionMenu={quickActionMenu}
           />
         </div>
         )}

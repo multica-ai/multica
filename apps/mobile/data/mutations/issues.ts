@@ -410,7 +410,9 @@ export function useToggleIssueReaction(issueId: string) {
 
 /**
  * Update an issue's editable fields (status / priority / assignee / due_date /
- * project_id / etc). Optimistic merge into the detail cache; settle invalidates
+ * project_id / etc). Predictable fields merge optimistically into the detail
+ * cache; description stays authoritative because the server resolves it
+ * against description_base and hidden channel-media markers. Settle invalidates
  * the my-issues list so a status change re-buckets the SectionList in
  * (tabs)/my-issues.tsx automatically.
  *
@@ -430,7 +432,12 @@ export function useUpdateIssue(issueId: string) {
       await qc.cancelQueries({ queryKey: key });
       const prev = qc.getQueryData<Issue>(key);
       if (prev) {
-        qc.setQueryData<Issue>(key, { ...prev, ...patch });
+        const {
+          description: _description,
+          description_base: _descriptionBase,
+          ...optimisticPatch
+        } = patch;
+        qc.setQueryData<Issue>(key, { ...prev, ...optimisticPatch });
       }
       return { prev, key };
     },

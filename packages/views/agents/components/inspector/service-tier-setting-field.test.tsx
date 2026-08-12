@@ -75,6 +75,7 @@ function renderField(
           label="Speed"
           runtimeId="runtime-1"
           runtimeOnline
+          provider="codex"
           model="gpt-5.6-sol"
           value=""
           canEdit

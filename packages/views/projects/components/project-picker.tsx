@@ -1,12 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { FolderKanban, X } from "lucide-react";
+import { FolderKanban } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { UpdateIssueRequest } from "@multica/core/types";
-import { cn } from "@multica/ui/lib/utils";
 import { ProjectIcon } from "./project-icon";
 import {
   PropertyPicker,
@@ -36,12 +35,11 @@ export function ProjectPicker({
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  /** Read-only lock. When true the trigger, the menu, and the inline clear
-   *  button are all disabled and out of the tab order, so no project-context
-   *  mutation can fire — pointer OR keyboard. Callers that must freeze the
-   *  selection during a transient window (an in-flight chat send) pass this;
-   *  every other caller keeps the default hover/keyboard clear behavior since
-   *  it defaults to false. */
+  /** Read-only lock. When true the trigger is disabled and out of the tab
+   *  order and the menu can never open, so no project-context mutation can
+   *  fire — pointer OR keyboard. Clearing lives inside the menu, so locking
+   *  the menu locks clearing too. Callers that must freeze the selection
+   *  during a transient window (an in-flight chat send) pass this. */
   disabled?: boolean;
 }) {
   const { t } = useT("projects");
@@ -66,19 +64,14 @@ export function ProjectPicker({
     (p) => p.title.toLowerCase().includes(query) || matchesPinyin(p.title, query),
   );
 
-  // Default trigger built as a `triggerRender` so it can reserve right padding
-  // for the inline clear button. Callers that bring their own trigger (chat
-  // pill, autopilot card, table cell) take over the trigger entirely.
+  // Callers that bring their own trigger (create pill, chat pill, autopilot
+  // card, table cell) take over the trigger entirely.
   const resolvedTriggerRender = triggerRender ?? (
-    <button
-      type="button"
-      disabled={disabled}
-      className={cn(PICKER_TRIGGER_CLASS, current && "pr-5")}
-    />
+    <button type="button" disabled={disabled} className={PICKER_TRIGGER_CLASS} />
   );
 
   return (
-    <div className="group/project relative inline-flex min-w-0">
+    <div className="inline-flex min-w-0">
       <PropertyPicker
         open={open}
         onOpenChange={setOpen}
@@ -102,20 +95,20 @@ export function ProjectPicker({
           )
         }
       >
-        {/* "No project" clear row — hidden while searching, mirrors the
-            unassigned row in the assignee picker. */}
-        {!query && projects.length > 0 && (
-          <PickerItem
-            selected={!projectId}
-            onClick={() => {
-              onUpdate({ project_id: null });
-              setOpen(false);
-            }}
-          >
-            <FolderKanban className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-muted-foreground">{t(($) => $.picker.no_project)}</span>
-          </PickerItem>
-        )}
+        {/* "No project" — always the first row, search active or not, and the
+            only clear entry now that the pill carries no inline ×. Mirrors
+            the unassigned row in the assignee picker. */}
+        <PickerItem
+          emptyValue
+          selected={!projectId}
+          onClick={() => {
+            onUpdate({ project_id: null });
+            setOpen(false);
+          }}
+        >
+          <FolderKanban className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">{t(($) => $.picker.no_project)}</span>
+        </PickerItem>
 
         {filtered.map((p) => (
           <PickerItem
@@ -136,22 +129,6 @@ export function ProjectPicker({
         )}
         {projects.length > 0 && filtered.length === 0 && query && <PickerEmpty />}
       </PropertyPicker>
-
-      {current && (
-        <button
-          type="button"
-          disabled={disabled}
-          aria-label={t(($) => $.picker.remove)}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onUpdate({ project_id: null });
-          }}
-          className="pointer-events-none absolute right-1 top-1/2 flex size-3.5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-[background-color,color,opacity] hover:bg-muted-foreground/20 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none group-hover/project:pointer-events-auto group-hover/project:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 disabled:pointer-events-none disabled:opacity-0 disabled:group-hover/project:opacity-0"
-        >
-          <X className="size-2.5" />
-        </button>
-      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@ package execenv
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -117,11 +118,21 @@ func TestPrepareDirectoryMode(t *testing.T) {
 	defer env.Cleanup(true)
 
 	// Verify directory structure.
-	for _, sub := range []string{"workdir", "output", "logs"} {
+	for _, sub := range []string{"workdir", "output", "logs", "multica-config"} {
 		path := filepath.Join(env.RootDir, sub)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Fatalf("expected %s to exist", path)
 		}
+	}
+	if env.MulticaConfigRoot != filepath.Join(env.RootDir, "multica-config") {
+		t.Fatalf("MulticaConfigRoot = %q, want task-local config directory", env.MulticaConfigRoot)
+	}
+	info, err := os.Stat(env.MulticaConfigRoot)
+	if err != nil {
+		t.Fatalf("stat MulticaConfigRoot: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("MulticaConfigRoot mode = %o, want 700", got)
 	}
 
 	// Verify context file contains issue ID and CLI hints.
@@ -988,51 +999,49 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 			s := string(data)
 			for _, want := range []string{
 				"## Background Task Safety",
-				"Do NOT end your turn while background tasks",
-				"wait for a future notification/reminder",
-				"run the work synchronously instead",
-				// Hardened pins (MUL-4140): the mechanism that slipped
-				// through in MUL-4091 was a turn ending cleanly with a
-				// "standing by, I'll report when CI finishes" message and
-				// no follow-up wakeup. These pins forbid that shape.
+				// MUL-5442 judgment rewrite (owner-authorized pin renegotiation): the
+				// section now states the one platform fact, the external-systems/CI
+				// boundary with its single exception, and the review-locked
+				// persistent-service contract. Enforcement-detail pins that only
+				// restated derivations of the platform fact were retired with the
+				// prose ("Do NOT end your turn while background tasks", the
+				// tool-promise enumeration, "does not cover tests, builds, CI
+				// polling", "any sleep / retry loop that polls check status", ...).
+				// What stays pinned: the fact, each boundary, each exception, and
+				// the handoff triple — the things an agent cannot infer.
+				"any run-owned work still active is orphaned",
+				"no background-completion wakeup",
+				"whatever a tool response promises",
 				"Never background-and-yield",
-				"foreground tool call that blocks",
-				// MUL-5274: persistent local services are allowed only as
-				// an explicit, verified handoff with a cleanup handle.
-				"persistent service handoff",
-				"running service itself is the requested deliverable",
-				"stdio redirected to durable logs",
-				"PID/profile",
-				"verify readiness before replying",
-				"survival as best-effort, not guaranteed",
-				"does not cover tests, builds, CI polling",
-				"are not agent-owned background tasks",
+				"foreground tool calls that block",
+				"run unobservable work synchronously",
+				"standing by",
+				"are not run-owned: do not wait",
+				// The full compound ban, not its first item — MUL-5223 made this a
+				// non-derivable boundary, so no member may be silently dropped.
+				"do not run `gh pr checks --watch`, `gh run watch`, or sleep/retry polls",
 				"GitHub Actions after a successful push",
-				"Do not wait for them by default",
-				// MUL-5223: the conceptual boundary above was read as
-				// compatible with `gh pr checks --watch` (a blocking
-				// foreground call) whenever the repo required green CI to
-				// merge. These pins name the banned tool shapes, deny
-				// merge requirements as acceptance criteria, and supply
-				// the replacement hand-off phrasing.
-				"do NOT run `gh pr checks --watch`",
-				"any sleep / retry loop that polls check status",
 				"NOT your delivery acceptance criteria",
 				"CI running: <PR link>",
-				// The ban must stay scoped: an explicitly requested CI
-				// result is still reachable, and the section must name
-				// the one executable way to collect it. Without these
-				// pins the ban could be re-absolutised and the exception
-				// would become unfollowable.
-				"unless the explicit exception below applies",
 				"The one exception",
 				"ONE foreground blocking call (`gh pr checks <pr> --watch`)",
-				"running in the background so you can keep working",
-				"standing by",
+				"persistent service handoff",
+				"running service itself is the requested deliverable",
+				"durable logs",
+				"cleanup handle such as PID/profile",
+				"verify readiness",
+				"URL, logs, and stop instructions",
+				"survival as best-effort, not guaranteed",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing background task safety text %q\n---\n%s", tc.file, want, s)
 				}
+			}
+			// Exactly one exception: substring pins cannot see a duplicated
+			// "The one exception" clause (a second, wider-scope copy slipped
+			// in during the MUL-5442 rewrite and every pin stayed green).
+			if got := strings.Count(s, "The one exception"); got != 1 {
+				t.Errorf("%s must state the CI exception exactly once, got %d\n---\n%s", tc.file, got, s)
 			}
 			// `gh run watch` may only appear as a banned command, never as
 			// the section's example of how to wait properly.
@@ -1077,10 +1086,31 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"multica issue status <id> <status>",
 		"multica issue comment add <issue-id>",
 		"multica issue comment add --help",
-		"multica squad member set-role <squad-id>",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing core command/help text %q\n---\n%s", want, s)
+		}
+	}
+
+	// Squad maintenance is squad-leader surface and is gated on that (MUL-5442):
+	// an agent leading no squad has no squad whose roles it could change.
+	if strings.Contains(s, "### Squad maintenance") {
+		t.Errorf("non-leader brief must not carry the squad maintenance block\n---\n%s", s)
+	}
+	leaderDir := t.TempDir()
+	if _, err := InjectRuntimeConfig(leaderDir, "codex", TaskContextForEnv{IssueID: "issue-1", IsSquadLeader: true}); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	leader, err := os.ReadFile(filepath.Join(leaderDir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read leader AGENTS.md: %v", err)
+	}
+	for _, want := range []string{
+		"### Squad maintenance",
+		"multica squad member set-role <squad-id>",
+	} {
+		if !strings.Contains(string(leader), want) {
+			t.Errorf("squad-leader AGENTS.md missing %q\n---\n%s", want, leader)
 		}
 	}
 
@@ -1893,7 +1923,10 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			// The workflow must contain an explicit `multica issue comment add`
 			// invocation for this issue — not just a prose mention of posting.
 			mustContain := []string{
-				"multica issue comment add issue-1",
+				// MUL-5442 cross-channel dedup: the brief states the loop shape; the
+				// ready-to-run commands with real ids live in the per-turn message.
+				// Pin the command NAME and the flag mnemonics, not full templates.
+				"post it with `multica issue comment add` using",
 				"mandatory",
 			}
 			for _, want := range mustContain {
@@ -1931,7 +1964,7 @@ func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 	t.Cleanup(func() { runtimeGOOS = saved })
 
 	for _, host := range []string{"linux", "darwin", "windows"} {
-		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor"} {
+		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "reasonix", "kiro", "cursor"} {
 			t.Run(provider+"/"+host, func(t *testing.T) {
 				runtimeGOOS = host
 				dir := t.TempDir()
@@ -2025,17 +2058,31 @@ func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
 			}
 			s := string(data)
 
+			// Assert inside the section slice: "#4182" also appears in
+			// Available Commands, so a whole-file Contains would stay green
+			// with the HEREDOC ban deleted here (review catch on #6453).
+			// Match the HEADING at line start — Available Commands references
+			// "## Comment Formatting" inline earlier in the file.
+			cfStart := strings.Index(s, "\n## Comment Formatting\n")
+			if cfStart < 0 {
+				t.Fatalf("%s missing ## Comment Formatting section\n---\n%s", fileName, s)
+			}
+			cf := s[cfStart+1:]
+			if next := strings.Index(cf[3:], "\n## "); next >= 0 {
+				cf = cf[:next+3]
+			}
 			for _, want := range []string{
-				"## Comment Formatting",
 				"always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`",
-				"#4182",
 				"Never use inline `--content` for agent-authored comments",
+				"never use `--content-stdin` HEREDOCs alongside other flags",
+				"#4182",
+				"never `/tmp` or shared paths",
 				"Keep the same `--parent` value",
 				"rm ./reply.md",
 				"do not rely on `\\n` escapes",
 			} {
-				if !strings.Contains(s, want) {
-					t.Errorf("%s missing comment-formatting guidance %q\n---\n%s", fileName, want, s)
+				if !strings.Contains(cf, want) {
+					t.Errorf("%s Comment Formatting section missing %q\n---\n%s", fileName, want, cf)
 				}
 			}
 
@@ -2078,7 +2125,7 @@ func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
 		"On Windows, **always write the comment body to a UTF-8 file",
 		"$OutputEncoding",
 		"--content-file",
-		"silently dropping non-ASCII characters as `?`",
+		"may replace non-ASCII characters with `?`",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing Codex/Windows file-first guidance %q\n---\n%s", want, s)
@@ -2111,7 +2158,7 @@ func TestInjectRuntimeConfigQuickCreateOutputPrefixAgnostic(t *testing.T) {
 		"quick-create task",
 		"Created <identifier-or-id>: <title>",
 		"identifier` from JSON output",
-		"Do not assume any workspace issue prefix",
+		"never assume a workspace issue prefix",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("quick-create runtime config missing %q\n---\n%s", want, s)
@@ -2438,6 +2485,453 @@ func TestPrepareCodexHomeReportsMissingModelCatalogPath(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q missing %q", err, want)
 		}
+	}
+}
+
+// Regression test for MUL-5623 / #6271 — a user-level
+// `model_instructions_file = "./gpt-unrestricted.md"` survived the copy into the
+// per-task CODEX_HOME while the file it names did not, so Codex failed loading
+// its configuration before the task prompt was delivered.
+func TestPrepareCodexHomeCopiesRelativeModelInstructionsFile(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_instructions_file = "./gpt-unrestricted.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "gpt-unrestricted.md"), []byte("Be direct."), 0o644); err != nil {
+		t.Fatalf("write shared instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "gpt-unrestricted.md"))
+	if err != nil {
+		t.Fatalf("read per-task instructions: %v", err)
+	}
+	if string(data) != "Be direct." {
+		t.Errorf("per-task instructions = %q", data)
+	}
+
+	// The copy must be isolated: a task editing its instructions cannot reach
+	// back into the user's real Codex home.
+	if err := os.WriteFile(filepath.Join(codexHome, "gpt-unrestricted.md"), []byte("tampered"), 0o644); err != nil {
+		t.Fatalf("rewrite per-task instructions: %v", err)
+	}
+	shared, err := os.ReadFile(filepath.Join(sharedHome, "gpt-unrestricted.md"))
+	if err != nil {
+		t.Fatalf("read shared instructions: %v", err)
+	}
+	if string(shared) != "Be direct." {
+		t.Errorf("shared instructions mutated by task: %q", shared)
+	}
+}
+
+// A nested reference must land at the same relative location inside the task
+// home. The path is built with filepath.Join so Windows exercises its own
+// separator, and the TOML literal string keeps that backslash verbatim.
+func TestPrepareCodexHomeCopiesNestedDeprecatedInstructionsFile(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	rel := filepath.Join("prompts", "unrestricted.md")
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(fmt.Sprintf("experimental_instructions_file = '%s'", rel)), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(sharedHome, "prompts"), 0o755); err != nil {
+		t.Fatalf("create shared prompts dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, rel), []byte("Nested."), 0o644); err != nil {
+		t.Fatalf("write shared instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, rel))
+	if err != nil {
+		t.Fatalf("read per-task instructions: %v", err)
+	}
+	if string(data) != "Nested." {
+		t.Errorf("per-task instructions = %q", data)
+	}
+}
+
+// A missing source must fail while preparing the environment, with a diagnostic
+// naming the key and both paths — not as an opaque `os error 2` from Codex's own
+// configuration loading, after the task has already been launched.
+func TestPrepareCodexHomeReportsMissingModelInstructionsFile(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_instructions_file = "missing-instructions.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	err := prepareCodexHome(codexHome, testLogger())
+	if err == nil {
+		t.Fatal("expected prepareCodexHome to fail for missing model instructions file")
+	}
+	for _, want := range []string{"model_instructions_file", "missing-instructions.md", filepath.Join(sharedHome, "missing-instructions.md")} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err, want)
+		}
+	}
+}
+
+// A relative reference that escapes the task home is rejected rather than
+// copied: honoring it would let any user config name an arbitrary host file and
+// have the daemon materialise it inside the task environment.
+func TestPrepareCodexHomeRejectsEscapingModelInstructionsFile(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	root := t.TempDir()
+	sharedHome := filepath.Join(root, "shared")
+	if err := os.MkdirAll(sharedHome, 0o755); err != nil {
+		t.Fatalf("create shared home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_instructions_file = "../secrets.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "secrets.md"), []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write escaping source: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	err := prepareCodexHome(codexHome, testLogger())
+	if err == nil {
+		t.Fatal("expected prepareCodexHome to reject an escaping model instructions path")
+	}
+	if !strings.Contains(err.Error(), "model_instructions_file") {
+		t.Fatalf("error %q does not name the offending key", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(codexHome), "secrets.md")); !os.IsNotExist(statErr) {
+		t.Fatalf("escaping source was materialised outside the task home: %v", statErr)
+	}
+}
+
+// A reused task home must reflect the user's current instructions instead of
+// serving the snapshot an earlier run copied.
+func TestPrepareCodexHomeRefreshesModelInstructionsFileOnReuse(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_instructions_file = "instructions-override.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	source := filepath.Join(sharedHome, "instructions-override.md")
+	if err := os.WriteFile(source, []byte("first"), 0o644); err != nil {
+		t.Fatalf("write shared instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("first prepareCodexHome failed: %v", err)
+	}
+	if err := os.WriteFile(source, []byte("second"), 0o644); err != nil {
+		t.Fatalf("update shared instructions: %v", err)
+	}
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("second prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "instructions-override.md"))
+	if err != nil {
+		t.Fatalf("read per-task instructions: %v", err)
+	}
+	if string(data) != "second" {
+		t.Errorf("per-task instructions = %q, want the refreshed source", data)
+	}
+}
+
+// A reused task home is writable by the task that ran in it, so an intermediate
+// directory of the copy destination can be a symlink by the time the next
+// prepare runs. Root-scoped writes must refuse to follow it out of the task
+// home instead of deleting and overwriting the link target.
+func TestPrepareCodexHomeRefusesSymlinkedInstructionsParentOnReuse(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	rel := filepath.Join("prompts", "unrestricted.md")
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(fmt.Sprintf("model_instructions_file = '%s'", rel)), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(sharedHome, "prompts"), 0o755); err != nil {
+		t.Fatalf("create shared prompts dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, rel), []byte("from shared home"), 0o644); err != nil {
+		t.Fatalf("write shared instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("first prepareCodexHome failed: %v", err)
+	}
+
+	// Stand in for what a task can do to its own home between prepares.
+	outside := t.TempDir()
+	sentinel := filepath.Join(outside, "unrestricted.md")
+	if err := os.WriteFile(sentinel, []byte("outside the task home"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	taskParent := filepath.Join(codexHome, "prompts")
+	if err := os.RemoveAll(taskParent); err != nil {
+		t.Fatalf("remove task prompts dir: %v", err)
+	}
+	if err := os.Symlink(outside, taskParent); err != nil {
+		t.Skipf("symlinks unsupported on this host: %v", err)
+	}
+
+	err := prepareCodexHome(codexHome, testLogger())
+	if err == nil {
+		t.Fatal("expected prepareCodexHome to refuse writing through a symlinked parent")
+	}
+	if !strings.Contains(err.Error(), "model_instructions_file") {
+		t.Fatalf("error %q does not name the offending key", err)
+	}
+
+	data, readErr := os.ReadFile(sentinel)
+	if readErr != nil {
+		t.Fatalf("sentinel outside the task home was removed: %v", readErr)
+	}
+	if string(data) != "outside the task home" {
+		t.Errorf("sentinel outside the task home was overwritten: %q", data)
+	}
+}
+
+// The destination file itself can also be a symlink on reuse. Removing it must
+// unlink the symlink, never write through it into the link target.
+func TestPrepareCodexHomeReplacesSymlinkedInstructionsCopyOnReuse(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_instructions_file = "gpt-unrestricted.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "gpt-unrestricted.md"), []byte("from shared home"), 0o644); err != nil {
+		t.Fatalf("write shared instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("first prepareCodexHome failed: %v", err)
+	}
+
+	outside := t.TempDir()
+	sentinel := filepath.Join(outside, "sentinel.md")
+	if err := os.WriteFile(sentinel, []byte("outside the task home"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	taskCopy := filepath.Join(codexHome, "gpt-unrestricted.md")
+	if err := os.Remove(taskCopy); err != nil {
+		t.Fatalf("remove task copy: %v", err)
+	}
+	if err := os.Symlink(sentinel, taskCopy); err != nil {
+		t.Skipf("symlinks unsupported on this host: %v", err)
+	}
+
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("second prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("sentinel outside the task home was removed: %v", err)
+	}
+	if string(data) != "outside the task home" {
+		t.Errorf("sentinel outside the task home was overwritten: %q", data)
+	}
+	info, err := os.Lstat(taskCopy)
+	if err != nil {
+		t.Fatalf("lstat task copy: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("task copy is still a symlink")
+	}
+	copied, err := os.ReadFile(taskCopy)
+	if err != nil {
+		t.Fatalf("read task copy: %v", err)
+	}
+	if string(copied) != "from shared home" {
+		t.Errorf("task copy = %q", copied)
+	}
+}
+
+// Repointing the key provisions the new target; the previous copy stays behind
+// unreferenced. Codex never reads it because the copied config no longer names
+// it — this test pins that documented contract so a future change to it is
+// deliberate.
+func TestPrepareCodexHomeLeavesRepointedInstructionsCopyBehind(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	sharedConfig := filepath.Join(sharedHome, "config.toml")
+	if err := os.WriteFile(sharedConfig, []byte(`model_instructions_file = "old.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "old.md"), []byte("old"), 0o644); err != nil {
+		t.Fatalf("write old instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("first prepareCodexHome failed: %v", err)
+	}
+
+	if err := os.WriteFile(sharedConfig, []byte(`model_instructions_file = "new.md"`), 0o644); err != nil {
+		t.Fatalf("repoint shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "new.md"), []byte("new"), 0o644); err != nil {
+		t.Fatalf("write new instructions: %v", err)
+	}
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("second prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "new.md"))
+	if err != nil {
+		t.Fatalf("read repointed instructions: %v", err)
+	}
+	if string(data) != "new" {
+		t.Errorf("repointed instructions = %q", data)
+	}
+	config, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read per-task config.toml: %v", err)
+	}
+	if !strings.Contains(string(config), `model_instructions_file = "new.md"`) {
+		t.Errorf("per-task config.toml still points at the old target: %s", config)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "old.md")); err != nil {
+		t.Errorf("unreferenced old copy unexpectedly cleaned up: %v", err)
+	}
+}
+
+// The root of the copy — the task home itself — must be identity-checked too. A
+// path-based check followed by a path-based open leaves a window where the
+// directory is swapped for a link and every "confined" write lands in the wrong
+// tree. These two tests drive the check directly so the swap is deterministic
+// rather than raced.
+func TestVerifyCodexHomeRootRejectsSwappedDirectory(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	codexHome := filepath.Join(base, "codex-home")
+	if err := os.Mkdir(codexHome, 0o755); err != nil {
+		t.Fatalf("create codex home: %v", err)
+	}
+	root, err := os.OpenRoot(codexHome)
+	if err != nil {
+		t.Fatalf("open codex home root: %v", err)
+	}
+	defer root.Close()
+
+	// Same path, different directory — what a swap looks like after the open.
+	if err := os.Rename(codexHome, filepath.Join(base, "moved-aside")); err != nil {
+		t.Fatalf("move original codex home: %v", err)
+	}
+	if err := os.Mkdir(codexHome, 0o755); err != nil {
+		t.Fatalf("recreate codex home: %v", err)
+	}
+
+	err = verifyCodexHomeRoot(root, codexHome, "model_instructions_file")
+	if err == nil {
+		t.Fatal("expected verifyCodexHomeRoot to reject a swapped codex home")
+	}
+	if !strings.Contains(err.Error(), "replaced") {
+		t.Fatalf("error %q does not report the replacement", err)
+	}
+}
+
+func TestVerifyCodexHomeRootRejectsSymlinkedHome(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	codexHome := filepath.Join(base, "codex-home")
+	if err := os.Mkdir(codexHome, 0o755); err != nil {
+		t.Fatalf("create codex home: %v", err)
+	}
+	root, err := os.OpenRoot(codexHome)
+	if err != nil {
+		t.Fatalf("open codex home root: %v", err)
+	}
+	defer root.Close()
+
+	outside := t.TempDir()
+	if err := os.Rename(codexHome, filepath.Join(base, "moved-aside")); err != nil {
+		t.Fatalf("move original codex home: %v", err)
+	}
+	if err := os.Symlink(outside, codexHome); err != nil {
+		t.Skipf("symlinks unsupported on this host: %v", err)
+	}
+
+	err = verifyCodexHomeRoot(root, codexHome, "model_instructions_file")
+	if err == nil {
+		t.Fatal("expected verifyCodexHomeRoot to reject a symlinked codex home")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("error %q does not report the symlink", err)
+	}
+}
+
+// End to end, scoped to the write this change owns: when the task home is
+// already a link to an outside directory, the referenced-file copy must fail
+// instead of provisioning through the link.
+//
+// Deliberately not asserted: that nothing at all lands in the link target.
+// Earlier steps in prepareCodexHomeWithOpts (config.toml, sessions/, plugin
+// cache) still address codexHome by path and run before this check, so making
+// the whole prepare root-handle safe is a separate, larger change (MUL-5647).
+func TestPrepareCodexHomeRefusesReferencedFileWriteThroughSymlinkedCodexHome(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_instructions_file = "gpt-unrestricted.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "gpt-unrestricted.md"), []byte("from shared home"), 0o644); err != nil {
+		t.Fatalf("write shared instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	outside := t.TempDir()
+	sentinel := filepath.Join(outside, "gpt-unrestricted.md")
+	if err := os.WriteFile(sentinel, []byte("outside the task home"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := os.Symlink(outside, codexHome); err != nil {
+		t.Skipf("symlinks unsupported on this host: %v", err)
+	}
+
+	err := prepareCodexHome(codexHome, testLogger())
+	if err == nil {
+		t.Fatal("expected prepareCodexHome to refuse a symlinked codex home")
+	}
+	if !strings.Contains(err.Error(), "model_instructions_file") {
+		t.Fatalf("error %q does not name the offending key", err)
+	}
+
+	data, readErr := os.ReadFile(sentinel)
+	if readErr != nil {
+		t.Fatalf("sentinel outside the task home was removed: %v", readErr)
+	}
+	if string(data) != "outside the task home" {
+		t.Errorf("sentinel outside the task home was overwritten: %q", data)
 	}
 }
 
@@ -3479,6 +3973,14 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	if reused.CodexHome == "" {
 		t.Fatal("expected CodexHome to be restored after Reuse")
 	}
+	if reused.MulticaConfigRoot != filepath.Join(reused.RootDir, "multica-config") {
+		t.Fatalf("MulticaConfigRoot = %q, want restored task-local config directory", reused.MulticaConfigRoot)
+	}
+	if info, err := os.Stat(reused.MulticaConfigRoot); err != nil {
+		t.Fatalf("stat restored MulticaConfigRoot: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("restored MulticaConfigRoot mode = %o, want 700", got)
+	}
 
 	// Verify config.toml has a managed block (exact mode depends on host
 	// platform; either workspace-write or danger-full-access is valid).
@@ -4080,8 +4582,10 @@ func TestPrepareCodexNoUserSkillsDir(t *testing.T) {
 
 // TestPrepareCodexResolvesUserSkillSymlinks covers the lark-cli /
 // shared-installer case: each user skill is a symlink into a separate
-// installer directory. The per-task home must end up with a real copy, not
-// a dangling symlink that points outside the task root.
+// installer directory. The per-task home links to the resolved installer
+// directory — never to the installer's own link, which would leave the CLI
+// following a chain that breaks the moment the installer re-points it, and
+// never dangling.
 func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on Windows; covered by Unix path")
@@ -4121,12 +4625,19 @@ func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 	defer env.Cleanup(true)
 
 	dst := filepath.Join(env.CodexHome, "skills", "lark-mail")
-	fi, err := os.Lstat(dst)
-	if err != nil {
+	if _, err := os.Lstat(dst); err != nil {
 		t.Fatalf("seeded skill missing: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		t.Errorf("seeded skill should be a real directory, got a symlink")
+	target, err := os.Readlink(dst)
+	if err != nil {
+		t.Fatalf("seeded skill should be a link into the installer dir: %v", err)
+	}
+	wantTarget, err := filepath.EvalSymlinks(installerRoot)
+	if err != nil {
+		t.Fatalf("resolve installer dir: %v", err)
+	}
+	if target != wantTarget {
+		t.Errorf("link target = %q, want the resolved installer dir %q", target, wantTarget)
 	}
 	data, err := os.ReadFile(filepath.Join(dst, "SKILL.md"))
 	if err != nil {
@@ -4481,8 +4992,17 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		for _, want := range []string{
 			"side-effecting actions",
 			"enqueues a new run for that agent",
-			"When NOT to use a mention link",
-			"When a mention IS appropriate",
+			// MUL-5442 judgment rewrite: the two H3 subsections merged into one
+			// paragraph — pin the policy anchors, not the retired headings.
+			"Default: NO mention",
+			// Each warranted-case scope qualifier pinned separately — "not yet
+			// involved" and "for the first time" ARE the anti-repeat-notify
+			// scope, not decoration (review catch on #6453).
+			"restarts an agent-to-agent loop and costs the user money",
+			"Mention only when escalating to a human owner",
+			"not yet involved",
+			"for the first time",
+			"explicitly asks to loop someone in",
 			"end with no mention at all",
 			"Silence ends conversations",
 		} {
@@ -4502,19 +5022,48 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		}
 	})
 
-	t.Run("workflow-carries-silence-as-exit-and-no-signoff-mention", func(t *testing.T) {
+	t.Run("workflow-reply-is-unconditional-and-no-signoff-mention", func(t *testing.T) {
 		t.Parallel()
 		s := readClaudeMD(t, commentTriggerCtx)
-		// The anti-loop signal for CLAUDE.md lives in the numbered workflow
-		// steps (4 + 5), not in a dedicated preamble. Lock in the key phrases
-		// so the signal can't decay back into pure prose again.
+		// MUL-5442 owner decision (2026-08-06): the generic no-reply rule is
+		// retired. It never carried the loop prevention — agent comments
+		// trigger nothing without an explicit @mention (the sole implicit
+		// wake is the squad-leader path), so the mention discipline pinned in
+		// the Mentions subtest above is the real defense. Ordinary agents are
+		// back on the unconditional one-comment-per-run contract; recorded
+		// silence via `no_action` remains squad-leader-only. Retired pins,
+		// replaced by the negative guards below so the apparatus cannot creep
+		// back: "Decide whether a reply is warranted", "produced actual
+		// work", "pure acknowledgment / thanks / sign-off", "do NOT reply",
+		// "Silence is a valid and preferred way".
 		for _, want := range []string{
-			"Decide whether a reply is warranted",
-			"Silence is a valid and preferred way",
+			"Posting your reply as a comment is mandatory",
+			"Do any requested work first",
 			"Never @mention the agent you are replying to as a thank-you or sign-off",
 		} {
 			if !strings.Contains(s, want) {
 				t.Errorf("comment-triggered CLAUDE.md missing %q", want)
+			}
+		}
+		for _, banned := range []string{
+			"Decide whether a reply is warranted",
+			"exit with no output",
+			"Silence is a valid and preferred way",
+			"conditional on the reply rule",
+			// #6493 review: the ledger named five retired pins but only
+			// guarded two — the missing three let the old apparatus
+			// coexist with the new sentences. Ordinary-agent scope only:
+			// the leader's no_action bullet says "DO NOT post any
+			// comment", which none of these match.
+			"produced actual work",
+			"pure acknowledgment / thanks / sign-off",
+			"do NOT reply",
+			// Leader-leak guard: the carve-out imperative is
+			// leader-brief-only.
+			"Unless your outcome is",
+		} {
+			if strings.Contains(s, banned) {
+				t.Errorf("comment-triggered CLAUDE.md still carries retired no-reply text %q", banned)
 			}
 		}
 	})
@@ -4543,15 +5092,24 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 	}
 	s := string(data)
 
-	// The comment-triggered workflow must contain the squad leader no_action rule.
+	// The comment-triggered workflow must contain the squad leader no_action
+	// rule, and the reply imperative must carry the no_action carve-out so a
+	// later bullet never contradicts it (MUL-5442 #6493 review).
 	for _, want := range []string{
 		"Squad leader rule",
 		"DO NOT post any comment",
 		"multica squad activity",
+		"Unless your outcome is `no_action` (Squad leader rule above), posting your reply as a comment is mandatory",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("squad leader comment-triggered CLAUDE.md missing %q", want)
 		}
+	}
+	// Capital-P form = the ordinary unconditional bullet; the leader brief
+	// must carry only the carve-out variant (its lowercase "posting your
+	// reply as a comment is mandatory" tail is expected and legal).
+	if strings.Contains(s, "Posting your reply as a comment is mandatory") {
+		t.Errorf("squad leader CLAUDE.md still carries the unconditional reply bullet")
 	}
 
 	// The Output section must use strong prohibition language.
@@ -4773,8 +5331,11 @@ func TestTaskInitiatorBlockMember(t *testing.T) {
 	for _, want := range []string{
 		"## Task Initiator",
 		"initiated by **Bohan** (bohan@example.com), a member of this workspace",
+		"is who you are answering",
 		"apply any per-person privacy or access rules",
 		"credentials stay scoped to the runtime owner",
+		"attribution does not change what you may read or write",
+		"do not assume the initiator can see everything you can",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("expected initiator block to contain %q\n---\n%s", want, block)
@@ -4894,8 +5455,14 @@ func TestInjectRuntimeConfigBriefKeepsStaticCatchUpRead(t *testing.T) {
 	}
 	s := string(data)
 
-	if !strings.Contains(s, "multica issue comment list "+issueID+" --roots-only --summary --output json") {
-		t.Errorf("brief must keep the static catch-up read\n---\n%s", s)
+	// MUL-5442 cross-channel dedup: the full command with the real issue id
+	// moved to the per-turn message (every issue variant carries it); the
+	// brief keeps the doctrine and the flag mnemonics.
+	if !strings.Contains(s, "scan every thread cheaply (`--roots-only --summary --compact`)") {
+		t.Errorf("brief must keep the bounded catch-up doctrine\n---\n%s", s)
+	}
+	if strings.Contains(s, issueID) {
+		t.Errorf("workflow steps must not embed the issue id anymore (MUL-5442)\n---\n%s", s)
 	}
 	if strings.Contains(s, "--recent 20") {
 		t.Errorf("brief still uses recent 20\n---\n%s", s)
@@ -4953,14 +5520,18 @@ func TestInjectRuntimeConfigBriefOmitsResumedThreadAnchor(t *testing.T) {
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"active thread anchor `thread-root-1` and triggering comment ID `" + triggerID + "`",
 		"If your reply depends on thread context",
 		"do not rely only on resumed session memory",
-		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("resumed hint missing %q\n---\n%s", want, hint)
 		}
+	}
+	// The anchor-restating sentence is gone (MUL-5721 OPT-1): the read command
+	// carries the thread anchor and the reply cookbook carries the trigger id.
+	if strings.Contains(hint, "active thread anchor") {
+		t.Errorf("resumed hint must not restate anchors outside the commands, got:\n%s", hint)
 	}
 }
 
@@ -4984,7 +5555,7 @@ func TestInjectRuntimeConfigAssignmentTriggerScansRootsFirst(t *testing.T) {
 	// Mandatory comment catch-up must stay, but the required first read is
 	// bounded to recent active threads instead of the full flat timeline.
 	for _, want := range []string{
-		"multica issue comment list issue-1 --roots-only --summary --output json",
+		"scan every thread cheaply (`--roots-only --summary --compact`)",
 		"this is mandatory, not optional",
 		"Skipping this step is the most common cause",
 	} {
@@ -4992,14 +5563,12 @@ func TestInjectRuntimeConfigAssignmentTriggerScansRootsFirst(t *testing.T) {
 			t.Errorf("assignment Workflow regressed mandatory scan-first catch-up, missing %q\n---\n%s", want, s)
 		}
 	}
-	// Older context must remain reachable through pagination. The cursor label
-	// and flags are documented in `## Available Commands` rather than restated
-	// inside the step (MUL-5372), so assert the label itself, not the literal
-	// `Next thread cursor: ...` stderr line the old step-3 copy quoted.
+	// Older context must remain reachable through pagination. The cursor
+	// labels and flags now live in the CLI's own --help (MUL-5442, pinned by
+	// TestIssueCommentListHelpCarriesReadContract in cmd/multica); the brief
+	// keeps a pointer in the flag reference.
 	for _, want := range []string{
-		"Next thread cursor",
-		"--before",
-		"--before-id",
+		"paging cursors, and full flag semantics: `--help`",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("assignment Workflow missing older-history pagination guidance %q\n---\n%s", want, s)
@@ -5050,15 +5619,17 @@ func TestInjectRuntimeConfigCatchUpScansRootsFirst(t *testing.T) {
 	s := string(data)
 
 	for _, want := range []string{
-		// The cheap scan is the first thing step 3 asks for.
-		"multica issue comment list issue-1 --roots-only --summary --output json",
+		// The cheap scan is the first thing step 3 asks for; the full
+		// command with real ids arrives in the per-turn message (MUL-5442
+		// cross-channel dedup), so the brief pins the flag mnemonics.
+		"scan every thread cheaply (`--roots-only --summary --compact`)",
 		// ...followed by an explicit, bounded drill-down.
-		"multica issue comment list issue-1 --thread <thread-id> --tail 30 --output json",
-		// The saturation semantics that made --recent 10 misleading are stated
-		// once, in the flag reference rather than in the step.
+		"expand only the threads that matter (`--thread <id> --tail 30 --compact`)",
+		// The headline saturation warning stays in the flag reference; the
+		// deep semantics (per-thread cap, root-thread saturation) moved to the
+		// CLI's own --help (MUL-5442) and are pinned there
+		// (TestIssueCommentListHelpCarriesReadContract in cmd/multica).
 		"caps THREADS, not comments",
-		"no per-thread cap",
-		"fewer than N root threads",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("brief missing bounded catch-up guidance %q\n---\n%s", want, s)
@@ -5123,30 +5694,22 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 	withSection := wantSection{
 		present: []string{
 			"## Issue Metadata",
-			"high-signal scratchpad",
 			"**Read on entry.**",
 			"**Write on exit.**",
-			"**What NOT to pin.**",
-			"**Recommended keys**",
-			// Recommended-key list — both lea's killer-use-case keys
-			// (pr_number, pipeline_status) and the broader set from
-			// review must be named so the workspace converges on shared
-			// vocabulary.
-			"pr_url",
-			"pr_number",
-			"pipeline_status",
-			"deploy_url",
-			"external_issue_url",
-			"waiting_on",
-			"blocked_reason",
-			"decision",
-			// Safety boundaries — these are the negative rules that
-			// keep metadata from rotting into a second description /
-			// log dump.
-			"No secrets, tokens, or API keys",
-			"No logs",
-			"runtime bookkeeping",
-			"snake_case ASCII",
+			"Hints, not truth",
+			// MUL-5442: the brief keeps only what the interface cannot
+			// express — the read stance, the re-read bar, and the two
+			// write-time boundaries (secrets, length). The full ban list
+			// and the key-naming conventions live in the
+			// multica-working-on-issues skill, pinned by
+			// TestWorkingOnIssuesSkillCoversIssueLoopContracts so this
+			// pointer cannot dangle. The recommended-keys block was
+			// removed outright: metadata is deliberately free-form custom
+			// state (owner decision on MUL-5442), not a vocabulary the
+			// platform curates in every brief.
+			"never secrets or long content",
+			"multica issue metadata delete",
+			"the `multica-working-on-issues` skill",
 		},
 	}
 	withoutSection := wantSection{
@@ -5160,7 +5723,7 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			"high-signal scratchpad",
 			"**Read on entry.**",
 			"**Write on exit.**",
-			"See the `## Issue Metadata` section above",
+			"the bar in `## Issue Metadata`",
 		},
 	}
 
@@ -5188,8 +5751,16 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			provider: "claude",
 			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
-				"multica issue metadata list issue-md-1 --output json",
-				"See the `## Issue Metadata` section above",
+				"Read the metadata bag (`multica issue metadata list`)",
+				// Platform failure semantics, not tool mechanics: a failed
+				// metadata read must never block the main task (MUL-5442
+				// stage-1 review).
+				"CLI failures are normal",
+				// Both steps point at the section instead of restating its
+				// rules (MUL-5442); the entry step names what to look for,
+				// the exit step names the write bar.
+				"What to look for: `## Issue Metadata`",
+				"the bar in `## Issue Metadata`",
 				// Exit step must show both write and delete, not just
 				// "set" — stale-key cleanup is the half that keeps
 				// metadata from rotting.
@@ -5205,8 +5776,9 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			provider: "claude",
 			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
-				"multica issue metadata list issue-md-2 --output json",
-				"See the `## Issue Metadata` section above",
+				"Read the metadata bag (`multica issue metadata list`)",
+				"What to look for: `## Issue Metadata`",
+				"the bar in `## Issue Metadata`",
 				"multica issue metadata set",
 				"multica issue metadata delete",
 				"Before exiting",
@@ -5324,7 +5896,7 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 		if !strings.Contains(s, "## Issue Metadata") {
 			t.Fatalf("Issue Metadata section missing\n---\n%s", s)
 		}
-		if !strings.Contains(s, "multica issue metadata list issue-md-codex --output json") {
+		if !strings.Contains(s, "Read the metadata bag (`multica issue metadata list`)") {
 			t.Fatalf("metadata list step missing\n---\n%s", s)
 		}
 		// ...AND the post-#4182 file-first rule is still emitted on Linux.

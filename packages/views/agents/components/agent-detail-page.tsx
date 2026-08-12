@@ -22,6 +22,7 @@ import type {
 } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
+  isAgentRuntimeBound,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
 import { api, ApiError } from "@multica/core/api";
@@ -134,17 +135,23 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     // would clobber a concurrent successful mutation if the failing call
     // resolves last (e.g. flipping visibility then runtime simultaneously
     // and only the visibility PATCH fails).
+    const optimisticData =
+      typeof data.runtime_id === "string"
+        ? { ...data, runtime_bound: data.runtime_id.trim().length > 0 }
+        : data;
     const queryKey = workspaceKeys.agents(wsId);
     const prevAgents = qc.getQueryData<Agent[]>(queryKey);
     const prevAgent = prevAgents?.find((a) => a.id === id);
     const prevFields: Record<string, unknown> = {};
     if (prevAgent) {
-      for (const key of Object.keys(data)) {
+      for (const key of Object.keys(optimisticData)) {
         prevFields[key] = (prevAgent as unknown as Record<string, unknown>)[key];
       }
     }
     qc.setQueryData<Agent[]>(queryKey, (old) =>
-      old?.map((a) => (a.id === id ? ({ ...a, ...data } as Agent) : a)),
+      old?.map((a) =>
+        a.id === id ? ({ ...a, ...optimisticData } as Agent) : a,
+      ),
     );
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
@@ -203,9 +210,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             </p>
           </div>
           <Button
-            type="button"
             size="sm"
-            onClick={() => navigation.push(paths.agents())}
+            render={<AppLink href={paths.agents()} />}
+            nativeButton={false}
           >
             {t(($) => $.detail.back_to_agents_full)}
           </Button>
@@ -239,9 +246,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               {t(($) => $.detail.try_again)}
             </Button>
             <Button
-              type="button"
               size="sm"
-              onClick={() => navigation.push(paths.agents())}
+              render={<AppLink href={paths.agents()} />}
+              nativeButton={false}
             >
               {t(($) => $.detail.back_to_agents_full)}
             </Button>
@@ -252,7 +259,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   }
 
   const isArchived = !!agent.archived_at;
-  const runtime = agent.runtime_id
+  const runtimeBound = isAgentRuntimeBound(agent);
+  const runtime = runtimeBound
     ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
     : null;
   const owner = agent.owner_id
@@ -264,13 +272,32 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // click explains itself instead of the affordance silently missing. While
   // membership is still resolving the decision is undetermined, so the button
   // is disabled rather than toasting a false "no access" at a real member.
-  const handleDm = () => {
-    if (permissionsLoading) return;
+  //
+  // The control is a real link, so a failed gate has to cancel the navigation
+  // AppLink would otherwise perform — preventDefault is that cancel.
+  const handleDm = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (permissionsLoading) {
+      e.preventDefault();
+      return;
+    }
     if (!canAssign.allowed) {
+      e.preventDefault();
       toast.error(t(($) => $.detail.dm_no_permission_toast));
       return;
     }
-    navigation.push(`${paths.chat()}?agent=${agent.id}`);
+    if (!runtimeBound) {
+      e.preventDefault();
+      toast.error(t(($) => $.detail.runtime_required_toast));
+    }
+  };
+  const handleAssign = () => {
+    if (!runtimeBound) {
+      toast.error(t(($) => $.detail.runtime_required_toast));
+      return;
+    }
+    useModalStore
+      .getState()
+      .open("quick-create-issue", { agent_id: agent.id });
   };
 
   return (
@@ -283,13 +310,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         canAssign={canAssign.allowed}
         canArchive={canEdit.allowed}
         dmPending={permissionsLoading}
+        dmHref={`${paths.chat()}?agent=${agent.id}`}
         onDm={handleDm}
-        onAssign={() =>
-          useModalStore
-            .getState()
-            .open("quick-create-issue", { agent_id: agent.id })
+        onAssign={handleAssign}
+        onArchive={
+          agent.system_key ? undefined : () => setConfirmArchive(true)
         }
-        onArchive={() => setConfirmArchive(true)}
       />
 
       {!canEdit.allowed && (
@@ -316,6 +342,25 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               onClick={() => handleRestore(agent.id)}
             >
               {t(($) => $.detail.restore)}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {!isArchived && !runtimeBound && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-caption text-amber-900 dark:text-amber-100">
+          <Server className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">
+            {t(($) => $.detail.runtime_required_banner)}
+          </span>
+          {canEdit.allowed && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 border-amber-500/40 bg-background/70 text-caption"
+              onClick={() => setTabNavIntent("general")}
+            >
+              {t(($) => $.detail.bind_runtime)}
             </Button>
           )}
         </div>
@@ -390,6 +435,7 @@ function DetailHeader({
   canAssign,
   canArchive,
   dmPending,
+  dmHref,
   onDm,
   onAssign,
   onArchive,
@@ -401,13 +447,19 @@ function DetailHeader({
   canAssign: boolean;
   canArchive: boolean;
   dmPending: boolean;
-  onDm: () => void;
+  dmHref: string;
+  /** Runs before the link navigates; calls preventDefault when a gate denies
+   *  the chat, which is what stops AppLink from pushing. */
+  onDm: (e: React.MouseEvent<HTMLAnchorElement>) => void;
   onAssign: () => void;
-  onArchive: () => void;
+  /** Absent for Multica's built-in agents, which the server refuses to
+   *  archive — the menu hides the action rather than offering a failure. */
+  onArchive?: () => void;
 }) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
   const isArchived = !!agent.archived_at;
+  const hasMoreActions = !!onArchive;
 
   return (
     <header className="shrink-0 border-b bg-background px-4 pb-5 pt-3 sm:px-6">
@@ -468,11 +520,15 @@ function DetailHeader({
           <div className="flex shrink-0 items-center gap-2 self-end lg:self-start">
             {!isArchived && (
               <Button
-                type="button"
                 variant="outline"
                 size="sm"
                 disabled={dmPending}
-                onClick={onDm}
+                // An anchor never matches `:disabled`, so the base variant's
+                // `disabled:` rules never fire here — Base UI's data-disabled
+                // is what carries the dimmed, inert look.
+                className="data-disabled:pointer-events-none data-disabled:opacity-50"
+                render={<AppLink href={dmHref} onClick={onDm} />}
+                nativeButton={false}
               >
                 <MessageSquare className="h-4 w-4" aria-hidden="true" />
                 {t(($) => $.detail.dm)}
@@ -484,27 +540,26 @@ function DetailHeader({
                 {t(($) => $.detail.assign_work)}
               </Button>
             )}
-            {!isArchived && canArchive ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={<Button variant="ghost" size="icon-sm" />}
-              aria-label={t(($) => $.detail.more_actions_aria)}
-            >
-              <MoreHorizontal
-                className="h-4 w-4 text-muted-foreground"
-                aria-hidden="true"
-              />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-auto">
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={onArchive}
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                {t(($) => $.detail.more_archive)}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            {!isArchived && canArchive && hasMoreActions ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={<Button variant="ghost" size="icon-sm" />}
+                  aria-label={t(($) => $.detail.more_actions_aria)}
+                >
+                  <MoreHorizontal
+                    className="h-4 w-4 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-auto">
+                  {onArchive && (
+                    <DropdownMenuItem variant="destructive" onClick={onArchive}>
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      {t(($) => $.detail.more_archive)}
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : null}
           </div>
         </div>

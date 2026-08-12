@@ -21,6 +21,7 @@ import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-sto
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import {
   formatTokens,
+  formatUsd,
   estimateCost,
   estimateCacheSavings,
   aggregateByDate,
@@ -114,11 +115,6 @@ function Segmented<T extends string | number>({
       ))}
     </div>
   );
-}
-
-function fmtMoney(n: number): string {
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  return `$${n.toFixed(2)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +231,7 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
             <CurrencyNumberFlow
               value={totals.cost}
               locales={locales}
-              aria-label={fmtMoney(totals.cost)}
+              aria-label={formatUsd(totals.cost)}
             />
           }
           hint={
@@ -263,7 +259,7 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
             <CurrencyNumberFlow
               value={totals.cacheSavings}
               locales={locales}
-              aria-label={fmtMoney(totals.cacheSavings)}
+              aria-label={formatUsd(totals.cacheSavings)}
             />
           }
           accent={totals.cacheSavings > 0 ? "success" : "default"}

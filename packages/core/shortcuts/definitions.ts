@@ -11,7 +11,10 @@ export type ShortcutActionId =
   | "toggleSidebar"
   | "toggleChat"
   | "findInIssue"
+  | "openThreadNav"
   | "send"
+  | "goBack"
+  | "goForward"
   | "goInbox"
   | "goChat"
   | "goMyIssues"
@@ -84,7 +87,29 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
   // to keep working while the caret sits in the chat composer itself.
   { id: "toggleChat", category: "general", defaultShortcut: primary("J"), allowInEditable: true },
   { id: "findInIssue", category: "general", defaultShortcut: primary("F"), allowInEditable: true },
+  // Mod+Shift+O mirrors "go to symbol in file" in code editors: jump to a
+  // section of the document you already have open, as opposed to Mod+F, which
+  // searches its text. `allowInEditable` because reaching another thread while
+  // drafting a comment is the common case, not the exception.
+  //
+  // Known gap: Chrome on Windows/Linux binds Ctrl+Shift+O to its bookmark
+  // manager, so on those web builds the default never reaches the page. It is
+  // recordable rather than reserved because the desktop app does receive it,
+  // and Settings → Keyboard shortcuts lets affected users rebind.
+  {
+    id: "openThreadNav",
+    category: "general",
+    defaultShortcut: createShortcutChord("O", { primary: true, shift: true }),
+    allowInEditable: true,
+  },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
+  // Browser-style history navigation (Mod+[ / Mod+]). Neither bracket is
+  // app-owned (PRIMARY_RESERVED_KEYS) nor browser-owned
+  // (BROWSER_ONLY_PRIMARY_RESERVED_KEYS), so both are recordable on every
+  // platform and runtime. `allowInEditable` is false so the chord never steps
+  // away from the page while the caret sits in an input, textarea, or editor.
+  { id: "goBack", category: "navigation", defaultShortcut: primary("["), allowInEditable: false },
+  { id: "goForward", category: "navigation", defaultShortcut: primary("]"), allowInEditable: false },
   { id: "goInbox", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goChat", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goMyIssues", category: "navigation", defaultShortcut: null, allowInEditable: false },

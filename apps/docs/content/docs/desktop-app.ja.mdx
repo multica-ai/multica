@@ -70,7 +70,15 @@ Desktop はワークスペースごとにタブを保存します。たとえば
 
 ## セルフホストインスタンスへの接続
 
-Desktop はデフォルトで Multica Cloud に接続します。セルフホストインスタンスに接続するには、ホームディレクトリに `~/.multica/desktop.json` を作成します:
+Desktop はデフォルトで Multica Cloud に接続します。セルフホストインスタンスに接続するには、ホームディレクトリの `.multica` の中に `desktop.json` を作成します:
+
+| プラットフォーム | パス |
+| --- | --- |
+| macOS | `/Users/<you>/.multica/desktop.json` |
+| Linux | `/home/<you>/.multica/desktop.json` |
+| Windows | `C:\Users\<you>\.multica\desktop.json` |
+
+これらはデフォルトの場所です。ホームディレクトリを移動またはリダイレクトしている場合は、実際のパスを使ってください。
 
 ```json
 {
@@ -78,6 +86,10 @@ Desktop はデフォルトで Multica Cloud に接続します。セルフホス
   "apiUrl": "https://api.example.com"
 }
 ```
+
+<Callout type="warning">
+これは CLI の `~/.multica/config.json` と**別のファイル**で、キー名も異なります: CLI は `server_url`、Desktop は `apiUrl` を使います。Desktop は CLI の設定を読みません。`~/.multica/profiles/desktop-<host>/` の下に専用の daemon プロファイルを管理します。`config.json` を編集しても、Desktop の接続先は変わりません。
+</Callout>
 
 `apiUrl` はバックエンドの公開アドレスです。必須で、`http` または `https` を使う必要があります。残りの 2 つのアドレスは省略でき、Desktop が自動で導出します:
 
@@ -99,11 +111,37 @@ Desktop はデフォルトで Multica Cloud に接続します。セルフホス
 }
 ```
 
-保存後に Desktop を再起動します。ファイルが存在するのに JSON、バージョン、URL のいずれかが無効な場合、アプリは設定エラーを表示し、自動では Cloud にフォールバックしません。そのファイルを削除して再起動すれば、デフォルトの Cloud 設定に戻ります。
+保存後に Desktop を再起動します。この設定は起動時に一度だけ読み込まれます。2 つの失敗の現れ方は異なるため、これが切り分けの手がかりになります:
+
+- **ファイルが見つからない**（ディレクトリが違う、またはファイル名が `desktop.json` ではない）: Desktop はデフォルトの Cloud 設定を使い、エラーは表示しません。つまり Desktop が Cloud のアドレスを表示したままで設定エラーも出ない場合、ファイルは Desktop が探している場所にありません。
+- **ファイルは見つかったが無効**（JSON、バージョン、URL のいずれかに問題がある）: Desktop は設定エラーを表示し、自動では Cloud にフォールバックしません。
+
+そのファイルを削除して再起動すれば、デフォルトの Cloud 設定に戻ります。
 
 <Callout type="warning">
 Desktop が接続できるのは、ブラウザと実行マシンの両方から到達できるアドレスだけです。リモートのセルフホストインスタンスが HTTPS を使っていない、または WebSocket をプロキシしていない場合、Desktop は接続を確立できません。完全な設定は[セルフホストクイックスタート](/self-host-quickstart#3-アクセス方法を選ぶ)を参照してください。
 </Callout>
+
+### Windows: ファイル名とエンコーディングを確認する
+
+Windows では、エディタの 2 つのデフォルト動作が Desktop の読めないファイルを気づかないうちに作ってしまいます:
+
+- **メモ帳は `.txt` を付け足します。** `desktop.json` として保存したつもりでも実際には `desktop.json.txt` になることがあり、Desktop はファイルが見つからないものとして扱います。エクスプローラーでファイル名拡張子の表示を有効にするか、保存ダイアログで*すべてのファイル*を選んでください。実際のファイル名を確認するには、PowerShell で `Get-ChildItem "$env:USERPROFILE\.multica" -Filter "desktop.json*"` を実行します。`Name` 列がちょうど `desktop.json` になっている必要があります。
+- **PowerShell のリダイレクトは UTF-16 や BOM 付きで書き込みます。** `> desktop.json` や `Out-File` はパースできないエンコーディングを生成することがあり、設定エラーとして現れます。
+
+どちらも避けるには、PowerShell で一度に作成します:
+
+```powershell
+$dir = "$env:USERPROFILE\.multica"
+New-Item -ItemType Directory -Force $dir | Out-Null
+$json = @'
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}
+'@
+[System.IO.File]::WriteAllText("$dir\desktop.json", $json)
+```
 
 ## Windows Defender が Multica をウイルスとして検出する
 

@@ -716,7 +716,7 @@ func TestChannelMessageFromLark_NormalizesAndStashesRaw(t *testing.T) {
 	}
 	cm := channelMessageFromLark(lm)
 
-	if cm.EventID != "evt" || cm.MessageID != "om" || cm.Text != "enriched body" {
+	if cm.EventID != "evt" || cm.MessageID != "om" || cm.Text != "enriched body" || cm.CommandText != "/issue do it" {
 		t.Fatalf("scalar fields not mapped: %+v", cm)
 	}
 	if cm.Type != channel.MsgTypeText {
@@ -733,7 +733,8 @@ func TestChannelMessageFromLark_NormalizesAndStashesRaw(t *testing.T) {
 		t.Fatalf("reply context not mapped: %+v", cm.ReplyTo)
 	}
 	// Raw must round-trip back to the original lark message (the boundary the
-	// Feishu resolvers read app_id / command_body / event_type from).
+	// Feishu resolvers read platform-specific fields such as app_id/event_type
+	// from); CommandBody is also projected onto normalized CommandText.
 	got, err := larkMsgFromRaw(cm)
 	if err != nil {
 		t.Fatalf("larkMsgFromRaw: %v", err)
@@ -764,9 +765,11 @@ func TestChannelMsgType(t *testing.T) {
 
 func TestDispatchResultFromEngine(t *testing.T) {
 	res := dispatchResultFromEngine(engine.Result{
-		Outcome:         engine.OutcomeNeedsBinding,
-		Sender:          "ou_user",
-		IssueIdentifier: "MUL-7",
+		Outcome:            engine.OutcomeNeedsBinding,
+		Sender:             "ou_user",
+		IssueIdentifier:    "MUL-7",
+		IssueDuplicate:     true,
+		IssueUsageHadMedia: true,
 	})
 	if res.Outcome != OutcomeNeedsBinding {
 		t.Fatalf("outcome not mapped: %q", res.Outcome)
@@ -776,5 +779,11 @@ func TestDispatchResultFromEngine(t *testing.T) {
 	}
 	if res.IssueIdentifier != "MUL-7" {
 		t.Fatalf("issue identifier not mapped: %q", res.IssueIdentifier)
+	}
+	if !res.IssueDuplicate {
+		t.Fatal("issue duplicate flag not mapped")
+	}
+	if !res.IssueUsageHadMedia {
+		t.Fatal("issue usage media flag not mapped")
 	}
 }

@@ -47,7 +47,7 @@ func TestDetectBuiltinRuntimes_ProbesRunConcurrently(t *testing.T) {
 	}
 
 	start := time.Now()
-	runtimes := d.detectBuiltinRuntimes(context.Background())
+	runtimes, _, _ := d.detectBuiltinRuntimes(context.Background())
 	elapsed := time.Since(start)
 
 	if len(runtimes) != len(d.cfg.Agents) {
@@ -104,7 +104,7 @@ func TestDetectBuiltinRuntimes_SkipsFailedProbes(t *testing.T) {
 		"tooold": {Path: "/usr/bin/true"},
 	}
 
-	runtimes := d.detectBuiltinRuntimes(context.Background())
+	runtimes, _, _ := d.detectBuiltinRuntimes(context.Background())
 	got := map[string]bool{}
 	for _, rt := range runtimes {
 		got[rt["type"]] = true
