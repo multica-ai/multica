@@ -20,7 +20,7 @@ export function ServerVersionBanner() {
   return (
     <div
       role="status"
-      className="flex items-center gap-2 border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground"
+      className="flex items-center gap-2 border-b bg-muted/30 px-4 py-2 text-caption text-muted-foreground"
     >
       <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />
       <span className="flex-1">
