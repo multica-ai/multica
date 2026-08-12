@@ -38,6 +38,21 @@ func TestCursorMcpApprovalKeyMatchesCursorAgentWithReorderedStdioConfig(t *testi
 	}
 }
 
+func TestCursorMcpApprovalKeyMatchesJSONStringifyWithHTMLCharacters(t *testing.T) {
+	t.Parallel()
+
+	keys, err := cursorMcpApprovalKeys("/tmp/work", map[string]json.RawMessage{
+		"fetch": json.RawMessage(`{"command":"uvx","args":["mcp"],"env":{"URL":"https://x.test?a=1&b=2"}}`),
+	})
+	if err != nil {
+		t.Fatalf("cursorMcpApprovalKeys: %v", err)
+	}
+	want := []string{"fetch-37ab92a3e088d73a"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("approval keys = %v, want %v", keys, want)
+	}
+}
+
 func TestPrepareCursorMcpConfigWritesProjectConfigAndApprovals(t *testing.T) {
 	t.Parallel()
 

@@ -282,11 +282,23 @@ func marshalCursorMcpApprovalServer(raw json.RawMessage) ([]byte, error) {
 
 	// Cursor parses stdio configs into command, args, and env fields before it
 	// computes approval keys, so the source JSON's object order must not leak in.
-	return json.Marshal(cursorStdioMcpApprovalServer{
+	return marshalJSONStringifyCompatible(cursorStdioMcpApprovalServer{
 		Command: command,
 		Args:    fields["args"],
 		Env:     fields["env"],
 	})
+}
+
+// marshalJSONStringifyCompatible serializes a value without Go's default HTML
+// escaping so approval payload bytes match Cursor's JSON.stringify output.
+func marshalJSONStringifyCompatible(value any) ([]byte, error) {
+	buf := &bytes.Buffer{}
+	enc := json.NewEncoder(buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(value); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
 func cursorProjectRoot(workDir string) string {
