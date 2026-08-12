@@ -367,9 +367,10 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 // DispatchAutopilotForPlanAttempt adds scheduler-attempt awareness to
 // DispatchAutopilotForPlan. A scheduled run_only dispatch whose runtime is
 // temporarily offline returns a retryable error before creating a run while
-// retryBudgetRemaining is true. The scheduler's bounded retry/backoff then
-// re-enters with the same (trigger_id, planned_at). On the final attempt the
-// normal admission path persists an explicit terminal skipped run/reason.
+// retryBudgetRemaining is true. The scheduled job permits exactly one retry,
+// one minute later, and re-enters with the same (trigger_id, planned_at). On
+// the final attempt the normal admission path persists an explicit terminal
+// skipped run/reason.
 func (s *AutopilotService) DispatchAutopilotForPlanAttempt(
 	ctx context.Context,
 	autopilot db.Autopilot,

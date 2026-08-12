@@ -83,10 +83,8 @@ func TestScheduledAutopilotOfflineRuntimeRetryContract(t *testing.T) {
 
 	persistentPlan := plan.Add(5 * time.Minute)
 	setStatus("offline")
-	for attempt := 1; attempt < 3; attempt++ {
-		if run, err = svc.DispatchAutopilotForPlanAttempt(ctx, agentAP, agentTrigger.ID, "schedule", nil, persistentPlan, true); err == nil || run != nil {
-			t.Fatalf("offline attempt %d must retry: run=%v err=%v", attempt, run, err)
-		}
+	if run, err = svc.DispatchAutopilotForPlanAttempt(ctx, agentAP, agentTrigger.ID, "schedule", nil, persistentPlan, true); err == nil || run != nil {
+		t.Fatalf("first offline attempt must retry: run=%v err=%v", run, err)
 	}
 	run, err = svc.DispatchAutopilotForPlanAttempt(ctx, agentAP, agentTrigger.ID, "schedule", nil, persistentPlan, false)
 	if err != nil || run == nil || run.Status != "skipped" || !strings.Contains(run.FailureReason.String, "offline at dispatch time") {
