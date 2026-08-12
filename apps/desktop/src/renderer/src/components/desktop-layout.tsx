@@ -12,7 +12,7 @@ import {
   useSidebar,
 } from "@multica/ui/components/ui/sidebar";
 import { ModalRegistry } from "@multica/views/modals/registry";
-import { AppSidebar, GlobalShortcuts } from "@multica/views/layout";
+import { AppSidebar, GlobalShortcuts, ServerVersionBanner } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { FloatingChat } from "@multica/views/chat";
 import { WorkspaceSlugProvider, paths, useCurrentWorkspace } from "@multica/core/paths";
@@ -246,6 +246,9 @@ export function DesktopShell() {
             <div className="flex flex-1 min-w-0 flex-col">
               <MainTopBar />
               <MainCanvas>
+                {/* Read-only version-mismatch hint (#5848). Desktop doesn't
+                    wrap DashboardLayout, so it mounts its own copy here. */}
+                <ServerVersionBanner />
                 <TabContent />
                 {slug && <FloatingChat />}
               </MainCanvas>

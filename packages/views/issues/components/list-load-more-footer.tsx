@@ -1,5 +1,6 @@
 "use client";
 
+import { EndpointUnavailableError } from "@multica/core/api";
 import { useT } from "../../i18n";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 
@@ -26,6 +27,7 @@ export function ListLoadMoreFooter({
   total,
   onLoadMore,
   isError = false,
+  error,
   onRetry,
 }: {
   hasMore: boolean;
@@ -33,18 +35,25 @@ export function ListLoadMoreFooter({
   total: number;
   onLoadMore: () => void;
   isError?: boolean;
+  /** The underlying page error, when known — an EndpointUnavailableError
+   * (older server missing the endpoint, #5848) swaps the copy for an
+   * upgrade hint while keeping the Retry button. */
+  error?: unknown;
   onRetry?: () => void;
 }) {
   const { t } = useT("issues");
 
   if (isError && onRetry) {
+    const unavailable = error instanceof EndpointUnavailableError;
     return (
       <button
         type="button"
         className="w-full py-2 text-caption text-destructive hover:underline"
         onClick={onRetry}
       >
-        {t(($) => $.table.load_more_failed_retry)}
+        {unavailable
+          ? t(($) => $.table.endpoint_unavailable_retry)
+          : t(($) => $.table.load_more_failed_retry)}
       </button>
     );
   }

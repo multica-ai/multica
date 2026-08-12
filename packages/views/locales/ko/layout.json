@@ -35,6 +35,10 @@
     "feedback": "피드백",
     "server_version": "서버 버전 {{version}}"
   },
+  "version_mismatch": {
+    "message": "서버 버전({{serverVersion}})이 이 앱({{appVersion}})보다 오래되어 일부 기능을 사용할 수 없을 수 있습니다. 서버를 업그레이드하세요.",
+    "dismiss": "닫기"
+  },
   "workspace_loader": {
     "loading_workspace": "워크스페이스 로딩 중...",
     "loading_named_prefix": "로딩 중"

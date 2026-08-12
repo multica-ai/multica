@@ -35,6 +35,10 @@
     "feedback": "反馈",
     "server_version": "服务器版本 {{version}}"
   },
+  "version_mismatch": {
+    "message": "服务端版本（{{serverVersion}}）低于当前应用（{{appVersion}}），部分功能可能不可用，请升级服务端。",
+    "dismiss": "关闭"
+  },
   "workspace_loader": {
     "loading_workspace": "正在加载工作区...",
     "loading_named_prefix": "正在加载"

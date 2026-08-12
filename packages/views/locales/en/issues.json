@@ -136,6 +136,7 @@
     "load_failed": "Failed to load issues.",
     "load_failed_retry": "Retry",
     "load_more_failed_retry": "Loading more failed — Retry",
+    "endpoint_unavailable_retry": "Server version is too old and lacks this endpoint — please upgrade the server — Retry",
     "load_more": "Load more",
     "loading_branch": "Loading…",
     "no_more": "No more",

@@ -19,6 +19,7 @@ import { AuthInitializer } from "./auth-initializer";
 import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 import { ClientUsageReporter } from "../client-usage";
+import { setClientIdentity } from "./client-identity";
 import {
   configureShortcutPlatform,
   configureShortcutRuntime,
@@ -38,6 +39,8 @@ function initCore(
   identity?: ClientIdentity,
 ) {
   if (initialized) return;
+
+  setClientIdentity(identity);
 
   configureShortcutPlatform(
     identity?.os === "macos" ||
