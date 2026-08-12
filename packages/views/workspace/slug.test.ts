@@ -22,12 +22,31 @@ describe("nameToWorkspaceSlug", () => {
     expect(nameToWorkspaceSlug("a.b.c")).toBe("a-b-c");
   });
 
+  // MUL-6050: a Chinese name used to produce no slug at all, which left the
+  // create form with an empty URL *and* an empty issue prefix — the two
+  // fields that make a workspace identifiable.
+  it("romanizes Chinese names into a slug", () => {
+    expect(nameToWorkspaceSlug("蜘蛛侠")).toBe("zhizhuxia");
+    expect(nameToWorkspaceSlug("前端团队")).toBe("qianduantuandui");
+    expect(nameToWorkspaceSlug("测试")).toBe("ceshi");
+  });
+
+  // Each Han run is romanized whole so the phrase dictionary can pick the
+  // right reading for 多音字 — per-character conversion would give
+  // "zhangsha" / "zhongqing" / "yinxing" here.
+  it("resolves polyphonic characters from surrounding context", () => {
+    expect(nameToWorkspaceSlug("长沙组")).toBe("changshazu");
+    expect(nameToWorkspaceSlug("重庆团队")).toBe("chongqingtuandui");
+    expect(nameToWorkspaceSlug("银行")).toBe("yinhang");
+  });
+
   // Regression: previously fell back to literal "workspace" — caused two
   // separate non-ASCII-named workspaces on the same instance to 409 (slug
   // taken) and silently surfaced a confusing "/workspace/issues" URL.
-  it("returns empty string for non-ASCII-only names", () => {
-    expect(nameToWorkspaceSlug("测试")).toBe("");
+  // Romanization covers Han only; everything else still asks the user.
+  it("returns empty string for names that romanize to nothing", () => {
     expect(nameToWorkspaceSlug("こんにちは")).toBe("");
+    expect(nameToWorkspaceSlug("안녕하세요")).toBe("");
     expect(nameToWorkspaceSlug("🚀")).toBe("");
     expect(nameToWorkspaceSlug("مرحبا")).toBe("");
   });
@@ -38,9 +57,11 @@ describe("nameToWorkspaceSlug", () => {
     expect(nameToWorkspaceSlug("   ")).toBe("");
   });
 
-  it("preserves ASCII characters even when mixed with non-ASCII", () => {
-    expect(nameToWorkspaceSlug("测试 Team")).toBe("team");
-    expect(nameToWorkspaceSlug("Project 测试 1")).toBe("project-1");
+  it("keeps Latin and romanized segments apart when a name mixes them", () => {
+    expect(nameToWorkspaceSlug("测试 Team")).toBe("ceshi-team");
+    expect(nameToWorkspaceSlug("Project 测试 1")).toBe("project-ceshi-1");
+    // No separator in the source: the romanized run must not glue onto it.
+    expect(nameToWorkspaceSlug("Acme蜘蛛侠")).toBe("acme-zhizhuxia");
   });
 });
 
