@@ -204,6 +204,27 @@ func TestEveryTerminalPathEndsInWordsOrLeavesTheRunOwed(t *testing.T) {
 		// publishers and a sweeper tick can repeat either, and WeCom redelivers
 		// callbacks after a reconnect, so every one of these arrives twice in
 		// production sooner or later.
+		p := p
+		// The same words, when a permission read fails for one attempt. A read
+		// that failed establishes nothing, so it must not be spent as a reason
+		// to stop: the answer is still the only copy and still owed.
+		t.Run(p.name+"/says it once even when a permission read blips", func(t *testing.T) {
+			t.Parallel()
+			rig := setUpTwoRounds(t, p, controlRounds()[0])
+			rig.out.retryAfter = 20 * time.Millisecond
+			before := len(said(t, rig.conn))
+			rig.q.installErrFor = 1
+
+			p.fire(t, rig)
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) && len(said(t, rig.conn)) == before {
+				time.Sleep(time.Millisecond)
+			}
+			if got := said(t, rig.conn)[before:]; len(got) != 1 || got[0] != p.want {
+				t.Fatalf("%s with one failed permission read left the user reading %q, want [%q]", p.name, got, p.want)
+			}
+		})
+
 		t.Run(p.name+"/says it once", func(t *testing.T) {
 			t.Parallel()
 			rig := setUpTwoRounds(t, p, controlRounds()[0])
