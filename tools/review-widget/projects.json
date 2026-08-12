@@ -4,6 +4,9 @@
     "project_id": "95c912c7-3a3d-4173-aedc-0834506ddfe2",
     "base_url": "https://dart.hbhf.is",
 
-    "_comment": "No assignee and no status override on purpose. Client comments land in `backlog`, unassigned, where the daemon cannot dispatch them. Triage them yourself, then assign + move to `todo` when the work is actually approved. Setting assignee_id here re-arms automatic agent dispatch on every client comment — do not do it without meaning to."
+    "triage_assignee_type": "agent",
+    "triage_assignee_id": "f836f8c5-f109-45b0-83f5-002ae2047600",
+
+    "_comment": "triage_assignee_id is the Client Intake agent. Client comments are assigned to it as `todo` so it picks them up, clarifies with the client in their own language, and hands a written spec to the Tech Lead. It is safe to auto-dispatch to BECAUSE its instructions forbid writing code, editing files, deploying, or assigning to a developer. Never point this at a coding agent — that is what opened ips PR #264 from a test comment. Remove the two triage_ keys to fall back to inert backlog/unassigned."
   }
 }

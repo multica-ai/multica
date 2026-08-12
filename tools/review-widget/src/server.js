@@ -160,25 +160,36 @@ async function createIssue({ config, client, comment, url, path, selector, label
 		.filter(Boolean)
 		.join('\n');
 
+	// Routing depends entirely on WHO the issue is assigned to.
+	//
+	// A raw client comment must never reach a *coding* agent unreviewed:
+	// assignee + `todo` is what makes the daemon dispatch, and doing that to a
+	// code-writing agent had one opening real PRs against the live repo within
+	// seconds of a comment (ips PR #264, from a test comment, reached CI before
+	// it was caught).
+	//
+	// A *triage* agent is the opposite, and is the point of this system. The
+	// Client Intake agent cannot write code, edit files, deploy, or assign to a
+	// developer — it can only clarify with the client and hand to the Tech Lead.
+	// Sending vague client feedback there first is strictly better than parking
+	// it in a backlog nobody reads.
+	//
+	// So: `triage_assignee_id` set  -> assigned + `todo`, dispatched to triage.
+	//     nothing set               -> unassigned + `backlog`, inert.
+	const triage = config.triage_assignee_id;
 	const body = {
 		title,
 		description,
 		priority: 'medium',
-		// Land in `backlog`, NOT `todo`. A client comment is a request, not an
-		// approved work order — it must be triaged by a human before any agent
-		// touches the codebase. `backlog` is the one status the handoff contract
-		// allows to be unassigned, and the daemon does not dispatch from it.
-		//
-		// This is load-bearing. Creating these as assigned `todo` had agents
-		// opening real PRs against the live repo within seconds of a comment
-		// (ips PR #264, from a test comment, reached CI before being caught).
-		status: config.status || 'backlog'
+		status: config.status || (triage ? 'todo' : 'backlog')
 	};
 	if (config.project_id) body.project_id = config.project_id;
-	// Assign only when a project explicitly opts in. Assignment plus `todo` is
-	// what makes the daemon pick an issue up, so the default (no assignee,
-	// backlog) is deliberately inert.
-	if (config.assignee_id) {
+
+	if (triage) {
+		body.assignee_type = config.triage_assignee_type || 'agent';
+		body.assignee_id = triage;
+	} else if (config.assignee_id) {
+		// Legacy escape hatch. Only ever point this at a non-coding agent.
 		body.assignee_type = config.assignee_type || 'user';
 		body.assignee_id = config.assignee_id;
 	}
@@ -287,7 +298,9 @@ async function handle(req, res) {
 
 			// Cancelled work is not something the client should still see pinned
 			// to the page — it reads as "you ignored me" rather than "we decided
-			// against this". Done stays visible so they can see what was fixed.
+			// against this". Everything else stays visible, including the
+			// in_progress/needs-info states a triage agent moves through, so the
+			// client can see their comment is being worked on.
 			const HIDDEN = new Set(['cancelled']);
 
 			const pins = issues
