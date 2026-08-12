@@ -314,6 +314,95 @@ func TestGetChatHistory_NilReaderServesStoredTranscript(t *testing.T) {
 	}
 }
 
+// TestGetChatHistory_TranscriptNamesItsChannel: a served transcript reports the
+// platform the session is bound to. HistoryPage.ChannelType is documented as
+// empty ONLY for a session on no channel, so omitting it here would tell a
+// WeCom/Feishu/DingTalk agent it is in a web-only chat — and would contradict
+// the empty-read path, which already names the platform for the same session.
+// One session, asserted both ways round, so the two paths cannot drift apart.
+func TestGetChatHistory_TranscriptNamesItsChannel(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("requires test database")
+	}
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "ChatHistoryChannelTypeAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID := newChatHistoryTaskForSession(t, sessionID)
+	withSlackHistory(t, nil)
+
+	var instID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, status, installer_user_id)
+		VALUES ($1, $2, 'wecom', '{"app_id":"bot-transcript-channel"}'::jsonb, 'active', $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&instID); err != nil {
+		t.Fatalf("create installation: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, instID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO channel_chat_session_binding
+			(chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
+		VALUES ($1, $2, 'wecom', 'GROUP_TRANSCRIPT', 'group')
+	`, sessionID, instID); err != nil {
+		t.Fatalf("bind session: %v", err)
+	}
+
+	// Empty read first: this leg already named the platform before this change.
+	w := httptest.NewRecorder()
+	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))
+	var empty ChatChannelHistoryResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &empty)
+
+	base := time.Date(2026, 8, 12, 1, 0, 0, 0, time.UTC)
+	insertChatVisibilityMessage(t, sessionID, "a wecom turn", "message", true, base)
+
+	w = httptest.NewRecorder()
+	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var served ChatChannelHistoryResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &served)
+
+	if len(served.Messages) != 1 {
+		t.Fatalf("expected the stored transcript, got %+v", served.Messages)
+	}
+	if served.ChannelType != "wecom" {
+		t.Errorf("served transcript channel_type = %q, want wecom", served.ChannelType)
+	}
+	if served.ChannelType != empty.ChannelType {
+		t.Errorf("same session reports channel_type %q when it has messages and %q when it does not",
+			served.ChannelType, empty.ChannelType)
+	}
+}
+
+// TestGetChatHistory_WebOnlyTranscriptHasNoChannelType: the other half of the
+// contract — a session bound to nothing must still report an empty channel_type.
+func TestGetChatHistory_WebOnlyTranscriptHasNoChannelType(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("requires test database")
+	}
+	agentID := createHandlerTestAgent(t, "ChatHistoryWebOnlyTypeAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID := newChatHistoryTaskForSession(t, sessionID)
+	withSlackHistory(t, nil)
+	insertChatVisibilityMessage(t, sessionID, "a web turn", "message", true, time.Date(2026, 8, 12, 1, 0, 0, 0, time.UTC))
+
+	w := httptest.NewRecorder()
+	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))
+
+	var resp ChatChannelHistoryResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.ChannelType != "" {
+		t.Errorf("web-only session channel_type = %q, want empty", resp.ChannelType)
+	}
+	if len(resp.Messages) != 1 {
+		t.Fatalf("expected the stored transcript, got %+v", resp.Messages)
+	}
+}
+
 // TestGetChatHistory_TranscriptPagesWithoutDuplicatesOrGaps: the transcript
 // honors the ?limit / ?before paging contract — walking back page by page with
 // next_cursor yields every stored message exactly once, and a full page

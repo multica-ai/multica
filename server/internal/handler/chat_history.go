@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -112,7 +113,16 @@ func (h *Handler) chatMessageHistory(r *http.Request, sessionID pgtype.UUID) (ch
 			TS:     m.CreatedAt.Time.UTC().Format(time.RFC3339Nano),
 		})
 	}
-	page := channel.HistoryPage{Messages: out}
+	// Name the platform the transcript came from. HistoryPage.ChannelType is
+	// documented as empty ONLY for a session bound to no channel, so leaving it
+	// unset here would tell a Feishu/WeCom/DingTalk agent it is in a web-only
+	// chat — and would disagree with the empty-read path below, which already
+	// reports the bound platform for the very same session.
+	channelType, err := h.sessionChannelType(r.Context(), sessionID)
+	if err != nil {
+		return channel.HistoryPage{}, fmt.Errorf("%w: %w", errChannelBindingRead, err)
+	}
+	page := channel.HistoryPage{ChannelType: channelType, Messages: out}
 	// Advertise a cursor when a full page came back, so the agent can page to
 	// older messages (mirrors the Slack reader's "more may exist" signal).
 	if len(messages) == limit && len(out) > 0 {
@@ -264,6 +274,12 @@ func (h *Handler) respondChatHistory(w http.ResponseWriter, r *http.Request, ses
 			})
 			return
 		}
+		if errors.Is(err, errChannelBindingRead) {
+			slog.Error("chat session channel binding read failed", append(logger.RequestAttrs(r),
+				"error", err, "chat_session_id", uuidToString(sessionID))...)
+			writeError(w, http.StatusInternalServerError, "failed to read chat session channel binding")
+			return
+		}
 		slog.Error("chat channel history read failed", append(logger.RequestAttrs(r),
 			"error", err, "chat_session_id", uuidToString(sessionID))...)
 		writeError(w, http.StatusBadGateway, "failed to read channel history")
@@ -325,6 +341,13 @@ func noHistoryNote(channelType string) string {
 	}
 	return "This conversation is on " + channelType + ", whose backlog this server cannot read. You can see the messages addressed to you in this session, but not the rest of the room."
 }
+
+// errChannelBindingRead marks a transcript read whose MESSAGES were fetched but
+// whose channel binding could not be. It is not an upstream channel failure, so
+// respondChatHistory answers it like the empty-read path answers the same
+// failure — one status code for one cause, whether or not the session happened
+// to have messages.
+var errChannelBindingRead = errors.New("chat session channel binding read failed")
 
 // sessionChannelType names the platform behind a session, or "" when there is
 // none. Channel-agnostic on purpose: a per-platform lookup here would go blind
