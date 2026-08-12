@@ -140,7 +140,13 @@ func (s *wsSender) lockWriter(ctx context.Context) error {
 	case s.wmu <- struct{}{}:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		// A caller that gave up waiting for the writer never reached the
+		// socket, so this belongs with the other failures ahead of the write:
+		// writeLocked's own doc claims to be "the only place that can say so",
+		// and that is one frame too late — a frame stopped here never gets to
+		// writeLocked at all. Left bare it read as a failure that may have
+		// painted the screen, and the round gave up a bubble nothing touched.
+		return fmt.Errorf("%w: %w", errFrameNotOnTheWire, ctx.Err())
 	}
 }
 
@@ -836,9 +842,14 @@ func (s *wsSender) writeStreamFrame(ctx context.Context, reqID string, w *ackWai
 //
 // A failure comes back wrapped in errFrameNotOnTheWire, which is this function's
 // one statement about the world: the frame did not go out whole, so whatever it
-// carried is on nobody's screen. It is the only place that can say so — past
+// carried is on nobody's screen. It is the last place that can say so — past
 // here the OS error is opaque — and callers that have to choose between saying
 // something again and leaving it unsaid read it rather than the error under it.
+//
+// Not the ONLY place, which this comment used to claim. Everything ahead of the
+// write owes the same statement and has to make it for itself: respondStream's
+// three returns before it marshals, and lockWriter, where a caller that gave up
+// waiting for the writer never arrives here at all.
 func (s *wsSender) writeLocked(ctx context.Context, payload []byte, t *outTrace) error {
 	s.seq++
 	seq := s.seq

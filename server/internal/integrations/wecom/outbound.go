@@ -317,6 +317,21 @@ const (
 // log line and no metric, and chat:done does not fire again.
 func (o *Outbound) sayTheAnswer(ctx context.Context, e events.Event, sessionID pgtype.UUID, taskID, content string, fallback attachmentTarget, retries endingRetries) error {
 	retries = retries.begin(time.Now())
+	// Asked on EVERY attempt, and ahead of the take.
+	//
+	// Ahead of the take because the bubble path writes its closing frame
+	// through the registered socket without ever loading the installation —
+	// sendAsMessage's check (below) only guards the plain-message fallback. A
+	// socket the reaper has not got to yet is not permission to keep writing:
+	// revoking an installation is a person withdrawing it.
+	//
+	// On every attempt because an attempt can be fifteen minutes behind the one
+	// that scheduled it, and the withdrawal can land in between. Inheriting the
+	// first attempt's answer would write to a chat whose owner has since said
+	// no.
+	if !o.installationStillOurs(ctx, fallback.InstallationID) {
+		return nil
+	}
 	// deliveredTo is set only by an attempt of OURS that landed. sayEnding
 	// returns a verdict rather than an address, and the difference matters
 	// here: roundToldAlready means somebody else already said this round's
@@ -332,32 +347,48 @@ func (o *Outbound) sayTheAnswer(ctx context.Context, e events.Event, sessionID p
 			}
 			return addr, err
 		})
-	if err == nil || errors.Is(err, errNothingToSay) {
-		// The words landed. Whatever the agent produced alongside them goes out
-		// behind them as its own message — a WeCom reply cannot carry a file
-		// inline.
+	if err == nil || errors.Is(err, errNoWordsOwed) || errors.Is(err, errNothingToSay) {
+		// Whatever the agent produced alongside the words goes out behind them
+		// as its own message — a WeCom reply cannot carry a file inline.
 		//
-		// Here rather than beside the send, because THIS is the line that means
-		// delivered. A booked retry also returns nil to the bus, and firing the
-		// attachment on that path would put the file in front of an answer that
-		// has not been said yet; the attempt that finally lands comes back
-		// through here and sends it then. The address is the one the delivery
-		// actually used, so a bubble sealed in place and a plain message both
-		// address the same chat.
-		// Addressed from the delivery when there was one, and from the binding
-		// when the answer had nothing to say — an empty completion whose only
-		// reply IS the file reaches here with no address of its own, and
-		// throwing the file away because no words went with it is how the work
-		// gets lost.
-		target := fallback
-		if delivered {
-			target = attachmentTarget{
-				InstallationID: deliveredTo.InstallationID,
-				ChatID:         deliveredTo.ChatID,
-				ChatType:       deliveredTo.ChatType,
+		// delivered is set only inside the send closure, so it is the proof
+		// that THIS call put something on the screen. sayEnding answers
+		// roundToldAlready — somebody else said this round's ending — without
+		// running the closure at all, and with a nil error; read as success
+		// that sends a file behind words we did not write, and a repeated
+		// chat:done delivers the text once and the file twice.
+		//
+		// The verdict itself is not read. It cannot add anything here: it is
+		// roundToldAlready in exactly the cases the closure did not run, which
+		// are exactly the cases delivered is false, so a condition on it could
+		// never fire on its own.
+		//
+		// errNoWordsOwed is the other way a file legitimately travels alone:
+		// the turn was fine and the completion was empty, which is what the
+		// platform does when the agent produced a file and said nothing about
+		// it.
+		//
+		// A repeat is not recoverable here. Duplicate copy is a line the user
+		// scrolls past; a duplicate attachment is a file sent twice into
+		// somebody's chat, and nothing takes it back.
+		//
+		// Re-checked rather than inherited: the send may have taken a while and
+		// the answer's own gate was passed before it.
+		if (delivered || errors.Is(err, errNoWordsOwed)) &&
+			o.installationStillOurs(ctx, fallback.InstallationID) {
+			// Addressed from the delivery when there was one, and from the
+			// binding when the file travels alone — that answer had no address
+			// of its own to give.
+			target := fallback
+			if delivered {
+				target = attachmentTarget{
+					InstallationID: deliveredTo.InstallationID,
+					ChatID:         deliveredTo.ChatID,
+					ChatType:       deliveredTo.ChatType,
+				}
 			}
+			o.deliverAttachments(e, target)
 		}
-		o.deliverAttachments(e, target)
 		return nil
 	}
 	if cause, again := answerRetryCause(err); again &&
@@ -368,6 +399,36 @@ func (o *Outbound) sayTheAnswer(ctx context.Context, e events.Event, sessionID p
 	// either way, and the caller's WARN is the only place that can say so.
 	return err
 }
+
+// installationStillOurs reports whether this installation may still be written
+// to. False on a revoked row, on a row that has gone, and on a lookup that
+// failed — the last one deliberately: a delivery that cannot establish
+// permission does not proceed on the assumption that it has it.
+//
+// sendAsMessage repeats this check because it holds the row it needs for the
+// send anyway. This one exists for the paths that never load it: the bubble's
+// closing frame, and the attachment behind it.
+func (o *Outbound) installationStillOurs(ctx context.Context, id pgtype.UUID) bool {
+	if !id.Valid {
+		return false
+	}
+	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
+		ID:          id,
+		ChannelType: channelTypeWecom,
+	})
+	if err != nil {
+		return false
+	}
+	return inst.Status == string(InstallationActive)
+}
+
+// errNoWordsOwed is the one outcome that says the turn is fine and there were
+// simply no words for it: a round nothing promised, with an empty completion.
+// It is separate from errNothingToSay on purpose. That one also means revoked,
+// no binding row, and a session that is not WeCom's — three cases where NOTHING
+// may be sent — and reading a file's permission off a value that carries them
+// sent attachments into chats we had just refused to write words to.
+var errNoWordsOwed = errors.New("wecom: no words owed for this round")
 
 // answerRetryCause reads what the ledger handed back and says whether the answer
 // is still this subscriber's to deliver, and under which cause the next attempt
@@ -406,6 +467,7 @@ func answerRetryCause(err error) (retryCause, bool) {
 	switch {
 	case err == nil,
 		errors.Is(err, errNothingToSay),
+		errors.Is(err, errNoWordsOwed),
 		errors.Is(err, errWordsMayBeOnScreen):
 		return retryNone, false
 	case errors.Is(err, errEndingDeferred):
@@ -533,7 +595,7 @@ func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t r
 		// WeCom round is waiting on these words: no binding row is consulted
 		// and no session that never asked anything here is written to.
 		if !t.Promised || !t.Addr.known() || o.senders == nil {
-			return roundAddress{}, errNothingToSay
+			return roundAddress{}, errNoWordsOwed
 		}
 		return t.Addr, o.senders.sendTextCtx(ctx, t.Addr.InstallationID, t.Addr.ChatID, t.Addr.ChatType, streamCopyNoReply)
 	}
