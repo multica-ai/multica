@@ -1,6 +1,7 @@
 import "../global.css";
 
 import { useEffect, useRef } from "react";
+import * as Linking from "expo-linking";
 import { Stack, router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -16,6 +17,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { LightboxProvider, prewarmHighlighter } from "@/lib/markdown";
 import { NAV_THEME } from "@/lib/theme";
 import { useColorScheme } from "@/lib/use-color-scheme";
+import { getAuthHandoffToken } from "@/lib/auth-handoff";
 
 // Kick off Shiki highlighter init at module load — fires once per process,
 // finishes before the user navigates to any screen with a code block. If
@@ -25,6 +27,7 @@ prewarmHighlighter();
 
 function AuthInitializer({ children }: { children: React.ReactNode }) {
   const initialize = useAuthStore((s) => s.initialize);
+  const loginWithToken = useAuthStore((s) => s.loginWithToken);
   const qc = useQueryClient();
   // Idempotent guard: 401 on multiple in-flight requests would otherwise
   // logout/navigate repeatedly during the same session-expire moment.
@@ -51,8 +54,43 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
         })();
       },
     });
-    initialize();
-  }, [initialize, qc]);
+    let disposed = false;
+    const handledTokens = new Set<string>();
+
+    const finishAuthHandoff = async (url: string | null) => {
+      const token = getAuthHandoffToken(url);
+      if (!token) return false;
+      if (handledTokens.has(token)) return true;
+      handledTokens.add(token);
+      try {
+        await loginWithToken(token);
+        await useWorkspaceStore.getState().clear();
+        qc.clear();
+        if (!disposed) router.replace("/");
+      } catch {
+        handledTokens.delete(token);
+        if (!disposed) {
+          router.replace({
+            pathname: "/login",
+            params: { authError: "Couldn't complete single sign-on." },
+          });
+        }
+      }
+      return true;
+    };
+
+    const subscription = Linking.addEventListener("url", ({ url }) => {
+      void finishAuthHandoff(url);
+    });
+    void Linking.getInitialURL().then(async (url) => {
+      if (!(await finishAuthHandoff(url))) await initialize();
+    });
+
+    return () => {
+      disposed = true;
+      subscription.remove();
+    };
+  }, [initialize, loginWithToken, qc]);
 
   return <>{children}</>;
 }
@@ -71,6 +109,7 @@ export default function RootLayout() {
                   <Stack screenOptions={{ headerShown: false }}>
                     <Stack.Screen name="index" />
                     <Stack.Screen name="(auth)" />
+                    <Stack.Screen name="auth/callback" />
                     <Stack.Screen name="(app)" />
                   </Stack>
                   <PortalHost />
