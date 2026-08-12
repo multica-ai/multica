@@ -933,7 +933,7 @@ func taskFailureReason(task db.AgentTaskQueue) string {
 
 func taskErrorType(reason string) string {
 	switch reason {
-	case "runtime_offline", "runtime_recovery":
+	case "runtime_offline", "runtime_recovery", "runtime_drained":
 		return "runtime"
 	case "timeout", "codex_semantic_inactivity":
 		return "timeout"
@@ -4175,9 +4175,16 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // never started, so there is nothing to be idempotent about, and every bundle
 // that did download is already cached on disk — a retry resumes from there
 // instead of re-fetching the whole set (MUL-5370).
+//
+// runtime_drained (NEX-38 decision one): a task stranded by a drained runtime
+// is retryable for the same reason runtime_offline is — the failure is the
+// runtime's intentional shutdown, not the agent. Once the runtime is drained
+// back to online (or a replacement runtime picks the work up) retrying is
+// exactly what the user wants.
 var retryableReasons = map[string]bool{
 	"runtime_offline":           true,
 	"runtime_recovery":          true,
+	"runtime_drained":           true,
 	"timeout":                   true,
 	"codex_semantic_inactivity": true,
 	string(taskfailure.ReasonAgentProviderNetwork):   true,
@@ -4287,13 +4294,22 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 
 // retryEligible reports whether a failed task qualifies for an automatic retry
 // attempt: an infrastructure-shaped failure_reason, remaining attempt budget,
-// not an autopilot run, and linked to an issue or chat session. Shared by
-// FailTask's in-transaction retry and the orphan sweeper's MaybeRetryFailedTask
-// so both agree on which failures re-run.
+// and linked to an issue or chat session. Shared by FailTask's in-transaction
+// retry and the orphan sweeper's MaybeRetryFailedTask so both agree on which
+// failures re-run.
+//
+// Autopilot tasks are excluded from auto-retry EXCEPT for 'runtime_drained'
+// (NEX-38 corrected contract): the autopilot scheduler owns its own re-run
+// cadence, but a task stranded by an intentional safe shutdown would otherwise
+// have NO recovery path at all — it is queued against a runtime that is going
+// away and consumes nothing useful. Retrying it lets the child be claimed by
+// whatever runtime hosts the agent once the drain settles (CreateRetryTask
+// re-resolves the runtime to the agent's current binding).
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
+	autopilotBlocked := t.AutopilotRunID.Valid && failureReason != "runtime_drained"
 	return retryableReasons[failureReason] &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
-		!t.AutopilotRunID.Valid &&
+		!autopilotBlocked &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid)
 }
 

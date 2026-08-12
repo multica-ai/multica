@@ -153,35 +153,41 @@ WHERE workspace_id = @workspace_id
 
 
 -- name: TouchAgentRuntimeLastSeen :execrows
--- Bumps last_seen_at on an already-online runtime. Deliberately does NOT
--- touch status or updated_at: status is unchanged on the hot heartbeat path,
--- and avoiding updated_at keeps the row HOT-eligible (no index columns
--- change) and avoids invalidating any downstream consumer that watches
--- updated_at.
+-- Bumps last_seen_at on an already-online OR draining runtime (NEX-38). A
+-- draining runtime must keep last_seen_at fresh so the offline sweeper does
+-- not misjudge an in-flight safe shutdown as a dead runtime, but it must
+-- never be flipped back to 'online' — that is the caller's decision, and the
+-- status predicate here deliberately does NOT include 'offline'. Deliberately
+-- does NOT touch status or updated_at: status is unchanged on the hot
+-- heartbeat path, and avoiding updated_at keeps the row HOT-eligible (no
+-- index columns change) and avoids invalidating any downstream consumer that
+-- watches updated_at.
 --
--- The status='online' predicate is load-bearing: callers read rt.Status from
--- a prior SELECT and may race with the sweeper, which can flip the row to
--- offline between that SELECT and this UPDATE. Without the predicate this
--- query would silently leave a freshly-heartbeated runtime stuck in offline.
--- Returning affected rows lets callers detect that race and fall back to
+-- The status predicate is load-bearing: callers read rt.Status from a prior
+-- SELECT and may race with the sweeper, which can flip the row to offline
+-- between that SELECT and this UPDATE. Without the predicate this query would
+-- silently leave a freshly-heartbeated runtime stuck in offline. Returning
+-- affected rows lets callers detect that race and fall back to
 -- MarkAgentRuntimeOnline to flip the row back online.
 UPDATE agent_runtime
 SET last_seen_at = now()
-WHERE id = $1 AND status = 'online';
+WHERE id = $1 AND status IN ('online', 'draining');
 
 -- name: TouchAgentRuntimesLastSeenBatch :execrows
 -- Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
 -- coalesces N per-runtime "bump last_seen_at" requests into a single UPDATE so a
 -- fleet beating every 15s costs ~1 DB transaction per batch tick instead of N.
 --
--- Same load-bearing predicate as the single-id form: status='online' avoids
--- silently un-deleting a sweeper-flipped offline row, and we deliberately do
--- NOT touch updated_at so the rows stay HOT-eligible. Affected-rows < len(ids)
--- means some IDs raced to offline between Schedule and flush; their next beat
--- will fall through the recordHeartbeat sync path and call MarkAgentRuntimeOnline.
+-- Same load-bearing predicate as the single-id form: status IN ('online',
+-- 'draining') admits draining runtimes (which still need fresh last_seen_at
+-- while draining) but avoids silently un-deleting a sweeper-flipped offline
+-- row, and we deliberately do NOT touch updated_at so the rows stay
+-- HOT-eligible. Affected-rows < len(ids) means some IDs raced to offline
+-- between Schedule and flush; their next beat will fall through the
+-- recordHeartbeat sync path and call MarkAgentRuntimeOnline.
 UPDATE agent_runtime
 SET last_seen_at = now()
-WHERE id = ANY(@ids::uuid[]) AND status = 'online';
+WHERE id = ANY(@ids::uuid[]) AND status IN ('online', 'draining');
 
 -- name: MarkAgentRuntimeOnline :one
 -- Used on the offline→online transition (and on first heartbeat after
@@ -198,18 +204,26 @@ SET status = 'offline', updated_at = now()
 WHERE id = $1;
 
 -- name: SelectStaleOnlineRuntimes :many
--- Lists online runtimes whose last_seen_at exceeds the stale window. The
--- sweeper uses this as a candidate set, then optionally filters via the
--- LivenessStore before flipping rows to offline (a fresh Redis liveness
--- record means the DB row is just lagging, not actually dead).
+-- Lists online OR draining runtimes whose last_seen_at exceeds the stale
+-- window. The sweeper uses this as a candidate set, then optionally filters
+-- via the LivenessStore before flipping rows to offline (a fresh Redis
+-- liveness record means the DB row is just lagging, not actually dead).
+--
+-- Draining runtimes are included (NEX-38 must-fix #2): a draining daemon
+-- that crashes and never returns must converge to offline like any other
+-- dead runtime instead of staying 'draining' forever. A LIVE draining
+-- daemon keeps bumping last_seen_at (and its Redis liveness key), so the
+-- stale predicate + LivenessStore filter leave it draining — the two guards
+-- together protect heartbeat races.
 SELECT id, workspace_id, owner_id, daemon_id, provider FROM agent_runtime
-WHERE status = 'online'
+WHERE status IN ('online', 'draining')
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision);
 
 -- name: MarkRuntimesOfflineByIDs :many
--- Flips a known set of runtime IDs from online to offline. Paired with
--- SelectStaleOnlineRuntimes in the sweeper so the candidate selection and
--- the actual write are decoupled (the LivenessStore filter sits between).
+-- Flips a known set of runtime IDs from online/draining to offline. Paired
+-- with SelectStaleOnlineRuntimes in the sweeper so the candidate selection
+-- and the actual write are decoupled (the LivenessStore filter sits
+-- between).
 --
 -- Re-checks the stale predicate inside the UPDATE so a concurrent heartbeat
 -- between the SELECT (candidate gather), the LivenessStore filter, and this
@@ -217,10 +231,13 @@ WHERE status = 'online'
 -- legacy MarkStaleRuntimesOffline UPDATE had this property implicitly
 -- because the predicate and the write lived in one statement; here we
 -- carry it forward explicitly so the SELECT/filter/UPDATE pipeline retains
--- the same race-freedom.
+-- the same race-freedom. The status predicate admits draining (NEX-38
+-- must-fix #2) so a lost draining daemon converges offline; the stale
+-- predicate still requires the row to have stopped heartbeating, so a live
+-- draining daemon is never flipped.
 UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
-WHERE status = 'online'
+WHERE status IN ('online', 'draining')
   AND id = ANY(@ids::uuid[])
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
 RETURNING id, workspace_id, owner_id, daemon_id, provider;

@@ -1542,6 +1542,24 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 	return i, err
 }
 
+const countQueuedTasksByRuntime = `-- name: CountQueuedTasksByRuntime :one
+SELECT count(*) FROM agent_task_queue
+WHERE runtime_id = $1 AND status = 'queued'
+`
+
+// How many tasks are sitting in 'queued' for a single runtime. The daemon
+// needs this while draining to tell the user how many queued tasks will stay
+// queued until queued_expired after the runtime shuts down (NEX-38 AC-8).
+// The heartbeat handler only runs it for draining runtimes, so the hot
+// online heartbeat path is untouched. Served by the partial index
+// idx_agent_task_queue_claim_candidates.
+func (q *Queries) CountQueuedTasksByRuntime(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countQueuedTasksByRuntime, runtimeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRunningTasks = `-- name: CountRunningTasks :one
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
@@ -2271,7 +2289,19 @@ INSERT INTO agent_task_queue (
     chat_input_task_id, fire_at
 )
 SELECT
-    p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    p.agent_id,
+    -- NEX-38 corrected contract (must-fix #1): never re-pin a retry to the
+    -- same runtime that just failed it. The parent's runtime_id may point at
+    -- a still-draining runtime (safe shutdown in progress) — copying it
+    -- would queue the child against a runtime that is intentionally going
+    -- away, and the retry would burn budget waiting on it. Resolve the
+    -- child's runtime from the agent's CURRENT binding instead: after a
+    -- drain the agent may have been re-bound to a different runtime, and a
+    -- still-draining runtime keeps claiming its pre-boundary queued work
+    -- (the draining daemon does not pause claims), so an unbound child is
+    -- claimable by whichever runtime hosts the agent now.
+    COALESCE(a.runtime_id, p.runtime_id),
+    p.issue_id, p.chat_session_id, p.autopilot_run_id,
     CASE WHEN $2::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
@@ -2289,6 +2319,7 @@ SELECT
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, $2
 FROM agent_task_queue p
+LEFT JOIN agent a ON a.id = p.agent_id
 WHERE p.id = $1
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
 `
@@ -2522,12 +2553,18 @@ func (q *Queries) DeleteSystemAgentByID(ctx context.Context, id pgtype.UUID) err
 
 const expireStaleQueuedTasks = `-- name: ExpireStaleQueuedTasks :many
 WITH victims AS (
-    SELECT id FROM agent_task_queue
-    WHERE status = 'queued'
-      AND created_at < now() - make_interval(secs => $1::double precision)
-    ORDER BY created_at ASC
+    SELECT t.id
+    FROM agent_task_queue t
+    LEFT JOIN agent_runtime ar ON ar.id = t.runtime_id
+    WHERE t.status = 'queued'
+      AND t.created_at < now() - make_interval(secs => $1::double precision)
+      -- NEX-38 corrected contract: a draining runtime keeps its queued work
+      -- claimable (it will complete before shutdown). NULL runtime (no
+      -- join) is orphaned and remains eligible for TTL expiry.
+      AND (ar.status IS NULL OR ar.status <> 'draining')
+    ORDER BY t.created_at ASC
     LIMIT $2::int
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE OF t SKIP LOCKED
 )
 UPDATE agent_task_queue t
 SET status = 'failed',
@@ -2539,6 +2576,14 @@ FROM victims v
 WHERE t.id = v.id
   AND t.status = 'queued'
   AND t.created_at < now() - make_interval(secs => $1::double precision)
+  -- Re-check the draining exclusion at apply time so a runtime that flips to
+  -- 'draining' between the CTE select and this UPDATE cannot have its queued
+  -- work clobbered mid-drain (same race-freedom pattern as the stale
+  -- predicate in MarkRuntimesOfflineByIDs).
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_runtime ar
+    WHERE ar.id = t.runtime_id AND ar.status = 'draining'
+  )
 RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for
 `
 
@@ -2555,12 +2600,23 @@ type ExpireStaleQueuedTasksParams struct {
 // queued (the admission check protects new enqueues, not in-flight queue
 // depth).
 //
+// NEX-38 corrected contract (CEO decision 2026-08-10): queued work accepted
+// BEFORE the drain boundary must be completed, not stranded — the draining
+// runtime keeps claiming and finishing its queued tasks while new triggers
+// are rejected by AgentReadiness. So queued rows whose runtime is still
+// 'draining' are deliberately NOT TTL-expired here; they stay claimable until
+// the runtime either claims them or converges to 'offline'. Once the runtime
+// is offline (daemon lost / fully shut down) the row is indistinguishable
+// from any other orphaned queued work and is expired as 'queued_expired' —
+// there is no separate 'runtime_drained' attribution for the TTL path.
+//
 // Concurrency safety: the daemon's claim path may race with this sweeper to
 // transition the same row out of 'queued'. We protect against that two
 // ways:
-//  1. The CTE selects victims with FOR UPDATE SKIP LOCKED so a row that is
-//     currently being claimed (or otherwise locked) is skipped — no lock
+//  1. The CTE selects victims with FOR UPDATE OF t SKIP LOCKED so a row that
+//     is currently being claimed (or otherwise locked) is skipped — no lock
 //     contention with the dispatch path, and we won't queue up behind it.
+//     FOR UPDATE OF t locks only the task row, not the joined runtime row.
 //  2. The outer UPDATE re-checks status='queued' AND the TTL predicate at
 //     apply time. If a daemon claimed the row between selection and update
 //     (e.g. lock released after the claim transaction commits), the row is
@@ -2844,7 +2900,7 @@ WHERE (
     AND NOT EXISTS (
       SELECT 1 FROM agent_runtime r
       WHERE r.id = agent_task_queue.runtime_id
-        AND r.status = 'online'
+        AND r.status IN ('online', 'draining')
         AND r.last_seen_at >= now() - make_interval(secs => $3::double precision)
     )
   )
@@ -2870,13 +2926,16 @@ type FailStaleTasksParams struct {
 //   - Running: no per-task lease is renewed once StartTask fires, so we key
 //     off the daemon-wide heartbeat instead — `agent_runtime.last_seen_at`,
 //     which the daemon bumps every ~15s while it is up. A running task whose
-//     runtime is `online` AND whose `last_seen_at` is within
+//     runtime is `online` OR `draining` AND whose `last_seen_at` is within
 //     @runtime_stale_secs is treated as alive and is NOT killed by this
 //     wall-clock backstop, even after `started_at` exceeds the running
 //     timeout. This is what lets healthy multi-hour research / training runs
 //     survive on self-hosted deployments (MUL-4107): the daemon side is
 //     bounded only by inactivity watchdogs (idle / per-tool), so the
 //     server-side wall clock must not shadow that with a coarser cap.
+//     `draining` is admitted (NEX-38 must-fix #3): a healthy, heartbeating
+//     draining runtime running a long task is intentionally being allowed to
+//     finish, so the wall-clock backstop must not kill it mid-drain.
 //
 // The daemon-dead case is the primary responsibility of `sweepStaleRuntimes`
 // (which mixes DB `last_seen_at` with the Redis LivenessStore and calls

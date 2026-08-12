@@ -14,6 +14,9 @@ describe("failureClassOf", () => {
     expect(failureClassOf("agent_error.agent_timeout")).toBe("timeout");
     expect(failureClassOf("agent_error.provider_server_error")).toBe("provider");
     expect(failureClassOf("runtime_offline")).toBe("runtime");
+    // NEX-38: a task stranded by a drained (safe-shutdown) runtime reads as a
+    // runtime-class failure, same as an offline daemon.
+    expect(failureClassOf("runtime_drained")).toBe("runtime");
     expect(failureClassOf("queued_expired")).toBe("runtime");
     // MUL-5370: the run never reached the model provider, so this belongs
     // with the substrate failures an operator fixes by checking the daemon.

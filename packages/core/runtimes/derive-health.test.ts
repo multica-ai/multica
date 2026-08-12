@@ -101,4 +101,20 @@ describe("deriveRuntimeHealth", () => {
       ),
     ).toBe("offline");
   });
+
+  it("never reports a draining runtime as online (NEX-38 safe degrade)", () => {
+    // A draining runtime is alive and heartbeating (fresh last_seen_at) but
+    // must never read as claimable. Health derivation has no dedicated
+    // draining bucket yet — the amber draining badge ships with the NEX-38 UI
+    // task — so the contract here is just "not online": it lands in the
+    // offline-flavoured bucket derived from last_seen_at.
+    const draining = deriveRuntimeHealth(
+      makeRuntime({
+        status: "draining",
+        last_seen_at: new Date(FIXED_NOW - 2 * 60_000).toISOString(),
+      }),
+      FIXED_NOW,
+    );
+    expect(draining).not.toBe("online");
+  });
 });

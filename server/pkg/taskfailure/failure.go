@@ -71,6 +71,15 @@ const (
 	// task went offline. Written by FailTasksForOfflineRuntimes.
 	ReasonRuntimeOffline Reason = "runtime_offline"
 
+	// ReasonRuntimeDrained: a task that was sitting in 'queued' expired
+	// because its runtime was in safe-shutdown (draining) — the runtime
+	// explicitly stopped accepting new work and the queued task was never
+	// picked up. Distinct from queued_expired (generic expiry) and
+	// runtime_offline (runtime down): the fix is to either wait for the
+	// runtime to be drained back online or to re-dispatch. Written by
+	// ExpireStaleQueuedTasks (NEX-38 decision one).
+	ReasonRuntimeDrained Reason = "runtime_drained"
+
 	// ReasonRuntimeRecovery: the daemon restarted while the task was
 	// in flight; the prior session is unrecoverable. Written by
 	// RecoverOrphanedTasksForRuntime at daemon startup.
@@ -199,6 +208,7 @@ var allReasons = []Reason{
 	// Platform / scheduler side.
 	ReasonQueuedExpired,
 	ReasonRuntimeOffline,
+	ReasonRuntimeDrained,
 	ReasonRuntimeRecovery,
 	ReasonTimeout,
 	ReasonIterationLimit,

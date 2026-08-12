@@ -50,19 +50,37 @@ func NewPassthroughHeartbeatScheduler(queries *db.Queries) *PassthroughHeartbeat
 }
 
 func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, rt db.AgentRuntime) error {
-	if rt.Status == "online" && rt.LastSeenAt.Valid {
-		rows, err := p.queries.TouchAgentRuntimeLastSeen(ctx, rt.ID)
-		if err != nil {
-			return err
+	switch rt.Status {
+	case "draining":
+		// NEX-38 AC-14/AC-16: a draining runtime must keep last_seen_at fresh
+		// so the offline sweeper never misjudges an in-flight drain as a dead
+		// runtime, but must NOT be flipped back to 'online' — that would
+		// silently resume claimability while the daemon believes it is still
+		// draining. Never fall through to MarkAgentRuntimeOnline here. (The
+		// touch query itself admits draining rows; see runtime.sql.)
+		_, err := p.queries.TouchAgentRuntimeLastSeen(ctx, rt.ID)
+		return err
+	case "online":
+		if rt.LastSeenAt.Valid {
+			rows, err := p.queries.TouchAgentRuntimeLastSeen(ctx, rt.ID)
+			if err != nil {
+				return err
+			}
+			if rows > 0 {
+				return nil
+			}
+			// Sweeper raced us to offline between the SELECT and this UPDATE.
+			// Fall through to MarkAgentRuntimeOnline to flip the row back.
 		}
-		if rows > 0 {
-			return nil
-		}
-		// Sweeper raced us to offline between the SELECT and this UPDATE.
-		// Fall through to MarkAgentRuntimeOnline to flip the row back.
+		_, err := p.queries.MarkAgentRuntimeOnline(ctx, rt.ID)
+		return err
+	default:
+		// offline (or a status this build does not know): the beat proves the
+		// daemon is alive, so flip the row online — the existing recovery
+		// semantics.
+		_, err := p.queries.MarkAgentRuntimeOnline(ctx, rt.ID)
+		return err
 	}
-	_, err := p.queries.MarkAgentRuntimeOnline(ctx, rt.ID)
-	return err
 }
 
 // BatchedHeartbeatScheduler coalesces same-id Schedule calls within a tick
@@ -118,7 +136,11 @@ func (b *BatchedHeartbeatScheduler) Schedule(ctx context.Context, rt db.AgentRun
 	// Status flip (offline→online) and never-seen rows must commit before
 	// returning so callers / dependent reads observe the new state. Only
 	// the hot "already online, bumping last_seen_at" case is batched.
-	if rt.Status != "online" || !rt.LastSeenAt.Valid {
+	// Draining runtimes are batched too (NEX-38 AC-14/AC-16): they must keep
+	// last_seen_at fresh but must never be flipped back to online, and the
+	// batch UPDATE's IN ('online','draining') predicate preserves that —
+	// exactly like the online row, the bulk touch just bumps last_seen_at.
+	if (rt.Status != "online" && rt.Status != "draining") || !rt.LastSeenAt.Valid {
 		return b.fallback.Schedule(ctx, rt)
 	}
 	b.mu.Lock()
@@ -206,11 +228,12 @@ func (b *BatchedHeartbeatScheduler) flushOnce(ctx context.Context) {
 		return
 	}
 	if int(rows) < len(ids) {
-		// Some runtimes raced into a non-online state between Schedule and
-		// flush. Their next heartbeat sees status != "online" and falls
-		// through to the sync MarkAgentRuntimeOnline path in recordHeartbeat,
-		// so the divergence self-heals within one beat (~15s).
-		slog.Info("heartbeat batch flush: some runtimes raced to offline",
+		// Some runtimes raced out of the online/draining set between Schedule
+		// and flush (e.g. the sweeper flipped a row to offline). Their next
+		// heartbeat sees a non-online, non-draining status and takes the sync
+		// MarkAgentRuntimeOnline path in recordHeartbeat, so the divergence
+		// self-heals within one beat (~15s).
+		slog.Info("heartbeat batch flush: some runtimes raced out of online/draining",
 			"scheduled", len(ids), "affected", rows)
 	}
 }

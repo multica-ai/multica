@@ -36,6 +36,14 @@ func AgentReadiness(ctx context.Context, q *db.Queries, agent db.Agent) (ready b
 	if err != nil {
 		return false, "", err
 	}
+	if rt.Status == "draining" {
+		// NEX-38 AC-15: a runtime in safe-shutdown must refuse new triggers
+		// with a reason distinct from plain offline so the failure monitor
+		// and the user can tell "the machine was intentionally drained" from
+		// "the machine is down". Shared by the issue / autopilot / squad
+		// admission paths, so this one branch covers all three entry points.
+		return false, "agent runtime is draining (safe shutdown in progress)", nil
+	}
 	if rt.Status != "online" {
 		return false, "agent runtime is " + rt.Status, nil
 	}

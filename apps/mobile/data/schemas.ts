@@ -661,8 +661,11 @@ export const RuntimeSchema: z.ZodType<RuntimeDevice> = z.object({
   launch_header: z.string().default(""),
   // The two fields presence derivation actually reads. Status defaults to
   // "offline" — a runtime row with an unparseable status is treated as
-  // unreachable, which is the safe degrade for the dot.
-  status: z.enum(["online", "offline"]).catch("offline"),
+  // unreachable, which is the safe degrade for the dot. 'draining' (NEX-38)
+  // is a first-class server state: the runtime is alive but refuses new
+  // work, so it parses through rather than being dropped to "offline" and
+  // silently re-marked claimable by the health derivation.
+  status: z.enum(["online", "draining", "offline"]).catch("offline"),
   last_seen_at: z.string().nullable().default(null),
   device_info: z.string().default(""),
   metadata: z.record(z.string(), z.unknown()).default({}),
