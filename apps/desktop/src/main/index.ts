@@ -7,6 +7,7 @@ import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
+import { setupLocalStack } from "./local-stack";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
@@ -831,6 +832,9 @@ if (!gotTheLock) {
 
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
+    if (runtimeConfigResult.ok) {
+      setupLocalStack(() => mainWindow, runtimeConfigResult.config.apiUrl);
+    }
     setupLocalDirectory(() => mainWindow);
 
     app.on("activate", () => {

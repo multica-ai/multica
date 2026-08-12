@@ -125,3 +125,128 @@ function lastLine(text: string): string {
   const lines = text.trim().split("\n").filter(Boolean);
   return lines.at(-1)?.trim() ?? "";
 }
+
+// --- Electron wiring ------------------------------------------------------
+// Kept in this file so the state machine above and its only real caller stay
+// together; everything electron-coupled lives below this line.
+
+import { execFile } from "child_process";
+import { BrowserWindow, ipcMain } from "electron";
+import {
+  isLocalApiUrl,
+  loadLocalStackConfig,
+  localStackConfigPath,
+} from "./local-stack-config";
+// LocalStackState and LocalStackConfig are already imported at the top of
+// this file for the state machine above; no second import is needed here.
+
+const COMMAND_TIMEOUT_MS = 180_000;
+
+/**
+ * Runs a command inside the checkout with BACKEND_PORT exported, mirroring what
+ * multica-start.sh does. process.env is already PATH-corrected by the fixPath()
+ * block in index.ts, which is how colima and docker (both in /opt/homebrew/bin)
+ * are found from a GUI launch.
+ */
+function createCommandRunner(config: LocalStackConfig): CommandRunner {
+  return (bin, args) =>
+    new Promise((resolve) => {
+      execFile(
+        bin,
+        args,
+        {
+          cwd: config.repoDir,
+          timeout: COMMAND_TIMEOUT_MS,
+          env: {
+            ...process.env,
+            BACKEND_PORT: String(config.backendPort),
+          },
+          maxBuffer: 4 * 1024 * 1024,
+        },
+        (err, stdout, stderr) => {
+          resolve({
+            ok: !err,
+            stdout: stdout?.toString() ?? "",
+            stderr: stderr?.toString() ?? (err ? err.message : ""),
+          });
+        },
+      );
+    });
+}
+
+function createBackendProbe(apiUrl: string): () => Promise<boolean> {
+  return async () => {
+    try {
+      const res = await fetch(`${apiUrl}/api/config`, {
+        signal: AbortSignal.timeout(3_000),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  };
+}
+
+let currentState: LocalStackState = { phase: "idle" };
+
+function broadcast(
+  windowGetter: () => BrowserWindow | null,
+  state: LocalStackState,
+): void {
+  currentState = state;
+  const win = windowGetter();
+  if (win && !win.isDestroyed()) {
+    win.webContents.send("local-stack:state", state);
+  }
+}
+
+/**
+ * Brings the local stack up when this build points at a backend on this machine
+ * and the supervisor is configured. Any other configuration resolves to `ready`
+ * immediately, so the renderer's gate is a no-op for SaaS builds.
+ */
+export function setupLocalStack(
+  windowGetter: () => BrowserWindow | null,
+  apiUrl: string,
+): void {
+  ipcMain.handle("local-stack:get-state", () => currentState);
+  ipcMain.handle("local-stack:skip", () => {
+    broadcast(windowGetter, { phase: "ready" });
+  });
+
+  const start = async (): Promise<LocalStackState> => {
+    if (!isLocalApiUrl(apiUrl)) {
+      broadcast(windowGetter, { phase: "ready" });
+      return currentState;
+    }
+
+    let config: LocalStackConfig | null;
+    try {
+      config = await loadLocalStackConfig(localStackConfigPath());
+    } catch (err) {
+      broadcast(windowGetter, {
+        phase: "failed",
+        step: "probe",
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return currentState;
+    }
+
+    // Not configured — behave exactly as the app does without this feature.
+    if (!config) {
+      broadcast(windowGetter, { phase: "ready" });
+      return currentState;
+    }
+
+    return bringUpLocalStack({
+      config,
+      run: createCommandRunner(config),
+      probeBackend: createBackendProbe(apiUrl),
+      onState: (state) => broadcast(windowGetter, state),
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    });
+  };
+
+  ipcMain.handle("local-stack:retry", () => start());
+  void start();
+}
