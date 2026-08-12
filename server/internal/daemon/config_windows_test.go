@@ -28,9 +28,7 @@ func TestCanonicalExecutablePathResolvesDirectoryJunction(t *testing.T) {
 	if _, err := filepath.EvalSymlinks(shimExecutable); err == nil {
 		t.Fatal("EvalSymlinks unexpectedly resolved a directory junction; test would not reproduce the bug")
 	}
-	if got := canonicalExecutablePath(shimExecutable); !strings.EqualFold(got, targetExecutable) {
-		t.Fatalf("canonicalExecutablePath() = %q, want junction target %q", got, targetExecutable)
-	}
+	assertResolvedExecutable(t, canonicalExecutablePath(shimExecutable), shimExecutable, targetExecutable)
 }
 
 func TestCanonicalExecutablePathKeepsRegularExecutable(t *testing.T) {
@@ -39,9 +37,7 @@ func TestCanonicalExecutablePathKeepsRegularExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := canonicalExecutablePath(executable); !strings.EqualFold(got, executable) {
-		t.Fatalf("canonicalExecutablePath() = %q, want %q", got, executable)
-	}
+	assertSameFile(t, canonicalExecutablePath(executable), executable)
 }
 
 func TestCanonicalExecutablePathFallsBackForMissingExecutable(t *testing.T) {
@@ -83,9 +79,7 @@ func TestResolveAgentExecutablePathCanonicalizesPATHJunction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveAgentExecutablePath: %v", err)
 	}
-	if !strings.EqualFold(got, targetExecutable) {
-		t.Fatalf("resolveAgentExecutablePath() = %q, want junction target %q", got, targetExecutable)
-	}
+	assertResolvedExecutable(t, got, filepath.Join(shimBin, "codex.exe"), targetExecutable)
 }
 
 func TestResolveAgentExecutablePathCanonicalizesConfiguredJunctionPath(t *testing.T) {
@@ -96,8 +90,29 @@ func TestResolveAgentExecutablePathCanonicalizesConfiguredJunctionPath(t *testin
 	if err != nil {
 		t.Fatalf("resolveAgentExecutablePath: %v", err)
 	}
-	if !strings.EqualFold(got, targetExecutable) {
-		t.Fatalf("resolveAgentExecutablePath() = %q, want junction target %q", got, targetExecutable)
+	assertResolvedExecutable(t, got, configured, targetExecutable)
+}
+
+func assertResolvedExecutable(t *testing.T, got, shim, target string) {
+	t.Helper()
+	if strings.EqualFold(got, shim) {
+		t.Fatalf("resolved executable still points at junction path %q", got)
+	}
+	assertSameFile(t, got, target)
+}
+
+func assertSameFile(t *testing.T, got, want string) {
+	t.Helper()
+	gotInfo, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("stat resolved executable %q: %v", got, err)
+	}
+	wantInfo, err := os.Stat(want)
+	if err != nil {
+		t.Fatalf("stat expected executable %q: %v", want, err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		t.Fatalf("resolved executable %q does not identify expected file %q", got, want)
 	}
 }
 
