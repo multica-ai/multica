@@ -641,7 +641,7 @@ func resolveAgentExecutablePath(cmd string) (string, error) {
 		return "", err
 	}
 	if strings.ContainsAny(cmd, "/\\") {
-		return resolved, nil
+		return canonicalConfiguredExecutablePath(resolved), nil
 	}
 	if isInMulticaHooksDir(resolved) {
 		if unshadowed, err := lookPathExcludingMulticaHooks(cmd); err == nil {
@@ -748,7 +748,7 @@ func canonicalExecutablePath(path string) string {
 	if err != nil {
 		return path
 	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
+	if real, err := canonicalPath(abs); err == nil {
 		return real
 	}
 	return abs
