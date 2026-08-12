@@ -1,15 +1,171 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func TestClientPutStreamDoesNotBufferAndSetsExactLength(t *testing.T) {
+	var roundTripStarted atomic.Bool
+	payload := []byte(strings.Repeat("stream-me", 1024))
+	reader := &readAfterRoundTrip{allowed: &roundTripStarted, body: bytes.NewReader(payload)}
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		roundTripStarted.Store(true)
+		if req.Method != http.MethodPut || req.ContentLength != int64(len(payload)) {
+			t.Fatalf("request method/length = %s/%d", req.Method, req.ContentLength)
+		}
+		if req.Header.Get("Authorization") != "Bearer token" || req.Header.Get("X-Workspace-ID") != "workspace" {
+			t.Fatalf("missing auth/workspace headers: %#v", req.Header)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.Equal(body, payload) {
+			t.Fatalf("streamed body mismatch")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"state":"uploaded"}`))}, nil
+	})
+	client := NewAPIClient("https://api.example.test", "workspace", "token")
+	client.HTTPClient = &http.Client{Transport: transport}
+	var result struct {
+		State string `json:"state"`
+	}
+	if err := client.PutStream(context.Background(), "/content", reader, int64(len(payload)), &result); err != nil {
+		t.Fatalf("PutStream: %v", err)
+	}
+	if result.State != "uploaded" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestClientPutStreamLeavesCallerReaderOpen(t *testing.T) {
+	reader := &trackedReadCloser{Reader: strings.NewReader("stream-me")}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if _, err := io.Copy(io.Discard, req.Body); err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	client := NewAPIClient(server.URL, "workspace", "token")
+
+	if err := client.PutStream(context.Background(), "/content", reader, int64(len("stream-me")), nil); err != nil {
+		t.Fatalf("PutStream: %v", err)
+	}
+	if reader.closed {
+		t.Fatal("PutStream closed the caller-owned reader")
+	}
+}
+
+func TestClientDownloadStreamDoesNotBuffer(t *testing.T) {
+	payload := []byte(strings.Repeat("download", 128*1024))
+	client := NewAPIClient("https://api.example.test", "workspace", "token")
+	client.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(&chunkReader{body: bytes.NewReader(payload), max: 4096})}, nil
+	})}
+	dst := &boundedWriteBuffer{maxWrite: 64 << 10}
+	if err := client.DownloadStream(context.Background(), "/content", dst); err != nil {
+		t.Fatalf("DownloadStream: %v", err)
+	}
+	if !bytes.Equal(dst.Bytes(), payload) {
+		t.Fatal("downloaded body mismatch")
+	}
+}
+
+func TestClientPutStreamBlocksCrossOriginRedirect(t *testing.T) {
+	var targetHit atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHit.Store(true)
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("authorization leaked to redirect target")
+		}
+	}))
+	defer target.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer origin.Close()
+	client := NewAPIClient(origin.URL, "workspace", "token")
+	err := client.PutStream(context.Background(), "/content", strings.NewReader("x"), 1, nil)
+	if err == nil {
+		t.Fatal("cross-origin redirect was accepted")
+	}
+	if targetHit.Load() {
+		t.Fatal("cross-origin redirect target was reached")
+	}
+}
+
+func TestClientStreamingHonorsLongerContextDeadline(t *testing.T) {
+	client := NewAPIClient("https://api.example.test", "workspace", "token")
+	client.HTTPClient.Timeout = time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	got := client.redirectSafeHTTPClient(ctx)
+	if got.Timeout < 50*time.Second {
+		t.Fatalf("streaming timeout = %s, want context-sized budget", got.Timeout)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+type readAfterRoundTrip struct {
+	allowed *atomic.Bool
+	body    io.Reader
+}
+
+type trackedReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (r *trackedReadCloser) Close() error {
+	r.closed = true
+	return nil
+}
+
+func (r *readAfterRoundTrip) Read(p []byte) (int, error) {
+	if !r.allowed.Load() {
+		return 0, fmt.Errorf("body was read before RoundTrip")
+	}
+	return r.body.Read(p)
+}
+
+type chunkReader struct {
+	body io.Reader
+	max  int
+}
+
+func (r *chunkReader) Read(p []byte) (int, error) {
+	if len(p) > r.max {
+		p = p[:r.max]
+	}
+	return r.body.Read(p)
+}
+
+type boundedWriteBuffer struct {
+	bytes.Buffer
+	maxWrite int
+}
+
+func (w *boundedWriteBuffer) Write(p []byte) (int, error) {
+	if len(p) > w.maxWrite {
+		return 0, fmt.Errorf("buffered write of %d bytes", len(p))
+	}
+	return w.Buffer.Write(p)
+}
 
 func TestPostJSON(t *testing.T) {
 	type reqBody struct {

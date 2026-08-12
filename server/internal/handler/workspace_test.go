@@ -201,7 +201,7 @@ RETURNING id
 	if _, err := testPool.Exec(ctx, `
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, 'owner')
-`, wsID, testUserID); err != nil {
+	`, wsID, testUserID); err != nil {
 		t.Fatalf("create owner member: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
@@ -373,8 +373,30 @@ INSERT INTO channel_media_pending_object (
 	storage_key, workspace_id, chat_message_id, storage_url
 )
 VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
-`, pendingObjectKey, wsID); err != nil {
+	`, pendingObjectKey, wsID); err != nil {
 		t.Fatalf("create pending channel media object: %v", err)
+	}
+
+	var corpusTransferID string
+	if err := testPool.QueryRow(ctx, `SELECT gen_random_uuid()`).Scan(&corpusTransferID); err != nil {
+		t.Fatalf("create corpus transfer ID: %v", err)
+	}
+	corpusDigest := strings.Repeat("d", 64)
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO corpus_transfer (
+	id, workspace_id, actor_id, idempotency_key, object_key, manifest,
+	manifest_sha256, expected_size_bytes, expected_sha256, state,
+	verified_size_bytes, verified_sha256, expires_at, confirmed_at
+)
+VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, $6, 1, $6, 'acked', 1, $6, now() + interval '1 hour', now())
+`, corpusTransferID, wsID, testUserID, corpusTransferID, "workspaces/"+wsID+"/corpus-transfers/"+corpusTransferID+"/archive.zip", corpusDigest); err != nil {
+		t.Fatalf("create corpus transfer: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO corpus_transfer_ack (workspace_id, transfer_id, sink_id, confirmed_sha256, acknowledged_by)
+VALUES ($1, $2, 'workspace-delete-sink', $3, $4)
+`, wsID, corpusTransferID, corpusDigest, testUserID); err != nil {
+		t.Fatalf("create corpus transfer ACK: %v", err)
 	}
 
 	t.Cleanup(func() {
@@ -383,6 +405,8 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, runtimeProfileID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot_rule_version WHERE id = $1`, ruleVersionID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_media_pending_object WHERE storage_key = $1`, pendingObjectKey)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM corpus_transfer_ack WHERE transfer_id = $1`, corpusTransferID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM corpus_transfer WHERE id = $1`, corpusTransferID)
 	})
 
 	w := httptest.NewRecorder()
@@ -451,6 +475,27 @@ WHERE storage_key = $1
 	}
 	if pendingObjectState != "deleting" {
 		t.Fatalf("pending channel media object state = %q, want deleting", pendingObjectState)
+	}
+
+	var corpusState string
+	var corpusCleanupPending bool
+	if err := testPool.QueryRow(ctx, `
+SELECT state, cleanup_pending
+FROM corpus_transfer
+WHERE id = $1
+`, corpusTransferID).Scan(&corpusState, &corpusCleanupPending); err != nil {
+		t.Fatalf("verify corpus transfer cleanup handoff: %v", err)
+	}
+	if corpusState != "purged" || !corpusCleanupPending {
+		t.Fatalf("corpus transfer state/pending = %q/%v, want purged/true", corpusState, corpusCleanupPending)
+	}
+
+	var corpusACKCount int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM corpus_transfer_ack WHERE transfer_id = $1`, corpusTransferID).Scan(&corpusACKCount); err != nil {
+		t.Fatalf("verify corpus transfer ACK cleanup: %v", err)
+	}
+	if corpusACKCount != 0 {
+		t.Fatalf("corpus transfer ACK rows survived workspace delete: %d", corpusACKCount)
 	}
 }
 

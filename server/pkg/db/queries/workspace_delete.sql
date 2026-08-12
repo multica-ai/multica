@@ -317,6 +317,30 @@ deleted_hourly AS (
 deleted_attachments AS (
     DELETE FROM attachment WHERE workspace_id = $1
 ),
+deleted_corpus_transfer_acks AS (
+    DELETE FROM corpus_transfer_ack WHERE workspace_id = $1
+),
+scheduled_corpus_transfer_cleanup AS (
+    -- Corpus bytes live outside PostgreSQL, so retain the transfer row as a
+    -- durable cleanup intent until the object-store reconciler has completed
+    -- its widening delete passes. The reconciler removes the ledger row once
+    -- the workspace no longer exists.
+    UPDATE corpus_transfer
+    SET state = CASE
+            WHEN state IN ('confirmed', 'acked', 'purged') THEN 'purged'
+            WHEN state IN ('failed', 'expired') THEN state
+            ELSE 'expired'
+        END,
+        verification_token = NULL,
+        verification_lease_expires_at = NULL,
+        cleanup_pending = true,
+        cleanup_lease_token = NULL,
+        cleanup_lease_expires_at = NULL,
+        cleanup_next_attempt_at = now(),
+        cleanup_last_error = NULL,
+        updated_at = now()
+    WHERE workspace_id = $1
+),
 deleted_channel_outbound_cards AS (
     DELETE FROM channel_outbound_card_message
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)

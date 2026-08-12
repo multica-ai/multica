@@ -304,6 +304,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			Storage: store,
 			Logger:  slog.Default(),
 		}
+		h.CorpusTransferReconciler = &service.CorpusTransferReconciler{
+			Queries: queries,
+			Storage: store,
+			Logger:  slog.Default(),
+		}
 	}
 	h.ChannelSupervisor = engine.NewSupervisor(
 		lark.NewChannelInstallationStore(queries),
@@ -1142,6 +1147,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/", h.GetWorkspace)
+					r.Route("/corpus-transfers", func(r chi.Router) {
+						r.Post("/", h.CreateCorpusTransfer)
+						r.Route("/{transferID}", func(r chi.Router) {
+							r.Get("/", h.GetCorpusTransfer)
+							r.Put("/content", h.UploadCorpusTransferContent)
+							r.Post("/complete", h.CompleteCorpusTransfer)
+							r.Get("/content", h.DownloadCorpusTransferContent)
+							r.Post("/acks", h.AcknowledgeCorpusTransfer)
+						})
+					})
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)

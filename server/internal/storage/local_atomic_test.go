@@ -59,11 +59,9 @@ func TestLocalStorageUploadStreamFailureKeepsPreviousObject(t *testing.T) {
 	}
 }
 
-// Both upload paths land 0644 objects. CreateTemp makes its file 0600, so
-// without the explicit mode the rename-into-place rewrite would have silently
-// narrowed permissions on deployments that serve the upload dir with a
-// front-end web server running as another user.
-func TestLocalStorageUploadsAreWorldReadable(t *testing.T) {
+// Public uploads keep the historical 0644 mode. Deployments may serve this
+// part of the upload tree with a front-end web server running as another user.
+func TestLocalStoragePublicUploadsRemainWorldReadable(t *testing.T) {
 	dir := t.TempDir()
 	s := &LocalStorage{uploadDir: dir}
 	if _, err := s.Upload(context.Background(), "buffered", []byte("a"), "text/plain", "a.txt"); err != nil {
@@ -79,6 +77,32 @@ func TestLocalStorageUploadsAreWorldReadable(t *testing.T) {
 		}
 		if info.Mode().Perm() != 0644 {
 			t.Fatalf("%s mode = %o, want 0644", key, info.Mode().Perm())
+		}
+	}
+}
+
+func TestLocalStoragePrivateCorpusUploadsUseOwnerOnlyMode(t *testing.T) {
+	dir := t.TempDir()
+	s := &LocalStorage{uploadDir: dir}
+	keys := []string{
+		"workspaces/ws/corpus-transfers/buffered/archive.zip",
+		"workspaces/ws/corpus-transfers/streamed/archive.zip",
+	}
+	if _, err := s.Upload(context.Background(), keys[0], []byte("a"), "application/zip", "buffered.zip"); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if _, err := s.UploadStream(context.Background(), keys[1], strings.NewReader("a"), 1, "application/zip", "streamed.zip"); err != nil {
+		t.Fatalf("UploadStream: %v", err)
+	}
+	for _, key := range keys {
+		for _, suffix := range []string{"", metaSuffix} {
+			info, err := os.Stat(filepath.Join(dir, key) + suffix)
+			if err != nil {
+				t.Fatalf("stat %s%s: %v", key, suffix, err)
+			}
+			if info.Mode().Perm() != 0600 {
+				t.Fatalf("%s%s mode = %o, want 0600", key, suffix, info.Mode().Perm())
+			}
 		}
 	}
 }

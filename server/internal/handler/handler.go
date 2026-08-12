@@ -173,6 +173,8 @@ type Handler struct {
 	LivenessStore          LivenessStore
 	HeartbeatScheduler     HeartbeatScheduler
 	Storage                storage.Storage
+	CorpusTransfers        corpusTransferStore
+	CorpusStorage          corpusTransferStorage
 	CFSigner               *auth.CloudFrontSigner
 	Analytics              analytics.Client
 	// DaemonPendingWork pushes "heartbeat now" hints for queued
@@ -248,6 +250,9 @@ type Handler struct {
 	// where the storage backend exists; main.go starts it as an independent
 	// worker goroutine. Nil when no storage backend is configured.
 	ChannelMediaReconciler *service.ChannelMediaReconciler
+	// CorpusTransferReconciler settles durable cleanup intents for failed and
+	// expired corpus transfers. Built only when object storage is configured.
+	CorpusTransferReconciler *service.CorpusTransferReconciler
 	// SlackInstall owns the bring-your-own-app Slack install lifecycle (register
 	// pasted tokens / list / revoke) and the at-rest encryption of each app's bot
 	// + app tokens (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set.
@@ -395,6 +400,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		LivenessStore:                NewNoopLivenessStore(),
 		HeartbeatScheduler:           NewPassthroughHeartbeatScheduler(queries),
 		Storage:                      store,
+		CorpusTransfers:              &sqlCorpusTransferStore{Queries: queries, txStarter: txStarter},
 		CFSigner:                     cfSigner,
 		Analytics:                    analyticsClient,
 		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
@@ -406,6 +412,9 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		}),
 		LLM: llmClient,
 		cfg: cfg,
+	}
+	if candidate, ok := store.(corpusTransferStorage); ok {
+		h.CorpusStorage = candidate
 	}
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 

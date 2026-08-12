@@ -461,6 +461,9 @@ func main() {
 		h.ChannelMediaReconciler.Metrics = channelMediaMetrics
 		go h.ChannelMediaReconciler.Run(sweepCtx)
 	}
+	if h.CorpusTransferReconciler != nil {
+		go h.CorpusTransferReconciler.Run(sweepCtx)
+	}
 
 	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
 	// `sys_cron_executions` table into the distributed lease + audit

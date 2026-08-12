@@ -1,0 +1,1 @@
+ALTER TABLE corpus_transfer_ack ADD CONSTRAINT corpus_transfer_ack_pkey PRIMARY KEY USING INDEX corpus_transfer_ack_primary_uidx;
