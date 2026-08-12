@@ -25,8 +25,13 @@ const DEFAULT_BACKEND_PORT = 8080;
 /**
  * Reads the supervisor config. Returns null when the file does not exist, which
  * is the "supervisor disabled" signal — the app then behaves exactly as it does
- * without this feature. A present-but-broken file throws instead, because
- * silently ignoring a typo would look identical to the feature being off.
+ * without this feature.
+ *
+ * A present file that is not a JSON object, or that is missing `repoDir`,
+ * throws: silently ignoring those would look identical to the feature being
+ * off. `composeFile` and `backendPort` are optional and fall back to the
+ * defaults below whenever they are absent *or* of the wrong type, so a typo in
+ * either one is not reported.
  */
 export async function loadLocalStackConfig(
   path: string,
