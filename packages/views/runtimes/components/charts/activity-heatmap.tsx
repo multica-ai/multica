@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { RuntimeUsage } from "@multica/core/types";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { addDaysIso, estimateCost, formatUsd, todayIso, weekStartIso } from "../../utils";
-import { useT } from "../../../i18n";
+import { useLocale, useT } from "../../../i18n";
 
 // 26 weeks (~6 months) gives the heatmap real presence in the wider chart
 // card and turns "long-view" into a meaningful tab — a 13-week strip looked
@@ -68,8 +68,8 @@ export function ActivityHeatmap({
   usage: RuntimeUsage[];
   tz: string;
 }) {
-  const { t, i18n } = useT("runtimes");
-  const locale = i18n.resolvedLanguage ?? i18n.language;
+  const { t } = useT("runtimes");
+  const locale = useLocale();
   const weekdayLabels = useMemo(() => fmtWeekdays(locale), [locale]);
   // Memo dep — estimateCost (called inside the body below) consults the
   // user-override store, so saving a custom rate must invalidate the cells.
