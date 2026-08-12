@@ -16,6 +16,7 @@ import type {
   DaemonPrefs,
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
+import type { LocalStackState } from "../shared/local-stack";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -147,6 +148,13 @@ interface DaemonAPI {
   openLogFile: () => Promise<{ success: boolean; error?: string }>;
 }
 
+interface LocalStackAPI {
+  getState: () => Promise<LocalStackState>;
+  retry: () => Promise<LocalStackState>;
+  skip: () => Promise<void>;
+  onState: (callback: (state: LocalStackState) => void) => () => void;
+}
+
 interface UpdaterAPI {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
   onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
@@ -165,6 +173,7 @@ declare global {
     electron: ElectronAPI;
     desktopAPI: DesktopAPI;
     daemonAPI: DaemonAPI;
+    localStackAPI: LocalStackAPI;
     updater: UpdaterAPI;
   }
 }

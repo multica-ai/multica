@@ -28,6 +28,7 @@ import {
   MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
   type MainRendererMessageChannel,
 } from "../shared/main-renderer-messages";
+import type { LocalStackState } from "../shared/local-stack";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -285,6 +286,23 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:open-log-file"),
 };
 
+const localStackAPI = {
+  /** Current supervisor state; call on mount before subscribing. */
+  getState: (): Promise<LocalStackState> =>
+    ipcRenderer.invoke("local-stack:get-state"),
+  /** Re-run the bring-up after a failure. */
+  retry: (): Promise<LocalStackState> => ipcRenderer.invoke("local-stack:retry"),
+  /** Dismiss the overlay and use the app anyway. */
+  skip: (): Promise<void> => ipcRenderer.invoke("local-stack:skip"),
+  /** Subscribe to state transitions. Returns an unsubscribe function. */
+  onState: (callback: (state: LocalStackState) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, state: LocalStackState) =>
+      callback(state);
+    ipcRenderer.on("local-stack:state", handler);
+    return () => ipcRenderer.removeListener("local-stack:state", handler);
+  },
+};
+
 const updaterAPI = {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
     const handler = (_: unknown, info: { version: string; releaseNotes?: string }) => callback(info);
@@ -318,6 +336,7 @@ if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("electron", electronAPI);
   contextBridge.exposeInMainWorld("desktopAPI", desktopAPI);
   contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);
+  contextBridge.exposeInMainWorld("localStackAPI", localStackAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
 } else {
   // @ts-expect-error - fallback for non-isolated context
@@ -326,6 +345,8 @@ if (process.contextIsolated) {
   window.desktopAPI = desktopAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.daemonAPI = daemonAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.localStackAPI = localStackAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.updater = updaterAPI;
 }
