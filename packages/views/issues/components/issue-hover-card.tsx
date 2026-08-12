@@ -156,7 +156,10 @@ function IssueHoverCardBody({
           {issue.identifier}
         </span>
       </div>
-      <p className="text-body text-foreground">{issue.title}</p>
+      {/* The full title is the point of the card, so it never truncates — but
+          an unbroken token (a pasted URL) would blow past the max-w-80 cap
+          without a break opportunity. */}
+      <p className="text-body text-foreground break-words">{issue.title}</p>
 
       {preview && (
         <p className="mt-1 text-caption text-muted-foreground line-clamp-2">{preview}</p>
