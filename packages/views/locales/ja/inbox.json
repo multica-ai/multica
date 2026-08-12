@@ -28,7 +28,8 @@
     },
     "archived_title": "アーカイブ済み",
     "archived_empty": "アーカイブされた通知はありません",
-    "unarchive_tooltip": "アーカイブ解除"
+    "unarchive_tooltip": "アーカイブ解除",
+    "actions_aria": "通知の操作"
   },
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",

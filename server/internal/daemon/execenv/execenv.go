@@ -137,13 +137,31 @@ type TaskContextForEnv struct {
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID                 string                  // non-empty for chat tasks
 	// ChatChannelType is the IM platform behind a chat session ("slack",
-	// "feishu", "wecom"); empty for a web/mobile chat. Any non-empty value
-	// means the reply leaves Multica for an external channel, so `multica
-	// attachment upload` cannot deliver a file and the Output section says
-	// text-only instead (MUL-4899). The orthogonal audience and history policies
-	// live in the per-turn chat prompt (daemon/prompt.go) — the server has no
-	// history reader for any other channel.
-	ChatChannelType         string
+	// "feishu", "wecom"); empty for a web/mobile chat. It names the surface in
+	// the brief's copy; what that surface can DELIVER is the separate field
+	// below (MUL-4899). The orthogonal audience and history policies live in
+	// the per-turn chat prompt (daemon/prompt.go) — the server has no history
+	// reader for any other channel.
+	ChatChannelType string
+	// ChatChannelDeliversFiles is the server's verdict, for THIS turn, on
+	// whether a file the agent produces reaches the reader: the adapter goes
+	// back for the bound attachment and this deployment has the object storage
+	// it goes back to. It arrives on the claim and is used as given. False
+	// covers an old server that never sent it, a deployment with no storage,
+	// and every channel whose adapter does not perform the hop — all three of
+	// which want the same instruction, the one telling the agent to describe
+	// its file in words.
+	//
+	// Carried here but deliberately NOT rendered into the brief. It is a
+	// per-turn value: a server upgrade that starts sending it, or object
+	// storage being turned on or off, flips it under a chat session that
+	// resumes across the change, and the brief is the prompt-cache prefix
+	// (MUL-5377). The agent-facing verdict is emitted by the per-turn chat
+	// prompt (daemon.buildChatPrompt) instead, and
+	// TestBriefByteIdenticalAcrossRunsForEveryKind is what keeps this field out
+	// of the brief.
+	ChatChannelDeliversFiles bool
+
 	AutopilotRunID          string // non-empty for autopilot run_only tasks
 	AutopilotID             string
 	AutopilotTitle          string

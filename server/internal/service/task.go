@@ -4275,7 +4275,11 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 	// reason-independent text guard is the load-bearing protection for both new
 	// and already persisted rows. Keep it in sync with the GetLastTaskSession /
 	// GetLastChatTaskSession resume queries.
-	if strings.Contains(lower, "could not resolve authentication method") {
+	//
+	// The phrase itself lives in taskfailure.AuthMethodUnresolved, shared with
+	// the daemon's in-turn fresh-session retry gate so the two layers cannot
+	// disagree about which errors mean "this session can never be resumed".
+	if taskfailure.AuthMethodUnresolved(errorText) {
 		return true
 	}
 	// Same defense-in-depth for the provider-agnostic empty-message shape:

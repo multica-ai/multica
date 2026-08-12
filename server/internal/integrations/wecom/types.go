@@ -33,6 +33,14 @@
 // what a callback points at); a kind it cannot read still gets a short
 // receipt.
 //
+// Outbound file delivery cannot report back to the agent that produced the
+// file. `multica attachment upload` returns once the object is in storage and
+// bound to the reply, while the send into the room runs on EventChatDone —
+// after the run has ended. A delivery that is shed, refused by WeCom, or lost
+// with the socket is therefore told to the person in the chat
+// (outbound_media.go) and never to the agent, which has already exited.
+// Routing that outcome back into a later turn is its own piece of work.
+//
 // Known limit, deliberate: outbound delivery requires a SINGLE backend
 // replica, because the only send path is the in-process WebSocket in
 // sendersRegistry while EventChatDone dispatches on the in-process

@@ -436,6 +436,10 @@ ORDER BY t.id;
 -- =====================
 
 -- name: CreateAutopilotTask :one
+-- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
+-- locks the owners' workspace rows in the writer's own transaction and returns
+-- false once they are gone, so this statement writes no row instead of stranding
+-- a task in a workspace that has just been deleted (MUL-5999).
 -- run_only autopilot dispatch. Attribution depends on the trigger:
 --   * schedule / webhook / api: no human authorized the run, so originator_user_id
 --     stays NULL and accountable_user_id is the rule_owner (the publisher of the
@@ -452,7 +456,7 @@ INSERT INTO agent_task_queue (
     originator_user_id, accountable_user_id, rule_version_id,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id
 )
-VALUES (
+SELECT
     $1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
@@ -460,7 +464,7 @@ VALUES (
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id)
-)
+WHERE lock_task_owner_rows($1, NULL, $2)
 RETURNING *;
 
 -- name: GetAutopilotTaskByRun :one

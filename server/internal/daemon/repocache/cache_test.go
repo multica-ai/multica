@@ -119,6 +119,203 @@ func TestRunGitOutputTimesOut(t *testing.T) {
 	}
 }
 
+func TestRepoMaintenanceYieldsToForeground(t *testing.T) {
+	t.Parallel()
+
+	cache := New(t.TempDir(), testLogger())
+	const barePath = "/cache/repo.git"
+	entered := make(chan struct{})
+	maintenanceDone := make(chan error, 1)
+	go func() {
+		ran, err := cache.WithRepoMaintenance(context.Background(), barePath, func(ctx context.Context) error {
+			close(entered)
+			<-ctx.Done()
+			return context.Cause(ctx)
+		})
+		if !ran && err == nil {
+			err = errors.New("maintenance did not run")
+		}
+		maintenanceDone <- err
+	}()
+	<-entered
+
+	foregroundDone := make(chan error, 1)
+	go func() {
+		foregroundDone <- cache.WithRepoLockContext(context.Background(), barePath, func() error { return nil })
+	}()
+
+	select {
+	case err := <-foregroundDone:
+		if err != nil {
+			t.Fatalf("foreground lock: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("foreground work did not preempt maintenance")
+	}
+	if err := <-maintenanceDone; !errors.Is(err, ErrMaintenancePreempted) {
+		t.Fatalf("maintenance error = %v, want preemption", err)
+	}
+	activity := cache.Activity()
+	if activity.MaintenanceActive != 0 || activity.ForegroundWaiters != 0 {
+		t.Fatalf("activity after release = %+v, want zero", activity)
+	}
+}
+
+func TestCancelMaintenanceStopsMaintenanceWithoutARepoCheckout(t *testing.T) {
+	t.Parallel()
+
+	cache := New(t.TempDir(), testLogger())
+	const barePath = "/cache/reused-worktree.git"
+	entered := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		ran, err := cache.WithRepoMaintenance(context.Background(), barePath, func(ctx context.Context) error {
+			close(entered)
+			<-ctx.Done()
+			return context.Cause(ctx)
+		})
+		if !ran && err == nil {
+			err = errors.New("maintenance did not run")
+		}
+		done <- err
+	}()
+	<-entered
+
+	cache.CancelMaintenance()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrMaintenancePreempted) {
+			t.Fatalf("maintenance error = %v, want preemption", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("maintenance did not stop after task-level cancellation")
+	}
+
+	if got := cache.Activity().MaintenanceActive; got != 0 {
+		t.Fatalf("maintenance active after cancellation = %d, want 0", got)
+	}
+}
+
+func TestCancelMaintenanceWaitsForCleanupBarrier(t *testing.T) {
+	t.Parallel()
+
+	cache := New(t.TempDir(), testLogger())
+	const barePath = "/cache/cleanup-barrier.git"
+	entered := make(chan struct{})
+	cancelled := make(chan struct{})
+	releaseCleanup := make(chan struct{})
+	maintenanceDone := make(chan struct{})
+	go func() {
+		_, _ = cache.WithRepoMaintenance(context.Background(), barePath, func(ctx context.Context) error {
+			close(entered)
+			<-ctx.Done()
+			close(cancelled)
+			<-releaseCleanup
+			return context.Cause(ctx)
+		})
+		close(maintenanceDone)
+	}()
+	<-entered
+
+	cancelDone := make(chan struct{})
+	go func() {
+		cache.CancelMaintenance()
+		close(cancelDone)
+	}()
+	<-cancelled
+	select {
+	case <-cancelDone:
+		t.Fatal("CancelMaintenance returned before maintenance cleanup released the repo")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseCleanup)
+	select {
+	case <-cancelDone:
+	case <-time.After(time.Second):
+		t.Fatal("CancelMaintenance did not return after maintenance cleanup completed")
+	}
+	<-maintenanceDone
+}
+
+func TestCreateWorktreeContextReturnsBusyAfterBoundedLockWait(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	cache := New(root, testLogger())
+	const (
+		workspaceID = "ws-1"
+		repoURL     = "https://github.com/org/repo.git"
+	)
+	barePath := cache.BarePath(workspaceID, repoURL)
+	if err := os.MkdirAll(barePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(barePath, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lock := cache.lockForRepo(barePath)
+	lock.Lock()
+	defer lock.Unlock()
+
+	_, err := cache.CreateWorktreeContext(context.Background(), WorktreeParams{
+		WorkspaceID:     workspaceID,
+		RepoURL:         repoURL,
+		WorkDir:         t.TempDir(),
+		LockWaitTimeout: 20 * time.Millisecond,
+	})
+	if !errors.Is(err, ErrRepoBusy) {
+		t.Fatalf("CreateWorktreeContext error = %v, want ErrRepoBusy", err)
+	}
+}
+
+func TestCreateWorktreeContextCancelsRunningGitProcessTree(t *testing.T) {
+	binDir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "git-descendant-survived")
+	script := filepath.Join(binDir, "git")
+	body := "#!/bin/sh\n(sleep 0.5; echo leaked > \"$MULTICA_TEST_GIT_MARKER\") &\nwait\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("MULTICA_TEST_GIT_MARKER", marker)
+
+	root := t.TempDir()
+	cache := New(root, testLogger())
+	const (
+		workspaceID = "ws-1"
+		repoURL     = "https://github.com/org/repo.git"
+	)
+	barePath := cache.BarePath(workspaceID, repoURL)
+	if err := os.MkdirAll(barePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(barePath, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := cache.CreateWorktreeContext(ctx, WorktreeParams{
+		WorkspaceID: workspaceID,
+		RepoURL:     repoURL,
+		WorkDir:     t.TempDir(),
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CreateWorktreeContext error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("CreateWorktreeContext took %s after cancellation", elapsed)
+	}
+
+	time.Sleep(600 * time.Millisecond)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("Git descendant survived checkout cancellation, stat error = %v", err)
+	}
+}
+
 func TestBareDirName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

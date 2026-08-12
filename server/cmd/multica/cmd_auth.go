@@ -236,7 +236,7 @@ func detectOutboundIP(serverURL string) net.IP {
 }
 
 func runAuthLoginBrowser(cmd *cobra.Command) error {
-	serverURL := resolveServerURL(cmd)
+	serverURL := resolveHumanServerURL(cmd)
 	appURL := resolveAppURL(cmd)
 
 	flagHost := callbackHostFlagValue(cmd)

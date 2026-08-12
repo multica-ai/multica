@@ -59,12 +59,46 @@ type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 // way, so it carries the same hazard — an INVALID v2 leftover recorded as
 // success would let migration 262 drop the still-valid v1, leaving all four
 // dashboard rollups on a full table scan.
-var preMigrationHooks = map[string]preMigrationHook{
-	"103_drop_legacy_daily_rollups":                         runTaskUsageHourlyHook,
-	"198_agent_task_attribution_strict_constraint_validate": runAttributionStrictHook,
-	"257_agent_task_queue_channel_media_pending_unique_v2":  cleanupInvalidConcurrentIndexHook("idx_one_pending_task_per_issue_agent_v2"),
-	"261_agent_task_queue_terminal_completed_at_v2":         cleanupInvalidConcurrentIndexHook("idx_agent_task_queue_terminal_completed_at_v2"),
+// concurrentIndexCleanups maps a migration version to the index it builds with
+// CREATE INDEX CONCURRENTLY. Every entry gets an invalid-index cleanup hook, so
+// an interrupted build cannot be mistaken for success on retry.
+//
+// The mapping is data rather than seven hand-written hook registrations so a
+// test can check each entry against the index its migration file actually
+// creates — a typo here would be invisible at runtime, because a hook that names
+// a nonexistent index is a silent no-op.
+//
+// MUL-5999: migrations 273–277 each build one index concurrently, three of them
+// on hot tables (agent_task_queue is the largest table in the database). They
+// carry the same hazard as 257 / 261: an interrupted build leaves an INVALID
+// index of the same name, `IF NOT EXISTS` then skips the rebuild, the runner
+// records the migration as applied, and the queries that need the index silently
+// stay on a full scan — the exact regression these migrations exist to fix.
+var concurrentIndexCleanups = map[string]string{
+	"257_agent_task_queue_channel_media_pending_unique_v2": "idx_one_pending_task_per_issue_agent_v2",
+	"261_agent_task_queue_terminal_completed_at_v2":        "idx_agent_task_queue_terminal_completed_at_v2",
+	"273_agent_task_queue_runtime_id_index":                "idx_agent_task_queue_runtime_id",
+	"274_task_token_workspace_id_index":                    "idx_task_token_workspace_id",
+	"275_task_token_agent_id_index":                        "idx_task_token_agent_id",
+	"276_chat_draft_restore_task_id_index":                 "idx_chat_draft_restore_task_id",
+	"277_autopilot_run_task_id_index":                      "idx_autopilot_run_task_id",
+	"278_agent_task_queue_agent_id_keyset_index":           "idx_agent_task_queue_agent_id_keyset",
+	"279_agent_task_queue_issue_id_keyset_index":           "idx_agent_task_queue_issue_id_keyset",
+	"281_agent_workspace_id_keyset_index":                  "idx_agent_workspace_id_keyset",
+	"282_issue_workspace_id_keyset_index":                  "idx_issue_workspace_id_keyset",
+	"283_agent_runtime_workspace_id_keyset_index":          "idx_agent_runtime_workspace_id_keyset",
 }
+
+var preMigrationHooks = func() map[string]preMigrationHook {
+	hooks := map[string]preMigrationHook{
+		"103_drop_legacy_daily_rollups":                         runTaskUsageHourlyHook,
+		"198_agent_task_attribution_strict_constraint_validate": runAttributionStrictHook,
+	}
+	for version, index := range concurrentIndexCleanups {
+		hooks[version] = cleanupInvalidConcurrentIndexHook(index)
+	}
+	return hooks
+}()
 
 // cleanupInvalidConcurrentIndexHook removes an INVALID index left by an
 // interrupted or failed CREATE INDEX CONCURRENTLY before the migration retries.

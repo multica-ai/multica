@@ -110,7 +110,8 @@
       "cancel": "취소",
       "confirm": "삭제",
       "confirming": "삭제하는 중..."
-    }
+    },
+    "row_actions_aria": "채팅 작업"
   },
   "window": {
     "new_chat_tooltip": "새 채팅",
@@ -215,7 +216,8 @@
     "pinned": "고정됨",
     "archive": "보관",
     "unarchive": "보관 해제",
-    "archived_title": "보관됨"
+    "archived_title": "보관됨",
+    "row_actions_aria": "채팅 작업"
   },
   "header": {
     "view_profile": "Agent 프로필 보기",

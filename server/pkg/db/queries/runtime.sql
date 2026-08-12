@@ -366,13 +366,71 @@ UPDATE agent
 SET runtime_id = @new_runtime_id
 WHERE runtime_id = @old_runtime_id;
 
--- name: ReassignTasksToRuntime :execrows
+-- name: LockWorkspaceForRuntimeMerge :exec
+-- Step 1 of the legacy runtime merge's fence, and the same first step every task
+-- write takes (lock_task_owner_rows, migration 284): the workspace row, FOR KEY
+-- SHARE. Taking it here rather than relying on the fence inside the reassignment
+-- keeps the merge's lock order identical to the writers' — workspaces before owner
+-- rows — so the two can never hold each other's next lock (MUL-5999).
+SELECT 1 FROM workspace w
+WHERE w.id IN (
+    SELECT r.workspace_id FROM agent_runtime r WHERE r.id = ANY(@runtime_ids::uuid[])
+)
+ORDER BY w.id
+FOR KEY SHARE;
+
+-- name: LockRuntimesForMerge :many
+-- Step 2: the runtime rows themselves, FOR UPDATE, in id order.
+--
+-- FOR UPDATE is the point. A task write's fence takes FOR KEY SHARE on the runtime
+-- it references, and KEY SHARE conflicts with UPDATE but not with another KEY
+-- SHARE — so while the merge held only the workspace's KEY SHARE, a concurrent
+-- enqueue against the OLD runtime went straight through after the task scan and was
+-- then silently removed by ON DELETE CASCADE when the old runtime was deleted.
+-- Holding FOR UPDATE on both runtimes from before the scan until COMMIT means a
+-- late writer either commits first (and the scan sees its task) or waits and finds
+-- the runtime gone, which its fence reports as "no row written".
+--
+-- Both runtimes are locked in one ordered statement so two merges running in
+-- opposite directions cannot take the same pair in opposite orders.
+--
+-- Returns the ids it actually locked: a caller that asked for two and got fewer
+-- knows a runtime disappeared before it got there and must abandon the merge.
+SELECT id FROM agent_runtime
+WHERE id = ANY(@runtime_ids::uuid[])
+ORDER BY id
+FOR UPDATE;
+
+-- name: ReassignTasksToRuntime :one
+-- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
+-- locks the owners' workspace rows in the writer's own transaction and returns
+-- false once they are gone, so this statement writes no row instead of stranding
+-- a task in a workspace that has just been deleted (MUL-5999).
 -- Re-points every queued/running/completed task referencing old_runtime_id.
 -- Required before deleting the old runtime row because agent_task_queue has
 -- an ON DELETE CASCADE FK that would otherwise drop historical tasks.
-UPDATE agent_task_queue
-SET runtime_id = @new_runtime_id
-WHERE runtime_id = @old_runtime_id;
+--
+-- Returns the fence verdict separately from the row count on purpose. "0 rows"
+-- is ambiguous — it means either "the old runtime had no tasks" or "the fence
+-- refused" — and a caller that cannot tell them apart would go on to delete the
+-- old runtime, letting that same ON DELETE CASCADE drop the very history this
+-- statement exists to preserve. FenceOk = false must abort the merge.
+WITH fence AS MATERIALIZED (
+    -- Once per statement rather than once per row: the predicate is VOLATILE, so
+    -- calling it from the WHERE clause of a bulk UPDATE would re-run it for every
+    -- candidate row.
+    SELECT lock_task_owner_rows(NULL, NULL, @new_runtime_id) AS ok
+),
+reassigned AS (
+    UPDATE agent_task_queue
+    SET runtime_id = @new_runtime_id
+    WHERE runtime_id = @old_runtime_id
+      AND (SELECT ok FROM fence)
+    RETURNING id
+)
+SELECT
+    (SELECT ok FROM fence) AS fence_ok,
+    (SELECT count(*) FROM reassigned) AS reassigned_tasks;
 
 -- name: RecordRuntimeLegacyDaemonID :exec
 -- Remembers the most recent hostname-derived daemon_id that was merged into

@@ -45,17 +45,6 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | Skills copied in the create transaction | 239 | Source skill ids sent as `skill_ids`, bound in the same `POST /api/agents` tx (267); `--no-skills` opts out | read `runAgentCopy` |
 | Secrets never copied | 240–266 | `custom_env`/`mcp_config`/`runtime_config` set only from explicit secret-safe flags, never read from the source | `multica agent copy --help` |
 
-Note: the CLI no longer exposes `--from-template`. The agent-template backend
-still exists (registry `server/internal/agenttmpl/`, handler `agent_template.go`,
-routes `GET /api/agent-templates` and `POST /api/agents/from-template`, plus the
-`packages/core` client/query wrappers) but is currently orphaned plumbing with no
-live caller: the removed CLI flag was its only non-test consumer, and onboarding
-does NOT use it — `packages/views/onboarding/steps/step-agent.tsx` builds four
-hardcoded local presets (i18n-resolved) and creates via plain `POST /api/agents`
-(`createAgent`), never `POST /api/agents/from-template`. Do not treat the template
-API as a supported agent-creation path. This skill teaches manual `agent create`
-only.
-
 ## Create handler — `server/internal/handler/agent.go`
 
 | Contract | Line | Behavior |
@@ -77,17 +66,11 @@ only.
 | `mcp_config` null-skip on create | 704–705 | raw JSON copied through unless the body value is the literal `null` |
 | `mcp_config` redacted on read | 54, 848–851 | `redactMcpConfig` sets `McpConfigRedacted=true`; a private agent read by a member also redacts (494, 509) |
 | Qwen Code managed-MCP injection | `pkg/agent/qwen.go` | Non-null `mcp_config` is written to a daemon-owned 0600 temporary JSON file and passed with `--mcp-config`; the file is removed after the process exits, while `null` preserves native inheritance. |
-| Random emoji avatar default | `agent_avatar.go` 11–32; `agent.go` 1127–1133 | Omitted, empty, or whitespace-only `avatar_url` becomes a cryptographically selected `emoji:<glyph>` sentinel; explicit values are preserved. The template handler uses the same helper at `agent_template.go` 458. |
+| Random emoji avatar default | `agent_avatar.go` 11–32; `agent.go` 1127–1133 | Omitted, empty, or whitespace-only `avatar_url` becomes a cryptographically selected `emoji:<glyph>` sentinel; explicit values are preserved. |
 | `CreateAgent` insert params | `agent.go` create path | Persists avatar_url, runtime_config, instructions, custom_env, custom_args, model, thinking_level, service_tier, mcp_config, visibility, max_concurrent_tasks |
 | `UpdateAgent` rejects `custom_env` | 910–913 | if `custom_env` present in body → 400 "use PUT /api/agents/{id}/env (or `multica agent env set`)" |
 | `UpdateAgent` persists / clears `mcp_config` | 944–948, 1060–1061 | Tri-state from the raw body: key omitted → no change; literal `null` → `ClearAgentMcpConfig`; object → replace. No 400 like `custom_env` — `mcp_config` IS updatable here |
 | `description` ≤ 255 on update too | 921–924 | same cap re-checked on update |
-
-## Create-from-template handler — `server/internal/handler/agent_template.go`
-
-| Contract | Line | Behavior |
-|---|---|---|
-| `max_concurrent_tasks` default + validation | `CreateAgentFromTemplate`; `defaultAndValidateAgentMaxConcurrentTasks` | Uses the same helper as manual create: omission or `null` defaults to 6; explicit numeric values outside 1–50 return 400 |
 
 ## Runtime model/thinking discovery — `server/pkg/agent/{models,thinking}.go`
 
