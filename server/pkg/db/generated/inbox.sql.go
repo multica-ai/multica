@@ -448,6 +448,7 @@ FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
 ORDER BY i.created_at DESC
+LIMIT 200
 `
 
 type ListInboxItemsParams struct {
@@ -475,6 +476,12 @@ type ListInboxItemsRow struct {
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 }
 
+// Active inbox for the recipient. LIMIT bounds the response the same way
+// ListArchivedInboxItems does: v1 ships no pagination, and without a cap a
+// heavy inbox produces multi-MB payloads on every mark-read refetch (#6527).
+// Rows are newest-first, so truncation drops the OLDEST rows and can never
+// hide a group's newest row — the one the deduplicated UI renders. The unread
+// badge uses CountUnreadInbox (a separate count query) and is unaffected.
 func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) ([]ListInboxItemsRow, error) {
 	rows, err := q.db.Query(ctx, listInboxItems, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
 	if err != nil {
