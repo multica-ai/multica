@@ -27,8 +27,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
+	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -172,9 +174,12 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 type RouterOptions struct {
 	HTTPMetrics     *obsmetrics.HTTPMetrics
 	BusinessMetrics *obsmetrics.BusinessMetrics
-	DaemonHub       *daemonws.Hub
-	DaemonWakeup    service.TaskWakeupNotifier
-	FeatureFlags    *featureflag.Service
+	// WecomMetrics is the WeCom adapter's health sink. Nil discards every
+	// counter, which is what a deployment with /metrics turned off gets.
+	WecomMetrics *obsmetrics.WecomMetrics
+	DaemonHub    *daemonws.Hub
+	DaemonWakeup service.TaskWakeupNotifier
+	FeatureFlags *featureflag.Service
 	// HeartbeatScheduler, when non-nil, replaces the default synchronous
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
@@ -583,6 +588,206 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		}
 	} else {
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
+	}
+
+	// DingTalk uses one outbound Stream connection per BYO installation. The
+	// AppSecret is encrypted at rest and the integration is inert unless its
+	// dedicated deployment key is configured.
+	if dingtalkKey, err := secretbox.LoadKey("MULTICA_DINGTALK_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(dingtalkKey)
+		if err != nil {
+			slog.Error("dingtalk: secretbox.New failed; integration disabled", "error", err)
+		} else {
+			dingtalkClient := dingtalk.NewClient(nil, "")
+			bindingSvc := dingtalk.NewBindingTokenService(queries, pool)
+			h.DingTalkBindingTokens = bindingSvc
+			replier := dingtalk.NewOutboundReplier(dingtalk.OutboundReplierConfig{
+				Binding: bindingSvc,
+				Decrypt: box.Open,
+				Client:  dingtalkClient,
+				AppURL:  appURLFromEnv(),
+				Logger:  slog.Default(),
+			})
+			ack := dingtalk.NewAckNotifier(dingtalkClient, box.Open, slog.Default())
+			var media engine.MediaResolver
+			if store != nil {
+				media = dingtalk.NewMediaResolver(
+					dingtalkClient,
+					box.Open,
+					store,
+					engine.NewDBMediaIntentLedger(queries),
+					slog.Default(),
+				)
+			}
+			channelRouter.Register(dingtalk.TypeDingTalk, dingtalk.NewDingTalkResolverSet(queries, pool, replier, ack, media))
+			dingtalk.NewOutbound(queries, box.Open, dingtalkClient, slog.Default()).Register(bus)
+			dingtalk.RegisterDingTalk(channelRegistry, dingtalk.ChannelDeps{
+				Decrypt: box.Open,
+				Client:  dingtalkClient,
+				Logger:  slog.Default(),
+			})
+			installSvc, installErr := dingtalk.NewInstallService(queries, pool, box, slog.Default())
+			if installErr != nil {
+				slog.Error("dingtalk: InstallService init failed; install disabled", "error", installErr)
+			} else {
+				h.DingTalkInstall = installSvc
+			}
+			slog.Info("dingtalk integration enabled (BYO per-installation stream mode)")
+		}
+	} else {
+		slog.Info("dingtalk integration disabled (MULTICA_DINGTALK_SECRET_KEY not set)")
+	}
+
+	// WeCom smart-bot integration ("智能机器人" / aibot). Per-installation
+	// WebSocket long connection to wss://openws.work.weixin.qq.com; the
+	// Supervisor drives one connection per active wecom installation, gated
+	// by the shared ws_lease_token so multi-replica deployments still hold
+	// at most one active socket per bot (WeCom itself only permits one).
+	//
+	// Gated by MULTICA_WECOM_SECRET_KEY. Without it, the whole block is
+	// skipped and the wecom Web-UI endpoints return 503; existing deployments
+	// are unaffected. The smart-bot flow does NOT require any public HTTP
+	// callback, so nothing else needs to be exposed to the internet.
+	if wecomKey, err := secretbox.LoadKey("MULTICA_WECOM_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(wecomKey)
+		if err != nil {
+			slog.Error("wecom: secretbox.New failed; wecom integration disabled", "error", err)
+		} else {
+			credsResolver, err := wecom.NewSecretboxCredentialsResolver(box)
+			if err != nil {
+				slog.Error("wecom: credentials resolver init failed; wecom integration disabled", "error", err)
+			} else {
+				wecomStore := wecom.NewStore(queries)
+				h.WecomStore = wecomStore
+				h.WecomCredentials = credsResolver
+
+				// Binding tokens back the per-user "link your Multica account"
+				// prompt sent to first-time WeCom senders. aibot userids are
+				// anonymized T-prefixed ids with no relation to real userids
+				// or emails, so an explicit binding table is the only correct
+				// answer — see wecom/binding.go for the rationale.
+				wecomBinding := wecom.NewBindingTokenService(queries, pool)
+				h.WecomBindingTokens = wecomBinding
+
+				// Senders registry: the wecom OutboundReplier is created here
+				// at boot, but the live wsSender it needs to push
+				// aibot_send_msg only exists inside a running wecomChannel.
+				// wecom.NewSendersRegistry mints a shared map; the
+				// ChannelDeps write side and the Replier read side both
+				// receive it, and each Channel.Connect self-registers on
+				// entry and clears on exit.
+				wecomSenders := wecom.NewSendersRegistry()
+
+				wecomReplier := wecom.NewOutboundReplier(wecom.OutboundReplierConfig{
+					Binding: wecomBinding,
+					Senders: wecomSenders,
+					AppURL:  appURLFromEnv(),
+					Logger:  slog.Default(),
+				})
+
+				// Wecom shares the engine.ChatSession (channel_type-keyed) so
+				// /issue, dedup, and run-triggering behave identically across
+				// platforms. Session titles use the wecom-flavored wording
+				// (Chinese product voice — wecom deployments are China-only).
+				wecomSession := engine.NewChatSession(queries, pool, wecom.TypeWecom, engine.SessionTitles{
+					Group:    "企业微信群聊",
+					Direct:   "企业微信单聊",
+					Fallback: "企业微信会话",
+				})
+
+				wecom.RegisterWecom(channelRegistry, wecom.ChannelDeps{
+					Credentials: credsResolver,
+					Senders:     wecomSenders,
+					Metrics:     wecomMetricsOrNil(opts.WecomMetrics),
+					Logger:      slog.Default(),
+				})
+				// Inbound media: a callback carries a pre-signed COS url and
+				// a per-url key, so the resolver needs no WeCom credential —
+				// only somewhere durable to put the bytes. Without an object
+				// store there is nothing to point an attachment at, so the
+				// resolver is left nil and attachments stay as their
+				// placeholder text. Same nil-guard as DingTalk above.
+				var wecomMedia engine.MediaResolver
+				if store != nil {
+					wecomMedia = wecom.NewMediaResolver(
+						store,
+						engine.NewDBMediaIntentLedger(queries),
+						wecomSenders,
+						slog.Default(),
+					)
+				}
+				channelRouter.Register(wecom.TypeWecom, wecom.NewResolverSet(
+					wecomStore, wecomSession, wecomReplier, wecomMedia,
+				))
+
+				// EventChatDone subscriber: pushes the agent's chat reply
+				// back over the same aibot WebSocket the inbound loop owns.
+				// Mirrors slack.NewOutbound(...).Register(bus). Without it
+				// the agent's reply lands only in Multica's web UI — the
+				// user in WeCom sees no response.
+				//
+				// WithAttachments adds the second hop: the files the agent
+				// bound to that reply are read back out of object storage and
+				// sent into the chat behind it. Passed only when this
+				// deployment configured storage — with none there is nothing
+				// to read an attachment out of, and the option is what the
+				// delivery path checks for.
+				//
+				// DeclareChannelFileDelivery is the same condition said to the
+				// agent: a run only gets told it can send a file where this
+				// branch actually built the hop that sends it. The two lines
+				// sit together on purpose — a deployment that has the storage
+				// and a deployment whose agents are promised delivery must be
+				// the same deployment, and the only way to keep that true is
+				// for one `if` to decide both.
+				wecomOutboundOpts := []wecom.OutboundOption{}
+				if store != nil {
+					wecomOutboundOpts = append(wecomOutboundOpts, wecom.WithAttachments(store))
+					h.DeclareChannelFileDelivery(string(wecom.TypeWecom))
+				}
+				wecom.NewOutbound(queries, wecomSenders, slog.Default(), wecomOutboundOpts...).Register(bus)
+
+				// Ranges the media fetcher may dial despite looking reserved.
+				// Empty by default, which leaves the SSRF guard exactly as
+				// strict as it ships. A deployment behind a fake-IP proxy
+				// needs it: there, every public hostname resolves into the
+				// proxy's pool (198.18.0.0/15 is the common one), so WeCom's
+				// own COS host is indistinguishable from a metadata endpoint
+				// by address alone and every attachment is refused.
+				if raw := strings.TrimSpace(os.Getenv("MULTICA_WECOM_MEDIA_ALLOW_CIDRS")); raw != "" {
+					for _, err := range wecom.SetMediaAllowedPrefixes(strings.Split(raw, ",")) {
+						slog.Error("wecom: ignoring malformed media allow cidr", "error", err)
+					}
+					slog.Warn("wecom: media guard has an operator allow-list; those ranges are reachable by a URL WeCom supplies",
+						"cidrs", raw)
+				}
+
+				// Frame tracing: off unless an operator asks for it. It
+				// records a bounded prefix of message text, so the fact that
+				// it is on has to be visible in the log it is writing into —
+				// otherwise a session gets left switched on and nobody
+				// notices message content accumulating.
+				if wecom.SetTrace(os.Getenv("MULTICA_WECOM_TRACE") == "1") {
+					slog.Warn("wecom: frame tracing ON — records message text; unset MULTICA_WECOM_TRACE when done")
+				}
+
+				slog.Info("wecom integration enabled (smart bot, long connection)")
+				// SINGLE-REPLICA CONSTRAINT: WeCom outbound (agent replies +
+				// inbox pushes) is delivered only by the replica holding each
+				// bot's in-process WebSocket lease. On a multi-replica
+				// deployment, an EventChatDone/EventInboxNew published on another
+				// replica cannot reach the lease holder, so those replies are
+				// dropped. This is stated conditionally rather than gated on a
+				// replica-count signal: the server has no reliable count here,
+				// and REDIS_URL means "Redis configured" (it also gates rate
+				// limiting), not "more than one replica". See wecom/outbound.go
+				// and SELF_HOSTING.md. Remove once outbound routes to the lease
+				// holder.
+				slog.Warn("wecom integration: WeCom agent replies and inbox pushes are delivered only by the replica holding each bot's WebSocket lease. If you run more than one backend replica, responses produced on a replica that does not hold the lease will be dropped — run the WeCom-enabled backend as a single replica until cross-replica outbound routing is implemented.")
+			}
+		}
+	} else {
+		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
 	}
 
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
@@ -1027,11 +1232,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/slack/installations", h.ListSlackInstallations)
+					r.Get("/wecom/installations", h.ListWecomInstallations)
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/slack/installations/{installationId}", h.RevokeSlackInstallation)
 					r.Post("/slack/install/byo", h.RegisterSlackBYO)
+					r.Delete("/wecom/installations/{installationId}", h.RevokeWecomInstallation)
+					r.Post("/wecom/install/byo", h.RegisterWecomBYO)
+				})
+
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/dingtalk/installations", h.ListDingTalkInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/dingtalk/installations/{installationId}", h.RevokeDingTalkInstallation)
+					r.Post("/dingtalk/install/byo", h.RegisterDingTalkBYO)
 				})
 			})
 		})
@@ -1049,6 +1267,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// logged-in user (from the session) is bound to the Slack id the token
 		// carries.
 		r.Post("/api/slack/binding/redeem", h.RedeemSlackBindingToken)
+		// DingTalk binding redemption is user-scoped for the same reason as
+		// Slack: the token is redeemed before workspace context is selected.
+		r.Post("/api/dingtalk/binding/redeem", h.RedeemDingTalkBindingToken)
+		// WeCom smart-bot binding-token redemption. Same rationale as
+		// Lark/Slack: the session is the source of truth for the redeemer's
+		// Multica identity; the token only carries the WeCom userid to bind.
+		r.Post("/api/wecom/binding/redeem", h.RedeemWecomBindingToken)
 
 		// Composio integration (MUL-3720). User-scoped (no workspace context):
 		// a connection belongs to a user. These four require a logged-in
@@ -1278,6 +1503,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/{itemType}/{itemId}", h.DeletePin)
 			})
 
+			// Saved issue views (MUL-4796).
+			r.Get("/api/issue-view-preferences", h.GetIssueViewPreference)
+			r.Put("/api/issue-view-preferences", h.PutIssueViewPreference)
+			r.Route("/api/issue-views", func(r chi.Router) {
+				r.Get("/", h.ListIssueViews)
+				r.Post("/", h.CreateIssueView)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetIssueViewByID)
+					r.Patch("/", h.UpdateIssueView)
+					r.Delete("/", h.DeleteIssueView)
+				})
+			})
+
 			// Attachments
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
 			// /api/attachments/{id}/download is registered in the
@@ -1302,11 +1540,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/agents", func(r chi.Router) {
 				r.Get("/", h.ListAgents)
 				r.Post("/", h.CreateAgent)
-				// Agent templates: pre-configured instructions + skill refs.
-				// Picking a template imports the referenced skills into the
-				// workspace (find-or-create by name) and creates the agent
-				// with the template's instructions in one transaction.
-				r.Post("/from-template", h.CreateAgentFromTemplate)
+				// The workspace's built-in Chief of Staff. Server-owned: the
+				// caller supplies only a runtime and a language, so a client
+				// cannot mint an agent carrying `system_key` and thereby claim
+				// the system instruction layer. Idempotent per workspace.
+				r.Post("/mika", h.CreateMikaAgent)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
@@ -1333,13 +1571,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
-			// Agent templates catalog (browse + detail). The Create flow
-			// lives under /api/agents/from-template above; this route is for
-			// the picker UI to list available templates.
-			r.Route("/api/agent-templates", func(r chi.Router) {
-				r.Get("/", h.ListAgentTemplates)
-				r.Get("/{slug}", h.GetAgentTemplate)
-			})
 			r.Route("/api/agent-builder/sessions", func(r chi.Router) {
 				// The creation studio's unfinished drafts. Builder sessions are
 				// invisible to every chat list (their carrier is kind='system'),
@@ -1461,12 +1692,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/archive", h.SetChatSessionArchived)
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
+					r.Post("/onboarding", h.StartMikaOnboarding)
 					// Explicit "refresh" of a turn's quick actions: re-runs the
 					// daemon suggestion pass for the latest assistant reply (MUL-5149).
 					r.Post("/quick-actions/regenerate", h.RegenerateChatQuickActions)
 					r.Get("/messages", h.ListChatMessages)
 					r.Get("/messages/page", h.ListChatMessagesPage)
 					r.Get("/pending-task", h.GetPendingChatTask)
+					r.Delete("/queued-tasks", h.ClearQueuedChatTasks)
+					r.Post("/queued-tasks/{taskId}/prioritize", h.PrioritizeQueuedChatTask)
 					r.Post("/read", h.MarkChatSessionRead)
 					// Deferred-cancellation draft restores (#5219):
 					// creator-only fetch + idempotent consume.
@@ -1709,4 +1943,15 @@ func composioCallbackBaseURL(publicURL string) string {
 		return publicURL
 	}
 	return appURLFromEnv()
+}
+
+// wecomMetricsOrNil keeps a typed nil out of the adapter's interface field.
+// A *WecomMetrics that is nil still satisfies wecom.Metrics, so assigning it
+// directly would give the adapter a non-nil interface holding a nil pointer —
+// and the first counter call would panic on a deployment with /metrics off.
+func wecomMetricsOrNil(m *obsmetrics.WecomMetrics) wecom.Metrics {
+	if m == nil {
+		return nil
+	}
+	return m
 }

@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
+  ExternalLink,
   Filter,
   FolderKanban,
   LayoutGrid,
@@ -40,7 +41,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useModalStore } from "@multica/core/modals";
-import { AppLink, useRowLink } from "../../navigation";
+import { AppLink, useIntentNavigate, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -228,6 +229,9 @@ function ProjectRowActions({
   canDelete: boolean;
 }) {
   const { t } = useT("projects");
+  const { t: tCommon } = useT("common");
+  const wsPaths = useWorkspacePaths();
+  const intentNavigate = useIntentNavigate();
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
   const deleteProject = useDeleteProject();
@@ -253,6 +257,19 @@ function ProjectRowActions({
           }
         />
         <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem
+            onClick={() =>
+              intentNavigate(
+                wsPaths.projectDetail(project.id),
+                "foreground-tab",
+                project.title,
+              )
+            }
+          >
+            <ExternalLink className="size-3.5" />
+            {tCommon(($) => $.navigation.open_in_new_tab)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onClick={togglePin}>
             {pinned ? (
               <PinOff className="size-3.5" />
@@ -372,7 +389,7 @@ function ProjectTableRow({
   return (
     <ListGridRow
       className={`h-11 cursor-pointer ${selected ? "bg-accent/30" : ""}`}
-      {...rowLink(rowHref)}
+      {...rowLink(rowHref, project.title)}
     >
       <CheckboxCell checked={selected} onToggle={onToggleSelect} />
       <ListGridCell className="gap-2">
@@ -698,7 +715,7 @@ function ProjectBatchToolbar({
 
   return (
     <>
-      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
+      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg max-md:above-chat-launcher">
         <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
           <span className="text-body font-medium">
             {t(($) => $.page.selected, { count: rows.length })}

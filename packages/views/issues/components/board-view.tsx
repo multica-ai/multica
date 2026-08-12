@@ -12,19 +12,15 @@ import {
   type DragEndEvent,
   type DragOverEvent,
 } from "@dnd-kit/core";
-import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
 import { toast } from "sonner";
 import type {
   Issue,
-  IssueAssigneeGroup,
   IssueAssigneeType,
   IssueStatus,
   Project,
   IssueProperty,
 } from "@multica/core/types";
-import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { AssigneeGroupedIssuesFilter, IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions, useSetIssueProperty, useUnsetIssueProperty } from "@multica/core/properties";
@@ -160,36 +156,22 @@ const EMPTY_IDS: string[] = [];
 
 function BoardViewImpl({
   issues,
-  assigneeGroups,
-  assigneeGroupQueryKey,
-  assigneeGroupFilter,
   visibleStatuses,
   hiddenStatuses,
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
   projectMap,
-  myIssuesScope,
-  myIssuesFilter,
-  sort,
   projectId,
   onCreateIssue,
   statusPagination,
   groupBranches,
 }: {
   issues: Issue[];
-  assigneeGroups?: IssueAssigneeGroup[];
-  assigneeGroupQueryKey?: QueryKey;
-  assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
   visibleStatuses: IssueStatus[];
   hiddenStatuses: IssueStatus[];
   onMoveIssue: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
-  /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
-  myIssuesScope?: string;
-  myIssuesFilter?: MyIssuesFilter;
-  /** Must match the sort the page queried with — embedded in the cache key. */
-  sort?: IssueSortParam;
   /** When set, the per-column "+" pre-fills the project on the create form. */
   projectId?: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
@@ -259,17 +241,9 @@ function BoardViewImpl({
       })
     : null;
   const { getActorName } = useActorName();
-  const myIssuesOpts = myIssuesScope
-    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
-    : undefined;
   const groupedIssues = useMemo(
-    () =>
-      groupBranches?.enabled
-        ? groupBranches.issues
-        : grouping === "assignee" && assigneeGroups
-        ? assigneeGroups.flatMap((group) => group.issues)
-        : issues,
-    [assigneeGroups, groupBranches, grouping, issues],
+    () => (groupBranches?.enabled ? groupBranches.issues : issues),
+    [groupBranches, issues],
   );
   const hydratedAssigneeGroups = useMemo<BoardColumnGroup[] | undefined>(() => {
     if (grouping === "assignee" && groupBranches?.enabled) {
@@ -298,35 +272,8 @@ function BoardViewImpl({
         }];
       });
     }
-    if (grouping !== "assignee" || !assigneeGroups) return undefined;
-    const order: Record<string, number> = {
-      member: 0,
-      agent: 1,
-      squad: 2,
-      none: 3,
-    };
-    return assigneeGroups
-      .map((group) => ({
-        id: group.id,
-        title:
-          group.assignee_type && group.assignee_id
-            ? getActorName(group.assignee_type, group.assignee_id)
-            : t(($) => $.filters.no_assignee),
-        assigneeType: group.assignee_type,
-        assigneeId: group.assignee_id,
-        totalCount: group.total,
-        createData: {
-          assignee_type: group.assignee_type,
-          assignee_id: group.assignee_id,
-        },
-      }))
-      .sort((a, b) => {
-        const aOrder = order[a.assigneeType ?? "none"] ?? 99;
-        const bOrder = order[b.assigneeType ?? "none"] ?? 99;
-        if (aOrder !== bOrder) return aOrder - bOrder;
-        return a.title.localeCompare(b.title);
-      });
-  }, [assigneeGroups, getActorName, groupBranches, grouping, t]);
+    return undefined;
+  }, [getActorName, groupBranches, grouping, t]);
   const groupPagination = useMemo(() => {
     if (!groupBranches?.enabled) return undefined;
     const grouped = new Map<string, IssueGroupPageState[]>();
@@ -627,34 +574,18 @@ function BoardViewImpl({
         ) : (
           groups.map((group) =>
             isStatusGroup(group) ? (
-              statusPagination ? (
-                <ServerPaginatedBoardColumn
-                  key={group.id}
-                  group={group}
-                  issueIds={columns[group.id] ?? EMPTY_IDS}
-                  issueMap={issueMapRef.current}
-                  childProgressMap={childProgressMap}
-                  projectMap={projectMap}
-                  page={statusPagination[group.status]}
-                  projectId={projectId}
-                  onCreateIssue={onCreateIssue}
-                  sortLabel={sortLabel}
-                />
-              ) : (
-                <PaginatedBoardColumn
-                  key={group.id}
-                  group={group}
-                  issueIds={columns[group.id] ?? EMPTY_IDS}
-                  issueMap={issueMapRef.current}
-                  childProgressMap={childProgressMap}
-                  projectMap={projectMap}
-                  myIssuesOpts={myIssuesOpts}
-                  sort={sort}
-                  projectId={projectId}
-                  onCreateIssue={onCreateIssue}
-                  sortLabel={sortLabel}
-                />
-              )
+              <ServerPaginatedBoardColumn
+                key={group.id}
+                group={group}
+                issueIds={columns[group.id] ?? EMPTY_IDS}
+                issueMap={issueMapRef.current}
+                childProgressMap={childProgressMap}
+                projectMap={projectMap}
+                page={statusPagination?.[group.status]}
+                projectId={projectId}
+                onCreateIssue={onCreateIssue}
+                sortLabel={sortLabel}
+              />
             ) : (
               groupPagination?.[group.id] ? (
                 <ServerPaginatedBoardColumn
@@ -665,21 +596,6 @@ function BoardViewImpl({
                   childProgressMap={childProgressMap}
                   projectMap={projectMap}
                   page={groupPagination[group.id]!}
-                  projectId={projectId}
-                  onCreateIssue={onCreateIssue}
-                  sortLabel={sortLabel}
-                />
-              ) : assigneeGroupQueryKey && assigneeGroupFilter ? (
-                <PaginatedAssigneeBoardColumn
-                  key={group.id}
-                  group={group}
-                  issueIds={columns[group.id] ?? EMPTY_IDS}
-                  issueMap={issueMapRef.current}
-                  childProgressMap={childProgressMap}
-                  projectMap={projectMap}
-                  queryKey={assigneeGroupQueryKey}
-                  filter={assigneeGroupFilter}
-                  sort={sort}
                   projectId={projectId}
                   onCreateIssue={onCreateIssue}
                   sortLabel={sortLabel}
@@ -710,19 +626,10 @@ function BoardViewImpl({
           </div>
         )}
 
-        {groupingProperty && !groupBranches?.enabled && (
-          <PropertyBoardPoolLoader
-            statuses={visibleStatuses}
-            myIssuesOpts={myIssuesOpts}
-            sort={sort}
-          />
-        )}
 
         {grouping === "status" && hiddenStatuses.length > 0 && (
           <BoardHiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
-            myIssuesOpts={myIssuesOpts}
-            sort={sort}
             statusPagination={statusPagination}
           />
         )}
@@ -747,63 +654,6 @@ function BoardViewImpl({
   );
 }
 
-const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn({
-  group,
-  issueIds,
-  issueMap,
-  childProgressMap,
-  projectMap,
-  queryKey,
-  filter,
-  sort,
-  projectId,
-  onCreateIssue,
-  sortLabel,
-}: {
-  group: BoardColumnGroup;
-  issueIds: string[];
-  issueMap: Map<string, Issue>;
-  childProgressMap?: Map<string, ChildProgress>;
-  projectMap?: Map<string, Project>;
-  queryKey: QueryKey;
-  filter: AssigneeGroupedIssuesFilter;
-  sort?: IssueSortParam;
-  projectId?: string;
-  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
-  sortLabel?: string | null;
-}) {
-  const { loadMore, hasMore, isLoading, total } = useLoadMoreByAssigneeGroup(
-    {
-      id: group.id,
-      assignee_type: group.assigneeType ?? null,
-      assignee_id: group.assigneeId ?? null,
-    },
-    queryKey,
-    filter,
-    sort,
-  );
-  return (
-    <BoardColumn
-      group={group}
-      issueIds={issueIds}
-      issueMap={issueMap}
-      childProgressMap={childProgressMap}
-      projectMap={projectMap}
-      totalCount={total}
-      projectId={projectId}
-      onCreateIssue={onCreateIssue}
-      sortLabel={sortLabel}
-      footer={
-        <ListLoadMoreFooter
-          hasMore={hasMore}
-          isLoading={isLoading}
-          total={total}
-          onLoadMore={loadMore}
-        />
-      }
-    />
-  );
-});
 
 const ServerPaginatedBoardColumn = memo(function ServerPaginatedBoardColumn({
   group,
@@ -821,12 +671,12 @@ const ServerPaginatedBoardColumn = memo(function ServerPaginatedBoardColumn({
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
-  page: IssueStatusPageState | IssueGroupPageState;
+  page?: IssueStatusPageState | IssueGroupPageState;
   projectId?: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   sortLabel?: string | null;
 }) {
-  const footer = (
+  const footer = page ? (
     <ListLoadMoreFooter
       hasMore={page.hasMore}
       isLoading={page.isLoading || page.isFetching}
@@ -835,7 +685,7 @@ const ServerPaginatedBoardColumn = memo(function ServerPaginatedBoardColumn({
       isError={page.isError}
       onRetry={page.retry}
     />
-  );
+  ) : undefined;
   return (
     <BoardColumn
       group={group}
@@ -843,7 +693,7 @@ const ServerPaginatedBoardColumn = memo(function ServerPaginatedBoardColumn({
       issueMap={issueMap}
       childProgressMap={childProgressMap}
       projectMap={projectMap}
-      totalCount={page.total}
+      totalCount={page?.total ?? group.totalCount}
       projectId={projectId}
       onCreateIssue={onCreateIssue}
       sortLabel={sortLabel}
@@ -852,146 +702,23 @@ const ServerPaginatedBoardColumn = memo(function ServerPaginatedBoardColumn({
   );
 });
 
-const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
-  group,
-  issueIds,
-  issueMap,
-  childProgressMap,
-  projectMap,
-  myIssuesOpts,
-  sort,
-  projectId,
-  onCreateIssue,
-  sortLabel,
-}: {
-  group: BoardColumnGroup & { status: IssueStatus };
-  issueIds: string[];
-  issueMap: Map<string, Issue>;
-  childProgressMap?: Map<string, ChildProgress>;
-  projectMap?: Map<string, Project>;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-  sort?: IssueSortParam;
-  projectId?: string;
-  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
-  sortLabel?: string | null;
-}) {
-  const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
-    group.status,
-    myIssuesOpts,
-    sort,
-  );
-  return (
-    <BoardColumn
-      group={group}
-      issueIds={issueIds}
-      issueMap={issueMap}
-      childProgressMap={childProgressMap}
-      projectMap={projectMap}
-      totalCount={total}
-      projectId={projectId}
-      onCreateIssue={onCreateIssue}
-      sortLabel={sortLabel}
-      footer={
-        <ListLoadMoreFooter
-          hasMore={hasMore}
-          isLoading={isLoading}
-          total={total}
-          onLoadMore={loadMore}
-        />
-      }
-    />
-  );
-});
-
-/**
- * Board-view-specific row that pulls the server-aggregated total from
- * `useLoadMoreByStatus` and hands it to the shared {@link HiddenColumnRow}.
- * Lives here (not in `hidden-columns-panel.tsx`) so the shared panel stays
- * free of `useLoadMoreByStatus` / `myIssuesOpts` coupling — the swimlane
- * uses an in-memory total instead.
- */
-/**
- * The property-grouped board derives its columns from the status-bucketed
- * pool, which pages per status. Property columns have no per-column
- * pagination yet (tracked in MUL-4493), so this strip keeps every issue
- * REACHABLE: one sentinel per status that still has server rows loads the
- * pool further and the property columns re-derive. Without it, rows beyond
- * a status's loaded page silently never join any column (review round 3).
- */
-function PropertyBoardPoolLoader({
-  statuses,
-  myIssuesOpts,
-  sort,
-}: {
-  statuses: IssueStatus[];
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-  sort?: IssueSortParam;
-}) {
-  return (
-    <div className="col-span-full flex justify-center py-1">
-      {statuses.map((status) => (
-        <PropertyBoardPoolSentinel key={status} status={status} myIssuesOpts={myIssuesOpts} sort={sort} />
-      ))}
-    </div>
-  );
-}
-
-function PropertyBoardPoolSentinel({
-  status,
-  myIssuesOpts,
-  sort,
-}: {
-  status: IssueStatus;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-  sort?: IssueSortParam;
-}) {
-  const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(status, myIssuesOpts, sort);
-  if (!hasMore) return null;
-  return <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />;
-}
-
-function BoardHiddenColumnRow({
-  status,
-  myIssuesOpts,
-  sort,
-}: {
-  status: IssueStatus;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-  sort?: IssueSortParam;
-}) {
-  const { total } = useLoadMoreByStatus(status, myIssuesOpts, sort);
-  return <HiddenColumnRow status={status} total={total} />;
-}
 
 function BoardHiddenColumnsPanel({
   hiddenStatuses,
-  myIssuesOpts,
-  sort,
   statusPagination,
 }: {
   hiddenStatuses: IssueStatus[];
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-  sort?: IssueSortParam;
   statusPagination?: IssueStatusPagination;
 }) {
   return (
     <HiddenColumnsPanel
       hiddenStatuses={hiddenStatuses}
       renderRow={(status) => (
-        statusPagination ? (
-          <HiddenColumnRow
-            key={status}
-            status={status}
-            total={statusPagination[status].total}
-          />
-        ) : (
-          <BoardHiddenColumnRow
-            key={status}
-            status={status}
-            myIssuesOpts={myIssuesOpts}
-            sort={sort}
-          />
-        )
+        <HiddenColumnRow
+          key={status}
+          status={status}
+          total={statusPagination?.[status]?.total}
+        />
       )}
     />
   );

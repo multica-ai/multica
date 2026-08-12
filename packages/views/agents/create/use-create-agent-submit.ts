@@ -41,7 +41,7 @@ export function useCreateAgentSubmit(options: {
   draft: AgentDraft;
   runtimeId: string | null;
   squadId: string | null;
-  /** Attribution for the `agent_created` event, not a template create. */
+  /** Creation-source attribution for the `agent_created` analytics event. */
   template?: string;
   duplicateSource?: Agent | null;
   /** Runs after the agent is committed, before navigation. */

@@ -27,7 +27,6 @@ package agent
 //     (see packages/core/agents/mcp-support.ts).
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -313,8 +312,7 @@ func (b *devecoBackend) processEvents(r io.Reader, ch chan<- Message) devecoEven
 	finalStatus := "completed"
 	var finalError string
 
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	scanner := newAgentStreamScanner(r)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -379,8 +377,8 @@ func (b *devecoBackend) handleTextEvent(event devecoEvent, ch chan<- Message, ou
 }
 
 // handleToolUseEvent processes "tool_use" events. A single tool_use event
-// contains both the call and result in part.state when the tool has completed
-// (state.status == "completed").
+// contains both the call and result in part.state when the tool reaches a
+// terminal state (state.status is "completed" or "error").
 func (b *devecoBackend) handleToolUseEvent(event devecoEvent, ch chan<- Message) {
 	var input map[string]any
 	if event.Part.State != nil && event.Part.State.Input != nil {
@@ -394,8 +392,15 @@ func (b *devecoBackend) handleToolUseEvent(event devecoEvent, ch chan<- Message)
 		Input:  input,
 	})
 
-	if event.Part.State != nil && event.Part.State.Status == "completed" {
-		outputStr := extractDevecoToolOutput(event.Part.State.Output)
+	// Pair every terminal tool-use with a tool-result. The daemon uses this
+	// pair to track in-flight tools, so dropping error results would leave its
+	// counter permanently elevated and suppress the normal idle watchdog.
+	state := event.Part.State
+	if state != nil && (state.Status == "completed" || state.Status == "error") {
+		outputStr := extractDevecoToolOutput(state.Output)
+		if state.Status == "error" && state.Error != "" {
+			outputStr = state.Error
+		}
 		trySend(ch, Message{
 			Type:   MessageToolResult,
 			Tool:   event.Part.Tool,
@@ -490,6 +495,7 @@ type devecoToolState struct {
 	Status string          `json:"status,omitempty"`
 	Input  json.RawMessage `json:"input,omitempty"`
 	Output any             `json:"output,omitempty"`
+	Error  string          `json:"error,omitempty"`
 }
 
 // devecoError represents an error event from deveco.

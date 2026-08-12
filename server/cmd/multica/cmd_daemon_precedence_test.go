@@ -204,11 +204,12 @@ func TestResolveDaemonAgentTimeoutOverridePrecedence(t *testing.T) {
 	}
 }
 
-// TestResolveDaemonDisableAutoUpdatePrecedence pins the single-direction
-// disable signal: flag OR falsy env OR persisted cfg=true all disable
-// auto-update; a truthy env leaves the override off so LoadConfig honors
-// the raw env; missing signals return false so the default wins.
-func TestResolveDaemonDisableAutoUpdatePrecedence(t *testing.T) {
+// TestResolveDaemonDisableSignalPrecedence pins the single-direction disable
+// signal shared by --no-auto-update and --no-auto-reload: flag OR falsy env OR
+// persisted cfg=true all disable; a truthy env leaves the override off so
+// LoadConfig honors the raw env; missing signals return false so the default
+// wins.
+func TestResolveDaemonDisableSignalPrecedence(t *testing.T) {
 	const envName = "TEST_MULTICA_DAEMON_AUTO_UPDATE"
 
 	cases := []struct {
@@ -234,7 +235,7 @@ func TestResolveDaemonDisableAutoUpdatePrecedence(t *testing.T) {
 			} else {
 				t.Setenv(envName, "")
 			}
-			got := resolveDaemonDisableAutoUpdate(tc.flag, envName, tc.cfg)
+			got := resolveDaemonDisableSignal(tc.flag, envName, tc.cfg)
 			if got != tc.want {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}

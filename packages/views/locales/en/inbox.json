@@ -13,7 +13,8 @@
     "mark_read": "Mark as read",
     "mark_unread": "Mark as unread",
     "archive": "Archive",
-    "unarchive": "Unarchive"
+    "unarchive": "Unarchive",
+    "open_in_new_tab": "Open in new tab"
   },
   "list": {
     "empty": "No notifications",
@@ -27,7 +28,8 @@
     },
     "archived_title": "Archived",
     "archived_empty": "No archived notifications",
-    "unarchive_tooltip": "Unarchive"
+    "unarchive_tooltip": "Unarchive",
+    "actions_aria": "Notification actions"
   },
   "detail": {
     "select_prompt": "Select a notification to view details",

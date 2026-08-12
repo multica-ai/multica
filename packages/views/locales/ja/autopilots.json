@@ -18,7 +18,7 @@
     "last_run_empty": "--",
     "empty": {
       "title": "まだオートパイロットがありません",
-      "hint": "AI エージェントの繰り返しタスクをスケジュールしましょう。テンプレートを選ぶか、ゼロから始められます。"
+      "hint": "AI エージェントの繰り返し作業をスケジュールしましょう。テンプレートを選ぶか、ゼロから始められます。"
     },
     "scope_all": "すべて",
     "no_matches": "該当する自動化はありません",
@@ -31,7 +31,7 @@
     "archived": "アーカイブ済み"
   },
   "execution_mode": {
-    "create_issue": "イシューを作成",
+    "create_issue": "タスクを作成",
     "run_only": "実行のみ"
   },
   "relative_date": {
@@ -126,7 +126,7 @@
     "owner_note": "作成者とワークスペース管理者は常にアクセスできます。"
   },
   "run_status": {
-    "issue_created": "イシュー作成済み",
+    "issue_created": "タスク作成済み",
     "running": "実行中",
     "completed": "完了",
     "failed": "失敗",
@@ -139,7 +139,7 @@
     "api": "API"
   },
   "run": {
-    "issue_linked": "イシューをリンク済み",
+    "issue_linked": "タスクをリンク済み",
     "view_log": "実行ログを表示",
     "skipped_group": {
       "label": "スキップ済み",
@@ -257,7 +257,7 @@
     "sr_edit": "オートパイロットを編集",
     "header_create": "新規オートパイロット",
     "header_edit": "オートパイロットを編集",
-    "subtitle": "繰り返し実行される AI タスク",
+    "subtitle": "繰り返し実行される AI 作業",
     "expand": "展開",
     "collapse": "折りたたむ",
     "close": "閉じる",
@@ -286,7 +286,7 @@
     "section_project": "プロジェクト",
     "no_project": "プロジェクトなし",
     "section_subscribers": "購読者",
-    "subscribers_hint": "このオートパイロットが作成するすべてのイシューを自動で購読します",
+    "subscribers_hint": "このオートパイロットが作成するすべてのタスクを自動で購読します",
     "subscribers_empty": "購読者はいません。チームメイトを追加すると、毎回通知されます",
     "subscribers_add": "購読者を追加",
     "subscribers_search_placeholder": "名前でメンバーを検索…",
@@ -316,12 +316,12 @@
     "error_assignee_required": "実行するエージェントまたはスクワッドを選択してください。",
     "output_modes": {
       "create_issue": {
-        "label": "イシューを作成",
-        "description": "実行のたびに追跡可能なイシューを作成します"
+        "label": "タスクを作成",
+        "description": "実行のたびに追跡可能なタスクを作成します"
       },
       "run_only": {
         "label": "実行のみ",
-        "description": "イシューを作成せず、静かに実行します"
+        "description": "タスクを作成せず、静かに実行します"
       }
     }
   },

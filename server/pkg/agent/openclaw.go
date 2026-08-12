@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -405,8 +404,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 	// backend on this code path emits real NDJSON streams and needs live
 	// progress updates, we'll need to split the fast path off a streaming
 	// reader instead of io.ReadAll.
-	scanner := bufio.NewScanner(bytes.NewReader(buf))
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	scanner := newAgentStreamScanner(bytes.NewReader(buf))
 
 	var output strings.Builder
 	var sessionID string

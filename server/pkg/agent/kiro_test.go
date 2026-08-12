@@ -106,7 +106,7 @@ while IFS= read -r line; do
       esac
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"ToolCallUpdate","toolCallId":"tc-current","status":"completed","name":"Shell","parameters":{"command":"echo current"},"output":"current tool output\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"loaded"}}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1,"cacheReadTokens":7,"cacheWriteTokens":3}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1,"cacheReadTokens":7,"cacheWriteTokens":3,"costUsdTicks":900}}}\n' "$id"
       if [ -n "$KIRO_LATE_CHUNK" ]; then
         sleep 0.05
         printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":" tail"}}}}\n'
@@ -202,8 +202,8 @@ func TestKiroBackendAttributesUsageToCurrentModel(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected usage under current model auto, got %+v", result.Usage)
 	}
-	if usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 3 {
-		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=7 cache_write=3", usage)
+	if usage != (TokenUsage{InputTokens: 2, OutputTokens: 1, CacheReadTokens: 7, CacheWriteTokens: 3, CostUSDTicks: 900}) {
+		t.Fatalf("usage = %+v, want all prompt-result fields", usage)
 	}
 }
 
@@ -1010,8 +1010,8 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	if result.Output != "loaded" {
 		t.Fatalf("output = %q, want loaded", result.Output)
 	}
-	if usage := result.Usage["unknown"]; usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 3 {
-		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=7 cache_write=3", usage)
+	if usage := result.Usage["unknown"]; usage != (TokenUsage{InputTokens: 2, OutputTokens: 1, CacheReadTokens: 7, CacheWriteTokens: 3, CostUSDTicks: 900}) {
+		t.Fatalf("usage = %+v, want all prompt-result fields", usage)
 	}
 	if len(messages) != 3 {
 		t.Fatalf("messages = %+v, want current tool use, tool result, and text only", messages)

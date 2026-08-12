@@ -208,7 +208,7 @@ func (s *TaskService) GenerateChatQuickActionsForTask(ctx context.Context, task 
 		return s.SupplementChatQuickActions(ctx, task, "", false)
 	}
 
-	prompt, err := s.buildChatQuickActionsPrompt(ctx, target)
+	prompt, err := s.buildChatQuickActionsPrompt(ctx, target, chatInputOwnerID(task))
 	if err != nil {
 		return err
 	}
@@ -336,7 +336,7 @@ func (s *TaskService) resolveChatQuickActionsPlaceholder(task db.AgentTaskQueue)
 // completion callback and this read would otherwise supply the context while
 // the result is still written to the older turn, and a newly-sent user message
 // would leave the window ending on a user row with no reply to build on.
-func (s *TaskService) buildChatQuickActionsPrompt(ctx context.Context, target db.ChatMessage) (string, error) {
+func (s *TaskService) buildChatQuickActionsPrompt(ctx context.Context, target db.ChatMessage, inputOwnerID pgtype.UUID) (string, error) {
 	// Strictly older than target, newest-first; reversed below. Over-fetch so
 	// dropped rows (no_response, failures) don't shrink the window below the
 	// intended turn count.
@@ -349,10 +349,30 @@ func (s *TaskService) buildChatQuickActionsPrompt(ctx context.Context, target db
 	if err != nil {
 		return "", fmt.Errorf("load chat messages for quick actions: %w", err)
 	}
+	msgs := selectChatQuickActionsContext(rows, target, inputOwnerID)
+	return renderChatQuickActionsContext(msgs, collectPreviousChatQuickActions(msgs)), nil
+}
 
+func selectChatQuickActionsContext(rows []db.ChatMessage, target db.ChatMessage, inputOwnerID pgtype.UUID) []db.ChatMessage {
+	// A queued successor's input can be stored before target even though it is
+	// logically the next turn. Keep user rows only when their task has already
+	// answered inside this anchored window (or owns the target task's input;
+	// auto-retry replies use the child task ID while their input keeps the root).
+	answeredTaskIDs := map[pgtype.UUID]struct{}{target.TaskID: {}}
+	answeredTaskIDs[inputOwnerID] = struct{}{}
+	for _, msg := range rows {
+		if msg.Role == "assistant" && msg.TaskID.Valid {
+			answeredTaskIDs[msg.TaskID] = struct{}{}
+		}
+	}
 	msgs := make([]db.ChatMessage, 0, len(rows)+1)
 	for i := len(rows) - 1; i >= 0; i-- {
 		msg := rows[i]
+		if msg.Role == "user" && msg.TaskID.Valid {
+			if _, answered := answeredTaskIDs[msg.TaskID]; !answered {
+				continue
+			}
+		}
 		// Only ordinary turns carry usable text. A no_response row holds an
 		// English placeholder body and a failure row holds an error, neither of
 		// which describes what the conversation is about.
@@ -368,7 +388,7 @@ func (s *TaskService) buildChatQuickActionsPrompt(ctx context.Context, target db
 		msgs = msgs[len(msgs)-(chatQuickActionsContextMessages-1):]
 	}
 	msgs = append(msgs, target)
-	return renderChatQuickActionsContext(msgs, collectPreviousChatQuickActions(msgs)), nil
+	return msgs
 }
 
 // collectPreviousChatQuickActions gathers the labels already offered in this

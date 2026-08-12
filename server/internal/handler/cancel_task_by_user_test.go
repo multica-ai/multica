@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -141,6 +142,202 @@ func cancelTaskByUserRequest(t *testing.T, userID, taskID string) *http.Request 
 	req := newRequestAs(userID, "POST", "/api/tasks/"+taskID+"/cancel", nil)
 	req = withURLParam(req, "taskId", taskID)
 	return withChatTestWorkspaceCtx(t, req)
+}
+
+func cancelQueuedTaskByUserRequest(
+	t *testing.T,
+	userID, taskID, sessionID, action string,
+) *http.Request {
+	t.Helper()
+	req := newRequestAs(
+		userID,
+		http.MethodPost,
+		"/api/tasks/"+taskID+"/cancel?expected_status=queued&chat_session_id="+
+			sessionID+"&queue_action="+action,
+		nil,
+	)
+	req = withURLParam(req, "taskId", taskID)
+	return withChatTestWorkspaceCtx(t, req)
+}
+
+func TestCancelTaskByUser_QueuedOnlyDoesNotCancelPromotedTask(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "CancelQueuedOnlyAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID := insertPendingChatTask(t, agentID, sessionID, "running")
+	req := newRequestAs(
+		testUserID,
+		http.MethodPost,
+		"/api/tasks/"+taskID+"/cancel?expected_status=queued&chat_session_id="+sessionID+"&queue_action=remove",
+		nil,
+	)
+	req = withURLParam(req, "taskId", taskID)
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w, withChatTestWorkspaceCtx(t, req))
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := taskStatus(t, taskID); got != "running" {
+		t.Fatalf("queued-only cancellation changed promoted task status to %q", got)
+	}
+}
+
+func TestCancelTaskByUser_QueuedEditPersistsDraftRestore(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "QueuedEditRestoreAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID, messageID, attachmentID := insertQueuedChatInputWithAttachment(
+		t,
+		agentID,
+		sessionID,
+		"edit this queued prompt",
+	)
+
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(
+		w,
+		cancelQueuedTaskByUserRequest(t, testUserID, taskID, sessionID, "edit"),
+	)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := taskStatus(t, taskID); got != "cancelled" {
+		t.Fatalf("queued edit task status = %q, want cancelled", got)
+	}
+
+	var restoreCount int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*)
+		FROM chat_draft_restore
+		WHERE id = $1
+		  AND chat_session_id = $2
+		  AND task_id = $3
+		  AND content = 'edit this queued prompt'
+		  AND $4::uuid = ANY(attachment_ids)
+	`, messageID, sessionID, taskID, attachmentID).Scan(&restoreCount); err != nil {
+		t.Fatalf("read durable queued edit restore: %v", err)
+	}
+	if restoreCount != 1 {
+		t.Fatalf("queued edit created %d durable restore rows", restoreCount)
+	}
+
+	var messageCount int
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT count(*) FROM chat_message WHERE id = $1`,
+		messageID,
+	).Scan(&messageCount); err != nil {
+		t.Fatalf("count edited queued message: %v", err)
+	}
+	if messageCount != 0 {
+		t.Fatalf("queued edit left %d input messages", messageCount)
+	}
+	var attachmentMessageID *string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT chat_message_id::text FROM attachment WHERE id = $1`,
+		attachmentID,
+	).Scan(&attachmentMessageID); err != nil {
+		t.Fatalf("read detached queued attachment: %v", err)
+	}
+	if attachmentMessageID != nil {
+		t.Fatalf("queued edit attachment still bound to %q", *attachmentMessageID)
+	}
+}
+
+func TestCancelTaskByUser_QueuedEditRollsBackOnRestoreFailure(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "QueuedEditRollbackAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID, messageID, attachmentID := insertQueuedChatInputWithAttachment(
+		t,
+		agentID,
+		sessionID,
+		"do not lose this queued prompt",
+	)
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO chat_draft_restore (id, chat_session_id, task_id, content, attachment_ids)
+		VALUES ($1, $2, $3, 'collision', '{}'::uuid[])
+	`, messageID, sessionID, taskID); err != nil {
+		t.Fatalf("seed restore collision: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM chat_draft_restore WHERE id = $1`, messageID)
+	})
+
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(
+		w,
+		cancelQueuedTaskByUserRequest(t, testUserID, taskID, sessionID, "edit"),
+	)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := taskStatus(t, taskID); got != "queued" {
+		t.Fatalf("failed queued edit left task status %q", got)
+	}
+
+	var bindingCount int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*)
+		FROM chat_message AS message
+		JOIN attachment ON attachment.chat_message_id = message.id
+		WHERE message.id = $1 AND attachment.id = $2
+	`, messageID, attachmentID).Scan(&bindingCount); err != nil {
+		t.Fatalf("read rolled back queued input: %v", err)
+	}
+	if bindingCount != 1 {
+		t.Fatalf("failed queued edit did not roll back input binding: count = %d", bindingCount)
+	}
+}
+
+func TestCancelTaskByUser_QueuedRemoveDeletesAttachment(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "QueuedRemoveAttachmentAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID, messageID, attachmentID := insertQueuedChatInputWithAttachment(
+		t,
+		agentID,
+		sessionID,
+		"discard this queued prompt",
+	)
+
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(
+		w,
+		cancelQueuedTaskByUserRequest(t, testUserID, taskID, sessionID, "remove"),
+	)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := taskStatus(t, taskID); got != "cancelled" {
+		t.Fatalf("queued remove task status = %q, want cancelled", got)
+	}
+
+	var rows int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT
+			(SELECT count(*) FROM chat_message WHERE id = $1) +
+			(SELECT count(*) FROM attachment WHERE id = $2)
+	`, messageID, attachmentID).Scan(&rows); err != nil {
+		t.Fatalf("count discarded queued input rows: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("queued remove left %d message/attachment rows", rows)
+	}
 }
 
 // createStartedEmptyChatTask seeds the exact shape the deferred cancel is about:
@@ -575,6 +772,89 @@ func TestCancelTaskByUser_ChatTaskWithoutTranscript_RestoresUserDraft(t *testing
 	}
 	if count != 0 {
 		t.Fatalf("expected linked user message to be deleted, got %d", count)
+	}
+}
+
+func TestCancelTaskByUser_ChatRetryRestoresRootInput(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "CancelChatRetryAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	var rootTaskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, status, priority, chat_session_id, completed_at
+		)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'completed', 0, $2, now())
+		RETURNING id
+	`, agentID, sessionID).Scan(&rootTaskID); err != nil {
+		t.Fatalf("create root chat task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, rootTaskID)
+	})
+	if _, err := testPool.Exec(
+		context.Background(),
+		`UPDATE agent_task_queue SET chat_input_task_id = id WHERE id = $1`,
+		rootTaskID,
+	); err != nil {
+		t.Fatalf("seal root chat input: %v", err)
+	}
+
+	var messageID string
+	const content = "restore the retry input"
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO chat_message (chat_session_id, role, content, task_id)
+		VALUES ($1, 'user', $2, $3)
+		RETURNING id
+	`, sessionID, content, rootTaskID).Scan(&messageID); err != nil {
+		t.Fatalf("create root chat message: %v", err)
+	}
+
+	var retryTaskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, status, priority, chat_session_id,
+			parent_task_id, retry_of_task_id, chat_input_task_id, attempt
+		)
+		VALUES (
+			$1, (SELECT runtime_id FROM agent WHERE id = $1), 'queued', 0, $2,
+			$3, $3, $3, 1
+		)
+		RETURNING id
+	`, agentID, sessionID, rootTaskID).Scan(&retryTaskID); err != nil {
+		t.Fatalf("create retry chat task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, retryTaskID)
+	})
+
+	transcript, err := testHandler.Queries.ListChatMessages(
+		context.Background(),
+		util.MustParseUUID(sessionID),
+	)
+	if err != nil {
+		t.Fatalf("list transcript with queued retry: %v", err)
+	}
+	if len(transcript) != 1 || transcript[0].Content != content {
+		t.Fatalf("queued retry hid its historical root input: %+v", transcript)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w, cancelTaskByUserRequest(t, testUserID, retryTaskID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp CancelTaskByUserResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode retry cancel response: %v", err)
+	}
+	if resp.CancelledChatMessage == nil ||
+		resp.CancelledChatMessage.MessageID != messageID ||
+		resp.CancelledChatMessage.Content != content {
+		t.Fatalf("retry did not restore its root input: %#v", resp.CancelledChatMessage)
 	}
 }
 

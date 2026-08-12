@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -186,11 +187,14 @@ exit 1
 }
 
 func TestCursorExecuteReportsScannerOverflow(t *testing.T) {
-	script := `#!/bin/sh
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-overflow"}'
-dd if=/dev/zero bs=1048576 count=11 2>/dev/null | tr '\000' x
+	// The oversized event is sized from agentStreamMaxLineBytes so raising
+	// the shared cap cannot silently turn this into a plain oversized-line
+	// pass that never reaches the overflow branch.
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' '{"type":"system","subtype":"init","session_id":"sess-overflow"}'
+dd if=/dev/zero bs=1048576 count=%d 2>/dev/null | tr '\000' x
 printf '\n'
-`
+`, agentStreamMaxLineBytes/(1024*1024)+1)
 	result := executeFakeCursor(t, script)
 
 	if result.Status != "failed" {

@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, ExternalLink, MessagesSquare, Trash2 } from "lucide-react";
+import { ChevronRight, ExternalLink, Trash2 } from "lucide-react";
+import { SlackMark } from "./slack-mark";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -90,12 +91,6 @@ export function SlackTab() {
 
   return (
     <div className="space-y-8">
-      <section className="space-y-1">
-        <p className="text-body text-muted-foreground">
-          {t(($) => $.slack.page_description)}
-        </p>
-      </section>
-
       {!configured ? (
         <Card>
           <CardContent className="space-y-2">
@@ -373,7 +368,7 @@ export function SlackAgentBindButton({
         }
         data-testid="slack-agent-connect"
       >
-        <MessagesSquare className="h-3 w-3" />
+        <SlackMark className="h-3 w-3" />
         {t(($) => $.slack.bind_button)}
       </Button>
 

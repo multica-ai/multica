@@ -704,6 +704,9 @@ func TestAcquireLocalDirectoryLock_ParentCancellationReportsWaitFailure(t *testi
 
 	select {
 	case <-parked:
+		if got := d.resourceWaitTasks.Load(); got != 1 {
+			t.Fatalf("resource wait count while parked = %d, want 1", got)
+		}
 		cancel()
 	case <-time.After(2 * time.Second):
 		t.Fatal("task never entered local_directory wait")
@@ -723,6 +726,9 @@ func TestAcquireLocalDirectoryLock_ParentCancellationReportsWaitFailure(t *testi
 
 	if got := failCalls.Load(); got != 1 {
 		t.Fatalf("fail callback calls = %d, want 1", got)
+	}
+	if got := d.resourceWaitTasks.Load(); got != 0 {
+		t.Fatalf("resource wait count after cancellation = %d, want 0", got)
 	}
 }
 

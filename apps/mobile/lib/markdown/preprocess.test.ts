@@ -6,6 +6,13 @@ const ABS_URL = `https://multica-app.copilothub.ai/api/attachments/${UUID}/downl
 const REL_URL = `/api/attachments/${UUID}/download`;
 
 describe("preprocessMobileMarkdown — !file file cards", () => {
+  it("keeps channel images visible while hiding their provenance marker", () => {
+    const image = `![](${REL_URL})`;
+    const marker = `<!-- multica:channel-media:${UUID} -->`;
+
+    expect(preprocessMobileMarkdown(`${image}\n\n${marker}`)).toBe(`${image}\n\n`);
+  });
+
   it("matches the CLI's escaped-bracket label and keeps it markdown-safe", () => {
     // CLI emits `a]b.pdf` escaped as `a\]b.pdf` (cmd_attachment.go
     // escapeMarkdownLabel). The old regex stopped at the first `]` and left the

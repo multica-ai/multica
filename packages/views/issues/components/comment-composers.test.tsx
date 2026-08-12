@@ -265,6 +265,9 @@ beforeEach(() => {
   insertMarkdownBehavior.succeed = true;
   localStorage.clear();
   useCommentComposerStore.setState({ sticky: true });
+  // The composer's pinning (and the height cap that follows it) is viewport
+  // dependent, so a narrow-viewport test must not leak into the next one.
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
   // The draft store is a module singleton — a draft left by a previous test
   // (e.g. the failed-send case) would trip the composers' draft-direct-mount
   // path and hide the shell the next test expects.
@@ -1092,6 +1095,18 @@ describe("sticky composer preference", () => {
 
   it("lets the editor grow when the preference is off", () => {
     useCommentComposerStore.setState({ sticky: false });
+    renderCommentInput();
+
+    activateComposer("comment-composer-shell");
+    expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
+  });
+
+  // The cap only earns its keep while the composer is pinned: it stops a long
+  // draft from swallowing the timeline it floats over. Below the mobile
+  // breakpoint nothing is pinned (see `useStickyComposer`), so a capped
+  // composer would just be a scroll-inside-a-scroll for no reason.
+  it("lets the editor grow below the mobile breakpoint, where nothing is pinned", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     renderCommentInput();
 
     activateComposer("comment-composer-shell");

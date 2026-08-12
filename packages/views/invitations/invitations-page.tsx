@@ -11,7 +11,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { paths } from "@multica/core/paths";
 import type { Invitation } from "@multica/core/types";
-import { useNavigation } from "../navigation";
+import { AppLink, useNavigation } from "../navigation";
 import { useLogout } from "../auth";
 import { DragStrip } from "../platform";
 import { useT } from "../i18n";
@@ -167,7 +167,10 @@ export function InvitationsPage() {
             <p className="text-body text-muted-foreground text-center">
               {t(($) => $.batch.empty_hint)}
             </p>
-            <Button onClick={() => push(paths.onboarding())}>
+            <Button
+              render={<AppLink href={paths.onboarding()} />}
+              nativeButton={false}
+            >
               {t(($) => $.batch.empty_continue)}
             </Button>
           </CardContent>

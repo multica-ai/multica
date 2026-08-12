@@ -1,6 +1,13 @@
 import { useId } from "react";
 import { Monitor } from "lucide-react";
 import qwenLogo from "./qwen-logo.svg";
+import reasonixLogo from "./reasonix-logo.svg";
+
+// Next.js exposes static imports as objects while Vite exposes URL strings.
+// Normalize both shapes here so shared provider logos work in web and desktop.
+function staticAssetSrc(asset: string | { src: string }): string {
+  return typeof asset === "string" ? asset : asset.src;
+}
 
 // Claude (Anthropic) — official mark, sourced from Bootstrap Icons (bi-claude)
 function ClaudeLogo({ className }: { className: string }) {
@@ -183,6 +190,13 @@ function KimiLogo({ className }: { className: string }) {
   );
 }
 
+// Reasonix — official logo served at https://reasonix.io/logo.svg.
+const reasonixLogoSrc = staticAssetSrc(reasonixLogo);
+
+function ReasonixLogo({ className }: { className: string }) {
+  return <img src={reasonixLogoSrc} alt="Reasonix" className={className} />;
+}
+
 // Qoder (QoderCLI) — official logo from qoder-color.svg
 function QoderLogo({ className }: { className: string }) {
   return (
@@ -204,16 +218,9 @@ function QoderLogo({ className }: { className: string }) {
   );
 }
 
-// Antigravity (Google) — official mark, shipped as a PNG asset next to
-// this file. Different bundlers type the PNG import differently — Next.js
-// gives a StaticImageData object (.src), electron-vite + plain vite give
-// a string. Normalise via unknown so neither side's narrower type wins
-// and breaks the other's typecheck.
+// Antigravity (Google) — official mark, shipped as a PNG asset next to this file.
 import antigravityLogo from "./antigravity-logo.png";
-const antigravityLogoSrc: string = (() => {
-  const asset = antigravityLogo as unknown;
-  return typeof asset === "string" ? asset : (asset as { src: string }).src;
-})();
+const antigravityLogoSrc = staticAssetSrc(antigravityLogo);
 
 function AntigravityLogo({ className }: { className: string }) {
   return <img src={antigravityLogoSrc} alt="Antigravity" className={className} />;
@@ -286,13 +293,22 @@ function GrokLogo({ className }: { className: string }) {
 
 // Qwen Code — official SVG copied verbatim from QwenLM/qwen-code's desktop
 // brand assets (packages/desktop/apps/electron/resources/brands/qwen-code/icon.svg).
-const qwenLogoSrc: string = (() => {
-  const asset = qwenLogo as unknown;
-  return typeof asset === "string" ? asset : (asset as { src: string }).src;
-})();
+const qwenLogoSrc = staticAssetSrc(qwenLogo);
 
 function QwenLogo({ className }: { className: string }) {
   return <img src={qwenLogoSrc} alt="" aria-hidden className={className} />;
+}
+
+// QwenPaw — the standalone mark lifted from the official wordmark
+// (agentscope-ai/QwenPaw, console/public/logo-light.svg, Apache-2.0). Upstream
+// ships a black light-theme mark and a white dark-theme one; currentColor gets
+// the same result from a single path.
+function QwenPawLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="-4.5 4 132 132" fill="currentColor" className={className}>
+      <path d="M0,69.98228499999999C0,104.210785,27.535208,131.96455,61.494133,131.96455C69.605812,131.96455,77.3424,130.36953,84.434273,127.48661L74.130531,109.50395C70.145035,110.80365,65.901604,111.5125,61.494133,111.5125C38.776711,111.5125,20.290945,92.880051,20.290945,69.98228499999999C20.290945,47.084499,38.776711,28.452009,61.494133,28.452009C84.21154,28.452009,102.69729,47.084499,102.69729,69.98228499999999C102.69729,79.174469,99.719872,87.669563,94.679405,94.557785L90.764221,87.71682C90.248428,86.818863,89.287231,86.25174,88.255692,86.25174L78.010559,86.25174C76.979034,86.25174,76.017838,86.807045,75.502052,87.71682L72.899734,92.253815C72.383965,93.163589,72.383965,94.274223,72.899734,95.172188L76.33432,101.162422L79.780609,107.176353L89.955383,124.91094L94.022957,132L94.081589,132L116.09566,131.89367L105.452,113.30843C116.30666,102.13131,123,86.842484,123,69.970448L122.97652,69.98228499999999C122.97652,35.753796,95.453049,8,61.494133,8C27.535208,8,0,35.753796,0,69.98228499999999Z" />
+    </svg>
+  );
 }
 
 export function ProviderLogo({
@@ -319,12 +335,16 @@ export function ProviderLogo({
       return <HermesLogo className={className} />;
     case "pi":
       return <PiLogo className={className} />;
+    case "omp":
+      return <PiLogo className={className} />;
     case "copilot":
       return <CopilotLogo className={className} />;
     case "cursor":
       return <CursorLogo className={className} />;
     case "kimi":
       return <KimiLogo className={className} />;
+    case "reasonix":
+      return <ReasonixLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
     case "qoder":
@@ -338,6 +358,8 @@ export function ProviderLogo({
       return <GrokLogo className={className} />;
     case "qwen":
       return <QwenLogo className={className} />;
+    case "qwenpaw":
+      return <QwenPawLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

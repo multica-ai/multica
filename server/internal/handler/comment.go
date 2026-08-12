@@ -2335,7 +2335,7 @@ func commentMergeTerminalOutcome(result commentMergeResult) (status DispatchStat
 }
 
 // mergeCommentIntoPendingTask folds a newly-arrived comment into the existing
-// QUEUED (not-yet-claimed) task for (issue, agent) instead of dropping it
+// pre-claim task for (issue, agent) instead of dropping it
 // (MUL-4195). It reports HOW it resolved via commentMergeResult so the caller
 // never mislabels a refused/failed merge as success (MUL-4525 §2). No path here
 // enqueues a duplicate: on any failure the original task is kept intact, so the
@@ -2678,6 +2678,12 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 				}
 			}
 			return triggers, nil
+		}
+		// A plain member-to-member reply must not start the issue assignee just
+		// because the thread has no agent owner. Explicit mentions and existing
+		// conversation owners were already resolved above.
+		if parentComment.AuthorType == "member" {
+			return nil, nil
 		}
 	}
 

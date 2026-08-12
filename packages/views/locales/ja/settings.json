@@ -1,7 +1,7 @@
 {
   "quick_actions": {
     "title": "クイックアクション",
-    "description": "実行するエージェントとプロンプトを事前に設定し、任意の課題のサイドバーからワンクリックで実行します。",
+    "description": "実行するエージェントとプロンプトを事前に設定し、任意のタスクのサイドバーからワンクリックで実行します。",
     "add": "クイックアクションを作成",
     "search_placeholder": "クイックアクションを検索",
     "loading": "クイックアクションを読み込んでいます…",
@@ -35,16 +35,16 @@
     "used_count": "{{count}} 回使用",
     "create_title": "クイックアクションを作成",
     "edit_title": "クイックアクションを編集",
-    "dialog_description": "@メンションと同じく、課題のコメントとして実行されます。",
+    "dialog_description": "@メンションと同じく、タスクのコメントとして実行されます。",
     "field_name": "名前",
     "field_name_placeholder": "コードレビュー",
     "field_target": "実行者",
     "field_prompt": "プロンプト",
-    "field_prompt_placeholder": "この課題に関連するコードをレビューし、正確性とエッジケースを重点的に確認してください。",
-    "prompt_hint": "そのまま送られます。課題の内容は既に読めます。",
-    "template_not_supported": "変数はまだサポートされていません。{{token}} を削除してください。エージェントはこの課題を既に読めます。",
+    "field_prompt_placeholder": "このタスクに関連するコードをレビューし、正確性とエッジケースを重点的に確認してください。",
+    "prompt_hint": "そのまま送られます。タスクの内容は既に読めます。",
+    "template_not_supported": "変数はまだサポートされていません。{{token}} を削除してください。エージェントはこのタスクを既に読めます。",
     "delete_title": "このクイックアクションを削除しますか？",
-    "delete_description": "すべての課題のサイドバーから消えます。過去の実行は実行ログに残ります。後で使う可能性があればアーカイブを選んでください。"
+    "delete_description": "すべてのタスクのサイドバーから消えます。過去の実行は実行ログに残ります。後で使う可能性があればアーカイブを選んでください。"
   },
   "auto_save": {
     "saving": "保存中…",
@@ -76,11 +76,7 @@
     },
     "sticky_comment_bar": {
       "title": "コメントバーを固定",
-      "hint": "イシューのページをスクロールしても、コメントバーを常に下部に固定します。"
-    },
-    "issue_link_new_tab": {
-      "title": "イシューリンクを新しいタブで開く",
-      "hint": "説明・コメント・チャット内のイシューリンクを、その場で移動せず新しいタブで開きます。"
+      "hint": "タスクのページをスクロールしても、コメントバーを常に下部に固定します。"
     }
   },
   "shortcuts": {
@@ -114,15 +110,18 @@
     },
     "actions": {
       "openSearch": { "label": "検索を開く", "description": "どこからでも検索やコマンドを実行します。" },
-      "createIssue": { "label": "Issueを作成", "description": "優先するissue作成フローを開きます。" },
+      "createIssue": { "label": "タスクを作成", "description": "優先するタスク作成フローを開きます。" },
       "toggleSidebar": { "label": "サイドバーを切り替え", "description": "メインサイドバーの表示を切り替えます。" },
       "toggleChat": { "label": "チャットウィンドウを切り替え", "description": "フローティングチャットを開閉します。開いたときは入力欄にフォーカスします。" },
-      "findInIssue": { "label": "Issue内を検索", "description": "開いているissueの詳細を検索します。" },
-      "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログで issue を作成します。" },
+      "findInIssue": { "label": "タスク内を検索", "description": "開いているタスクの詳細を検索します。" },
+      "openThreadNav": { "label": "スレッドナビゲーターを開く", "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。" },
+      "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログでタスクを作成します。" },
+      "goBack": { "label": "戻る", "description": "ブラウザーのように履歴を戻ります。" },
+      "goForward": { "label": "進む", "description": "ブラウザーのように履歴を進みます。" },
       "goInbox": { "label": "受信トレイへ移動", "description": "ワークスペースの受信トレイを開きます。" },
       "goChat": { "label": "チャットへ移動", "description": "ワークスペースのチャットを開きます。" },
-      "goMyIssues": { "label": "自分のIssuesへ移動", "description": "自分に割り当てられたissueを開きます。" },
-      "goIssues": { "label": "Issuesへ移動", "description": "Issue一覧を開きます。" },
+      "goMyIssues": { "label": "自分のタスクへ移動", "description": "自分に割り当てられたタスクを開きます。" },
+      "goIssues": { "label": "タスクへ移動", "description": "タスク一覧を開きます。" },
       "goProjects": { "label": "プロジェクトへ移動", "description": "プロジェクト一覧を開きます。" },
       "goAutopilots": { "label": "自動化へ移動", "description": "ワークスペースの自動化を開きます。" },
       "goAgents": { "label": "エージェントへ移動", "description": "エージェント一覧を開きます。" },
@@ -171,7 +170,7 @@
       "profile": "プロフィール",
       "preferences": "環境設定",
       "shortcuts": "ショートカット",
-      "issue": "イシュー",
+      "issue": "タスク",
       "chat": "チャット",
       "notifications": "通知",
       "tokens": "API トークン",
@@ -188,7 +187,7 @@
   },
   "properties": {
     "title": "プロパティ",
-    "description": "このワークスペースの Issue に型付きカスタムプロパティを定義します。値は各 Issue に設定され、エージェントが読み書きできます。",
+    "description": "このワークスペースのタスクに型付きカスタムプロパティを定義します。値は各タスクに設定され、エージェントが読み書きできます。",
     "search_placeholder": "名前で絞り込み...",
     "new_property": "新規プロパティ",
     "show_archived": "アーカイブ済みを表示",
@@ -199,7 +198,7 @@
       "usage": "使用数",
       "updated": "更新日時"
     },
-    "usage_count_other": "{{count}} 件の Issue",
+    "usage_count_other": "{{count}} 件のタスク",
     "loading": "プロパティを読み込み中...",
     "empty": "プロパティはまだありません",
     "empty_hint": "Severity や Environment のような型付きフィールドを作成できます。エージェントはバリデーション付きで読み書きします。",
@@ -245,7 +244,7 @@
     },
     "archive_dialog": {
       "title": "プロパティをアーカイブしますか？",
-      "description": "「{{name}}」はピッカーとフィルターから非表示になります。Issue 上の既存の値は保持され、後で復元できます。",
+      "description": "「{{name}}」はピッカーとフィルターから非表示になります。タスク上の既存の値は保持され、後で復元できます。",
       "cancel": "キャンセル",
       "confirm": "プロパティをアーカイブ",
       "failed": "プロパティをアーカイブできませんでした"
@@ -253,9 +252,9 @@
   },
   "labels": {
     "title": "ラベル",
-    "description": "このワークスペースの Issue、Skill 用ラベルを個別に管理します。",
+    "description": "このワークスペースのタスク、Skill 用ラベルを個別に管理します。",
     "scopes": {
-      "issue": "Issue",
+      "issue": "タスク",
       "skill": "Skill"
     },
     "search_placeholder": "名前または説明で絞り込み...",
@@ -315,28 +314,32 @@
   },
   "notifications": {
     "title": "インボックス通知",
-    "description": "どのイベントがインボックス通知を生成するかを制御します。ミュートしたイベントタイプは静かにフィルタされますが、イシューを直接開けば引き続き確認できます。",
+    "description": "どのイベントがインボックス通知を生成するかを制御します。ミュートしたイベントタイプは静かにフィルタされますが、タスクを直接開けば引き続き確認できます。",
     "toast_failed": "通知設定を更新できませんでした",
     "groups": {
       "assignments": {
         "label": "担当の割り当て",
-        "description": "イシューの担当者に割り当てられたとき、または解除されたとき"
+        "description": "タスクの担当者に割り当てられたとき、または解除されたとき"
       },
       "status_changes": {
         "label": "ステータス変更",
-        "description": "フォロー中のイシューのステータスが変わったとき（例: todo、in progress、done）"
+        "description": "フォロー中のタスクのステータスが変わったとき（例: todo、in progress、done）"
       },
       "comments": {
-        "label": "コメントとメンション",
-        "description": "フォロー中のイシューに新しいコメントが付いたとき、または誰かがあなたを @メンションしたとき"
+        "label": "コメント",
+        "description": "フォロー中のタスクに新しいコメントが付いたとき"
+      },
+      "mentions": {
+        "label": "メンション",
+        "description": "誰かがあなたを @メンションしたとき（@all と @squad を含む）"
       },
       "updates": {
         "label": "優先度と期限",
-        "description": "フォロー中のイシューの優先度や期限が変わったとき"
+        "description": "フォロー中のタスクの優先度や期限が変わったとき"
       },
       "agent_activity": {
         "label": "エージェントのアクティビティ",
-        "description": "エージェントのタスクが完了または失敗したとき"
+        "description": "エージェントの作業が完了または失敗したとき"
       }
     },
     "system": {
@@ -406,10 +409,10 @@
     "context_label": "コンテキスト",
     "context_placeholder": "このワークスペースで作業する AI エージェント向けの背景情報とコンテキスト",
     "slug_label": "スラッグ",
-    "issue_prefix_label": "イシュー接頭辞",
-    "issue_prefix_hint": "{{example}} のようなイシュー番号に使用されます。",
-    "prefix_confirm_title": "イシュー接頭辞を変更しますか？",
-    "prefix_confirm_description": "すべてのイシュー番号が {{oldPrefix}}-N から {{newPrefix}}-N に振り直されます。Pull request のタイトル、ブランチ名、ドキュメントやチャットのリンクなど、{{oldPrefix}}-N を使用している外部参照は解決されなくなります。",
+    "issue_prefix_label": "タスク接頭辞",
+    "issue_prefix_hint": "{{example}} のようなタスク番号に使用されます。",
+    "prefix_confirm_title": "タスク接頭辞を変更しますか？",
+    "prefix_confirm_description": "すべてのタスク番号が {{oldPrefix}}-N から {{newPrefix}}-N に振り直されます。Pull request のタイトル、ブランチ名、ドキュメントやチャットのリンクなど、{{oldPrefix}}-N を使用している外部参照は解決されなくなります。",
     "save": "保存",
     "saving": "保存中...",
     "manage_hint": "ワークスペース設定を更新できるのは admin と owner のみです。",
@@ -439,7 +442,7 @@
   },
   "delete_workspace_dialog": {
     "title": "ワークスペースを削除",
-    "description": "この操作は元に戻せません。すべてのイシュー、エージェント、データが完全に削除されます。",
+    "description": "この操作は元に戻せません。すべてのタスク、エージェント、データが完全に削除されます。",
     "type_to_confirm_prefix": "確認するには、下に",
     "type_to_confirm_suffix": " と入力してください。",
     "cancel": "キャンセル",
@@ -458,8 +461,8 @@
     "master_description_off": "GitHub 機能はオフです。PR サイドバー、Co-authored-by トレーラー、自動リンクが一時停止されています。バックエンドのデータは削除されません。",
     "section_connection": "接続",
     "connection_title": "GitHub App",
-    "connection_description_prefix": "イシューを Pull request に自動でリンクします。ブランチ、タイトル、または本文に",
-    "connection_description_suffix": "を含む PR がマージされると、対応するイシューが次のステータスに移動します:",
+    "connection_description_prefix": "タスクを Pull request に自動でリンクします。ブランチ、タイトル、または本文に",
+    "connection_description_suffix": "を含む PR がマージされると、対応するタスクが次のステータスに移動します:",
     "connection_description_done": "完了",
     "connection_identifier_example": "MUL-123",
     "connected_to": "{{login}} に接続済み",
@@ -483,12 +486,12 @@
     "toast_disconnected": "GitHub App の接続を解除しました",
     "section_features": "機能",
     "feature_pr_sidebar_label": "Pull request サイドバー",
-    "feature_pr_sidebar_description": "リンクされた Pull request をイシュー詳細サイドバーに表示します。",
+    "feature_pr_sidebar_description": "リンクされた Pull request をタスク詳細サイドバーに表示します。",
     "feature_co_author_label": "Co-authored-by トレーラー",
     "feature_co_author_description_prefix": "エージェントが作成したコミットに",
     "feature_co_author_description_suffix": "を追加します。",
-    "feature_auto_link_label": "イシューと PR を自動リンク",
-    "feature_auto_link_description": "PR のタイトル、本文、ブランチ名をイシュー識別子と照合し、自動でリンクを作成します。",
+    "feature_auto_link_label": "タスクと PR を自動リンク",
+    "feature_auto_link_description": "PR のタイトル、本文、ブランチ名をタスク識別子と照合し、自動でリンクを作成します。",
     "section_repositories": "リポジトリ",
     "repositories_shortcut_label": "リポジトリ URL はリポジトリタブにあります",
     "repositories_shortcut_link": "リポジトリを管理 →",
@@ -496,7 +499,7 @@
   },
   "vcs": {
     "section_title": "Git providers (self-hosted)",
-    "page_description": "Connect a self-hosted Forgejo, Gitea, or GitLab instance to mirror pull requests onto issues. Each connection uses an access token; agents push branches and open PRs using the runtime's own Git credentials.",
+    "page_description": "セルフホストの Forgejo、Gitea、GitLab インスタンスを接続し、Pull request をタスクにミラーリングします。接続ごとにアクセストークンを使用し、エージェントはランタイム自身の Git 認証情報でブランチを push して PR を作成します。",
     "connect_title": "Connect a provider instance",
     "connected_as": "Connected as {{login}}",
     "form_provider_label": "Provider",
@@ -519,7 +522,7 @@
     "copied": "Copied to clipboard",
     "copy_failed": "Could not copy",
     "disconnect_confirm_title": "Disconnect this provider?",
-    "disconnect_confirm_description": "Mirrored pull requests and their issue links for this connection will be removed. This cannot be undone.",
+    "disconnect_confirm_description": "この接続でミラーリングされた Pull request と、そのタスクへのリンクが削除されます。この操作は元に戻せません。",
     "disconnect_confirm_cancel": "Cancel",
     "disconnect_confirm_action": "Disconnect",
     "toast_connected": "Provider connected",
@@ -537,7 +540,7 @@
   },
   "lark": {
     "section_title": "Lark",
-    "page_description": "各 Multica エージェントを Lark (飞书) PersonalAgent ボットに接続します。メンバーはボットに DM したり、グループで @ メンションしたり、/issue と入力して新しい Multica イシューを起こすことができます。",
+    "page_description": "各 Multica エージェントを Lark (飞书) PersonalAgent ボットに接続します。メンバーはボットに DM したり、グループで @ メンションしたり、/issue と入力して新しい Multica タスクを起こすことができます。",
     "not_enabled_title": "Lark 連携が有効化されていません",
     "not_enabled_description_prefix": "Lark ボットの設置を有効化するにはサーバーに",
     "not_enabled_description_suffix": "を設定してください。",
@@ -642,7 +645,7 @@
   },
   "slack": {
     "section_title": "Slack",
-    "page_description": "各 Multica エージェントを専用の Slack ボットに接続します。メンバーはボットに DM したり、チャンネルで @メンションしたり、/issue と入力して新しい Multica イシューを起こすことができます。",
+    "page_description": "各 Multica エージェントを専用の Slack ボットに接続します。メンバーはボットに DM したり、チャンネルで @メンションしたり、/issue と入力して新しい Multica タスクを起こすことができます。",
     "not_enabled_title": "Slack 連携が有効になっていません",
     "not_enabled_description_prefix": "サーバーで",
     "not_enabled_description_suffix": "を設定すると Slack ボットのインストールが有効になります。",
@@ -682,6 +685,92 @@
     "byo_cancel": "キャンセル",
     "byo_success_toast": "Slack ボットを接続しました",
     "byo_failed_toast": "Slack ボットを接続できませんでした"
+  },
+  "dingtalk": {
+    "section_title": "DingTalk",
+    "page_description": "各 Multica エージェントを専用の DingTalk ロボットに接続します。メンバーはボットに DM したり、グループで @メンションしたり、/issue と入力して新しい Multica イシューを起こすことができます。",
+    "not_enabled_title": "DingTalk 連携が有効になっていません",
+    "not_enabled_description_prefix": "サーバーで",
+    "not_enabled_description_suffix": "を設定すると DingTalk ロボットのインストールが有効になります。",
+    "not_enabled_self_host_hint": "セルフホストの場合: 詳細はプロジェクトの README を参照してください。",
+    "connected_bots": "接続済みのボット",
+    "loading": "読み込み中…",
+    "empty_title": "まだボットが接続されていません",
+    "empty_description_prefix": "このワークスペースのエージェントを開き、",
+    "empty_description_cta": "DingTalk を接続",
+    "empty_description_suffix": "をクリックしてロボットをインストールします。",
+    "revoked_badge": "取り消し済み",
+    "installed_at_label": "{{when}} にインストール",
+    "disconnect": "切断",
+    "disconnecting": "切断中…",
+    "disconnect_confirm_title": "この DingTalk ボットを切断しますか？",
+    "disconnect_confirm_description": "このボットはこのワークスペースの DingTalk メッセージを受信しなくなります。インストール記録は監査のため保持され、あとでボットを再接続できます。",
+    "disconnect_confirm_cancel": "キャンセル",
+    "toast_disconnected": "DingTalk ボットを切断しました",
+    "toast_disconnect_failed": "切断に失敗しました",
+    "bind_button": "DingTalk を接続",
+    "bind_button_title": "{{agent}} を DingTalk ボットに接続",
+    "agent_bot_connected_label": "DingTalk に接続済み",
+    "agent_bot_disconnect_tooltip": "この DingTalk ボットをエージェントから解除します。ボットは DingTalk メッセージを受信しなくなります。",
+    "byo_dialog_title": "DingTalk ボットを接続",
+    "byo_docs_link": "Step-by-step：Multica エージェントを DingTalk に接続する",
+    "byo_appkey_label": "AppKey（client id）",
+    "byo_appsecret_label": "AppSecret（client secret）",
+    "byo_submit": "接続",
+    "byo_submitting": "接続中…",
+    "byo_cancel": "キャンセル",
+    "byo_success_toast": "DingTalk ボットを接続しました",
+    "byo_failed_toast": "DingTalk ボットを接続できませんでした"
+  },
+  "wecom": {
+    "section_title": "WeCom",
+    "page_description": "各 Multica エージェントを専用の WeCom (企业微信) スマートボットに接続します。メンバーはボットに DM を送り、グループで @ メンションし、/issue と入力して Multica タスクを作成できます。WebSocket ロングコネクションで応答するため、公開コールバック URL は不要です。",
+    "not_enabled_title": "WeCom 連携が有効化されていません",
+    "not_enabled_description_prefix": "サーバー側で",
+    "not_enabled_description_suffix": "を設定すると WeCom スマートボットのインストールが有効になります。",
+    "not_enabled_self_host_hint": "セルフホスト運用の方はプロジェクトの README を参照してください。",
+    "preview_title": "WeCom インストールは近日提供予定",
+    "preview_description": "保存時暗号化キーは設定済みですが、このデプロイでは WeCom のインストールがまだ有効になっていません。",
+    "connected_bots": "接続済みのボット",
+    "loading": "読み込み中…",
+    "empty_title": "まだボットが接続されていません",
+    "empty_description_prefix": "このワークスペースでエージェントを開き",
+    "empty_description_cta": "WeCom を接続",
+    "empty_description_suffix": "をクリックしてスマートボットをインストールします。",
+    "revoked_badge": "無効化済み",
+    "bot_id_label": "Bot ID: {{botId}}",
+    "disconnect": "接続を解除",
+    "disconnecting": "解除中…",
+    "disconnect_confirm_title": "この WeCom ボットを解除しますか？",
+    "disconnect_confirm_description": "このボットはこのワークスペースの WeCom メッセージを受け取らなくなります。監査のためレコードは保持され、同じエージェントから再インストールできます。",
+    "disconnect_confirm_cancel": "キャンセル",
+    "toast_disconnected": "WeCom ボットを解除しました",
+    "toast_disconnect_failed": "接続解除に失敗しました",
+    "bind_button": "WeCom を接続",
+    "bind_button_title": "{{agent}} を WeCom スマートボットに接続",
+    "agent_bot_connected_label": "WeCom に接続済み",
+    "agent_bot_connected_label_with_id": "WeCom に接続済み — {{botId}}",
+    "agent_bot_disconnect_tooltip": "このスマートボットをエージェントから解除します。WeCom のメッセージを受け取らなくなります。",
+    "byo_dialog_title": "WeCom スマートボットを接続",
+    "byo_bot_id_label": "Bot ID",
+    "byo_bot_id_placeholder": "例: aibot_xxxxxxxxxxxxxxxx",
+    "byo_secret_label": "ロングコネクション Secret",
+    "byo_secret_placeholder": "管理コンソールに一度だけ表示される Secret を貼り付けます",
+    "byo_bot_name_label": "チャットでのボット名（任意）",
+    "byo_bot_name_placeholder": "例: Multica Bot",
+    "byo_bot_name_hint": "名前にスペースが含まれる場合のみ必要です。自分宛ての @ メンションと、その後に入力されたコマンドを区別するために使います。あとから変更するとき（WeCom 管理コンソールで改名した場合を含む）は、いったん接続を解除してから接続し直してください。",
+    "byo_submit": "接続",
+    "byo_submitting": "接続中…",
+    "byo_cancel": "キャンセル",
+    "byo_success_toast": "WeCom ボットを接続しました",
+    "byo_conflict_same_workspace": "このボットはこのワークスペースの別のエージェントに接続済みです。先にそちらで切断してから、ここに接続してください。",
+    "byo_conflict_archived_agent": "このボットはこのワークスペースのアーカイブ済みエージェントに接続されています。そのエージェントを復元するか、ボットを切断してから接続してください。",
+    "byo_conflict_other_workspace": "このボットは別の Multica ワークスペースに接続済みです。先にそちらで切断してから接続してください。",
+    "byo_rejected": "ボットを接続できませんでした。WeCom 管理コンソールの Bot ID とシークレット、および長時間接続が有効なスマートボットであることを確認してください。",
+    "byo_credentials_rejected": "WeCom がこの Bot ID とシークレットを拒否しました。WeCom 管理コンソールで両方を確認し、長時間接続が有効なスマートボットであることもご確認ください。",
+    "byo_credentials_unverifiable": "WeCom に接続できず、このボットを検証できませんでした。認証情報は変更されていません。少し時間をおいてもう一度お試しください。",
+    "byo_install_failed": "ボットを保存できませんでした。こちら側の問題です。認証情報は変更されていません。もう一度お試しいただき、続くようならサポートにご連絡ください。",
+    "byo_failed_toast": "WeCom ボットを接続できませんでした"
   },
   "repositories": {
     "section_title": "リポジトリ",
@@ -784,7 +873,7 @@
       },
       "member": {
         "label": "メンバー",
-        "description": "イシューの作成と作業"
+        "description": "タスクの作成と作業"
       }
     }
   }

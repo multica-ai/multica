@@ -5,7 +5,6 @@ import {
   useInfiniteQuery,
   useQuery,
   useQueryClient,
-  type InfiniteData,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -34,15 +33,19 @@ import {
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
-import { removeChatMessageFromCaches } from "@multica/core/realtime";
+import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
+import {
+  enqueuePendingChatTask,
+  hideQueuedChatMessages,
+} from "@multica/core/chat/pending";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
+import { useChatTaskActions } from "./use-chat-task-actions";
 import { useChatProjectContextSupport } from "./use-chat-project-context-support";
 import { createLogger } from "@multica/core/logger";
 import type {
   Agent,
   Attachment,
   ChatMessage,
-  ChatMessagesPage,
   ChatPendingTask,
 } from "@multica/core/types";
 import { useT } from "../../i18n";
@@ -150,39 +153,40 @@ export function hasInFlightPendingTask(
   const pending = qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId));
   return Boolean(pending?.task_id);
 }
-const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
 
-function appendChatMessageToLatestPageCache(
+export function seedAcceptedPendingTask(
   qc: ReturnType<typeof useQueryClient>,
   sessionId: string,
-  message: ChatMessage,
+  task: {
+    task_id: string;
+    created_at: string;
+    message_id: string;
+    content: string;
+    supports_queue?: boolean;
+    queued?: boolean;
+  },
 ) {
-  qc.setQueryData<InfiniteData<ChatMessagesPage>>(
-    chatKeys.messagesPage(sessionId),
+  qc.setQueryData<ChatPendingTask>(
+    chatKeys.pendingTask(sessionId),
     (old) => {
-      if (!old) {
-        return {
-          pages: [{
-            messages: [message],
-            limit: 50,
-            has_more: false,
-            next_cursor: null,
-          }],
-          pageParams: [null],
-        };
+      const next = enqueuePendingChatTask(old, {
+        task_id: task.task_id,
+        status: "queued",
+        created_at: task.created_at,
+        message_id: task.message_id,
+        content: task.content,
+      }, task.queued);
+      if (task.supports_queue === true || old?.supports_queue === true) {
+        next.supports_queue = true;
       }
-      if (old.pages.some((page) => page.messages.some((m) => m.id === message.id))) {
-        return old;
-      }
-      return {
-        ...old,
-        pages: old.pages.map((page, index) =>
-          index === 0 ? { ...page, messages: [...page.messages, message] } : page,
-        ),
-      };
+      return next;
     },
   );
+  qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
 }
+
+const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
+
 
 /**
  * Layout-agnostic chat controller. Holds every piece of chat conversation
@@ -229,7 +233,14 @@ export function useChatController(opts?: { isActive?: boolean }) {
   } = useInfiniteQuery(chatMessagesPageOptions(activeSessionId ?? ""));
 
   const messagePages = activeSessionId ? rawMessagePages?.pages ?? [] : [];
-  const messages = [...messagePages].reverse().flatMap((page) => page.messages);
+  const allMessages = [...messagePages].reverse().flatMap((page) => page.messages);
+
+  const { data: pendingTask, isLoading: pendingTaskLoading } = useQuery(
+    pendingChatTaskOptions(activeSessionId ?? ""),
+  );
+  const showSkeleton =
+    !!activeSessionId && (messagesLoading || pendingTaskLoading);
+  const messages = hideQueuedChatMessages(allMessages, pendingTask);
   const olderMessageCount = messagePages
     .slice(1)
     .reduce((sum, page) => sum + page.messages.length, 0);
@@ -237,11 +248,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
     messages.length > 0
       ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
       : 0;
-  const showSkeleton = !!activeSessionId && messagesLoading;
-
-  const { data: pendingTask } = useQuery(
-    pendingChatTaskOptions(activeSessionId ?? ""),
-  );
   const pendingTaskId = pendingTask?.task_id ?? null;
   const stopRequestedBeforeTaskRef = useRef(false);
   // Durable deferred-cancellation draft restores (#5219). The whole lifecycle —
@@ -256,6 +262,13 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const appForeground = useAppForeground();
   const { restoreDraftRequest, enqueueLocalRestore, handleRestoreDraftApplied } =
     useChatDraftRestore(activeSessionId, isActive && appForeground);
+  const {
+    cancelChatTask,
+    handleEditQueuedTask,
+    handleRemoveQueuedTask,
+    handleClearQueuedTasks,
+    handleSendQueuedTaskNow,
+  } = useChatTaskActions(activeSessionId, enqueueLocalRestore);
   // Nonce handed to ChatInput to pull focus into the compose box when a new
   // chat starts. Bumped by handleNewChat / handleStartNewChat only, so
   // selecting an existing chat or a deep link never steals focus.
@@ -435,55 +448,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // (MUL-5181 L2); surfaces only forward whether the affordance exists.
   const uploadEnabled = !!activeAgent;
 
-  const cancelChatTask = useCallback(
-    async (
-      taskId: string,
-      sessionId: string,
-      options: { restoreDraftToInput: boolean; source: string },
-    ) => {
-      apiLogger.info("cancelTask.start", {
-        taskId,
-        sessionId,
-        source: options.source,
-      });
-      qc.setQueryData(chatKeys.pendingTask(sessionId), {});
-
-      try {
-        const result = await api.cancelTaskById(taskId);
-        const restored = result.cancelled_chat_message;
-        if (restored?.restore_to_input) {
-          removeChatMessageFromCaches(qc, restored.chat_session_id, restored.message_id);
-          if (options.restoreDraftToInput && restored.chat_session_id === sessionId) {
-            enqueueLocalRestore({
-              id: restored.message_id,
-              content: restored.content,
-              attachments: restored.attachments,
-              sessionId: restored.chat_session_id,
-            });
-          }
-        }
-        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
-        apiLogger.info("cancelTask.success", {
-          taskId,
-          sessionId,
-          restoredToInput: !!restored?.restore_to_input && options.restoreDraftToInput,
-        });
-        return result;
-      } catch (err) {
-        apiLogger.warn("cancelTask.error (task may have already finished)", {
-          taskId,
-          sessionId,
-          err,
-        });
-        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
-        return null;
-      }
-    },
-    [qc, enqueueLocalRestore],
-  );
-
   const handleSend = useCallback(
     async (
       content: string,
@@ -502,6 +466,12 @@ export function useChatController(opts?: { isActive?: boolean }) {
         apiLogger.warn("sendChatMessage skipped: agent is archived", {
           sessionId: activeSessionId,
           agentId: activeAgent.id,
+        });
+        return false;
+      }
+      if (pendingTaskId && pendingTask?.supports_queue !== true) {
+        apiLogger.warn("sendChatMessage skipped: server does not support follow-up queues", {
+          sessionId: activeSessionId,
         });
         return false;
       }
@@ -590,15 +560,18 @@ export function useChatController(opts?: { isActive?: boolean }) {
         created_at: result.created_at,
         attachments: draftAttachments,
       };
-      appendChatMessageToLatestPageCache(qc, sessionId, sent);
-      qc.setQueryData<ChatMessage[]>(
-        chatKeys.messages(sessionId),
-        (old) => (old ? [...old, sent] : [sent]),
-      );
-      qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
+      // Single door into the message caches (MUL-5711): idempotent by id, so
+      // this row and the chat:message echo of the same send converge in either
+      // arrival order, and this richer row (it carries the draft attachments)
+      // is never downgraded by the echo, which has no attachments field.
+      upsertChatMessageToCaches(qc, sessionId, sent, { seedIfMissing: true });
+      seedAcceptedPendingTask(qc, sessionId, {
         task_id: result.task_id,
-        status: "queued",
         created_at: result.created_at,
+        message_id: result.message_id,
+        content: finalContent,
+        supports_queue: result.supports_queue,
+        queued: result.queued,
       });
       // Cache primed → publish the new active session, but only if the user
       // hasn't navigated away mid-send. See isStillOnComposeTarget. commitInput
@@ -639,6 +612,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
       activeSessionId,
       activeAgent,
       isAgentArchived,
+      pendingTask,
+      pendingTaskId,
       isAgentRuntimeBound,
       ensureSession,
       cancelChatTask,
@@ -837,6 +812,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
     // actions
     handleSend,
     handleStop,
+    handleSendQueuedTaskNow,
+    handleEditQueuedTask,
+    handleRemoveQueuedTask,
+    handleClearQueuedTasks,
     uploadEnabled,
     handleNewChat,
     handleStartNewChat,

@@ -34,9 +34,12 @@ Multica は、普段使っている AI コーディングツールの代わり�
 | OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
 | Pi | `pi` | ✓ | — | `.pi/skills/` |
+| Oh-My-Pi | `omp` | ✓ | — | `.omp/skills/` |
 | Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | `.qwen/skills/` |
+| QwenPaw | `qwenpaw` | ✓ | ✓ | 1 回の実行専用のワークスペース `skills/` |
+| Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 
 「Multica による MCP 管理」とは、エージェント設定に MCP server を入力し、Multica が実行前にその設定を対応ツールへ渡せることを意味します。そのツールにほかの MCP 設定方法がない、という意味ではありません。
@@ -46,6 +49,8 @@ Multica は、普段使っている AI コーディングツールの代わり�
 エージェントを作成するとき、モデル一覧は対応するランタイムから取得されます。固定されたモデル名を提供するツールもあれば、ローカル設定、ログイン中のアカウント、サブスクリプションに応じて利用可能なモデルを返すツールもあります。
 
 モデルを選択しない場合、Multica はそのツールのデフォルト設定を使用します。一覧が空の場合は、ランタイムがオンラインでツールにログイン済みであることを確認してから、モデル一覧を更新してください。
+
+唯一の例外が QwenPaw です。Multica 側で選んだモデルを受け付けないため、選択欄は操作できず「ランタイムで管理」と表示されます。モデルは QwenPaw 側の設定で選んでください。QwenPaw のモデル一覧が空なのは正常であり、ランタイムがオフラインであることを示すものではありません。
 
 <Callout type="info">
 ツールによってモデル名が異なることがあります。AI コーディングツールを変更すると、以前のモデル値は新しいツールで使えないため、選び直す必要があります。

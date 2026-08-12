@@ -107,36 +107,37 @@ Conventional format: `feat(scope)`, `fix(scope)`, `refactor(scope)`, `docs`, `te
 
 This is the **mandatory** glossary for every translation PR. It used to live at `packages/views/locales/glossary.md`; that file is now a stub pointing here.
 
-### The core distinction: entity vs concept
+### The core distinction: everyday noun vs Multica-specific term
 
 Multica's product nouns split into two categories:
 
-- **Entity** — has a URL, a database row, an API type. In Chinese text, render as **lowercase English** so it visually reads like a type name and signals "this is a Multica system entity".
-- **Concept** — generic noun, not a database entity. **Translate fully** so Chinese users don't see jagged English embedded in flowing text.
+- **Everyday noun** — the word a user would say out loud for it. **Translate fully**, whether or not it is a database entity: `issue` → 任务, `workspace` → 工作区, `project` → 项目.
+- **Multica-specific term** — a concept no local word carries (`skill`), or a schema-level identifier a user may have to type or match (`todo`, `in_progress`, `task_id`). Render as **lowercase English** so it reads like a type name.
 
-This rule is aligned with `apps/docs/content/docs/*.zh.mdx` — the docs are the de facto Chinese voice standard and have been battle-tested across 20+ pages.
+The Chinese pages under `apps/docs/content/docs/*.zh.mdx` are the de facto voice standard for everything else on this page. They still carry the old English `issue` in prose and are being swept separately — follow the table below, not those pages, for this term.
 
-### Entities — mixed rule (`issue` / `skill` / `task`)
+### `issue` is the product's task — translate it
 
-`issue` / `skill` / `task` are Multica's core entities. They have schema columns, API fields, and product UI labels that are all English. In Chinese text, they follow a **mixed rule** — what to use depends on where the word appears:
+`issue` is the English product name for the thing a user files and an agent works on. In every other locale it is **the everyday word for "task"**:
 
-| Context | Render | Example |
-| --- | --- | --- |
-| **UI strings, state names, code references** | lowercase English | "排队中的 task"、"创建子 issue"、"为智能体注入 skill" |
-| **Doc titles / section headings** | Title-case English **or** the Chinese term | "Issue 与 project"、"Skills"、"执行任务" |
-| **Long-form doc prose, when the entity is the running subject** | Chinese term, with English in parentheses on first mention | "**执行任务**（task）是智能体每一次工作的单位" |
-| **API / DB fields** | always `task` / `issue` / `skill` | `task_id`, `issue_status`, `skill_uuid` |
+| Entity | en | zh-Hans | ja | ko |
+| --- | --- | --- | --- | --- |
+| the filed unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** |
+| one agent execution run (`task`) | Task | `task` | **作業** | **작업** |
 
-Chinese term reference:
+Both nouns are user-visible and they are **not** the same thing — an issue can carry many runs. Never let one locale spell both with the same word, which is why the run keeps a visually distinct form in each locale.
 
-- `task` ↔ `执行任务` (or shortened to `任务` once context is clear)
-- `issue` has no settled Chinese translation — leave English; titles may capitalize as `Issue`
-- `skill` has no settled Chinese translation — leave English; titles may capitalize as `Skills`
+What does not move:
 
-**Why `issue` / `skill` / `task` aren't forced into Chinese the way `project` / `autopilot` are**:
+- **API / DB fields** stay `issue` / `task` / `skill` everywhere: `issue_status`, `task_id`, `skill_uuid`.
+- **Code references and literal commands** stay English: `multica issue ...`, the `/issue` Slack and Lark slash command.
+- **`skill`** keeps lowercase English in Chinese text — a Multica-specific concept with no established Chinese term; titles may capitalize as `Skills`.
+- **`issue` in the "problem" sense** (runtime health) is a plain noun, not the entity: `{{count}} issues` on a machine card is `{{count}} 个异常`, not `任务`.
 
-- **`issue` / `task`**: dev teams talk in English. The Chinese candidates ("任务" — too vague, almost synonymous with "工作"; "工单" — IT ticket connotation; "议题" — GitHub-style but doesn't match the product feel) all read worse than `issue`. **But** in long-form doc prose, repeating lowercase `task` 50× breaks the rhythm — so prose is allowed to use `执行任务`, while UI strings and state names stay lowercase English.
-- **`skill`**: Multica-specific concept with no established Chinese term.
+**Why `issue` is translated while `skill` is not**: users file and read issues all day, and "issue" has no meaning in Chinese, Japanese, or Korean outside of dev jargon. The everyday task word is what people already say for this. `skill` is a Multica-specific concept where no local word carries the meaning.
+
+Other product nouns follow the same "translate what has a settled local word" test:
+
 - **`project` → "项目"**: settled mainstream Chinese word. Feishu / Tower / Teambition / PingCode / GitHub Projects — every Chinese product translates it. No product keeps `project` in Chinese context.
 - **`autopilot` → "自动化"**: in Chinese, "autopilot" associates with Tesla's "自动驾驶" and doesn't match what the feature does (run tasks on a schedule). Notion and Feishu both use "自动化"; that's the industry consensus.
 
@@ -211,7 +212,7 @@ In UI, surface them in English (optionally `code-style` wrapped):
 
 Always put **a single space** between an English word (entity / brand / acronym) and surrounding Chinese:
 
-- "Create new issue" → "新建 issue"
+- "Create new issue" → "新建任务"（`任务` is Chinese, so no space)
 - "Assign to agent" → "分配给智能体"
 - "Configure runtime" → "配置运行时"
 - "Stop daemon" → "停止守护进程"
@@ -229,13 +230,13 @@ i18next uses `_one` / `_other`; Chinese has no grammatical number, only fill `_o
 
 // zh-Hans/issues.json
 {
-  "issue_count_other": "{{count}} 个 issue"
+  "issue_count_other": "{{count}} 个任务"
 }
 ```
 
 Common count formats:
 
-- `{{count}} issues` → `{{count}} 个 issue`
+- `{{count}} issues` → `{{count}} 个任务`
 - `{{count}} agents` → `{{count}} 个智能体`
 - `{{count}} workspaces` → `{{count}} 个工作区`
 - `{{count}} comments` → `{{count}} 条评论`
@@ -300,7 +301,7 @@ See `auth.json` for the canonical example (the `web` section contains `prefer_de
 - **Error messages**: gentle but clear. "无法保存修改" beats "保存修改失败了！".
 - **Buttons**: verb first, 2–4 characters. "取消"、"保存修改"、"立即同步".
 - **Tooltips**: full short sentence. "复制链接到剪贴板".
-- **Placeholders**: example-style. "输入 issue 标题...".
+- **Placeholders**: example-style. "输入任务标题...".
 
 ### Where to look when in doubt
 

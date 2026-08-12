@@ -87,19 +87,22 @@ const sessions: ChatSession[] = [
   makeSession({ id: "s3", updated_at: "2026-07-08T01:00:00Z" }),
 ];
 
-function renderList(activeSessionId: string | null, onArchive = vi.fn()) {
+function renderList(
+  activeSessionId: string | null,
+  { onArchive = vi.fn(), onSelectSession = vi.fn() } = {},
+) {
   render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <ChatThreadList
         sessions={sessions}
         agents={[agent]}
         activeSessionId={activeSessionId}
-        onSelectSession={vi.fn()}
+        onSelectSession={onSelectSession}
         onArchive={onArchive}
       />
     </I18nProvider>,
   );
-  return onArchive;
+  return { onArchive, onSelectSession };
 }
 
 const ARCHIVE_LABEL = enChat.list.archive;
@@ -111,7 +114,7 @@ describe("ChatThreadList archive delegation", () => {
   });
 
   it("delegates the history-row Archive action to onArchive with that session", () => {
-    const onArchive = renderList("s2");
+    const { onArchive } = renderList("s2");
     // Rows render in order s1, s2, s3 → the second archive button is s2's.
     const archiveButtons = screen.getAllByRole("button", { name: ARCHIVE_LABEL });
     fireEvent.click(archiveButtons[1]!);
@@ -121,7 +124,7 @@ describe("ChatThreadList archive delegation", () => {
   });
 
   it("passes the archived row's session even when it isn't the open one", () => {
-    const onArchive = renderList("s1");
+    const { onArchive } = renderList("s1");
     const archiveButtons = screen.getAllByRole("button", { name: ARCHIVE_LABEL });
     // Archive s3 while s1 is the open one — the parent decides what to do.
     fireEvent.click(archiveButtons[2]!);
@@ -168,5 +171,86 @@ describe("ChatThreadList no_response preview (MUL-4351)", () => {
     expect(
       screen.queryByText("The agent finished this turn without a text reply."),
     ).not.toBeInTheDocument();
+  });
+});
+
+// Touch has no hover, so the hover strip's actions also live in a per-row menu.
+describe("ChatThreadList compact row menu", () => {
+  beforeEach(() => {
+    setActiveSession.mockClear();
+    archiveMutate.mockClear();
+  });
+
+  const openRowMenu = (index: number) =>
+    fireEvent.click(
+      screen.getAllByRole("button", { name: enChat.list.row_actions_aria })[index]!,
+    );
+
+  it("archives the row it belongs to", async () => {
+    const { onArchive } = renderList("s1");
+
+    openRowMenu(1);
+    fireEvent.click(await screen.findByRole("menuitem", { name: ARCHIVE_LABEL }));
+
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(onArchive.mock.calls[0]![0]).toMatchObject({ id: "s2" });
+  });
+
+  it("offers the same pin toggle the hover strip does", async () => {
+    renderList(null);
+
+    openRowMenu(0);
+
+    expect(await screen.findByRole("menuitem", { name: enChat.list.pin })).toBeInTheDocument();
+  });
+
+  it("does not select the row when the menu opens", () => {
+    const { onSelectSession } = renderList(null);
+
+    openRowMenu(0);
+
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it("stays reachable on a wide viewport that cannot hover", () => {
+    // The menu and the hover strip must both switch on hover capability. Gating
+    // either on width strands a landscape phone: past `md` the menu would be
+    // hidden and the strip would wait for a hover that never arrives.
+    renderList(null);
+
+    const trigger = screen.getAllByRole("button", {
+      name: enChat.list.row_actions_aria,
+    })[0]!;
+    const strip = trigger.parentElement!.querySelector(
+      "[class*='group-hover/row']",
+    )!;
+
+    expect(trigger.className).toContain("[@media(hover:hover)]:hidden");
+    expect(trigger.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):hidden/);
+    expect(strip.className).toContain("[@media(hover:hover)]:group-hover/row:flex");
+    expect(strip.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):group-/);
+  });
+});
+
+describe("ChatThreadList row keyboard semantics", () => {
+  it("selects the row on Enter", () => {
+    const { onSelectSession } = renderList(null);
+
+    const row = screen.getByText("Chat s1").closest("[tabindex]")!;
+    fireEvent.keyDown(row, { key: "Enter" });
+
+    expect(onSelectSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves Enter pressed inside a row control to that control", () => {
+    // Opening the action menu with the keyboard must not also select the row.
+    const { onSelectSession } = renderList(null);
+
+    fireEvent.keyDown(
+      screen.getAllByRole("button", { name: enChat.list.row_actions_aria })[0]!,
+      { key: "Enter" },
+    );
+
+    expect(onSelectSession).not.toHaveBeenCalled();
   });
 });

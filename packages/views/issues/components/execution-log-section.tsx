@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Ban, CheckCircle2, ChevronRight, Loader2, RotateCcw, Square, XCircle } from "lucide-react";
+import { ChevronRight, Loader2, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api, dispatchReasonCode } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
+import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import type { AgentTask } from "@multica/core/types";
 import { useTimeAgo } from "../../i18n";
 import {
@@ -18,7 +19,16 @@ import { formatDuration } from "../../agents/components/agent-activity-hover-con
 import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
+import {
+  formatTokens,
+  formatUsd,
+  summarizeTaskUsage,
+  summarizeTaskUsageAcross,
+} from "../../runtimes/utils";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
+import { IssueUsageDialog } from "./issue-usage-dialog";
+import { TaskStatusIcon } from "./task-status-icon";
+import { useStatusLabel, useTriggerText } from "./task-run-labels";
 
 // Right-panel section that lists every agent run for this issue. Active
 // runs sit at the top (always visible when present); past runs (terminal
@@ -46,6 +56,8 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 
 interface ExecutionLogSectionProps {
   issueId: string;
+  /** Shown in the usage dialog's subtitle so the panel names what it totals. */
+  identifier?: string;
 }
 
 // Past-runs sort priority: newest first by timestamp. When two runs
@@ -57,10 +69,11 @@ const PAST_STATUS_RANK: Record<string, number> = {
   completed: 2,
 };
 
-export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
+export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSectionProps) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
   const [showPast, setShowPast] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
 
   // Cache key registered in `issueKeys.tasks` (packages/core/issues/queries.ts)
   // so the global useRealtimeSync `task:` prefix path invalidates it via
@@ -111,27 +124,49 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
   if (activeTasks.length === 0 && pastTasks.length === 0) return null;
 
   return (
-    <div>
-      <button
-        type="button"
-        className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${
-          open ? "" : "text-muted-foreground hover:text-foreground"
-        }`}
-        onClick={() => setOpen(!open)}
-      >
-        {t(($) => $.execution_log.section)}
-        <ChevronRight
-          className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${
-            open ? "rotate-90" : ""
+    // `@container/execution-log`: the header's three items only fit side by
+    // side above a certain width, and the width that decides it is the
+    // sidebar's — a resizable 260–420px panel — not the viewport's. See
+    // IssueUsageTotal for the tier this container drives.
+    <div className="@container/execution-log">
+      {/* Header is two independent targets, not one: the label + chevron
+          collapse the section, the total on the right opens the usage
+          breakdown. Nesting a button inside a button is invalid HTML, so they
+          are siblings in a flex row rather than a button wrapping a button. */}
+      <div className="mb-2 flex w-full items-center gap-1">
+        <button
+          type="button"
+          className={`flex min-w-0 items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-caption font-medium transition-colors hover:bg-accent/70 ${
+            open ? "" : "text-muted-foreground hover:text-foreground"
           }`}
-        />
+          onClick={() => setOpen(!open)}
+        >
+          {/* The section label is the one item here that may shrink, so it
+              carries the nowrap + ellipsis pair. Without it the squeezed
+              button broke "Execution log" across two lines (MUL-5804) — a
+              section heading that reflows is a layout bug, not a narrow
+              column. The tier below keeps the ellipsis from ever showing at
+              the panel's 260px minimum; it is the backstop for a longer
+              translation, not the everyday state. */}
+          <span className="truncate">{t(($) => $.execution_log.section)}</span>
+          <ChevronRight
+            className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${
+              open ? "rotate-90" : ""
+            }`}
+          />
+        </button>
         {activeTasks.length > 0 && (
-          <span className="ml-auto inline-flex items-center gap-1 text-info">
+          <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-info">
             <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
-            <span className="font-mono tabular-nums">{activeTasks.length}</span>
+            <span className="font-mono text-caption tabular-nums">{activeTasks.length}</span>
           </span>
         )}
-      </button>
+        <IssueUsageTotal
+          tasks={tasks}
+          alone={activeTasks.length === 0}
+          onOpen={() => setUsageOpen(true)}
+        />
+      </div>
       {open && (
         <div className="space-y-0.5 pl-2">
           {activeTasks.map((task) => (
@@ -168,26 +203,86 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
           )}
         </div>
       )}
+      <IssueUsageDialog
+        open={usageOpen}
+        onOpenChange={setUsageOpen}
+        identifier={identifier ?? ""}
+        tasks={tasks}
+      />
     </div>
   );
 }
 
-// ─── Trigger description ────────────────────────────────────────────────────
+// ─── Issue total ───────────────────────────────────────────────────────────
 
-// Primary source: the canonical snapshot taken at task creation time
-// (comment text / autopilot title). Survives source edits/deletes and
-// is information-dense — far better than a structural label.
+// The issue's whole spend, as a header affordance: "2.1M · $4.92". Answers
+// "what has this issue cost" without expanding anything, and is the entry
+// point to the per-run breakdown.
 //
-// Retry tasks inherit the parent's trigger_summary on the DB side (so the
-// snapshot survives across attempts), but a row that just shows the
-// inherited summary is indistinguishable from its parent. We prepend
-// "Retry #N" when parent_task_id is set so retries are scannable as
-// retries even when their summary is inherited.
+// Renders nothing when no run on the issue has recorded usage — an issue whose
+// runs all predate usage reporting gets its old header back rather than a
+// "0 · $0.00" that would read as "this was free".
 //
-// Fallback chain for legacy tasks created before the snapshot field
-// shipped, OR for sources we don't snapshot (direct assignment / chat):
-// degrade to a short structural label by trigger source. New tasks
-// (post-061 migration) almost always hit the snapshot path.
+// Narrow sections drop the token figure and keep the cost. Something has to
+// give at the narrow end — the header's full form needs ~246px next to the
+// active-run chip and the sidebar's 260px minimum leaves 228px — and the token
+// count is the piece whose absence costs least: the cost answers "what has
+// this issue spent", and the exact token split is a click away in the dialog
+// this opens. It is a figure that yields, never a figure's digits: a clipped
+// "$31.1…" would read as a different number than the issue actually spent.
+export function IssueUsageTotal({
+  tasks,
+  alone,
+  onOpen,
+}: {
+  tasks: AgentTask[];
+  alone: boolean;
+  onOpen: () => void;
+}) {
+  const { t } = useT("issues");
+  // Custom rates are read imperatively inside `estimateCost`, so a saved rate
+  // change does not re-render this on its own — subscribe and make the memo
+  // depend on the snapshot, or the header total keeps quoting the old price
+  // until the task list refetches.
+  const pricings = useCustomPricingStore((s) => s.pricings);
+  const total = useMemo(
+    () => summarizeTaskUsageAcross(tasks.map((task) => task.usage)),
+    [tasks, pricings],
+  );
+  if (!total) return null;
+
+  // Two thresholds because the header has two shapes, and the tier should cost
+  // the reader a figure only where the row genuinely runs out: beside the
+  // active-run chip the full form needs ~246px, alone ~218px. Written as whole
+  // literal classes — Tailwind scans source text, so a composed string would
+  // generate neither. `@max-…` (rather than showing at `@min-…`) is what makes
+  // a host that renders this outside the section's `@container` degrade to the
+  // full form instead of silently losing the tokens forever.
+  const narrowTier = alone
+    ? "@max-[14rem]/execution-log:hidden"
+    : "@max-[16rem]/execution-log:hidden";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<button type="button" onClick={onOpen} />}
+        className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-caption tabular-nums transition-colors hover:bg-accent/70 ${
+          alone ? "ml-auto" : ""
+        }`}
+      >
+        <span className={`font-medium ${narrowTier}`}>
+          {formatTokens(total.tokens)}
+        </span>
+        <span className={`text-faint-foreground ${narrowTier}`}>·</span>
+        <span className="text-muted-foreground">{formatUsd(total.cost)}</span>
+      </TooltipTrigger>
+      <TooltipContent>{t(($) => $.execution_log.usage_total_tooltip)}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+// Trigger description and status labels live in ./task-run-labels so the
+// usage dialog lists a run exactly the way this section does.
 
 // ─── Row visual config ─────────────────────────────────────────────────────
 
@@ -204,48 +299,6 @@ const STATUS_TONE: Record<AgentTask["status"], string> = {
 };
 
 // ─── Active row ────────────────────────────────────────────────────────────
-
-import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
-
-function useTriggerText(task: AgentTask): string {
-  const { t } = useT("issues");
-  const isRetry = !!task.parent_task_id;
-  const retryPrefix = isRetry
-    ? task.attempt && task.attempt > 1
-      ? t(($) => $.execution_log.trigger_retry_attempt_prefix, { attempt: task.attempt })
-      : t(($) => $.execution_log.trigger_retry_prefix)
-    : "";
-
-  if (task.trigger_summary) return retryPrefix + stripMentionMarkdown(task.trigger_summary);
-  if (isRetry) {
-    return task.attempt && task.attempt > 1
-      ? t(($) => $.execution_log.trigger_retry_attempt, { attempt: task.attempt })
-      : t(($) => $.execution_log.trigger_retry);
-  }
-  if (task.autopilot_run_id) return t(($) => $.execution_log.trigger_autopilot);
-  if (task.trigger_comment_id) return t(($) => $.execution_log.trigger_comment);
-  // Assignment-triggered run that carried a handoff note: show the note inline
-  // (truncated by TriggerText) the way comment triggers show their text, so the
-  // row reads as the handoff instead of the generic "initial run".
-  if (task.handoff_note) {
-    return retryPrefix + t(($) => $.execution_log.trigger_handoff_prefix) + stripMentionMarkdown(task.handoff_note);
-  }
-  return t(($) => $.execution_log.trigger_initial);
-}
-
-function useStatusLabel(status: AgentTask["status"]): string {
-  const { t } = useT("issues");
-  switch (status) {
-    case "queued": return t(($) => $.execution_log.status_queued);
-    case "dispatched": return t(($) => $.execution_log.status_dispatched);
-    case "waiting_local_directory":
-      return t(($) => $.execution_log.status_waiting_local_directory);
-    case "running": return t(($) => $.execution_log.status_running);
-    case "completed": return t(($) => $.execution_log.status_completed);
-    case "failed": return t(($) => $.execution_log.status_failed);
-    case "cancelled": return t(($) => $.execution_log.status_cancelled);
-  }
-}
 
 // One active (running / queued / dispatched / parked) task row. Running rows
 // keep status to a single live elapsed timer; transcript and stop stay available
@@ -304,6 +357,13 @@ export function ActiveTaskRow({
     setConfirmOpen(true);
   };
 
+  // Deliberately no token figure on an active row: the daemon reports usage
+  // once, after `runner.run` returns (server/internal/daemon/daemon.go), and
+  // the write publishes no realtime event — so a running task has no usage to
+  // show, and would not learn of it mid-run if it did. Rendering the branch
+  // anyway would only ever be exercised by hand-written fixtures, which is a
+  // test that asserts a scenario production cannot produce. Restore it in the
+  // same change that adds incremental reporting + cache invalidation.
   return (
     <RowShell task={task}>
       <TriggerText text={trigger} />
@@ -375,6 +435,29 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const failureLabel =
     task.status === "failed" ? failureReasonLabel(task.failure_reason) : null;
 
+  // What this run cost, in the slot the relative timestamp used to hold.
+  //
+  // The sidebar is 288px and the row already carries an avatar, the trigger
+  // text, and a status mark; a third column would come straight out of the
+  // trigger, which is what people scan this list for. The list is sorted
+  // newest-first, so "which run came first" is already expressed by position —
+  // the exact "when" is the detail, and how much it cost is the new question.
+  // The displaced timestamp moves into the row tooltip below, together with
+  // the duration and model, which were previously not surfaced here at all.
+  //
+  // `null` (no usage recorded) renders an em dash, never 0: a run from before
+  // usage reporting was not free, we simply have no figure for it.
+  const usage = summarizeTaskUsage(task.usage);
+  const rowTitle = [
+    time,
+    task.started_at && task.completed_at
+      ? formatDuration(task.started_at, new Date(task.completed_at).getTime())
+      : "",
+    usage?.models.join(", ") ?? "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   // Retry only makes sense for terminal-but-not-success rows. Passing
   // task.id targets this specific row's agent — without it, the rerun
   // endpoint would fall back to the issue's current assignee and the
@@ -407,13 +490,19 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   };
 
   return (
-    <RowShell task={task}>
+    <RowShell task={task} title={rowTitle}>
       <TriggerText text={trigger} />
       <TaskCommentCoverage task={task} />
       <RowStatus title={failureLabel ?? label}>
         <TaskStatusIcon status={task.status} />
-        <span className="sr-only">{failureLabel ?? label}</span>
-        <span className="text-muted-foreground">{time}</span>
+        <span className="sr-only">
+          {[failureLabel ?? label, time].filter(Boolean).join(" · ")}
+        </span>
+        {usage ? (
+          <span className="tabular-nums">{formatTokens(usage.tokens)}</span>
+        ) : (
+          <span className="text-faint-foreground">—</span>
+        )}
       </RowStatus>
       <RowActions>
         <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
@@ -448,13 +537,22 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
 function RowShell({
   task,
+  title,
   children,
 }: {
   task: AgentTask;
+  /** Carries the details the right column no longer has room for (time,
+   *  duration, model). Lives on the row, not on RowStatus, because RowStatus
+   *  is swapped out for the action buttons on hover — a title there would
+   *  disappear at exactly the moment the pointer arrives. */
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="group/execution-log-row flex items-center gap-2 overflow-hidden rounded px-1 py-1.5 transition-colors hover:bg-accent/40">
+    <div
+      title={title || undefined}
+      className="group/execution-log-row flex items-center gap-2 overflow-hidden rounded px-1 py-1.5 transition-colors hover:bg-accent/40"
+    >
       {task.agent_id ? (
         <ActorAvatar
           actorType="agent"
@@ -532,19 +630,6 @@ function RowStatus({
       {children}
     </div>
   );
-}
-
-function TaskStatusIcon({ status }: { status: AgentTask["status"] }) {
-  switch (status) {
-    case "completed":
-      return <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5 text-success" />;
-    case "failed":
-      return <XCircle aria-hidden="true" className="h-3.5 w-3.5 text-destructive" />;
-    case "cancelled":
-      return <Ban aria-hidden="true" className="h-3.5 w-3.5 text-muted-foreground" />;
-    default:
-      return null;
-  }
 }
 
 // Action slot — visible by default for touch devices. On hover-capable

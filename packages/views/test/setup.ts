@@ -60,3 +60,9 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 if (typeof document.elementFromPoint !== "function") {
   document.elementFromPoint = () => null;
 }
+
+// jsdom has no layout, so it doesn't implement scrollIntoView; list components
+// that keep a keyboard cursor in view (e.g. the thread navigator) call it.
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = () => {};
+}

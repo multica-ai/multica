@@ -4,15 +4,11 @@ import type { Agent } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 
-/**
- * Empty compose placeholder shown when a chat has no messages yet. Agent-aware:
- * it leads with the chosen agent's avatar + name + description so the user knows
- * exactly who they're about to talk to. The composer below is the entry point —
- * no starter prompts, they read as filler more than help.
- */
+/** Empty compose placeholder shown before the first user message. */
 export function EmptyState({ agent }: { agent: Agent | null }) {
   const { t } = useT("chat");
   const description = agent?.description?.trim();
+
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-8">
       {agent && (

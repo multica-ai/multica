@@ -68,7 +68,7 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":20}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":20,"cacheReadTokens":3,"cacheWriteTokens":2,"costUsdTicks":900}}}\n' "$id"
       ;;
     *)
       printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
@@ -380,11 +380,9 @@ func TestQwenpawBackendUsage(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected usage entry for model 'unknown', got %+v", result.Usage)
 	}
-	if usage.InputTokens != 10 {
-		t.Fatalf("expected 10 input tokens, got %d", usage.InputTokens)
-	}
-	if usage.OutputTokens != 20 {
-		t.Fatalf("expected 20 output tokens, got %d", usage.OutputTokens)
+	want := TokenUsage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 3, CacheWriteTokens: 2, CostUSDTicks: 900}
+	if usage != want {
+		t.Fatalf("usage = %+v, want %+v", usage, want)
 	}
 }
 
@@ -657,6 +655,80 @@ done
 	}
 	if !strings.Contains(args, "/tmp/test-qwenpaw-workspace") {
 		t.Fatalf("expected workspace path in command args, got:\n%s", args)
+	}
+}
+
+// TestQwenpawExtraArgsReachTheCommandLine pins MULTICA_QWENPAW_ARGS end to
+// end. config.go reads it and daemon.go forwards it as ExecOptions.ExtraArgs,
+// but the backend used to consume CustomArgs only, so the variable was read,
+// plumbed, and then silently dropped. ExtraArgs must land before CustomArgs,
+// matching the precedence documented in CLI_AND_DAEMON.md.
+func TestQwenpawExtraArgsReachTheCommandLine(t *testing.T) {
+	t.Parallel()
+
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$@" > "%s"
+while IFS= read -r line; do
+  id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"sessionId":"ses_qwenpaw_extra"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":5,"outputTokens":10}}}\n' "$id"
+      ;;
+    *)
+      printf '{"jsonrpc":"2.0","id":%%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      ;;
+  esac
+done
+`, argsFile)
+
+	bin := writeFakeQwenpawScript(t, script)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	b, err := New("qwenpaw", Config{
+		ExecutablePath: bin,
+		Logger:         logger,
+	})
+	if err != nil {
+		t.Fatalf("New(qwenpaw) error: %v", err)
+	}
+
+	ctx := context.Background()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:        t.TempDir(),
+		ExtraArgs:  []string{"--daemon-wide"},
+		CustomArgs: []string{"--per-agent"},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	for range session.Messages {
+	}
+	<-session.Result
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := string(raw)
+
+	if !strings.Contains(args, "--daemon-wide") {
+		t.Fatalf("expected ExtraArgs in command args, got:\n%s", args)
+	}
+	extra := strings.Index(args, "--daemon-wide")
+	custom := strings.Index(args, "--per-agent")
+	if custom < 0 {
+		t.Fatalf("expected CustomArgs in command args, got:\n%s", args)
+	}
+	if extra > custom {
+		t.Fatalf("ExtraArgs must precede CustomArgs, got:\n%s", args)
 	}
 }
 

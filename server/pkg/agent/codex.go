@@ -152,6 +152,38 @@ const CodexFirstTurnNoProgressMarker = "codex app-server no progress timeout"
 // did not answer within the bounded handshake window.
 const CodexHandshakeTimeoutMarker = "codex app-server handshake timeout"
 
+// codexResumeMarker and codexLineOverflowMarker are the two halves of the
+// error text a resume-overflow produces: the method that failed (written by
+// startOrResumeThread) and bufio's own ErrTooLong wording, which reaches the
+// string through the reader goroutine.
+const (
+	codexResumeMarker       = "thread/resume failed"
+	codexLineOverflowMarker = "token too long"
+)
+
+// CodexResumeOverflowError reports whether an agent error string is the
+// resume-overflow failure — the thread/resume response did not fit in our
+// stdout line buffer, so the thread cannot be handed to us at all.
+//
+// This lives next to the code that writes both halves of the text so the two
+// cannot drift apart, and it is exported because the daemon has only the error
+// STRING at report time: by then the typed bufio.ErrTooLong that
+// isCodexResumeOverflow matches in-process is long gone. Both markers are
+// required — "thread/resume failed" alone covers ordinary rejections that a
+// plain retry handles, and "token too long" alone would also match an overflow
+// on some other RPC, where dropping the session pointer cures nothing.
+//
+// The session behind such a failure is unusable for resume until it shrinks,
+// which it never does — codex rollouts are append-only. Callers use this to
+// stop handing the same oversized thread to the next task (MUL-5722).
+func CodexResumeOverflowError(errText string) bool {
+	if errText == "" {
+		return false
+	}
+	lower := strings.ToLower(errText)
+	return strings.Contains(lower, codexResumeMarker) && strings.Contains(lower, codexLineOverflowMarker)
+}
+
 // codexModelCatalogRefreshFailureSignal matches the Codex models-manager error
 // emitted when the model catalog could not be refreshed. Codex reports several
 // distinct causes under this prefix ("timeout waiting for child process to
@@ -862,7 +894,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				// thread may hold the submitted input or an unfinished turn.
 				// Resuming it again could duplicate that input; start a fresh
 				// thread instead and keep ResumeExpected so codexTurnInput
-				// prepends the continuity notice about the lost context.
+				// prepends the caller's continuity notice about the lost
+				// context.
 				if attemptOpts.ResumeSessionID != "" {
 					b.cfg.Logger.Warn("codex retry dropping resume pointer after model catalog refresh failure",
 						"prior_thread_id", attemptOpts.ResumeSessionID,
@@ -1085,8 +1118,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -1095,7 +1127,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			c.handleLine(line)
 		}
 		if err := scanner.Err(); err != nil {
-			c.markProcessExited(fmt.Errorf("%w: %v", errCodexProcessExited, err))
+			// %w on BOTH: callers match errCodexProcessExited to decide the
+			// process is gone, and bufio.ErrTooLong to tell "we could not read
+			// the response" apart from "codex died". startOrResumeThread needs
+			// that distinction to report an oversized resume as a rejected
+			// resume rather than a crash (MUL-5722).
+			c.markProcessExited(fmt.Errorf("%w: %w", errCodexProcessExited, err))
 			return
 		}
 		c.markProcessExited(errCodexProcessExited)
@@ -1343,7 +1380,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					"stderr_bare_timeout_count", classification.bareTimeout,
 				)
 			}
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			resCh <- Result{
+				Status:         finalStatus,
+				Error:          finalError,
+				DurationMs:     time.Since(startTime).Milliseconds(),
+				ResumeRejected: isCodexResumeOverflow(opts, err),
+			}
 			return
 		}
 		c.threadID = threadID
@@ -1356,13 +1398,17 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// 3. Send turn and wait for completion. When a resume was expected but we
 		// ended up on a fresh thread (the live thread/resume RPC was rejected — a
 		// corrupt/incompatible rollout, server-side thread GC, schema drift — or a
-		// transport failure forced a fresh retry), prepend a continuity notice so
-		// the agent tells the user the prior conversation could not be restored.
-		// The daemon's pre-flight gates only catch cases detectable before launch;
+		// transport failure forced a fresh retry), prepend the caller's continuity
+		// notice so the agent does not assume continuity it no longer has. The
+		// daemon's pre-flight gates only catch cases detectable before launch;
 		// this covers the ones only the live resume reveals (MUL-4424).
+		//
+		// Whether that notice asks the agent to tell the USER is the caller's
+		// call, not ours: it depends on whether this surface's conversation is
+		// still readable, which this package cannot see (MUL-5722).
 		turnParams := map[string]any{
 			"threadId": threadID,
-			"input":    codexTurnInput(prompt, opts.ResumeExpected, resumed),
+			"input":    codexTurnInput(prompt, opts.ResumeExpected, resumed, opts.ResumeContinuityNotice),
 		}
 		// Per-turn reasoning override. Mirrors the per-thread injection in
 		// startOrResumeThread; keeping both in sync is enforced by the
@@ -1664,23 +1710,26 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-// codexResumeUnavailableNotice is prepended to the first turn's input when a
-// resume was expected but Codex ended up on a fresh thread. It mirrors the
-// daemon brief's Session Continuity Notice so the disclosure is identical
-// whether the loss is detected pre-launch (daemon gate) or only by the live
-// thread/resume RPC (MUL-4424).
-const codexResumeUnavailableNotice = "[System notice] You were expected to continue an earlier conversation, but restoring that session failed and this is a fresh thread with no memory of the previous turns. Rebuild context from the issue/thread, and when you reply, tell the user up front (one short sentence) that the previous conversation context could not be restored and this is a new session.\n\n"
+// The continuity notice this backend prepends is supplied by the caller via
+// ExecOptions.ResumeContinuityNotice rather than written here. It used to be a
+// constant in this file that mirrored the daemon's, which meant two hand-kept
+// copies of the same paragraph and no way for this package to know which
+// surface it was running on — the wording is only correct if you know whether
+// the conversation is still readable (MUL-5722).
 
 // codexTurnInput builds the input content for the first turn/start. When a
 // resume was expected (resumeExpected) but the backend landed on a fresh thread
-// (!resumed), it prepends codexResumeUnavailableNotice so the user learns the
-// prior context was lost instead of the run silently continuing as new. The
-// notice is folded into the same text block as the prompt to stay within the
-// single-text-block turn input Codex already accepts.
-func codexTurnInput(prompt string, resumeExpected, resumed bool) []map[string]any {
+// (!resumed), it prepends the caller's continuity notice so the run does not
+// silently continue as new. The notice is folded into the same text block as
+// the prompt to stay within the single-text-block turn input Codex accepts.
+//
+// An empty notice means the caller has already disclosed the loss in the prompt
+// itself, so this must add nothing — that is the whole guard against a turn
+// carrying the same paragraph twice.
+func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) []map[string]any {
 	text := prompt
 	if resumeExpected && !resumed {
-		text = codexResumeUnavailableNotice + prompt
+		text = notice + prompt
 	}
 	return []map[string]any{{"type": "text", "text": text}}
 }
@@ -2329,6 +2378,29 @@ func (c *codexClient) getProcessErr() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.processErr
+}
+
+// isCodexResumeOverflow reports whether a failed startOrResumeThread failed
+// because the thread/resume RESPONSE did not fit in our stdout line buffer.
+//
+// Codex serializes the entire thread into that single response, so a long
+// enough thread overflows agentStreamMaxLineBytes and the reader goroutine
+// dies with bufio.ErrTooLong. Every other transport error means codex is
+// gone; this one means codex is fine and we cannot read it. The distinction
+// is what makes it a resume REJECTION: the thread cannot be handed to us at
+// all, so only starting over can cure it — exactly what Result.ResumeRejected
+// documents, and the evidence shouldRetryWithFreshSession looks for first.
+//
+// Recovery has to go through the daemon rather than a local thread/start
+// fallback. By the time we get here the reader goroutine has exited and codex
+// is blocked writing the rest of the oversized line into a pipe nobody drains,
+// so this process can no longer answer any RPC. The daemon's fresh-session
+// retry re-execs codex, which is the only way back (MUL-5722).
+//
+// Requires ResumeSessionID: an overflow on a thread/start response is a
+// different failure and nothing about the session pointer would fix it.
+func isCodexResumeOverflow(opts ExecOptions, err error) bool {
+	return opts.ResumeSessionID != "" && errors.Is(err, bufio.ErrTooLong)
 }
 
 func isCodexTransportError(err error) bool {

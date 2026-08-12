@@ -110,6 +110,9 @@ brew install multica-ai/tap/multica
 
 You also need at least one AI agent CLI installed:
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
+- [Antigravity CLI](https://antigravity.google/docs/cli-install) (`agy` on PATH)
+- [CodeBuddy Code](https://www.codebuddy.ai/docs/cli/quickstart) (`codebuddy` on PATH)
+- [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) (`deveco` on PATH)
 - [Codex](https://github.com/openai/codex) (`codex` on PATH)
 - [GitHub Copilot CLI](https://docs.github.com/en/copilot) (`copilot` on PATH)
 - [OpenClaw](https://github.com/openclaw/openclaw) (`openclaw` on PATH)
@@ -118,12 +121,14 @@ You also need at least one AI agent CLI installed:
 - [Pi](https://pi.dev/) (`pi` on PATH)
 - [Cursor Agent](https://cursor.com/) (`cursor-agent` on PATH)
 - Kimi (`kimi` on PATH)
+- [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) (`reasonix` on PATH; run `reasonix setup` first)
 - Kiro CLI (`kiro-cli` on PATH)
 - Qoder CLI (`qodercli` on PATH)
 - Qoder CN CLI (`qoderclicn` on PATH)
 - Trae CLI (`traecli` on PATH)
 - [Grok Build CLI](https://docs.x.ai/) (`grok` on PATH)
 - Qwen Code (`qwen` on PATH)
+- [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (`qwenpaw` on PATH; pick its model in QwenPaw's own configuration)
 
 ### b) One-command setup
 
@@ -368,6 +373,8 @@ kubectl delete namespace multica
 The Usage / Runtime dashboards read from a derived `task_usage_hourly` table populated by `rollup_task_usage_hourly()`. As of MUL-2957 the backend runs this rollup **in-process** on every replica via a DB-backed scheduler (`sys_cron_executions`); a fresh self-host install needs no operator action and the bundled `pgvector/pgvector:pg17` image works without changes — you do **not** need to swap it for an image that ships `pg_cron`, register an external cron job, set up a systemd timer, or run a Kubernetes `CronJob`.
 
 Multiple backend replicas are safe: each replica ticks every 30 seconds and tries to claim the current 5-minute UTC plan, but the unique key `(job_name, scope_kind, scope_id, plan_time)` means only one wins each plan. Inspect steady-state operation:
+
+> **Exception — WeCom (企业微信) smart bot must run single-replica.** Unlike Slack and Lark, whose outbound is stateless HTTP that any replica can perform, the WeCom smart bot's only outbound path is an in-process WebSocket long connection. Agent replies and inbox pushes are delivered only by the replica currently holding a given bot's connection lease. If you run more than one backend replica with WeCom enabled (`MULTICA_WECOM_SECRET_KEY` set), responses produced on a replica that does not hold the lease are silently dropped and the WeCom user sees nothing. Until cross-replica outbound routing lands, run the WeCom-enabled backend as a single replica. Everything else (including the rollup scheduler above) is multi-replica safe.
 
 ```sql
 SELECT plan_time, status, attempt, runner_id,

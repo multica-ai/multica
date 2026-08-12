@@ -10,7 +10,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@multica/ui/components/ui/resizable";
-import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useChatStore } from "@multica/core/chat";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
@@ -24,6 +24,7 @@ import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { ChatMessageList, ChatMessageSkeleton } from "./components/chat-message-list";
 import { ChatInput } from "./components/chat-input";
+import { ChatQueue } from "./components/chat-queue";
 import { ChatThreadList } from "./components/chat-thread-list";
 import { ChatSessionHeader } from "./components/chat-session-header";
 import { EmptyState } from "./components/chat-empty-state";
@@ -57,7 +58,7 @@ export function ChatPage() {
   const { t } = useT("chat");
   const { searchParams, replace } = useNavigation();
   const wsPaths = useWorkspacePaths();
-  const isMobile = useIsMobile();
+  const isCompact = useIsCompact();
 
   const c = useChatController({ isActive: true });
   const { data: quickActionsPending = null } = useQuery(
@@ -73,7 +74,7 @@ export function ChatPage() {
   const urlAgent = searchParams.get("agent") || null;
 
   // "Composing a brand-new chat" — the user hit ⊕ but hasn't sent yet, so no
-  // session exists. On mobile this decides list-vs-conversation; on desktop the
+  // session exists. At compact widths this decides list-vs-conversation; on desktop the
   // conversation pane is always mounted so it only needs to reset itself once a
   // real session takes over.
   const [composingNew, setComposingNew] = useState(false);
@@ -139,13 +140,13 @@ export function ChatPage() {
 
   // Single archive path for both entry points (thread-list row + conversation
   // header). When the archived chat is the one in view, move the pane off it:
-  // on desktop advance to the next chat (Inbox-style); on mobile drop back to
+  // on desktop advance to the next chat (Inbox-style); when compact drop back to
   // the list, which reads more naturally than being thrown into an unrelated
   // conversation full-screen. Archiving any other chat leaves the view put.
   const handleArchive = (session: ChatSession) => {
     supersedeAgentIntent();
     if (session.id === c.activeSessionId) {
-      if (isMobile) {
+      if (isCompact) {
         c.setActiveSession(null);
         setComposingNew(false);
       } else {
@@ -168,8 +169,9 @@ export function ChatPage() {
     if (projectId === c.activeProjectId) return;
     c.handleProjectChange(projectId);
     // Removing a project stays in the current conversation. Choosing a
-    // project for an existing conversation starts a clean session, and mobile
-    // must remain in the compose pane after activeSessionId is cleared.
+    // project for an existing conversation starts a clean session, and a
+    // compact layout must stay in the compose pane after activeSessionId is
+    // cleared.
     if (!c.currentSession || projectId !== null) setComposingNew(true);
   };
 
@@ -240,6 +242,7 @@ export function ChatPage() {
   // No compose-box agent selector — the agent is fixed when the chat starts.
   // `@container`: the conversation column's gutter (CHAT_GUTTER) widens with
   // THIS pane, which the user resizes independently of the browser window.
+  const queuedTasks = c.pendingTask?.queued_tasks ?? [];
   const conversation = (
     <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession && (
@@ -296,6 +299,15 @@ export function ChatPage() {
         <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} />
       )}
 
+      <ChatQueue
+        tasks={queuedTasks}
+        headStatus={c.pendingTask?.status}
+        onSendNow={c.handleSendQueuedTaskNow}
+        onEdit={c.handleEditQueuedTask}
+        onRemove={c.handleRemoveQueuedTask}
+        onClear={c.handleClearQueuedTasks}
+      />
+
       <ChatInput
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
@@ -303,6 +315,7 @@ export function ChatPage() {
         uploadEnabled={c.uploadEnabled}
         onStop={c.handleStop}
         isRunning={!!c.pendingTaskId}
+        allowSubmitWhileRunning={c.pendingTask?.supports_queue === true}
         disabled={
           c.isSessionArchived || c.isAgentArchived || !c.isAgentRuntimeBound
         }
@@ -320,8 +333,8 @@ export function ChatPage() {
     </div>
   );
 
-  // -- Mobile: list / conversation toggle -----------------------------------
-  if (isMobile) {
+  // -- Compact: list / conversation toggle -----------------------------------
+  if (isCompact) {
     if (c.activeSessionId || composingNew) {
       return (
         <div className="flex flex-1 flex-col min-h-0">

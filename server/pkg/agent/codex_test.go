@@ -1935,6 +1935,9 @@ func TestCodexTurnInput(t *testing.T) {
 	t.Parallel()
 
 	const prompt = "do the task"
+	// Stands in for whatever the daemon computed for this surface; the backend
+	// only carries it, so the exact wording is the caller's business.
+	const chatNotice = "[System notice] the previous conversation context could not be restored.\n\n"
 	text := func(input []map[string]any) string {
 		if len(input) != 1 {
 			t.Fatalf("expected a single input block, got %d", len(input))
@@ -1945,7 +1948,7 @@ func TestCodexTurnInput(t *testing.T) {
 
 	// Resume expected but the backend fell back to a fresh thread → disclose,
 	// and the original prompt must still be delivered.
-	fallback := text(codexTurnInput(prompt, true, false))
+	fallback := text(codexTurnInput(prompt, true, false, chatNotice))
 	if !strings.Contains(fallback, "previous conversation context could not be restored") {
 		t.Errorf("expected continuity notice on resume fallback, got:\n%s", fallback)
 	}
@@ -1955,11 +1958,33 @@ func TestCodexTurnInput(t *testing.T) {
 
 	// Successful resume, or an ordinary fresh start with no resume expected →
 	// no notice, prompt delivered verbatim.
-	if got := text(codexTurnInput(prompt, true, true)); got != prompt {
+	if got := text(codexTurnInput(prompt, true, true, chatNotice)); got != prompt {
 		t.Errorf("successful resume must not add a notice, got:\n%s", got)
 	}
-	if got := text(codexTurnInput(prompt, false, false)); got != prompt {
+	if got := text(codexTurnInput(prompt, false, false, chatNotice)); got != prompt {
 		t.Errorf("fresh start must not add a notice, got:\n%s", got)
+	}
+}
+
+// TestCodexTurnInputNoticeMatchesWhatTheSurfaceLost is the MUL-5722 half of the
+// continuity notice. An issue's discussion survives in its comments, which the
+// agent re-reads every turn, so ordering it to announce "the previous context
+// was lost" tells the user the discussion is gone when none of it is. The
+// notice still has to fire — the agent must not silently assume continuity —
+// but on that surface it informs the agent instead of scripting an apology.
+func TestCodexTurnInputSuppressesNoticeWhenCallerAlreadyDisclosed(t *testing.T) {
+	t.Parallel()
+
+	// An empty notice is how the caller says "the prompt already carries it".
+	// Honouring that is the backend's half of the no-duplicate guarantee: on
+	// the daemon's fresh-session retry the prompt already ends with the
+	// continuity notice, and before MUL-5722 this path prepended a second copy
+	// of the same paragraph into the same turn.
+	const prompt = "do the task"
+	input := codexTurnInput(prompt, true, false, "")
+	got, _ := input[0]["text"].(string)
+	if got != prompt {
+		t.Fatalf("empty notice must leave the prompt untouched, got:\n%s", got)
 	}
 }
 
@@ -3133,8 +3158,8 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 	}
 
 	// Regression for GH#4520. On `thread/resume`, the fake codex emits a
-	// single stdout line larger than the daemon's bufio.Scanner cap (10 MB),
-	// which trips "bufio.Scanner: token too long" in the reader goroutine.
+	// single stdout line larger than agentStreamMaxLineBytes, which trips
+	// "bufio.Scanner: token too long" in the reader goroutine.
 	// Pre-fix, drainAndWait then hung forever on cmd.Wait(): the reader had
 	// stopped consuming the pipe, codex was blocked writing into a full
 	// stdout buffer, stdin.Close never unblocked codex, and the deferred
@@ -3155,12 +3180,13 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 		`read line`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
 		`read line`+"\n"+
-		// Emit a > 10 MB single line with no embedded newline. printf
+		// Emit a single line past the cap with no embedded newline. printf
 		// avoids the trailing newline echo would add; head + tr generates
-		// the bulk payload in pure POSIX shell. The scanner errors out at
-		// 10 MB even though we write 11 MB.
+		// the bulk payload in pure POSIX shell. The size is derived from
+		// the production constant so raising the cap cannot silently turn
+		// this regression test into a no-op.
 		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
-		`head -c 11000000 /dev/zero | tr '\0' 'x'`+"\n"+
+		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
 		`printf '"}}\n'`+"\n"+
 		// Hold the process open without reading more stdin. Pre-fix this
 		// hangs cmd.Wait() because codex never sees stdin EOF (it isn't
@@ -3193,6 +3219,15 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 		t.Fatalf("expected empty SessionID so outer fallback retries fresh, got %q",
 			result.SessionID)
 	}
+	// MUL-5722 layer 2: an unreadable resume response is a rejected resume,
+	// and this flag is the positive evidence shouldRetryWithFreshSession
+	// requires. Without it #5715's gate stops the retry dead (codex is in
+	// neither the ResumeRejected-capable nor the undetectable set), and the
+	// next turn resumes the same oversized thread forever.
+	if !result.ResumeRejected {
+		t.Fatalf("expected ResumeRejected=true so the daemon retries on a fresh session; error=%q",
+			result.Error)
+	}
 	// With the shrunken 500 ms grace, two bounded phases plus the SIGKILL
 	// round-trip should complete in ~1-2 s. Pre-fix this test would block
 	// until the executeFakeCodex 10 s outer timeout and fail with "timeout
@@ -3201,6 +3236,50 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 	if elapsed > 5*time.Second {
 		t.Fatalf("cleanup took %s, expected < 5s with shrunken grace (bug regressed?)",
 			elapsed)
+	}
+}
+
+func TestCodexExecuteDoesNotClaimResumeRejectedWhenOverflowIsNotAResume(t *testing.T) {
+	// Not t.Parallel(): mutates codexGracefulShutdownTimeoutNanos globally,
+	// same as its sibling above.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// The overflow guard is scoped to resumes on purpose. A run with no prior
+	// session that overflows on the thread/start response is a different
+	// failure: there is no session pointer to drop, so reporting a resume
+	// rejection would send the daemon looking for a cure that does not apply
+	// — and ResumeRejected is documented as positive evidence, not a generic
+	// "something went wrong" flag.
+	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		// Same oversized single line, but answering thread/start rather than
+		// thread/resume because the caller passed no ResumeSessionID.
+		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
+		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
+		`printf '"}}\n'`+"\n"+
+		`sleep 30`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Cwd:                       t.TempDir(),
+		Timeout:                   30 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "token too long") {
+		t.Fatalf("expected error to surface scanner overflow cause, got %q", result.Error)
+	}
+	if result.ResumeRejected {
+		t.Fatalf("expected ResumeRejected=false without a prior session, error=%q", result.Error)
 	}
 }
 
@@ -3532,8 +3611,12 @@ func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testi
 		`fi`+"\n")
 
 	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
-		ResumeSessionID:           "thr-prior",
-		ResumeExpected:            true,
+		ResumeSessionID: "thr-prior",
+		ResumeExpected:  true,
+		// Supplied by the daemon since MUL-5722: this package no longer holds
+		// the wording, because only the caller knows whether the surface's
+		// conversation can still be read.
+		ResumeContinuityNotice:    "[System notice] the previous conversation context could not be restored.\n\n",
 		Timeout:                   20 * time.Second,
 		SemanticInactivityTimeout: 100 * time.Millisecond,
 	}, 20*time.Second)
@@ -3562,8 +3645,8 @@ func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testi
 	if !strings.Contains(string(second), "thread/start") {
 		t.Fatalf("expected the retry to start a fresh thread, got %s", second)
 	}
-	// ResumeExpected survives the cleared pointer, so the agent is told the
-	// prior context could not be restored.
+	// ResumeExpected survives the cleared pointer, so the caller's notice is
+	// still prepended and the agent is told the prior context is gone.
 	if !strings.Contains(string(second), "previous conversation context could not be restored") {
 		t.Fatalf("expected the retry input to carry the continuity notice, got %s", second)
 	}
@@ -5349,5 +5432,86 @@ func TestCodexPatchApplyStillTruncatesNonSecretPayload(t *testing.T) {
 	// The caller's slice is deliberately left alone: redaction copies first.
 	if original, _ := changes[0].(map[string]any)["content"].(string); len(original) != len(body) {
 		t.Fatalf("codexPatchInput must not mutate its argument: %d != %d", len(original), len(body))
+	}
+}
+
+func TestCodexResumeOverflowError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		errText string
+		want    bool
+	}{
+		{
+			// The exact text executeOnce puts in Result.Error for this failure.
+			name:    "resume overflow",
+			errText: "codex thread/resume failed: codex process exited: bufio.Scanner: token too long",
+			want:    true,
+		},
+		{
+			// Both markers required: an overflow on another RPC leaves the
+			// stored thread perfectly resumable, so retiring it cures nothing.
+			name:    "overflow on thread/start",
+			errText: "codex thread/start failed: codex process exited: bufio.Scanner: token too long",
+			want:    false,
+		},
+		{
+			// An ordinary resume rejection already has a recovery path.
+			name:    "resume failure without overflow",
+			errText: "codex thread/resume failed: thread not found",
+			want:    false,
+		},
+		{
+			name:    "unrelated process failure",
+			errText: "codex process exited: exit status 2",
+			want:    false,
+		},
+		{name: "empty", errText: "", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := CodexResumeOverflowError(tc.errText); got != tc.want {
+				t.Fatalf("CodexResumeOverflowError(%q) = %v, want %v", tc.errText, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCodexResumeOverflowErrorMatchesLiveFailureText guards the seam between
+// the two halves of MUL-5722's layer 3: in-process the backend detects the
+// overflow from the typed bufio.ErrTooLong, but the daemon classifies it at
+// report time from the error STRING alone. If the wording produced by
+// startOrResumeThread ever drifts from what the predicate matches, the resume
+// pointer silently stops being retired and the permanent-stall bug returns
+// with every test above still green.
+func TestCodexResumeOverflowErrorMatchesLiveFailureText(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
+		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
+		`printf '"}}\n'`+"\n"+
+		`sleep 30`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Cwd:                       t.TempDir(),
+		ResumeSessionID:           "thr_prior",
+		Timeout:                   30 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+
+	if !CodexResumeOverflowError(result.Error) {
+		t.Fatalf("predicate missed the error the backend actually produced: %q", result.Error)
 	}
 }

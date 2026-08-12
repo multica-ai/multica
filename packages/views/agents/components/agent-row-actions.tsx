@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   AlertCircle,
   Copy,
+  ExternalLink,
   MoreHorizontal,
   RotateCcw,
   Square,
@@ -15,6 +16,7 @@ import type { Agent } from "@multica/core/types";
 import type { AgentPresenceDetail } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import {
   AlertDialog,
@@ -34,6 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../../i18n";
+import { AppLink, useIntentNavigate } from "../../navigation";
 
 interface AgentRowActionsProps {
   agent: Agent;
@@ -43,17 +46,17 @@ interface AgentRowActionsProps {
   // the server is still the source of truth, this only hides UI for ops
   // the user can't perform.
   canManage: boolean;
-  // Called when the user picks "Duplicate" — the page opens a Create
-  // dialog pre-populated with this agent's config as a template.
-  onDuplicate: (agent: Agent) => void;
+  // Destination of "Duplicate" — the manual create form, pre-populated with
+  // this agent's config as a template. A href rather than a callback so the
+  // menu item is a real link (modifier-click opens it in a new tab).
+  duplicateHref: string;
 }
 
 /**
  * Per-row dropdown menu for the agents list. The set of actions is derived
  * from (a) the agent's lifecycle state (active vs archived) and (b) the
- * caller's permission level. If no actions apply, the trigger is omitted so
- * the row renders an empty cell (column width still preserved by the parent
- * ListGridCell).
+ * caller's permission level. "Open in new tab" applies to every row, so the
+ * trigger always renders.
  *
  * The row is a plain `<div>` whose whole-row navigation is a mouse `onClick`
  * (see `useRowLink`), not an ancestor `<a>`. The host cell stops click
@@ -64,9 +67,12 @@ export function AgentRowActions({
   agent,
   presence,
   canManage,
-  onDuplicate,
+  duplicateHref,
 }: AgentRowActionsProps) {
   const { t } = useT("agents");
+  const { t: tCommon } = useT("common");
+  const paths = useWorkspacePaths();
+  const intentNavigate = useIntentNavigate();
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
 
@@ -83,10 +89,12 @@ export function AgentRowActions({
   // branches.
   const showStop = canManage && !isArchived && hasActiveWork;
   const showDuplicate = !isArchived; // any workspace member can duplicate
-  const showArchive = canManage && !isArchived;
+  // Multica's built-in agents cannot be archived — the server refuses it, and
+  // the workspace's entry point runs through one. Hide the action rather than
+  // let it fail with a toast.
+  const isSystemAgent = !!agent.system_key;
+  const showArchive = canManage && !isArchived && !isSystemAgent;
   const showRestore = canManage && isArchived;
-
-  const hasAnyAction = showStop || showDuplicate || showArchive || showRestore;
 
   const invalidateAgents = () => {
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
@@ -126,10 +134,6 @@ export function AgentRowActions({
     }
   };
 
-  if (!hasAnyAction) {
-    return null;
-  }
-
   return (
     <>
       <DropdownMenu>
@@ -145,6 +149,23 @@ export function AgentRowActions({
           }
         />
         <DropdownMenuContent align="end" className="w-auto">
+          {/* Same shape as every other entity row menu: an explicit CTA is a
+              foreground open executed through the adapter (an anchor-based
+              item would depend on native activation surviving the menu
+              closing under it). */}
+          <DropdownMenuItem
+            onClick={() =>
+              intentNavigate(
+                paths.agentDetail(agent.id),
+                "foreground-tab",
+                agent.name,
+              )
+            }
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            {tCommon(($) => $.navigation.open_in_new_tab)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           {showStop && (
             <DropdownMenuItem
               onClick={() => setConfirmCancel(true)}
@@ -154,7 +175,7 @@ export function AgentRowActions({
             </DropdownMenuItem>
           )}
           {showDuplicate && (
-            <DropdownMenuItem onClick={() => onDuplicate(agent)}>
+            <DropdownMenuItem render={<AppLink href={duplicateHref} />}>
               <Copy className="h-3.5 w-3.5" />
               {t(($) => $.row_actions.duplicate)}
             </DropdownMenuItem>

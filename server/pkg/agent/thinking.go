@@ -11,8 +11,9 @@ import (
 )
 
 // thinking.go discovers per-model reasoning/effort catalogs for the
-// claude, codex, and opencode backends so the daemon can advertise them to the
-// UI without hard-coding (and getting wrong) what's installed locally.
+// claude, codex, opencode, pi, and kimi backends so the daemon can advertise
+// them to the UI without hard-coding (and getting wrong) what's installed
+// locally.
 //
 // MUL-2339: we deliberately do not flatten Claude's `low|medium|high|
 // xhigh|max` and Codex's `none|minimal|low|medium|high|xhigh|max|ultra`
@@ -374,6 +375,7 @@ func parseCodexModelCatalog(raw []byte) ([]Model, error) {
 		if label == "" {
 			label = m.Slug
 		}
+		label = normalizeCodexModelLabel(m.Slug, label)
 		models = append(models, Model{
 			ID:           m.Slug,
 			Label:        label,
@@ -386,6 +388,19 @@ func parseCodexModelCatalog(raw []byte) ([]Model, error) {
 		models[0].Default = true
 	}
 	return models, nil
+}
+
+func normalizeCodexModelLabel(id, label string) string {
+	switch id {
+	case "gpt-5.6-sol":
+		return "GPT-5.6 Sol"
+	case "gpt-5.6-terra":
+		return "GPT-5.6 Terra"
+	case "gpt-5.6-luna":
+		return "GPT-5.6 Luna"
+	default:
+		return label
+	}
 }
 
 func codexServiceTiersFromDebugModel(m codexDebugModel) []ModelServiceTier {
@@ -543,55 +558,30 @@ func annotateCodebuddyThinkingFromACP(models []Model, sessionResult json.RawMess
 
 // parseACPCodebuddyEffort extracts the effort levels and the advertised default
 // from an ACP session/new result. Returns no levels when the response carries no
-// recognisable thought_level option, which makes the caller fall back to the
-// static set rather than hiding the thinking picker entirely.
+// recognisable effort option, which makes the caller fall back to the static
+// set rather than hiding the thinking picker entirely.
+//
+// This is the shared parser (parseACPEffortOption) plus CodeBuddy's flag
+// overlay. The overlay stays CodeBuddy-specific on purpose: it exists because
+// this backend applies the level through `--effort` rather than over ACP, so
+// its usable vocabulary is narrower than what its session advertises. Every
+// other runtime takes the advertised list verbatim.
 func parseACPCodebuddyEffort(raw json.RawMessage) (levels []string, defaultLevel string) {
-	type acpChoice struct {
-		Value string `json:"value"`
-	}
-	type acpOption struct {
-		ID                string      `json:"id"`
-		Category          string      `json:"category"`
-		CurrentValue      string      `json:"currentValue"`
-		CurrentValueSnake string      `json:"current_value"`
-		Options           []acpChoice `json:"options"`
-	}
-	var resp struct {
-		ConfigOptions      []acpOption `json:"configOptions"`
-		ConfigOptionsSnake []acpOption `json:"config_options"`
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
+	option, ok := parseACPEffortOption(raw)
+	if !ok {
 		return nil, ""
 	}
-	options := resp.ConfigOptions
-	if len(options) == 0 {
-		options = resp.ConfigOptionsSnake
-	}
-	for _, opt := range options {
-		if !strings.EqualFold(strings.TrimSpace(opt.ID), "thought_level") &&
-			!strings.EqualFold(strings.TrimSpace(opt.Category), "thought_level") {
+	for _, choice := range option.Choices {
+		if !codebuddyFlagEffortValues[choice.Value] {
 			continue
 		}
-		seen := map[string]bool{}
-		for _, choice := range opt.Options {
-			value := strings.TrimSpace(choice.Value)
-			if value == "" || seen[value] || !codebuddyFlagEffortValues[value] {
-				continue
-			}
-			seen[value] = true
-			levels = append(levels, value)
-		}
-		current := strings.TrimSpace(opt.CurrentValue)
-		if current == "" {
-			current = strings.TrimSpace(opt.CurrentValueSnake)
-		}
-		// Only echo a default we could actually pass to --effort.
-		if codebuddyFlagEffortValues[current] {
-			defaultLevel = current
-		}
-		return levels, defaultLevel
+		levels = append(levels, choice.Value)
 	}
-	return nil, ""
+	// Only echo a default we could actually pass to --effort.
+	if codebuddyFlagEffortValues[option.CurrentValue] {
+		defaultLevel = option.CurrentValue
+	}
+	return levels, defaultLevel
 }
 
 // ── Shared validation ────────────────────────────────────────────────
@@ -642,7 +632,7 @@ func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, mo
 		return false, err
 	}
 	models := catalog.Models
-	target := model
+	target := modelIDForCapabilityLookup(providerType, model)
 	if target == "" {
 		// Default model = the entry the catalog marks as Default. If no
 		// entry is flagged, fall through to the no-match return; that
@@ -760,22 +750,114 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"medium": true,
 		"high":   true,
 	},
+	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
+	// the exact subset supported by each model before execution.
+	"pi": {
+		"off":     true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
+	},
+}
+
+// thinkingDynamicCatalogProviders are the runtimes whose effort vocabulary is
+// owned by a daemon-local model catalog instead of a fixed enum above. The
+// server accepts any well-formed token for them and lets the daemon's
+// per-model check decide before execution.
+var thinkingDynamicCatalogProviders = map[string]bool{
+	"codex":    true,
+	"opencode": true,
+	"kimi":     true,
+}
+
+// acpCatalogThinkingProviders are the ACP runtimes that discover their effort
+// catalog from `session/new` and apply it with `session/set_config_option`.
+// They behave like the dynamic-catalog providers above — the server accepts a
+// well-formed token and the daemon checks it against the discovered catalog —
+// but they are listed separately because membership means something stricter:
+// the runtime's Execute must actually call applyACPEffortOption.
+//
+// Do NOT add a runtime here just because it speaks ACP. Two things have to be
+// true, and neither is implied by the protocol:
+//
+//   - Its Execute wires up applyACPEffortOption. Copilot is the counterexample
+//     — its discovery runs over ACP but it executes through its own CLI
+//     surface (`--acp` is blocked in copilot.go), so a catalog here would
+//     render a picker with nothing behind it.
+//   - Someone has confirmed the runtime actually threads the setting into its
+//     provider request, from its source or a real run. Advertising is not
+//     evidence — Hermes accepts set_config_option and ignores it, Kimi ≤0.28.1
+//     confirms "on" after being set to "max" — and neither is the read-back in
+//     applyACPEffortOption, which only proves the session reports the new
+//     value. This list is where that offline verification is recorded; the
+//     read-back is runtime diagnostics on top of it.
+var acpCatalogThinkingProviders = map[string]bool{
+	// reasonix v1.21.5: session/new advertises option id `effort` (category
+	// `thought_level`), set_config_option returns the refreshed options, and
+	// the effort reaches the session controller rather than stopping at the
+	// config surface. Its catalog is per model — see
+	// annotateACPThinkingForSessionModel.
+	"reasonix": true,
+}
+
+// usesDynamicThinkingCatalog reports whether a provider's effort vocabulary is
+// owned by a daemon-local catalog rather than a fixed server-side enum.
+func usesDynamicThinkingCatalog(providerType string) bool {
+	return thinkingDynamicCatalogProviders[providerType] || acpCatalogThinkingProviders[providerType]
+}
+
+// ThinkingControlSupported reports whether Multica can deliver a per-agent
+// reasoning effort to this runtime at all. False means the answer to any
+// thinking_level is "no", regardless of the token: the runtime exposes no
+// effort dial on the surface the daemon speaks to it over, so there is nothing
+// to inject and nothing a different spelling would fix.
+//
+// Hermes is the instructive case (MUL-5770). The Hermes CLI does support
+// reasoning effort — `agent.reasoning_effort` in `<HERMES_HOME>/config.yaml`,
+// checked against its own `minimal|low|medium|high|xhigh|max|ultra` set — but
+// Multica drives Hermes over ACP (`hermes acp`), and its ACP adapter does not
+// carry that setting onto the session:
+//   - `session/new` advertises `models` and `modes` only, no `configOptions`,
+//     so there is no effort catalog to discover;
+//   - `session/set_config_option` records the value on the session and never
+//     applies it;
+//   - `acp_adapter/session.py::_make_agent` constructs the agent without
+//     `reasoning_config`, so every ACP session runs at the transport default.
+//
+// Verified against Hermes Agent v0.18.2. Because the config file is read by
+// the CLI/gateway paths but not the ACP one, writing an effort into a per-task
+// HERMES_HOME would be just as inert as accepting the value here — which is
+// why this is a capability gap to report, not a value to pass through. Revisit
+// when Hermes' ACP surface exposes reasoning; the picker then follows from the
+// discovered catalog like every other runtime's.
+func ThinkingControlSupported(providerType string) bool {
+	if usesDynamicThinkingCatalog(providerType) {
+		return true
+	}
+	_, ok := providerThinkingEnums[providerType]
+	return ok
 }
 
 // IsKnownThinkingValue reports whether `value` is a recognised effort
 // token for the given provider. Empty string is always accepted (means
-// "use runtime default"). Unknown providers (no thinking concept) accept
-// only empty; Codex and OpenCode accept well-formed tokens here because their
-// daemon-local catalogs perform the exact per-model check before execution.
+// "use runtime default"). Providers with no reasoning control accept
+// only empty; Codex, OpenCode, Kimi, and the ACP catalog runtimes accept
+// well-formed tokens here because their daemon-local catalogs perform the
+// exact per-model check before execution.
 //
 // This is the cheap synchronous gate the server uses on CreateAgent /
 // UpdateAgent. Unlike ValidateThinkingLevel it does NOT consult the live
-// catalog or per-model subset.
+// catalog or per-model subset. Callers that surface a rejection to a user
+// should ask ThinkingControlSupported first so the message says "this runtime
+// has no reasoning control" instead of implying a bad token.
 func IsKnownThinkingValue(providerType, value string) bool {
 	if value == "" {
 		return true
 	}
-	if providerType == "codex" || providerType == "opencode" {
+	if usesDynamicThinkingCatalog(providerType) {
 		return isValidDynamicThinkingValue(value)
 	}
 	enum, ok := providerThinkingEnums[providerType]

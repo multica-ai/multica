@@ -1,9 +1,12 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,11 +82,19 @@ type fakeBinder struct {
 	lastEnsure   EnsureSessionParams
 	lastAppend   AppendParams
 	lastBind     BindMediaParams
+	pendingFresh int
+	pendingErr   error
 }
 
 func (f *fakeBinder) EnsureSession(_ context.Context, p EnsureSessionParams) (pgtype.UUID, error) {
 	f.lastEnsure = p
 	return f.ensureID, f.ensureErr
+}
+func (f *fakeBinder) MarkPendingFresh(_ context.Context, _ pgtype.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pendingFresh++
+	return f.pendingErr
 }
 func (f *fakeBinder) AppendMessage(_ context.Context, p AppendParams) (AppendResult, error) {
 	f.mu.Lock()
@@ -118,6 +129,11 @@ func (f *fakeBinder) appendedParams() AppendParams {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lastAppend
+}
+func (f *fakeBinder) pendingFreshCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pendingFresh
 }
 
 type fakeAuditor struct {
@@ -242,11 +258,12 @@ func (f *fakeMedia) calls() int {
 }
 
 type fakeIssues struct {
-	called bool
-	params service.IssueCreateParams
-	opts   service.IssueCreateOpts
-	result service.IssueCreateResult
-	err    error
+	called             bool
+	params             service.IssueCreateParams
+	opts               service.IssueCreateOpts
+	result             service.IssueCreateResult
+	err                error
+	attachmentsChanged atomic.Int64
 }
 
 func (f *fakeIssues) Create(_ context.Context, p service.IssueCreateParams, o service.IssueCreateOpts) (service.IssueCreateResult, error) {
@@ -256,20 +273,32 @@ func (f *fakeIssues) Create(_ context.Context, p service.IssueCreateParams, o se
 	return f.result, f.err
 }
 
+func (f *fakeIssues) PublishAttachmentsChanged(context.Context, db.Issue, pgtype.UUID) {
+	f.attachmentsChanged.Add(1)
+}
+
 type fakeTasks struct {
-	mu         sync.Mutex
-	called     bool
-	callCount  int
-	promotions int
-	forceFresh bool
-	initiator  pgtype.UUID
-	err        error
+	mu                  sync.Mutex
+	called              bool
+	callCount           int
+	promotions          int
+	issueTaskPromotions []pgtype.UUID
+	forceFresh          bool
+	initiator           pgtype.UUID
+	err                 error
 }
 
 func (f *fakeTasks) PromoteChannelChatTasksIfMediaReady(_ context.Context, _ pgtype.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.promotions++
+	return nil
+}
+
+func (f *fakeTasks) PromoteDeferredChannelIssueTask(_ context.Context, taskID pgtype.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.issueTaskPromotions = append(f.issueTaskPromotions, taskID)
 	return nil
 }
 
@@ -560,6 +589,9 @@ func TestRouter_Ingested_InTxMark_FinalizeNone(t *testing.T) {
 	if !waitFor(time.Second, func() bool { return len(h.binder.boundMedia().MediaRefs) == 1 }) {
 		t.Fatalf("resolved media not bound after append: %+v", h.binder.boundMedia().MediaRefs)
 	}
+	if got := h.binder.boundMedia(); got.IssueID.Valid || got.Body != "hello" {
+		t.Fatalf("plain chat media target/body = issue:%v body:%q", got.IssueID, got.Body)
+	}
 }
 
 func TestRouter_NoMediaMessageSkipsMediaPipeline(t *testing.T) {
@@ -784,6 +816,12 @@ func TestRouter_IssueCommand_Creates(t *testing.T) {
 	if h.issues.params.OriginType.String != "lark_chat" {
 		t.Fatalf("origin_type must come from the resolver set, got %q", h.issues.params.OriginType.String)
 	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("direct issue create must not also enqueue a chat task, calls=%d", h.tasks.calls())
+	}
+	if h.typing.calls() != 0 {
+		t.Fatalf("terminal issue command must not start a chat processing indicator, calls=%d", h.typing.calls())
+	}
 	if !waitFor(time.Second, func() bool {
 		for _, r := range h.replier.calls() {
 			if r.IssueIdentifier == "MUL-42" && r.IssueTitle == "Fix login" {
@@ -793,6 +831,388 @@ func TestRouter_IssueCommand_Creates(t *testing.T) {
 		return false
 	}) {
 		t.Fatalf("expected an issue-created reply with the workspace-qualified identifier")
+	}
+}
+
+func TestRouter_IssueCommandWithMediaBindsWithoutChatRun(t *testing.T) {
+	h := newHarness(t)
+	issueTaskID := uuidFromString(t, "99999999-9999-4999-8999-999999999999")
+	h.binder.appendResult = AppendResult{
+		MessageID:   uuidFromString(t, "77777777-7777-4777-8777-777777777777"),
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Inspect image",
+		},
+	}
+	h.issues.result = service.IssueCreateResult{
+		Issue: db.Issue{
+			ID: uuidFromString(t, "88888888-8888-4888-8888-888888888888"), Number: 43, Title: "Inspect image",
+		},
+		AssignedTaskID: issueTaskID,
+	}
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 1 }) {
+		t.Fatal("issue command media did not finish binding")
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("media completion must not enqueue a chat task, calls=%d", h.tasks.calls())
+	}
+	if got := h.binder.boundMedia(); len(got.MediaRefs) != 1 || got.IssueID != h.issues.result.Issue.ID || got.Body != "hello" {
+		t.Fatalf("bound issue media = %+v", got)
+	}
+}
+
+func TestRouter_IssueCommand_ActiveDuplicateIsTerminalProductOutcome(t *testing.T) {
+	h := newHarness(t)
+	h.binder.appendResult = AppendResult{
+		MessageID:   uuidFromString(t, "77777777-7777-4777-8777-777777777777"),
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Existing issue",
+		},
+	}
+	duplicate := db.Issue{
+		ID:     uuidFromString(t, "88888888-8888-4888-8888-888888888888"),
+		Number: 44,
+		Title:  "Existing issue",
+	}
+	h.issues.result = service.IssueCreateResult{DuplicateIssue: &duplicate}
+	h.issues.err = service.ErrActiveDuplicate
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("duplicate issue must be a product outcome, got error: %v", err)
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("duplicate command must not enqueue a chat task, calls=%d", h.tasks.calls())
+	}
+	if h.typing.calls() != 0 {
+		t.Fatalf("duplicate command must not start a processing indicator, calls=%d", h.typing.calls())
+	}
+	if !waitFor(time.Second, func() bool {
+		for _, result := range h.replier.calls() {
+			if result.IssueDuplicate && result.IssueID == duplicate.ID && result.IssueIdentifier == "MUL-44" && result.IssueTitle == duplicate.Title {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("duplicate result was not delivered to replier: %+v", h.replier.calls())
+	}
+	if !waitFor(time.Second, func() bool { return h.binder.boundMedia().MessageID.Valid }) {
+		t.Fatalf("duplicate media was not finalized: %+v", h.binder.boundMedia())
+	}
+	if h.media.calls() != 0 {
+		t.Fatalf("duplicate media unexpectedly invoked resolver, calls=%d", h.media.calls())
+	}
+	if got := h.binder.boundMedia().MediaRefs; len(got) != 0 {
+		t.Fatalf("duplicate media unexpectedly persisted refs: %+v", got)
+	}
+	if got := h.binder.boundMedia().IssueID; got.Valid {
+		t.Fatalf("duplicate media unexpectedly targeted existing issue %v", got)
+	}
+	if h.issues.attachmentsChanged.Load() != 0 {
+		t.Fatalf("duplicate media published issue attachment changes = %d, want 0", h.issues.attachmentsChanged.Load())
+	}
+	h.tasks.mu.Lock()
+	issuePromotions := len(h.tasks.issueTaskPromotions)
+	h.tasks.mu.Unlock()
+	if issuePromotions != 0 {
+		t.Fatalf("duplicate media promoted a non-existent issue task, calls=%d", issuePromotions)
+	}
+}
+
+func TestRouter_IssueCommand_ActiveDuplicateFinalizesWithoutWaitingForSessionMedia(t *testing.T) {
+	h := newHarness(t)
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseFirst) }) })
+	h.media.resolve = func(_ context.Context, msg channel.InboundMessage) channel.InboundMessage {
+		if msg.MessageID == "om-first" {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		return msg
+	}
+
+	first := p2pMessage(t)
+	first.MessageID = "om-first"
+	if err := h.router.Handle(context.Background(), first); err != nil {
+		t.Fatalf("first Handle: %v", err)
+	}
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first session media job did not start")
+	}
+
+	duplicateMessageID := uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+	h.binder.appendResult = AppendResult{
+		MessageID:   duplicateMessageID,
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Existing issue",
+		},
+	}
+	duplicate := db.Issue{
+		ID:     uuidFromString(t, "88888888-8888-4888-8888-888888888888"),
+		Number: 44,
+		Title:  "Existing issue",
+	}
+	h.issues.result = service.IssueCreateResult{DuplicateIssue: &duplicate}
+	h.issues.err = service.ErrActiveDuplicate
+
+	second := p2pMessage(t)
+	second.MessageID = "om-duplicate"
+	if err := h.router.Handle(context.Background(), second); err != nil {
+		t.Fatalf("duplicate Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.binder.boundMedia().MessageID == duplicateMessageID }) {
+		t.Fatal("duplicate finalization waited behind the session's active media resolver")
+	}
+	if h.media.calls() != 1 {
+		t.Fatalf("duplicate finalization invoked media resolver, calls=%d", h.media.calls())
+	}
+	if got := h.binder.boundMedia(); len(got.MediaRefs) != 0 || got.IssueID.Valid {
+		t.Fatalf("duplicate finalization persisted media or targeted the issue: %+v", got)
+	}
+
+	releaseOnce.Do(func() { close(releaseFirst) })
+	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 2 }) {
+		t.Fatalf("session media job did not finish after release, promotions=%d", h.tasks.promotionCalls())
+	}
+}
+
+func TestRouter_MediaFinalizationExpiredDeadlineDoesNotLogResolutionFailure(t *testing.T) {
+	h := newHarness(t)
+	var logs bytes.Buffer
+	h.router.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	messageID := uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+
+	h.router.resolveAndBindMedia(
+		ResolverSet{Session: h.binder, Media: h.media},
+		h.inst.inst,
+		h.ident.id,
+		messageID,
+		p2pMessage(t),
+		h.binder.ensureID,
+		db.Issue{},
+		pgtype.Text{},
+		"",
+		pgtype.UUID{},
+		false,
+		time.Now().Add(-time.Second),
+	)
+
+	if got := h.binder.boundMedia(); got.MessageID != messageID || len(got.MediaRefs) != 0 {
+		t.Fatalf("expired finalize-only bind = %+v", got)
+	}
+	if h.media.calls() != 0 {
+		t.Fatalf("finalize-only path invoked media resolver, calls=%d", h.media.calls())
+	}
+	if bytes.Contains(logs.Bytes(), []byte("media resolution incomplete")) {
+		t.Fatalf("finalize-only path logged a media resolution failure: %s", logs.String())
+	}
+}
+
+func TestRouter_IssueCommand_InfrastructureFailureRemainsError(t *testing.T) {
+	h := newHarness(t)
+	h.binder.appendResult = AppendResult{
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Unavailable issue",
+		},
+	}
+	issueErr := errors.New("database unavailable")
+	h.issues.err = issueErr
+
+	err := h.router.Handle(context.Background(), p2pMessage(t))
+	if !errors.Is(err, issueErr) {
+		t.Fatalf("infrastructure failure = %v", err)
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("failed issue command must not enqueue a chat task, calls=%d", h.tasks.calls())
+	}
+	if len(h.replier.calls()) != 0 {
+		t.Fatalf("failed issue command must not emit a success outcome: %+v", h.replier.calls())
+	}
+}
+
+func TestRouter_BareIssueReturnsUsageWithoutCreatingOrResolvingMedia(t *testing.T) {
+	h := newHarness(t)
+	h.binder.parseIssue = true
+	msg := p2pMessage(t)
+	msg.Text = "/issue"
+	msg.CommandText = "/issue"
+	msg.Type = channel.MsgTypeImage
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("bare issue must be a product outcome, got error: %v", err)
+	}
+	if h.issues.called {
+		t.Fatal("bare issue unexpectedly called IssueService.Create")
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("bare issue unexpectedly enqueued a chat task, calls=%d", h.tasks.calls())
+	}
+	if h.media.calls() != 0 {
+		t.Fatalf("bare issue unexpectedly resolved media, calls=%d", h.media.calls())
+	}
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeIssueUsage && calls[0].IssueUsageHadMedia
+	}) {
+		t.Fatalf("issue usage result was not delivered: %+v", h.replier.calls())
+	}
+}
+
+func TestRouter_BareIssueWithoutMediaDoesNotRequestMediaResend(t *testing.T) {
+	h := newHarness(t)
+	h.binder.parseIssue = true
+	h.media.noMedia = true
+	msg := p2pMessage(t)
+	msg.Text = "/issue"
+	msg.CommandText = "/issue"
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("bare issue must be a product outcome, got error: %v", err)
+	}
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeIssueUsage && !calls[0].IssueUsageHadMedia
+	}) {
+		t.Fatalf("plain issue usage result was not delivered: %+v", h.replier.calls())
+	}
+}
+
+func TestRouter_IssueCommand_MediaTargetsCreatedIssue(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		text        string
+		commandText string
+		title       string
+		description string
+	}{
+		{name: "image before command", text: "[Image]\n/issue 解读该架构图", commandText: "/issue 解读该架构图", title: "解读该架构图", description: ""},
+		{name: "command before image", text: "/issue 解读这个架构图\n[Image]", commandText: "/issue 解读这个架构图", title: "解读这个架构图", description: "[Image]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			issueID := uuidFromString(t, "77777777-7777-7777-7777-777777777777")
+			issueTaskID := uuidFromString(t, "88888888-8888-4888-8888-888888888888")
+			h.binder.parseIssue = true
+			h.binder.appendResult = AppendResult{
+				MessageID:   uuidFromString(t, "99999999-9999-4999-8999-999999999999"),
+				DedupMarked: true,
+			}
+			h.issues.result = service.IssueCreateResult{
+				Issue:          db.Issue{ID: issueID, Number: 42, Title: tc.title},
+				AssignedTaskID: issueTaskID,
+			}
+			msg := p2pMessage(t)
+			msg.Type = channel.MsgTypeImage
+			msg.Text = tc.text
+			// DingTalk omits its adapter-generated image marker from the command
+			// source, regardless of whether the image precedes or follows the text.
+			msg.CommandText = tc.commandText
+
+			if err := h.router.Handle(context.Background(), msg); err != nil {
+				t.Fatalf("Handle: %v", err)
+			}
+			if h.issues.params.Title != tc.title {
+				t.Fatalf("created issue title = %q, want %q", h.issues.params.Title, tc.title)
+			}
+			if h.issues.params.Description.String != tc.description || h.issues.params.Description.Valid != (tc.description != "") {
+				t.Fatalf("created issue description = %#v, want %q", h.issues.params.Description, tc.description)
+			}
+			if !waitFor(time.Second, func() bool { return len(h.binder.boundMedia().MediaRefs) == 1 }) {
+				t.Fatalf("resolved media not bound: %+v", h.binder.boundMedia())
+			}
+			if got := h.binder.boundMedia().IssueID; got != issueID {
+				t.Fatalf("media target issue = %v, want %v", got, issueID)
+			}
+			if got := h.binder.boundMedia().IssueDescriptionBase; !got.Valid || got.String != tc.description {
+				t.Fatalf("media description base = %#v, want valid %q", got, tc.description)
+			}
+			if h.issues.opts.AssignedAgentRunFireAt.IsZero() {
+				t.Fatal("media-backed /issue must defer its assigned-agent task")
+			}
+			if !waitFor(time.Second, func() bool {
+				h.tasks.mu.Lock()
+				defer h.tasks.mu.Unlock()
+				return len(h.tasks.issueTaskPromotions) == 1
+			}) {
+				t.Fatal("deferred issue task was not promoted after media binding")
+			}
+			h.tasks.mu.Lock()
+			gotTaskID := h.tasks.issueTaskPromotions[0]
+			h.tasks.mu.Unlock()
+			if gotTaskID != issueTaskID {
+				t.Fatalf("promoted issue task = %v, want %v", gotTaskID, issueTaskID)
+			}
+			if !waitFor(time.Second, func() bool { return h.issues.attachmentsChanged.Load() == 1 }) {
+				t.Fatalf("attachment change events = %d, want 1", h.issues.attachmentsChanged.Load())
+			}
+		})
+	}
+}
+
+func TestRouter_IssueCommand_WithoutMediaKeepsImmediateAssignedTask(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+	h.binder.appendResult = AppendResult{
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Fix broken layout",
+		},
+	}
+	h.issues.result = service.IssueCreateResult{
+		Issue: db.Issue{ID: uuidFromString(t, "77777777-7777-7777-7777-777777777777"), Number: 42, Title: "Fix broken layout"},
+	}
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !h.issues.opts.AssignedAgentRunFireAt.IsZero() {
+		t.Fatalf("text-only /issue unexpectedly deferred its assigned task until %v", h.issues.opts.AssignedAgentRunFireAt)
+	}
+	h.tasks.mu.Lock()
+	promotions := len(h.tasks.issueTaskPromotions)
+	h.tasks.mu.Unlock()
+	if promotions != 0 {
+		t.Fatalf("text-only /issue task promotions = %d, want 0", promotions)
+	}
+}
+
+func TestRouter_IssueCommand_BindFailurePromotesDeferredTaskWithoutAttachmentEvent(t *testing.T) {
+	h := newHarness(t)
+	issueTaskID := uuidFromString(t, "88888888-8888-4888-8888-888888888888")
+	h.binder.appendResult = AppendResult{
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Fix broken layout",
+		},
+	}
+	h.binder.bindErr = errors.New("attachment write failed")
+	h.issues.result = service.IssueCreateResult{
+		Issue:          db.Issue{ID: uuidFromString(t, "77777777-7777-7777-7777-777777777777"), Number: 42, Title: "Fix broken layout"},
+		AssignedTaskID: issueTaskID,
+	}
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool {
+		h.tasks.mu.Lock()
+		defer h.tasks.mu.Unlock()
+		return len(h.tasks.issueTaskPromotions) == 1
+	}) {
+		t.Fatal("failed attachment bind left the issue task deferred")
+	}
+	if h.issues.attachmentsChanged.Load() != 0 {
+		t.Fatalf("attachment change events after failed bind = %d, want 0", h.issues.attachmentsChanged.Load())
 	}
 }
 
@@ -854,6 +1274,42 @@ func TestRouter_FlushArchived_ClearsTyping(t *testing.T) {
 	}
 	if !waitFor(time.Second, func() bool { return h.typing.settledCalls() == 1 }) {
 		t.Fatalf("archived flush must clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
+	}
+}
+
+// TestRouter_FlushSessionArchived_ClearsTypingAndSaysNothing pins what the
+// flush does with the refusal EnqueueChatTask returns when the session was
+// archived while the debounce window was still open. Two things have to be
+// true, and the second is the one worth a test: the typing indicator must be
+// cleared here (no task will exist, so the bus-driven clear can never fire),
+// and nothing may be posted back — the archive deleted the channel binding
+// before this flush ran, so a notice would be addressed to a room that is no
+// longer bound to this conversation. The error is not one of the two the
+// switch names, so it falls to the default log branch and says nothing, which
+// is the behaviour this test holds in place.
+func TestRouter_FlushSessionArchived_ClearsTypingAndSaysNothing(t *testing.T) {
+	h := newHarness(t)
+	h.tasks.err = service.ErrChatSessionArchived
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.typing.settledCalls() == 1 }) {
+		t.Fatalf("an archived-session flush must clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
+	}
+	// The ingest ACK is the only reply this message is entitled to; anything
+	// else came from the flush. Waiting the window out is the assertion —
+	// waitFor returns false only if it never happened.
+	spoke := func() (Result, bool) {
+		for _, r := range h.replier.calls() {
+			if r.Outcome != OutcomeIngested {
+				return r, true
+			}
+		}
+		return Result{}, false
+	}
+	if waitFor(200*time.Millisecond, func() bool { _, ok := spoke(); return ok }) {
+		reply, _ := spoke()
+		t.Fatalf("archived-session flush posted %q into a room the archive had already unbound", reply.Outcome)
 	}
 }
 
@@ -996,7 +1452,7 @@ func TestRouter_AdapterFreshBodyIsNotParsedAgain(t *testing.T) {
 	}
 }
 
-func TestRouter_BareFreshSkipsEmptyTurnAndForcesNextRealMessage(t *testing.T) {
+func TestRouter_BareFreshPersistsIntentAndRepliesWithoutEmptyTurn(t *testing.T) {
 	h := newHarness(t)
 	h.media.noMedia = true
 
@@ -1017,24 +1473,14 @@ func TestRouter_BareFreshSkipsEmptyTurnAndForcesNextRealMessage(t *testing.T) {
 	if h.dedup.marks() != 1 {
 		t.Fatalf("bare fresh dedup marks = %d, want 1", h.dedup.marks())
 	}
-
-	next := p2pMessage(t)
-	next.MessageID = "om-2"
-	next.Text = "start the new topic"
-	if err := h.router.Handle(context.Background(), next); err != nil {
-		t.Fatalf("next Handle: %v", err)
+	if h.binder.pendingFreshCalls() != 1 {
+		t.Fatalf("pending fresh writes = %d, want 1", h.binder.pendingFreshCalls())
 	}
-	if !h.tasks.freshArg() {
-		t.Fatal("the next real message must consume the pending ForceFresh intent")
-	}
-
-	again := p2pMessage(t)
-	again.MessageID = "om-3"
-	if err := h.router.Handle(context.Background(), again); err != nil {
-		t.Fatalf("again Handle: %v", err)
-	}
-	if h.tasks.freshArg() {
-		t.Fatal("the pending ForceFresh intent must be consumed exactly once")
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeFreshPending
+	}) {
+		t.Fatalf("fresh-pending result was not delivered: %+v", h.replier.calls())
 	}
 }
 
@@ -1055,38 +1501,23 @@ func TestRouter_AdapterBareFreshUsesOriginalCommandText(t *testing.T) {
 	if h.tasks.wasCalled() {
 		t.Fatal("adapter-enriched bare fresh must not schedule an empty agent run")
 	}
+	if h.binder.pendingFreshCalls() != 1 {
+		t.Fatalf("pending fresh writes = %d, want 1", h.binder.pendingFreshCalls())
+	}
 }
 
-func TestRouter_BareFreshSurvivesFailedEnqueue(t *testing.T) {
+func TestRouter_BareFreshPersistenceFailureDoesNotAcknowledge(t *testing.T) {
 	h := newHarness(t)
 	h.media.noMedia = true
+	h.binder.pendingErr = errors.New("database unavailable")
 
 	reset := p2pMessage(t)
 	reset.Text = "/new"
-	if err := h.router.Handle(context.Background(), reset); err != nil {
-		t.Fatalf("bare fresh Handle: %v", err)
+	if err := h.router.Handle(context.Background(), reset); err == nil {
+		t.Fatal("bare fresh must fail when its durable intent cannot be stored")
 	}
-
-	h.tasks.err = service.ErrChatTaskAgentNoRuntime
-	failed := p2pMessage(t)
-	failed.MessageID = "om-2"
-	failed.Text = "first attempt while offline"
-	if err := h.router.Handle(context.Background(), failed); err != nil {
-		t.Fatalf("failed enqueue Handle: %v", err)
-	}
-	if !h.tasks.freshArg() {
-		t.Fatal("failed enqueue must still receive the pending ForceFresh intent")
-	}
-
-	h.tasks.err = nil
-	next := p2pMessage(t)
-	next.MessageID = "om-3"
-	next.Text = "retry after runtime is available"
-	if err := h.router.Handle(context.Background(), next); err != nil {
-		t.Fatalf("retry Handle: %v", err)
-	}
-	if !h.tasks.freshArg() {
-		t.Fatal("pending ForceFresh intent must survive until a run queues")
+	if len(h.replier.calls()) != 0 {
+		t.Fatalf("failed persistence emitted a success reply: %+v", h.replier.calls())
 	}
 }
 

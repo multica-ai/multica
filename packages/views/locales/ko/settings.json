@@ -1,7 +1,7 @@
 {
   "quick_actions": {
     "title": "퀵 액션",
-    "description": "실행할 에이전트와 프롬프트를 미리 설정한 뒤, 어떤 이슈의 사이드바에서든 한 번의 클릭으로 실행합니다.",
+    "description": "실행할 에이전트와 프롬프트를 미리 설정한 뒤, 어떤 태스크의 사이드바에서든 한 번의 클릭으로 실행합니다.",
     "add": "퀵 액션 만들기",
     "search_placeholder": "퀵 액션 검색",
     "loading": "퀵 액션을 불러오는 중…",
@@ -35,16 +35,16 @@
     "used_count": "{{count}}회 사용",
     "create_title": "퀵 액션 만들기",
     "edit_title": "퀵 액션 편집",
-    "dialog_description": "@멘션처럼 이슈 댓글로 실행됩니다.",
+    "dialog_description": "@멘션처럼 태스크 댓글로 실행됩니다.",
     "field_name": "이름",
     "field_name_placeholder": "코드 리뷰",
     "field_target": "실행자",
     "field_prompt": "프롬프트",
-    "field_prompt_placeholder": "이 이슈에 연결된 코드를 검토하고 정확성과 예외 상황을 중점적으로 확인하세요.",
-    "prompt_hint": "작성한 그대로 전달됩니다. 에이전트는 이슈를 이미 읽을 수 있습니다.",
-    "template_not_supported": "변수는 아직 지원되지 않습니다. {{token}}을(를) 제거하세요. 에이전트는 이미 이 이슈를 읽습니다.",
+    "field_prompt_placeholder": "이 태스크에 연결된 코드를 검토하고 정확성과 예외 상황을 중점적으로 확인하세요.",
+    "prompt_hint": "작성한 그대로 전달됩니다. 에이전트는 태스크를 이미 읽을 수 있습니다.",
+    "template_not_supported": "변수는 아직 지원되지 않습니다. {{token}}을(를) 제거하세요. 에이전트는 이미 이 태스크를 읽습니다.",
     "delete_title": "이 퀵 액션을 삭제할까요?",
-    "delete_description": "모든 이슈 사이드바에서 사라집니다. 과거 실행 기록은 실행 로그에 남습니다. 다시 쓸 수 있다면 보관을 선택하세요."
+    "delete_description": "모든 태스크 사이드바에서 사라집니다. 과거 실행 기록은 실행 로그에 남습니다. 다시 쓸 수 있다면 보관을 선택하세요."
   },
   "auto_save": {
     "saving": "저장 중…",
@@ -76,11 +76,7 @@
     },
     "sticky_comment_bar": {
       "title": "댓글 입력창 고정",
-      "hint": "이슈 페이지를 스크롤할 때 댓글 입력창을 항상 하단에 고정합니다."
-    },
-    "issue_link_new_tab": {
-      "title": "이슈 링크를 새 탭에서 열기",
-      "hint": "설명, 댓글, 채팅의 이슈 링크를 현재 페이지에서 이동하지 않고 새 탭에서 엽니다."
+      "hint": "태스크 페이지를 스크롤할 때 댓글 입력창을 항상 하단에 고정합니다."
     }
   },
   "shortcuts": {
@@ -114,15 +110,18 @@
     },
     "actions": {
       "openSearch": { "label": "검색 열기", "description": "어디서나 검색하고 명령을 실행합니다." },
-      "createIssue": { "label": "Issue 만들기", "description": "선호하는 issue 만들기 흐름을 엽니다." },
+      "createIssue": { "label": "태스크 만들기", "description": "선호하는 태스크 만들기 흐름을 엽니다." },
       "toggleSidebar": { "label": "사이드바 전환", "description": "기본 사이드바를 표시하거나 숨깁니다." },
       "toggleChat": { "label": "채팅 창 전환", "description": "플로팅 채팅 창을 열거나 닫습니다. 열면 메시지 입력란에 포커스합니다." },
-      "findInIssue": { "label": "Issue에서 찾기", "description": "열린 issue 상세 내용에서 검색합니다." },
-      "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 이슈를 만듭니다." },
+      "findInIssue": { "label": "태스크에서 찾기", "description": "열린 태스크 상세 내용에서 검색합니다." },
+      "openThreadNav": { "label": "스레드 내비게이터 열기", "description": "열린 태스크의 댓글 스레드를 나열하고 검색해 이동합니다." },
+      "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 태스크를 만듭니다." },
+      "goBack": { "label": "뒤로 가기", "description": "브라우저처럼 기록을 따라 뒤로 이동합니다." },
+      "goForward": { "label": "앞으로 가기", "description": "브라우저처럼 기록을 따라 앞으로 이동합니다." },
       "goInbox": { "label": "받은 편지함으로 이동", "description": "워크스페이스 받은 편지함을 엽니다." },
       "goChat": { "label": "채팅으로 이동", "description": "워크스페이스 채팅을 엽니다." },
-      "goMyIssues": { "label": "내 Issues로 이동", "description": "나에게 할당된 issue를 엽니다." },
-      "goIssues": { "label": "Issues로 이동", "description": "Issue 목록을 엽니다." },
+      "goMyIssues": { "label": "내 태스크로 이동", "description": "나에게 할당된 태스크를 엽니다." },
+      "goIssues": { "label": "태스크로 이동", "description": "태스크 목록을 엽니다." },
       "goProjects": { "label": "프로젝트로 이동", "description": "프로젝트 목록을 엽니다." },
       "goAutopilots": { "label": "자동화로 이동", "description": "워크스페이스 자동화를 엽니다." },
       "goAgents": { "label": "에이전트로 이동", "description": "에이전트 목록을 엽니다." },
@@ -171,7 +170,7 @@
       "profile": "프로필",
       "preferences": "환경설정",
       "shortcuts": "단축키",
-      "issue": "이슈",
+      "issue": "태스크",
       "chat": "채팅",
       "notifications": "알림",
       "tokens": "API 토큰",
@@ -188,7 +187,7 @@
   },
   "properties": {
     "title": "속성",
-    "description": "이 워크스페이스의 Issue에 타입이 있는 사용자 지정 속성을 정의합니다. 값은 각 Issue에 설정되며 에이전트가 읽고 쓸 수 있습니다.",
+    "description": "이 워크스페이스의 태스크에 타입이 있는 사용자 지정 속성을 정의합니다. 값은 각 태스크에 설정되며 에이전트가 읽고 쓸 수 있습니다.",
     "search_placeholder": "이름으로 필터...",
     "new_property": "새 속성",
     "show_archived": "보관된 항목 표시",
@@ -199,7 +198,7 @@
       "usage": "사용",
       "updated": "업데이트"
     },
-    "usage_count_other": "{{count}}개 Issue",
+    "usage_count_other": "{{count}}개 태스크",
     "loading": "속성을 불러오는 중...",
     "empty": "아직 속성이 없습니다",
     "empty_hint": "Severity, Environment 같은 타입 필드를 만들어 보세요. 에이전트가 검증과 함께 읽고 씁니다.",
@@ -245,7 +244,7 @@
     },
     "archive_dialog": {
       "title": "속성을 보관할까요?",
-      "description": "\"{{name}}\"이(가) 선택기와 필터에서 숨겨집니다. Issue의 기존 값은 유지되며 나중에 복원할 수 있습니다.",
+      "description": "\"{{name}}\"이(가) 선택기와 필터에서 숨겨집니다. 태스크의 기존 값은 유지되며 나중에 복원할 수 있습니다.",
       "cancel": "취소",
       "confirm": "속성 보관",
       "failed": "속성을 보관하지 못했습니다"
@@ -253,9 +252,9 @@
   },
   "labels": {
     "title": "레이블",
-    "description": "이 워크스페이스의 이슈, 스킬 레이블을 각각 관리합니다.",
+    "description": "이 워크스페이스의 태스크, 스킬 레이블을 각각 관리합니다.",
     "scopes": {
-      "issue": "이슈",
+      "issue": "태스크",
       "skill": "스킬"
     },
     "search_placeholder": "이름 또는 설명으로 필터링...",
@@ -315,24 +314,28 @@
   },
   "notifications": {
     "title": "인박스 알림",
-    "description": "어떤 이벤트가 인박스 알림을 만들지 제어합니다. 음소거한 이벤트 유형은 조용히 걸러지지만, 이슈를 직접 열면 계속 볼 수 있습니다.",
+    "description": "어떤 이벤트가 인박스 알림을 만들지 제어합니다. 음소거한 이벤트 유형은 조용히 걸러지지만, 태스크를 직접 열면 계속 볼 수 있습니다.",
     "toast_failed": "알림 설정을 업데이트하지 못했습니다",
     "groups": {
       "assignments": {
         "label": "할당",
-        "description": "이슈에 할당되거나 할당 해제될 때"
+        "description": "태스크에 할당되거나 할당 해제될 때"
       },
       "status_changes": {
         "label": "상태 변경",
-        "description": "팔로우 중인 이슈의 상태가 바뀔 때(예: 할 일, 진행 중, 완료)"
+        "description": "팔로우 중인 태스크의 상태가 바뀔 때(예: 할 일, 진행 중, 완료)"
       },
       "comments": {
-        "label": "댓글 및 멘션",
-        "description": "팔로우 중인 이슈에 새 댓글이 달리거나 누군가 나를 @멘션할 때"
+        "label": "댓글",
+        "description": "팔로우 중인 태스크에 새 댓글이 달릴 때"
+      },
+      "mentions": {
+        "label": "멘션",
+        "description": "누군가 나를 @멘션할 때(@all, @squad 포함)"
       },
       "updates": {
         "label": "우선순위 및 마감일",
-        "description": "팔로우 중인 이슈의 우선순위나 마감일이 바뀔 때"
+        "description": "팔로우 중인 태스크의 우선순위나 마감일이 바뀔 때"
       },
       "agent_activity": {
         "label": "에이전트 활동",
@@ -410,10 +413,10 @@
     "context_label": "맥락",
     "context_placeholder": "이 워크스페이스에서 작업하는 AI 에이전트가 알아야 할 배경 정보와 맥락",
     "slug_label": "슬러그",
-    "issue_prefix_label": "이슈 접두사",
-    "issue_prefix_hint": "{{example}} 같은 이슈 번호에 사용됩니다.",
-    "prefix_confirm_title": "이슈 접두사를 변경할까요?",
-    "prefix_confirm_description": "모든 이슈 번호가 {{oldPrefix}}-N에서 {{newPrefix}}-N으로 다시 매겨집니다. Pull request 제목, 브랜치 이름, 문서와 채팅의 링크처럼 {{oldPrefix}}-N을 사용하는 외부 참조는 더 이상 연결되지 않습니다.",
+    "issue_prefix_label": "태스크 접두사",
+    "issue_prefix_hint": "{{example}} 같은 태스크 번호에 사용됩니다.",
+    "prefix_confirm_title": "태스크 접두사를 변경할까요?",
+    "prefix_confirm_description": "모든 태스크 번호가 {{oldPrefix}}-N에서 {{newPrefix}}-N으로 다시 매겨집니다. Pull request 제목, 브랜치 이름, 문서와 채팅의 링크처럼 {{oldPrefix}}-N을 사용하는 외부 참조는 더 이상 연결되지 않습니다.",
     "save": "저장",
     "saving": "저장하는 중...",
     "manage_hint": "관리자와 소유자만 워크스페이스 설정을 업데이트할 수 있습니다.",
@@ -439,7 +442,7 @@
   },
   "delete_workspace_dialog": {
     "title": "워크스페이스 삭제",
-    "description": "이 작업은 되돌릴 수 없습니다. 모든 이슈, 에이전트, 데이터가 영구 삭제됩니다.",
+    "description": "이 작업은 되돌릴 수 없습니다. 모든 태스크, 에이전트, 데이터가 영구 삭제됩니다.",
     "type_to_confirm_prefix": "확인하려면 아래에",
     "type_to_confirm_suffix": "을(를) 입력하세요.",
     "cancel": "취소",
@@ -458,8 +461,8 @@
     "master_description_off": "GitHub 기능이 꺼져 있습니다. PR 사이드바, Co-authored-by 트레일러, 자동 연결이 일시 중지됩니다. 백엔드 데이터는 삭제되지 않습니다.",
     "section_connection": "연결",
     "connection_title": "GitHub App",
-    "connection_description_prefix": "이슈를 Pull request에 자동으로 연결합니다. 브랜치, 제목 또는 본문에",
-    "connection_description_suffix": "이(가) 있는 PR이 병합되면 해당 이슈가",
+    "connection_description_prefix": "태스크를 Pull request에 자동으로 연결합니다. 브랜치, 제목 또는 본문에",
+    "connection_description_suffix": "이(가) 있는 PR이 병합되면 해당 태스크가",
     "connection_description_done": "완료",
     "connection_identifier_example": "MUL-123",
     "connected_to": "{{login}}에 연결됨",
@@ -483,12 +486,12 @@
     "toast_disconnected": "GitHub App 연결을 해제했습니다",
     "section_features": "기능",
     "feature_pr_sidebar_label": "Pull request 사이드바",
-    "feature_pr_sidebar_description": "연결된 Pull request를 이슈 상세 사이드바에 표시합니다.",
+    "feature_pr_sidebar_description": "연결된 Pull request를 태스크 상세 사이드바에 표시합니다.",
     "feature_co_author_label": "Co-authored-by 트레일러",
     "feature_co_author_description_prefix": "에이전트가 작성한 커밋에",
     "feature_co_author_description_suffix": "을(를) 추가합니다.",
-    "feature_auto_link_label": "이슈와 PR 자동 연결",
-    "feature_auto_link_description": "PR 제목, 본문, 브랜치 이름을 이슈 식별자와 대조해 자동으로 연결합니다.",
+    "feature_auto_link_label": "태스크와 PR 자동 연결",
+    "feature_auto_link_description": "PR 제목, 본문, 브랜치 이름을 태스크 식별자와 대조해 자동으로 연결합니다.",
     "section_repositories": "저장소",
     "repositories_shortcut_label": "저장소 URL은 저장소 탭에 있습니다",
     "repositories_shortcut_link": "저장소 관리 →",
@@ -496,7 +499,7 @@
   },
   "vcs": {
     "section_title": "Git providers (self-hosted)",
-    "page_description": "Connect a self-hosted Forgejo, Gitea, or GitLab instance to mirror pull requests onto issues. Each connection uses an access token; agents push branches and open PRs using the runtime's own Git credentials.",
+    "page_description": "셀프 호스팅 Forgejo, Gitea, GitLab 인스턴스를 연결해 Pull request를 태스크에 미러링합니다. 연결마다 액세스 토큰을 사용하며, 에이전트는 런타임 자체의 Git 자격 증명으로 브랜치를 푸시하고 PR을 엽니다.",
     "connect_title": "Connect a provider instance",
     "connected_as": "Connected as {{login}}",
     "form_provider_label": "Provider",
@@ -519,7 +522,7 @@
     "copied": "Copied to clipboard",
     "copy_failed": "Could not copy",
     "disconnect_confirm_title": "Disconnect this provider?",
-    "disconnect_confirm_description": "Mirrored pull requests and their issue links for this connection will be removed. This cannot be undone.",
+    "disconnect_confirm_description": "이 연결에서 미러링된 Pull request와 태스크 연결이 제거됩니다. 되돌릴 수 없습니다.",
     "disconnect_confirm_cancel": "Cancel",
     "disconnect_confirm_action": "Disconnect",
     "toast_connected": "Provider connected",
@@ -636,13 +639,13 @@
       },
       "member": {
         "label": "멤버",
-        "description": "이슈 생성 및 작업"
+        "description": "태스크 생성 및 작업"
       }
     }
   },
   "lark": {
     "section_title": "Lark",
-    "page_description": "각 Multica 에이전트를 Lark(飞书) PersonalAgent 봇에 연결하세요. 멤버는 봇과 1:1로 대화하거나, 그룹에서 @ 멘션하거나, /issue 를 입력해 새 Multica 이슈를 만들 수 있습니다.",
+    "page_description": "각 Multica 에이전트를 Lark(飞书) PersonalAgent 봇에 연결하세요. 멤버는 봇과 1:1로 대화하거나, 그룹에서 @ 멘션하거나, /issue 를 입력해 새 Multica 태스크를 만들 수 있습니다.",
     "not_enabled_title": "Lark 연동이 비활성화되어 있어요",
     "not_enabled_description_prefix": "Lark 봇 설치를 활성화하려면 서버에",
     "not_enabled_description_suffix": "을(를) 설정하세요.",
@@ -747,7 +750,7 @@
   },
   "slack": {
     "section_title": "Slack",
-    "page_description": "각 Multica 에이전트를 전용 Slack 봇에 연결하세요. 멤버는 봇과 1:1로 대화하거나, 채널에서 @ 멘션하거나, /issue 를 입력해 새 Multica 이슈를 만들 수 있습니다.",
+    "page_description": "각 Multica 에이전트를 전용 Slack 봇에 연결하세요. 멤버는 봇과 1:1로 대화하거나, 채널에서 @ 멘션하거나, /issue 를 입력해 새 Multica 태스크를 만들 수 있습니다.",
     "not_enabled_title": "Slack 연동이 활성화되지 않았어요",
     "not_enabled_description_prefix": "서버에서",
     "not_enabled_description_suffix": "를 설정하면 Slack 봇 설치가 활성화됩니다.",
@@ -787,5 +790,91 @@
     "byo_cancel": "취소",
     "byo_success_toast": "Slack 봇을 연결했어요",
     "byo_failed_toast": "Slack 봇을 연결하지 못했어요"
+  },
+  "dingtalk": {
+    "section_title": "DingTalk",
+    "page_description": "각 Multica 에이전트를 전용 DingTalk 로봇에 연결하세요. 멤버는 봇과 1:1로 대화하거나, 그룹에서 @ 멘션하거나, /issue 를 입력해 새 Multica 이슈를 만들 수 있습니다.",
+    "not_enabled_title": "DingTalk 연동이 활성화되지 않았어요",
+    "not_enabled_description_prefix": "서버에서",
+    "not_enabled_description_suffix": "를 설정하면 DingTalk 로봇 설치가 활성화됩니다.",
+    "not_enabled_self_host_hint": "셀프 호스팅: 자세한 내용은 프로젝트 README를 참고하세요.",
+    "connected_bots": "연결된 봇",
+    "loading": "불러오는 중…",
+    "empty_title": "아직 연결된 봇이 없어요",
+    "empty_description_prefix": "이 워크스페이스의 에이전트를 열고",
+    "empty_description_cta": "DingTalk 연결",
+    "empty_description_suffix": "을(를) 클릭해 로봇을 설치하세요.",
+    "revoked_badge": "해제됨",
+    "installed_at_label": "{{when}}에 설치됨",
+    "disconnect": "연결 해제",
+    "disconnecting": "연결 해제 중…",
+    "disconnect_confirm_title": "이 DingTalk 봇을 연결 해제할까요?",
+    "disconnect_confirm_description": "봇이 이 워크스페이스의 DingTalk 메시지를 더 이상 받지 않습니다. 설치 기록은 감사를 위해 보관되며, 나중에 봇을 다시 연결할 수 있어요.",
+    "disconnect_confirm_cancel": "취소",
+    "toast_disconnected": "DingTalk 봇을 연결 해제했어요",
+    "toast_disconnect_failed": "연결 해제에 실패했어요",
+    "bind_button": "DingTalk 연결",
+    "bind_button_title": "{{agent}}을(를) DingTalk 봇에 연결",
+    "agent_bot_connected_label": "DingTalk에 연결됨",
+    "agent_bot_disconnect_tooltip": "이 DingTalk 봇을 에이전트에서 연결 해제합니다. 봇이 DingTalk 메시지를 받지 않게 됩니다.",
+    "byo_dialog_title": "DingTalk 봇 연결",
+    "byo_docs_link": "Step-by-step: Multica 에이전트를 DingTalk에 연결하기",
+    "byo_appkey_label": "AppKey(client id)",
+    "byo_appsecret_label": "AppSecret(client secret)",
+    "byo_submit": "연결",
+    "byo_submitting": "연결 중…",
+    "byo_cancel": "취소",
+    "byo_success_toast": "DingTalk 봇을 연결했어요",
+    "byo_failed_toast": "DingTalk 봇을 연결하지 못했어요"
+  },
+  "wecom": {
+    "section_title": "WeCom",
+    "page_description": "각 Multica 에이전트를 전용 WeCom(企业微信) 스마트봇에 연결합니다. 멤버는 봇에게 DM을 보내고, 그룹에서 @ 멘션하고, /issue를 입력해 Multica 태스크를 만들 수 있어요. WebSocket 롱 커넥션으로 응답하므로 공개 콜백 URL이 필요 없어요.",
+    "not_enabled_title": "WeCom 통합이 활성화되지 않았어요",
+    "not_enabled_description_prefix": "서버에서",
+    "not_enabled_description_suffix": "를 설정하면 WeCom 스마트봇 설치가 활성화돼요.",
+    "not_enabled_self_host_hint": "셀프호스팅 사용자는 프로젝트 README를 참고해 주세요.",
+    "preview_title": "WeCom 설치는 곧 제공됩니다",
+    "preview_description": "저장 시 암호화 키는 설정되어 있지만, 이 배포에서는 아직 WeCom 설치가 완전히 활성화되지 않았어요.",
+    "connected_bots": "연결된 봇",
+    "loading": "불러오는 중…",
+    "empty_title": "아직 연결된 봇이 없어요",
+    "empty_description_prefix": "이 워크스페이스에서 에이전트를 열고",
+    "empty_description_cta": "WeCom 연결",
+    "empty_description_suffix": "을 눌러 스마트봇을 설치하세요.",
+    "revoked_badge": "해지됨",
+    "bot_id_label": "Bot ID: {{botId}}",
+    "disconnect": "연결 해제",
+    "disconnecting": "해제 중…",
+    "disconnect_confirm_title": "이 WeCom 봇의 연결을 해제할까요?",
+    "disconnect_confirm_description": "봇이 이 워크스페이스의 WeCom 메시지를 더 이상 받지 않아요. 감사 기록은 유지되며 같은 에이전트에서 다시 설치할 수 있어요.",
+    "disconnect_confirm_cancel": "취소",
+    "toast_disconnected": "WeCom 봇의 연결을 해제했어요",
+    "toast_disconnect_failed": "연결 해제 실패",
+    "bind_button": "WeCom 연결",
+    "bind_button_title": "{{agent}}을(를) WeCom 스마트봇에 연결",
+    "agent_bot_connected_label": "WeCom에 연결됨",
+    "agent_bot_connected_label_with_id": "WeCom에 연결됨 — {{botId}}",
+    "agent_bot_disconnect_tooltip": "이 스마트봇을 에이전트에서 해제합니다. WeCom 메시지를 더 이상 받지 않아요.",
+    "byo_dialog_title": "WeCom 스마트봇 연결",
+    "byo_bot_id_label": "Bot ID",
+    "byo_bot_id_placeholder": "예: aibot_xxxxxxxxxxxxxxxx",
+    "byo_secret_label": "롱 커넥션 Secret",
+    "byo_secret_placeholder": "관리자 콘솔에 한 번만 표시되는 Secret을 붙여넣으세요",
+    "byo_bot_name_label": "채팅에 표시되는 봇 이름 (선택)",
+    "byo_bot_name_placeholder": "예: Multica Bot",
+    "byo_bot_name_hint": "이름에 공백이 있을 때만 필요해요. 봇이 자기 @멘션과 뒤에 입력된 명령어를 구분하는 데 씁니다. 나중에 바꾸려면(WeCom 콘솔에서 이름을 바꾼 경우 포함) 연결을 끊었다가 다시 연결해 주세요.",
+    "byo_submit": "연결",
+    "byo_submitting": "연결 중…",
+    "byo_cancel": "취소",
+    "byo_success_toast": "WeCom 봇을 연결했어요",
+    "byo_conflict_same_workspace": "이 봇은 이미 이 워크스페이스의 다른 에이전트에 연결되어 있어요. 거기서 먼저 연결을 해제한 뒤 여기에 연결해 주세요.",
+    "byo_conflict_archived_agent": "이 봇은 이 워크스페이스의 보관된 에이전트에 연결되어 있어요. 그 에이전트를 복원하거나 봇 연결을 해제한 뒤 연결해 주세요.",
+    "byo_conflict_other_workspace": "이 봇은 이미 다른 Multica 워크스페이스에 연결되어 있어요. 거기서 먼저 연결을 해제한 뒤 연결해 주세요.",
+    "byo_rejected": "봇을 연결하지 못했어요. WeCom 관리 콘솔의 Bot ID와 시크릿, 그리고 장기 연결이 켜진 스마트 봇인지 확인해 주세요.",
+    "byo_credentials_rejected": "WeCom이 이 Bot ID와 시크릿을 거부했어요. WeCom 관리 콘솔에서 두 값을 확인하고, 장기 연결이 켜진 스마트 봇인지도 확인해 주세요.",
+    "byo_credentials_unverifiable": "WeCom에 연결하지 못해 이 봇을 확인할 수 없었어요. 인증 정보는 변경되지 않았어요. 잠시 후 다시 시도해 주세요.",
+    "byo_install_failed": "봇을 저장하지 못했어요. 저희 쪽 문제입니다. 인증 정보는 변경되지 않았어요. 다시 시도해 보시고, 계속 실패하면 지원팀에 문의해 주세요.",
+    "byo_failed_toast": "WeCom 봇을 연결하지 못했어요"
   }
 }
