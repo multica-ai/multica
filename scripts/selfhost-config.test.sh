@@ -35,7 +35,9 @@ sed 's/^FRONTEND_PORT=.*/FRONTEND_PORT=3100/' .env.example >"$tmp_env"
 printf '\nBACKEND_PORT=9100\nSMTP_FROM_EMAIL=multica@example.com\n' >>"$tmp_env"
 
 config="$(
-  docker compose \
+  LOCAL_UPLOAD_DIR=/var/lib/multica/uploads \
+  LOCAL_UPLOAD_BASE_URL=https://uploads.example.com \
+    docker compose \
     --env-file "$tmp_env" \
     -f docker-compose.selfhost.yml \
     config
@@ -47,6 +49,8 @@ require_config "$config" 'FRONTEND_ORIGIN: http://localhost:3100'
 require_config "$config" 'GOOGLE_REDIRECT_URI: http://localhost:3100/auth/callback'
 require_config "$config" 'MULTICA_APP_URL: http://localhost:3100'
 require_config "$config" 'SMTP_FROM_EMAIL: multica@example.com'
+require_config "$config" 'LOCAL_UPLOAD_DIR: /var/lib/multica/uploads'
+require_config "$config" 'LOCAL_UPLOAD_BASE_URL: https://uploads.example.com'
 
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then
