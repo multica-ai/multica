@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS recruitment_inbox_event_message_key_idx;

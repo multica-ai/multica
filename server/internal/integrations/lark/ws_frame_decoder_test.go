@@ -51,6 +51,9 @@ func TestLarkJSONFrameDecoderTextMessageInP2P(t *testing.T) {
 	if msg.SenderOpenID != "ou_user" {
 		t.Errorf("SenderOpenID = %q", msg.SenderOpenID)
 	}
+	if msg.SenderType != "user" {
+		t.Errorf("SenderType = %q", msg.SenderType)
+	}
 	if msg.Body != "hello" {
 		t.Errorf("Body = %q", msg.Body)
 	}

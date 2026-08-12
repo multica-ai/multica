@@ -138,6 +138,13 @@ type WSConnectorConfig struct {
 
 	// Logger optional; defaults to slog.Default.
 	Logger *slog.Logger
+
+	// OnConnected / OnDisconnected are optional lifecycle hooks for dedicated
+	// services that expose transport readiness. Hooks must return quickly and
+	// must not inspect message content. OnDisconnected runs exactly once for
+	// every successfully-dialed connection, on every exit path.
+	OnConnected    func()
+	OnDisconnected func()
 }
 
 func (c WSConnectorConfig) withDefaults() WSConnectorConfig {
@@ -214,6 +221,12 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 	conn, _, err := c.cfg.Dialer.DialContext(ctx, endpoint.URL, endpoint.Headers)
 	if err != nil {
 		return fmt.Errorf("dial ws: %w", err)
+	}
+	if c.cfg.OnConnected != nil {
+		c.cfg.OnConnected()
+	}
+	if c.cfg.OnDisconnected != nil {
+		defer c.cfg.OnDisconnected()
 	}
 
 	// runCtx fans out cancellation to the watchdog + ping goroutines

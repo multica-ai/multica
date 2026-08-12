@@ -148,6 +148,31 @@ backend:
   tolerations: []
 
 # -----------------------------------------------------------------------------
+# Private recruitment inbox processor (disabled by default)
+# -----------------------------------------------------------------------------
+recruitmentInbox:
+  # Enabling creates one standalone always-on pod from the backend image. It
+  # consumes only the RECRUITMENT_INBOX_* keys in existingSecret and does not
+  # route source messages through Multica chat/task storage.
+  enabled: false
+  replicas: 1
+  config:
+    roleVersion: v1
+    model: gpt-5.6-luna
+    imageModel: gpt-5.6-luna
+    audioModel: gpt-4o-mini-transcribe
+    workers: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  affinity: {}
+  tolerations: []
+
+# -----------------------------------------------------------------------------
 # Frontend (Next.js standalone)
 # -----------------------------------------------------------------------------
 frontend:

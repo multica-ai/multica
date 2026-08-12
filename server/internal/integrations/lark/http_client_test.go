@@ -605,6 +605,9 @@ func TestHTTPClient_SendTextMessage_HappyPath(t *testing.T) {
 			if body["msg_type"] != "text" {
 				t.Errorf("msg_type: got %q want text (NOT interactive — chat replies are plain bubbles)", body["msg_type"])
 			}
+			if body["uuid"] != "opaque-idempotency-key" {
+				t.Errorf("uuid: got %q want opaque-idempotency-key", body["uuid"])
+			}
 			// content is a JSON-encoded string Lark requires: the outer
 			// HTTP body is JSON, and `content` is another JSON
 			// document INSIDE it. Decode and inspect.
@@ -623,6 +626,7 @@ func TestHTTPClient_SendTextMessage_HappyPath(t *testing.T) {
 		InstallationID: testCreds(),
 		ChatID:         ChatID("oc_chat_42"),
 		Text:           "Hello world",
+		IdempotencyKey: "opaque-idempotency-key",
 	})
 	if err != nil {
 		t.Fatalf("send: %v", err)

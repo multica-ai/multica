@@ -279,6 +279,11 @@ type SendTextParams struct {
 	InstallationID InstallationCredentials
 	ChatID         ChatID
 	Text           string
+	// IdempotencyKey maps to Feishu's documented `uuid` field on the send
+	// endpoint. Empty preserves the historical behavior. Dedicated processors
+	// should derive a stable, non-sensitive value from the inbound message ID so
+	// an ambiguous transport retry cannot create a duplicate reply.
+	IdempotencyKey string
 	// ReplyTarget threads the text reply back into a Lark topic; see
 	// ReplyTarget. Empty keeps the chat-level send.
 	ReplyTarget ReplyTarget

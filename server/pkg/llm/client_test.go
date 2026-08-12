@@ -163,6 +163,9 @@ func TestGenerateJSONUsesGPT56CompatibleParameters(t *testing.T) {
 	if gotBody["model"] != "gpt-5.6-luna" {
 		t.Fatalf("expected configured GPT-5.6 model, got body %#v", gotBody)
 	}
+	if gotBody["store"] != false {
+		t.Fatalf("internal JSON calls must explicitly disable upstream storage, got body %#v", gotBody)
+	}
 }
 
 func TestGenerateJSONFallsBackToLegacyMaxTokens(t *testing.T) {

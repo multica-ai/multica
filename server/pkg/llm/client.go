@@ -79,6 +79,17 @@ type Client struct {
 	enabled      bool
 }
 
+// SDK exposes the configured official OpenAI client to narrowly-scoped
+// internal integrations that need a modality the small wrapper does not yet
+// model (for example image input or audio transcription). Callers must still
+// check Enabled first and must not log request bodies.
+func (c *Client) SDK() *openai.Client {
+	if c == nil {
+		return nil
+	}
+	return &c.sdk
+}
+
 // New builds a Client from cfg. It never returns an error: an unconfigured
 // Config produces a disabled client whose calls return ErrNotConfigured, which
 // keeps wiring in main/router simple (no boot-time failure when the LLM layer
@@ -224,6 +235,7 @@ func (c *Client) GenerateJSON(ctx context.Context, model, systemPrompt, userProm
 	params := openai.ChatCompletionNewParams{
 		Messages: messages,
 		Model:    shared.ChatModel(strings.TrimSpace(model)),
+		Store:    openai.Bool(false),
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONObject: &shared.ResponseFormatJSONObjectParam{},
 		},

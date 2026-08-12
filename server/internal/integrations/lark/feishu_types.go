@@ -21,7 +21,12 @@ type InboundMessage struct {
 	ChatType     ChatType
 	MessageID    string
 	SenderOpenID OpenID
-	Body         string
+	// SenderType is the official event sender_type (normally "user" or
+	// "app"). Consumers that listen to every message in an allowlisted chat
+	// use it to reject bot-authored messages before any processing, preventing
+	// reply loops without relying on display names or message content.
+	SenderType string
+	Body       string
 	// Content is the raw msg_type-specific JSON string Lark sends in
 	// event.message.content. Text/post decoding consumes it immediately; media
 	// ingestion keeps it so the adapter can extract image_key/file_key before

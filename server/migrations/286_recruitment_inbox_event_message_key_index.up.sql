@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX CONCURRENTLY recruitment_inbox_event_message_key_idx
+ON recruitment_inbox_event (message_key);
