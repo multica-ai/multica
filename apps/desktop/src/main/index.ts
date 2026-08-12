@@ -562,7 +562,13 @@ if (is.dev) {
   // to "Multica", but anchoring it here makes WM_CLASS ↔ StartupWMClass
   // (declared in electron-builder.yml) survive a regression in
   // productName / the build pipeline. Must run before requestSingleInstanceLock().
-  app.setName("Multica");
+  //
+  // Read it back from app.getName() rather than hardcoding the literal: a
+  // hardcoded name overrides electron-builder's productName override, which
+  // would make a differently-branded build (e.g. a local self-host package)
+  // silently share userData and the single-instance lock with the official
+  // app. For official builds this is identical to "Multica".
+  app.setName(app.getName());
 }
 
 // --- Protocol registration -----------------------------------------------
