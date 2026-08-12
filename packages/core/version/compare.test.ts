@@ -8,21 +8,27 @@ describe("compareVersions", () => {
     expect(compareVersions("0.9.0", "0.8.9")).toBe("app_newer");
   });
 
-  it("flags server_newer when the server is ahead (client updater owns this)", () => {
-    expect(compareVersions("0.8.0", "0.9.0")).toBe("server_newer");
-    expect(compareVersions("0.9.9", "1.0.0")).toBe("server_newer");
+  it("flags app_newer on patch drift too (the #5848 scenario)", () => {
+    expect(compareVersions("0.4.9", "0.4.8")).toBe("app_newer");
+    expect(compareVersions("0.8.2", "0.8.0")).toBe("app_newer");
   });
 
-  it("treats equal major/minor as equal, ignoring patch drift", () => {
-    expect(compareVersions("0.8.2", "0.8.0")).toBe("equal");
-    expect(compareVersions("0.8.0", "0.8.2")).toBe("equal");
+  it("flags server_newer when the server is ahead on any level", () => {
+    expect(compareVersions("0.8.0", "0.9.0")).toBe("server_newer");
+    expect(compareVersions("0.9.9", "1.0.0")).toBe("server_newer");
+    expect(compareVersions("0.4.8", "0.4.9")).toBe("server_newer");
+    expect(compareVersions("0.8.0", "0.8.2")).toBe("server_newer");
+  });
+
+  it("treats identical versions as equal", () => {
     expect(compareVersions("1.2.3", "1.2.3")).toBe("equal");
+    expect(compareVersions("0.9", "0.9.0")).toBe("equal");
   });
 
   it("accepts a leading v and prerelease/build suffixes", () => {
     expect(compareVersions("v0.9.0", "0.8.0")).toBe("app_newer");
     expect(compareVersions("0.9.0-beta.1", "0.8.0")).toBe("app_newer");
-    expect(compareVersions("0.9.0+build.7", "0.9.1")).toBe("equal");
+    expect(compareVersions("0.9.0+build.7", "0.9.1")).toBe("server_newer");
   });
 
   it("returns unknown when either side is missing", () => {

@@ -42,6 +42,17 @@ describe("ServerVersionBanner", () => {
     );
   });
 
+  it("renders on patch-only drift (app 0.4.9 + server 0.4.8, #5848)", () => {
+    setClientIdentity({ platform: "desktop", version: "0.4.9", os: "macos" });
+    configStore.getState().setServerVersion("0.4.8");
+
+    render(<ServerVersionBanner />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Server version (0.4.8) is older than this app (0.4.9)",
+    );
+  });
+
   it("stays hidden when the server is newer or versions match", () => {
     setClientIdentity({ platform: "desktop", version: "0.8.0", os: "macos" });
     configStore.getState().setServerVersion("0.9.0");
