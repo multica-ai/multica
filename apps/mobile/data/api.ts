@@ -191,11 +191,12 @@ class ApiClient {
 
   private async fetch<T>(
     path: string,
-    init: RequestInit & { signal?: AbortSignal } = {},
+    init: RequestInit & { signal?: AbortSignal; timeoutMs?: number } = {},
   ): Promise<T> {
     const rid = createRequestId();
     const start = Date.now();
-    const method = init.method ?? "GET";
+    const { timeoutMs = FETCH_TIMEOUT_MS, ...requestInit } = init;
+    const method = requestInit.method ?? "GET";
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -203,7 +204,7 @@ class ApiClient {
       "X-Client-OS": "ios",
       "X-Client-Version": "0.1.0",
       "X-Request-ID": rid,
-      ...((init.headers as Record<string, string>) ?? {}),
+      ...((requestInit.headers as Record<string, string>) ?? {}),
     };
     if (this.token) {
       headers["Authorization"] = `Bearer ${this.token}`;
@@ -228,9 +229,9 @@ class ApiClient {
     //       spinner stuck on the screen indefinitely.
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
-      controller.abort(new Error(`request timed out after ${FETCH_TIMEOUT_MS}ms`));
-    }, FETCH_TIMEOUT_MS);
-    const callerSignal = init.signal;
+      controller.abort(new Error(`request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    const callerSignal = requestInit.signal;
     const onCallerAbort = () => controller.abort(callerSignal?.reason);
     if (callerSignal) {
       if (callerSignal.aborted) controller.abort(callerSignal.reason);
@@ -242,7 +243,7 @@ class ApiClient {
     let res: Response;
     try {
       res = await fetch(`${API_URL}${path}`, {
-        ...init,
+        ...requestInit,
         signal: controller.signal,
         headers,
       });
@@ -261,7 +262,7 @@ class ApiClient {
           duration: `${duration}ms`,
         });
         throw new ApiError(
-          `Request timed out after ${FETCH_TIMEOUT_MS}ms`,
+          `Request timed out after ${timeoutMs}ms`,
           0,
           undefined,
         );
@@ -1046,7 +1047,7 @@ class ApiClient {
   async sendChatMessage(
     sessionId: string,
     content: string,
-    opts?: { attachmentIds?: string[] },
+    opts?: { attachmentIds?: string[]; timeoutMs?: number },
   ): Promise<SendChatMessageResponse> {
     // Strict parse — we need task_id + created_at to anchor the optimistic
     // StatusPill. Fallback would silently break the elapsed-time timer.
@@ -1064,6 +1065,7 @@ class ApiClient {
       {
         method: "POST",
         body: JSON.stringify(body),
+        timeoutMs: opts?.timeoutMs,
       },
     );
     const parsed = SendChatMessageResponseSchema.safeParse(raw);

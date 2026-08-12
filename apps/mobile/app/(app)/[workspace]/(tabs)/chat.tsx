@@ -32,6 +32,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActionSheetIOS,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -40,17 +41,17 @@ import {
 import { router } from "expo-router";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNetInfo } from "@react-native-community/netinfo";
 import type {
   Agent,
   ChatMessage,
   ChatPendingTask,
 } from "@multica/core/types";
 import {
-  enqueuePendingChatTask,
   hideQueuedChatMessages,
   removePendingChatTask,
 } from "@multica/core/chat/pending";
-import { api } from "@/data/api";
+import { ApiError, api } from "@/data/api";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { agentListOptions } from "@/data/queries/agents";
@@ -71,6 +72,15 @@ import {
   DRAFT_NEW_SESSION,
   useChatDraftsStore,
 } from "@/data/stores/chat-drafts-store";
+import { useChatOutboxStore } from "@/data/stores/chat-outbox-store";
+import {
+  createChatOutboxClientId,
+  MAX_CHAT_OUTBOX_ATTEMPTS,
+  nextChatOutboxItem,
+  nextFailedChatOutboxItem,
+  permanentlyFailedChatOutboxItem,
+  type ChatOutboxItem,
+} from "@/data/stores/chat-outbox";
 import { useChatSessionPickerStore } from "@/data/stores/chat-session-picker-store";
 import { useChatSessionRealtime } from "@/data/realtime/use-chat-session-realtime";
 import {
@@ -184,6 +194,7 @@ export default function ChatTab() {
   }, [selectedAgentId, availableAgents, activeSession, agents]);
 
   const availability = useWorkspaceAgentAvailability();
+  const netInfo = useNetInfo();
   const presenceDetail = useAgentPresence(wsId, currentAgent?.id);
   const presenceAvailability =
     presenceDetail === "loading" ? undefined : presenceDetail.availability;
@@ -198,6 +209,10 @@ export default function ChatTab() {
   const setDraft = useChatDraftsStore((s) => s.setDraft);
   const clearDraft = useChatDraftsStore((s) => s.clearDraft);
   const promoteNewDraft = useChatDraftsStore((s) => s.promoteNewDraft);
+  const outboxItems = useChatOutboxStore((s) => s.items);
+  const enqueueOutbox = useChatOutboxStore((s) => s.enqueue);
+  const updateOutbox = useChatOutboxStore((s) => s.update);
+  const removeOutbox = useChatOutboxStore((s) => s.remove);
 
   // ── Realtime ───────────────────────────────────────────────────────────
   useChatSessionRealtime(activeSessionId, () => {
@@ -252,6 +267,86 @@ export default function ChatTab() {
     [activeSessionId, currentAgent, createSession],
   );
 
+  const attemptOutboxSend = useCallback(
+    async (sessionId: string, requestedClientId?: string) => {
+      const head = nextChatOutboxItem(
+        useChatOutboxStore.getState().items,
+        sessionId,
+      );
+      if (!head) return;
+      if (requestedClientId && head.clientId !== requestedClientId) {
+        Alert.alert(
+          "Send in order",
+          "An earlier unsent message must be sent or removed first.",
+        );
+        return;
+      }
+
+      updateOutbox(head.clientId, (item) => ({
+        ...item,
+        status: "sending",
+        lastError: null,
+        nextAttemptAt: null,
+      }));
+      try {
+        // A short send-specific ceiling avoids a false-online connection
+        // leaving this visible message without feedback for thirty seconds.
+        const result = await api.sendChatMessage(sessionId, head.content, {
+          attachmentIds:
+            head.attachmentIds.length > 0 ? head.attachmentIds : undefined,
+          timeoutMs: 8_000,
+        });
+        removeOutbox(head.clientId);
+        const sent: ChatMessage = {
+          id: result.message_id,
+          chat_session_id: sessionId,
+          role: "user",
+          content: head.content,
+          task_id: result.task_id,
+          created_at: result.created_at,
+        };
+        qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
+          old?.some((message) => message.id === sent.id)
+            ? old
+            : [...(old ?? []), sent],
+        );
+        seedAcceptedPendingTask(qc, {
+          chat_session_id: sessionId,
+          task_id: result.task_id,
+          created_at: result.created_at,
+          message_id: result.message_id,
+          content: head.content,
+          optimistic_task_id: `outbox-${head.clientId}`,
+          supports_queue: result.supports_queue,
+          queued: result.queued,
+        });
+        void qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unable to send message";
+        if (
+          error instanceof ApiError &&
+          error.status >= 400 &&
+          error.status < 500
+        ) {
+          // A 401 clears this user partition through auth-store. Marking it
+          // failed first avoids a retry race while that cleanup runs.
+          updateOutbox(head.clientId, (item) =>
+            permanentlyFailedChatOutboxItem(item, message),
+          );
+          return;
+        }
+        updateOutbox(head.clientId, (item) =>
+          nextFailedChatOutboxItem(
+            item,
+            `${message}. Check this chat before sending again.`,
+          ),
+        );
+      }
+    },
+    [qc, removeOutbox, updateOutbox],
+  );
+
   const handleSend = useCallback(
     async (
       content: string,
@@ -267,96 +362,153 @@ export default function ChatTab() {
         return;
       }
 
+      if (!activeSessionId && netInfo.isConnected === false) {
+        Alert.alert(
+          "Connect to start a new chat",
+          "New chats need an internet connection before messages can be queued.",
+        );
+        return;
+      }
+      if (!userId || !wsSlug) return;
+
       const isNewSession = !activeSessionId;
       const sessionId = await ensureSession(content);
       if (!sessionId) return;
-
-      const sentAt = new Date().toISOString();
-      const optimistic: ChatMessage = {
-        id: `optimistic-${Date.now()}`,
-        chat_session_id: sessionId,
-        role: "user",
-        content,
-        task_id: null,
-        created_at: sentAt,
-      };
-      const optimisticTaskId = `optimistic-${optimistic.id}`;
-      qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
-        old ? [...old, optimistic] : [optimistic],
-      );
-      qc.setQueryData<ChatPendingTask>(
-        chatKeys.pendingTask(sessionId),
-        (old) =>
-          enqueuePendingChatTask(
-            old,
-            {
-              task_id: optimisticTaskId,
-              status: "queued",
-              created_at: sentAt,
-              message_id: optimistic.id,
-              content,
-            },
-            Boolean(old?.task_id),
-          ),
-      );
       if (isNewSession) {
         promoteNewDraft(sessionId);
         setActiveSessionId(sessionId);
       }
 
-      try {
-        const result = await api.sendChatMessage(sessionId, content, {
-          attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
-        });
-        // Replace the local bubble before reconciling pending state. When the
-        // server says this is a follow-up, its real message id lets the shared
-        // queue filter hide it immediately instead of waiting for the refetch.
-        qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
-          old?.map((message) =>
-            message.id === optimistic.id
-              ? {
-                  ...message,
-                  id: result.message_id,
-                  task_id: result.task_id,
-                  created_at: result.created_at,
-                }
-              : message,
-          ),
-        );
-        seedAcceptedPendingTask(qc, {
-          chat_session_id: sessionId,
-          task_id: result.task_id,
-          created_at: result.created_at,
-          message_id: result.message_id,
-          content,
-          optimistic_task_id: optimisticTaskId,
-          supports_queue: result.supports_queue,
-          queued: result.queued,
-        });
-        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        if (options.clearDraft !== false) {
-          clearDraft(sessionId);
-        }
-      } catch (err) {
-        qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
-          old ? old.filter((m) => m.id !== optimistic.id) : old,
-        );
-        qc.setQueryData<ChatPendingTask>(
-          chatKeys.pendingTask(sessionId),
-          (old) => removePendingChatTask(old, optimisticTaskId),
-        );
-        throw err;
+      const item: ChatOutboxItem = {
+        clientId: createChatOutboxClientId(),
+        sessionId,
+        workspaceSlug: wsSlug,
+        userId,
+        content,
+        attachmentIds,
+        createdAt: new Date().toISOString(),
+        status: "queued",
+        attemptCount: 0,
+        retryable: true,
+        lastError:
+          netInfo.isConnected === false ? "Waiting for a connection" : null,
+        nextAttemptAt: null,
+      };
+      enqueueOutbox(item);
+      if (options.clearDraft !== false) clearDraft(sessionId);
+      if (netInfo.isConnected !== false) {
+        await attemptOutboxSend(sessionId, item.clientId);
       }
     },
     [
       activeSessionId,
+      attemptOutboxSend,
       currentAgent,
       runtimeBound,
       ensureSession,
-      qc,
       promoteNewDraft,
       clearDraft,
+      enqueueOutbox,
+      netInfo.isConnected,
+      userId,
+      wsSlug,
     ],
+  );
+
+  const activeOutboxItems = useMemo(
+    () =>
+      activeSessionId
+        ? outboxItems.filter((item) => item.sessionId === activeSessionId)
+        : [],
+    [activeSessionId, outboxItems],
+  );
+
+  const editOutboxItem = useCallback(
+    (item: ChatOutboxItem) => {
+      if (item.status === "sending") return;
+      Alert.prompt(
+        "Edit unsent message",
+        undefined,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Save",
+            onPress: (content?: string) => {
+              const next = content?.trim();
+              if (!next) return;
+              updateOutbox(item.clientId, (current) => ({
+                ...current,
+                content: next,
+                clientId: createChatOutboxClientId(),
+                status: "queued",
+                attemptCount: 0,
+                retryable: true,
+                lastError: null,
+                nextAttemptAt: null,
+              }));
+            },
+          },
+        ],
+        "plain-text",
+        item.content,
+      );
+    },
+    [updateOutbox],
+  );
+
+  const handleOutboxPress = useCallback(
+    (item: ChatOutboxItem) => {
+      if (item.status === "sending") {
+        Alert.alert(
+          "Cancel local retry?",
+          "This stops future local retries. It cannot recall a message that may already have reached the server.",
+          [
+            { text: "Keep sending", style: "cancel" },
+            {
+              text: "Cancel local retry",
+              style: "destructive",
+              onPress: () => removeOutbox(item.clientId),
+            },
+          ],
+        );
+        return;
+      }
+      const canRetry =
+        item.retryable && item.attemptCount < MAX_CHAT_OUTBOX_ATTEMPTS;
+      const options = canRetry
+        ? ["Cancel", "Edit", "Send now", "Remove"]
+        : ["Cancel", "Edit", "Remove"];
+      const removeIndex = options.length - 1;
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options,
+          cancelButtonIndex: 0,
+          destructiveButtonIndex: removeIndex,
+        },
+        (index) => {
+          if (index === 1) {
+            editOutboxItem(item);
+            return;
+          }
+          if (canRetry && index === 2) {
+            if (
+              item.nextAttemptAt &&
+              new Date(item.nextAttemptAt).getTime() > Date.now()
+            ) {
+              Alert.alert(
+                "Try again shortly",
+                "This message is backing off after its last failure.",
+              );
+              return;
+            }
+            void attemptOutboxSend(item.sessionId, item.clientId);
+            return;
+          }
+          if (index === removeIndex) removeOutbox(item.clientId);
+        },
+      );
+    },
+    [attemptOutboxSend, editOutboxItem, removeOutbox],
   );
 
   // ── Cancel in-flight ───────────────────────────────────────────────────
@@ -467,6 +619,7 @@ export default function ChatTab() {
       >
         <ChatMessageList
           messages={visibleMessages}
+          outboxItems={activeOutboxItems}
           loading={messagesLoading}
           hasSessions={sessions.length > 0}
           agentName={currentAgent?.name}
@@ -478,6 +631,7 @@ export default function ChatTab() {
           pendingTask={pendingTask}
           liveTaskMessages={liveTaskMessages}
           availability={presenceAvailability}
+          onOutboxPress={handleOutboxPress}
         />
         {runtimeBound ? (
           <OfflineBanner
