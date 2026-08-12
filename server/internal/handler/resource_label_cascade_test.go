@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -289,38 +290,42 @@ func TestDeleteWorkspace_CleansResourceLabelAssignments(t *testing.T) {
 	}
 }
 
-// TestDeleteWorkspace_RollsBackResourceLabelCleanup verifies the cleanup and
-// final workspace delete share one database statement. A restrictive test-only
-// foreign key makes the final delete fail; both junction rows must remain.
+// TestDeleteWorkspace_RollsBackResourceLabelCleanup verifies the resource-label
+// sweep and the later administration cleanup share one transaction. Locking the
+// workspace's member row makes that late step time out; both junction rows must
+// be restored when the transaction rolls back.
 func TestDeleteWorkspace_RollsBackResourceLabelCleanup(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
+	// The teardown transaction sets its own lock_timeout (MUL-5983); shorten
+	// it so the blocked administration step fails while the test is young.
+	setWorkspaceDeleteLockTimeoutForTest(t, 100*time.Millisecond)
 	wsID, agentID, skillID := seedWorkspaceResourceLabelFixture(t, ctx, "handler-tests-delete-labels-rollback")
 
-	const guardTable = "workspace_delete_resource_label_rollback_guard"
-	_, _ = testPool.Exec(ctx, `DROP TABLE IF EXISTS `+guardTable)
-	if _, err := testPool.Exec(ctx, `
-		CREATE TABLE `+guardTable+` (
-			workspace_id UUID NOT NULL REFERENCES workspace(id)
-		)
-	`); err != nil {
-		t.Fatalf("create workspace delete guard: %v", err)
+	blocker, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin member blocker: %v", err)
 	}
-	if _, err := testPool.Exec(ctx, `INSERT INTO `+guardTable+` (workspace_id) VALUES ($1)`, wsID); err != nil {
-		t.Fatalf("insert workspace delete guard: %v", err)
+	t.Cleanup(func() { _ = blocker.Rollback(context.Background()) })
+	if _, err := blocker.Exec(ctx, `
+		SELECT id FROM member WHERE workspace_id = $1 FOR UPDATE
+	`, wsID); err != nil {
+		t.Fatalf("lock workspace member: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DROP TABLE IF EXISTS `+guardTable)
-	})
 
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
 	req = withURLParam(req, "id", wsID)
 	testHandler.DeleteWorkspace(w, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("DeleteWorkspace: expected 500, got %d: %s", w.Code, w.Body.String())
+	// A lock the teardown cannot get is transient, so the handler reports it
+	// as a retryable 503 rather than a generic failure.
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("DeleteWorkspace: expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := blocker.Rollback(ctx); err != nil {
+		t.Fatalf("release member blocker: %v", err)
 	}
 
 	var workspaceExists bool

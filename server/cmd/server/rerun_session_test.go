@@ -246,6 +246,76 @@ func TestGetLastTaskSessionKeepsToolEmptinessError(t *testing.T) {
 	}
 }
 
+// TestGetLastTaskSessionExcludesAuthResolutionFailure is the SQL half of the
+// auth-resolution resume fix: a provider that cannot resolve its own
+// authentication method (no api_key / auth_token / header) fails deterministically
+// on resume, so the (agent_id, issue_id) lookup must not hand the same dead
+// session to the next task. The row carries agent_error.unknown — what every
+// daemon version writes for this text — so only the ILIKE guard drops it, which
+// is what un-wedges an issue stuck before the fix deployed without a daemon
+// upgrade.
+func TestGetLastTaskSessionExcludesAuthResolutionFailure(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'POISONED-AUTH', '/tmp/poisoned', 'agent_error.unknown',
+		        'hermes provider error: "Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the X-Api-Key or Authorization headers to be explicitly omitted"')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert poisoned task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	requireSessionExcluded(t, prior.SessionID, err)
+}
+
+// TestGetLastTaskSessionKeepsSessionOnAuthAdjacentError is the narrowness half:
+// the ILIKE guard must match the exact provider phrase, not any error that
+// merely talks about authentication. A false positive silently drops
+// conversation context on every follow-up, which is worse than the bug it
+// guards against.
+func TestGetLastTaskSessionKeepsSessionOnAuthAdjacentError(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'HEALTHY-AUTH', '/tmp/healthy', 'agent_error.unknown',
+		        'hermes provider error: could not resolve an authentication method for this model')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if !prior.SessionID.Valid || prior.SessionID.String != "HEALTHY-AUTH" {
+		t.Fatalf("an auth-adjacent but non-matching error must not retire the session, got %+v", prior.SessionID)
+	}
+}
+
 // TestCompletedTaskRolloutMissingWithholdsAndDisclosesGap is the cross-layer
 // regression for MUL-5305 Must-fix 1: a COMPLETED follow-up whose Codex rollout
 // is missing (the #5934 case — the user waits for each turn to finish) must (1)

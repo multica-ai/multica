@@ -35,6 +35,18 @@ func TestDefaultGCIntervalIsTwoHours(t *testing.T) {
 	}
 }
 
+func TestRepoMaintenanceKillSwitchDefaultsOnAndCanDisable(t *testing.T) {
+	t.Setenv("MULTICA_GC_REPO_MAINTENANCE_ENABLED", "")
+	if !boolFromEnv("MULTICA_GC_REPO_MAINTENANCE_ENABLED", true) {
+		t.Fatal("repo maintenance kill switch should default to enabled")
+	}
+
+	t.Setenv("MULTICA_GC_REPO_MAINTENANCE_ENABLED", "false")
+	if boolFromEnv("MULTICA_GC_REPO_MAINTENANCE_ENABLED", true) {
+		t.Fatal("repo maintenance kill switch should accept false")
+	}
+}
+
 func TestPatternsFromEnv_DropsSeparatorBearingEntries(t *testing.T) {
 	t.Setenv("MULTICA_GC_ARTIFACT_PATTERNS", "node_modules, .next ,foo/bar, ../etc, ,target")
 	got := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", nil)

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -97,7 +98,16 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		args = append(args, "--session", opts.ResumeSessionID)
 	}
 	args = append(args, filterCustomArgs(opts.CustomArgs, opencodeBlockedArgs, b.cfg.Logger)...)
-	args = append(args, prompt)
+	// The task prompt is delivered on stdin, never argv — see the StdinPipe
+	// wiring below. `opencode run` merges its variadic [message..] positional
+	// with whatever is piped in, so an invocation that passes no positional
+	// makes the piped text the entire run message. Inlining it instead fails
+	// hard on Windows: CreateProcess caps lpCommandLine at 32,767 characters
+	// (8,191 when a .cmd shim routes the call through cmd.exe), and a prompt
+	// carrying the workspace's models and skills clears that on its own — the
+	// process then never starts and Go surfaces the misleading "The filename or
+	// extension is too long" (#6538). Keeping the prompt off argv also stops it
+	// from being echoed into the "agent command" log line below.
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
@@ -113,7 +123,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// signalled. Returning nil here keeps os/exec from racing us with its own
 	// kill; WaitDelay remains the hard backstop.
 	cmd.Cancel = func() error { return nil }
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args, "prompt_bytes", len(prompt))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -164,9 +174,17 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cancel()
 		return nil, fmt.Errorf("opencode stdout pipe: %w", err)
 	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("opencode stdin pipe: %w", err)
+	}
+	var closeStdinOnce sync.Once
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[opencode:stderr] ")
 
 	if err := cmd.Start(); err != nil {
+		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start opencode: %w", err)
 	}
@@ -179,6 +197,19 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// procDone closes once cmd.Wait() returns, letting the cancellation handler
 	// skip a process that already exited and avoid signalling a dead pid.
 	procDone := make(chan struct{})
+
+	// Write the prompt from its own goroutine so it cannot deadlock against the
+	// stdout reader below: a prompt larger than the OS pipe buffer (~64 KiB)
+	// blocks mid-write until OpenCode drains it, and OpenCode cannot drain while
+	// nobody is consuming its stdout. Closing stdin is what ends the prompt —
+	// OpenCode reads it to EOF (`await Bun.stdin.text()`), so a stdin left open
+	// hangs the run forever. Close on every path, success or error.
+	writeErrCh := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(stdin, prompt)
+		closeStdin()
+		writeErrCh <- err
+	}()
 
 	// On cancellation / timeout, terminate opencode (and the tool subprocesses
 	// it spawned) BEFORE unblocking the scanner. The previous implementation
@@ -196,6 +227,10 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			return // finished on its own; nothing to terminate
 		case <-runCtx.Done():
 		}
+		// Release a prompt write still blocked on a full stdin pipe — an
+		// OpenCode that stopped reading before draining it would otherwise
+		// strand that goroutine for the lifetime of the daemon.
+		closeStdin()
 		if cmd.Process != nil {
 			signalProcessGroup(cmd.Process, syscall.SIGTERM)
 			select {
@@ -220,6 +255,10 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		close(procDone)
 		duration := time.Since(startTime)
 
+		// Wait closes the process pipes, so a prompt write still blocked when
+		// OpenCode exited has returned by now. The writer sends exactly once.
+		writeErr := <-writeErrCh
+
 		if runCtx.Err() == context.DeadlineExceeded {
 			scanResult.status = "timeout"
 			scanResult.errMsg = fmt.Sprintf("opencode timed out after %s", timeout)
@@ -234,6 +273,25 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			// the process exit detail so a mid-step crash still surfaces the
 			// signal / exit code that killed it.
 			scanResult.errMsg = fmt.Sprintf("%s; opencode exited with error: %v", scanResult.errMsg, exitErr)
+		} else if writeErr != nil && !scanResult.sawTerminalSignal {
+			// A failed prompt write is only benign once the run is PROVEN to have
+			// finished: OpenCode reads stdin to EOF before it does any work, so a
+			// run that reached a terminal signal necessarily received the whole
+			// prompt, and an EPIPE recorded after that just means the pipe closed
+			// on its way out — failing on it would discard a successful result.
+			//
+			// Absence of failure is not that proof. status starts at "completed"
+			// and processEvents only fails closed on structural evidence, so a
+			// child that emits nothing and exits 0 still reports "completed". If
+			// the prompt never landed, that is precisely the run we must not pass
+			// off as a clean success, so key on sawTerminalSignal instead.
+			// Append rather than overwrite so the stream's own diagnosis survives.
+			if scanResult.errMsg == "" {
+				scanResult.errMsg = fmt.Sprintf("opencode prompt write failed: %v", writeErr)
+			} else {
+				scanResult.errMsg = fmt.Sprintf("%s; opencode prompt write failed: %v", scanResult.errMsg, writeErr)
+			}
+			scanResult.status = "failed"
 		}
 
 		b.cfg.Logger.Info("opencode finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
@@ -272,7 +330,15 @@ type eventResult struct {
 	output           string
 	sessionID        string
 	usage            TokenUsage // accumulated token usage across all steps
-	noTerminalSignal bool       // guard fired: stream reached EOF before a step or required continuation completed
+	noTerminalSignal bool       // guard fired: the stream ended without evidence the run actually finished
+	// sawTerminalSignal is positive evidence that the run actually finished: a
+	// step_finish closed the last step with no continuation pending and with
+	// something to show for it. It is NOT the negation of noTerminalSignal — a
+	// stream with no events at all sets neither, because there is nothing to
+	// fail closed on and nothing that proves completion either. Callers that
+	// need "this run really completed" must test this field; status defaults to
+	// "completed" and cannot carry that meaning on its own.
+	sawTerminalSignal bool
 }
 
 // processEvents reads JSON lines from r, dispatches events to ch, and returns
@@ -303,6 +369,24 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	openStep := false                // between a step_start and its step_finish
 	stepHasContinuationTool := false // current step has a local tool result OpenCode must feed back
 	awaitingContinuation := false    // the last step_finish still required another step
+	sawStepFinish := false           // at least one step closed; see eventResult.sawTerminalSignal
+
+	// Step bracketing still misses a third shape: a step that opens and closes
+	// cleanly while carrying nothing at all — no text, no tool call, and no
+	// reported usage whatsoever (#6522, observed as step_finish reason "unknown"
+	// with every token counter and the cost at 0). No usage means the provider
+	// round-trip never happened, so that step is a dead stream wearing a clean
+	// finish, and ending a run on one is another false-green completion.
+	//
+	// The criterion is deliberately "this step produced nothing", NOT "the run
+	// produced no text": a task whose only deliverable is a tool side effect is
+	// legitimate and must stay green. Any single sign of life — text, a tool
+	// call, or any usage field the protocol reports — keeps the step productive.
+	// This is also why the reason itself is not consulted: a missing or
+	// unrecognised reason stays terminal for protocol compatibility (see the
+	// back-compat regression), and voidness is orthogonal to it.
+	stepProducedOutput := false // current step emitted text, a tool call, or reported usage
+	lastStepVoid := false       // the most recently closed step produced nothing at all
 
 	scanner := newAgentStreamScanner(r)
 
@@ -324,8 +408,12 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		switch event.Type {
 		case "text":
 			b.handleTextEvent(event, ch, &output)
+			if event.Part.Text != "" {
+				stepProducedOutput = true
+			}
 		case "tool_use":
 			b.handleToolUseEvent(event, ch)
+			stepProducedOutput = true
 			if event.Part.Metadata == nil || !event.Part.Metadata.ProviderExecuted {
 				stepHasContinuationTool = true
 			}
@@ -335,13 +423,18 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			openStep = true
 			stepHasContinuationTool = false
 			awaitingContinuation = false
+			stepProducedOutput = false
 			trySend(ch, Message{Type: MessageStatus, Status: "running"})
 		case "step_finish":
 			openStep = false
+			sawStepFinish = true
 			awaitingContinuation = event.Part.Reason == "tool-calls" ||
 				(event.Part.Reason != "" && stepHasContinuationTool)
 			stepHasContinuationTool = false
-			// Accumulate token usage from step_finish events.
+			// Accumulate token usage from step_finish events. Only the fields
+			// TokenUsage models are billed; every reported field additionally
+			// counts as proof the provider round-trip happened, which is what
+			// keeps a productive step out of the void-step guard below.
 			if t := event.Part.Tokens; t != nil {
 				usage.InputTokens += t.Input
 				usage.OutputTokens += t.Output
@@ -350,6 +443,10 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 					usage.CacheWriteTokens += t.Cache.Write
 				}
 			}
+			if stepReportedUsage(&event.Part) {
+				stepProducedOutput = true
+			}
+			lastStepVoid = !stepProducedOutput
 		}
 	}
 
@@ -363,30 +460,67 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	}
 
 	// Require a positive terminal signal. A clean EOF while a step is still
-	// open — or right after a step that finished with reason "tool-calls",
-	// whose continuation step never started — means the run did not finish:
-	// its provider stream died and `opencode run` exited without emitting an
-	// error event. Fail closed on that structural evidence rather than
-	// reporting a false-green completion.
+	// open — right after a step that finished with reason "tool-calls", whose
+	// continuation step never started — or on a step that carried nothing at
+	// all means the run did not finish: its provider stream died and
+	// `opencode run` exited without emitting an error event. Fail closed on
+	// that structural evidence rather than reporting a false-green completion.
 	noTerminalSignal := false
-	if finalStatus == "completed" && (openStep || awaitingContinuation) {
-		finalStatus = "failed"
-		if openStep {
+	if finalStatus == "completed" {
+		switch {
+		case openStep:
+			finalStatus = "failed"
 			finalError = "opencode stream ended without a terminal signal (step still open at EOF)"
-		} else {
+			noTerminalSignal = true
+		case awaitingContinuation:
+			finalStatus = "failed"
 			finalError = "opencode stream ended without a terminal signal (last step required a continuation that never started)"
+			noTerminalSignal = true
+		case lastStepVoid:
+			finalStatus = "failed"
+			finalError = "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing"
+			noTerminalSignal = true
 		}
-		noTerminalSignal = true
 	}
 
 	return eventResult{
-		status:           finalStatus,
-		errMsg:           finalError,
-		output:           output.String(),
-		sessionID:        sessionID,
-		usage:            usage,
-		noTerminalSignal: noTerminalSignal,
+		status:            finalStatus,
+		errMsg:            finalError,
+		output:            output.String(),
+		sessionID:         sessionID,
+		usage:             usage,
+		noTerminalSignal:  noTerminalSignal,
+		sawTerminalSignal: sawStepFinish && !noTerminalSignal,
 	}
+}
+
+// stepReportedUsage reports whether a step_finish part carries any evidence
+// that the provider round-trip actually happened.
+//
+// OpenCode's protocol keeps reasoning and the aggregate total in fields of
+// their own alongside input/output/cache, and reports cost as a sibling of the
+// whole token block — a step can legitimately land with reasoning or cost
+// positive while input and output are both zero. Checking only input/output
+// would therefore call such a step void and fail a healthy run, so every field
+// the protocol reports counts. Only an across-the-board zero means no model
+// call happened.
+//
+// The reasoning and total counters are read as evidence only, deliberately not
+// folded into TokenUsage: total is derived (adding it would double-count) and
+// TokenUsage has no reasoning bucket, so recording either here would change
+// billing figures rather than fix this bug.
+func stepReportedUsage(part *opencodeEventPart) bool {
+	if part.Cost > 0 {
+		return true
+	}
+	t := part.Tokens
+	if t == nil {
+		return false
+	}
+	if t.Input > 0 || t.Output > 0 || t.Reasoning > 0 || t.Total > 0 {
+		return true
+	}
+	return t.Cache != nil && (t.Cache.Read > 0 || t.Cache.Write > 0)
 }
 
 func (b *opencodeBackend) handleTextEvent(event opencodeEvent, ch chan<- Message, output *strings.Builder) {
@@ -399,7 +533,7 @@ func (b *opencodeBackend) handleTextEvent(event opencodeEvent, ch chan<- Message
 
 // handleToolUseEvent processes "tool_use" events from opencode. A single
 // tool_use event contains both the call and result in part.state when the
-// tool has completed (state.status == "completed").
+// tool reaches a terminal state (state.status is "completed" or "error").
 func (b *opencodeBackend) handleToolUseEvent(event opencodeEvent, ch chan<- Message) {
 	// Extract input from state.input (the tool invocation parameters).
 	var input map[string]any
@@ -415,9 +549,15 @@ func (b *opencodeBackend) handleToolUseEvent(event opencodeEvent, ch chan<- Mess
 		Input:  input,
 	})
 
-	// If the tool has completed, also emit a tool-result message.
-	if event.Part.State != nil && event.Part.State.Status == "completed" {
-		outputStr := extractToolOutput(event.Part.State.Output)
+	// Pair every terminal tool-use with a tool-result. The daemon uses this
+	// pair to track in-flight tools, so dropping error results would leave its
+	// counter permanently elevated and suppress the normal idle watchdog.
+	state := event.Part.State
+	if state != nil && (state.Status == "completed" || state.Status == "error") {
+		outputStr := extractToolOutput(state.Output)
+		if state.Status == "error" && state.Error != "" {
+			outputStr = state.Error
+		}
 		trySend(ch, Message{
 			Type:   MessageToolResult,
 			Tool:   event.Part.Tool,
@@ -552,6 +692,11 @@ type opencodeEventPart struct {
 	// step_finish token usage
 	Tokens *opencodeTokens `json:"tokens,omitempty"`
 
+	// step_finish cost, a sibling of the token block rather than a member of
+	// it. Read only as round-trip evidence by stepReportedUsage; opencode's
+	// billing figures come from the token counters above.
+	Cost float64 `json:"cost,omitempty"`
+
 	// step_finish reason (FinishReason: "stop", "tool-calls", …). Absent on
 	// older opencode versions whose step-finish parts predate the field.
 	Reason string `json:"reason,omitempty"`
@@ -561,11 +706,16 @@ type opencodePartMetadata struct {
 	ProviderExecuted bool `json:"providerExecuted,omitempty"`
 }
 
-// opencodeTokens represents token usage in a step_finish event.
+// opencodeTokens represents token usage in a step_finish event. Reasoning and
+// Total are separate counters in the protocol, not components of Input/Output,
+// so a step can report either while both of those are zero; they are parsed so
+// stepReportedUsage can see them.
 type opencodeTokens struct {
-	Input  int64                `json:"input"`
-	Output int64                `json:"output"`
-	Cache  *opencodeCacheTokens `json:"cache,omitempty"`
+	Input     int64                `json:"input"`
+	Output    int64                `json:"output"`
+	Reasoning int64                `json:"reasoning,omitempty"`
+	Total     int64                `json:"total,omitempty"`
+	Cache     *opencodeCacheTokens `json:"cache,omitempty"`
 }
 
 type opencodeCacheTokens struct {
@@ -578,6 +728,7 @@ type opencodeToolState struct {
 	Status string          `json:"status,omitempty"`
 	Input  json.RawMessage `json:"input,omitempty"`
 	Output any             `json:"output,omitempty"`
+	Error  string          `json:"error,omitempty"`
 }
 
 // opencodeError represents an error event from opencode.

@@ -148,7 +148,7 @@ func fetchWorkspaces(ctx context.Context, cmd *cobra.Command) ([]workspaceSummar
 	serverURL := resolveServerURL(cmd)
 	token := resolveToken(cmd)
 	if token == "" {
-		return nil, fmt.Errorf("not authenticated: run 'multica login' first")
+		return nil, fmt.Errorf("not authenticated: run 'multica login' first%s", daemonPortOnlyContextHint())
 	}
 
 	client := cli.NewAPIClient(serverURL, "", token)
@@ -352,6 +352,9 @@ func resolveWorkspaceRef(ctx context.Context, cmd *cobra.Command, input string) 
 }
 
 func runWorkspaceSwitch(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("workspace switch"); err != nil {
+		return err
+	}
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 

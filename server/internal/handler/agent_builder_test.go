@@ -123,7 +123,7 @@ func TestCreateAgentBuilderSessionCreatesIsolatedHiddenBuilder(t *testing.T) {
 	}
 }
 
-func TestCreateAgentAttachesSkillsInCreateTransaction(t *testing.T) {
+func TestCreateAgentAttachesSkillsWithoutCreatingAWelcomeChat(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -157,14 +157,14 @@ func TestCreateAgentAttachesSkillsInCreateTransaction(t *testing.T) {
 	if len(response.Skills) != 1 || response.Skills[0].ID != skillID {
 		t.Fatalf("create response did not include attached skill: %+v", response.Skills)
 	}
-	var introSessions int
+	var chatSessions int
 	if err := testPool.QueryRow(ctx, `
-		SELECT count(*) FROM chat_session WHERE agent_id = $1 AND is_agent_intro = true
-	`, response.ID).Scan(&introSessions); err != nil {
-		t.Fatalf("count welcome chat sessions: %v", err)
+		SELECT count(*) FROM chat_session WHERE agent_id = $1
+	`, response.ID).Scan(&chatSessions); err != nil {
+		t.Fatalf("count chat sessions: %v", err)
 	}
-	if introSessions != 1 {
-		t.Fatalf("welcome chat sessions = %d, want 1", introSessions)
+	if chatSessions != 0 {
+		t.Fatalf("chat sessions after agent create = %d, want 0", chatSessions)
 	}
 }
 

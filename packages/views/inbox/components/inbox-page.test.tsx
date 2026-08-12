@@ -69,9 +69,19 @@ vi.mock("@multica/core/inbox/mutations", () => {
   };
 });
 
+// Render-time capture of the props IssueDetail receives, so tests can assert
+// what the page threads into it (highlight replay token) without standing up
+// the real detail.
+const issueDetailProps = vi.hoisted(
+  () => [] as Array<Record<string, unknown>>,
+);
 vi.mock("../../issues/components", () => ({
-  IssueDetail: () => null,
+  IssueDetail: (props: Record<string, unknown>) => {
+    issueDetailProps.push(props);
+    return null;
+  },
   StatusIcon: () => null,
+  issueHighlightMementoKey: (issueId: string) => `highlight:${issueId}`,
 }));
 
 const replace = vi.fn();
@@ -81,13 +91,19 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({ searchParams, replace }),
 }));
 
-// Mobile by default — it renders the list and the detail as one column, which
-// keeps most assertions simple. Tests about actioning a row WHILE it is open
-// need the two-panel desktop layout, since mobile swaps the list out for the
-// detail on selection.
-const layout = { isMobile: true };
+// Drive the layout from a viewport width so a test can name the device it
+// cares about instead of a boolean, and the two breakpoints stay in one place.
+// Phone-width by default — one column keeps most assertions simple. Tests
+// about actioning a row WHILE it is open need the two-panel desktop layout,
+// since a single column swaps the list out for the detail on selection.
+const PHONE = 390;
+const FOLD_INNER = 851;
+const TABLET = 1024;
+const DESKTOP = 1440;
+const layout = { width: PHONE };
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
-  useIsMobile: () => layout.isMobile,
+  useIsMobile: () => layout.width < 768,
+  useIsCompact: () => layout.width < 1024,
 }));
 vi.mock("@multica/ui/components/ui/resizable", () => ({
   ResizablePanelGroup: ({ children }: { children: React.ReactNode }) => (
@@ -171,7 +187,8 @@ function reset() {
   markReadMutate.mockClear();
   markUnreadMutate.mockClear();
   rowActions = null;
-  layout.isMobile = true;
+  issueDetailProps.length = 0;
+  layout.width = PHONE;
 }
 
 describe("InboxPage", () => {
@@ -234,6 +251,23 @@ describe("InboxPage", () => {
     render(<InboxPage />);
 
     expect(replace).toHaveBeenCalledWith("/acme/inbox");
+  });
+
+  it("replays the comment highlight when the already-open row is clicked again", () => {
+    // Re-clicking the open notification is an explicit "take me back to that
+    // comment". It doesn't remount the detail (same issue key), so the page
+    // signals the replay through the bumped token; a selection change keeps
+    // the token still — its remount replays the landing by itself.
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [item({ details: { comment_id: "comment-1" } })];
+
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    expect(issueDetailProps.at(-1)?.highlightRequestToken).toBe(0);
+
+    fireEvent.click(screen.getByTestId("row"));
+    expect(issueDetailProps.at(-1)?.highlightRequestToken).toBe(1);
   });
 
   it("keeps the archived view in the URL when selecting an item there", () => {
@@ -305,7 +339,7 @@ describe("InboxPage", () => {
     // silently undoes the user's "mark as unread" — the action looks like a
     // no-op.
     reset();
-    layout.isMobile = false;
+    layout.width = DESKTOP;
     listData.active = [
       item({ id: "inbox-a", issue_id: "issue-a", read: false }),
     ];
@@ -325,7 +359,7 @@ describe("InboxPage", () => {
     // The guard is scoped to the row while it stays selected. Coming back to it
     // later is a fresh open and must behave like any other.
     reset();
-    layout.isMobile = false;
+    layout.width = DESKTOP;
     listData.active = [
       item({ id: "inbox-a", issue_id: "issue-a", read: false }),
       item({ id: "inbox-b", issue_id: "issue-b", read: false }),
@@ -341,6 +375,36 @@ describe("InboxPage", () => {
     fireEvent.click(rowA!);
 
     expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+  });
+
+  it("folds to a single column on a folded inner screen", () => {
+    // 851px — the reported Pixel Fold inner screen. Above the phone breakpoint
+    // but far too narrow for nav + list + detail, so it takes the same single
+    // column: opening a row replaces the list rather than sharing the width.
+    reset();
+    layout.width = FOLD_INNER;
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+    render(<InboxPage />);
+    expect(screen.queryByTestId("list")).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId("row"));
+
+    expect(screen.queryByTestId("list")).toBeNull();
+  });
+
+  it("keeps both panes at the compact breakpoint", () => {
+    // 1024px is the first width that keeps the two-pane layout. The nav
+    // auto-collapses there instead (see the sidebar), so the list has to stay
+    // on screen next to an open item.
+    reset();
+    layout.width = TABLET;
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+
+    expect(screen.queryByTestId("list")).not.toBeNull();
   });
 
   it("does not swallow a deep link to an issue that is not in the archive", () => {

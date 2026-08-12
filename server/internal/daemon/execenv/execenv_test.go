@@ -118,11 +118,21 @@ func TestPrepareDirectoryMode(t *testing.T) {
 	defer env.Cleanup(true)
 
 	// Verify directory structure.
-	for _, sub := range []string{"workdir", "output", "logs"} {
+	for _, sub := range []string{"workdir", "output", "logs", "multica-config"} {
 		path := filepath.Join(env.RootDir, sub)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Fatalf("expected %s to exist", path)
 		}
+	}
+	if env.MulticaConfigRoot != filepath.Join(env.RootDir, "multica-config") {
+		t.Fatalf("MulticaConfigRoot = %q, want task-local config directory", env.MulticaConfigRoot)
+	}
+	info, err := os.Stat(env.MulticaConfigRoot)
+	if err != nil {
+		t.Fatalf("stat MulticaConfigRoot: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("MulticaConfigRoot mode = %o, want 700", got)
 	}
 
 	// Verify context file contains issue ID and CLI hints.
@@ -2048,17 +2058,31 @@ func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
 			}
 			s := string(data)
 
+			// Assert inside the section slice: "#4182" also appears in
+			// Available Commands, so a whole-file Contains would stay green
+			// with the HEREDOC ban deleted here (review catch on #6453).
+			// Match the HEADING at line start — Available Commands references
+			// "## Comment Formatting" inline earlier in the file.
+			cfStart := strings.Index(s, "\n## Comment Formatting\n")
+			if cfStart < 0 {
+				t.Fatalf("%s missing ## Comment Formatting section\n---\n%s", fileName, s)
+			}
+			cf := s[cfStart+1:]
+			if next := strings.Index(cf[3:], "\n## "); next >= 0 {
+				cf = cf[:next+3]
+			}
 			for _, want := range []string{
-				"## Comment Formatting",
 				"always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`",
-				"#4182",
 				"Never use inline `--content` for agent-authored comments",
+				"never use `--content-stdin` HEREDOCs alongside other flags",
+				"#4182",
+				"never `/tmp` or shared paths",
 				"Keep the same `--parent` value",
 				"rm ./reply.md",
 				"do not rely on `\\n` escapes",
 			} {
-				if !strings.Contains(s, want) {
-					t.Errorf("%s missing comment-formatting guidance %q\n---\n%s", fileName, want, s)
+				if !strings.Contains(cf, want) {
+					t.Errorf("%s Comment Formatting section missing %q\n---\n%s", fileName, want, cf)
 				}
 			}
 
@@ -2101,7 +2125,7 @@ func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
 		"On Windows, **always write the comment body to a UTF-8 file",
 		"$OutputEncoding",
 		"--content-file",
-		"silently dropping non-ASCII characters as `?`",
+		"may replace non-ASCII characters with `?`",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing Codex/Windows file-first guidance %q\n---\n%s", want, s)
@@ -3949,6 +3973,14 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	if reused.CodexHome == "" {
 		t.Fatal("expected CodexHome to be restored after Reuse")
 	}
+	if reused.MulticaConfigRoot != filepath.Join(reused.RootDir, "multica-config") {
+		t.Fatalf("MulticaConfigRoot = %q, want restored task-local config directory", reused.MulticaConfigRoot)
+	}
+	if info, err := os.Stat(reused.MulticaConfigRoot); err != nil {
+		t.Fatalf("stat restored MulticaConfigRoot: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("restored MulticaConfigRoot mode = %o, want 700", got)
+	}
 
 	// Verify config.toml has a managed block (exact mode depends on host
 	// platform; either workspace-write or danger-full-access is valid).
@@ -4550,8 +4582,10 @@ func TestPrepareCodexNoUserSkillsDir(t *testing.T) {
 
 // TestPrepareCodexResolvesUserSkillSymlinks covers the lark-cli /
 // shared-installer case: each user skill is a symlink into a separate
-// installer directory. The per-task home must end up with a real copy, not
-// a dangling symlink that points outside the task root.
+// installer directory. The per-task home links to the resolved installer
+// directory — never to the installer's own link, which would leave the CLI
+// following a chain that breaks the moment the installer re-points it, and
+// never dangling.
 func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on Windows; covered by Unix path")
@@ -4591,12 +4625,19 @@ func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 	defer env.Cleanup(true)
 
 	dst := filepath.Join(env.CodexHome, "skills", "lark-mail")
-	fi, err := os.Lstat(dst)
-	if err != nil {
+	if _, err := os.Lstat(dst); err != nil {
 		t.Fatalf("seeded skill missing: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		t.Errorf("seeded skill should be a real directory, got a symlink")
+	target, err := os.Readlink(dst)
+	if err != nil {
+		t.Fatalf("seeded skill should be a link into the installer dir: %v", err)
+	}
+	wantTarget, err := filepath.EvalSymlinks(installerRoot)
+	if err != nil {
+		t.Fatalf("resolve installer dir: %v", err)
+	}
+	if target != wantTarget {
+		t.Errorf("link target = %q, want the resolved installer dir %q", target, wantTarget)
 	}
 	data, err := os.ReadFile(filepath.Join(dst, "SKILL.md"))
 	if err != nil {
@@ -4951,8 +4992,17 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		for _, want := range []string{
 			"side-effecting actions",
 			"enqueues a new run for that agent",
-			"When NOT to use a mention link",
-			"When a mention IS appropriate",
+			// MUL-5442 judgment rewrite: the two H3 subsections merged into one
+			// paragraph — pin the policy anchors, not the retired headings.
+			"Default: NO mention",
+			// Each warranted-case scope qualifier pinned separately — "not yet
+			// involved" and "for the first time" ARE the anti-repeat-notify
+			// scope, not decoration (review catch on #6453).
+			"restarts an agent-to-agent loop and costs the user money",
+			"Mention only when escalating to a human owner",
+			"not yet involved",
+			"for the first time",
+			"explicitly asks to loop someone in",
 			"end with no mention at all",
 			"Silence ends conversations",
 		} {
@@ -4972,28 +5022,48 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		}
 	})
 
-	t.Run("workflow-carries-silence-as-exit-and-no-signoff-mention", func(t *testing.T) {
+	t.Run("workflow-reply-is-unconditional-and-no-signoff-mention", func(t *testing.T) {
 		t.Parallel()
 		s := readClaudeMD(t, commentTriggerCtx)
-		// The anti-loop signal must reach the brief; lock in the key phrases so
-		// it can't decay back into pure prose again. The reply-warranted rules
-		// live in the Reply mode block, while the no-sign-off-mention rule is
-		// mention policy and lives in `## Mentions` (MUL-5442) — these
-		// assertions are file-wide on purpose, so the signal is pinned without
-		// pinning which section carries it.
+		// MUL-5442 owner decision (2026-08-06): the generic no-reply rule is
+		// retired. It never carried the loop prevention — agent comments
+		// trigger nothing without an explicit @mention (the sole implicit
+		// wake is the squad-leader path), so the mention discipline pinned in
+		// the Mentions subtest above is the real defense. Ordinary agents are
+		// back on the unconditional one-comment-per-run contract; recorded
+		// silence via `no_action` remains squad-leader-only. Retired pins,
+		// replaced by the negative guards below so the apparatus cannot creep
+		// back: "Decide whether a reply is warranted", "produced actual
+		// work", "pure acknowledgment / thanks / sign-off", "do NOT reply",
+		// "Silence is a valid and preferred way".
 		for _, want := range []string{
-			"Decide whether a reply is warranted",
-			// Both outcomes pinned individually (MUL-5442 stage-1 review):
-			// the work-produced arm and the silent-exit arm must each
-			// survive compression, not just the bullet's heading.
-			"produced actual work",
-			"pure acknowledgment / thanks / sign-off",
-			"do NOT reply",
-			"Silence is a valid and preferred way",
+			"Posting your reply as a comment is mandatory",
+			"Do any requested work first",
 			"Never @mention the agent you are replying to as a thank-you or sign-off",
 		} {
 			if !strings.Contains(s, want) {
 				t.Errorf("comment-triggered CLAUDE.md missing %q", want)
+			}
+		}
+		for _, banned := range []string{
+			"Decide whether a reply is warranted",
+			"exit with no output",
+			"Silence is a valid and preferred way",
+			"conditional on the reply rule",
+			// #6493 review: the ledger named five retired pins but only
+			// guarded two — the missing three let the old apparatus
+			// coexist with the new sentences. Ordinary-agent scope only:
+			// the leader's no_action bullet says "DO NOT post any
+			// comment", which none of these match.
+			"produced actual work",
+			"pure acknowledgment / thanks / sign-off",
+			"do NOT reply",
+			// Leader-leak guard: the carve-out imperative is
+			// leader-brief-only.
+			"Unless your outcome is",
+		} {
+			if strings.Contains(s, banned) {
+				t.Errorf("comment-triggered CLAUDE.md still carries retired no-reply text %q", banned)
 			}
 		}
 	})
@@ -5022,15 +5092,24 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 	}
 	s := string(data)
 
-	// The comment-triggered workflow must contain the squad leader no_action rule.
+	// The comment-triggered workflow must contain the squad leader no_action
+	// rule, and the reply imperative must carry the no_action carve-out so a
+	// later bullet never contradicts it (MUL-5442 #6493 review).
 	for _, want := range []string{
 		"Squad leader rule",
 		"DO NOT post any comment",
 		"multica squad activity",
+		"Unless your outcome is `no_action` (Squad leader rule above), posting your reply as a comment is mandatory",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("squad leader comment-triggered CLAUDE.md missing %q", want)
 		}
+	}
+	// Capital-P form = the ordinary unconditional bullet; the leader brief
+	// must carry only the carve-out variant (its lowercase "posting your
+	// reply as a comment is mandatory" tail is expected and legal).
+	if strings.Contains(s, "Posting your reply as a comment is mandatory") {
+		t.Errorf("squad leader CLAUDE.md still carries the unconditional reply bullet")
 	}
 
 	// The Output section must use strong prohibition language.
@@ -5379,7 +5458,7 @@ func TestInjectRuntimeConfigBriefKeepsStaticCatchUpRead(t *testing.T) {
 	// MUL-5442 cross-channel dedup: the full command with the real issue id
 	// moved to the per-turn message (every issue variant carries it); the
 	// brief keeps the doctrine and the flag mnemonics.
-	if !strings.Contains(s, "scan every thread cheaply (`--roots-only --summary`)") {
+	if !strings.Contains(s, "scan every thread cheaply (`--roots-only --summary --compact`)") {
 		t.Errorf("brief must keep the bounded catch-up doctrine\n---\n%s", s)
 	}
 	if strings.Contains(s, issueID) {
@@ -5443,7 +5522,7 @@ func TestInjectRuntimeConfigBriefOmitsResumedThreadAnchor(t *testing.T) {
 		"No other new comments on this issue since your last run",
 		"If your reply depends on thread context",
 		"do not rely only on resumed session memory",
-		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("resumed hint missing %q\n---\n%s", want, hint)
@@ -5476,7 +5555,7 @@ func TestInjectRuntimeConfigAssignmentTriggerScansRootsFirst(t *testing.T) {
 	// Mandatory comment catch-up must stay, but the required first read is
 	// bounded to recent active threads instead of the full flat timeline.
 	for _, want := range []string{
-		"scan every thread cheaply (`--roots-only --summary`)",
+		"scan every thread cheaply (`--roots-only --summary --compact`)",
 		"this is mandatory, not optional",
 		"Skipping this step is the most common cause",
 	} {
@@ -5543,9 +5622,9 @@ func TestInjectRuntimeConfigCatchUpScansRootsFirst(t *testing.T) {
 		// The cheap scan is the first thing step 3 asks for; the full
 		// command with real ids arrives in the per-turn message (MUL-5442
 		// cross-channel dedup), so the brief pins the flag mnemonics.
-		"scan every thread cheaply (`--roots-only --summary`)",
+		"scan every thread cheaply (`--roots-only --summary --compact`)",
 		// ...followed by an explicit, bounded drill-down.
-		"expand only the threads that matter (`--thread <id> --tail 30`)",
+		"expand only the threads that matter (`--thread <id> --tail 30 --compact`)",
 		// The headline saturation warning stays in the flag reference; the
 		// deep semantics (per-thread cap, root-thread saturation) moved to the
 		// CLI's own --help (MUL-5442) and are pinned there

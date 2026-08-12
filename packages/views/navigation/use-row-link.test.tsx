@@ -61,9 +61,45 @@ describe("useRowLink", () => {
     fireEvent.click(screen.getByRole("row"), { ctrlKey: true });
 
     expect(openInNewTab).toHaveBeenCalledTimes(2);
-    expect(openInNewTab).toHaveBeenNthCalledWith(1, "/acme/projects/p1");
-    expect(openInNewTab).toHaveBeenNthCalledWith(2, "/acme/projects/p1");
+    expect(openInNewTab).toHaveBeenNthCalledWith(1, "/acme/projects/p1", undefined);
+    expect(openInNewTab).toHaveBeenNthCalledWith(2, "/acme/projects/p1", undefined);
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("opens a foreground tab for cmd+shift click (spec's 'take me there' modifier)", () => {
+    const push = vi.fn();
+    const openInNewTab = vi.fn();
+    const adapter = makeAdapter({ push, openInNewTab });
+
+    renderProbe(adapter);
+    fireEvent.click(screen.getByRole("row"), { metaKey: true, shiftKey: true });
+
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/projects/p1", undefined, {
+      activate: true,
+    });
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("passes newTabTitle through as the desktop tab label", () => {
+    const openInNewTab = vi.fn();
+    const adapter = makeAdapter({ openInNewTab });
+
+    function TitledProbe() {
+      const rowLink = useRowLink();
+      return (
+        <div role="row" {...rowLink("/acme/projects/p1", "Roadmap")}>
+          row
+        </div>
+      );
+    }
+    render(
+      <NavigationProvider value={adapter}>
+        <TitledProbe />
+      </NavigationProvider>,
+    );
+    fireEvent.click(screen.getByRole("row"), { metaKey: true });
+
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/projects/p1", "Roadmap");
   });
 
   // Web has no adapter, and the row is a <div> — there is no native
@@ -111,7 +147,7 @@ describe("useRowLink", () => {
     screen.getByRole("row").dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
-    expect(openInNewTab).toHaveBeenCalledWith("/acme/projects/p1");
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/projects/p1", undefined);
     expect(push).not.toHaveBeenCalled();
   });
 

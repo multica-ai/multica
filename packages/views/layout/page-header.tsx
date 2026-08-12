@@ -3,10 +3,19 @@
 import { cn } from "@multica/ui/lib/utils";
 import { SidebarTrigger, useSidebarSafe } from "@multica/ui/components/ui/sidebar";
 
-function MobileSidebarTrigger() {
+/**
+ * The way back to the nav wherever it is not a permanent column: a sheet below
+ * the compact breakpoint, auto-collapsed from there up to `xl`.
+ *
+ * Every surface below `xl` needs one of these. `PageHeader` supplies it for
+ * free, so this is exported for the pages that build their own chrome instead
+ * — without it a touch user has no way to reopen the nav at all. Renders
+ * nothing outside a `SidebarProvider` so such a page still stands alone.
+ */
+export function CollapsedNavTrigger() {
   const sidebar = useSidebarSafe();
   if (!sidebar) return null;
-  return <SidebarTrigger className="mr-2 md:hidden" />;
+  return <SidebarTrigger className="mr-2 xl:hidden" />;
 }
 
 interface PageHeaderProps {
@@ -27,7 +36,7 @@ interface PageHeaderProps {
 export function PageHeader({ children, leading, className }: PageHeaderProps) {
   return (
     <header className={cn("flex h-12 shrink-0 items-center border-b px-4", className)}>
-      {leading ?? <MobileSidebarTrigger />}
+      {leading ?? <CollapsedNavTrigger />}
       {children}
     </header>
   );

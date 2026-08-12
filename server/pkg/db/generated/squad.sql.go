@@ -410,10 +410,12 @@ type ListSquadMemberStatusRowsRow struct {
 }
 
 // Per-row join used to build the squad-members status view. One row per
-// (squad_member × active_task); members with no active task return a
+// (squad_member × in_flight_task); members with no in-flight task return a
 // single row with NULL task_* columns. Human members and agent members
 // with no agent row also return one row with NULL agent_/runtime_ columns.
-// The handler aggregates rows by member_id.
+// waiting_local_directory stays in the row set so its issue remains visible,
+// but the handler only treats dispatched/running rows as working because the
+// squad status vocabulary has no queued bucket.
 func (q *Queries) ListSquadMemberStatusRows(ctx context.Context, squadID pgtype.UUID) ([]ListSquadMemberStatusRowsRow, error) {
 	rows, err := q.db.Query(ctx, listSquadMemberStatusRows, squadID)
 	if err != nil {

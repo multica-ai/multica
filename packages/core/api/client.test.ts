@@ -915,6 +915,15 @@ describe("ApiClient", () => {
       url: "app://desktop/acme/issues",
       workspace_id: "ws-1",
       kind: "bug",
+      context: {
+        kind: "desktop_route_error",
+        trigger: "route-errorElement",
+        error: {
+          name: "TypeError",
+          message: "Cannot read properties of undefined",
+          stack: "TypeError: Cannot read properties of undefined",
+        },
+      },
     });
 
     expect(response).toEqual({
@@ -930,6 +939,15 @@ describe("ApiClient", () => {
           url: "app://desktop/acme/issues",
           workspace_id: "ws-1",
           kind: "bug",
+          context: {
+            kind: "desktop_route_error",
+            trigger: "route-errorElement",
+            error: {
+              name: "TypeError",
+              message: "Cannot read properties of undefined",
+              stack: "TypeError: Cannot read properties of undefined",
+            },
+          },
         }),
       }),
     );
@@ -1708,6 +1726,54 @@ describe("ApiClient", () => {
   });
 });
 
+// The onboarding flow acts on a workspace the app has not navigated to, so
+// these calls pass the slug explicitly. The server reads X-Workspace-Slug
+// before ?workspace_id, so the header — not the param — is what has to carry
+// the target workspace.
+describe("ApiClient explicit workspace targeting", () => {
+  function stubOk(body: unknown) {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function slugHeaderOf(fetchMock: ReturnType<typeof vi.fn>): unknown {
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    return (init.headers as Record<string, string>)["X-Workspace-Slug"];
+  }
+
+  it("sends the given slug on Mika creation", async () => {
+    const fetchMock = stubOk({ id: "agent-1" });
+    await new ApiClient("https://api.example.test").createMikaAgent(
+      { runtime_id: "runtime-1", language: "en" },
+      "proxima-centauri",
+    );
+    expect(slugHeaderOf(fetchMock)).toBe("proxima-centauri");
+  });
+
+  it("sends the given slug when listing another workspace's runtimes", async () => {
+    const fetchMock = stubOk([]);
+    await new ApiClient("https://api.example.test").listRuntimes(
+      { workspace_id: "ws-2", owner: "me" },
+      "proxima-centauri",
+    );
+    expect(slugHeaderOf(fetchMock)).toBe("proxima-centauri");
+  });
+
+  it("omits the header when no slug is given, leaving the ambient one", async () => {
+    const fetchMock = stubOk([]);
+    await new ApiClient("https://api.example.test").listRuntimes({
+      workspace_id: "ws-2",
+    });
+    expect(slugHeaderOf(fetchMock)).toBeUndefined();
+  });
+});
+
 describe("ApiClient model discovery response schema", () => {
   const completed = {
     id: "req-1",
@@ -1854,5 +1920,72 @@ describe("ApiClient unsubscribe endpoints", () => {
       new ApiClient("https://api.example.test")
         .unsubscribeFromIssueSubtree("issue-1", "user-1", "member"),
     ).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("ApiClient startMikaOnboarding", () => {
+  it("returns the opening a well-formed response reports", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            started: true,
+            message_id: "message-1",
+            created_at: "2026-01-01T00:00:00Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").startMikaOnboarding("session-1", {
+        language: "en",
+      }),
+    ).resolves.toEqual({
+      started: true,
+      message_id: "message-1",
+      created_at: "2026-01-01T00:00:00Z",
+    });
+  });
+
+  it("falls back to started=false when the response is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ started: "yes" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    // started=false is the safe reading: the flow treats it as "someone else
+    // already opened this conversation" and navigates, rather than acting on a
+    // body it could not understand.
+    await expect(
+      new ApiClient("https://api.example.test").startMikaOnboarding("session-1", {
+        language: "en",
+      }),
+    ).resolves.toEqual({ started: false });
+  });
+
+  it("tolerates a backend that omits the optional opening fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ started: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").startMikaOnboarding("session-1", {
+        language: "en",
+      }),
+    ).resolves.toEqual({ started: false });
   });
 });

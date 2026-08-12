@@ -8,6 +8,7 @@
     "members": "メンバー",
     "projects": "プロジェクト",
     "issues": "タスク",
+    "cancelled": "キャンセル済み",
     "recent": "最近の項目"
   },
   "pages": {

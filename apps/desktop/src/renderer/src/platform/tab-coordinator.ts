@@ -70,17 +70,37 @@ export function registerCoordinatorQueryClient(qc: QueryClient): void {
  * see ScrollRestorationProvider in @multica/views/platform). Offsets are
  * looked up live against the tab's memento, scoped to the route the view is
  * mounting under, so in-tab back/forward pulls each route's own offsets.
+ *
+ * The generic view-state entries ride the same channel: reads resolve
+ * against the memento's `view` map, writes commit through the store — no
+ * capture pass, the view pushes at the moment its restorable state changes.
  */
 export function createScrollRestorationAdapter(
   tabId: string,
 ): ScrollRestorationAdapter {
+  const activeRouteKey = (): string | null => {
+    const state = useTabStore.getState();
+    const active = getActiveTab(state);
+    if (!active || active.id !== tabId) return null;
+    return splitTabUrl(active.url).pathname;
+  };
   return {
     get(containerKey) {
-      const state = useTabStore.getState();
-      const active = getActiveTab(state);
-      if (!active || active.id !== tabId) return undefined;
-      const routeKey = splitTabUrl(active.url).pathname;
-      return active.memento.scroll[scrollMementoKey(routeKey, containerKey)];
+      const routeKey = activeRouteKey();
+      if (routeKey === null) return undefined;
+      const active = getActiveTab(useTabStore.getState());
+      return active?.memento.scroll[scrollMementoKey(routeKey, containerKey)];
+    },
+    getViewState(entryKey) {
+      const routeKey = activeRouteKey();
+      if (routeKey === null) return undefined;
+      const active = getActiveTab(useTabStore.getState());
+      return active?.memento.view[scrollMementoKey(routeKey, entryKey)];
+    },
+    setViewState(entryKey, value) {
+      const routeKey = activeRouteKey();
+      if (routeKey === null) return;
+      useTabStore.getState().commitViewState(tabId, routeKey, entryKey, value);
     },
   };
 }

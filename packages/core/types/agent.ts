@@ -1,3 +1,5 @@
+import type { ChatSession } from "./chat";
+
 export type AgentStatus = "idle" | "working" | "blocked" | "error" | "offline";
 
 export type AgentRuntimeMode = "local" | "cloud";
@@ -123,6 +125,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "traecli",
   "grok",
   "qwen",
+  "qwenpaw",
 ] as const;
 
 export type RuntimeProtocolFamily =
@@ -406,6 +409,17 @@ export interface TaskUsage {
   cost_usd_ticks?: number;
 }
 
+/**
+ * Response of the Mika bootstrap endpoint: the workspace's Mika plus the
+ * caller's conversation with it, resolved together server-side so two clients
+ * cannot each open their own onboarding session.
+ */
+export interface MikaBootstrapResponse extends Agent {
+  /** Absent only when the server could not resolve the session; retry the
+   *  same call rather than creating one client-side. */
+  onboarding_session?: ChatSession;
+}
+
 export interface Agent {
   id: string;
   workspace_id: string;
@@ -421,7 +435,16 @@ export interface Agent {
   runtime_bound?: boolean;
   name: string;
   description: string;
+  /** What this agent's owner wrote. For a system agent this holds only the
+   *  workspace's own notes — the product half is `system_instructions`. */
   instructions: string;
+  /** Set for product-defined agents (e.g. "mika"). Absent for user- and
+   *  template-created agents. Identity for "maintained by Multica" checks —
+   *  never the display name, which owners may change. */
+  system_key?: string;
+  /** Read-only product half of a system agent's prompt, served from the
+   *  backend binary. Absent for ordinary agents. */
+  system_instructions?: string;
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
@@ -585,8 +608,8 @@ export interface CreateAgentRequest {
   thinking_level?: string;
   /** Optional Codex service-tier catalog ID. See `Agent.service_tier`. */
   service_tier?: string;
-  /** Optional template slug used by the onboarding agent picker. Surfaced
-   *  as the `template` property on the `agent_created` PostHog event. */
+  /** Optional creation-source attribution. Surfaced as the `template`
+   *  property on the `agent_created` PostHog event. */
   template?: string;
   /** Workspace skill IDs attached atomically with the agent row. */
   skill_ids?: string[];
@@ -651,86 +674,6 @@ export interface AgentBuilderSessionSummary {
  *  wait for it before showing the new runtime as selected. */
 export interface AgentBuilderRuntimeSwitch {
   runtime_id: string;
-}
-
-/** Agent template summary — fields needed by the picker grid. Does NOT
- *  include `instructions` to keep the list payload small; the detail
- *  endpoint or the create flow returns the full template body. */
-export interface AgentTemplateSummary {
-  slug: string;
-  name: string;
-  description: string;
-  /** Optional grouping for the picker UI ("Engineering" / "Writing" / …). */
-  category?: string;
-  /** Optional lucide-react icon name (e.g. "Search"). Frontend falls back
-   *  to a generic icon when empty. */
-  icon?: string;
-  /** Optional semantic color token for the icon badge — one of "info" /
-   *  "success" / "warning" / "primary" / "secondary". Frontend has a
-   *  static class map so Tailwind can JIT-scan all variants. */
-  accent?: string;
-  skills: AgentTemplateSkillRef[];
-}
-
-/** Full agent template — same as `AgentTemplateSummary` plus the
- *  instructions block. Returned by `GET /api/agent-templates/:slug`. */
-export interface AgentTemplate extends AgentTemplateSummary {
-  instructions: string;
-}
-
-/** Skill reference inside an agent template. `source_url` is the upstream
- *  GitHub / skills.sh URL fetched on create; `cached_*` mirror the upstream
- *  frontmatter at template-author time and let the picker render without
- *  HTTP fetches. */
-export interface AgentTemplateSkillRef {
-  source_url: string;
-  cached_name: string;
-  cached_description: string;
-}
-
-export interface CreateAgentFromTemplateRequest {
-  template_slug: string;
-  name: string;
-  runtime_id: string;
-  model?: string;
-  visibility?: AgentVisibility;
-  /**
-   * Invocation permission mode (MUL-3963). When present it is authoritative;
-   * when absent the backend maps the legacy `visibility` field
-   * (private -> private, workspace -> public_to + workspace target). On
-   * UPDATE, permission changes are OWNER-ONLY (the backend silently ignores
-   * these fields from non-owner admins).
-   */
-  permission_mode?: AgentPermissionMode;
-  /** Invocation grants — see `AgentInvocationTargetInput`. */
-  invocation_targets?: AgentInvocationTargetInput[];
-  max_concurrent_tasks?: number;
-  /** Optional overrides applied to the template before creation. nil/omit
-   *  uses the template's own value. */
-  description?: string;
-  instructions?: string;
-  avatar_url?: string;
-  /** Workspace skill IDs attached **in addition to** the template's
-   *  skills. Server dedupes against template skills automatically. */
-  extra_skill_ids?: string[];
-}
-
-export interface CreateAgentFromTemplateResponse {
-  agent: Agent;
-  /** Skill IDs that were newly created in the workspace from upstream URLs. */
-  imported_skill_ids: string[];
-  /** Skill IDs that already existed in the workspace (same name) and were
-   *  reused rather than re-imported. The UI can surface this as a toast so
-   *  the user knows their pre-existing skill wasn't overwritten. */
-  reused_skill_ids: string[];
-}
-
-/** 422 body returned by `POST /api/agents/from-template` when one or more
- *  template skill URLs cannot be reached. The transaction is rolled back —
- *  no partial workspace state. */
-export interface CreateAgentFromTemplateFailure {
-  error: string;
-  failed_urls: string[];
 }
 
 export interface UpdateAgentRequest {
@@ -1017,6 +960,11 @@ export interface DashboardAgentRunTime {
   total_seconds: number;
   task_count: number;
   failed_count: number;
+  // Runs the user stopped mid-flight. Disjoint from `failed_count`, and
+  // both are subsets of `task_count` — the succeeded count is the
+  // remainder. A stopped run still occupied an agent and still spent
+  // tokens, so its seconds belong in `total_seconds`.
+  cancelled_count: number;
 }
 
 // One (date) bucket of terminal-task run-time + counts for the workspace
@@ -1028,6 +976,8 @@ export interface DashboardRunTimeDaily {
   total_seconds: number;
   task_count: number;
   failed_count: number;
+  // See DashboardAgentRunTime.cancelled_count.
+  cancelled_count: number;
 }
 
 // One (date, failure_reason) bucket of terminal-task counts for the workspace

@@ -38,6 +38,7 @@
     "channels",
     "lark-bot-integration",
     "slack-bot-integration",
+    "dingtalk-bot-integration",
     "github-integration",
     "vcs-integration",
     "---アプリ---",

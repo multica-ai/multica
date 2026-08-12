@@ -34,4 +34,18 @@ describe("ProviderLogo", () => {
     expect(logoSrc).toContain("fill='#6D44E8'");
     expect(logo?.classList.contains("runtime-logo")).toBe(true);
   });
+
+  it("renders the QwenPaw mark instead of the generic fallback", () => {
+    const { container } = render(
+      <ProviderLogo provider="qwenpaw" className="runtime-logo" />,
+    );
+
+    const logo = container.querySelector("svg");
+
+    // currentColor keeps the single path legible in both themes, matching the
+    // separate light/dark marks upstream ships.
+    expect(logo?.getAttribute("fill")).toBe("currentColor");
+    expect(logo?.querySelector("path")).not.toBeNull();
+    expect(logo?.classList.contains("runtime-logo")).toBe(true);
+  });
 });

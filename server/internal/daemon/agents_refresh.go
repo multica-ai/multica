@@ -27,7 +27,20 @@ var agentConvergeMaxBackoff = 30 * time.Minute
 // of codex/claude is picked up without a restart. A round is one `--version`
 // fork per installed CLI, fanned out and machine-level — it does not scale with
 // workspace count or runtime count. Overridable for tests.
-var agentVersionRefreshInterval = 5 * time.Minute
+//
+// This is the one local probe whose cost grows with the host (one fork per
+// installed CLI) and which executes third-party binaries, some of whose
+// wrappers have visible side effects when run — so it is the one worth
+// lengthening if background probing needs to get cheaper.
+//
+// It is not lengthened further than selfReloadCheckInterval, though, because
+// the round does more than refresh a displayed version string: it also keys
+// version-sensitive launch policy, and it is what confirms a CLI has dropped
+// below its minimum supported version and must stop being given work. The
+// interval is therefore also the window in which an unsupported CLI keeps
+// claiming tasks, which is why this tracks the reload check rather than being
+// pushed out on cost grounds alone.
+var agentVersionRefreshInterval = 10 * time.Minute
 
 // agentDiscoveryLoop keeps the registered runtime set converged on the agent
 // CLIs actually installed on this machine, so a CLI installed while the daemon

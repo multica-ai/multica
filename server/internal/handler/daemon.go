@@ -751,43 +751,122 @@ func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntim
 			}
 			merged[oldID] = struct{}{}
 
-			agents, err := h.Queries.ReassignAgentsToRuntime(r.Context(), db.ReassignAgentsToRuntimeParams{
-				NewRuntimeID: registered.ID,
-				OldRuntimeID: old.ID,
-			})
-			if err != nil {
-				slog.Warn("legacy runtime merge: reassign agents failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
-				continue
+			if err := h.mergeLegacyRuntime(r.Context(), registered.ID, old.ID, legacyID, provider); err != nil {
+				slog.Warn("legacy runtime merge failed",
+					"legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
 			}
-			tasks, err := h.Queries.ReassignTasksToRuntime(r.Context(), db.ReassignTasksToRuntimeParams{
-				NewRuntimeID: registered.ID,
-				OldRuntimeID: old.ID,
-			})
-			if err != nil {
-				slog.Warn("legacy runtime merge: reassign tasks failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
-				continue
-			}
-			if err := h.Queries.RecordRuntimeLegacyDaemonID(r.Context(), db.RecordRuntimeLegacyDaemonIDParams{
-				ID:             registered.ID,
-				LegacyDaemonID: strToText(legacyID),
-			}); err != nil {
-				slog.Warn("legacy runtime merge: record legacy daemon_id failed", "legacy_daemon_id", legacyID, "error", err)
-			}
-			if err := h.Queries.DeleteAgentRuntime(r.Context(), old.ID); err != nil {
-				slog.Warn("legacy runtime merge: delete old runtime failed", "old_runtime_id", oldID, "error", err)
-				continue
-			}
-
-			slog.Info("legacy runtime merged",
-				"legacy_daemon_id", legacyID,
-				"old_runtime_id", oldID,
-				"new_runtime_id", newID,
-				"provider", provider,
-				"agents_reassigned", agents,
-				"tasks_reassigned", tasks,
-			)
 		}
 	}
+}
+
+// errRuntimeMergeFenced reports that the task-write fence refused the
+// reassignment because the target runtime's workspace is being deleted or is
+// already gone. The merge is abandoned, not retried in place: the next daemon
+// registration re-runs it, and by then either the workspace is gone entirely or
+// the teardown rolled back.
+var errRuntimeMergeFenced = errors.New("runtime merge refused by the task-write fence")
+
+// mergeLegacyRuntime folds one legacy runtime row into the freshly registered one,
+// as a single transaction.
+//
+// Order is load-bearing. The fence comes first — workspace row, then both runtime
+// rows FOR UPDATE — and tasks move next, because that statement carries the same
+// fence predicate every task write uses and is the only step that can tell us the
+// target workspace is being torn down. Its verdict is separate from its row
+// count for exactly this reason: "0 tasks reassigned" is also what a legacy runtime
+// with no history looks like, and treating a fenced refusal as success would take
+// us straight to DeleteAgentRuntime below — where agent_task_queue's
+// ON DELETE CASCADE would delete the history this merge is supposed to carry
+// forward (MUL-5999 review).
+//
+// One transaction, because the fence's workspace lock lives only as long as the
+// statement that took it. Run as four autocommit statements, the merge had two
+// ways to leave the tenant inconsistent and the registration reporting success:
+//
+//   - a transient failure on the agent reassignment left tasks pointing at the new
+//     runtime while their agents stayed on the old one, self-healing only on some
+//     later registration;
+//   - worse, in the gap after the task commit a workspace teardown could lock and
+//     delete the target runtime, whose UnbindTasksFromRuntime step clears
+//     runtime_id on the tasks that had just moved. The next merge looks for tasks
+//     by the OLD runtime id, so that history was permanently detached.
+//
+// Holding the fence lock from the first statement to COMMIT closes both: the
+// teardown cannot start deleting the target until this merge finishes, and any
+// failure rolls the whole merge back to its starting state.
+func (h *Handler) mergeLegacyRuntime(ctx context.Context, newRuntimeID, oldRuntimeID pgtype.UUID, legacyID, provider string) error {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin merge tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	// Fence, in the same order every task write uses: workspace row first, then the
+	// owner rows. Without the FOR UPDATE on the runtimes, a concurrent enqueue
+	// against the OLD runtime slipped through after the task scan — writers hold
+	// only FOR KEY SHARE on the workspace, and so did this merge, and two KEY SHARE
+	// locks do not conflict — and DeleteAgentRuntime below then removed that
+	// brand-new task through ON DELETE CASCADE.
+	runtimeIDs := []pgtype.UUID{oldRuntimeID, newRuntimeID}
+	if err := qtx.LockWorkspaceForRuntimeMerge(ctx, runtimeIDs); err != nil {
+		return fmt.Errorf("lock workspace: %w", err)
+	}
+	locked, err := qtx.LockRuntimesForMerge(ctx, runtimeIDs)
+	if err != nil {
+		return fmt.Errorf("lock runtimes: %w", err)
+	}
+	if len(locked) != len(runtimeIDs) {
+		// One of them went away while we were queueing for the lock; the fence
+		// inside the reassignment would refuse anyway.
+		return errRuntimeMergeFenced
+	}
+
+	reassignment, err := qtx.ReassignTasksToRuntime(ctx, db.ReassignTasksToRuntimeParams{
+		NewRuntimeID: newRuntimeID,
+		OldRuntimeID: oldRuntimeID,
+	})
+	if err != nil {
+		return fmt.Errorf("reassign tasks: %w", err)
+	}
+	if !reassignment.FenceOk {
+		return errRuntimeMergeFenced
+	}
+
+	agents, err := qtx.ReassignAgentsToRuntime(ctx, db.ReassignAgentsToRuntimeParams{
+		NewRuntimeID: newRuntimeID,
+		OldRuntimeID: oldRuntimeID,
+	})
+	if err != nil {
+		return fmt.Errorf("reassign agents: %w", err)
+	}
+
+	// Inside the transaction this can no longer be best-effort: a failed statement
+	// poisons the transaction, so it either lands with the rest of the merge or the
+	// merge is rolled back.
+	if err := qtx.RecordRuntimeLegacyDaemonID(ctx, db.RecordRuntimeLegacyDaemonIDParams{
+		ID:             newRuntimeID,
+		LegacyDaemonID: strToText(legacyID),
+	}); err != nil {
+		return fmt.Errorf("record legacy daemon_id: %w", err)
+	}
+	if err := qtx.DeleteAgentRuntime(ctx, oldRuntimeID); err != nil {
+		return fmt.Errorf("delete old runtime: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit merge: %w", err)
+	}
+
+	slog.Info("legacy runtime merged",
+		"legacy_daemon_id", legacyID,
+		"old_runtime_id", uuidToString(oldRuntimeID),
+		"new_runtime_id", uuidToString(newRuntimeID),
+		"provider", provider,
+		"agents_reassigned", agents,
+		"tasks_reassigned", reassignment.ReassignedTasks,
+	)
+	return nil
 }
 
 func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request) {
@@ -1636,6 +1715,12 @@ type claimBuildFailure struct {
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
+	// Claim-only capability: this server resolves the squad-leader role on the
+	// wire (is_leader_task / squad_id), so the daemon must not re-derive it
+	// from the briefing text. Set unconditionally — on every claim, leader or
+	// not — because its absence is what tells an upgraded daemon it is talking
+	// to a server too old to have answered the question (MUL-5811).
+	resp.LeaderRoleResolved = true
 	supportsCoalescedComments := requestHasClientCapability(r, protocol.DaemonCapabilityCoalescedCommentsV1)
 	// Empty-but-non-nil so pgx persists '{}' rather than NULL for tasks without
 	// comment input. Comment tasks replace this with the ids actually embedded
@@ -1696,6 +1781,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			ServiceTier:           agent.ServiceTier.String,
 			RuntimeConfig:         runtimeConfig,
 			DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
+		}
+		// System agents carry a product-owned instruction layer that ships with
+		// this binary instead of being copied into their row at creation. That
+		// is what makes it hot-updatable: editing the embedded file and
+		// deploying reaches every existing workspace on its next task, with no
+		// migration and no client upgrade. agent.Instructions holds only the
+		// workspace's own notes, so a release can never overwrite them.
+		//
+		// Composing here covers every task kind, because this is the single
+		// place a claimed task's agent payload is assembled.
+		if agent.SystemKey.String == service.MikaSystemKey {
+			resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
 		}
 		if useSkillRefs {
 			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
@@ -1794,33 +1891,53 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// (No FK on squad_id — see migration 127.) We append (not replace)
 			// so per-agent instructions stay authoritative; the squad briefing
 			// stacks on top as task-specific squad context.
-			if resp.Agent != nil && task.IsLeaderTask && task.SquadID.Valid {
-				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-					ID:          task.SquadID,
-					WorkspaceID: issue.WorkspaceID,
-				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-					// Parent-status authority is deliberately NARROWER than
-					// briefing injection. Injection is keyed off is_leader_task
-					// (see above) and therefore also fires on the MUL-3724 path,
-					// where the issue belongs to a plain agent and this squad was
-					// only @mentioned for help. Granting status ownership there
-					// would let a guest squad push someone else's in-flight issue
-					// to in_review, so we gate it on the issue actually being
-					// assigned to this squad.
-					ownsIssueStatus := issue.AssigneeType.Valid &&
-						issue.AssigneeType.String == "squad" &&
-						uuidToString(issue.AssigneeID) == uuidToString(squad.ID)
-					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus)
-					if strings.TrimSpace(resp.Agent.Instructions) == "" {
-						resp.Agent.Instructions = briefing
-					} else {
-						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+			if task.IsLeaderTask {
+				injected := false
+				if resp.Agent != nil && task.SquadID.Valid {
+					if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+						ID:          task.SquadID,
+						WorkspaceID: issue.WorkspaceID,
+					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+						// Parent-status authority is deliberately NARROWER than
+						// briefing injection. Injection is keyed off is_leader_task
+						// (see above) and therefore also fires on the MUL-3724 path,
+						// where the issue belongs to a plain agent and this squad was
+						// only @mentioned for help. Granting status ownership there
+						// would let a guest squad push someone else's in-flight issue
+						// to in_review, so we gate it on the issue actually being
+						// assigned to this squad.
+						ownsIssueStatus := issue.AssigneeType.Valid &&
+							issue.AssigneeType.String == "squad" &&
+							uuidToString(issue.AssigneeID) == uuidToString(squad.ID)
+						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus)
+						if strings.TrimSpace(resp.Agent.Instructions) == "" {
+							resp.Agent.Instructions = briefing
+						} else {
+							resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+						}
+						injected = true
+						slog.Debug("injected squad leader briefing",
+							"squad_id", uuidToString(squad.ID),
+							"squad_name", squad.Name,
+							"leader_agent_id", resp.Agent.ID,
+							"owns_issue_status", ownsIssueStatus,
+						)
 					}
-					slog.Debug("injected squad leader briefing",
-						"squad_id", uuidToString(squad.ID),
-						"squad_name", squad.Name,
-						"leader_agent_id", resp.Agent.ID,
-						"owns_issue_status", ownsIssueStatus,
+				}
+				// Every skip above (NULL squad_id, squad hard-deleted, leader
+				// swapped after enqueue) leaves a task the daemon must NOT run
+				// as a leader: it has no roster to delegate to and no protocol
+				// to follow. The daemon derives its leader role from this flag
+				// (MUL-5811), so clearing it here is what keeps
+				// "is_leader_task on the wire ⇔ briefing injected" true, and the
+				// run degrades to an ordinary agent turn exactly as it did when
+				// the daemon inferred the role from the briefing text itself.
+				if !injected {
+					resp.IsLeaderTask = false
+					slog.Warn("squad leader briefing not injected; claim delivered as a non-leader task",
+						"task_id", uuidToString(task.ID),
+						"squad_id", uuidToString(task.SquadID),
+						"agent_id", uuidToString(task.AgentID),
 					)
 				}
 			}
@@ -2103,10 +2220,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
 			resp.ThreadName = cs.Title
-			// An is_agent_intro session carries no user message: the agent opens
-			// the conversation by introducing itself. Flag it so the daemon builds
-			// a self-introduction prompt rather than a "reply to their message"
-			// prompt (MUL-4230). The is_agent_intro column stays true for the
+			// Legacy compatibility: agent creation no longer creates intro chats,
+			// but historical is_agent_intro sessions can still be resumed. Such a
+			// session carries no user message on its opening turn, so flag it for
+			// the historical self-introduction prompt (MUL-4230). The column stays true for the
 			// session's whole life, so gate the intro prompt on the session still
 			// having zero human messages — otherwise every follow-up turn after the
 			// creator replies would re-run the "introduce yourself" prompt and the
@@ -2149,6 +2266,15 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			if binding, berr := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), cs.ID); berr == nil {
 				resp.ChatChannelType = binding.ChannelType
 				resp.ChatType = binding.ChatType
+				// Whether a file the agent produces reaches this
+				// conversation is the server's question, not the daemon's.
+				// It takes an adapter that goes back for the bound
+				// attachment AND storage for it to go back to, and only
+				// this process knows both. Answered here so the daemon
+				// never has to infer it from the channel type — an
+				// inference that promises delivery on any deployment
+				// running WeCom without object storage.
+				resp.ChatChannelDeliversFiles = h.channelDeliversFiles(binding.ChannelType)
 				if binding.ChannelType == string(slack.TypeSlack) {
 					// The latest trigger was a thread reply iff its reply-target
 					// thread (last_thread_id) differs from its own message id (a

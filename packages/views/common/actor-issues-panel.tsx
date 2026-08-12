@@ -19,6 +19,7 @@ import {
   IssueDisplayControls,
   ViewRefreshIndicator,
 } from "../issues/components/issues-header";
+import { FilterChipsBar } from "../issues/components/filter-chips-bar";
 import { IssueSurface } from "../issues/surface/issue-surface";
 import { useT } from "../i18n";
 
@@ -50,6 +51,7 @@ function ActorIssuesHeader({
   const { t } = useT("issues");
 
   return (
+    <>
     <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b px-4">
       <div className="flex items-center gap-3">
         <div className="relative">
@@ -98,6 +100,8 @@ function ActorIssuesHeader({
         <ViewRefreshIndicator active={isRefreshing} />
       </div>
     </div>
+    <FilterChipsBar />
+    </>
   );
 }
 

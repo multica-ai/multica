@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
@@ -26,6 +26,11 @@ import {
 } from "@multica/core/agents";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useAppForeground } from "../../common/use-app-foreground";
+import {
+  RowActionsMenu,
+  handleRowActivationKey,
+  type RowActionItem,
+} from "../../common/row-actions-menu";
 import {
   PickerEmpty,
   PickerItem,
@@ -54,6 +59,7 @@ import {
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
 import { useQuickActionsFailureToast } from "./use-quick-actions-failure-toast";
@@ -68,6 +74,8 @@ import { ChatQueue } from "./chat-queue";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
+import { useVisualViewportKeyboard } from "./use-visual-viewport-keyboard";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import {
   hasInFlightPendingTask,
   isStillOnComposeTarget,
@@ -76,44 +84,13 @@ import {
 } from "./use-chat-controller";
 import { useChatProjectContextSupport } from "./use-chat-project-context-support";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, Attachment, ChatMessage, ChatMessagesPage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import type { Agent, Attachment, ChatMessage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
 const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
 
-function appendChatMessageToLatestPageCache(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  message: ChatMessage,
-) {
-  qc.setQueryData<InfiniteData<ChatMessagesPage>>(
-    chatKeys.messagesPage(sessionId),
-    (old) => {
-      if (!old) {
-        return {
-          pages: [{
-            messages: [message],
-            limit: 50,
-            has_more: false,
-            next_cursor: null,
-          }],
-          pageParams: [null],
-        };
-      }
-      if (old.pages.some((page) => page.messages.some((m) => m.id === message.id))) {
-        return old;
-      }
-      return {
-        ...old,
-        pages: old.pages.map((page, index) =>
-          index === 0 ? { ...page, messages: [...page.messages, message] } : page,
-        ),
-      };
-    },
-  );
-}
 
 export function ChatWindow() {
   const { t } = useT("chat");
@@ -523,11 +500,11 @@ export function ChatWindow() {
         created_at: result.created_at,
         attachments: draftAttachments,
       };
-      appendChatMessageToLatestPageCache(qc, sessionId, sent);
-      qc.setQueryData<ChatMessage[]>(
-        chatKeys.messages(sessionId),
-        (old) => (old ? [...old, sent] : [sent]),
-      );
+      // Single door into the message caches (MUL-5711): idempotent by id, so
+      // this row and the chat:message echo of the same send converge in either
+      // arrival order, and this richer row (it carries the draft attachments)
+      // is never downgraded by the echo, which has no attachments field.
+      upsertChatMessageToCaches(qc, sessionId, sent, { seedIfMissing: true });
       seedAcceptedPendingTask(qc, sessionId, {
         task_id: result.task_id,
         created_at: result.created_at,
@@ -738,14 +715,65 @@ export function ChatWindow() {
 
   const isVisible = isOpen && (isExpanded || boundsReady);
 
+  // Small screens drop the floating-card form entirely — a 90%-of-375px
+  // "window" is all chrome and no content, so the panel goes full-screen
+  // (Lark/IM-style) and the resize/expand affordances disappear with it.
+  const isMobile = useIsMobile();
+
   // `@container`: the window is user-resizable from 360px to 90% of the
   // viewport, so the chat body's gutter (CHAT_GUTTER) has to key off the
   // window's own width, not the page behind it.
-  const containerClass = "absolute bottom-2 right-2 z-50 flex flex-col overflow-hidden rounded-xl bg-surface-raised shadow-[var(--floating-shadow)] ring-1 ring-surface-border @container";
+  const containerClass = cn(
+    "absolute z-50 flex flex-col overflow-hidden bg-surface-raised @container",
+    isMobile
+      ? "inset-x-0"
+      : "right-2 rounded-xl shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
+  );
+  // Soft keyboards shrink only the *visual* viewport — the layout viewport
+  // (and this panel's bottom-anchored parent) keeps its full height, so
+  // without correction the panel's lower half, composer included, sits
+  // behind the keyboard while iOS pans the page and chops the panel's top
+  // instead. While the keyboard is up, pin the panel to the visual
+  // viewport: bottom glued to its bottom edge (occludedBottom tracks any
+  // pan), height/maxHeight bounded by the visible strip, so the composer
+  // rides the keyboard's top edge.
+  //
+  // Every branch writes the SAME style keys with explicit values: motion.div
+  // applies styles imperatively and never unsets a key that merely
+  // disappears from the style prop, so a conditional spread here would
+  // leave the keyboard geometry stuck on the DOM after the keyboard closes.
+  const keyboard = useVisualViewportKeyboard();
   const containerStyle: React.CSSProperties = {
     transformOrigin: "bottom right",
     pointerEvents: isOpen ? "auto" : "none",
+    ...(isMobile
+      ? {
+          // Full-screen panel anchored to the visible bottom edge;
+          // width/height live in the motion animate below.
+          top: "auto",
+          bottom: keyboard ? keyboard.occludedBottom : 0,
+          maxHeight: "none",
+        }
+      : {
+          // Floating card; only the anchor and the height cap live here.
+          top: "auto",
+          bottom: keyboard ? keyboard.occludedBottom + 8 : 8,
+          maxHeight: keyboard ? keyboard.viewportHeight - 16 : "none",
+        }),
   };
+
+  // Width/height are ALWAYS owned by motion, in both modes: useIsMobile
+  // resolves after the first client render, and a key that merely vanishes
+  // from `animate` keeps its last DOM value — a phone's first frame would
+  // otherwise leave the desktop card's inline width stuck on the
+  // full-screen panel. Mixed units (px <-> "100%") skip interpolation and
+  // jump, which is the behavior we want for keyboard snaps anyway.
+  const motionSize = isMobile
+    ? {
+        width: "100%",
+        height: keyboard ? keyboard.viewportHeight : "100%",
+      }
+    : { width: renderWidth, height: renderHeight };
 
   const contextItems = useChatContextItems(wsId);
   const queuedTasks = pendingTask?.queued_tasks ?? [];
@@ -755,12 +783,11 @@ export function ChatWindow() {
       ref={windowRef}
       className={containerClass}
       style={containerStyle}
-      initial={{ opacity: 0, scale: 0.95, width: renderWidth, height: renderHeight }}
+      initial={{ opacity: 0, scale: 0.95, ...motionSize }}
       animate={{
         opacity: isVisible ? 1 : 0,
         scale: isVisible ? 1 : 0.95,
-        width: renderWidth,
-        height: renderHeight,
+        ...motionSize,
       }}
       transition={{
         width: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
@@ -769,7 +796,7 @@ export function ChatWindow() {
         scale: { type: "spring", duration: 0.2, bounce: 0 },
       }}
     >
-      <ChatResizeHandles onDragStart={startDrag} />
+      {!isMobile && <ChatResizeHandles onDragStart={startDrag} />}
       {/* Header — ⊕ new + session dropdown | window tools */}
       <div className="flex items-center justify-between border-b px-4 py-2.5 gap-2">
         <div className="flex items-center gap-1 min-w-0">
@@ -798,23 +825,25 @@ export function ChatWindow() {
           />
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  onClick={toggleExpand}
-                />
-              }
-            >
-              {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
-            </TooltipContent>
-          </Tooltip>
+          {!isMobile && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={toggleExpand}
+                  />
+                }
+              >
+                {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
+              </TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -1090,6 +1119,11 @@ function AgentPickerItem({
   );
 }
 
+interface SessionRowAction extends RowActionItem {
+  /** Extra visible text in the hover strip (the stop button reads "Stop"). */
+  stripText?: string;
+}
+
 /**
  * Session dropdown: a flat "Chat history" list of all non-archived
  * sessions. Selecting a session from a different agent implicitly
@@ -1302,6 +1336,34 @@ function SessionDropdown({
           ? t(($) => $.session_history.row_subtitle.new_reply)
           : formatTimeAgo(session.updated_at);
 
+    // One list drives both action surfaces — the compact menu without hover
+    // and the hover strip with it — so they cannot drift.
+    const rowActions: SessionRowAction[] = isRunning
+      ? [
+          {
+            key: "stop",
+            icon: <Square className="size-2.5 fill-current" />,
+            label: t(($) => $.session_history.row_stop_aria),
+            stripText: t(($) => $.session_history.stop_action),
+            danger: true,
+            onSelect: () => setConfirmingStopId(session.id),
+          },
+        ]
+      : [
+          {
+            key: "rename",
+            icon: <Pencil className="size-3.5" />,
+            label: t(($) => $.session_history.row_rename_aria),
+            onSelect: () => setRenamingId(session.id),
+          },
+          {
+            key: "archive",
+            icon: <Archive className="size-3.5" />,
+            label: t(($) => $.list.archive),
+            onSelect: () => handleArchive(session),
+          },
+        ];
+
     return (
       <div
         key={session.id}
@@ -1313,9 +1375,7 @@ function SessionDropdown({
         }}
         onKeyDown={(e) => {
           if (isRenaming || isConfirmingAction) return;
-          if (e.key !== "Enter" && e.key !== " ") return;
-          e.preventDefault();
-          handleSelectSession(session);
+          handleRowActivationKey(e, () => handleSelectSession(session));
         }}
         className={cn(
           "group/history-row relative flex min-h-11 min-w-0 cursor-default items-center gap-2 overflow-hidden rounded-md py-1.5 pl-2 pr-2 outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring",
@@ -1398,7 +1458,7 @@ function SessionDropdown({
             </div>
           ) : (
             <div className="flex shrink-0 items-center">
-              <div className="flex h-7 items-center justify-end gap-1.5 text-caption text-muted-foreground group-hover/history-row:hidden">
+              <div className="flex h-7 items-center justify-end gap-1.5 text-caption text-muted-foreground [@media(hover:hover)]:group-hover/history-row:hidden [@media(hover:hover)]:group-focus-within/history-row:hidden">
                 {isRunning && <Loader2 className="size-3 animate-spin" />}
                 {showCompleted && !isRunning && <Check className="size-3 text-emerald-500" />}
                 {showUnread && !isRunning && !showCompleted && (
@@ -1410,9 +1470,16 @@ function SessionDropdown({
                 )}
                 <span className={cn("truncate", (showUnread || showCompleted || isRunning) && "font-medium text-foreground")}>{trailingStatus}</span>
               </div>
-              <div className="hidden h-7 items-center gap-0.5 group-hover/history-row:flex">
-                {isRunning && pendingTask && (
+              {/* Touch has no hover: without it the status above stays put and
+                  these same actions move into the row's compact menu. */}
+              <RowActionsMenu
+                label={t(($) => $.session_history.row_actions_aria)}
+                groups={[rowActions]}
+              />
+              <div className="hidden h-7 items-center gap-0.5 [@media(hover:hover)]:group-hover/history-row:flex [@media(hover:hover)]:group-focus-within/history-row:flex">
+                {rowActions.map((action) => (
                   <button
+                    key={action.key}
                     type="button"
                     onPointerDown={(e) => {
                       e.preventDefault();
@@ -1421,54 +1488,20 @@ function SessionDropdown({
                     onClick={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
-                      setConfirmingStopId(session.id);
+                      action.onSelect();
                     }}
-                    className="inline-flex h-7 items-center gap-1 rounded px-1.5 text-micro font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:outline-none"
-                    aria-label={t(($) => $.session_history.row_stop_aria)}
-                    title={t(($) => $.session_history.row_stop_aria)}
+                    className={
+                      action.danger
+                        ? "inline-flex h-7 items-center gap-1 rounded px-1.5 text-micro font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:outline-none"
+                        : "inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+                    }
+                    aria-label={action.label}
+                    title={action.label}
                   >
-                    <Square className="size-2.5 fill-current" />
-                    {t(($) => $.session_history.stop_action)}
+                    {action.icon}
+                    {action.stripText}
                   </button>
-                )}
-                {!isRunning && (
-                  <>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        setRenamingId(session.id);
-                      }}
-                      className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
-                      aria-label={t(($) => $.session_history.row_rename_aria)}
-                      title={t(($) => $.session_history.row_rename_aria)}
-                    >
-                      <Pencil className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        handleArchive(session);
-                      }}
-                      className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
-                      aria-label={t(($) => $.list.archive)}
-                      title={t(($) => $.list.archive)}
-                    >
-                      <Archive className="size-3.5" />
-                    </button>
-                  </>
-                )}
+                ))}
               </div>
             </div>
           )
@@ -1667,7 +1700,7 @@ function EmptyState({
   // presume the user already knows what chat is for.
   if (!hasSessions) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-8">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center-safe gap-3 overflow-y-auto px-6 py-8">
         <div className="text-center space-y-3">
           <h3 className="text-title-sm font-semibold">
             {t(($) => $.empty_state.first_time_title)}
@@ -1689,7 +1722,7 @@ function EmptyState({
 
   // Returning user: starter prompts are the fastest path back to action.
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-8">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center-safe gap-5 overflow-y-auto px-6 py-8">
       <div className="text-center space-y-1">
         <h3 className="text-title-sm font-semibold">
           {agentName

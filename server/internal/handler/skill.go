@@ -29,8 +29,8 @@ import (
 // Two failure modes covered:
 //   - Embedded NUL (0x00) — PG rejects with SQLSTATE 22021. Removed.
 //   - Other invalid-UTF-8 byte sequences (e.g. 0x91 = Windows-1252 smart
-//     quote, which crashed agent-template import of skills containing
-//     Windows-encoded prose). `strings.ToValidUTF8` drops them.
+//     quote in imported Windows-encoded prose). `strings.ToValidUTF8` drops
+//     them.
 //
 // Name is kept for compatibility with the many call sites; the behaviour
 // is a strict superset of the original.

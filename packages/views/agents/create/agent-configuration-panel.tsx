@@ -404,6 +404,7 @@ export function AgentExecutionOverrides({
         label={t(($) => $.creation_studio.speed_label)}
         runtimeId={runtime?.id ?? null}
         runtimeOnline={runtimeOnline}
+        provider={runtime?.provider ?? ""}
         model={draft.model}
         value={draft.serviceTier}
         canEdit={!disabled}

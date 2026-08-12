@@ -27,6 +27,15 @@
       "hint": "보통 몇 초 정도 걸립니다. 데몬이 워크스페이스에 등록되는 중입니다."
     }
   },
+  "mika_setup": {
+    "title": "런타임이 준비되었습니다. Mika와 시작하세요.",
+    "description": "Mika가 목표를 태스크로 구체화하고 적합한 에이전트를 조율하며, 워크플로에 필요할 때 재사용 가능한 specialist 추가를 돕습니다.",
+    "action": "Mika와 시작",
+    "failed": "Mika를 시작하지 못했습니다",
+    "dialog_title": "Mika를 어디에서 실행할까요?",
+    "dialog_description": "Mika가 사용할 런타임을 선택하세요. 나중에 설정에서 변경할 수 있습니다.",
+    "cancel": "취소"
+  },
   "machine": {
     "search_placeholder": "기기 검색...",
     "filters": {
@@ -262,6 +271,12 @@
   "charts": {
     "heatmap_less": "적음",
     "heatmap_more": "많음",
+    "heatmap_no_activity": "활동 없음",
+    "heatmap_busiest_day": "가장 활발한 날짜",
+    "heatmap_most_active_weekday": "가장 활발한 요일",
+    "heatmap_quietest_weekday": "가장 한산한 요일",
+    "heatmap_average": "평균 {{value}}",
+    "heatmap_window_total_other": "{{count}}일 합계",
     "tooltip_total": "합계"
   },
   "list": {

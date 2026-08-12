@@ -212,6 +212,14 @@ multica config show
 multica config show --profile staging
 ```
 
+Do not set `MULTICA_DAEMON_PORT` in the host shell, Compose service, or container entrypoint that starts a daemon. The host daemon derives its health port from `--profile` and injects this variable into agent tasks itself. Remove the variable from older startup environments entirely: versions 0.4.22 and 0.4.23 otherwise mistake that shell for a managed task and reject login. Newer versions let guarded human login and `daemon status` recover when the port is the only task signal, but ordinary API and profile-resolving commands intentionally remain fail-closed until the variable is removed.
+
+When the CLI runs inside a daemon-managed agent task, it does not load or modify these human-owned profile files. Multica API commands authenticate with the task-scoped credential injected by the daemon. `config show` and `config set` use private task-local state; human/local commands such as `login`, `logout`, `setup`, `workspace switch`, local runtime profile path changes, `daemon start` / `stop` / `restart`, `daemon logs`, and `daemon probe-runtimes` are unavailable. `auth status` does not print token material in this context.
+
+`daemon status` and `daemon disk-usage` stay available so an agent can inspect the runtime hosting it, scoped to that runtime: `status` probes the health port the daemon injected, and `disk-usage` scans the workspaces root the daemon injected. Neither accepts `--profile`, `disk-usage` also rejects `--all-profiles` and `--workspaces-root`, and its STATUS column is blank because resolving it would require the human's stored token. Use `du` and `df` for anything outside that scope.
+
+This protects implicit Multica CLI profile resolution while preserving the normal `HOME` and XDG variables used by other provider tools. It is not an OS filesystem boundary: processes running as the same system user may still open an explicitly known path. Use a dedicated user, container, VM, or equivalent isolation when that stronger guarantee is required.
+
 <Callout type="warning">
 CLI configuration files contain tokens that can access Multica as you. Don't commit them to a repository, upload them to logs, or share them with others.
 </Callout>

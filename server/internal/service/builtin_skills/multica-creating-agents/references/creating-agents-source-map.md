@@ -45,17 +45,6 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | Skills copied in the create transaction | 239 | Source skill ids sent as `skill_ids`, bound in the same `POST /api/agents` tx (267); `--no-skills` opts out | read `runAgentCopy` |
 | Secrets never copied | 240–266 | `custom_env`/`mcp_config`/`runtime_config` set only from explicit secret-safe flags, never read from the source | `multica agent copy --help` |
 
-Note: the CLI no longer exposes `--from-template`. The agent-template backend
-still exists (registry `server/internal/agenttmpl/`, handler `agent_template.go`,
-routes `GET /api/agent-templates` and `POST /api/agents/from-template`, plus the
-`packages/core` client/query wrappers) but is currently orphaned plumbing with no
-live caller: the removed CLI flag was its only non-test consumer, and onboarding
-does NOT use it — `packages/views/onboarding/steps/step-agent.tsx` builds four
-hardcoded local presets (i18n-resolved) and creates via plain `POST /api/agents`
-(`createAgent`), never `POST /api/agents/from-template`. Do not treat the template
-API as a supported agent-creation path. This skill teaches manual `agent create`
-only.
-
 ## Create handler — `server/internal/handler/agent.go`
 
 | Contract | Line | Behavior |
@@ -67,7 +56,7 @@ only.
 | `description` ≤ 255 code points | 627–629 | `utf8.RuneCountInString(req.Description) > maxAgentDescriptionLength` → 400 |
 | `runtime_id` required | 631–633 | `if req.RuntimeID == ""` → 400 "runtime_id is required" |
 | `runtime_id` must resolve in workspace | 642–658 | parsed + `GetAgentRuntimeForWorkspace`; unknown → 400 "invalid runtime_id" |
-| `thinking_level` provider-level validation | 896–903 | `!agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel)` → 400; fixed providers use an enum, Codex/OpenCode use safe-token syntax, and per-model gaps are deferred to daemon (MUL-2339) |
+| `thinking_level` provider-level validation | `agent.go` create/update paths | `!agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel)` → 400; fixed-vocabulary providers use an enum (Pi: `off|minimal|low|medium|high|xhigh|max`), Codex/OpenCode use safe-token syntax, and per-model gaps are deferred to daemon (MUL-2339) |
 | `thinking_level` rejection copy | `agent.go` `thinkingLevelRejection` / `existingThinkingLevelRejection` | Splits "runtime has no reasoning control" from "unrecognised token" so a runtime-capability 400 does not read as a typo; both carry-over branches point at `thinking_level=""` (MUL-5770) |
 | `service_tier` provider-level validation | `agent.go` create/update paths | Non-empty values are Codex-only safe tokens; exact per-model support is daemon-owned |
 | Defaults: `{}` config/env, `[]` args | 688–701 | `RuntimeConfig`→`{}`, `CustomEnv`→`{}`, `CustomArgs`→`[]` when nil, before insert |
@@ -77,17 +66,11 @@ only.
 | `mcp_config` null-skip on create | 704–705 | raw JSON copied through unless the body value is the literal `null` |
 | `mcp_config` redacted on read | 54, 848–851 | `redactMcpConfig` sets `McpConfigRedacted=true`; a private agent read by a member also redacts (494, 509) |
 | Qwen Code managed-MCP injection | `pkg/agent/qwen.go` | Non-null `mcp_config` is written to a daemon-owned 0600 temporary JSON file and passed with `--mcp-config`; the file is removed after the process exits, while `null` preserves native inheritance. |
-| Random emoji avatar default | `agent_avatar.go` 11–32; `agent.go` 1127–1133 | Omitted, empty, or whitespace-only `avatar_url` becomes a cryptographically selected `emoji:<glyph>` sentinel; explicit values are preserved. The template handler uses the same helper at `agent_template.go` 458. |
+| Random emoji avatar default | `agent_avatar.go` 11–32; `agent.go` 1127–1133 | Omitted, empty, or whitespace-only `avatar_url` becomes a cryptographically selected `emoji:<glyph>` sentinel; explicit values are preserved. |
 | `CreateAgent` insert params | `agent.go` create path | Persists avatar_url, runtime_config, instructions, custom_env, custom_args, model, thinking_level, service_tier, mcp_config, visibility, max_concurrent_tasks |
 | `UpdateAgent` rejects `custom_env` | 910–913 | if `custom_env` present in body → 400 "use PUT /api/agents/{id}/env (or `multica agent env set`)" |
 | `UpdateAgent` persists / clears `mcp_config` | 944–948, 1060–1061 | Tri-state from the raw body: key omitted → no change; literal `null` → `ClearAgentMcpConfig`; object → replace. No 400 like `custom_env` — `mcp_config` IS updatable here |
 | `description` ≤ 255 on update too | 921–924 | same cap re-checked on update |
-
-## Create-from-template handler — `server/internal/handler/agent_template.go`
-
-| Contract | Line | Behavior |
-|---|---|---|
-| `max_concurrent_tasks` default + validation | `CreateAgentFromTemplate`; `defaultAndValidateAgentMaxConcurrentTasks` | Uses the same helper as manual create: omission or `null` defaults to 6; explicit numeric values outside 1–50 return 400 |
 
 ## Runtime model/thinking discovery — `server/pkg/agent/{models,thinking}.go`
 
@@ -97,9 +80,15 @@ only.
 | Codex fallback catalog | `models.go` 301–354 | Used for Codex <0.122.0 and failed/malformed discovery; includes current verified visible models plus legacy `gpt-5.3-codex`, with a separate `Thinking` catalog on every model |
 | Codex discovery version gate | `thinking.go` 280, 306–337 | `codex debug models --bundled` is used only for parseable versions ≥0.122.0; unsupported versions and command/parse/empty failures return the static model + thinking fallback |
 | Codex catalog projection | `thinking.go` `parseCodexModelCatalog` | Hidden models are excluded; visible model, reasoning, and `service_tiers` metadata are preserved |
-| Per-model thinking validation | `thinking.go` 547–640 | `ValidateThinkingLevel` accepts only values in the explicit model's `Thinking.SupportedLevels`; an empty Codex model fails closed because its effective `config.toml` model is unknown |
-| Dynamic Codex token gate | `thinking.go` 642–710 | Server persistence accepts syntactically safe Codex tokens so new catalog values do not require a Multica release; exact support remains a daemon-local per-model check |
-| Runtime reasoning capability | `thinking.go` `ThinkingControlSupported` | True for the fixed-enum providers plus Codex/OpenCode. False for runtimes with no effort dial on the surface the daemon drives — Hermes' ACP adapter never carries `reasoning_config` onto a session, so its CLI-level `agent.reasoning_effort` cannot be reached from Multica (verified against Hermes Agent v0.18.2, MUL-5770) |
+| Pi RPC model/thinking discovery | `models.go` `discoverPiModelsRPC` / `piThinkingFromRPCModel` | Starts an ephemeral `pi --mode rpc --no-session` process, requests `get_state` + `get_available_models`, preserves extension-registered providers, marks the current model as Default, and mirrors Pi's exact per-model `reasoning` / `thinkingLevelMap` rules. Older/forked Pi falls back to `--list-models` with no guessed thinking catalog. |
+| Pi invocation effort | `pi.go` `buildPiArgs` / `piBlockedArgs` | A non-empty persisted value becomes `--thinking <level>`; custom `--thinking` flags are filtered so the first-class field is the sole owner. |
+| Per-model thinking validation | `thinking.go` `ValidateThinkingLevel` | Accepts only values in the explicit model's `Thinking.SupportedLevels`; Pi empty-model validation resolves to the RPC current-model Default, while an empty Codex model fails closed because its effective `config.toml` model is unknown. |
+| Dynamic Codex token gate | `thinking.go` `IsKnownThinkingValue` | Server persistence accepts syntactically safe Codex/OpenCode/Kimi and ACP-catalog tokens so new catalog values do not require a Multica release; Pi instead uses its fixed seven-token CLI vocabulary. Exact support remains a daemon-local per-model check. |
+| Runtime reasoning capability | `thinking.go` `ThinkingControlSupported` | True for the fixed-enum providers (including Pi), the dynamic-catalog providers (Codex/OpenCode/Kimi), and the ACP-catalog providers in `acpCatalogThinkingProviders`. False for runtimes with no effort dial on the surface the daemon drives — Hermes' ACP adapter never carries `reasoning_config` onto a session, so its CLI-level `agent.reasoning_effort` cannot be reached from Multica (verified against Hermes Agent v0.18.2, MUL-5770) |
+| Generic ACP effort catalog | `acp_effort.go` `parseACPEffortOption` / `annotateACPThinkingForSessionModel` | One provider-neutral parser reads the effort selector out of any ACP `session/new` response (option id or category `effort` / `thought_level`), taking the advertised values verbatim. CodeBuddy keeps a flag whitelist on top because it applies the level via `--effort`, not over ACP |
+| ACP effort catalogs are per model, not per session | `acp_effort.go` `annotateACPThinkingForSessionModel` | Only the model marked `Default` (the advertised `currentModelId`) is annotated. ACP options may depend on each other, and reasonix v1.21.5 derives the catalog from the current model's provider entry — `deepseek-v4-flash` advertises `low`, `deepseek-v4-pro` does not, and some models expose no effort at all. Copying one catalog across models would offer levels the runtime then refuses. Other models keep `Thinking=nil` until per-model probing exists |
+| ACP effort application | `acp_effort.go` `applyACPEffortOption` | Sends `session/set_config_option` with the id the session advertised, then re-reads `currentValue`. The read-back proves only that the session reports the new value — not that the runtime threaded it into its provider request; it catches Kimi ≤0.28.1 confirming `on` after being set to `max`. Failures warn and let the prompt through rather than failing the task. `stateIsCurrent=false` after a model switch skips the local vocabulary check, because the advertised list then describes the previous model |
+| ACP effort opt-in | `thinking.go` `acpCatalogThinkingProviders` | A runtime joins only when its `Execute` calls `applyACPEffortOption` AND someone has confirmed from source or a real run that it acts on the setting — currently `reasonix` (GitHub #6720). This list, not the read-back, is where that verification is recorded. Speaking ACP is not sufficient: Copilot discovers over ACP but executes through its own CLI, so a catalog there would render a picker with nothing behind it |
 | Per-model service-tier validation | `thinking.go` `ValidateServiceTier` | Accepts only a tier advertised for the explicit Codex model; empty model fails closed because config.toml is unknown |
 | Daemon invalid-combination handling | `internal/daemon/daemon.go` 3860–3892 | Before execution, invalid `(provider, model, thinking_level)` combinations log a warning and omit the override rather than failing the task |
 

@@ -10,6 +10,7 @@ import {
   computeCostInWindow,
   estimateCost,
   estimateCostBreakdown,
+  formatTokens,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
@@ -1391,5 +1392,23 @@ describe("summarizeTaskUsageAcross", () => {
   it("is null only when no run has any usage", () => {
     expect(summarizeTaskUsageAcross([undefined, [], undefined])).toBeNull();
     expect(summarizeTaskUsageAcross([])).toBeNull();
+  });
+});
+
+describe("formatTokens", () => {
+  it("uses a compact unit ladder for large token counts", () => {
+    expect(formatTokens(999)).toBe("999");
+    expect(formatTokens(1_000)).toBe("1K");
+    expect(formatTokens(1_050)).toBe("1.1K");
+    expect(formatTokens(1_000_000)).toBe("1M");
+    expect(formatTokens(2_200_000_000)).toBe("2.2B");
+    expect(formatTokens(29_513_100_000)).toBe("29.5B");
+    expect(formatTokens(1_000_000_000_000)).toBe("1T");
+  });
+
+  it("promotes values that round across a unit boundary", () => {
+    expect(formatTokens(999_949)).toBe("999.9K");
+    expect(formatTokens(999_950)).toBe("1M");
+    expect(formatTokens(999_999_999)).toBe("1B");
   });
 });

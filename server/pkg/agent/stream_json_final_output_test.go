@@ -12,7 +12,11 @@ import (
 	"time"
 )
 
-func TestFinalizeStreamResultEmptySuccessWithoutAssistantUsesSafeNotice(t *testing.T) {
+// A successful run that produced no deliverable text must report an EMPTY
+// output, never a placeholder sentence. Empty is what the issue / direct-chat /
+// channel delivery paths each branch on to pick their own no-response behavior;
+// any non-empty prose here defeats all three at once (GH #6462).
+func TestFinalizeStreamResultEmptySuccessWithoutAssistantReturnsEmptyOutput(t *testing.T) {
 	t.Parallel()
 
 	status, output, errMsg := finalizeStreamResult(
@@ -25,8 +29,52 @@ func TestFinalizeStreamResultEmptySuccessWithoutAssistantUsesSafeNotice(t *testi
 		streamTerminalState{sawResult: true},
 		"",
 	)
-	if status != "completed" || output != emptySuccessfulStreamResult || errMsg != "" {
-		t.Fatalf("finalizeStreamResult() = (%q, %q, %q), want completed safe notice", status, output, errMsg)
+	if status != "completed" || output != "" || errMsg != "" {
+		t.Fatalf("finalizeStreamResult() = (%q, %q, %q), want completed with empty output", status, output, errMsg)
+	}
+}
+
+// resolveFallback is the single policy every stream-json backend applies per
+// assistant event, so pin all four outcomes here rather than only through the
+// per-backend stream fixtures.
+func TestAssistantTurnResolveFallback(t *testing.T) {
+	t.Parallel()
+
+	const prior = "AN ANSWER THE MODEL ALREADY GAVE"
+	tests := []struct {
+		name string
+		turn assistantTurn
+		want string
+	}{
+		{
+			name: "text-only turn becomes the fallback",
+			turn: assistantTurn{text: "NEW ANSWER", understood: true},
+			want: "NEW ANSWER",
+		},
+		{
+			name: "tool-using turn is intermediate and clears it",
+			turn: assistantTurn{text: "I WILL USE A TOOL", toolUses: 1, understood: true},
+			want: "",
+		},
+		{
+			name: "understood silent turn leaves it alone",
+			turn: assistantTurn{understood: true},
+			want: prior,
+		},
+		{
+			name: "unreadable turn clears it",
+			turn: assistantTurn{understood: false},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.turn.resolveFallback(prior); got != tt.want {
+				t.Fatalf("resolveFallback(%q) = %q, want %q", prior, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -150,14 +198,56 @@ printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_
 			},
 		},
 		{
-			name:       "empty successful result after tool-using turn uses safe notice",
+			name:       "empty successful result after tool-using turn returns empty output",
 			scriptBody: toolLastStream + `printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-boundary","result":""}'` + "\n",
 			wantStatus: "completed",
-			wantOutput: emptySuccessfulStreamResult,
+			wantOutput: "",
 			forbiddenOutput: []string{
 				"PRE-TOOL NARRATION",
 				"I WILL USE A TOOL",
 				"TOOL TRACE",
+			},
+		},
+		{
+			// A thinking-only trailing event carries neither an answer nor an
+			// intermediacy signal, so it must not discard the answer the model
+			// already delivered. Regression for the overwrite that turned a
+			// complete reply into a no-response turn.
+			name:       "text-less trailing assistant event preserves the last answer",
+			scriptBody: multiTurnStream + `printf '%s\n' '{"type":"assistant","message":{"role":"assistant","model":"test-model","content":[{"type":"thinking","text":"SILENT DELIBERATION"}]}}'` + "\n" + `printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-boundary","result":""}'` + "\n",
+			wantStatus: "completed",
+			wantOutput: "LAST ASSISTANT ANSWER",
+			forbiddenOutput: []string{
+				"FIRST-TURN NARRATION",
+				"TOOL TRACE",
+				"SILENT DELIBERATION",
+			},
+		},
+		{
+			// An assistant event whose body does not match the expected shape
+			// is unreadable, not silent: the model may have answered inside it.
+			// The earlier narration must NOT be promoted to the final answer.
+			name:       "unparseable trailing assistant event drops the fallback",
+			scriptBody: multiTurnStream + `printf '%s\n' '{"type":"assistant","message":"NOT AN OBJECT"}'` + "\n" + `printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-boundary","result":""}'` + "\n",
+			wantStatus: "completed",
+			wantOutput: "",
+			forbiddenOutput: []string{
+				"FIRST-TURN NARRATION",
+				"TOOL TRACE",
+				"LAST ASSISTANT ANSWER",
+			},
+		},
+		{
+			// Same rule for a content block type we do not render: we cannot
+			// claim the turn was silent, so the fallback must not survive it.
+			name:       "unknown content block drops the fallback",
+			scriptBody: multiTurnStream + `printf '%s\n' '{"type":"assistant","message":{"role":"assistant","model":"test-model","content":[{"type":"server_tool_use","id":"st-1","name":"web_search"}]}}'` + "\n" + `printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-boundary","result":""}'` + "\n",
+			wantStatus: "completed",
+			wantOutput: "",
+			forbiddenOutput: []string{
+				"FIRST-TURN NARRATION",
+				"TOOL TRACE",
+				"LAST ASSISTANT ANSWER",
 			},
 		},
 		{

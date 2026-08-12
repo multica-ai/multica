@@ -48,7 +48,7 @@ export function DailyErrorsChart({ data }: { data: DailyErrorsData[] }) {
           axisLine={false}
           tickMargin={8}
           allowDecimals={false}
-          width={40}
+          width="auto"
         />
         <ChartTooltip
           content={

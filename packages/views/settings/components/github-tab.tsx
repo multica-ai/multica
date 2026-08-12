@@ -28,7 +28,7 @@ import {
 } from "@multica/core/github";
 import { api } from "@multica/core/api";
 import type { Workspace } from "@multica/core/types";
-import { useNavigation } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 import { GitHubMark } from "./github-mark";
@@ -318,7 +318,8 @@ export function GitHubTab() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => navigation.push(repositoriesHref)}
+                render={<AppLink href={repositoriesHref} />}
+                nativeButton={false}
               >
                 <ExternalLink className="h-3 w-3" />
                 {t(($) => $.github.repositories_shortcut_link)}

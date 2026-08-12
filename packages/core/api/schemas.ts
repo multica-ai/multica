@@ -1,8 +1,5 @@
 import { z } from "zod";
 import type {
-  Agent,
-  AgentTemplate,
-  AgentTemplateSummary,
   AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
   AgentBuilderSessionSummary,
@@ -20,11 +17,17 @@ import type {
   ChatPendingTask,
   PrioritizeQueuedChatTaskResponse,
   SendChatMessageResponse,
+  StartMikaOnboardingResponse,
   Comment,
-  CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   CronPreviewResponse,
+  DingTalkInstallation,
+  ListDingTalkInstallationsResponse,
+  RedeemDingTalkBindingTokenResponse,
+  WecomInstallation,
+  ListWecomInstallationsResponse,
+  RedeemWecomBindingTokenResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
   GitHubPullRequest,
@@ -203,6 +206,62 @@ export const ResourceLabelsResponseSchema = z.object({
 export const EMPTY_RESOURCE_LABELS_RESPONSE: ResourceLabelsResponse = {
   labels: [],
 };
+
+// Saved issue views (MUL-4796). `query`/`display` are opaque definition
+// blobs interpreted client-side per `definition_version` — keep them as
+// loose records so newer servers can add fields freely. `scope_type` /
+// `visibility` stay lenient strings; downstream code uses explicit `===`
+// comparisons and default branches per the API-compat rules.
+export const IssueViewSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  owner_id: z.string().default(""),
+  name: z.string().default(""),
+  scope_type: z.string().default("workspace"),
+  scope_id: z.string().nullish(),
+  scope_variant: z.string().nullish(),
+  visibility: z.string().default("private"),
+  definition_version: z.number().default(1),
+  query: z.record(z.string(), z.unknown()).default({}),
+  display: z.record(z.string(), z.unknown()).default({}),
+  revision: z.number().default(1),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export type IssueView = z.infer<typeof IssueViewSchema>;
+
+export const IssueViewListSchema = z.array(IssueViewSchema);
+
+export const IssueViewPreferenceSchema = z.object({
+  scope_type: z.string().default("workspace"),
+  scope_id: z.string().nullish(),
+  prefs: z.object({
+    hidden: z.array(z.string()).default([]),
+    order: z.array(z.string()).default([]),
+  }).loose().default({ hidden: [], order: [] }),
+  updated_at: z.string().default(""),
+}).loose();
+
+export type IssueViewPreference = z.infer<typeof IssueViewPreferenceSchema>;
+
+export const EMPTY_ISSUE_VIEW_PREFERENCE: IssueViewPreference = {
+  scope_type: "workspace",
+  scope_id: null,
+  prefs: { hidden: [], order: [] },
+  updated_at: "",
+};
+
+export interface CreateIssueViewRequest {
+  name: string;
+  scope_type: "workspace" | "my" | "project";
+  scope_id?: string | null;
+  scope_variant?: "assigned" | "created" | "involved" | "any" | "members" | "agents" | null;
+  visibility: "private" | "workspace";
+  definition_version: number;
+  query: Record<string, unknown>;
+  display: Record<string, unknown>;
+}
 
 // Custom property definitions. `type` stays a lenient string so newer server
 // types don't break installed clients; UI narrows with isKnownPropertyType.
@@ -423,7 +482,10 @@ export const ChatMessageSchema = z.object({
   attachments: z.array(AttachmentSchema).optional(),
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
-  message_kind: z.enum(["message", "no_response"]).catch("message").optional(),
+  message_kind: z
+    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening"])
+    .catch("message")
+    .optional(),
   // Optional additive data degrades independently: a malformed suggestion
   // must not hide the assistant reply that contains it.
   quick_actions: z.array(ChatQuickActionSchema).catch([]).optional().default([]),
@@ -458,6 +520,11 @@ export const AttachmentResponseSchema = z.object({
   id: z.string(),
   url: z.string(),
   download_url: z.string(),
+  // Forced-attachment ("download button") URL — credential-free and, unlike
+  // `download_url`, always Content-Disposition: attachment across every storage
+  // mode. Optional: a server older than this field omits it, and callers fall
+  // back to `download_url` / the stable endpoint. Never persisted (short-lived).
+  attachment_download_url: z.string().optional(),
   markdown_url: z.string().optional().default(""),
   filename: z.string(),
   chat_session_id: z.string().nullable().optional(),
@@ -1024,11 +1091,15 @@ const DashboardUsageByAgentSchema = z.object({
 
 export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
 
+// `cancelled_count` defaults to 0 so an installed client pointed at a
+// backend that predates it still renders: those rows simply carry no
+// cancelled segment, which is exactly what that backend measured.
 const DashboardAgentRunTimeSchema = z.object({
   agent_id: z.string().default(""),
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
+  cancelled_count: z.number().default(0),
 }).loose();
 
 export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);
@@ -1038,6 +1109,7 @@ const DashboardRunTimeDailySchema = z.object({
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
+  cancelled_count: z.number().default(0),
 }).loose();
 
 export const DashboardRunTimeDailyListSchema = z.array(DashboardRunTimeDailySchema);
@@ -1292,6 +1364,15 @@ export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> =
   attachment_ids: z.array(z.string()).nullish().transform((ids) => ids ?? undefined),
 }).loose();
 
+// `started` is the only field the flow branches on, and a malformed response
+// must not be read as "the opening landed" — parseWithFallback's fallback says
+// it did not, which leaves the flow's own retry as the recovery path.
+export const StartMikaOnboardingResponseSchema: z.ZodType<StartMikaOnboardingResponse> = z.object({
+  started: z.boolean(),
+  message_id: z.string().nullish().transform((id) => id ?? undefined),
+  created_at: z.string().nullish().transform((at) => at ?? undefined),
+}).loose();
+
 export const PrioritizeQueuedChatTaskResponseSchema:
   z.ZodType<PrioritizeQueuedChatTaskResponse> = z.object({
     task_id: z.string(),
@@ -1318,124 +1399,6 @@ export const EMPTY_CANCEL_TASK_RESPONSE: CancelTaskResponse = {
   result: null,
   error: null,
   created_at: "",
-};
-
-// ---------------------------------------------------------------------------
-// Agent template catalog — `/api/agent-templates*` and the
-// create-from-template response. The desktop app's create-agent picker
-// reaches these endpoints, and a future server change to the template shape
-// would white-screen older installed builds (#2192 pattern) without these
-// parsers. Lenient by the same rules as IssueSchema above: arrays default to
-// `[]`, optional fields stay optional, `.loose()` lets unknown fields pass
-// through unchanged.
-// ---------------------------------------------------------------------------
-
-const AgentTemplateSkillRefSchema = z.object({
-  source_url: z.string(),
-  cached_name: z.string().default(""),
-  cached_description: z.string().default(""),
-}).loose();
-
-const AgentTemplateSummarySchemaBase = z.object({
-  slug: z.string(),
-  name: z.string(),
-  description: z.string().default(""),
-  category: z.string().optional(),
-  icon: z.string().optional(),
-  accent: z.string().optional(),
-  // skills MUST default to [] — picker code reads `template.skills.length`
-  // and `.map(...)`, both of which crash on `undefined`. The most common
-  // future drift (field renamed / wrapped) lands here.
-  skills: z.array(AgentTemplateSkillRefSchema).default([]),
-}).loose();
-
-export const AgentTemplateSummarySchema = AgentTemplateSummarySchemaBase;
-
-// List endpoint historically returns a bare array. Server could legitimately
-// migrate to `{templates: [...]}` later — we accept either shape so an old
-// desktop survives the upgrade.
-export const AgentTemplateSummaryListSchema = z.union([
-  z.array(AgentTemplateSummarySchemaBase),
-  z.object({ templates: z.array(AgentTemplateSummarySchemaBase).default([]) })
-    .loose()
-    .transform((v) => v.templates),
-]);
-
-export const EMPTY_AGENT_TEMPLATE_SUMMARY_LIST: AgentTemplateSummary[] = [];
-
-export const AgentTemplateSchema = AgentTemplateSummarySchemaBase.extend({
-  // Detail-only field. Default "" so a malformed detail still renders the
-  // header + skill list; the user just sees an empty Instructions block.
-  instructions: z.string().default(""),
-}).loose();
-
-// Used as the parse fallback for `GET /api/agent-templates/:slug`. Slug comes
-// from the URL, so we round-trip the requested one back into the fallback
-// at the call site (see `getAgentTemplate` in client.ts).
-export const EMPTY_AGENT_TEMPLATE_DETAIL: AgentTemplate = {
-  slug: "",
-  name: "",
-  description: "",
-  skills: [],
-  instructions: "",
-};
-
-// ---------------------------------------------------------------------------
-// Agent invocation permissions (MUL-3963)
-//
-// Full agent request/response payloads are NOT zod-validated today — the API
-// client returns them typed directly (see client.ts `listAgents` /
-// `getAgent` / `createAgent`), so there is no `AgentSchema` /
-// `CreateAgentRequestSchema` / `UpdateAgentRequestSchema` to extend here.
-// These lenient, exported fragments encode the new permission fields so any
-// future agent schema — and the from-template minimal agent below — can reuse
-// them. Per this file's convention the enum stays lenient (a future
-// server-side value degrades to the strict default rather than failing the
-// parse), and the target array defaults to `[]`.
-// ---------------------------------------------------------------------------
-
-export const AgentPermissionModeSchema = z
-  .enum(["private", "public_to"])
-  .catch("private");
-
-export const AgentInvocationTargetSchema = z
-  .object({
-    target_type: z.string(),
-    target_id: z.string().nullable().optional().transform((v) => v ?? null),
-  })
-  .loose();
-
-export const AgentInvocationTargetsSchema = z
-  .array(AgentInvocationTargetSchema)
-  .default([]);
-
-// `agent` is a full Agent record — schematising every field would duplicate
-// a 50-field interface and bit-rot fast. We keep it loose and require only
-// `id`, the one field the create-from-template flow consumes (used to
-// navigate to the new agent's detail page). Downstream code already
-// optional-chains the rest. The permission fields are parsed leniently when
-// present so the from-template response carries a well-formed access shape.
-const MinimalAgentSchema = z.object({
-  id: z.string(),
-  permission_mode: AgentPermissionModeSchema.optional(),
-  invocation_targets: AgentInvocationTargetsSchema.optional(),
-}).loose();
-
-export const CreateAgentFromTemplateResponseSchema = z.object({
-  agent: MinimalAgentSchema,
-  imported_skill_ids: z.array(z.string()).default([]),
-  reused_skill_ids: z.array(z.string()).default([]),
-}).loose();
-
-// Fallback when the success response fails to parse. The agent server-side
-// has likely been created already, so we can't pretend nothing happened —
-// the caller (`create-agent-dialog.tsx`) is responsible for noticing
-// `agent.id === ""` and skipping navigation while keeping the list
-// invalidation, so the user finds their new agent in the list.
-export const EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE: CreateAgentFromTemplateResponse = {
-  agent: { id: "" } as Agent,
-  imported_skill_ids: [],
-  reused_skill_ids: [],
 };
 
 export const AgentBuilderSessionSchema = z.object({
@@ -1529,6 +1492,8 @@ export const SquadSchema = z.object({
   name: z.string(),
   description: z.string().default(""),
   instructions: z.string().default(""),
+  system_key: z.string().optional(),
+  system_instructions: z.string().optional(),
   avatar_url: z.string().nullable().optional().transform((v) => v ?? null),
   leader_id: z.string(),
   creator_id: z.string(),
@@ -2135,4 +2100,97 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   error: "invalid model discovery response",
   created_at: "",
   updated_at: "",
+};
+
+export const DingTalkInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  status: z.string().default("revoked"),
+  installed_at: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_DINGTALK_INSTALLATION: DingTalkInstallation = {
+  id: "",
+  workspace_id: "",
+  agent_id: "",
+  installer_user_id: "",
+  status: "revoked",
+  installed_at: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListDingTalkInstallationsResponseSchema = z.object({
+  installations: z.array(DingTalkInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE: ListDingTalkInstallationsResponse = {
+  installations: [],
+  configured: false,
+};
+
+export const RedeemDingTalkBindingTokenResponseSchema = z.object({
+  workspace_id: z.string().default(""),
+  installation_id: z.string().default(""),
+  dingtalk_user_id: z.string().default(""),
+}).loose();
+
+export const EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE: RedeemDingTalkBindingTokenResponse = {
+  workspace_id: "",
+  installation_id: "",
+  dingtalk_user_id: "",
+};
+
+// WeCom smart-bot ("智能机器人" / aibot) installation responses. `.loose()` so a
+// newer backend field never fails the parse on an older desktop build (see
+// CLAUDE.md → API Compatibility). Defaults are chosen so a malformed response
+// degrades safely: `configured` defaults false (renders the "ask your operator"
+// state rather than a Connect dialog whose submit is guaranteed to fail), and a
+// missing `status` defaults to "revoked" rather than "active" so a broken read
+// never shows a bot as connected when it may not be.
+export const WecomInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  bot_id: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  status: z.string().default("revoked"),
+}).loose();
+
+export const EMPTY_WECOM_INSTALLATION: WecomInstallation = {
+  id: "",
+  workspace_id: "",
+  agent_id: "",
+  bot_id: "",
+  installer_user_id: "",
+  status: "revoked",
+};
+
+export const ListWecomInstallationsResponseSchema = z.object({
+  installations: z.array(WecomInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE: ListWecomInstallationsResponse = {
+  installations: [],
+  configured: false,
+};
+
+export const RedeemWecomBindingTokenResponseSchema = z.object({
+  workspace_id: z.string().default(""),
+  installation_id: z.string().default(""),
+  wecom_user_id: z.string().default(""),
+}).loose();
+
+export const EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE: RedeemWecomBindingTokenResponse = {
+  workspace_id: "",
+  installation_id: "",
+  wecom_user_id: "",
 };

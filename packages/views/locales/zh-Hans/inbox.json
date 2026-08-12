@@ -13,7 +13,8 @@
     "mark_read": "标为已读",
     "mark_unread": "标为未读",
     "archive": "归档",
-    "unarchive": "取消归档"
+    "unarchive": "取消归档",
+    "open_in_new_tab": "在新标签页打开"
   },
   "list": {
     "empty": "暂无通知",
@@ -27,7 +28,8 @@
     },
     "archived_title": "已归档",
     "archived_empty": "暂无已归档通知",
-    "unarchive_tooltip": "取消归档"
+    "unarchive_tooltip": "取消归档",
+    "actions_aria": "通知操作"
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",

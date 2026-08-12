@@ -127,7 +127,8 @@
   "picker": {
     "no_project": "프로젝트 없음",
     "empty": "아직 프로젝트가 없습니다",
-    "search_placeholder": "프로젝트 검색..."
+    "search_placeholder": "프로젝트 검색...",
+    "clear_aria": "프로젝트 지우기"
   },
   "chip": {
     "fallback_label": "프로젝트"

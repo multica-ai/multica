@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   createContext,
   useCallback,
   useContext,
@@ -10,7 +11,6 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { Archive, ArchiveRestore, Check, CircleDot } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import {
   ContextMenu,
@@ -19,7 +19,7 @@ import {
   ContextMenuSeparator,
 } from "@multica/ui/components/ui/context-menu";
 import type { InboxView } from "./inbox-view";
-import { useT } from "../../i18n";
+import { useInboxItemActions, type InboxRowActions } from "./inbox-item-actions";
 
 /**
  * Right-click actions for inbox rows.
@@ -32,18 +32,11 @@ import { useT } from "../../i18n";
  *
  * Rows delegate: the row only reports (item, cursor position) up to this
  * singleton, which anchors the menu at the cursor via a virtual anchor element.
+ *
+ * The provider also hands the same action set back down (`useInboxRowActions`)
+ * so the row's own compact menu — the touch replacement for right-click and
+ * hover — offers exactly these actions.
  */
-
-/** Row-level actions the menu invokes, all keyed by inbox item id. */
-export interface InboxRowActions {
-  onMarkRead: (id: string) => void;
-  onMarkUnread: (id: string) => void;
-  /**
-   * Archive in the main list, unarchive in the archived one — the same
-   * reversal-of-the-current-view the row's hover button performs.
-   */
-  onAction: (id: string) => void;
-}
 
 interface ActiveMenu {
   item: InboxItem;
@@ -52,7 +45,12 @@ interface ActiveMenu {
 
 type OpenInboxContextMenu = (item: InboxItem, event: MouseEvent) => void;
 
-const InboxContextMenuContext = createContext<OpenInboxContextMenu | null>(null);
+interface InboxContextMenuValue {
+  open: OpenInboxContextMenu;
+  actions: InboxRowActions;
+}
+
+const InboxContextMenuContext = createContext<InboxContextMenuValue | null>(null);
 
 export function InboxContextMenuProvider({
   view,
@@ -88,8 +86,13 @@ export function InboxContextMenuProvider({
     setOpen(v);
   }, []);
 
+  const value = useMemo<InboxContextMenuValue>(
+    () => ({ open: openMenu, actions }),
+    [openMenu, actions],
+  );
+
   return (
-    <InboxContextMenuContext.Provider value={openMenu}>
+    <InboxContextMenuContext.Provider value={value}>
       {children}
       {/* Mounted on first use, kept mounted after — the popup itself unmounts
           while closed. */}
@@ -113,7 +116,15 @@ export function InboxContextMenuProvider({
  * crashing, which keeps `InboxListItem` renderable on its own.
  */
 export function useInboxContextMenu(): OpenInboxContextMenu | null {
-  return useContext(InboxContextMenuContext);
+  return useContext(InboxContextMenuContext)?.open ?? null;
+}
+
+/**
+ * The list's row actions, for the row's own compact menu. `null` without a
+ * provider, same graceful degradation as `useInboxContextMenu`.
+ */
+export function useInboxRowActions(): InboxRowActions | null {
+  return useContext(InboxContextMenuContext)?.actions ?? null;
 }
 
 function InboxContextMenuSingleton({
@@ -129,8 +140,7 @@ function InboxContextMenuSingleton({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const { t } = useT("inbox");
-  const isArchivedView = view === "archived";
+  const groups = useInboxItemActions(item, view, actions);
 
   // Point-sized virtual anchor at the right-click position, so the menu opens
   // at the cursor rather than at the row's top-left corner.
@@ -145,39 +155,17 @@ function InboxContextMenuSingleton({
   return (
     <ContextMenu open={open} onOpenChange={onOpenChange}>
       <ContextMenuContent anchor={anchor}>
-        {/* The read toggle is main-view only. Archived rows deliberately render
-            as read (archiving preserves `read` so a restore can bring the real
-            state back) and the unread count excludes archived items — so a
-            toggle here would report success and change nothing on screen. */}
-        {!isArchivedView && (
-          <>
-            {item.read === true ? (
-              <ContextMenuItem onClick={() => actions.onMarkUnread(item.id)}>
-                <CircleDot className="h-4 w-4" />
-                {t(($) => $.context_menu.mark_unread)}
+        {groups.map((group, index) => (
+          <Fragment key={group[0]?.key ?? index}>
+            {index > 0 && <ContextMenuSeparator />}
+            {group.map((action) => (
+              <ContextMenuItem key={action.key} onClick={action.onSelect}>
+                {action.icon}
+                {action.label}
               </ContextMenuItem>
-            ) : (
-              <ContextMenuItem onClick={() => actions.onMarkRead(item.id)}>
-                <Check className="h-4 w-4" />
-                {t(($) => $.context_menu.mark_read)}
-              </ContextMenuItem>
-            )}
-            <ContextMenuSeparator />
-          </>
-        )}
-        <ContextMenuItem onClick={() => actions.onAction(item.id)}>
-          {isArchivedView ? (
-            <>
-              <ArchiveRestore className="h-4 w-4" />
-              {t(($) => $.context_menu.unarchive)}
-            </>
-          ) : (
-            <>
-              <Archive className="h-4 w-4" />
-              {t(($) => $.context_menu.archive)}
-            </>
-          )}
-        </ContextMenuItem>
+            ))}
+          </Fragment>
+        ))}
       </ContextMenuContent>
     </ContextMenu>
   );

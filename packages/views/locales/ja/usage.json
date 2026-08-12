@@ -1,6 +1,10 @@
 {
-  "title": "使用量",
-  "subtitle": "このワークスペース全体のトークン消費とエージェントの活動です。",
+  "title": "分析",
+  "tab_usage": "使用量",
+  "header": {
+    "timezone_and_updated": "{{tz}} · {{time}} 更新",
+    "refresh": "更新"
+  },
   "filter": {
     "project_label": "プロジェクト",
     "all_projects": "すべてのプロジェクト",
@@ -30,7 +34,6 @@
     "metric_tokens": "トークン",
     "metric_time": "時間",
     "metric_tasks": "作業",
-    "metric_errors": "エラー",
     "no_data": "この期間に使用量はありません。",
     "metric_label": "指標"
   },
@@ -43,6 +46,11 @@
     "partial_label": "{{range}} (一部 · 7日中 {{covered}}日)"
   },
   "errors": {
+    "kpi_failed_label": "失敗した作業 · {{days}}日",
+    "kpi_failed_hint": "{{total}} 回の実行中",
+    "kpi_rate_label": "失敗率 · {{days}}日",
+    "kpi_agents_label": "影響を受けたエージェント · {{days}}日",
+    "kpi_agents_hint": "最多 {{name}} · {{count}} 回",
     "tooltip_rate": "エラー率",
     "class": {
       "auth": "認証",

@@ -177,6 +177,7 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			toolUseCount: state.toolUseCount, sawResult: state.sawResult, resultIsError: state.resultIsError,
 			resultBytes: len(state.finalResultText), lastAssistantBytes: len(state.lastAssistantText),
 			scannerError: scanErr != nil, lastEventType: state.lastEventType,
+			unreadableAssistantCount: state.unreadableAssistantCount,
 		})
 		b.cfg.Logger.Info("qwen finished", "pid", cmd.Process.Pid, "status", status, "duration", duration.Round(time.Millisecond).String())
 		resCh <- Result{
@@ -228,6 +229,7 @@ type qwenStreamState struct {
 	sawResult, resultIsError                                            bool
 	usage                                                               map[string]TokenUsage
 	eventCount, invalidEventCount, assistantEventCount, toolUseCount    int
+	unreadableAssistantCount                                            int
 }
 
 func handleQwenEvent(event qwenStreamEvent, ch chan<- Message, state *qwenStreamState) {
@@ -242,16 +244,15 @@ func handleQwenEvent(event qwenStreamEvent, ch chan<- Message, state *qwenStream
 		trySend(ch, Message{Type: MessageStatus, Status: "running", SessionID: state.sessionID})
 	case "assistant":
 		state.assistantEventCount++
-		text, tools, model := handleQwenAssistant(event.Message, ch, state.usage)
+		turn, model := handleQwenAssistant(event.Message, ch, state.usage)
 		if model != "" {
 			state.model = model
 		}
-		state.toolUseCount += tools
-		if tools == 0 && text != "" {
-			state.lastAssistantText = text
-		} else if tools > 0 {
-			state.lastAssistantText = ""
+		state.toolUseCount += turn.toolUses
+		if !turn.understood {
+			state.unreadableAssistantCount++
 		}
+		state.lastAssistantText = turn.resolveFallback(state.lastAssistantText)
 	case "user":
 		handleQwenUser(event.Message, ch)
 	case "result":
@@ -275,11 +276,14 @@ func handleQwenEvent(event qwenStreamEvent, ch chan<- Message, state *qwenStream
 	}
 }
 
-func handleQwenAssistant(raw json.RawMessage, ch chan<- Message, usage map[string]TokenUsage) (string, int, string) {
+func handleQwenAssistant(raw json.RawMessage, ch chan<- Message, usage map[string]TokenUsage) (assistantTurn, string) {
 	var message qwenMessage
 	if json.Unmarshal(raw, &message) != nil {
-		return "", 0, ""
+		// Unreadable body: understood stays false so the caller drops any
+		// fallback rather than let an older turn stand in for this one.
+		return assistantTurn{}, ""
 	}
+	turn := assistantTurn{understood: true}
 	if message.Usage != nil && message.Model != "" {
 		usage[message.Model] = qwenTokenUsage(message.Usage)
 	}
@@ -303,9 +307,17 @@ func handleQwenAssistant(raw json.RawMessage, ch chan<- Message, usage map[strin
 				_ = json.Unmarshal(block.Input, &input)
 			}
 			trySend(ch, Message{Type: MessageToolUse, Tool: block.Name, CallID: block.ID, Input: input})
+		default:
+			// A block type we do not render may be carrying the model's answer
+			// in a shape we cannot read, so we must not claim this turn was
+			// silent. Recognising a new no-text block is a deliberate one-line
+			// addition here, not an accident of falling through.
+			turn.understood = false
 		}
 	}
-	return text.String(), tools, message.Model
+	turn.text = text.String()
+	turn.toolUses = tools
+	return turn, message.Model
 }
 
 func handleQwenUser(raw json.RawMessage, ch chan<- Message) {
