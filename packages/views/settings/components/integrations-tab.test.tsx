@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ApiError } from "@multica/core/api";
 import { configStore } from "@multica/core/config";
@@ -93,6 +94,21 @@ describe("Settings IntegrationsTab", () => {
 
     expect(screen.getByTestId("composio-tab")).toBeInTheDocument();
     expect(queryCallsRef.current[0]?.enabled).toBe(true);
+  });
+
+  it("shows each channel description below its icon and title", () => {
+    renderTab();
+
+    for (const channel of ["lark", "slack", "dingtalk", "wecom"]) {
+      const icon = screen.getByTestId(`integration-channel-icon-${channel}`);
+      const title = icon.closest("h3");
+      const description = title?.nextElementSibling;
+      expect(title).not.toBeNull();
+      expect(description?.tagName).toBe("P");
+      expect(description).toHaveClass("text-caption", "text-muted-foreground");
+      expect(icon).not.toHaveClass("border");
+      expect(icon).not.toHaveClass("bg-muted/40");
+    }
   });
 
   it("hides Composio when the feature flag is on but the server reports 503", () => {
