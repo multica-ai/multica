@@ -6,9 +6,13 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalStackState } from "../../../shared/local-stack";
-import { LocalStackOverlay, useLocalStackState } from "./local-stack-overlay";
+import {
+  LocalStackOverlay,
+  SKIP_VISIBLE_AFTER_MS,
+  useLocalStackState,
+} from "./local-stack-overlay";
 
 // This repo has no @testing-library/user-event dependency — interaction tests
 // use fireEvent (see src/renderer/src/components/route-error-page.test.tsx).
@@ -116,20 +120,99 @@ describe("LocalStackOverlay", () => {
       "done",
     );
   });
+
+  // Bounded worst case for a bring-up that hangs everywhere is roughly nine
+  // minutes (three 180s command timeouts plus the 90s backend poll). Without an
+  // escape hatch during `running` that is nine minutes of a window with no
+  // buttons and no keyboard way out.
+  describe("escape hatch while running", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("offers Continue anyway while running once the delay elapses", () => {
+      const onSkip = vi.fn();
+      render(
+        <LocalStackOverlay
+          state={{ phase: "running", step: "backend" }}
+          onRetry={() => {}}
+          onSkip={onSkip}
+        />,
+      );
+
+      expect(
+        screen.queryByRole("button", { name: /continue anyway/i }),
+      ).not.toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(SKIP_VISIBLE_AFTER_MS);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /continue anyway/i }));
+      expect(onSkip).toHaveBeenCalledOnce();
+    });
+
+    // Retry stays failure-only: re-running a bring-up that is still in flight
+    // is what the main-process single-flight guard exists to prevent.
+    it("does not offer Retry while running", () => {
+      render(
+        <LocalStackOverlay
+          state={{ phase: "running", step: "backend" }}
+          onRetry={() => {}}
+          onSkip={() => {}}
+        />,
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(SKIP_VISIBLE_AFTER_MS);
+      });
+
+      expect(
+        screen.queryByRole("button", { name: /retry/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    // `idle` is what the renderer sees when main is up but the supervisor has
+    // not reported yet. It blocks exactly like `running`, so it needs the same
+    // way out.
+    it("offers Continue anyway from a stuck idle state too", () => {
+      render(
+        <LocalStackOverlay
+          state={{ phase: "idle" }}
+          onRetry={() => {}}
+          onSkip={() => {}}
+        />,
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(SKIP_VISIBLE_AFTER_MS);
+      });
+
+      expect(
+        screen.getByRole("button", { name: /continue anyway/i }),
+      ).toBeInTheDocument();
+    });
+  });
 });
 
-// useLocalStackState is the single mechanism implementing the "read then
+// useLocalStackState implements the "seed synchronously, then read, then
 // subscribe" invariant: the bring-up starts before React mounts, so the hook
-// must read getState() on mount (not rely on onState alone) or it would sit
-// on "idle" forever. Stub window.localStackAPI directly rather than going
+// seeds from the preload's synchronous snapshot and still reads getState() on
+// mount (an event emitted between the snapshot and the subscription would
+// otherwise be lost). Stub window.localStackAPI directly rather than going
 // through the real preload bridge.
 function stubLocalStackAPI(overrides: {
   getState: ReturnType<typeof vi.fn>;
   onState: ReturnType<typeof vi.fn>;
+  initialState?: LocalStackState;
 }) {
   Object.defineProperty(window, "localStackAPI", {
     configurable: true,
     value: {
+      initialState: overrides.initialState ?? ({ phase: "idle" } as LocalStackState),
       getState: overrides.getState,
       onState: overrides.onState,
       retry: vi.fn(),
@@ -139,6 +222,37 @@ function stubLocalStackAPI(overrides: {
 }
 
 describe("useLocalStackState", () => {
+  // The first render decides whether App paints the overlay or mounts
+  // CoreProvider. Seeding from the preload snapshot is what keeps a SaaS build
+  // — where main resolved `ready` long before the window existed — from showing
+  // the startup overlay as its first visible frame.
+  it("seeds synchronously from the preload snapshot, before any IPC resolves", () => {
+    const getState = vi.fn(() => new Promise<LocalStackState>(() => {}));
+    const onState = vi.fn(() => () => {});
+    stubLocalStackAPI({
+      getState,
+      onState,
+      initialState: { phase: "ready" },
+    });
+
+    const { result } = renderHook(() => useLocalStackState());
+
+    expect(result.current).toEqual({ phase: "ready" });
+  });
+
+  // A rejected invoke (no handler registered, main torn down) must open the
+  // gate, not hold it shut: the failure mode it replaces is a button-less
+  // overlay with no timeout and no keyboard escape.
+  it("falls back to ready when getState() rejects", async () => {
+    const getState = vi.fn().mockRejectedValue(new Error("no handler"));
+    const onState = vi.fn(() => () => {});
+    stubLocalStackAPI({ getState, onState, initialState: { phase: "idle" } });
+
+    const { result } = renderHook(() => useLocalStackState());
+
+    await waitFor(() => expect(result.current).toEqual({ phase: "ready" }));
+  });
+
   it("calls getState() on mount and lands the resolved value in state", async () => {
     const getState = vi
       .fn()
@@ -187,9 +301,10 @@ describe("useLocalStackState", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
-  // The hook's `active` flag exists precisely for this: a slow initial
-  // getState() call that only resolves after the component is gone must not
-  // resurrect stale state or throw. Prove the guard by resolving it late.
+  // Documents the intent of the hook's `active` flag: a slow initial getState()
+  // that resolves after unmount must not resurrect stale state. This is not a
+  // regression guard — React 18 silently no-ops a post-unmount setState, so the
+  // assertions below hold with or without the flag.
   it("ignores a getState() resolution that arrives after unmount", async () => {
     let resolveGetState: ((state: LocalStackState) => void) | undefined;
     const getState = vi.fn(

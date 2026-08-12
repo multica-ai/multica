@@ -834,13 +834,23 @@ if (!gotTheLock) {
     });
 
     desktopInitialized = true;
+
+    // Register the local-stack IPC surface before the first window exists: the
+    // preload reads the supervisor's initial state synchronously, so the
+    // handler has to be installed before any renderer boots. Registration is
+    // unconditional — when the runtime config failed to parse there is no
+    // apiUrl to gate on, and the supervisor resolves to `ready` so the renderer
+    // can show the actionable configuration-error screen instead of hanging on
+    // a button-less startup overlay.
+    setupLocalStack(
+      () => mainWindow,
+      runtimeConfigResult.ok ? runtimeConfigResult.config.apiUrl : null,
+    );
+
     createWindow();
 
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
-    if (runtimeConfigResult.ok) {
-      setupLocalStack(() => mainWindow, runtimeConfigResult.config.apiUrl);
-    }
     setupLocalDirectory(() => mainWindow);
 
     app.on("activate", () => {

@@ -39,19 +39,36 @@ function statusFor(
   return order === currentIndex ? "active" : "pending";
 }
 
+/** How long a bring-up may run before the overlay offers a way out. */
+export const SKIP_VISIBLE_AFTER_MS = 15_000;
+
 /**
- * Subscribes to supervisor state. Reads the current value on mount first: the
- * bring-up starts as soon as the main process is ready, which is before React
- * mounts, so a subscribe-only approach would miss the early transitions.
+ * Subscribes to supervisor state.
+ *
+ * The initial value comes from the synchronous preload read, not from an IPC
+ * round-trip: the whole app is gated on this state, so seeding with `idle`
+ * would paint the overlay as the first frame of every launch (including SaaS
+ * builds, which have nothing to bring up) and would serialize the CoreProvider
+ * mount behind an invoke. The async read still runs afterwards to close the
+ * window between the preload snapshot and the subscription, and falls back to
+ * `ready` if it rejects — a supervisor we cannot reach must never keep the gate
+ * closed.
  */
 export function useLocalStackState(): LocalStackState {
-  const [state, setState] = useState<LocalStackState>({ phase: "idle" });
+  const [state, setState] = useState<LocalStackState>(
+    () => window.localStackAPI.initialState ?? { phase: "ready" },
+  );
 
   useEffect(() => {
     let active = true;
-    void window.localStackAPI.getState().then((s) => {
-      if (active) setState(s);
-    });
+    window.localStackAPI
+      .getState()
+      .then((s) => {
+        if (active) setState(s);
+      })
+      .catch(() => {
+        if (active) setState({ phase: "ready" });
+      });
     const unsubscribe = window.localStackAPI.onState(setState);
     return () => {
       active = false;
@@ -72,6 +89,23 @@ export function LocalStackOverlay({
   onSkip: () => void;
 }) {
   const failed = state.phase === "failed";
+
+  // Escape hatch while the bring-up is still running. Worst case without it is
+  // colima status + colima start + compose up (180s each) plus the 90s backend
+  // poll — around nine minutes of a window with no buttons — and it is also
+  // what makes a supervisor that wedges mid-run survivable rather than terminal.
+  // Delayed rather than immediate so the common short bring-up doesn't invite
+  // the user to skip a stack that is seconds from ready.
+  const [escapeHatchVisible, setEscapeHatchVisible] = useState(false);
+  const running = state.phase === "running" || state.phase === "idle";
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = setTimeout(
+      () => setEscapeHatchVisible(true),
+      SKIP_VISIBLE_AFTER_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [running]);
 
   return (
     <div className="flex h-screen flex-col">
@@ -118,7 +152,7 @@ export function LocalStackOverlay({
             })}
           </ul>
 
-          {failed && (
+          {failed ? (
             <>
               <pre className="mt-4 max-h-32 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs text-muted-foreground">
                 {state.message}
@@ -130,6 +164,14 @@ export function LocalStackOverlay({
                 </Button>
               </div>
             </>
+          ) : (
+            escapeHatchVisible && (
+              <div className="mt-4 flex gap-2">
+                <Button variant="outline" onClick={onSkip}>
+                  Continue anyway
+                </Button>
+              </div>
+            )
           )}
         </div>
       </div>

@@ -65,8 +65,30 @@ function fetchRuntimeConfig(): RuntimeConfigResult {
   return { ok: false, error: { message: "Runtime config unavailable" } };
 }
 
+// Synchronously read the local-stack supervisor's current state, for the same
+// reason as the two reads above: the renderer gates the whole app on it, and an
+// async round-trip would (a) paint the startup overlay as the first frame of
+// every launch, including SaaS builds that have nothing to bring up, and (b)
+// leave the gate closed forever if the handler is missing or the invoke
+// rejects. `ready` is the fallback because a supervisor we cannot reach must
+// never be able to trap the window.
+function fetchInitialLocalStackState(): LocalStackState {
+  try {
+    const state = ipcRenderer.sendSync("local-stack:get-initial-state") as
+      | LocalStackState
+      | undefined;
+    if (state && typeof state === "object" && typeof state.phase === "string") {
+      return state;
+    }
+  } catch {
+    // fall through
+  }
+  return { phase: "ready" };
+}
+
 const appInfo = fetchAppInfo();
 const runtimeConfig = fetchRuntimeConfig();
+const initialLocalStackState = fetchInitialLocalStackState();
 const windowContext = readDesktopWindowContext(process.argv);
 
 // Read the OS-preferred locale that main injected via additionalArguments.
@@ -287,6 +309,9 @@ const daemonAPI = {
 };
 
 const localStackAPI = {
+  /** Supervisor state captured synchronously at preload time, so the renderer
+   *  has a definitive value on its very first render. */
+  initialState: initialLocalStackState,
   /** Current supervisor state; call on mount before subscribing. */
   getState: (): Promise<LocalStackState> =>
     ipcRenderer.invoke("local-stack:get-state"),

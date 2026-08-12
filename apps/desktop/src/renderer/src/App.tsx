@@ -453,8 +453,21 @@ export default function App() {
   }, [localeAdapter, locale]);
 
   const localStackState = useLocalStackState();
+  // The daemon auto-start gate is structural, not a condition anyone checks:
+  // the auto-start effect lives in AppContent, inside the CoreProvider subtree
+  // that this overlay *replaces*. Rendering the overlay as a sibling of
+  // CoreProvider instead of in place of it would silently un-gate
+  // daemon:auto-start against a backend that is not up yet — the one ordering
+  // constraint the whole supervisor exists to enforce.
+  //
+  // `runtimeConfigResult.ok` is part of the condition because the supervisor
+  // has nothing to gate on without a parsed config: without it, a malformed
+  // ~/.multica/desktop.json would hold the overlay up forever and hide the
+  // BlockingRuntimeConfigError screen that actually names the problem.
   const localStackBlocking =
-    windowContext.kind === "main" && localStackState.phase !== "ready";
+    windowContext.kind === "main" &&
+    runtimeConfigResult.ok &&
+    localStackState.phase !== "ready";
 
   return (
     <ThemeProvider>

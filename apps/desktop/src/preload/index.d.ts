@@ -149,6 +149,8 @@ interface DaemonAPI {
 }
 
 interface LocalStackAPI {
+  /** Supervisor state captured synchronously at preload time. */
+  initialState: LocalStackState;
   getState: () => Promise<LocalStackState>;
   retry: () => Promise<LocalStackState>;
   skip: () => Promise<void>;
