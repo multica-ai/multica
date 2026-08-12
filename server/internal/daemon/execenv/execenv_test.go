@@ -4582,8 +4582,10 @@ func TestPrepareCodexNoUserSkillsDir(t *testing.T) {
 
 // TestPrepareCodexResolvesUserSkillSymlinks covers the lark-cli /
 // shared-installer case: each user skill is a symlink into a separate
-// installer directory. The per-task home must end up with a real copy, not
-// a dangling symlink that points outside the task root.
+// installer directory. The per-task home links to the resolved installer
+// directory — never to the installer's own link, which would leave the CLI
+// following a chain that breaks the moment the installer re-points it, and
+// never dangling.
 func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on Windows; covered by Unix path")
@@ -4623,12 +4625,19 @@ func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 	defer env.Cleanup(true)
 
 	dst := filepath.Join(env.CodexHome, "skills", "lark-mail")
-	fi, err := os.Lstat(dst)
-	if err != nil {
+	if _, err := os.Lstat(dst); err != nil {
 		t.Fatalf("seeded skill missing: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		t.Errorf("seeded skill should be a real directory, got a symlink")
+	target, err := os.Readlink(dst)
+	if err != nil {
+		t.Fatalf("seeded skill should be a link into the installer dir: %v", err)
+	}
+	wantTarget, err := filepath.EvalSymlinks(installerRoot)
+	if err != nil {
+		t.Fatalf("resolve installer dir: %v", err)
+	}
+	if target != wantTarget {
+		t.Errorf("link target = %q, want the resolved installer dir %q", target, wantTarget)
 	}
 	data, err := os.ReadFile(filepath.Join(dst, "SKILL.md"))
 	if err != nil {

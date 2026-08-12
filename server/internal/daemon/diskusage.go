@@ -462,11 +462,19 @@ func taskSize(taskDir string, matcher artifactMatcher) (totalBytes int64, artifa
 		if path == absRoot {
 			return nil
 		}
-		// Symlinks: never followed, never counted. WalkDir already refuses to
-		// descend through them, but a symlinked file would otherwise show up
-		// here as a non-dir entry — drop it explicitly so the size stays
-		// consistent with cleanTaskArtifacts' refusal to touch link targets.
-		if entry.Type()&os.ModeSymlink != 0 {
+		// Links: never followed, never counted. WalkDir already refuses to
+		// descend through a symlink, but a symlinked file would otherwise show
+		// up here as a non-dir entry, and a Windows junction is reported as a
+		// directory WalkDir does descend (see linkedDirModes) — drop both
+		// explicitly so the size stays consistent with cleanTaskArtifacts'
+		// refusal to touch link targets.
+		if entry.Type()&linkedDirModes != 0 {
+			if entry.IsDir() {
+				// A junction: WalkDir would descend into the link target.
+				// SkipDir is safe here only because the entry is a directory —
+				// returning it for a file would skip the remaining siblings.
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if entry.IsDir() {

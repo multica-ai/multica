@@ -27,7 +27,15 @@ import (
 type fakeSessionBinder struct {
 	ensureIn engine.EnsureSessionInput
 	appendIn engine.AppendInput
+	bindIn   engine.BindMediaInput
+	binds    int
 	sessID   pgtype.UUID
+}
+
+func (f *fakeSessionBinder) BindMediaRefs(_ context.Context, in engine.BindMediaInput) error {
+	f.bindIn = in
+	f.binds++
+	return nil
 }
 
 func (f *fakeSessionBinder) EnsureSession(_ context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error) {
@@ -78,22 +86,78 @@ func TestSessionBinder_AppendUsesTextAsCommand(t *testing.T) {
 	}
 }
 
-func TestSessionBinder_BindMediaIsNoop(t *testing.T) {
+// The resolver downloads, decrypts and stores an attachment; this is the step
+// that attaches it to the message. Returning nil without binding reads to the
+// Router as success, so every attachment would be fetched and then silently
+// discarded — the agent sees only "[Image]" and nothing is logged.
+func TestSessionBinder_BindMediaReachesTheSessionStore(t *testing.T) {
 	t.Parallel()
-	b := &sessionBinder{session: &fakeSessionBinder{}}
-	if err := b.BindMedia(context.Background(), engine.BindMediaParams{}); err != nil {
-		t.Errorf("BindMedia = %v, want nil (wecom resolves no media)", err)
+	fb := &fakeSessionBinder{}
+	b := &sessionBinder{session: fb}
+	refs := []channel.MediaRef{{StorageKey: "k", Filename: "photo.jpg"}}
+	issue := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
+
+	if err := b.BindMedia(context.Background(), engine.BindMediaParams{
+		MediaRefs: refs,
+		IssueID:   issue,
+	}); err != nil {
+		t.Fatalf("BindMedia: %v", err)
+	}
+	if fb.binds != 1 {
+		t.Fatalf("BindMediaRefs called %d times, want 1 — the refs never reached the session store", fb.binds)
+	}
+	if len(fb.bindIn.MediaRefs) != 1 {
+		t.Errorf("MediaRefs = %d, want 1", len(fb.bindIn.MediaRefs))
+	}
+	// IssueID is what makes an /issue turn's attachment belong to the issue
+	// rather than to a chat message nobody opens again.
+	if fb.bindIn.IssueID != issue {
+		t.Error("IssueID was dropped; an /issue attachment would land on the chat message instead")
+	}
+}
+
+// The media budget is how long the chat task waits before running. Dropped, the
+// run fires at once and the agent is handed the placeholder mid-download.
+func TestSessionBinder_AppendCarriesTheMediaBudget(t *testing.T) {
+	t.Parallel()
+	fb := &fakeSessionBinder{}
+	b := &sessionBinder{session: fb}
+	if _, err := b.AppendMessage(context.Background(), engine.AppendParams{
+		MediaPendingSeconds: 45,
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if fb.appendIn.MediaPendingSeconds != 45 {
+		t.Errorf("MediaPendingSeconds = %v, want 45 — the media budget never reached the append", fb.appendIn.MediaPendingSeconds)
 	}
 }
 
 func TestNewResolverSet_WiresAllResolvers(t *testing.T) {
 	t.Parallel()
-	set := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil)
+	set := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil, nil)
 	if set.Installation == nil || set.Identity == nil || set.Dedup == nil || set.Session == nil || set.Audit == nil {
 		t.Error("NewResolverSet left a required resolver nil")
 	}
 	if set.OriginType != originWecomChat {
 		t.Errorf("OriginType = %q, want %q", set.OriginType, originWecomChat)
+	}
+	// A deployment with no object store passes nil and must degrade to
+	// placeholder text, which the Router only does when Media is nil.
+	if set.Media != nil {
+		t.Error("nil media argument produced a non-nil Media resolver")
+	}
+	// And a configured one must actually reach the Router — this is the
+	// whole wiring, and a resolver built at boot and dropped here would look
+	// exactly like media ingestion never having been written.
+	media := NewMediaResolver(&fakeMediaStorage{}, newFakeMediaLedger(nil), nil, testLogger())
+	withMedia := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil, media)
+	if withMedia.Media == nil {
+		t.Fatal("a media resolver was passed and dropped")
+	}
+	if !withMedia.Media.HasMedia(mediaMessage(t, "image", map[string]any{
+		"image": map[string]any{"url": "https://cos.invalid/a", "aeskey": testAESKey},
+	})) {
+		t.Error("the wired resolver does not recognize a media message")
 	}
 }
 

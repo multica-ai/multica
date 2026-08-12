@@ -116,6 +116,8 @@
       "findInIssue": { "label": "태스크에서 찾기", "description": "열린 태스크 상세 내용에서 검색합니다." },
       "openThreadNav": { "label": "스레드 내비게이터 열기", "description": "열린 태스크의 댓글 스레드를 나열하고 검색해 이동합니다." },
       "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 태스크를 만듭니다." },
+      "goBack": { "label": "뒤로 가기", "description": "브라우저처럼 기록을 따라 뒤로 이동합니다." },
+      "goForward": { "label": "앞으로 가기", "description": "브라우저처럼 기록을 따라 앞으로 이동합니다." },
       "goInbox": { "label": "받은 편지함으로 이동", "description": "워크스페이스 받은 편지함을 엽니다." },
       "goChat": { "label": "채팅으로 이동", "description": "워크스페이스 채팅을 엽니다." },
       "goMyIssues": { "label": "내 태스크로 이동", "description": "나에게 할당된 태스크를 엽니다." },

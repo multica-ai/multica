@@ -154,6 +154,108 @@ describe("useDownloadAttachment (web)", () => {
     );
   });
 
+  // #6092 mints a signed capability into `download_url` in proxy mode. A bare
+  // `<a download>` navigation can authenticate to it with no Authorization
+  // header and no session cookie, so the web path must prefer it over the
+  // cookie-gated slug endpoint that 401s to download.txt in token-mode
+  // self-hosting, where auth is a bearer token in JS and a bare navigation
+  // carries no credential at all.
+  it("navigates to the capability download_url in proxy mode, not the cookie-gated endpoint", async () => {
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/file.md",
+      download_url:
+        "/api/attachments/att-1/signed-download?exp=1735689600&sig=abc123",
+      filename: "file.md",
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const appendSpy = vi.spyOn(document.body, "appendChild");
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(clickSpy).toHaveBeenCalledOnce();
+    const anchor = appendSpy.mock.calls
+      .map(([node]) => node)
+      .find((node): node is HTMLAnchorElement =>
+        node instanceof HTMLAnchorElement,
+      );
+    expect(anchor).toBeDefined();
+    expect(anchor!.getAttribute("href")).toBe(
+      "/api/attachments/att-1/signed-download?exp=1735689600&sig=abc123",
+    );
+    // The capability is itself the credential and is signed over exactly one
+    // attachment id, so the workspace slug is no longer part of the URL. It is
+    // not bound to a user — the signature covers (version, attachment id,
+    // expiry) only — so it stays a bearer capability for its 60-second life.
+    expect(anchor!.getAttribute("href")).not.toContain("workspace_slug");
+  });
+
+  it("resolves the capability download_url against a configured API base (split origin)", async () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test/");
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/file.md",
+      download_url:
+        "/api/attachments/att-1/signed-download?exp=1735689600&sig=abc123",
+      filename: "file.md",
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const appendSpy = vi.spyOn(document.body, "appendChild");
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(clickSpy).toHaveBeenCalledOnce();
+    const anchor = appendSpy.mock.calls
+      .map(([node]) => node)
+      .find((node): node is HTMLAnchorElement =>
+        node instanceof HTMLAnchorElement,
+      );
+    expect(anchor!.href).toBe(
+      "https://api.example.test/api/attachments/att-1/signed-download?exp=1735689600&sig=abc123",
+    );
+  });
+
+  // Ordering guard, not a reachable user scenario: `api.getAttachment` resolves
+  // workspace context server-side and 400s when there is none, so the preflight
+  // would fail before this branch in real use. What this pins is purely the
+  // client-side order — `capabilityDownloadUrl` is consulted before the
+  // `workspaceSlug` guard — so a capability download never depends on the slug
+  // the legacy fallback needs.
+  it("consults the capability before the workspace-slug guard", async () => {
+    useWorkspaceSlugMock.mockReturnValueOnce(null);
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/file.md",
+      download_url:
+        "/api/attachments/att-1/signed-download?exp=1735689600&sig=abc123",
+      filename: "file.md",
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(clickSpy).toHaveBeenCalledOnce();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
   it("shows a toast and does not click a download link when the workspace slug is missing", async () => {
     useWorkspaceSlugMock.mockReturnValueOnce(null);
     getAttachmentMock.mockResolvedValueOnce({

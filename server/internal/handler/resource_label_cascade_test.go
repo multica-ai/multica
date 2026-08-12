@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 // Resource-label junction tables (agent_to_label / skill_to_label) deliberately
@@ -290,22 +290,6 @@ func TestDeleteWorkspace_CleansResourceLabelAssignments(t *testing.T) {
 	}
 }
 
-type lockTimeoutTxStarter struct {
-	delegate txStarter
-}
-
-func (s lockTimeoutTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
-	tx, err := s.delegate.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '100ms'`); err != nil {
-		_ = tx.Rollback(ctx)
-		return nil, err
-	}
-	return tx, nil
-}
-
 // TestDeleteWorkspace_RollsBackResourceLabelCleanup verifies the resource-label
 // sweep and the later administration cleanup share one transaction. Locking the
 // workspace's member row makes that late step time out; both junction rows must
@@ -315,6 +299,9 @@ func TestDeleteWorkspace_RollsBackResourceLabelCleanup(t *testing.T) {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
+	// The teardown transaction sets its own lock_timeout (MUL-5983); shorten
+	// it so the blocked administration step fails while the test is young.
+	setWorkspaceDeleteLockTimeoutForTest(t, 100*time.Millisecond)
 	wsID, agentID, skillID := seedWorkspaceResourceLabelFixture(t, ctx, "handler-tests-delete-labels-rollback")
 
 	blocker, err := testPool.Begin(ctx)
@@ -328,15 +315,14 @@ func TestDeleteWorkspace_RollsBackResourceLabelCleanup(t *testing.T) {
 		t.Fatalf("lock workspace member: %v", err)
 	}
 
-	handler := *testHandler
-	handler.TxStarter = lockTimeoutTxStarter{delegate: testHandler.TxStarter}
-
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
 	req = withURLParam(req, "id", wsID)
-	handler.DeleteWorkspace(w, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("DeleteWorkspace: expected 500, got %d: %s", w.Code, w.Body.String())
+	testHandler.DeleteWorkspace(w, req)
+	// A lock the teardown cannot get is transient, so the handler reports it
+	// as a retryable 503 rather than a generic failure.
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("DeleteWorkspace: expected 503, got %d: %s", w.Code, w.Body.String())
 	}
 	if err := blocker.Rollback(ctx); err != nil {
 		t.Fatalf("release member blocker: %v", err)

@@ -13,6 +13,9 @@ package wecom
 // With MULTICA_WECOM_TRACE=1 the server records enough to check a real-device
 // session afterwards: which way the frame went, what chat it was addressed
 // to, whether that chat is a room or a person, and what the server said back.
+// The switch also covers the one thing a frame does not carry — what an
+// attachment's own response said its name was (traceMediaHeaders), which no
+// later inspection can recover once the five-minute media URL has lapsed.
 //
 // Why not slog.Debug, which the siblings use for their per-frame lines
 // (slack_channel.go:162, lark/ws_connector.go:339): logger.parseLevel
@@ -25,9 +28,16 @@ package wecom
 // that" cannot be answered from lengths alone — so it is message content, in
 // a log, and it should be turned on deliberately and turned off after. The
 // prefix is capped rather than full, the cap counts runes so a Chinese
-// message is not cut mid-character, bearer tokens are redacted out of it, and
-// nothing here reads a credential field: the bot secret rides in the
-// aibot_subscribe body, which traceOutFields never descends into.
+// message is not cut mid-character, bearer tokens are redacted out of every
+// message string, and nothing here reads a credential field: the bot secret
+// rides in the aibot_subscribe body, which traceOutFields never descends
+// into.
+//
+// Two strings skip the redactor, both from an attachment's Content-Disposition:
+// the header itself and the filename read out of it. traceMediaHeaders writes
+// them verbatim under a cap of its own, and says why the redactor would destroy
+// the only thing the line is for, and why nothing in that header is a
+// credential.
 
 import (
 	"log/slog"
@@ -54,6 +64,32 @@ func tracingOn() bool { return tracing.Load() }
 // in; short enough that a transcript is not reconstructable from the log.
 const tracePreviewRunes = 120
 
+// traceHeaderRunes bounds an attachment's Content-Disposition, and the name
+// parsed out of it, on their way to the trace. It is a runaway guard on a
+// remote string, not a preview cap, which is why it is not tracePreviewRunes.
+//
+// 120 would defeat the line. `attachment; filename=""` is 23 runes on its own
+// and a percent-escaped CJK character is 9, so a name of eleven Chinese
+// characters is already over the preview cap — and non-ASCII names are the
+// whole reason this line exists, since a name that is nothing but escapes is
+// the one most likely to come out wrong. Worse than losing the tail: the cut
+// lands mid-escape ("…%E7%89%8…"), and a half-written escape cannot be
+// decoded back into the character it stood for, so a truncated line does not
+// even answer the question it was written to answer.
+//
+// 2048 is sized against the largest thing this can legitimately be rather
+// than picked round. POSIX filesystems stop a name at 255 BYTES;
+// percent-escaping every one of those triples it to 765, and a header carrying
+// BOTH parameter forms of such a name — filename= and filename*= — comes to
+// about 1570 runes with its scaffolding.
+//
+// NTFS counts 255 UTF-16 code units instead, so a name of 255 CJK characters is
+// 765 bytes before escaping and can exceed this cap in the both-parameter form.
+// That is a name no interface offers to type and no user has; the cap is chosen
+// against what arrives, not against what the longest filesystem would accept,
+// and a log line is not where an unbounded remote string should land.
+const traceHeaderRunes = 2048
+
 // tracePreview returns a bounded, single-line prefix of s with any bearer
 // token redacted. Newlines become spaces so one frame stays one log line, and
 // the cut is on a rune boundary.
@@ -75,11 +111,21 @@ const tracePreviewRunes = 120
 // (OutboundReplier owns it, and BindingPath is configurable). A "token=" in a
 // URL is the shape worth hiding wherever it appears.
 func tracePreview(s string) string {
-	s = redactBearerTokens(s)
-	out := make([]rune, 0, tracePreviewRunes)
+	return traceBound(redactBearerTokens(s), tracePreviewRunes)
+}
+
+// traceBound is tracePreview's second half on its own: the single-line
+// flattening and a cap, without the redaction. The cap is a parameter because
+// its two callers bound different things for different reasons — a message
+// preview is deliberately short (tracePreviewRunes), an attachment header is
+// bounded only so a remote string cannot run away (traceHeaderRunes).
+// traceMediaHeaders is the only caller that skips the redaction, and it says
+// there why.
+func traceBound(s string, limit int) string {
+	out := make([]rune, 0, limit)
 	cut := false
 	for _, r := range s {
-		if len(out) == tracePreviewRunes {
+		if len(out) == limit {
 			cut = true
 			break
 		}
@@ -188,7 +234,10 @@ func traceOutAttempt(log *slog.Logger, seq uint64, t *outTrace) {
 // by another goroutine's frame.
 //
 // The error text goes through tracePreview: it is the socket's words, not
-// ours, and everything else this file writes is bounded and redacted.
+// ours, so it is bounded and redacted like every other message string here.
+// The strings in this file that are bounded but NOT redacted are an
+// attachment's Content-Disposition and the filename read out of it, and
+// traceMediaHeaders says why.
 func traceOutResult(log *slog.Logger, seq uint64, t *outTrace, stage string, err error) {
 	if t == nil {
 		return
@@ -244,6 +293,45 @@ func traceInbound(log *slog.Logger, mc aibotMsgCallback, text string) {
 		"msgtype", mc.MsgType,
 		"len", len(text),
 		"text", tracePreview(text),
+	)
+}
+
+// traceMediaHeaders records what an attachment's response said about itself:
+// the Content-Disposition exactly as it arrived, and the name this package
+// parsed out of it. Those two side by side are the whole diagnosis for a
+// filename that comes out looking wrong, and they cannot be recovered later —
+// the URL they came from is good for five minutes, so an attachment whose
+// name is questioned tomorrow can never be re-fetched to settle it.
+//
+// Both values are flattened to one line and capped at traceHeaderRunes, and
+// neither is run through redactBearerTokens the way every other traced string
+// is. Two deliberate departures, for one reason: the point of this line is
+// the exact bytes.
+//
+// The redactor rewrites anything shaped like "token=…", and a file may
+// legitimately be called that — a redacted filename is a filename nobody can
+// diagnose. Nothing here is a credential anyway: the header carries a name,
+// and the pre-signed URL that does carry one is deliberately absent from this
+// line and from everything else media_download.go emits.
+//
+// The cap is traceHeaderRunes rather than the message preview's because a
+// percent-escaped name spends nine runes per Chinese character; the preview
+// cap would cut an ordinary filename in half and leave a fragment of an
+// escape behind. traceHeaderRunes says what it is sized against.
+//
+// It fires even when the header was absent, recording an empty value. A run
+// that produced no line at all would leave the reader unable to tell "the
+// server sent no Content-Disposition" from "the switch was off".
+func traceMediaHeaders(log *slog.Logger, msgID string, index int, h mediaHeaders) {
+	if !tracingOn() || log == nil {
+		return
+	}
+	log.Info("wecom trace",
+		"dir", "in.media",
+		"msg_id", msgID,
+		"index", index,
+		"content_disposition", traceBound(h.Disposition, traceHeaderRunes),
+		"filename", traceBound(h.Filename, traceHeaderRunes),
 	)
 }
 

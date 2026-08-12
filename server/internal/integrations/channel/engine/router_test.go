@@ -1,8 +1,10 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -898,17 +900,120 @@ func TestRouter_IssueCommand_ActiveDuplicateIsTerminalProductOutcome(t *testing.
 	}) {
 		t.Fatalf("duplicate result was not delivered to replier: %+v", h.replier.calls())
 	}
-	if !waitFor(time.Second, func() bool { return len(h.binder.boundMedia().MediaRefs) == 1 }) {
+	if !waitFor(time.Second, func() bool { return h.binder.boundMedia().MessageID.Valid }) {
 		t.Fatalf("duplicate media was not finalized: %+v", h.binder.boundMedia())
 	}
-	if got := h.binder.boundMedia().IssueID; got != duplicate.ID {
-		t.Fatalf("duplicate media target = %v, want %v", got, duplicate.ID)
+	if h.media.calls() != 0 {
+		t.Fatalf("duplicate media unexpectedly invoked resolver, calls=%d", h.media.calls())
+	}
+	if got := h.binder.boundMedia().MediaRefs; len(got) != 0 {
+		t.Fatalf("duplicate media unexpectedly persisted refs: %+v", got)
+	}
+	if got := h.binder.boundMedia().IssueID; got.Valid {
+		t.Fatalf("duplicate media unexpectedly targeted existing issue %v", got)
+	}
+	if h.issues.attachmentsChanged.Load() != 0 {
+		t.Fatalf("duplicate media published issue attachment changes = %d, want 0", h.issues.attachmentsChanged.Load())
 	}
 	h.tasks.mu.Lock()
 	issuePromotions := len(h.tasks.issueTaskPromotions)
 	h.tasks.mu.Unlock()
 	if issuePromotions != 0 {
 		t.Fatalf("duplicate media promoted a non-existent issue task, calls=%d", issuePromotions)
+	}
+}
+
+func TestRouter_IssueCommand_ActiveDuplicateFinalizesWithoutWaitingForSessionMedia(t *testing.T) {
+	h := newHarness(t)
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseFirst) }) })
+	h.media.resolve = func(_ context.Context, msg channel.InboundMessage) channel.InboundMessage {
+		if msg.MessageID == "om-first" {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		return msg
+	}
+
+	first := p2pMessage(t)
+	first.MessageID = "om-first"
+	if err := h.router.Handle(context.Background(), first); err != nil {
+		t.Fatalf("first Handle: %v", err)
+	}
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first session media job did not start")
+	}
+
+	duplicateMessageID := uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+	h.binder.appendResult = AppendResult{
+		MessageID:   duplicateMessageID,
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Existing issue",
+		},
+	}
+	duplicate := db.Issue{
+		ID:     uuidFromString(t, "88888888-8888-4888-8888-888888888888"),
+		Number: 44,
+		Title:  "Existing issue",
+	}
+	h.issues.result = service.IssueCreateResult{DuplicateIssue: &duplicate}
+	h.issues.err = service.ErrActiveDuplicate
+
+	second := p2pMessage(t)
+	second.MessageID = "om-duplicate"
+	if err := h.router.Handle(context.Background(), second); err != nil {
+		t.Fatalf("duplicate Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.binder.boundMedia().MessageID == duplicateMessageID }) {
+		t.Fatal("duplicate finalization waited behind the session's active media resolver")
+	}
+	if h.media.calls() != 1 {
+		t.Fatalf("duplicate finalization invoked media resolver, calls=%d", h.media.calls())
+	}
+	if got := h.binder.boundMedia(); len(got.MediaRefs) != 0 || got.IssueID.Valid {
+		t.Fatalf("duplicate finalization persisted media or targeted the issue: %+v", got)
+	}
+
+	releaseOnce.Do(func() { close(releaseFirst) })
+	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 2 }) {
+		t.Fatalf("session media job did not finish after release, promotions=%d", h.tasks.promotionCalls())
+	}
+}
+
+func TestRouter_MediaFinalizationExpiredDeadlineDoesNotLogResolutionFailure(t *testing.T) {
+	h := newHarness(t)
+	var logs bytes.Buffer
+	h.router.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	messageID := uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+
+	h.router.resolveAndBindMedia(
+		ResolverSet{Session: h.binder, Media: h.media},
+		h.inst.inst,
+		h.ident.id,
+		messageID,
+		p2pMessage(t),
+		h.binder.ensureID,
+		db.Issue{},
+		pgtype.Text{},
+		"",
+		pgtype.UUID{},
+		false,
+		time.Now().Add(-time.Second),
+	)
+
+	if got := h.binder.boundMedia(); got.MessageID != messageID || len(got.MediaRefs) != 0 {
+		t.Fatalf("expired finalize-only bind = %+v", got)
+	}
+	if h.media.calls() != 0 {
+		t.Fatalf("finalize-only path invoked media resolver, calls=%d", h.media.calls())
+	}
+	if bytes.Contains(logs.Bytes(), []byte("media resolution incomplete")) {
+		t.Fatalf("finalize-only path logged a media resolution failure: %s", logs.String())
 	}
 }
 

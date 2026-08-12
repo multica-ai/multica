@@ -701,8 +701,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Metrics:     wecomMetricsOrNil(opts.WecomMetrics),
 					Logger:      slog.Default(),
 				})
+				// Inbound media: a callback carries a pre-signed COS url and
+				// a per-url key, so the resolver needs no WeCom credential —
+				// only somewhere durable to put the bytes. Without an object
+				// store there is nothing to point an attachment at, so the
+				// resolver is left nil and attachments stay as their
+				// placeholder text. Same nil-guard as DingTalk above.
+				var wecomMedia engine.MediaResolver
+				if store != nil {
+					wecomMedia = wecom.NewMediaResolver(
+						store,
+						engine.NewDBMediaIntentLedger(queries),
+						wecomSenders,
+						slog.Default(),
+					)
+				}
 				channelRouter.Register(wecom.TypeWecom, wecom.NewResolverSet(
-					wecomStore, wecomSession, wecomReplier,
+					wecomStore, wecomSession, wecomReplier, wecomMedia,
 				))
 
 				// EventChatDone subscriber: pushes the agent's chat reply
@@ -711,6 +726,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// the agent's reply lands only in Multica's web UI — the
 				// user in WeCom sees no response.
 				wecom.NewOutbound(queries, wecomSenders, slog.Default()).Register(bus)
+
+				// Ranges the media fetcher may dial despite looking reserved.
+				// Empty by default, which leaves the SSRF guard exactly as
+				// strict as it ships. A deployment behind a fake-IP proxy
+				// needs it: there, every public hostname resolves into the
+				// proxy's pool (198.18.0.0/15 is the common one), so WeCom's
+				// own COS host is indistinguishable from a metadata endpoint
+				// by address alone and every attachment is refused.
+				if raw := strings.TrimSpace(os.Getenv("MULTICA_WECOM_MEDIA_ALLOW_CIDRS")); raw != "" {
+					for _, err := range wecom.SetMediaAllowedPrefixes(strings.Split(raw, ",")) {
+						slog.Error("wecom: ignoring malformed media allow cidr", "error", err)
+					}
+					slog.Warn("wecom: media guard has an operator allow-list; those ranges are reachable by a URL WeCom supplies",
+						"cidrs", raw)
+				}
 
 				// Frame tracing: off unless an operator asks for it. It
 				// records a bounded prefix of message text, so the fact that

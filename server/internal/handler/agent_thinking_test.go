@@ -426,6 +426,7 @@ func TestUpdateAgent_RuntimeSwitch_ClearsKnownIncompatibleModel(t *testing.T) {
 
 	ctx := context.Background()
 	claudeRuntimeID := createClaudeProviderRuntime(t)
+	secondClaudeRuntimeID := createClaudeProviderRuntime(t)
 	codexRuntimeID := createCodexProviderRuntime(t)
 
 	t.Cleanup(func() {
@@ -483,6 +484,24 @@ func TestUpdateAgent_RuntimeSwitch_ClearsKnownIncompatibleModel(t *testing.T) {
 		_ = json.NewDecoder(w.Body).Decode(&resp)
 		if resp["model"] != "gpt-5.5" {
 			t.Errorf("expected exact target model preserved, got %v", resp["model"])
+		}
+	})
+
+	t.Run("runtime-only switch keeps context-tagged target model", func(t *testing.T) {
+		agentID := createAgentOnRuntimeWithModel(t, "runtime-model-switch-context-tag", claudeRuntimeID, "claude-opus-5[1m]")
+		body := map[string]any{
+			"runtime_id": secondClaudeRuntimeID,
+		}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 preserving context-tagged Claude model, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		if resp["model"] != "claude-opus-5[1m]" {
+			t.Errorf("expected context-tagged Claude model preserved, got %v", resp["model"])
 		}
 	})
 

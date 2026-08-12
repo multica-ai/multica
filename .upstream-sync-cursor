@@ -1,3 +1,3 @@
 # Upstream release the fork currently sits on. Written by scripts/upstream-sync.sh.
-tag=v0.4.22
-sha=65506a8113b6b70867f07b98af7eb4208f791554
+tag=v0.4.23
+sha=2ca4eedcad9b3ed5dd3a0e4a23955ca8d601df49

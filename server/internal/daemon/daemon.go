@@ -511,10 +511,10 @@ type Daemon struct {
 	activeEnvRoots     map[string]int  // env root path -> reference count (handles reuse paths marked twice)
 	deletingEnvRoots   map[string]bool // env roots reserved by GC; new tasks wait until the mutation finishes
 
-	activeCodexStoresMu   sync.Mutex
-	activeCodexStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
-	activeCodexStores     map[string]int  // per-conversation Codex session store path -> live-task refcount; guards the store from GC mid-task (MUL-4424)
-	deletingCodexStores   map[string]bool // store paths a GC delete has reserved; markActive waits these out so a task never mounts a store mid-removal
+	activeStoresMu   sync.Mutex
+	activeStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
+	activeStores     map[string]int  // persistent store path (per-conversation Codex sessions, per-agent Hermes memories) -> live-task refcount; guards the store from GC mid-task (MUL-4424)
+	deletingStores   map[string]bool // store paths a GC delete has reserved; markActive waits these out so a task never mounts a store mid-removal
 
 	// localPathLocks serialises agent tasks whose project resource is a
 	// local_directory pinned to this daemon. Two tasks targeting the same
@@ -575,8 +575,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
 		deletingEnvRoots:          make(map[string]bool),
-		activeCodexStores:         make(map[string]int),
-		deletingCodexStores:       make(map[string]bool),
+		activeStores:              make(map[string]int),
+		deletingStores:            make(map[string]bool),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		pendingWorkInflight:       make(map[string]struct{}),
@@ -590,7 +590,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
 	}
 	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
-	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
+	d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
 	// Seed the copy-on-write availability set from the startup probe. Callers
 	// must go through d.agents() from here on; cfg.Agents is the initial value
 	// only and does not track later refreshes.
@@ -5847,6 +5847,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var hermesSourceHome string
 	var hermesSourceMustExist bool
 	var hermesEnv map[string]string
+	var hermesMemoryStore string
 	if provider == "hermes" {
 		sel := agent.ParseHermesProfileArgs(agentCustomArgs)
 		res := execenv.ResolveHermesProfile(agentEnvOverrides["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
@@ -5860,6 +5861,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			hermesEnv = map[string]string{}
 		}
 		hermesEnv["HERMES_HOME"] = res.SourceHome
+		// The overlay links memories/ here so the agent's long-term memory
+		// survives the task instead of being reset by every run (#6638). Keyed on
+		// the resolved source home so switching an agent's profile switches its
+		// memory line, matching Hermes' own "a profile is an isolated instance"
+		// model. Guarded from the GC for the whole task, as the Codex store below.
+		if store := execenv.HermesMemoryStorePath(d.cfg.Profile, task.AgentID, res.SourceHome); store != "" {
+			hermesMemoryStore = store
+			d.markActiveStore(store)
+			defer d.unmarkActiveStore(store)
+		}
+	}
+	// Reasonix locates its user config from the environment (REASONIX_HOME, and
+	// the platform config dirs behind it), which an agent's custom_env may
+	// re-point or clear. The per-task reasonix.toml has to restate the
+	// permissions from whichever config the child ends up loading, so the deny
+	// rules the runtime owner set there survive the task-scoped config that
+	// overrides them — hence the same sanitized env the child is launched with.
+	var reasonixEnv map[string]string
+	if provider == "reasonix" {
+		reasonixEnv = sanitizeAgentEnv(agentEnvOverrides)
 	}
 	// Guard this task's per-issue Codex session store from the GC for the whole
 	// task, starting before Prepare/Reuse mounts it — so a prune that samples the
@@ -5867,8 +5888,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
 	if provider == "codex" {
 		if store := execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx); store != "" {
-			d.markActiveCodexStore(store)
-			defer d.unmarkActiveCodexStore(store)
+			d.markActiveStore(store)
+			defer d.unmarkActiveStore(store)
 		}
 	}
 	if shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
@@ -5887,6 +5908,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
+			HermesMemoryStore:     hermesMemoryStore,
+			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		})
@@ -5911,6 +5934,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
+			HermesMemoryStore:     hermesMemoryStore,
+			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}
@@ -7350,56 +7375,58 @@ func (d *Daemon) reserveEnvRootForGC(envRoot string) (release func(), ok bool) {
 	}, true
 }
 
-// markActiveCodexStore records that a task is about to use the given per-issue
-// Codex session store, so the GC never reclaims it mid-task — the store lives
-// outside the env root, so isActiveEnvRoot does not cover it (MUL-4424). If a GC
+// markActiveStore records that a task is about to use the given persistent
+// store — a per-issue Codex session store or a per-agent Hermes memory store —
+// so the GC never reclaims it mid-task. These stores live outside the env root,
+// so isActiveEnvRoot does not cover them (MUL-4424). If a GC
 // delete has already reserved this store, we wait for that removal to finish
 // before claiming it, so a task never mounts a store mid-removal; the store is
 // then recreated fresh by Prepare. Reference-counted like the env-root guard.
-func (d *Daemon) markActiveCodexStore(store string) {
+func (d *Daemon) markActiveStore(store string) {
 	if store == "" {
 		return
 	}
-	d.activeCodexStoresMu.Lock()
-	defer d.activeCodexStoresMu.Unlock()
-	for d.deletingCodexStores[store] {
-		d.activeCodexStoresCond.Wait()
+	d.activeStoresMu.Lock()
+	defer d.activeStoresMu.Unlock()
+	for d.deletingStores[store] {
+		d.activeStoresCond.Wait()
 	}
-	d.activeCodexStores[store]++
+	d.activeStores[store]++
 }
 
-func (d *Daemon) unmarkActiveCodexStore(store string) {
+func (d *Daemon) unmarkActiveStore(store string) {
 	if store == "" {
 		return
 	}
-	d.activeCodexStoresMu.Lock()
-	defer d.activeCodexStoresMu.Unlock()
-	if d.activeCodexStores[store] <= 1 {
-		delete(d.activeCodexStores, store)
+	d.activeStoresMu.Lock()
+	defer d.activeStoresMu.Unlock()
+	if d.activeStores[store] <= 1 {
+		delete(d.activeStores, store)
 		return
 	}
-	d.activeCodexStores[store]--
+	d.activeStores[store]--
 }
 
-// reserveCodexStoreForDeletion atomically checks that no live task holds store
+// reserveStoreForDeletion atomically checks that no live task holds store
 // and, if so, marks it reserved so no task can claim it until the caller runs
 // the returned commit (after the actual removal). ok=false means a task holds it
-// — do not delete. This is the exclusive protocol PruneCodexSessionStores needs:
+// — do not delete. This is the exclusive protocol the store pruners
+// (PruneCodexSessionStores, PruneHermesMemoryStores) need:
 // the "confirm inactive" and the mark happen under one lock acquisition, so a
-// markActiveCodexStore either loses the check (store stays) or blocks on the
+// markActiveStore either loses the check (store stays) or blocks on the
 // reservation, closing the stat->remove race (MUL-4424).
-func (d *Daemon) reserveCodexStoreForDeletion(store string) (commit func(), ok bool) {
-	d.activeCodexStoresMu.Lock()
-	defer d.activeCodexStoresMu.Unlock()
-	if d.activeCodexStores[store] > 0 || d.deletingCodexStores[store] {
+func (d *Daemon) reserveStoreForDeletion(store string) (commit func(), ok bool) {
+	d.activeStoresMu.Lock()
+	defer d.activeStoresMu.Unlock()
+	if d.activeStores[store] > 0 || d.deletingStores[store] {
 		return nil, false
 	}
-	d.deletingCodexStores[store] = true
+	d.deletingStores[store] = true
 	return func() {
-		d.activeCodexStoresMu.Lock()
-		delete(d.deletingCodexStores, store)
-		d.activeCodexStoresCond.Broadcast()
-		d.activeCodexStoresMu.Unlock()
+		d.activeStoresMu.Lock()
+		delete(d.deletingStores, store)
+		d.activeStoresCond.Broadcast()
+		d.activeStoresMu.Unlock()
 	}, true
 }
 
