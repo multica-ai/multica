@@ -151,6 +151,20 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 }
 
 func cleanupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) error {
+	// The claim-intake tables deliberately carry no foreign keys, so direct
+	// fixture teardown must remove their rows before deleting the Workspace.
+	if _, err := pool.Exec(ctx, `
+		DELETE FROM workspace_claim_intake_action
+		WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)
+	`, integrationTestWorkspaceSlug); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `
+		DELETE FROM workspace_claim_intake_control
+		WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)
+	`, integrationTestWorkspaceSlug); err != nil {
+		return err
+	}
 	if _, err := pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, integrationTestWorkspaceSlug); err != nil {
 		return err
 	}
@@ -163,24 +177,259 @@ func cleanupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) erro
 // Helper to make authenticated requests
 func authRequest(t *testing.T, method, path string, body any) *http.Response {
 	t.Helper()
+	return authRequestWithToken(t, testServer.URL, method, path, body, testToken, testWorkspaceID, "")
+}
+
+func authRequestWithToken(
+	t *testing.T,
+	baseURL, method, path string,
+	body any,
+	token, workspaceID, idempotencyKey string,
+) *http.Response {
+	t.Helper()
 	var bodyReader io.Reader
 	if body != nil {
-		b, _ := json.Marshal(body)
+		b, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal request body: %v", err)
+		}
 		bodyReader = bytes.NewReader(b)
 	}
-	req, err := http.NewRequest(method, testServer.URL+path, bodyReader)
+	req, err := http.NewRequest(method, baseURL+path, bodyReader)
 	if err != nil {
 		t.Fatalf("failed to create request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+testToken)
-	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req.Header.Set("Authorization", "Bearer "+token)
+	if workspaceID != "" {
+		req.Header.Set("X-Workspace-ID", workspaceID)
+	}
+	if idempotencyKey != "" {
+		req.Header.Set("Idempotency-Key", idempotencyKey)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
 	return resp
+}
+
+func requireResponseStatus(t *testing.T, response *http.Response, want int) []byte {
+	t.Helper()
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if response.StatusCode != want {
+		t.Fatalf("status = %d, want %d: %s", response.StatusCode, want, body)
+	}
+	return body
+}
+
+func resetIntegrationClaimIntake(t *testing.T, workspaceID string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `
+		DELETE FROM workspace_claim_intake_action
+		WHERE workspace_id = $1
+	`, workspaceID); err != nil {
+		t.Fatalf("delete claim-intake actions: %v", err)
+	}
+	command, err := testPool.Exec(ctx, `
+		UPDATE workspace_claim_intake_control
+		SET state = 'resumed',
+		    generation = 0,
+		    updated_by_type = 'system',
+		    updated_by_id = NULL,
+		    auth_source = 'system',
+		    actor_display = 'system',
+		    reason = 'router integration reset',
+		    authoritative_action_id = NULL,
+		    effective_at = now(),
+		    updated_at = now()
+		WHERE workspace_id = $1
+	`, workspaceID)
+	if err != nil {
+		t.Fatalf("reset claim-intake control: %v", err)
+	}
+	if command.RowsAffected() != 1 {
+		t.Fatalf("reset claim-intake control affected %d rows, want 1", command.RowsAffected())
+	}
+}
+
+func assertIntegrationClaimIntakeState(t *testing.T, workspaceID, wantState string, wantGeneration int64) {
+	t.Helper()
+	var state string
+	var generation int64
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT state, generation
+		FROM workspace_claim_intake_control
+		WHERE workspace_id = $1
+	`, workspaceID).Scan(&state, &generation); err != nil {
+		t.Fatalf("load claim-intake control: %v", err)
+	}
+	if state != wantState || generation != wantGeneration {
+		t.Fatalf("claim-intake state = (%s, %d), want (%s, %d)", state, generation, wantState, wantGeneration)
+	}
+}
+
+func createIntegrationMember(t *testing.T, role string) (string, string) {
+	t.Helper()
+	ctx := context.Background()
+	email := fmt.Sprintf("claim-intake-%s-%d@multica.test", role, time.Now().UnixNano())
+	var userID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ($1, $2)
+		RETURNING id
+	`, "Claim Intake "+role, email).Scan(&userID); err != nil {
+		t.Fatalf("create %s user: %v", role, err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, $3)
+	`, testWorkspaceID, userID, role); err != nil {
+		t.Fatalf("create %s membership: %v", role, err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, userID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+	})
+	token, err := generateTestJWT(userID, email, "Claim Intake "+role)
+	if err != nil {
+		t.Fatalf("generate %s JWT: %v", role, err)
+	}
+	return userID, token
+}
+
+func createIntegrationPAT(t *testing.T, userID string) string {
+	t.Helper()
+	raw, err := auth.GeneratePATToken()
+	if err != nil {
+		t.Fatalf("generate PAT fixture: %v", err)
+	}
+	prefix := raw
+	if len(prefix) > 12 {
+		prefix = prefix[:12]
+	}
+	var id string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO personal_access_token (
+			user_id, name, token_hash, token_prefix, expires_at
+		) VALUES ($1, 'claim-intake-router-test', $2, $3, now() + interval '1 hour')
+		RETURNING id
+	`, userID, auth.HashToken(raw), prefix).Scan(&id); err != nil {
+		t.Fatalf("create PAT fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE id = $1`, id)
+	})
+	return raw
+}
+
+func createIntegrationTaskToken(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, runtime_id
+		FROM agent
+		WHERE workspace_id = $1
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("load task-token agent: %v", err)
+	}
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+		VALUES ($1, $2, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("create task-token task: %v", err)
+	}
+	raw, err := auth.GenerateAgentTaskToken()
+	if err != nil {
+		t.Fatalf("generate task token fixture: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_token (
+			token_hash, task_id, agent_id, workspace_id, user_id, expires_at
+		) VALUES ($1, $2, $3, $4, $5, now() + interval '1 hour')
+	`, auth.HashToken(raw), taskID, agentID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("create task token fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	return raw
+}
+
+func createIntegrationDaemonToken(t *testing.T) string {
+	t.Helper()
+	raw, err := auth.GenerateDaemonToken()
+	if err != nil {
+		t.Fatalf("generate daemon token fixture: %v", err)
+	}
+	var id string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at)
+		VALUES ($1, $2, 'claim-intake-router-test', now() + interval '1 hour')
+		RETURNING id
+	`, auth.HashToken(raw), testWorkspaceID).Scan(&id); err != nil {
+		t.Fatalf("create daemon token fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM daemon_token WHERE id = $1`, id)
+	})
+	return raw
+}
+
+func assertOperatorMachineDenied(t *testing.T, baseURL, token string, wantStatus int) {
+	t.Helper()
+	resetIntegrationClaimIntake(t, testWorkspaceID)
+	path := "/api/workspaces/" + testWorkspaceID + "/claim-intake"
+	for _, suffix := range []string{"", "/actions", "/ledger"} {
+		requireResponseStatus(t, authRequestWithToken(
+			t, baseURL, http.MethodGet, path+suffix, nil, token, testWorkspaceID, "",
+		), wantStatus)
+	}
+	requireResponseStatus(t, authRequestWithToken(
+		t,
+		baseURL,
+		http.MethodPost,
+		path+"/pause",
+		map[string]any{"reason": "machine credential denial proof"},
+		token,
+		testWorkspaceID,
+		"machine-pause-denial-proof",
+	), wantStatus)
+	assertIntegrationClaimIntakeState(t, testWorkspaceID, "resumed", 0)
+
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE workspace_claim_intake_control
+		SET state = 'paused', generation = 7, updated_at = now()
+		WHERE workspace_id = $1
+	`, testWorkspaceID); err != nil {
+		t.Fatalf("seed paused claim-intake control: %v", err)
+	}
+	requireResponseStatus(t, authRequestWithToken(
+		t,
+		baseURL,
+		http.MethodPost,
+		path+"/resume",
+		map[string]any{
+			"reason":              "machine must not remove fence",
+			"expected_generation": 7,
+		},
+		token,
+		testWorkspaceID,
+		"machine-resume-denial-proof",
+	), wantStatus)
+	assertIntegrationClaimIntakeState(t, testWorkspaceID, "paused", 7)
+	resetIntegrationClaimIntake(t, testWorkspaceID)
 }
 
 func readJSON(t *testing.T, resp *http.Response, v any) {
@@ -203,6 +452,255 @@ func generateTestJWT(userID, email, name string) (string, error) {
 }
 
 // ---- Health ----
+
+func TestWorkspaceClaimIntakeRouterAuthorizationMatrix(t *testing.T) {
+	path := "/api/workspaces/" + testWorkspaceID + "/claim-intake"
+
+	t.Run("owner JWT", func(t *testing.T) {
+		resetIntegrationClaimIntake(t, testWorkspaceID)
+		requireResponseStatus(t, authRequestWithToken(
+			t, testServer.URL, http.MethodGet, path, nil, testToken, testWorkspaceID, "",
+		), http.StatusOK)
+		requireResponseStatus(t, authRequestWithToken(
+			t,
+			testServer.URL,
+			http.MethodPost,
+			path+"/pause",
+			map[string]any{"reason": "owner router proof"},
+			testToken,
+			testWorkspaceID,
+			"owner-router-pause",
+		), http.StatusOK)
+		assertIntegrationClaimIntakeState(t, testWorkspaceID, "paused", 1)
+		requireResponseStatus(t, authRequestWithToken(
+			t,
+			testServer.URL,
+			http.MethodPost,
+			path+"/resume",
+			map[string]any{
+				"reason":              "owner router proof complete",
+				"expected_generation": 1,
+			},
+			testToken,
+			testWorkspaceID,
+			"owner-router-resume",
+		), http.StatusOK)
+		for _, suffix := range []string{"/actions", "/ledger"} {
+			requireResponseStatus(t, authRequestWithToken(
+				t, testServer.URL, http.MethodGet, path+suffix, nil, testToken, testWorkspaceID, "",
+			), http.StatusOK)
+		}
+		assertIntegrationClaimIntakeState(t, testWorkspaceID, "resumed", 2)
+	})
+
+	t.Run("admin JWT", func(t *testing.T) {
+		resetIntegrationClaimIntake(t, testWorkspaceID)
+		_, token := createIntegrationMember(t, "admin")
+		requireResponseStatus(t, authRequestWithToken(
+			t, testServer.URL, http.MethodGet, path, nil, token, testWorkspaceID, "",
+		), http.StatusOK)
+		requireResponseStatus(t, authRequestWithToken(
+			t,
+			testServer.URL,
+			http.MethodPost,
+			path+"/pause",
+			map[string]any{"reason": "admin router proof"},
+			token,
+			testWorkspaceID,
+			"admin-router-pause",
+		), http.StatusOK)
+		assertIntegrationClaimIntakeState(t, testWorkspaceID, "paused", 1)
+	})
+
+	t.Run("member JWT denied", func(t *testing.T) {
+		resetIntegrationClaimIntake(t, testWorkspaceID)
+		_, token := createIntegrationMember(t, "member")
+		for _, suffix := range []string{"", "/actions", "/ledger"} {
+			requireResponseStatus(t, authRequestWithToken(
+				t, testServer.URL, http.MethodGet, path+suffix, nil, token, testWorkspaceID, "",
+			), http.StatusForbidden)
+		}
+		requireResponseStatus(t, authRequestWithToken(
+			t,
+			testServer.URL,
+			http.MethodPost,
+			path+"/pause",
+			map[string]any{"reason": "member router denial proof"},
+			token,
+			testWorkspaceID,
+			"member-router-denied",
+		), http.StatusForbidden)
+		assertIntegrationClaimIntakeState(t, testWorkspaceID, "resumed", 0)
+	})
+
+	t.Run("human PAT", func(t *testing.T) {
+		resetIntegrationClaimIntake(t, testWorkspaceID)
+		token := createIntegrationPAT(t, testUserID)
+		requireResponseStatus(t, authRequestWithToken(
+			t, testServer.URL, http.MethodGet, path, nil, token, testWorkspaceID, "",
+		), http.StatusOK)
+		requireResponseStatus(t, authRequestWithToken(
+			t,
+			testServer.URL,
+			http.MethodPost,
+			path+"/pause",
+			map[string]any{"reason": "human PAT router proof"},
+			token,
+			testWorkspaceID,
+			"pat-router-pause",
+		), http.StatusOK)
+		assertIntegrationClaimIntakeState(t, testWorkspaceID, "paused", 1)
+	})
+
+	t.Run("cross-Workspace JWT denied", func(t *testing.T) {
+		resetIntegrationClaimIntake(t, testWorkspaceID)
+		ctx := context.Background()
+		slug := fmt.Sprintf("claim-intake-router-cross-%d", time.Now().UnixNano())
+		var workspaceID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO workspace (name, slug, description)
+			VALUES ('Claim Intake Router Cross', $1, 'authorization proof')
+			RETURNING id
+		`, slug).Scan(&workspaceID); err != nil {
+			t.Fatalf("create cross-Workspace fixture: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace_claim_intake_action WHERE workspace_id = $1`, workspaceID)
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace_claim_intake_control WHERE workspace_id = $1`, workspaceID)
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+		})
+		crossPath := "/api/workspaces/" + workspaceID + "/claim-intake"
+		for _, suffix := range []string{"", "/actions", "/ledger"} {
+			requireResponseStatus(t, authRequestWithToken(
+				t, testServer.URL, http.MethodGet, crossPath+suffix, nil, testToken, testWorkspaceID, "",
+			), http.StatusNotFound)
+		}
+		requireResponseStatus(t, authRequestWithToken(
+			t,
+			testServer.URL,
+			http.MethodPost,
+			crossPath+"/pause",
+			map[string]any{"reason": "cross-Workspace router denial proof"},
+			testToken,
+			testWorkspaceID,
+			"cross-workspace-router-denied",
+		), http.StatusNotFound)
+		assertIntegrationClaimIntakeState(t, workspaceID, "resumed", 0)
+	})
+}
+
+func TestWorkspaceClaimIntakeRouterMachineCredentialsDenied(t *testing.T) {
+	t.Run("task token", func(t *testing.T) {
+		assertOperatorMachineDenied(t, testServer.URL, createIntegrationTaskToken(t), http.StatusForbidden)
+	})
+
+	t.Run("cloud node PAT", func(t *testing.T) {
+		fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != "/api/v1/pat/verify" {
+				t.Errorf("unexpected Fleet verify request: %s %s", r.Method, r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"valid":true,"owner_id":%q,"instance_id":"synthetic-instance","instance_record_id":"synthetic-record"}`, testUserID)
+		}))
+		defer fleet.Close()
+		t.Setenv("MULTICA_CLOUD_FLEET_URL", fleet.URL)
+		hub := realtime.NewHub()
+		go hub.Run()
+		bus := events.New()
+		router := NewRouter(testPool, hub, bus, analytics.NoopClient{}, nil)
+		server := httptest.NewServer(router)
+		defer server.Close()
+		assertOperatorMachineDenied(t, server.URL, "mcn_synthetic_claim_intake", http.StatusForbidden)
+	})
+
+	t.Run("daemon token unavailable on human routes", func(t *testing.T) {
+		assertOperatorMachineDenied(t, testServer.URL, createIntegrationDaemonToken(t), http.StatusUnauthorized)
+	})
+}
+
+func TestDaemonBatchClaimCanonicalAndTransitionalAliasReturnPausedFence(t *testing.T) {
+	ctx := context.Background()
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id
+		FROM agent_runtime
+		WHERE workspace_id = $1
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load integration runtime: %v", err)
+	}
+
+	var actionID string
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace_claim_intake_control
+		SET state = 'paused',
+		    generation = 17,
+		    authoritative_action_id = gen_random_uuid(),
+		    effective_at = now(),
+		    updated_at = now()
+		WHERE workspace_id = $1
+		RETURNING authoritative_action_id::text
+	`, testWorkspaceID).Scan(&actionID); err != nil {
+		t.Fatalf("pause integration Workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(context.Background(), `
+			UPDATE workspace_claim_intake_control
+			SET state = 'resumed',
+			    generation = 0,
+			    updated_by_type = 'system',
+			    updated_by_id = NULL,
+			    auth_source = 'system',
+			    actor_display = 'system',
+			    reason = 'integration test reset',
+			    authoritative_action_id = NULL,
+			    effective_at = now(),
+			    updated_at = now()
+			WHERE workspace_id = $1
+		`, testWorkspaceID); err != nil {
+			t.Errorf("reset integration claim-intake control: %v", err)
+		}
+	})
+
+	for _, path := range []string{
+		"/api/daemon/tasks/claim",
+		"/api/daemon/claim",
+	} {
+		t.Run(path, func(t *testing.T) {
+			response := authRequest(t, http.MethodPost, path, map[string]any{
+				"daemon_id":   "router-alias-consumer",
+				"runtime_ids": []string{runtimeID},
+				"max_tasks":   1,
+			})
+			if response.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(response.Body)
+				response.Body.Close()
+				t.Fatalf("status = %d, want 200: %s", response.StatusCode, string(body))
+			}
+			var body struct {
+				Tasks            []json.RawMessage `json:"tasks"`
+				PausedWorkspaces []struct {
+					WorkspaceID string `json:"workspace_id"`
+					State       string `json:"state"`
+					Generation  int64  `json:"generation"`
+					ActionID    string `json:"action_id"`
+				} `json:"paused_workspaces"`
+			}
+			readJSON(t, response, &body)
+			if len(body.Tasks) != 0 || len(body.PausedWorkspaces) != 1 {
+				t.Fatalf("claim response = %+v", body)
+			}
+			fence := body.PausedWorkspaces[0]
+			if fence.WorkspaceID != testWorkspaceID ||
+				fence.State != "paused" ||
+				fence.Generation != 17 ||
+				fence.ActionID != actionID {
+				t.Fatalf("paused fence = %+v", fence)
+			}
+		})
+	}
+}
 
 func TestHealth(t *testing.T) {
 	resp, err := http.Get(testServer.URL + "/health")

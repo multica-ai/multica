@@ -387,6 +387,133 @@ func TestClaimTaskByRuntime_ChatIntroGateClearsAfterUserReplies(t *testing.T) {
 	}
 }
 
+func TestClaimTaskByRuntime_StampsAuthenticatedDaemonConsumer(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Consumer stamp runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Consumer stamp agent")
+	taskID := seedQueuedIssueTask(t, ctx, agentID, runtimeID, issueID)
+	const daemonID = "authenticated-consumer-a"
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest(
+		http.MethodPost,
+		"/api/daemon/runtimes/"+runtimeID+"/tasks/claim",
+		nil,
+		testWorkspaceID,
+		daemonID,
+	)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var consumerID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT claim_consumer_id
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&consumerID); err != nil {
+		t.Fatalf("load consumer identity: %v", err)
+	}
+	if consumerID != daemonID {
+		t.Fatalf("claim consumer = %q, want authenticated daemon %q", consumerID, daemonID)
+	}
+}
+
+func TestClaimTaskByRuntime_LegacyUserAuthUsesRegisteredDaemonConsumer(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Legacy consumer stamp runtime")
+	const registeredDaemonID = "registered-consumer-a"
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_runtime
+		SET daemon_id = $2
+		WHERE id = $1
+	`, runtimeID, registeredDaemonID); err != nil {
+		t.Fatalf("register runtime daemon: %v", err)
+	}
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Legacy consumer stamp agent")
+	taskID := seedQueuedIssueTask(t, ctx, agentID, runtimeID, issueID)
+
+	w := httptest.NewRecorder()
+	req := newRequest(
+		http.MethodPost,
+		"/api/daemon/runtimes/"+runtimeID+"/tasks/claim",
+		nil,
+	)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var consumerID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT claim_consumer_id
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&consumerID); err != nil {
+		t.Fatalf("load legacy consumer identity: %v", err)
+	}
+	if consumerID != registeredDaemonID {
+		t.Fatalf("claim consumer = %q, want registered daemon %q", consumerID, registeredDaemonID)
+	}
+}
+
+func TestClaimTaskByRuntime_DaemonTokenCannotClaimPeerRuntime(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Peer runtime guard")
+	const registeredDaemonID = "registered-consumer-b"
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_runtime
+		SET daemon_id = $2
+		WHERE id = $1
+	`, runtimeID, registeredDaemonID); err != nil {
+		t.Fatalf("register runtime daemon: %v", err)
+	}
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Peer runtime guard agent")
+	taskID := seedQueuedIssueTask(t, ctx, agentID, runtimeID, issueID)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest(
+		http.MethodPost,
+		"/api/daemon/runtimes/"+runtimeID+"/tasks/claim",
+		nil,
+		testWorkspaceID,
+		"different-authenticated-daemon",
+	)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("peer runtime claim status = %d, want 404: %s", w.Code, w.Body.String())
+	}
+
+	var status string
+	var consumerID *string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, claim_consumer_id
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&status, &consumerID); err != nil {
+		t.Fatalf("load peer runtime task: %v", err)
+	}
+	if status != "queued" || consumerID != nil {
+		t.Fatalf("peer runtime task = status %q consumer %v, want queued/unowned", status, consumerID)
+	}
+}
+
 func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

@@ -4394,7 +4394,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			continue
 		}
 
-		tasks, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
+		claimResult, err := d.ClaimTasksWSFirstWithControl(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
 		if err != nil {
 			d.exitClaim()
 			releaseSlots(slots)
@@ -4406,6 +4406,15 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			}
 			continue
 		}
+		for _, fence := range claimResult.PausedWorkspaces {
+			d.logger.Info("workspace claim intake paused",
+				"workspace_id", fence.WorkspaceID,
+				"generation", fence.Generation,
+				"action_id", fence.ActionID,
+				"effective_at", fence.EffectiveAt,
+			)
+		}
+		tasks := claimResult.Tasks
 
 		// Dispatch each claimed task into a slot. activeTasks is incremented for
 		// every dispatched task BEFORE exitClaim so the auto-update barrier never

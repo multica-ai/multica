@@ -1,0 +1,1 @@
+ALTER TABLE workspace_claim_intake_control ADD CONSTRAINT workspace_claim_intake_control_pkey PRIMARY KEY USING INDEX workspace_claim_intake_control_workspace_uidx;

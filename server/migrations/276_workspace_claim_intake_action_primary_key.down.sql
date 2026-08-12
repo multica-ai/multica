@@ -1,0 +1,1 @@
+ALTER TABLE workspace_claim_intake_action DROP CONSTRAINT IF EXISTS workspace_claim_intake_action_pkey;

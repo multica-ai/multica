@@ -81,3 +81,24 @@ func TestClient_ClaimTasks_EmptyResult(t *testing.T) {
 		t.Fatalf("got %d tasks, want 0", len(tasks))
 	}
 }
+
+func TestClient_ClaimTasks_PausedMetadataIsSuccessful(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tasks":[],"paused_workspaces":[{"workspace_id":"ws-paused","state":"paused","generation":7,"action_id":"action-7","effective_at":"2026-08-07T00:00:00Z"}]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetToken("synthetic-test-token")
+	result, err := c.ClaimTasksWithControl(context.Background(), "daemon-x", []string{"rt-a"}, 1)
+	if err != nil {
+		t.Fatalf("ClaimTasksWithControl: %v", err)
+	}
+	if len(result.Tasks) != 0 || len(result.PausedWorkspaces) != 1 {
+		t.Fatalf("result = %+v, want no tasks and one paused workspace", result)
+	}
+	if result.PausedWorkspaces[0].Generation != 7 || result.PausedWorkspaces[0].WorkspaceID != "ws-paused" {
+		t.Fatalf("paused metadata = %+v", result.PausedWorkspaces[0])
+	}
+}

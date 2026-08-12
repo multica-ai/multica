@@ -18,18 +18,18 @@ import (
 // token kind the caller used:
 //
 //   - JWT cookie / mul_ PAT  → X-User-ID = the human's user id.
-//                              X-Actor-Source is left empty.
+//     X-Actor-Source is left empty.
 //   - mat_ task token        → X-User-ID = the OWNING human's user id,
-//                              plus X-Agent-ID, X-Task-ID, and the
-//                              authoritative server-set header
-//                              `X-Actor-Source: task_token`.
+//     plus X-Agent-ID, X-Task-ID, and the
+//     authoritative server-set header
+//     `X-Actor-Source: task_token`.
 //   - mcn_ cloud-node PAT    → X-User-ID = the OWNING human's user id,
-//                              plus `X-Actor-Source: cloud_pat`.
-//                              The token authenticates a cloud-runtime
-//                              EC2 node operating on the owner's
-//                              behalf — same conceptual category as
-//                              mat_ (machine running owner-scoped
-//                              code) for authorization purposes.
+//     plus `X-Actor-Source: cloud_pat`.
+//     The token authenticates a cloud-runtime
+//     EC2 node operating on the owner's
+//     behalf — same conceptual category as
+//     mat_ (machine running owner-scoped
+//     code) for authorization purposes.
 //
 // The mat_ and mcn_ designs (MUL-2600 and the cloud-node PAT story
 // respectively) were both deliberately built this way: every request
@@ -101,6 +101,21 @@ func RequireHumanActor(next http.Handler) http.Handler {
 		switch r.Header.Get("X-Actor-Source") {
 		case "task_token", "cloud_pat":
 			writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequireHumanClaimIntakeActor is the stricter control-plane guard for
+// workspace claim-intake mutations. The Auth middleware leaves the actor source
+// empty only for a human JWT or human mul_ PAT. Every server-stamped non-empty
+// source is therefore denied by default, including future machine credentials.
+// Handlers repeat this check and reject daemon-token context for defense in depth.
+func RequireHumanClaimIntakeActor(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Actor-Source") != "" {
+			writeError(w, http.StatusForbidden, "claim-intake mutations are only available to human workspace owners and admins")
 			return
 		}
 		next.ServeHTTP(w, r)

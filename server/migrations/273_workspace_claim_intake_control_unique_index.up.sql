@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY workspace_claim_intake_control_workspace_uidx ON workspace_claim_intake_control (workspace_id);

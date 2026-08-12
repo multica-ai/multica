@@ -101,6 +101,34 @@ type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
 }
 
+// WorkspaceClaimIntakeFence is the authoritative machine-readable claim-intake
+// state returned alongside ordinary claim results. ActionID is invalid for the
+// generation-zero baseline, which predates any operator mutation.
+type WorkspaceClaimIntakeFence struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	State       string      `json:"state"`
+	Generation  int64       `json:"generation"`
+	ActionID    pgtype.UUID `json:"action_id"`
+	EffectiveAt time.Time   `json:"effective_at"`
+}
+
+// RuntimeClaimResult distinguishes an ordinary empty queue from an authoritative
+// Workspace pause without encoding the pause as an HTTP/WS error that would make
+// daemon clients fall back to an older unprotected route.
+type RuntimeClaimResult struct {
+	Task        *db.AgentTaskQueue `json:"task"`
+	Paused      bool               `json:"paused"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Generation  int64              `json:"generation"`
+	ActionID    pgtype.UUID        `json:"action_id"`
+	EffectiveAt time.Time          `json:"effective_at"`
+}
+
+type RuntimeBatchClaimResult struct {
+	Tasks            []db.AgentTaskQueue         `json:"tasks"`
+	PausedWorkspaces []WorkspaceClaimIntakeFence `json:"paused_workspaces"`
+}
+
 // triggerSummaryMaxLen caps the snapshot length so the row stays cheap to
 // transmit (it ends up in every task list response). 200 is enough for a
 // recognisable preview of a one-paragraph comment.
@@ -2866,11 +2894,37 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 
 	err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		t0 := time.Now()
+		agentSnapshot, err := qtx.GetAgent(ctx, agentID)
+		if err != nil {
+			getAgentMs = time.Since(t0).Milliseconds()
+			outcome = "error_get_agent"
+			return fmt.Errorf("agent not found: %w", err)
+		}
+		controls, err := qtx.LockWorkspaceClaimIntakeControlsForClaim(ctx, []pgtype.UUID{agentSnapshot.WorkspaceID})
+		if err != nil {
+			getAgentMs = time.Since(t0).Milliseconds()
+			outcome = "error_claim_intake_lock"
+			return fmt.Errorf("lock workspace claim intake control: %w", err)
+		}
+		if len(controls) != 1 {
+			getAgentMs = time.Since(t0).Milliseconds()
+			outcome = "error_claim_intake_missing"
+			return fmt.Errorf("workspace claim intake control missing")
+		}
+		if controls[0].State != "resumed" {
+			getAgentMs = time.Since(t0).Milliseconds()
+			outcome = "workspace_paused"
+			return nil
+		}
 		agent, err := qtx.GetAgentForClaimUpdate(ctx, agentID)
 		getAgentMs = time.Since(t0).Milliseconds()
 		if err != nil {
-			outcome = "error_get_agent"
-			return fmt.Errorf("agent not found: %w", err)
+			outcome = "error_get_agent_lock"
+			return fmt.Errorf("lock agent for claim: %w", err)
+		}
+		if agent.WorkspaceID != agentSnapshot.WorkspaceID {
+			outcome = "error_agent_workspace_changed"
+			return fmt.Errorf("agent workspace changed during claim")
 		}
 
 		t0 = time.Now()
@@ -2890,6 +2944,7 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
 			AgentID:          agentID,
 			PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
+			ConsumerID:       pgtype.Text{},
 		})
 		claimAgentMs = time.Since(t0).Milliseconds()
 		if err != nil {
@@ -2958,123 +3013,42 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 }
 
 // ClaimTaskForRuntime claims the next runnable task for a runtime while
-// still respecting each agent's max_concurrent_tasks limit.
-//
-// Empty-claim fast path: when EmptyClaim is configured and a recent
-// check verified the runtime had no queued tasks, returns immediately
-// without touching Postgres. The cache is invalidated synchronously on
-// every enqueue (notifyTaskAvailable), so a queued task becomes
-// claimable on the next call rather than waiting for the TTL.
-func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.UUID) (*db.AgentTaskQueue, error) {
-	start := time.Now()
-	var (
-		outcome          = "no_task"
-		listMs, loopMs   int64
-		listCount, tried int
-		claimedFlag      bool
-	)
-	defer func() {
-		totalMs := time.Since(start).Milliseconds()
-		if totalMs < 300 {
-			return
-		}
-		slog.Info("claim_for_runtime slow",
-			"runtime_id", util.UUIDToString(runtimeID),
-			"outcome", outcome,
-			"total_ms", totalMs,
-			"list_pending_ms", listMs,
-			"list_pending_count", listCount,
-			"agents_tried", tried,
-			"claim_loop_ms", loopMs,
-			"claimed", claimedFlag,
-		)
-	}()
+// holding the Workspace claim-intake control lock in the same transaction that
+// refreshes stale ownership or creates fresh ownership. It remains a
+// compatibility wrapper for internal callers that do not have a consumer
+// identity; daemon-facing handlers should call ClaimTaskForRuntimeAsConsumer.
+func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.UUID) (*RuntimeClaimResult, error) {
+	return s.ClaimTaskForRuntimeAsConsumer(ctx, runtimeID, "")
+}
 
-	runtimeKey := util.UUIDToString(runtimeID)
-	if err := s.PromoteDueDeferredTasksForRuntime(ctx, runtimeID); err != nil {
-		outcome = "error_promote_deferred"
+// ClaimTaskForRuntimeAsConsumer is the consumer-aware singular claim path. The
+// supplied consumer identity is stamped atomically on both fresh ownership and
+// stale redelivery so the Workspace-global operator ledger identifies the
+// machine that established the current delivery.
+func (s *TaskService) ClaimTaskForRuntimeAsConsumer(
+	ctx context.Context,
+	runtimeID pgtype.UUID,
+	consumerID string,
+) (*RuntimeClaimResult, error) {
+	batch, err := s.claimTasksForRuntimes(ctx, []pgtype.UUID{runtimeID}, 1, consumerID)
+	if err != nil {
 		return nil, err
 	}
-
-	// Check this before EmptyClaim: a lost claim response moves the task out of
-	// `queued`, so the empty-queued cache cannot represent recoverability.
-	stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
-		RuntimeID:         runtimeID,
-		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
-		PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
-	})
-	if err == nil {
-		outcome = "reclaimed_dispatched"
-		claimedFlag = true
-		slog.Info("stale dispatched task reclaimed",
-			"task_id", util.UUIDToString(stale.ID),
-			"runtime_id", runtimeKey,
-			"agent_id", util.UUIDToString(stale.AgentID),
-		)
-		return &stale, nil
+	result := &RuntimeClaimResult{}
+	if len(batch.PausedWorkspaces) > 0 {
+		fence := batch.PausedWorkspaces[0]
+		result.Paused = true
+		result.WorkspaceID = fence.WorkspaceID
+		result.Generation = fence.Generation
+		result.ActionID = fence.ActionID
+		result.EffectiveAt = fence.EffectiveAt
+		return result, nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		outcome = "error_reclaim_dispatched"
-		return nil, fmt.Errorf("reclaim stale dispatched task: %w", err)
+	if len(batch.Tasks) > 0 {
+		task := batch.Tasks[0]
+		result.Task = &task
 	}
-
-	if s.EmptyClaim.IsEmpty(ctx, runtimeKey) {
-		outcome = "empty_cache_hit"
-		return nil, nil
-	}
-
-	// Sample the invalidation version BEFORE the SELECT. If a
-	// concurrent enqueue Bumps between this read and the post-SELECT
-	// MarkEmpty, the next IsEmpty will see the empty key tagged with
-	// a stale version and reject it — closing the race that would
-	// otherwise stall the just-queued task until the empty key's TTL
-	// expired.
-	preSelectVersion := s.EmptyClaim.CurrentVersion(ctx, runtimeKey)
-
-	t0 := time.Now()
-	tasks, err := s.Queries.ListQueuedClaimCandidatesByRuntime(ctx, runtimeID)
-	listMs = time.Since(t0).Milliseconds()
-	listCount = len(tasks)
-	if err != nil {
-		outcome = "error_list"
-		return nil, fmt.Errorf("list queued claim candidates: %w", err)
-	}
-
-	if len(tasks) == 0 {
-		s.EmptyClaim.MarkEmpty(ctx, runtimeKey, preSelectVersion)
-		outcome = "empty_db"
-		return nil, nil
-	}
-
-	loopStart := time.Now()
-	triedAgents := map[string]struct{}{}
-	var claimed *db.AgentTaskQueue
-	for _, candidate := range tasks {
-		agentKey := util.UUIDToString(candidate.AgentID)
-		if _, seen := triedAgents[agentKey]; seen {
-			continue
-		}
-		triedAgents[agentKey] = struct{}{}
-		tried++
-
-		task, err := s.ClaimTask(ctx, candidate.AgentID)
-		if err != nil {
-			loopMs = time.Since(loopStart).Milliseconds()
-			outcome = "error_claim"
-			return nil, err
-		}
-		if task != nil && task.RuntimeID == runtimeID {
-			claimed = task
-			break
-		}
-	}
-	loopMs = time.Since(loopStart).Milliseconds()
-	if claimed != nil {
-		claimedFlag = true
-		outcome = "claimed"
-	}
-
-	return claimed, nil
+	return result, nil
 }
 
 // FinalizeTaskClaim atomically persists the task-scoped token and, for a
@@ -3119,7 +3093,9 @@ func (s *TaskService) FinalizeTaskClaim(
 // RequeueTaskAfterClaimFailure immediately releases an exact dispatched claim
 // whose payload finalization failed before the HTTP response was written. The
 // SQL CAS includes dispatched_at so a late handler cannot roll back a newer
-// reclaim. This is not a fresh enqueue: do not duplicate queued analytics.
+// reclaim. The released row clears its prior ownership stamps; a later claim
+// writes a new authoritative generation/action and consumer. This is not a
+// fresh enqueue: do not duplicate queued analytics.
 func (s *TaskService) RequeueTaskAfterClaimFailure(ctx context.Context, task db.AgentTaskQueue) (*db.AgentTaskQueue, error) {
 	requeued, err := s.Queries.RequeueAgentTaskAfterClaimFailure(ctx, db.RequeueAgentTaskAfterClaimFailureParams{
 		TaskID:       task.ID,
@@ -3139,63 +3115,179 @@ func (s *TaskService) RequeueTaskAfterClaimFailure(ctx context.Context, task db.
 	return &requeued, nil
 }
 
-// ClaimTasksForRuntimes is the machine-level (MUL-4257) batch counterpart of
-// ClaimTaskForRuntime: it claims up to maxTasks tasks across every runtime in
-// runtimeIDs in a single call, so a daemon can poll for all of its runtimes
-// with one HTTP request and a constant number of DB queries instead of one
-// request (and one promote/reclaim/list cycle) per runtime.
-//
-// It preserves the exact per-runtime semantics, just set-ified:
-//  1. promote due deferred tasks across the set (one UPDATE);
-//  2. reclaim up to maxTasks stale-dispatched tasks across the set (one UPDATE)
-//     — done before the empty-cache check because a lost claim response moves
-//     the task out of `queued`, which the empty-queued cache cannot represent;
-//  3. short-circuit runtimes whose empty-claim verdict is cached, sampling the
-//     invalidation version for the rest BEFORE the candidate SELECT;
-//  4. list queued candidates across the non-empty set (one SELECT);
-//  5. mark still-empty runtimes so their next idle poll skips Postgres;
-//  6. claim per distinct agent via ClaimTask (unchanged — preserves the
-//     per-(issue, agent) serialization, the agent concurrency cap, and every
-//     dispatch side effect) until maxTasks is reached.
-//
-// The returned slice contains both reclaimed and freshly-claimed tasks, each
-// already carrying its runtime_id so the daemon routes it to the matching
-// runtime locally.
-func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pgtype.UUID, maxTasks int) ([]db.AgentTaskQueue, error) {
+// ClaimTasksForRuntimes is the canonical machine-level claim path. Every
+// requested runtime is resolved first, every distinct Workspace control row is
+// then locked in deterministic order, and all ownership changes commit in one
+// transaction. A missing/unreadable control row rolls back the whole batch.
+func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pgtype.UUID, maxTasks int) (*RuntimeBatchClaimResult, error) {
+	return s.claimTasksForRuntimes(ctx, runtimeIDs, maxTasks, "")
+}
+
+func (s *TaskService) ClaimTasksForRuntimesAsConsumer(ctx context.Context, runtimeIDs []pgtype.UUID, maxTasks int, consumerID string) (*RuntimeBatchClaimResult, error) {
+	return s.claimTasksForRuntimes(ctx, runtimeIDs, maxTasks, consumerID)
+}
+
+func (s *TaskService) claimTasksForRuntimes(ctx context.Context, runtimeIDs []pgtype.UUID, maxTasks int, consumerID string) (*RuntimeBatchClaimResult, error) {
+	result := &RuntimeBatchClaimResult{
+		Tasks:            []db.AgentTaskQueue{},
+		PausedWorkspaces: []WorkspaceClaimIntakeFence{},
+	}
 	if len(runtimeIDs) == 0 || maxTasks <= 0 {
-		return nil, nil
+		return result, nil
 	}
 
-	// De-dup runtime IDs defensively so MarkEmpty/version bookkeeping stays
-	// unambiguous even if a daemon ever sends a duplicate.
-	seen := make(map[string]struct{}, len(runtimeIDs))
-	uniqueIDs := make([]pgtype.UUID, 0, len(runtimeIDs))
-	runtimeInSet := make(map[string]struct{}, len(runtimeIDs))
-	for _, rid := range runtimeIDs {
-		key := util.UUIDToString(rid)
-		runtimeInSet[key] = struct{}{}
-		if _, dup := seen[key]; dup {
+	seenRuntime := make(map[string]struct{}, len(runtimeIDs))
+	uniqueRuntimeIDs := make([]pgtype.UUID, 0, len(runtimeIDs))
+	for _, runtimeID := range runtimeIDs {
+		key := util.UUIDToString(runtimeID)
+		if _, duplicate := seenRuntime[key]; duplicate {
 			continue
 		}
-		seen[key] = struct{}{}
-		uniqueIDs = append(uniqueIDs, rid)
+		seenRuntime[key] = struct{}{}
+		uniqueRuntimeIDs = append(uniqueRuntimeIDs, runtimeID)
 	}
 
-	claimed := make([]db.AgentTaskQueue, 0, maxTasks)
+	var promoted []db.AgentTaskQueue
+	var claimed []db.AgentTaskQueue
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		runtimeRows, err := qtx.ListWorkspaceIDsForRuntimes(ctx, uniqueRuntimeIDs)
+		if err != nil {
+			return fmt.Errorf("resolve runtime workspaces: %w", err)
+		}
+		if len(runtimeRows) == 0 {
+			return nil
+		}
 
-	// 1. Promote due deferred tasks across the whole set (promote-first, like
-	// the singular path). Replay the per-row side effects the singular service
-	// method PromoteDueDeferredTasksForRuntime performs — crucially
-	// EmptyClaim.Bump (via NotifyTaskEnqueued → notifyTaskAvailable) so a
-	// just-promoted deferred task invalidates its runtime's cached empty
-	// verdict BEFORE the empty-cache filter in step 3; otherwise a stale
-	// MarkEmpty from a prior idle poll would short-circuit the runtime and the
-	// promoted task would sit unclaimed until the empty key's TTL. Also emits
-	// the deferred→queued UI event and the enqueue analytics sample.
-	promoted, err := s.Queries.PromoteDueDeferredTasksForRuntimes(ctx, uniqueIDs)
+		workspaceIDs := make([]pgtype.UUID, 0, len(runtimeRows))
+		workspaceSeen := make(map[string]struct{}, len(runtimeRows))
+		for _, row := range runtimeRows {
+			key := util.UUIDToString(row.WorkspaceID)
+			if _, duplicate := workspaceSeen[key]; duplicate {
+				continue
+			}
+			workspaceSeen[key] = struct{}{}
+			workspaceIDs = append(workspaceIDs, row.WorkspaceID)
+		}
+		controls, err := qtx.LockWorkspaceClaimIntakeControlsForClaim(ctx, workspaceIDs)
+		if err != nil {
+			return fmt.Errorf("lock workspace claim intake controls: %w", err)
+		}
+		if len(controls) != len(workspaceIDs) {
+			return fmt.Errorf("workspace claim intake control missing")
+		}
+
+		activeWorkspace := make(map[string]struct{}, len(controls))
+		controlByWorkspace := make(map[string]db.WorkspaceClaimIntakeControl, len(controls))
+		for _, control := range controls {
+			workspaceKey := util.UUIDToString(control.WorkspaceID)
+			controlByWorkspace[workspaceKey] = control
+			if control.State == "resumed" {
+				activeWorkspace[workspaceKey] = struct{}{}
+				continue
+			}
+			result.PausedWorkspaces = append(result.PausedWorkspaces, WorkspaceClaimIntakeFence{
+				WorkspaceID: control.WorkspaceID,
+				State:       control.State,
+				Generation:  control.Generation,
+				ActionID:    control.AuthoritativeActionID,
+				EffectiveAt: control.EffectiveAt.Time,
+			})
+		}
+
+		activeRuntimeIDs := make([]pgtype.UUID, 0, len(runtimeRows))
+		for _, row := range runtimeRows {
+			if _, active := activeWorkspace[util.UUIDToString(row.WorkspaceID)]; active {
+				activeRuntimeIDs = append(activeRuntimeIDs, row.RuntimeID)
+			}
+		}
+		if len(activeRuntimeIDs) == 0 {
+			return nil
+		}
+
+		promoted, err = qtx.PromoteDueDeferredTasksForRuntimes(ctx, activeRuntimeIDs)
+		if err != nil {
+			return fmt.Errorf("promote deferred tasks: %w", err)
+		}
+
+		consumer := pgtype.Text{String: consumerID, Valid: consumerID != ""}
+		reclaimed, err := qtx.ReclaimStaleDispatchedTasksForRuntimes(ctx, db.ReclaimStaleDispatchedTasksForRuntimesParams{
+			RuntimeIds:        activeRuntimeIDs,
+			ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
+			PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
+			MaxTasks:          int32(maxTasks),
+			ConsumerID:        consumer,
+		})
+		if err != nil {
+			return fmt.Errorf("reclaim stale dispatched tasks: %w", err)
+		}
+		claimed = append(claimed, reclaimed...)
+		if len(claimed) >= maxTasks {
+			claimed = claimed[:maxTasks]
+			return nil
+		}
+
+		candidates, err := qtx.ListQueuedClaimCandidatesByRuntimes(ctx, activeRuntimeIDs)
+		if err != nil {
+			return fmt.Errorf("list queued claim candidates: %w", err)
+		}
+		// Preserve the canonical batch contract of at most one fresh claim per
+		// agent per poll. This keeps distribution compatible with the singular
+		// path while the enclosing transaction makes the whole batch atomic.
+		triedAgents := make(map[string]struct{}, len(candidates))
+		for _, candidate := range candidates {
+			if len(claimed) >= maxTasks {
+				break
+			}
+			agentKey := util.UUIDToString(candidate.AgentID)
+			if _, tried := triedAgents[agentKey]; tried {
+				continue
+			}
+			triedAgents[agentKey] = struct{}{}
+
+			agent, err := qtx.GetAgentForClaimUpdate(ctx, candidate.AgentID)
+			if err != nil {
+				return fmt.Errorf("load claim agent: %w", err)
+			}
+			control, ok := controlByWorkspace[util.UUIDToString(agent.WorkspaceID)]
+			if !ok || control.State != "resumed" {
+				return fmt.Errorf("claim agent workspace control changed unexpectedly")
+			}
+			running, err := qtx.CountRunningTasks(ctx, candidate.AgentID)
+			if err != nil {
+				return fmt.Errorf("count running tasks: %w", err)
+			}
+			if running >= int64(agent.MaxConcurrentTasks) {
+				continue
+			}
+			task, err := qtx.ClaimAgentTaskForRuntimes(ctx, db.ClaimAgentTaskForRuntimesParams{
+				AgentID:          candidate.AgentID,
+				RuntimeIds:       activeRuntimeIDs,
+				PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
+				ConsumerID:       consumer,
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("claim task: %w", err)
+			}
+			if task.ChatSessionID.Valid && task.ChatInputTaskID.Valid && task.ChatInputTaskID == task.ID {
+				if err := qtx.ReanchorClaimedDirectChatInput(ctx, db.ReanchorClaimedDirectChatInputParams{
+					DispatchedAt: task.DispatchedAt,
+					TaskID:       task.ID,
+				}); err != nil {
+					return fmt.Errorf("reanchor claimed direct chat input: %w", err)
+				}
+			}
+			claimed = append(claimed, task)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("promote deferred tasks: %w", err)
+		return nil, err
 	}
+
+	result.Tasks = claimed
 	for _, task := range promoted {
 		slog.Info("deferred fallback task promoted (batch)",
 			"task_id", util.UUIDToString(task.ID),
@@ -3205,122 +3297,13 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 		s.NotifyTaskEnqueued(ctx, task)
 	}
-
-	// 2. Reclaim lost-response dispatched tasks across the set, up to maxTasks.
-	reclaimed, err := s.Queries.ReclaimStaleDispatchedTasksForRuntimes(ctx, db.ReclaimStaleDispatchedTasksForRuntimesParams{
-		RuntimeIds:        uniqueIDs,
-		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
-		PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
-		MaxTasks:          int32(maxTasks),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("reclaim stale dispatched tasks: %w", err)
+	for _, task := range claimed {
+		slog.Info("task claimed", "task_id", util.UUIDToString(task.ID), "agent_id", util.UUIDToString(task.AgentID))
+		s.captureTaskDispatched(ctx, task)
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskDispatch(ctx, task)
 	}
-	for i := range reclaimed {
-		claimed = append(claimed, reclaimed[i])
-		slog.Info("stale dispatched task reclaimed (batch)",
-			"task_id", util.UUIDToString(reclaimed[i].ID),
-			"runtime_id", util.UUIDToString(reclaimed[i].RuntimeID),
-			"agent_id", util.UUIDToString(reclaimed[i].AgentID),
-		)
-	}
-	if len(claimed) >= maxTasks {
-		return claimed[:maxTasks], nil
-	}
-
-	// 3. Empty-cache short-circuit + version sampling for the remaining runtimes.
-	nonEmpty := make([]pgtype.UUID, 0, len(uniqueIDs))
-	versions := make(map[string]int64, len(uniqueIDs))
-	for _, rid := range uniqueIDs {
-		key := util.UUIDToString(rid)
-		if s.EmptyClaim.IsEmpty(ctx, key) {
-			continue
-		}
-		versions[key] = s.EmptyClaim.CurrentVersion(ctx, key)
-		nonEmpty = append(nonEmpty, rid)
-	}
-	if len(nonEmpty) == 0 {
-		return claimed, nil
-	}
-
-	// 4. One candidate SELECT across the non-empty set.
-	candidates, err := s.Queries.ListQueuedClaimCandidatesByRuntimes(ctx, nonEmpty)
-	if err != nil {
-		// Steps 2/6 commit reclaimed/claimed tasks in their own transactions,
-		// so `claimed` may already hold tasks dispatched server-side. Dropping
-		// them with a 500 makes the daemon HTTP-fall-back and claim a SECOND
-		// batch into the same free slots (the first batch then waits for stale
-		// reclaim) — the same double-claim this PR set out to remove
-		// (MUL-4257). Prefer partial success: hand back what committed so the
-		// handler finalizes and returns it; the errored candidates stay queued
-		// for the next poll.
-		if len(claimed) > 0 {
-			slog.Error("batch claim: candidate query failed after partial success; returning claimed tasks to avoid loss",
-				"error", err, "claimed", len(claimed))
-			return claimed, nil
-		}
-		return nil, fmt.Errorf("list queued claim candidates: %w", err)
-	}
-
-	// 5. Mark runtimes with zero candidates empty so their next idle poll skips
-	// Postgres. Runtimes that had at least one candidate are intentionally not
-	// marked (positive results always re-check the DB, matching the singular
-	// path).
-	withCandidates := make(map[string]struct{}, len(candidates))
-	for i := range candidates {
-		withCandidates[util.UUIDToString(candidates[i].RuntimeID)] = struct{}{}
-	}
-	for _, rid := range nonEmpty {
-		key := util.UUIDToString(rid)
-		if _, ok := withCandidates[key]; !ok {
-			s.EmptyClaim.MarkEmpty(ctx, key, versions[key])
-		}
-	}
-
-	// 6. Claim per distinct agent (unchanged path → same per-(issue, agent)
-	// serialization, capacity cap, and dispatch side effects) until maxTasks is
-	// reached.
-	triedAgents := make(map[string]struct{}, len(candidates))
-	for i := range candidates {
-		if len(claimed) >= maxTasks {
-			break
-		}
-		agentKey := util.UUIDToString(candidates[i].AgentID)
-		if _, tried := triedAgents[agentKey]; tried {
-			continue
-		}
-		triedAgents[agentKey] = struct{}{}
-
-		task, err := s.ClaimTask(ctx, candidates[i].AgentID)
-		if err != nil {
-			// Each ClaimTask commits in its own transaction, so earlier
-			// iterations (and step-2 reclaims) are already dispatched
-			// server-side. Returning nil here would drop them and force the
-			// daemon to double-claim via HTTP fallback (MUL-4257). Return the
-			// partial batch instead; the failed agent's task stays queued.
-			if len(claimed) > 0 {
-				slog.Error("batch claim: claim task failed after partial success; returning claimed tasks to avoid loss",
-					"error", err, "claimed", len(claimed))
-				return claimed, nil
-			}
-			return nil, fmt.Errorf("claim task: %w", err)
-		}
-		if task == nil {
-			continue
-		}
-		// ClaimAgentTask selects by agent only; guard that the claimed task
-		// belongs to a runtime this daemon hosts. An agent with a
-		// higher-priority queued task on ANOTHER daemon's runtime could
-		// otherwise be dispatched here and dropped — matching the singular
-		// path's runtime_id guard. Such a stray dispatch is recovered by the
-		// reclaim path on the owning daemon's next poll.
-		if _, ok := runtimeInSet[util.UUIDToString(task.RuntimeID)]; !ok {
-			continue
-		}
-		claimed = append(claimed, *task)
-	}
-
-	return claimed, nil
+	return result, nil
 }
 
 func (s *TaskService) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) error {

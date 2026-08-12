@@ -78,7 +78,10 @@ VALUES ($1, $2, $3, 'local', $4, now()) ON CONFLICT (id) DO NOTHING`, rbAgentArc
 // the runtime and agents with them. channel_installation has no such FK — the
 // bug under test — so those rows are cleaned by app_id separately.
 func cleanRebindOwners(ctx context.Context, pool *pgxpool.Pool) {
-	_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE id = ANY($1)`, []string{rbWS, rbWS2})
+	workspaceIDs := []string{rbWS, rbWS2}
+	_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE id = ANY($1)`, workspaceIDs)
+	_, _ = pool.Exec(ctx, `DELETE FROM workspace_claim_intake_action WHERE workspace_id = ANY($1)`, workspaceIDs)
+	_, _ = pool.Exec(ctx, `DELETE FROM workspace_claim_intake_control WHERE workspace_id = ANY($1)`, workspaceIDs)
 }
 
 // TestChannelStore_ReclaimDeadRevokedFences guards the REVOKED branch of the
@@ -101,6 +104,7 @@ func TestChannelStore_ReclaimDeadRevokedFences(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, rbChatSess)
 	}
 	clean()
+	cleanRebindOwners(ctx, pool)
 	seedRebindOwners(t, ctx, pool)
 	t.Cleanup(func() { cleanRebindOwners(ctx, pool) })
 	t.Cleanup(clean)
@@ -209,6 +213,7 @@ func TestChannelStore_ReinstallReactivationSemantics(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, rbChatSess)
 	}
 	clean()
+	cleanRebindOwners(ctx, pool)
 	seedRebindOwners(t, ctx, pool)
 	t.Cleanup(func() { cleanRebindOwners(ctx, pool) })
 	t.Cleanup(clean)
@@ -338,6 +343,7 @@ func TestChannelStore_RebindCleansDependentRows(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_audit WHERE channel_event_id = $1`, auditEvent)
 	}
 	clean()
+	cleanRebindOwners(ctx, pool)
 	seedRebindOwners(t, ctx, pool)
 	t.Cleanup(func() { cleanRebindOwners(ctx, pool) })
 	t.Cleanup(clean)
@@ -445,6 +451,7 @@ func TestChannelStore_RebindGuardedDeleteRaceWithReactivation(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_audit WHERE channel_event_id = $1`, auditEvent)
 	}
 	clean()
+	cleanRebindOwners(ctx, pool)
 	seedRebindOwners(t, ctx, pool)
 	t.Cleanup(func() { cleanRebindOwners(ctx, pool) })
 	t.Cleanup(clean)
@@ -555,6 +562,7 @@ func TestChannelStore_ReclaimDeadReclaimsOrphansRefusesLiveOwners(t *testing.T) 
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = ANY($1)`, apps)
 	}
 	clean()
+	cleanRebindOwners(ctx, pool)
 	seedRebindOwners(t, ctx, pool)
 	t.Cleanup(func() { cleanRebindOwners(ctx, pool) })
 	t.Cleanup(clean)

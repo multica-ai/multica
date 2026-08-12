@@ -112,11 +112,11 @@ func TestClaimTasksForRuntimes_MultiRuntimeDrain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("call1: %v", err)
 	}
-	if len(got1) != 2 {
-		t.Fatalf("call1 claimed %d tasks, want 2", len(got1))
+	if len(got1.Tasks) != 2 {
+		t.Fatalf("call1 claimed %d tasks, want 2", len(got1.Tasks))
 	}
 	seen := map[string]int{}
-	for _, task := range got1 {
+	for _, task := range got1.Tasks {
 		seen[util.UUIDToString(task.RuntimeID)]++
 	}
 	if seen[rt1] != 1 || seen[rt2] != 1 {
@@ -129,11 +129,11 @@ func TestClaimTasksForRuntimes_MultiRuntimeDrain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("call2: %v", err)
 	}
-	if len(got2) != 1 {
-		t.Fatalf("call2 claimed %d tasks, want 1", len(got2))
+	if len(got2.Tasks) != 1 {
+		t.Fatalf("call2 claimed %d tasks, want 1", len(got2.Tasks))
 	}
-	if util.UUIDToString(got2[0].RuntimeID) != rt1 {
-		t.Fatalf("call2 claimed runtime = %s, want rt1", util.UUIDToString(got2[0].RuntimeID))
+	if util.UUIDToString(got2.Tasks[0].RuntimeID) != rt1 {
+		t.Fatalf("call2 claimed runtime = %s, want rt1", util.UUIDToString(got2.Tasks[0].RuntimeID))
 	}
 
 	// Call 3: everything dispatched => empty.
@@ -141,8 +141,8 @@ func TestClaimTasksForRuntimes_MultiRuntimeDrain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("call3: %v", err)
 	}
-	if len(got3) != 0 {
-		t.Fatalf("call3 claimed %d tasks, want 0", len(got3))
+	if len(got3.Tasks) != 0 {
+		t.Fatalf("call3 claimed %d tasks, want 0", len(got3.Tasks))
 	}
 }
 
@@ -160,8 +160,8 @@ func TestClaimTasksForRuntimes_MaxTasksCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("claimed %d tasks with max_tasks=1, want 1", len(got))
+	if len(got.Tasks) != 1 {
+		t.Fatalf("claimed %d tasks with max_tasks=1, want 1", len(got.Tasks))
 	}
 }
 
@@ -171,11 +171,11 @@ func TestClaimTasksForRuntimes_EmptyInputs(t *testing.T) {
 	pool := newTaskClaimRacePool(t)
 	svc := NewTaskService(db.New(pool), pool, nil, events.New())
 
-	if got, err := svc.ClaimTasksForRuntimes(ctx, nil, 5); err != nil || got != nil {
+	if got, err := svc.ClaimTasksForRuntimes(ctx, nil, 5); err != nil || got == nil {
 		t.Fatalf("nil runtimes: got=%v err=%v, want nil,nil", got, err)
 	}
 	rt1, _ := batchClaimFixture(t, ctx, pool)
-	if got, err := svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{util.MustParseUUID(rt1)}, 0); err != nil || got != nil {
+	if got, err := svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{util.MustParseUUID(rt1)}, 0); err != nil || got == nil {
 		t.Fatalf("maxTasks=0: got=%v err=%v, want nil,nil", got, err)
 	}
 }

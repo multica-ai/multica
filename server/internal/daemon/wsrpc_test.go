@@ -277,3 +277,63 @@ func TestWSRPCClient_TimeoutUncertainWhenAlreadySent(t *testing.T) {
 		t.Fatal("Call did not return")
 	}
 }
+
+// TestWSRPCClient_CancelClassifiesFrameDelivery ensures context cancellation
+// preserves the same sent-versus-unsent safety boundary as timeout and detach.
+// A queued frame is cancelled and remains safe to retry over HTTP; a frame whose
+// write already began is uncertain and must not be retried immediately.
+func TestWSRPCClient_CancelClassifiesFrameDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		markSent      bool
+		wantUncertain bool
+	}{
+		{name: "unsent", markSent: false, wantUncertain: false},
+		{name: "sent", markSent: true, wantUncertain: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newWSRPCClient(time.Second)
+			itemReady := make(chan *wsOutbound, 1)
+			c.attach(func(frame []byte) (*wsOutbound, error) {
+				item := &wsOutbound{data: frame}
+				itemReady <- item
+				return item, nil
+			})
+
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() {
+				_, err := c.Call(ctx, "tasks.claim", time.Second, nil, nil)
+				done <- err
+			}()
+
+			item := <-itemReady
+			if tc.markSent && !item.beginWrite() {
+				t.Fatal("writer could not begin sending pending frame")
+			}
+			cancel()
+
+			select {
+			case err := <-done:
+				if tc.wantUncertain {
+					if !errors.Is(err, errWSRPCUncertain) {
+						t.Fatalf("err = %v, want errWSRPCUncertain", err)
+					}
+				} else {
+					if !errors.Is(err, context.Canceled) {
+						t.Fatalf("err = %v, want context.Canceled", err)
+					}
+					if errors.Is(err, errWSRPCUncertain) {
+						t.Fatalf("unsent cancellation reported uncertain: %v", err)
+					}
+				}
+			case <-time.After(time.Second):
+				t.Fatal("Call did not return after cancellation")
+			}
+
+			if !tc.markSent && item.beginWrite() {
+				t.Fatal("cancelled unsent frame must be dropped by the writer")
+			}
+		})
+	}
+}

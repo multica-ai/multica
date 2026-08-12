@@ -954,6 +954,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceRuntimesAndProjects(ctx, requester.WorkspaceID) },
 		},
 		{
+			name: "delete claim-intake control plane",
+			run:  func() error { return qtx.DeleteWorkspaceClaimIntakeControlPlane(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete administration data",
 			run:  func() error { return qtx.DeleteWorkspaceAdministration(ctx, requester.WorkspaceID) },
 		},

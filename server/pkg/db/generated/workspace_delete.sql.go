@@ -104,6 +104,20 @@ func (q *Queries) DeleteWorkspaceChatMessages(ctx context.Context, workspaceID p
 	return err
 }
 
+const deleteWorkspaceClaimIntakeControlPlane = `-- name: DeleteWorkspaceClaimIntakeControlPlane :exec
+WITH deleted_claim_intake_actions AS (
+    DELETE FROM workspace_claim_intake_action
+    WHERE workspace_claim_intake_action.workspace_id = $1
+)
+DELETE FROM workspace_claim_intake_control
+WHERE workspace_claim_intake_control.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceClaimIntakeControlPlane(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceClaimIntakeControlPlane, workspaceID)
+	return err
+}
+
 const deleteWorkspaceComments = `-- name: DeleteWorkspaceComments :exec
 DELETE FROM comment WHERE comment.workspace_id = $1
 `

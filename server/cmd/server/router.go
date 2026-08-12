@@ -1160,6 +1160,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/runtime-profiles", h.ListRuntimeProfiles)
 					r.Get("/runtime-profiles/{profileId}", h.GetRuntimeProfile)
 				})
+				// Claim-intake operator control plane. Status and audit reads are
+				// owner/admin scoped; mutations add a strict human-only gate.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Get("/claim-intake", h.GetWorkspaceClaimIntakeStatus)
+					r.Get("/claim-intake/actions", h.ListWorkspaceClaimIntakeActions)
+					r.Get("/claim-intake/ledger", h.ListWorkspaceClaimIntakeLedger)
+					r.With(handler.RequireHumanClaimIntakeActor).Post("/claim-intake/pause", h.PauseWorkspaceClaimIntake)
+					r.With(handler.RequireHumanClaimIntakeActor).Post("/claim-intake/resume", h.ResumeWorkspaceClaimIntake)
+				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))

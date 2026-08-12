@@ -37,14 +37,12 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// X-Actor-Source is server-set only — any value supplied by
-			// the client is untrusted and discarded before the auth
-			// branches run. Only the mat_ branch below re-sets it. This
-			// is what prevents a client from sending a normal mul_ PAT
-			// plus a forged `X-Actor-Source: member` (or anything else)
-			// to convince a downstream handler that its request came
-			// from a non-task-token path.
+			// Authentication provenance headers are server-set only — any values
+			// supplied by the client are untrusted and discarded before the auth
+			// branches run. Only validated branches below re-set them. This
+			// prevents callers from forging either actor or credential provenance.
 			r.Header.Del("X-Actor-Source")
+			r.Header.Del("X-Auth-Source")
 
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
@@ -92,6 +90,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// this header is allowed to carry — strip anything else a
 				// client tried to send.
 				r.Header.Set("X-Actor-Source", "task_token")
+				r.Header.Set("X-Auth-Source", "task_token")
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -149,6 +148,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// treated as the owner having approved an account-
 				// level action.
 				r.Header.Set("X-Actor-Source", "cloud_pat")
+				r.Header.Set("X-Auth-Source", "cloud_pat")
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -163,6 +163,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// UPDATE — last_used_at is bumped once per TTL window.
 				if userID, ok := patCache.Get(r.Context(), hash); ok {
 					r.Header.Set("X-User-ID", userID)
+					r.Header.Set("X-Auth-Source", "pat")
 					next.ServeHTTP(w, r)
 					return
 				}
@@ -180,6 +181,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 
 				userID := uuidToString(pat.UserID)
 				r.Header.Set("X-User-ID", userID)
+				r.Header.Set("X-Auth-Source", "pat")
 
 				// Clamp cache TTL to the token's remaining lifetime so a
 				// PAT expiring in <AuthCacheTTL can't continue passing
@@ -226,6 +228,11 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				return
 			}
 			r.Header.Set("X-User-ID", sub)
+			if fromCookie {
+				r.Header.Set("X-Auth-Source", "session")
+			} else {
+				r.Header.Set("X-Auth-Source", "jwt")
+			}
 			if email, ok := claims["email"].(string); ok {
 				r.Header.Set("X-User-Email", email)
 			}

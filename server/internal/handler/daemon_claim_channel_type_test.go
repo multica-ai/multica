@@ -72,8 +72,16 @@ type claimedChatChannel struct {
 func claimChatChannelFields(t *testing.T, runtimeID string) claimedChatChannel {
 	t.Helper()
 	w := httptest.NewRecorder()
+	var daemonID string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT COALESCE(daemon_id, '') FROM agent_runtime WHERE id = $1`,
+		runtimeID,
+	).Scan(&daemonID); err != nil {
+		t.Fatalf("load claim runtime daemon identity: %v", err)
+	}
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "claim-channel-type")
+		testWorkspaceID, daemonID)
 	req = withURLParam(req, "runtimeId", runtimeID)
 
 	testHandler.ClaimTaskByRuntime(w, req)

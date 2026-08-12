@@ -405,6 +405,14 @@ deleted_profiles AS (
 )
 DELETE FROM project WHERE project.workspace_id = $1;
 
+-- name: DeleteWorkspaceClaimIntakeControlPlane :exec
+WITH deleted_claim_intake_actions AS (
+    DELETE FROM workspace_claim_intake_action
+    WHERE workspace_claim_intake_action.workspace_id = $1
+)
+DELETE FROM workspace_claim_intake_control
+WHERE workspace_claim_intake_control.workspace_id = $1;
+
 -- name: DeleteWorkspaceAdministration :exec
 WITH
 deleted_members AS (

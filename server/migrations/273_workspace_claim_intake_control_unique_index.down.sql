@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS workspace_claim_intake_control_workspace_uidx;

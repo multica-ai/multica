@@ -133,6 +133,42 @@ func TestRequireHumanActor_IgnoresUnknownActorSource(t *testing.T) {
 	}
 }
 
+// TestRequireHumanClaimIntakeActor_DefaultDenyNonHumanSources pins the
+// stronger control-plane contract: unlike the account-level billing guard,
+// claim-intake mutation routes allow only the empty human actor source.
+func TestRequireHumanClaimIntakeActor_DefaultDenyNonHumanSources(t *testing.T) {
+	for _, actorSource := range []string{"task_token", "cloud_pat", "daemon_token", "future_kind"} {
+		t.Run(actorSource, func(t *testing.T) {
+			called := false
+			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusOK)
+			})
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/test/claim-intake/pause", nil)
+			req.Header.Set("X-Actor-Source", actorSource)
+			w := httptest.NewRecorder()
+			RequireHumanClaimIntakeActor(next).ServeHTTP(w, req)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", w.Code)
+			}
+			if called {
+				t.Fatal("inner handler must not run")
+			}
+		})
+	}
+}
+
+func TestRequireHumanClaimIntakeActor_AllowsHumanSource(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/test/claim-intake/pause", nil)
+	w := httptest.NewRecorder()
+	RequireHumanClaimIntakeActor(next).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
 
 // TestRequireHumanActor_AppliedViaChiRouterUse pins the wiring side of
 // the contract: when the guard is attached to a chi route group via

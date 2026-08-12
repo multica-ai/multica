@@ -1527,15 +1527,15 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claimed, err := h.TaskService.ClaimTasksForRuntimes(r.Context(), authorized, maxTasks)
+	claimResult, err := h.TaskService.ClaimTasksForRuntimesAsConsumer(r.Context(), authorized, maxTasks, req.DaemonID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to claim tasks: "+err.Error())
 		return
 	}
 
-	out := make([]AgentTaskResponse, 0, len(claimed))
-	for i := range claimed {
-		task := claimed[i]
+	out := make([]AgentTaskResponse, 0, len(claimResult.Tasks))
+	for i := range claimResult.Tasks {
+		task := claimResult.Tasks[i]
 		rt, ok := runtimeByID[uuidToString(task.RuntimeID)]
 		if !ok {
 			// Service guards claims to the authorized set; a miss here would be
@@ -1611,7 +1611,10 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			"runtimes", len(authorized), "requested_max", maxTasks, "claimed", len(out),
 			"total_ms", time.Since(start).Milliseconds())
 	}
-	writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": out})
+	writeMeasuredJSON(w, http.StatusOK, map[string]any{
+		"tasks":             out,
+		"paused_workspaces": claimResult.PausedWorkspaces,
+	})
 }
 
 // claimBuildFailure captures a pre-response failure from
@@ -2632,20 +2635,44 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runtimeWorkspaceID := uuidToString(runtime.WorkspaceID)
+	consumerID := middleware.DaemonIDFromContext(r.Context())
+	if consumerID != "" && runtime.DaemonID.Valid && runtime.DaemonID.String != consumerID {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+	if consumerID == "" && runtime.DaemonID.Valid {
+		consumerID = runtime.DaemonID.String
+	}
 	authMs = time.Since(start).Milliseconds()
 
 	claimStart := time.Now()
-	task, err := h.TaskService.ClaimTaskForRuntime(r.Context(), parseUUID(runtimeID))
+	claimResult, err := h.TaskService.ClaimTaskForRuntimeAsConsumer(
+		r.Context(),
+		parseUUID(runtimeID),
+		consumerID,
+	)
 	claimMs = time.Since(claimStart).Milliseconds()
 	if err != nil {
 		outcome = "error_claim"
 		writeError(w, http.StatusInternalServerError, "failed to claim task: "+err.Error())
 		return
 	}
-
+	if claimResult.Paused {
+		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{
+			"task":         nil,
+			"paused":       true,
+			"workspace_id": uuidToString(claimResult.WorkspaceID),
+			"generation":   claimResult.Generation,
+			"action_id":    uuidToString(claimResult.ActionID),
+			"effective_at": claimResult.EffectiveAt,
+		})
+		outcome = "workspace_paused"
+		return
+	}
+	task := claimResult.Task
 	if task == nil {
 		slog.Debug("no task to claim", "runtime_id", runtimeID)
-		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
+		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil, "paused": false})
 		outcome = "no_task"
 		return
 	}

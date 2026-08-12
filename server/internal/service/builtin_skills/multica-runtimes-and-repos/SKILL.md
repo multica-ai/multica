@@ -43,6 +43,19 @@ multica runtime update <runtime-id> --target-version <version> --output json
 multica runtime delete <runtime-id>
 multica repo checkout <url>
 multica repo checkout <url> --ref <branch-or-sha>
+
+multica workspace claim-intake status <workspace-id> --output json
+multica workspace claim-intake pause <workspace-id> \
+  --reason <redacted-reason> \
+  --idempotency-key <stable-key> \
+  --output json
+multica workspace claim-intake resume <workspace-id> \
+  --reason <redacted-reason> \
+  --idempotency-key <stable-key> \
+  --expected-generation <observed-generation> \
+  --output json
+multica workspace claim-intake actions <workspace-id> --output json
+multica workspace claim-intake ledger <workspace-id> --output json
 ```
 
 `runtime update` and `runtime delete` are writes. Starting a runtime update is limited to its owner or a workspace owner/admin; the original initiator may keep polling that specific in-flight request if their admin role changes. `runtime delete` removes a runtime registration; if active agents are still bound, it refuses unless the user explicitly passes `--cascade`, which unbinds those agents and cancels their queued/running tasks before deleting the runtime. Unbinding keeps the agents and everything they own — instructions, skills, chats, labels, channel installations, autopilots and task history — and only clears `agent.runtime_id`; an unbound agent cannot run until it is bound to a runtime again (`multica agent update <id> --runtime-id <runtime-id>`), and every trigger path refuses it with `agent_runtime_required`. `repo checkout` creates a dedicated branch in the task working directory. Most runtimes use a linked worktree; Linux and Windows Codex use task-local Git metadata so a task can stage and commit without making the shared `.repos` cache writable.
@@ -60,6 +73,14 @@ The daemon injects a task-scoped `mat_` credential for Multica API commands and 
 - Human/local profile and daemon commands — including `login`, `logout`, `setup`, `workspace switch`, local runtime profile path mutation, `daemon start` / `stop` / `restart`, `daemon logs`, and `daemon probe-runtimes` — are unavailable. `daemon stop` in particular would terminate the daemon running this task and every sibling task on it.
 
 The daemon still preserves the real `HOME` and XDG variables for provider tools such as `gh`, `aws`, `kubectl`, and npm. This is CLI resolution hardening, not hard filesystem confidentiality: a process under the same OS user can still open an explicitly known Owner path. Dedicated Unix users, containers, VMs, or an equivalent OS boundary are required for that stronger isolation.
+
+## Workspace claim intake
+
+Claim-intake control is a durable workspace-wide fence for new task ownership. Only an authenticated human workspace owner or admin can pause or resume it. Ordinary members, task tokens, cloud-node PATs, daemon credentials, and cross-workspace actors cannot mutate it.
+
+Before a planned pause, read `status` and record its `generation` and `last_action_id`. Supply a non-sensitive reason and a stable idempotency key to `pause`; replaying the exact request with the same key returns the stored result. After the pause acknowledgement, no claim or stale-dispatch reclaim may newly establish ownership in that workspace. Work claimed before the fence remains active and can drain; pausing does not cancel it.
+
+Before resuming, read status again and pass that observed generation as `--expected-generation`. A stale generation is rejected and audited, so re-read status rather than guessing. Use `actions` for the append-only operator audit. Use `ledger` for workspace-global counts and per-task fence classifications: `unclassified`, `pre_fence`, `current_generation`, and `post_fence_anomaly`. Missing or unreadable control state is fail-closed; investigate it instead of bypassing the claim path or restarting an active daemon.
 
 ## Debugging an agent that did not run
 
