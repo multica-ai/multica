@@ -338,6 +338,8 @@ import {
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  SkillSchema,
+  EMPTY_SKILL,
   IssueViewSchema,
   IssueViewListSchema,
   IssueViewPreferenceSchema,
@@ -2222,6 +2224,18 @@ export class ApiClient {
     return this.fetch("/api/skills/import", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  // Re-downloads the skill from its stored config.origin source, replacing
+  // name/description/content/files in place while preserving the skill id and
+  // its agent bindings.
+  async refreshSkill(id: string): Promise<Skill> {
+    const raw = await this.fetch<unknown>(`/api/skills/${id}/refresh`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, SkillSchema, EMPTY_SKILL, {
+      endpoint: "POST /api/skills/:id/refresh",
     });
   }
 

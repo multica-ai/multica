@@ -67,6 +67,7 @@
   "actions": {
     "row_menu": "操作",
     "add_to_agent": "エージェントに追加",
+    "refresh": "ソースから更新",
     "my_agents": "自分のエージェント",
     "other_agents": "その他のエージェント",
     "no_agents": "利用可能なエージェントがありません",
@@ -139,6 +140,23 @@
     "toast_save_failed": "スキルを保存できませんでした",
     "toast_deleted": "スキルを削除しました",
     "toast_delete_failed": "スキルを削除できませんでした",
+    "refresh": {
+      "button": "更新",
+      "tooltip": "ソースからスキルを再ダウンロードします",
+      "source_github": "GitHub",
+      "source_skills_sh": "Skills.sh",
+      "source_clawhub": "ClawHub",
+      "toast_success": "{{source}} からスキルを更新しました",
+      "toast_failed": "スキルの更新に失敗しました",
+      "dialog": {
+        "title": "ソースから更新しますか？",
+        "description": "「{{name}}」を {{source}} から再ダウンロードし、名前・説明・SKILL.md・ファイルを最新バージョンで置き換えます。",
+        "warning": "このスキルへのローカル編集は上書きされます。エージェントへの割り当て、ラベル、作成者は保持されます。",
+        "cancel": "キャンセル",
+        "confirm": "更新",
+        "refreshing": "更新中…"
+      }
+    },
     "delete_dialog": {
       "title": "スキルを削除しますか？",
       "description_with_agents_other": "「{{name}}」を完全に削除し、現在使用中の {{count}} 個のエージェントから削除します。",
