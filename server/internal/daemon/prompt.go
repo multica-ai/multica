@@ -469,6 +469,13 @@ func buildChatPrompt(task Task) string {
 	// thread reader, so they get the transcript command without the thread
 	// drill-down (MUL-4899).
 	//
+	// WHERE the conversation lives is therefore per-branch, not shared: only the
+	// unconditional "don't go looking in issues/comments" survives up top. Saying
+	// "its history lives in the channel, NOT in Multica" for every channel type
+	// contradicted the very next line on a transcript surface, which tells the
+	// agent Multica stored it and hands it the command to read it back. An agent
+	// given both reasonably believes the read cannot work and skips it.
+	//
 	// The no-narration rule is a THIRD axis and belongs to neither half: it is a
 	// property of delivering to an IM channel at all, so it is emitted for every
 	// channel type. #4776 introduced it that way; the MUL-4899 split moved it into
@@ -476,9 +483,9 @@ func buildChatPrompt(task Task) string {
 	// silently dropped it for Feishu/Lark (GH #6006).
 	if task.ChatChannelType != "" {
 		platform := channelDisplayName(task.ChatChannelType)
-		fmt.Fprintf(&b, "You are operating inside a %s conversation — not the Multica web app. This conversation and its history live in %s, NOT in Multica; never look in Multica issues or comments for it.\n", platform, platform)
+		fmt.Fprintf(&b, "You are operating inside a %s conversation — not the Multica web app. Never look in Multica issues or comments for this conversation.\n", platform)
 		if task.ChatChannelType == execenv.ChannelTypeSlack {
-			b.WriteString("The message below may be only what triggered you. Read the conversation with:\n")
+			fmt.Fprintf(&b, "This conversation and its history live in %s, NOT in Multica. The message below may be only what triggered you. Read the conversation with:\n", platform)
 			b.WriteString("- `multica chat history --output json` — the channel overview: recent top-level messages, each thread tagged with a `thread_id` and `reply_count`. It does NOT expand thread contents.\n")
 			b.WriteString("- `multica chat thread [<thread_id>] --output json` — read one thread's messages; omit the id to read the thread you are in, or pass a `thread_id` from the overview to read a specific thread.\n")
 			if task.ChatInThread {
@@ -491,9 +498,9 @@ func buildChatPrompt(task Task) string {
 			// prefixed with "我先读取…"). Tell the agent to keep them out of its answer.
 			b.WriteString("Do these reads SILENTLY as an internal step — they are how you gather context, not part of your answer.\n")
 		} else if execenv.SurfacePersistsTranscript(task.ChatChannelType) {
-			b.WriteString("The message below may be only what triggered you. Multica stores this conversation and you can read it back with `multica chat history` when you need earlier context that is not below — it returns the stored transcript.\n")
+			fmt.Fprintf(&b, "The conversation happens in %s, and Multica stores a transcript of it. The message below may be only what triggered you — read it back with `multica chat history` when you need earlier context that is not below.\n", platform)
 		} else {
-			fmt.Fprintf(&b, "Work from the context already provided to you below — Multica has no history reader for %s, so there is no command that can fetch more of this conversation. If you genuinely need earlier context that is not here, ask the user for it rather than guessing.\n", platform)
+			fmt.Fprintf(&b, "This conversation and its history live in %s, NOT in Multica, and Multica has no history reader for it. Work from the context already provided to you below — no command can fetch more of this conversation. If you genuinely need earlier context that is not here, ask the user for it rather than guessing.\n", platform)
 		}
 		// Scoped to process, not results — a completion confirmation IS the deliverable.
 		fmt.Fprintf(&b, "Reply to %s with the final outcome only. Do NOT narrate planned or in-progress steps (\"我先读取…\"); completed actions are part of the outcome.\n", platform)

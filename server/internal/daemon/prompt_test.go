@@ -503,6 +503,35 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 			t.Fatalf("web-only chat prompt should not mention channel history, got:\n%s", out)
 		}
 	})
+
+	// A transcript surface must not be told its history is "NOT in Multica" and
+	// then handed a Multica command to read that history. The claim used to be
+	// unconditional, so every Feishu/WeCom/DingTalk prompt carried both halves;
+	// an agent that believes the first one has no reason to run the second.
+	for _, channelType := range []string{
+		execenv.ChannelTypeFeishu,
+		execenv.ChannelTypeWecom,
+		execenv.ChannelTypeDingtalk,
+	} {
+		t.Run(channelType+" transcript prompt does not contradict itself", func(t *testing.T) {
+			out := buildChatPrompt(Task{
+				ChatSessionID:   "sess-1",
+				ChatChannelType: channelType,
+				ChatMessage:     "刚刚聊到哪了",
+			})
+			if !strings.Contains(out, "multica chat history") {
+				t.Fatalf("transcript surface lost its read-back command\n--- output ---\n%s", out)
+			}
+			if strings.Contains(out, "NOT in Multica") {
+				t.Errorf("transcript surface told its history is NOT in Multica, then told to read it from Multica\n--- output ---\n%s", out)
+			}
+			// The useful half of the original sentence must survive: the agent
+			// still must not go hunting through issues and comments.
+			if !strings.Contains(out, "Never look in Multica issues or comments") {
+				t.Errorf("lost the issues/comments prohibition\n--- output ---\n%s", out)
+			}
+		})
+	}
 }
 
 // TestBuildChatPromptNoNarrationOnEveryChannel pins the THIRD axis of the chat
