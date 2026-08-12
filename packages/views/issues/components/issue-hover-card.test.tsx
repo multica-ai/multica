@@ -189,8 +189,26 @@ describe("IssueHoverCard", () => {
 
     const priority = screen.getByTestId("priority-icon");
     expect(priority).toHaveAttribute("data-priority", "high");
-    // Ordering: priority leads the header, the status icon follows it.
-    expect(priority.nextElementSibling).toBe(screen.getByTestId("status-icon"));
+    // Ordering: priority leads the header, the status icon follows it. Both
+    // glyphs sit inside their own naming wrapper, so compare the wrappers.
+    expect(priority.parentElement?.nextElementSibling).toContainElement(
+      screen.getByTestId("status-icon"),
+    );
+  });
+
+  it("names the status and priority glyphs for assistive tech", async () => {
+    mockIssue({ ...BASE_ISSUE, status: "in_progress", priority: "high" });
+
+    await openCard();
+
+    // Localized names from the shipped issues namespace — no key of this
+    // card's own. Removing either aria-label drops the element from the query.
+    expect(screen.getByLabelText("In Progress")).toContainElement(
+      screen.getByTestId("status-icon"),
+    );
+    expect(screen.getByLabelText("High")).toContainElement(
+      screen.getByTestId("priority-icon"),
+    );
   });
 
   it("omits the priority glyph when the issue has no priority", async () => {

@@ -135,12 +135,23 @@ function IssueHoverCardBody({
   return (
     <div className="flex flex-col gap-1.5">
       {/* Priority, status, identifier — the same lead-with-priority order as
-          BoardCardContent, at the icon size the status glyph already uses. No
-          aria-label: naming it would need a translation key, and this card
-          deliberately carries no copy of its own. */}
+          BoardCardContent, at the icon size the status glyph already uses.
+          StatusIcon and PriorityIcon both render a bare <svg> that forwards no
+          aria props, so each glyph is named by an `role="img"` wrapper: on a
+          role-less span an aria-label is dropped by assistive tech. */}
       <div className="flex items-center gap-1.5">
-        {hasPriority && <PriorityIcon priority={issue.priority} />}
-        <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+        {hasPriority && (
+          <span role="img" aria-label={t(($) => $.priority[issue.priority])} className="flex">
+            <PriorityIcon priority={issue.priority} />
+          </span>
+        )}
+        <span
+          role="img"
+          aria-label={t(($) => $.status[issue.status])}
+          className="flex shrink-0"
+        >
+          <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+        </span>
         <span className="text-caption font-medium text-muted-foreground">
           {issue.identifier}
         </span>
