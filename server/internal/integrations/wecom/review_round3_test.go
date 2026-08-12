@@ -151,3 +151,77 @@ func TestAnEndingSaidByAnotherPublisherSendsNoFile(t *testing.T) {
 }
 
 var _ = pgtype.UUID{}
+
+// A permission read that failed is not permission that was withdrawn, and the
+// difference is the answer.
+//
+// The gate that closed the revocation hole returned a bool, so a database blip
+// on one attempt read the same as "revoked" — and sayTheAnswer returned nil,
+// which reports a one-shot chat:done handled while this subscriber is still
+// holding the only copy of the reply. The read failing establishes nothing, so
+// the attempt is refused and the answer stays owed.
+//
+// Eve's reproduction, driven exactly: open the bubble, fail the FIRST
+// installation read, leave every later one healthy, and give the chain 20ms.
+func TestAPermissionReadThatFailedDoesNotEatTheAnswer(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.out.retryAfter = 20 * time.Millisecond
+	rig.ran(t, "REQ-BLIP", 1, "task-1")
+	opened := len(rig.conn.streamFrames(t))
+
+	// The first read blips; the retry behind it finds the row exactly as it is.
+	rig.q.installErrFor = 1
+
+	rig.answer(t, "42", "task-1")
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && len(rig.conn.streamFrames(t)) == opened {
+		time.Sleep(time.Millisecond)
+	}
+	frames := rig.conn.streamFrames(t)
+	if len(frames) == opened {
+		t.Fatalf("the answer was never said: a lookup that failed for one attempt was read as permission withdrawn, and chat:done was reported handled with the reply still in hand")
+	}
+	last := frames[len(frames)-1]
+	if last["content"] != "42" || last["finish"] != true {
+		t.Errorf("the attempt behind the blip wrote %v, want the answer sealed into the bubble", last)
+	}
+}
+
+// Same conflation, the other side of the delivery.
+//
+// Once the words are out, re-running the whole answer would say them twice, so
+// an unreadable permission cannot book a retry here. What it must not do is
+// pass silently: the file is withheld and the failure is surfaced, because
+// nothing else speaks for an attachment that never went.
+func TestAPermissionReadThatFailedAfterTheAnswerSurfacesTheWithheldFile(t *testing.T) {
+	t.Parallel()
+	streams := newStreamStore()
+	reg := newSendersRegistry()
+	instID := mustTestUUID(t)
+	conn := newMediaConn()
+	reg.set(instID, conn.newSender())
+
+	q := oneAttachmentQueries(t, db.Attachment{ID: mustTestUUID(t), Filename: "a.txt", Url: "u"})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	o := NewOutbound(q, reg, streams, nil, WithAttachments(&fakeObjectStore{key: "u", data: []byte("X")}))
+	o.spawn = func(f func()) { f() }
+	o.retryAfter = -1 // no retries: this is about the report, not the recovery
+
+	// Reads: 1 the answer's own gate, 2 sendAsMessage's, 3 the post-answer
+	// re-check. Only the third blips.
+	q.installErrFor = 3
+
+	err := o.processEvent(context.Background(), chatDoneEvent("the answer"))
+	if err == nil {
+		t.Error("processEvent reported success while the file was silently dropped — nothing else speaks for an attachment that never went")
+	}
+	if got := markdownSends(t, conn); len(got) != 1 {
+		t.Errorf("text sends = %d, want 1 — the words go out either way", len(got))
+	}
+	if got := mediaSends(t, conn); len(got) != 0 {
+		t.Errorf("sent %d file(s) on a permission nobody could read", len(got))
+	}
+}

@@ -329,8 +329,20 @@ func (o *Outbound) sayTheAnswer(ctx context.Context, e events.Event, sessionID p
 	// that scheduled it, and the withdrawal can land in between. Inheriting the
 	// first attempt's answer would write to a chat whose owner has since said
 	// no.
-	if !o.installationStillOurs(ctx, fallback.InstallationID) {
+	switch o.mayStillWrite(ctx, fallback.InstallationID) {
+	case installationGone:
+		// Established: nobody may write here again. The answer is not owed to
+		// anyone, so reporting the event handled is the truth.
 		return nil
+	case installationUnreadable:
+		// Nothing was established. Refusing to write is right; reporting the
+		// work finished is not — chat:done fires once and this subscriber holds
+		// the only copy. Book an attempt on the same bounded schedule a refused
+		// send uses, and let the last one fall through to the caller's WARN.
+		if o.bookAnswerRetry(e, sessionID, taskID, content, fallback, retries, retryRefused) {
+			return nil
+		}
+		return errors.New("wecom: could not read the installation's permission, and the answer is out of attempts")
 	}
 	// deliveredTo is set only by an attempt of OURS that landed. sayEnding
 	// returns a verdict rather than an address, and the difference matters
@@ -374,8 +386,26 @@ func (o *Outbound) sayTheAnswer(ctx context.Context, e events.Event, sessionID p
 		//
 		// Re-checked rather than inherited: the send may have taken a while and
 		// the answer's own gate was passed before it.
-		if (delivered || errors.Is(err, errNoWordsOwed)) &&
-			o.installationStillOurs(ctx, fallback.InstallationID) {
+		// Re-read on a budget of its own. The words may have taken most of the
+		// caller's, and a read that ran out of time would otherwise look like a
+		// permission that was withdrawn — the same conflation this gate exists
+		// to avoid, arriving by a different road.
+		var permitted installationCheck
+		if delivered || errors.Is(err, errNoWordsOwed) {
+			reCtx, done := deliveryBudget(context.WithoutCancel(ctx))
+			permitted = o.mayStillWrite(reCtx, fallback.InstallationID)
+			done()
+			if permitted == installationUnreadable {
+				// The words are already out, so re-running the whole answer
+				// would say them twice. The file is not sent and the failure is
+				// surfaced rather than swallowed: this is the one outcome the
+				// operator has to see, because nothing else will speak for it.
+				o.logger.WarnContext(ctx, "wecom outbound: the file was not sent — the installation's permission could not be read after the answer landed",
+					"chat_session_id", util.UUIDToString(sessionID))
+				return fmt.Errorf("wecom: answer delivered, attachment withheld: permission unreadable")
+			}
+		}
+		if (delivered || errors.Is(err, errNoWordsOwed)) && permitted == installationOK {
 			// Addressed from the delivery when there was one, and from the
 			// binding when the file travels alone — that answer had no address
 			// of its own to give.
@@ -400,26 +430,50 @@ func (o *Outbound) sayTheAnswer(ctx context.Context, e events.Event, sessionID p
 	return err
 }
 
-// installationStillOurs reports whether this installation may still be written
-// to. False on a revoked row, on a row that has gone, and on a lookup that
-// failed — the last one deliberately: a delivery that cannot establish
-// permission does not proceed on the assumption that it has it.
+// installationCheck is what one permission read established. Three outcomes,
+// because collapsing them is how the first version of this gate lost answers:
+// a lookup that failed and a row that says revoked are the same refusal for THIS
+// attempt and opposite facts about every later one.
+type installationCheck int
+
+const (
+	// installationOK — active. Write.
+	installationOK installationCheck = iota
+	// installationGone — revoked, or the row is not there. Final: nobody may
+	// write to it again, and an answer held for it is not owed to anyone.
+	installationGone
+	// installationUnreadable — the read itself failed. Nothing is established.
+	// Refuse this attempt, and do NOT report the work finished: the answer is
+	// still the only copy and still this subscriber's to deliver.
+	installationUnreadable
+)
+
+// mayStillWrite reads the installation's permission for one attempt.
 //
-// sendAsMessage repeats this check because it holds the row it needs for the
-// send anyway. This one exists for the paths that never load it: the bubble's
-// closing frame, and the attachment behind it.
-func (o *Outbound) installationStillOurs(ctx context.Context, id pgtype.UUID) bool {
+// The three-way split follows the convention the rest of this file already
+// keeps: pgx.ErrNoRows is a fact, every other error is a failed question. The
+// gate that preceded this returned a bool and answered "no" to both, so a
+// database blip on one attempt confirmed a one-shot chat:done as handled and
+// threw the answer away.
+func (o *Outbound) mayStillWrite(ctx context.Context, id pgtype.UUID) installationCheck {
 	if !id.Valid {
-		return false
+		return installationGone
 	}
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          id,
 		ChannelType: channelTypeWecom,
 	})
-	if err != nil {
-		return false
+	switch {
+	case err == nil:
+	case errors.Is(err, pgx.ErrNoRows):
+		return installationGone
+	default:
+		return installationUnreadable
 	}
-	return inst.Status == string(InstallationActive)
+	if inst.Status != string(InstallationActive) {
+		return installationGone
+	}
+	return installationOK
 }
 
 // errNoWordsOwed is the one outcome that says the turn is fine and there were

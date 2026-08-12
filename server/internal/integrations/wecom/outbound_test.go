@@ -36,6 +36,8 @@ type fakeOutboundQueries struct {
 	sessionErr     error
 	installation   db.ChannelInstallation
 	installErr     error
+	installErrFor  int // 1-based read to fail; 0 fails none
+	installReads   int
 	memberBinding  db.ChannelUserBinding
 	memberErr      error
 	workspace      db.Workspace
@@ -101,6 +103,13 @@ func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Cont
 	return f.sessionBinding, f.sessionErr
 }
 func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
+	// installErrFor lets a test fail one read and not the rest, which is the
+	// shape a transient database blip actually has — the retry behind it has to
+	// find the row there.
+	f.installReads++
+	if n := f.installErrFor; n > 0 && f.installReads == n {
+		return db.ChannelInstallation{}, errors.New("wecom test: transient database error")
+	}
 	return f.installation, f.installErr
 }
 func (f *fakeOutboundQueries) FindChannelBindingForMember(context.Context, db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error) {
