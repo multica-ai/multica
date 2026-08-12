@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "@multica/ui/components/ui/button";
+import { DragStrip } from "@multica/views/platform";
 import {
   LOCAL_STACK_STEPS,
   type LocalStackState,
@@ -73,61 +74,64 @@ export function LocalStackOverlay({
   const failed = state.phase === "failed";
 
   return (
-    <div className="flex h-screen items-center justify-center bg-background p-8 text-foreground">
-      <div className="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm">
-        <h1 className="text-lg font-semibold">
-          {failed ? "Local stack failed to start" : "Starting local stack"}
-        </h1>
+    <div className="flex h-screen flex-col">
+      <DragStrip />
+      <div className="flex flex-1 items-center justify-center bg-background p-8 text-foreground">
+        <div className="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm">
+          <h1 className="text-lg font-semibold">
+            {failed ? "Local stack failed to start" : "Starting local stack"}
+          </h1>
 
-        <ul className="mt-5 space-y-2">
-          {STEPS.map((step) => {
-            const status = statusFor(step.key, state);
-            return (
-              <li
-                key={step.key}
-                data-testid={`step-${step.key}`}
-                data-status={status}
-                className="flex items-center gap-3 text-sm"
-              >
-                <span
-                  aria-hidden
-                  className={
-                    status === "done"
-                      ? "size-2 rounded-full bg-primary"
-                      : status === "active"
-                        ? "size-2 animate-pulse rounded-full bg-primary"
-                        : status === "failed"
-                          ? "size-2 rounded-full bg-destructive"
-                          : "size-2 rounded-full bg-muted-foreground/30"
-                  }
-                />
-                <span
-                  className={
-                    status === "pending"
-                      ? "text-muted-foreground"
-                      : "text-foreground"
-                  }
+          <ul className="mt-5 space-y-2">
+            {STEPS.map((step) => {
+              const status = statusFor(step.key, state);
+              return (
+                <li
+                  key={step.key}
+                  data-testid={`step-${step.key}`}
+                  data-status={status}
+                  className="flex items-center gap-3 text-sm"
                 >
-                  {step.label}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+                  <span
+                    aria-hidden
+                    className={
+                      status === "done"
+                        ? "size-2 rounded-full bg-primary"
+                        : status === "active"
+                          ? "size-2 animate-pulse rounded-full bg-primary"
+                          : status === "failed"
+                            ? "size-2 rounded-full bg-destructive"
+                            : "size-2 rounded-full bg-muted-foreground/30"
+                    }
+                  />
+                  <span
+                    className={
+                      status === "pending"
+                        ? "text-muted-foreground"
+                        : "text-foreground"
+                    }
+                  >
+                    {step.label}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
 
-        {failed && (
-          <>
-            <pre className="mt-4 max-h-32 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs text-muted-foreground">
-              {state.message}
-            </pre>
-            <div className="mt-4 flex gap-2">
-              <Button onClick={onRetry}>Retry</Button>
-              <Button variant="outline" onClick={onSkip}>
-                Continue anyway
-              </Button>
-            </div>
-          </>
-        )}
+          {failed && (
+            <>
+              <pre className="mt-4 max-h-32 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs text-muted-foreground">
+                {state.message}
+              </pre>
+              <div className="mt-4 flex gap-2">
+                <Button onClick={onRetry}>Retry</Button>
+                <Button variant="outline" onClick={onSkip}>
+                  Continue anyway
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
