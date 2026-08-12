@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LocalStackState } from "../shared/local-stack";
 import type { CommandRunner } from "./local-stack";
-import { bringUpLocalStack } from "./local-stack";
+import { bringUpLocalStack, resolveStartDecision } from "./local-stack";
 
 const config = {
   repoDir: "/repo",
@@ -181,5 +181,51 @@ describe("bringUpLocalStack", () => {
 
     const calls = run.mock.calls.map(([bin, args]) => [bin, ...args].join(" "));
     expect(calls.some((c) => c.includes("pull"))).toBe(false);
+  });
+});
+
+describe("resolveStartDecision", () => {
+  it("is inert for a non-local apiUrl without ever consulting loadConfig", async () => {
+    const loadConfig = vi.fn(async () => config);
+
+    const decision = await resolveStartDecision({
+      apiUrl: "https://api.multica.ai",
+      loadConfig,
+    });
+
+    expect(decision).toEqual({ kind: "inert", reason: "non-local-api" });
+    expect(loadConfig).not.toHaveBeenCalled();
+  });
+
+  it("is inert when the supervisor is not configured", async () => {
+    const decision = await resolveStartDecision({
+      apiUrl: "http://localhost:8080",
+      loadConfig: async () => null,
+    });
+
+    expect(decision).toEqual({ kind: "inert", reason: "not-configured" });
+  });
+
+  it("carries the thrown message when loading the config fails", async () => {
+    const decision = await resolveStartDecision({
+      apiUrl: "http://localhost:8080",
+      loadConfig: async () => {
+        throw new Error("local stack config: repoDir is required");
+      },
+    });
+
+    expect(decision).toEqual({
+      kind: "config-error",
+      message: "local stack config: repoDir is required",
+    });
+  });
+
+  it("carries the loaded config when bring-up should proceed", async () => {
+    const decision = await resolveStartDecision({
+      apiUrl: "http://localhost:8080",
+      loadConfig: async () => config,
+    });
+
+    expect(decision).toEqual({ kind: "bring-up", config });
   });
 });

@@ -1,5 +1,5 @@
 import type { LocalStackState } from "../shared/local-stack";
-import type { LocalStackConfig } from "./local-stack-config";
+import { isLocalApiUrl, type LocalStackConfig } from "./local-stack-config";
 
 export interface CommandResult {
   ok: boolean;
@@ -126,19 +126,53 @@ function lastLine(text: string): string {
   return lines.at(-1)?.trim() ?? "";
 }
 
+/**
+ * What `setupLocalStack`'s `start()` should do next, given the app's
+ * configured apiUrl and a way to load the supervisor config. Kept pure and
+ * electron-free (no fs, no ipcMain) so the branch that enforces "a
+ * SaaS-pointed build must never touch docker" is directly testable without
+ * mocking electron.
+ */
+export type StartDecision =
+  | { kind: "inert"; reason: "non-local-api" | "not-configured" }
+  | { kind: "config-error"; message: string }
+  | { kind: "bring-up"; config: LocalStackConfig };
+
+export async function resolveStartDecision(deps: {
+  apiUrl: string;
+  loadConfig: () => Promise<LocalStackConfig | null>;
+}): Promise<StartDecision> {
+  if (!isLocalApiUrl(deps.apiUrl)) {
+    return { kind: "inert", reason: "non-local-api" };
+  }
+
+  let config: LocalStackConfig | null;
+  try {
+    config = await deps.loadConfig();
+  } catch (err) {
+    return {
+      kind: "config-error",
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  // Not configured — behave exactly as the app does without this feature.
+  if (!config) {
+    return { kind: "inert", reason: "not-configured" };
+  }
+
+  return { kind: "bring-up", config };
+}
+
 // --- Electron wiring ------------------------------------------------------
 // Kept in this file so the state machine above and its only real caller stay
 // together; everything electron-coupled lives below this line.
 
 import { execFile } from "child_process";
 import { BrowserWindow, ipcMain } from "electron";
-import {
-  isLocalApiUrl,
-  loadLocalStackConfig,
-  localStackConfigPath,
-} from "./local-stack-config";
-// LocalStackState and LocalStackConfig are already imported at the top of
-// this file for the state machine above; no second import is needed here.
+import { loadLocalStackConfig, localStackConfigPath } from "./local-stack-config";
+// LocalStackState, LocalStackConfig, and isLocalApiUrl are already imported
+// at the top of this file for the pure logic above; no second import here.
 
 const COMMAND_TIMEOUT_MS = 180_000;
 
@@ -215,36 +249,31 @@ export function setupLocalStack(
   });
 
   const start = async (): Promise<LocalStackState> => {
-    if (!isLocalApiUrl(apiUrl)) {
-      broadcast(windowGetter, { phase: "ready" });
-      return currentState;
-    }
-
-    let config: LocalStackConfig | null;
-    try {
-      config = await loadLocalStackConfig(localStackConfigPath());
-    } catch (err) {
-      broadcast(windowGetter, {
-        phase: "failed",
-        step: "probe",
-        message: err instanceof Error ? err.message : String(err),
-      });
-      return currentState;
-    }
-
-    // Not configured — behave exactly as the app does without this feature.
-    if (!config) {
-      broadcast(windowGetter, { phase: "ready" });
-      return currentState;
-    }
-
-    return bringUpLocalStack({
-      config,
-      run: createCommandRunner(config),
-      probeBackend: createBackendProbe(apiUrl),
-      onState: (state) => broadcast(windowGetter, state),
-      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    const decision = await resolveStartDecision({
+      apiUrl,
+      loadConfig: () => loadLocalStackConfig(localStackConfigPath()),
     });
+
+    switch (decision.kind) {
+      case "inert":
+        broadcast(windowGetter, { phase: "ready" });
+        return currentState;
+      case "config-error":
+        broadcast(windowGetter, {
+          phase: "failed",
+          step: "config",
+          message: decision.message,
+        });
+        return currentState;
+      case "bring-up":
+        return bringUpLocalStack({
+          config: decision.config,
+          run: createCommandRunner(decision.config),
+          probeBackend: createBackendProbe(apiUrl),
+          onState: (state) => broadcast(windowGetter, state),
+          sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        });
+    }
   };
 
   ipcMain.handle("local-stack:retry", () => start());
