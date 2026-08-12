@@ -1232,12 +1232,20 @@ func (e *acpRPCError) Error() string {
 // unknown-session path (src/kimi_cli/acp/server.py), while Reasonix says
 // "session/resume: unknown session <id>" under -32602 — so neither the
 // code nor one runtime's exact wording is discriminating and both are matched.
+// isACPSessionNotFound reports whether an ACP RPC error means the requested
+// session no longer exists on the agent side. Different runtimes use different
+// JSON-RPC error codes for the same condition: -32602 (invalid params, used by
+// hermes/kiro/traecli/qoder when the session id is absent or malformed),
+// -32603 (internal error, used by grok whose adapter wraps the lookup), and
+// -32002 (dim's application-level "ACP session not found"). The message/data
+// text is the disambiguator across all three so a generic -32603 transport
+// fault is not mistaken for a missing session.
 func isACPSessionNotFound(err error) bool {
 	var rpcErr *acpRPCError
 	if !errors.As(err, &rpcErr) {
 		return false
 	}
-	if rpcErr.Code != -32603 && rpcErr.Code != -32602 {
+	if rpcErr.Code != -32603 && rpcErr.Code != -32602 && rpcErr.Code != -32002 {
 		return false
 	}
 	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)

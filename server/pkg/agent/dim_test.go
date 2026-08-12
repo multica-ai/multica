@@ -28,11 +28,13 @@ func TestDimModelSelectionSupported(t *testing.T) {
 	}
 }
 
-// fakeDimACPScript impersonates `dim acp` for unit tests. Dim sessions are
-// bound to the creating process (session/load from another process fails with
-// "held by another process"), so this fake only supports session/new — the
-// backend must never send session/load. It records every request line to
-// DIM_REQUESTS_FILE so tests can assert which RPCs were (and were not) sent.
+// fakeDimACPScript impersonates `dim acp` for unit tests. Dim 0.3.10+
+// releases its per-process session lock shortly after the owning process
+// exits, so a follow-up run resumes via the standard ACP session/load. This
+// fake answers session/load with a resumed session (retaining the requested
+// id, matching the real server which does not echo sessionId on load). It
+// records every request line to DIM_REQUESTS_FILE so tests can assert which
+// RPCs were (and were not) sent.
 func fakeDimACPScript() string {
 	return `#!/bin/sh
 while IFS= read -r line; do
@@ -42,15 +44,21 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentInfo":{"name":"dimcode","version":"0.3.2"},"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":false}}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentInfo":{"name":"dimcode","version":"0.3.10"},"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":false}}}}\n' "$id"
       ;;
     *'"method":"session/new"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_dim_new","models":{"availableModels":[{"modelId":"dim/model-a","name":"Model A"}],"currentModelId":"dim/model-a"}}}\n' "$id"
       ;;
     *'"method":"session/load"'*)
-      # The real dim ACP server rejects cross-process loads; a fake that
-      # answers is fine — the point is the backend must never send it.
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Session held by another process"}}\n' "$id"
+      # The real dim ACP server resumes the session and returns configOptions
+      # (no sessionId field — the id is the one the client requested). When
+      # DIM_LOAD_NOT_FOUND is set, emulate a session that no longer exists so
+      # tests can exercise the ResumeRejected path.
+      if [ -n "$DIM_LOAD_NOT_FOUND" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32002,"message":"ACP session not found","data":{"sessionId":"ses_prior"}}}\n' "$id"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"permission","currentValue":"full-access"},{"id":"mode","currentValue":"agent"}],"models":{"currentModelId":"dim/model-a"}}}\n' "$id"
+      fi
       ;;
     *'"method":"session/set_config_option"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
@@ -84,12 +92,21 @@ func writeFakeDimScript(t *testing.T, requestsFile string) string {
 
 func newDimTestBackend(t *testing.T, requestsFile string) Backend {
 	t.Helper()
+	return newDimTestBackendWithEnv(t, requestsFile, nil)
+}
+
+func newDimTestBackendWithEnv(t *testing.T, requestsFile string, extra map[string]string) Backend {
+	t.Helper()
 	bin := writeFakeDimScript(t, requestsFile)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	env := map[string]string{"DIM_REQUESTS_FILE": requestsFile}
+	for k, v := range extra {
+		env[k] = v
+	}
 	b, err := New("dim", Config{
 		ExecutablePath: bin,
 		Logger:         logger,
-		Env:            map[string]string{"DIM_REQUESTS_FILE": requestsFile},
+		Env:            env,
 	})
 	if err != nil {
 		t.Fatalf("New(dim) error: %v", err)
@@ -149,11 +166,12 @@ func TestDimSessionNew(t *testing.T) {
 	}
 }
 
-// TestDimResumeStartsFresh verifies that when the daemon asks to resume a
-// prior session, the backend ignores it, starts a fresh session, and reports
-// ResumeRejected so the daemon classifies the run correctly — instead of
-// failing on a session/load that dim would refuse ("held by another process").
-func TestDimResumeStartsFresh(t *testing.T) {
+// TestDimResumeLoadsSession verifies that when the daemon asks to resume a
+// prior session, the backend resumes it via the standard ACP session/load,
+// reuses the resumed session id, and does NOT re-issue set_config_option
+// (a loaded session retains its permission/mode). ResumeRejected must stay
+// false because the resume succeeded.
+func TestDimResumeLoadsSession(t *testing.T) {
 	t.Parallel()
 	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
 	b := newDimTestBackend(t, requestsFile)
@@ -174,18 +192,61 @@ func TestDimResumeStartsFresh(t *testing.T) {
 	if result.Status != "completed" {
 		t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
 	}
-	if result.SessionID != "ses_dim_new" {
-		t.Fatalf("expected a fresh session id, got %q", result.SessionID)
+	if result.SessionID != "ses_prior" {
+		t.Fatalf("expected the resumed session id ses_prior, got %q", result.SessionID)
 	}
-	if !result.ResumeRejected {
-		t.Fatal("expected ResumeRejected=true when a resume was requested but dim cannot resume")
+	if result.ResumeRejected {
+		t.Fatal("ResumeRejected must be false when session/load succeeded")
 	}
 
 	reqs := readDimRequests(t, requestsFile)
-	if strings.Contains(reqs, "session/load") {
-		t.Fatal("backend must never send session/load even when a resume was requested")
+	if !strings.Contains(reqs, "session/load") {
+		t.Fatal("expected a session/load when a resume was requested")
 	}
-	if !strings.Contains(reqs, "session/new") {
-		t.Fatal("expected a fresh session/new")
+	if strings.Contains(reqs, "session/new") {
+		t.Fatal("backend must not send session/new when the resume succeeded")
+	}
+	// A resumed session already carries permission/mode, so the config block
+	// must be skipped — no set_config_option after a successful load.
+	if strings.Contains(reqs, "set_config_option") {
+		t.Fatal("set_config_option must not be sent on a resumed session")
+	}
+}
+
+// TestDimResumeNotFound verifies that when session/load reports the prior
+// session is gone (ACP -32002 session not found), the backend fails with
+// ResumeRejected=true so the daemon retries on a fresh session instead of
+// silently losing the conversation.
+func TestDimResumeNotFound(t *testing.T) {
+	t.Parallel()
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	b := newDimTestBackendWithEnv(t, requestsFile, map[string]string{"DIM_LOAD_NOT_FOUND": "1"})
+
+	ctx := context.Background()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:             t.TempDir(),
+		ResumeSessionID: "ses_prior",
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q", result.Status)
+	}
+	if !result.ResumeRejected {
+		t.Fatal("expected ResumeRejected=true when session/load reports not found")
+	}
+
+	reqs := readDimRequests(t, requestsFile)
+	if !strings.Contains(reqs, "session/load") {
+		t.Fatal("expected a session/load attempt")
+	}
+	if strings.Contains(reqs, "session/new") {
+		t.Fatal("backend must not fall through to session/new itself; the daemon owns the fresh retry")
 	}
 }

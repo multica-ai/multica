@@ -5,7 +5,9 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,19 +18,14 @@ import (
 // It validates the full daemon contract against a live Dim (dimcode) process:
 //   - `dim acp` starts and responds to ACP RPCs (initialize, session/new)
 //   - session/set_config_option (permission=full-access, mode=agent) succeeds
-//   - session/set_model switches the model
-//   - session/prompt returns a completed turn with stopReason=end_turn
-//   - the agent can use tools (file write) under the injected full-access
-//     permission
+//   - session/prompt returns a completed turn
+//   - the agent can actually write a file under the injected full-access
+//     permission (the whole point of raising permission from the read-only
+//     default) — a sentinel file is written and read back
 //
 // This test is gated by MULTICA_RUN_REAL_AGENT_SMOKE=1 and requires `dim`
 // on PATH with an active Dim OAuth login. The RPCs it exercises are the ones
-// the execution path needs, verified against dimcode 0.3.2.
-//
-// Session resume is deliberately not tested here: Dim binds sessions to the
-// creating process, so a fresh process's session/load is rejected. The dim
-// backend never sends session/load (see dim.go + dim_test.go for that
-// assertion).
+// the execution path needs, verified against dimcode 0.3.10.
 func TestDimRealACPSmoke(t *testing.T) {
 	requireRealAgentSmoke(t)
 	if testing.Short() {
@@ -56,13 +53,19 @@ func TestDimRealACPSmoke(t *testing.T) {
 		t.Fatalf("new dim backend: %v", err)
 	}
 
+	cwd := t.TempDir()
+	sentinel := filepath.Join(cwd, "sentinel.txt")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
+	// Prompt the agent to write a sentinel file under full-access. This is
+	// the real permission proof: the read-only default would deny the write,
+	// so a successful write confirms set_config_option landed.
 	session, err := backend.Execute(ctx,
-		"Reply with exactly one word: pong. Do not use any tools.",
+		"Write the text 'dim-was-here' to the file sentinel.txt in the current directory using your file write tool, then reply with exactly: done",
 		ExecOptions{
-			Cwd:    t.TempDir(),
+			Cwd:     cwd,
 			Timeout: 100 * time.Second,
 		},
 	)
@@ -81,24 +84,36 @@ func TestDimRealACPSmoke(t *testing.T) {
 		if result.Status != "completed" {
 			t.Fatalf("real dim run did not complete: status=%q error=%q", result.Status, result.Error)
 		}
-		if !strings.Contains(strings.ToLower(result.Output), "pong") {
-			t.Fatalf("expected real dim output to contain 'pong', got %q", result.Output)
-		}
 		if result.SessionID == "" {
 			t.Error("expected a non-empty session id from real dim")
 		}
-		t.Logf("real dim smoke OK: session=%s output=%q", result.SessionID, result.Output)
+		// The hard proof: the sentinel file must exist with the expected
+		// content. A permission failure would leave it absent.
+		data, readErr := os.ReadFile(sentinel)
+		if readErr != nil {
+			t.Fatalf("sentinel file was not written (permission=full-access not effective): %v", readErr)
+		}
+		if !strings.Contains(string(data), "dim-was-here") {
+			t.Fatalf("sentinel file content unexpected: %q", string(data))
+		}
+		t.Logf("real dim smoke OK: session=%s output=%q sentinel=%q", result.SessionID, result.Output, strings.TrimSpace(string(data)))
 
 	case <-time.After(120 * time.Second):
 		t.Fatal("timeout waiting for real dim result")
 	}
 }
 
-// TestDimRealResumeRejected verifies that when a ResumeSessionID is passed,
-// the dim backend does NOT attempt session/load (which would fail with
-// "held by another process"), starts a fresh session instead, and reports
-// ResumeRejected=true so the daemon classifies the run correctly.
-func TestDimRealResumeRejected(t *testing.T) {
+// TestDimRealCrossRunResume verifies cross-run session continuity against a
+// real `dim acp`: run A establishes conversation context (a secret token),
+// then a fresh run B in a new process resumes that session via session/load
+// and must be able to recall the token. This is the regression review #2
+// requires: run B uses context established only in run A.
+//
+// dim 0.3.10+ releases its per-process session lock within ~5s of the owning
+// process exiting, so the resume succeeds once run A's process has torn down.
+// Gated by MULTICA_RUN_REAL_AGENT_SMOKE=1 and requires `dim` on PATH with an
+// active Dim OAuth login.
+func TestDimRealCrossRunResume(t *testing.T) {
 	requireRealAgentSmoke(t)
 	if testing.Short() {
 		t.Skip("skipping real-binary smoke test in -short mode")
@@ -117,47 +132,78 @@ func TestDimRealResumeRejected(t *testing.T) {
 		t.Fatalf("new dim backend: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
+	cwd := t.TempDir()
+	secret := "ZEBRA-91337"
 
-	// Pass a fake prior session ID — the backend should ignore it, start
-	// fresh, and mark ResumeRejected.
-	session, err := backend.Execute(ctx,
-		"Reply with exactly one word: fresh. Do not use any tools.",
+	// Run A: establish context by telling the agent a secret token.
+	runCtxA, cancelA := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancelA()
+	sessionA, err := backend.Execute(runCtxA,
+		"Remember this secret token: "+secret+". Reply with exactly: ok",
 		ExecOptions{
-			Cwd:             t.TempDir(),
-			Timeout:         100 * time.Second,
-			ResumeSessionID: "sess_prior_does_not_exist",
+			Cwd:     cwd,
+			Timeout: 100 * time.Second,
 		},
 	)
 	if err != nil {
-		t.Fatalf("execute: %v", err)
+		t.Fatalf("run A execute: %v", err)
 	}
-
 	go func() {
-		for range session.Messages {
+		for range sessionA.Messages {
 		}
 	}()
-
+	var sessionID string
 	select {
-	case result := <-session.Result:
+	case result := <-sessionA.Result:
 		if result.Status != "completed" {
-			t.Fatalf("real dim resume run did not complete: status=%q error=%q", result.Status, result.Error)
+			t.Fatalf("run A did not complete: status=%q error=%q", result.Status, result.Error)
 		}
-		if !result.ResumeRejected {
-			t.Fatal("expected ResumeRejected=true when a resume was requested but dim cannot resume across processes")
+		sessionID = result.SessionID
+		if sessionID == "" {
+			t.Fatal("run A returned no session id; cannot resume")
 		}
-		if result.SessionID == "" {
-			t.Error("expected a non-empty fresh session id")
-		}
-		// The session ID must NOT be the one we passed in — it should be a
-		// freshly created session.
-		if result.SessionID == "sess_prior_does_not_exist" {
-			t.Fatal("expected a fresh session id, not the requested resume id")
-		}
-		t.Logf("real dim resume-rejected OK: session=%s output=%q", result.SessionID, result.Output)
-
+		t.Logf("run A OK: session=%s", sessionID)
 	case <-time.After(120 * time.Second):
-		t.Fatal("timeout waiting for real dim resume result")
+		t.Fatal("timeout waiting for run A result")
+	}
+
+	// Give dim time to release the per-process session lock after run A's
+	// process exits (~5s on dim 0.3.10+).
+	t.Logf("waiting for dim to release the session lock before run B...")
+	time.Sleep(8 * time.Second)
+
+	// Run B: resume run A's session and ask for the secret. The token was
+	// only ever mentioned in run A, so a correct resume recalls it.
+	runCtxB, cancelB := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancelB()
+	sessionB, err := backend.Execute(runCtxB,
+		"What was the secret token I told you? Reply with exactly the token and nothing else.",
+		ExecOptions{
+			Cwd:             cwd,
+			Timeout:         100 * time.Second,
+			ResumeSessionID: sessionID,
+		},
+	)
+	if err != nil {
+		t.Fatalf("run B execute: %v", err)
+	}
+	go func() {
+		for range sessionB.Messages {
+		}
+	}()
+	select {
+	case result := <-sessionB.Result:
+		if result.Status != "completed" {
+			t.Fatalf("run B did not complete: status=%q error=%q", result.Status, result.Error)
+		}
+		if result.ResumeRejected {
+			t.Fatal("run B reported ResumeRejected=true; session/load should have succeeded after the release window")
+		}
+		if !strings.Contains(result.Output, secret) {
+			t.Fatalf("run B did not recall the secret from run A: output=%q (expected to contain %q)", result.Output, secret)
+		}
+		t.Logf("run B OK: cross-run continuity confirmed, session=%s output=%q", result.SessionID, result.Output)
+	case <-time.After(120 * time.Second):
+		t.Fatal("timeout waiting for run B result")
 	}
 }

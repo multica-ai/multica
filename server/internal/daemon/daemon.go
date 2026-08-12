@@ -5608,7 +5608,10 @@ func providerDisplayName(name string) string {
 // and no inline delivery: claude 2.1.220 (CLAUDE.md), codex 0.144.6 driving the
 // app-server (AGENTS.md), opencode 1.17.7 (AGENTS.md), pi 0.67.2 (AGENTS.md),
 // hermes 0.18.2 over ACP (AGENTS.md). kiro was confirmed earlier by a kiro-cli
-// 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
+// 2.13.0 ACP smoke — see the call site. dim (dimcode 0.3.8) reads AGENTS.md
+// from the session cwd over ACP (verified by a canary AGENTS.md whose mandated
+// reply token was echoed back), so it is also absent here. Still unprobed: grok,
+// qoder, codebuddy.
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
 	case "openclaw", "kimi", "traecli", "qwenpaw":

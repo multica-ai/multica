@@ -255,7 +255,7 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// advertised by session/new under models.availableModels. Enumeration
 		// requires a logged-in dim (OAuth); on any failure fall back to an
 		// empty catalog so the UI keeps manual entry available.
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discoverDimModels(ctx, executablePath)
 		})
 	default:
