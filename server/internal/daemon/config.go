@@ -629,9 +629,12 @@ func shellArgsFromEnv(name string) ([]string, error) {
 	return args, nil
 }
 
-// resolveAgentExecutablePath returns the concrete executable path the daemon
+// resolveAgentExecutablePath returns the executable entry point the daemon
 // should keep for an agent command. Bare command names are pinned to the path
 // resolved during startup so later PATH changes cannot redirect task launches.
+// On Windows this deliberately keeps the stable discovered junction path;
+// resolveAgentEntryWithHeal follows it for each launch so installer upgrades
+// that retarget a still-live junction take effect without a daemon restart.
 // When ~/.multica/hooks shadows a real agent binary, skip that hooks directory:
 // previously generated hook wrappers can execute the same command name and
 // recurse forever if the daemon records or launches the wrapper.
@@ -648,7 +651,7 @@ func resolveAgentExecutablePath(cmd string) (string, error) {
 			return unshadowed, nil
 		}
 	}
-	return canonicalExecutablePath(resolved), nil
+	return discoveredExecutablePath(resolved), nil
 }
 
 // agentExecutablePresent reports whether path currently resolves to a runnable
@@ -702,7 +705,7 @@ func lookPathExcludingMulticaHooks(cmd string) (string, error) {
 		}
 		candidate := filepath.Join(dir, cmd)
 		if isExecutableFile(candidate) {
-			return canonicalExecutablePath(candidate), nil
+			return discoveredExecutablePath(candidate), nil
 		}
 	}
 	return "", exec.ErrNotFound

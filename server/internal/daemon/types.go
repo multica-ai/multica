@@ -8,7 +8,7 @@ import (
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path string // path to CLI binary (pinned at startup; symlink-resolved to a concrete, possibly versioned, path)
+	Path string // stable startup-resolved CLI entry point; launch resolution may follow platform links to a concrete path
 	// Command is the bare command name or MULTICA_*_PATH value that Path was
 	// resolved from at startup. It is kept so the daemon can re-resolve Path
 	// if the pinned executable later vanishes — e.g. a version manager

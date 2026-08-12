@@ -3,7 +3,7 @@
 package daemon
 
 import (
-	"strings"
+	"path/filepath"
 	"syscall"
 
 	"golang.org/x/sys/windows"
@@ -35,20 +35,29 @@ func canonicalPath(path string) (string, error) {
 			return "", err
 		}
 		if length < uint32(len(buffer)) {
-			resolved := windows.UTF16ToString(buffer[:length])
-			return trimWindowsExtendedPathPrefix(resolved), nil
+			return windows.UTF16ToString(buffer[:length]), nil
 		}
 		buffer = make([]uint16, length+1)
 	}
 }
 
-func trimWindowsExtendedPathPrefix(path string) string {
-	if strings.HasPrefix(path, `\\?\UNC\`) {
-		return `\\` + strings.TrimPrefix(path, `\\?\UNC\`)
+func discoveredExecutablePath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
 	}
-	return strings.TrimPrefix(path, `\\?\`)
+	return abs
 }
 
 func canonicalConfiguredExecutablePath(path string) string {
-	return canonicalExecutablePath(path)
+	return discoveredExecutablePath(path)
+}
+
+func executablePathForLaunch(path string) (string, bool, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", true, err
+	}
+	resolved, err := canonicalPath(abs)
+	return resolved, true, err
 }
