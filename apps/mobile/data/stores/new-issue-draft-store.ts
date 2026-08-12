@@ -21,13 +21,16 @@
  * that's the only place that calls it on workspace-id transitions.
  */
 import { useEffect, useRef } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import type {
   IssuePriority,
   IssueStatus,
   Project,
 } from "@multica/core/types";
 import type { AssigneeValue } from "@/components/issue/pickers/assignee-picker-body";
+import { draftStorageKey, readDraftPartition } from "./draft-persistence";
 
 interface NewIssueDraftState {
   status: IssueStatus;
@@ -54,7 +57,7 @@ const INITIAL: Pick<
   project: null,
 };
 
-export const useNewIssueDraftStore = create<NewIssueDraftState>((set) => ({
+export const useNewIssueDraftStore = create<NewIssueDraftState>()(persist((set) => ({
   ...INITIAL,
   setStatus: (next) => set({ status: next }),
   setPriority: (next) => set({ priority: next }),
@@ -62,7 +65,29 @@ export const useNewIssueDraftStore = create<NewIssueDraftState>((set) => ({
   setDueDate: (next) => set({ dueDate: next }),
   setProject: (next) => set({ project: next }),
   reset: () => set({ ...INITIAL }),
+}), {
+  name: "multica_draft:new-issue:unscoped",
+  storage: createJSONStorage(() => AsyncStorage),
+  skipHydration: true,
+  partialize: (state) => ({
+    status: state.status,
+    priority: state.priority,
+    assignee: state.assignee,
+    dueDate: state.dueDate,
+    project: state.project,
+  }),
 }));
+
+export async function hydrateNewIssueDraft(userId: string, workspaceSlug: string) {
+  const name = draftStorageKey("new-issue", userId, workspaceSlug);
+  const persisted = await readDraftPartition<
+    Pick<NewIssueDraftState, "status" | "priority" | "assignee" | "dueDate" | "project">
+  >("new-issue", userId, workspaceSlug);
+  useNewIssueDraftStore.persist.setOptions({
+    name,
+  });
+  useNewIssueDraftStore.setState({ ...INITIAL, ...persisted });
+}
 
 /**
  * Clears the new-issue draft store whenever the active workspace id
