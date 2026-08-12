@@ -793,9 +793,9 @@
         "description": "태스크 생성 및 작업"
       }
     },
+    "share_links_title": "공유 링크",
     "role_field": "역할：",
     "expiry_field": "만료：",
-    "share_links_title": "공유 링크（{{count}}）",
     "share_links_create_title": "공유 링크 만들기",
     "share_links_create_button": "생성",
     "share_links_creating": "생성 중...",

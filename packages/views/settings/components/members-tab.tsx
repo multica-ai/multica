@@ -539,9 +539,9 @@ export function MembersTab() {
                 <Link className="h-4 w-4 text-muted-foreground" />
                 <h3 className="text-body font-medium">{t(($) => $.members.share_links_create_title)}</h3>
               </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-caption text-muted-foreground shrink-0">{t(($) => $.members.role_field)}</span>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <div className="flex min-w-0 flex-1 basis-40 items-center gap-2">
+                  <span className="text-body text-muted-foreground shrink-0">{t(($) => $.members.role_field)}</span>
                   <Select
                     items={(["member", "admin"] as const).map((value) => ({
                       value,
@@ -553,19 +553,19 @@ export function MembersTab() {
                     <SelectTrigger size="sm">
                       <SelectValue>{() => roleConfig[shareLinkRole].label}</SelectValue>
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="min-w-0">
                       <SelectItem value="member">{roleConfig.member.label}</SelectItem>
                       <SelectItem value="admin">{roleConfig.admin.label}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-caption text-muted-foreground shrink-0">{t(($) => $.members.expiry_field)}</span>
+                <div className="flex min-w-0 flex-1 basis-40 items-center gap-2">
+                  <span className="text-body text-muted-foreground shrink-0">{t(($) => $.members.expiry_field)}</span>
                   <Select
                     items={[
-                      { value: "24", label: "24h" },
-                      { value: "168", label: "7d" },
-                      { value: "720", label: "30d" },
+                      { value: "24", label: "24 hours" },
+                      { value: "168", label: "7 days" },
+                      { value: "720", label: "30 days" },
                       { value: "0", label: "Never" },
                     ]}
                     value={shareLinkExpiry}
@@ -573,19 +573,19 @@ export function MembersTab() {
                   >
                     <SelectTrigger size="sm">
                       <SelectValue>{() => {
-                        const opts: Record<string, string> = { "24": "24h", "168": "7d", "720": "30d", "0": "Never" };
+                        const opts: Record<string, string> = { "24": "24 hours", "168": "7 days", "720": "30 days", "0": "Never" };
                         return opts[shareLinkExpiry] || shareLinkExpiry;
                       }}</SelectValue>
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="min-w-0">
                       <SelectItem value="24">24 hours</SelectItem>
                       <SelectItem value="168">7 days</SelectItem>
                       <SelectItem value="720">30 days</SelectItem>
-                      <SelectItem value="0">Never expire</SelectItem>
+                      <SelectItem value="0">Never</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                <Button onClick={handleCreateShareLink} disabled={shareLinkLoading}>
+                <Button onClick={handleCreateShareLink} disabled={shareLinkLoading} className="shrink-0">
                   {shareLinkLoading ? t(($) => $.members.share_links_creating) : t(($) => $.members.share_links_create_button)}
                 </Button>
               </div>

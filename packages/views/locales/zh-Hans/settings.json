@@ -1044,9 +1044,9 @@
         "description": "创建并处理任务"
       }
     },
+    "share_links_title": "分享链接",
     "role_field": "角色：",
     "expiry_field": "有效期：",
-    "share_links_title": "分享链接（{{count}}）",
     "share_links_create_title": "创建分享链接",
     "share_links_create_button": "生成",
     "share_links_creating": "生成中...",

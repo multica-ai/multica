@@ -1044,9 +1044,9 @@
         "description": "タスクの作成と作業"
       }
     },
+    "share_links_title": "共有リンク",
     "role_field": "ロール：",
     "expiry_field": "有効期限：",
-    "share_links_title": "共有リンク（{{count}}）",
     "share_links_create_title": "共有リンクを作成",
     "share_links_create_button": "生成",
     "share_links_creating": "生成中...",
