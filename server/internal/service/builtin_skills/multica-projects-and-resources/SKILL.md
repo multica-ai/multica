@@ -1,37 +1,20 @@
 ---
 name: multica-projects-and-resources
-description: "Use when creating, inspecting, updating, or debugging Multica projects and their resources (github_repo, local_directory)."
+description: "Use when creating, inspecting, updating, or debugging Multica projects and their resources."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
 
-# Multica Projects and Resources
+# Multica Projects & Resources
 
-## Quick start
+Projects are durable context containers; attached resources affect future
+agent tasks; mutated only via resource commands — comments do NOT create
+durable resources. Project resources are durable and affect future tasks;
+state in `.multica/project/resources.json` in the workdir.
 
-Projects are durable context containers. Resources attached to a project can affect future agent tasks.
-
-```bash
-multica project list --output json
-multica project get <project-id> --output json
-multica project resource list <project-id> --output json
-```
-
-Project resources are mutated through project resource commands/endpoints. Issue
-comments do not create durable project resources.
-
-## Core model
-
-A project groups work and carries durable resources. A resource is not just display metadata; it is context later injected into task briefs and `.multica/project/resources.json`.
-
-A project's `description` is also durable context: when an issue (or a quick-create task) is bound to a project, the project description is injected into the agent's brief under `## Project Context` and written to `.multica/project/resources.json` as `project_description`. Use it for project-wide rules/context that should apply to every task in the project.
-
-Common resource types:
-
-- `github_repo` — durable GitHub repo context, with `resource_ref.url`, optional checkout `ref`, and optional prompt-only `default_branch_hint`;
-- `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, and optional label.
-
-## CLI
+Types: `github_repo` (`github_repo.resource_ref.url`, `ref`,
+`default_branch_hint`); `local_directory` (`resource_ref.local_path`, `daemon_id`, optional
+`ref`).
 
 ```bash
 multica project list --output json
@@ -40,7 +23,7 @@ multica project create --title "<title>" --repo <github-url> --output json
 multica project create --title "<title>" --start-date 2026-03-01 --due-date 2026-03-31 --output json
 multica project update <project-id> --title "<title>" --output json
 multica project update <project-id> --due-date 2026-04-15 --output json
-multica project update <project-id> --start-date "" --output json   # clear the start date
+multica project update <project-id> --start-date "" --output json
 multica project status <project-id> in_progress --output json
 multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json
@@ -51,49 +34,29 @@ multica project resource update <project-id> <resource-id> --ref <branch-or-sha>
 multica project resource remove <project-id> <resource-id> --output json
 ```
 
-For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default checkout branch/tag/SHA for future tasks in that project. JSON `--ref '<json>'` remains the escape hatch for full payloads or resource types not covered by shortcuts.
+`github_repo` non-JSON `--ref` sets `resource_ref.ref` (default checkout
+branch/tag/SHA). Dates are optional `YYYY-MM-DD`; omitted on update preserved;
+`--start-date ""` clears.
 
-`--start-date` / `--due-date` are optional calendar days (`YYYY-MM-DD`, like issue dates). On `project update`, pass an empty string (`--start-date ""`) to clear a date; an unset flag leaves it untouched.
-
-## Referring to a project in a comment
-
-A project has no `MUL-123`-style identifier, so writing its title as prose
-produces dead text — there is nothing for the reader's client to autolink. Use
-the mention-link form instead, with the project UUID from
+No `MUL-123` id for projects — reference via mention-link with the UUID from
 `multica project list --output json`:
 
-    [Roadmap](mention://project/<project-id>)
+```
+[Roadmap](mention://project/<project-id>)
+```
 
-Every client makes it navigable, with different presentation: web and desktop
-render a chip carrying the project's icon and current title, while mobile
-renders an ordinary link that opens the project on tap. Unlike `@agent` /
-`@squad`, it is a pure link: `util.MentionRe` does not even include `project`,
-so it enqueues nothing and notifies nobody — the same no-side-effect contract
-as an `issue` mention.
+Pure link, no side effects: `util.MentionRe` excludes `project` — nothing
+enqueued/notified (same as `issue`). Prefer it over pasting the URL — mobile
+hands pasted URLs to the system browser.
 
-Prefer this form over pasting the project's URL. Web and desktop do unfurl a
-bare in-app project URL into that same chip, but mobile does not — there a
-pasted URL is handed to the system browser and takes the reader out of the app.
+Add/update a resource when the user asks for durable project context (e.g.
+"bind this GitHub repo to the project"). `multica repo checkout` is task-local
+state — not a project resource.
 
-## When to add a resource
+Debug wrong context: 1) `multica project get <project-id> --output json`; 2)
+`multica project resource list <project-id> --output json`; 3) check
+`resource_ref.url`, `ref`, `default_branch_hint`, `local_path`, `daemon_id`;
+4) create/update/delete/status/resource commands mutate durable workspace
+state — side effects.
 
-Add/update a project resource when the user asks for durable project context: "把这个 GitHub repo 绑到项目上", "以后都用这个 repo", "agent 总是拿不到这个项目的仓库", or "这个项目要在我的本地目录里跑".
-
-Project resources are durable and affect future tasks. `multica repo checkout`
-is task-local checkout state.
-
-## Debugging wrong context
-
-1. `multica project get <project-id> --output json`.
-2. `multica project resource list <project-id> --output json`.
-3. Check `github_repo.resource_ref.url`, optional `ref`, `default_branch_hint`, and `local_directory.resource_ref.daemon_id`.
-4. Updating resources is a durable mutation. After an update, listing the
-   resource is the verification path.
-5. If resources match the expected task context, inspect runtime/repo checkout
-   path next.
-
-## Side effects
-
-Project create/update/delete/status and project resource add/update/remove mutate durable workspace state and affect future tasks. Ask before changing `local_directory` unless the user explicitly requested that exact local path.
-
-More source-backed details: `references/projects-and-resources-source-map.md`.
+Details: `references/projects-and-resources-source-map.md`.
