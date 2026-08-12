@@ -195,7 +195,7 @@ func (r *OutboundReplier) post(ctx context.Context, inst engine.ResolvedInstalla
 
 func issueCreatedText(res engine.Result) string {
 	id := issueResultIdentifier(res)
-	title := strings.TrimSpace(res.IssueTitle)
+	title := memberIssueTitle(strings.TrimSpace(res.IssueTitle))
 	if title == "" {
 		return "✅ Created " + id
 	}
@@ -204,11 +204,19 @@ func issueCreatedText(res engine.Result) string {
 
 func issueDuplicateText(res engine.Result) string {
 	id := issueResultIdentifier(res)
-	title := strings.TrimSpace(res.IssueTitle)
+	title := memberIssueTitle(strings.TrimSpace(res.IssueTitle))
 	if title == "" {
 		return "⚠️ Not created — active issue " + id + " already exists."
 	}
 	return "⚠️ Not created — active issue " + id + " already exists: " + title
+}
+
+func memberIssueTitle(title string) string {
+	title = channel.BreakMarkdownLinkAdjacency(title)
+	// formatMrkdwn deliberately preserves existing Slack entities such as
+	// <url|label> and <@user>. Encode their opening delimiter before that pass
+	// so member-authored links and mentions are handled as visible text.
+	return strings.ReplaceAll(title, "<", "&lt;")
 }
 
 func issueResultIdentifier(res engine.Result) string {
