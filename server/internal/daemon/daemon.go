@@ -880,7 +880,7 @@ func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string,
 	var launchOutcome healOutcome
 	if launchPath, handled, err := executablePathForLaunch(entry.Path); handled {
 		if err != nil {
-			d.logger.Debug("resolve agent executable for launch failed; keeping discovered path",
+			d.logger.Warn("resolve agent executable for launch failed; keeping discovered path",
 				"provider", provider, "path", entry.Path, "error", err)
 			launchOutcome.failure = err
 		} else if outcome, ok := d.resolveAgentLaunchTarget(ctx, provider, entry, launchPath); ok {
@@ -1013,8 +1013,9 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 	}
 	if launchPath, handled, err := executablePathForLaunch(newPath); handled {
 		if err != nil {
-			d.logger.Debug("resolve re-discovered agent executable for launch failed; keeping discovered path",
+			d.logger.Warn("resolve re-discovered agent executable for launch failed; keeping discovered path",
 				"provider", provider, "path", newPath, "error", err)
+			return healOutcome{failure: err}
 		} else {
 			newPath = launchPath
 		}

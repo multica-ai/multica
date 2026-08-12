@@ -383,6 +383,68 @@ func TestResolveAgentEntryCanonicalizesRediscoveredJunction(t *testing.T) {
 	}
 }
 
+func TestResolveAgentEntryForLaunchRejectsRediscoveredJunctionWhenFinalPathResolutionFails(t *testing.T) {
+	targetExecutable, shimBin := stageJunctionExecutable(t)
+	stableExecutable := filepath.Join(shimBin, "codex.exe")
+	t.Setenv("PATH", shimBin)
+	t.Setenv("PATHEXT", ".EXE")
+
+	originalDetect := detectAgentVersion
+	detectCalled := false
+	detectAgentVersion = func(context.Context, string) (string, error) {
+		detectCalled = true
+		return "0.144.3", nil
+	}
+	t.Cleanup(func() { detectAgentVersion = originalDetect })
+
+	resolutionErr := errors.New("final path volume has no DOS name")
+	originalLaunchResolver := executablePathForLaunch
+	executablePathForLaunch = func(path string) (string, bool, error) {
+		if strings.EqualFold(path, stableExecutable) {
+			return "", true, resolutionErr
+		}
+		return originalLaunchResolver(path)
+	}
+	t.Cleanup(func() { executablePathForLaunch = originalLaunchResolver })
+
+	var logs bytes.Buffer
+	d := newSelfHealTestDaemon()
+	d.logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	d.setAgentVersion("codex", "0.144.1")
+	entry := AgentEntry{Path: filepath.Join(t.TempDir(), "removed", "codex.exe"), Command: "codex"}
+
+	got, _, err := d.resolveAgentEntryForLaunch(context.Background(), "codex", entry)
+	if err == nil {
+		t.Fatalf("resolveAgentEntryForLaunch returned rediscovered unresolved path %q; want final-path failure", got.Path)
+	}
+	if !errors.Is(err, resolutionErr) {
+		t.Fatalf("resolveAgentEntryForLaunch error = %v, want %v", err, resolutionErr)
+	}
+	if detectCalled {
+		t.Fatal("detectAgentVersion was called for an unverified rediscovered launch target")
+	}
+	d.resolvedPathsMu.RLock()
+	_, cached := d.resolvedPaths["codex"]
+	d.resolvedPathsMu.RUnlock()
+	if cached {
+		t.Fatal("unverified rediscovered launch target was cached in resolvedPaths")
+	}
+	if strings.EqualFold(got.Path, stableExecutable) || sameFile(got.Path, targetExecutable) {
+		t.Fatalf("resolveAgentEntryForLaunch returned a launchable target %q after resolution failure", got.Path)
+	}
+
+	logText := logs.String()
+	if !strings.Contains(logText, "level=WARN") {
+		t.Fatalf("rediscovery resolution failure log = %q, want WARN", logText)
+	}
+	if !strings.Contains(logText, stableExecutable) {
+		t.Fatalf("rediscovery resolution failure log = %q, want path %q", logText, stableExecutable)
+	}
+	if !strings.Contains(logText, resolutionErr.Error()) {
+		t.Fatalf("rediscovery resolution failure log = %q, want error %q", logText, resolutionErr)
+	}
+}
+
 func TestCanonicalExecutablePathLaunchesBeyondMaxPath(t *testing.T) {
 	deep := t.TempDir()
 	for len(deep) < 280 {

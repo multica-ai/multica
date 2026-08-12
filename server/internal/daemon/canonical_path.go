@@ -12,7 +12,9 @@ func discoveredExecutablePath(path string) string {
 	return canonicalExecutablePath(path)
 }
 
-func executablePathForLaunch(string) (string, bool, error) {
+var executablePathForLaunch = executablePathForLaunchDefault
+
+func executablePathForLaunchDefault(string) (string, bool, error) {
 	return "", false, nil
 }
 

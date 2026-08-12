@@ -53,7 +53,9 @@ func canonicalConfiguredExecutablePath(path string) string {
 	return discoveredExecutablePath(path)
 }
 
-func executablePathForLaunch(path string) (string, bool, error) {
+var executablePathForLaunch = executablePathForLaunchWindows
+
+func executablePathForLaunchWindows(path string) (string, bool, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", true, err
