@@ -374,6 +374,32 @@ func TestDaemonStatusInTaskContextReportsNamedProfileHost(t *testing.T) {
 	})
 }
 
+// A container-level MULTICA_DAEMON_PORT selects an explicit endpoint just as
+// the task-injected value does, but it does not make the CLI task-scoped. The
+// endpoint may belong to a named-profile daemon, so comparing its identity to
+// the default profile would manufacture a collision.
+func TestDaemonStatusWithExplicitPortReportsNamedProfileHost(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	mkProfiles(t)
+	stub := serveHealthAs(t, "host-named-profile", map[string]any{
+		"profile": "host-named-profile", "launched_by": "desktop",
+	})
+	t.Setenv("MULTICA_DAEMON_PORT", strconv.Itoa(stub.port))
+
+	out, err := captureStdout(t, func() error {
+		return runDaemonStatus(daemonStatusCmdFor(t, "", ""), nil)
+	})
+	if err != nil {
+		t.Fatalf("runDaemonStatus = %v, want nil", err)
+	}
+	if !strings.Contains(out, "running") {
+		t.Fatalf("stdout = %q, want the explicit-port daemon reported as running", out)
+	}
+	if strings.Contains(out, "hashes to the same port") {
+		t.Fatalf("stdout = %q, explicit endpoint must not be treated as a profile-hash collision", out)
+	}
+}
+
 // A profile field that is present but not a string is a daemon answering
 // wrongly, not an older daemon unable to answer. Collapsing it to "" would
 // read as a match for the default profile and hand lifecycle commands a daemon

@@ -226,3 +226,24 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 		t.Fatalf("ref = %q, want release/v2", got)
 	}
 }
+
+func TestRunRepoCheckoutStillUsesDaemonPortDirectly(t *testing.T) {
+	requestCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		json.NewEncoder(w).Encode(map[string]string{"path": "/work/repo"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+	t.Setenv("MULTICA_DAEMON_PORT", strings.TrimPrefix(srv.URL, "http://127.0.0.1:"))
+
+	if err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"}); err != nil {
+		t.Fatalf("runRepoCheckout: %v", err)
+	}
+	if requestCount != 1 {
+		t.Fatalf("repo checkout made %d requests, want 1", requestCount)
+	}
+}

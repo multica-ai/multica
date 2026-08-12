@@ -868,6 +868,23 @@ func TestDaemonStatusHealthPortInTaskContext(t *testing.T) {
 		}
 	})
 
+	t.Run("daemon port alone selects the health endpoint without marking a task", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		clearDaemonTaskEnv(t)
+		t.Setenv("MULTICA_DAEMON_PORT", strconv.Itoa(injectedPort))
+
+		got, err := daemonStatusHealthPort(testCmd())
+		if err != nil {
+			t.Fatalf("daemonStatusHealthPort: %v", err)
+		}
+		if got != injectedPort {
+			t.Fatalf("health port = %d, want the explicit %d", got, injectedPort)
+		}
+		if inDaemonManagedExecutionContext() {
+			t.Fatal("MULTICA_DAEMON_PORT alone marked daemon status as task-scoped")
+		}
+	})
+
 	t.Run("inside a task uses the injected port", func(t *testing.T) {
 		t.Chdir(t.TempDir())
 		clearDaemonTaskEnv(t)
@@ -883,6 +900,21 @@ func TestDaemonStatusHealthPortInTaskContext(t *testing.T) {
 		}
 		if got == healthPortForProfile("") {
 			t.Fatal("injected port collided with the profile-derived port; the test proves nothing")
+		}
+	})
+
+	t.Run("task config root and daemon port use the injected port", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		clearDaemonTaskEnv(t)
+		t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-config"))
+		t.Setenv("MULTICA_DAEMON_PORT", strconv.Itoa(injectedPort))
+
+		got, err := daemonStatusHealthPort(testCmd())
+		if err != nil {
+			t.Fatalf("daemonStatusHealthPort: %v", err)
+		}
+		if got != injectedPort {
+			t.Fatalf("health port = %d, want the injected %d", got, injectedPort)
 		}
 	})
 

@@ -255,12 +255,13 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	taskContext := inDaemonManagedExecutionContext()
 	token := resolveToken(cmd)
 	if taskContext && !strings.HasPrefix(token, "mat_") {
-		// When the ONLY daemon signal is a workdir marker (no MULTICA_AGENT_ID /
-		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), the likeliest cause outside a
-		// real task is a leftover marker from a crashed daemon task in a
-		// local_directory. Name the exact file so a normal user can recover
-		// instead of hitting an opaque "requires mat_ token" error.
-		if !inAgentExecutionContext() && os.Getenv("MULTICA_DAEMON_PORT") == "" {
+		// When the only task signal is a workdir marker, the likeliest cause
+		// outside a real task is a leftover marker from a crashed daemon task in
+		// a local_directory. MULTICA_DAEMON_PORT does not change that conclusion:
+		// it may be a container-level health endpoint override. Name the exact
+		// marker so a normal user can recover instead of hitting an opaque
+		// "requires mat_ token" error.
+		if !inAgentExecutionContext() && strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) == "" {
 			if markerPath := daemonTaskContextMarkerPath(); markerPath != "" {
 				return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token; detected a daemon task marker at %s — if you are not running inside an agent task this is likely a leftover, remove it and retry", markerPath)
 			}
@@ -333,17 +334,17 @@ func normalizeAPIBaseURL(raw string) string {
 // inAgentExecutionContext reports whether the CLI has explicit task identity
 // markers from a daemon-managed agent task.
 func inAgentExecutionContext() bool {
-	return os.Getenv("MULTICA_AGENT_ID") != "" || os.Getenv("MULTICA_TASK_ID") != ""
+	return strings.TrimSpace(os.Getenv("MULTICA_AGENT_ID")) != "" || strings.TrimSpace(os.Getenv("MULTICA_TASK_ID")) != ""
 }
 
-// inDaemonManagedExecutionContext reports whether the CLI is being invoked
-// from inside a daemon-managed agent task. MULTICA_DAEMON_PORT is included as
-// a defense-in-depth marker for subprocesses that lose MULTICA_AGENT_ID or
-// MULTICA_TASK_ID but still run under the daemon environment. In this context
-// workspace and token must come from daemon-provided env; falling back to
-// user-global ~/.multica/config.json can make agent writes land as a member.
+// inDaemonManagedExecutionContext reports whether the CLI has daemon-managed
+// task identity or isolation markers. MULTICA_DAEMON_PORT is deliberately not
+// a task marker: daemon containers may set it as a health endpoint override.
+// In a task, workspace and token must come from daemon-provided env; falling
+// back to user-global ~/.multica/config.json can make agent writes land as a
+// member.
 func inDaemonManagedExecutionContext() bool {
-	return inAgentExecutionContext() || os.Getenv("MULTICA_DAEMON_PORT") != "" || hasDaemonTaskContextMarker()
+	return inAgentExecutionContext() || strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) != "" || hasDaemonTaskContextMarker()
 }
 
 // requireTaskLocalConfigRoot prevents daemon-managed subprocesses that lost

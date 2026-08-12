@@ -142,10 +142,42 @@ func TestNewAPIClient_LeftoverMarkerActionableError(t *testing.T) {
 
 	if _, err := newAPIClient(testCmd()); err == nil {
 		t.Fatal("newAPIClient(): expected error for leftover daemon-task marker, got nil")
-	} else if !strings.Contains(err.Error(), execenv.TaskContextMarkerRelPath) {
+	} else if !strings.Contains(err.Error(), filepath.FromSlash(execenv.TaskContextMarkerRelPath)) {
 		t.Fatalf("error should name the marker path; got %q", err.Error())
 	} else if !strings.Contains(err.Error(), "leftover") {
 		t.Fatalf("error should hint it may be a leftover; got %q", err.Error())
+	}
+}
+
+func TestNewAPIClient_LeftoverMarkerWithDaemonPortRemainsActionable(t *testing.T) {
+	chdirWithDaemonTaskMarker(t)
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_DAEMON_PORT", "20032")
+	t.Setenv(cli.TaskConfigRootEnv, "")
+	t.Setenv("MULTICA_TOKEN", "")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+
+	if _, err := newAPIClient(testCmd()); err == nil {
+		t.Fatal("newAPIClient(): expected error for leftover daemon-task marker, got nil")
+	} else if !strings.Contains(err.Error(), "leftover") {
+		t.Fatalf("error should hint the marker may be leftover; got %q", err.Error())
+	}
+}
+
+func TestNewAPIClient_TaskConfigRootWithMarkerUsesGenericTaskError(t *testing.T) {
+	chdirWithDaemonTaskMarker(t)
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_DAEMON_PORT", "20032")
+	t.Setenv(cli.TaskConfigRootEnv, filepath.Join(t.TempDir(), "task-config"))
+	t.Setenv("MULTICA_TOKEN", "")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+
+	if _, err := newAPIClient(testCmd()); err == nil {
+		t.Fatal("newAPIClient(): expected task token error, got nil")
+	} else if strings.Contains(err.Error(), "leftover") {
+		t.Fatalf("active task config root was mislabeled as a leftover marker: %q", err.Error())
 	}
 }
 
@@ -214,14 +246,14 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("daemon port marker also skips config", func(t *testing.T) {
+	t.Run("daemon port alone still reads config", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "")
 		t.Setenv("MULTICA_TASK_ID", "")
 		t.Setenv("MULTICA_DAEMON_PORT", "27182")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
-		if got := resolveWorkspaceID(testCmd()); got != "" {
-			t.Fatalf("resolveWorkspaceID() = %q, want empty", got)
+		if got := resolveWorkspaceID(testCmd()); got != "config-file-ws" {
+			t.Fatalf("resolveWorkspaceID() = %q, want config-file-ws", got)
 		}
 	})
 
@@ -295,15 +327,15 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("daemon port marker without env never reads config", func(t *testing.T) {
+	t.Run("daemon port alone still reads config", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "")
 		t.Setenv("MULTICA_TASK_ID", "")
 		t.Setenv("MULTICA_DAEMON_PORT", "27182")
 		t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 		t.Setenv("MULTICA_TOKEN", "")
 
-		if got := resolveToken(testCmd()); got != "" {
-			t.Fatalf("resolveToken() = %q, want empty in daemon-managed context without MULTICA_TOKEN", got)
+		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+			t.Fatalf("resolveToken() = %q, want profile token", got)
 		}
 	})
 
@@ -369,14 +401,14 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("daemon port set without agent context avoids config fallback", func(t *testing.T) {
+	t.Run("daemon port set without task context allows config fallback", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "")
 		t.Setenv("MULTICA_TASK_ID", "")
 		t.Setenv("MULTICA_TOKEN", "")
 		t.Setenv("MULTICA_DAEMON_PORT", "19514")
 
-		if got := resolveToken(testCmd()); got != "" {
-			t.Fatalf("resolveToken() = %q, want empty (daemon port set, fail closed)", got)
+		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+			t.Fatalf("resolveToken() = %q, want profile token", got)
 		}
 	})
 
@@ -392,9 +424,8 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 	})
 
 	// MULTICA_SERVER_URL is a user-facing env var that may be set in a
-	// normal shell. It is NOT a daemon identity signal — only
-	// MULTICA_DAEMON_PORT is. The config fallback must still work when
-	// SERVER_URL is set but no daemon signal is present.
+	// normal shell. It is not a daemon task identity signal. The config fallback
+	// must still work when SERVER_URL is set without a task marker.
 	t.Run("MULTICA_SERVER_URL alone does not block config fallback", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "")
 		t.Setenv("MULTICA_TASK_ID", "")
@@ -466,7 +497,7 @@ func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
 	})
 }
 
-func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
+func TestNewAPIClient_DaemonPortAllowsHumanToken(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
@@ -479,12 +510,12 @@ func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
 		t.Fatalf("seed config: %v", err)
 	}
 
-	_, err := newAPIClient(testCmd())
-	if err == nil {
-		t.Fatal("newAPIClient(): expected error without task token")
+	client, err := newAPIClient(testCmd())
+	if err != nil {
+		t.Fatalf("newAPIClient(): %v", err)
 	}
-	if !strings.Contains(err.Error(), "mat_ token") {
-		t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+	if client.Token != "mul_profile_token" {
+		t.Fatalf("client token = %q, want profile token", client.Token)
 	}
 }
 
@@ -507,6 +538,41 @@ func TestNewAPIClient_WorkdirMarkerRequiresTaskToken(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mat_ token") {
 		t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+	}
+}
+
+func TestInDaemonManagedExecutionContextUsesTaskMarkers(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	tests := []struct {
+		name           string
+		agentID        string
+		taskID         string
+		daemonPort     string
+		taskConfigRoot string
+		want           bool
+	}{
+		{name: "no markers"},
+		{name: "daemon port alone is a health endpoint hint", daemonPort: "20032"},
+		{name: "blank daemon port is not a task marker", daemonPort: "  \t "},
+		{name: "blank task markers are ignored", agentID: " ", taskID: "\t", taskConfigRoot: "  "},
+		{name: "agent identity marks a task", agentID: "agent-123", want: true},
+		{name: "task identity marks a task", taskID: "task-456", want: true},
+		{name: "task config root marks a task", taskConfigRoot: filepath.Join(t.TempDir(), "task-config"), want: true},
+		{name: "task marker wins when daemon port is also set", taskID: "task-456", daemonPort: "20032", want: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MULTICA_AGENT_ID", tc.agentID)
+			t.Setenv("MULTICA_TASK_ID", tc.taskID)
+			t.Setenv("MULTICA_DAEMON_PORT", tc.daemonPort)
+			t.Setenv(cli.TaskConfigRootEnv, tc.taskConfigRoot)
+
+			if got := inDaemonManagedExecutionContext(); got != tc.want {
+				t.Fatalf("inDaemonManagedExecutionContext() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

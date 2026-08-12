@@ -449,11 +449,14 @@ func TestHumanAuthCommandsFailClosedInTaskContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	loginCmd := testCmd()
-	loginCmd.Flags().String("token", "mul_fake_login", "")
-	_ = loginCmd.Flags().Set("token", "mul_fake_login")
 	for name, run := range map[string]func() error{
-		"login":  func() error { return runAuthLogin(loginCmd, nil) },
+		"interactive login": func() error { return runAuthLogin(testCmd(), nil) },
+		"token login": func() error {
+			loginCmd := testCmd()
+			loginCmd.Flags().String("token", "mul_fake_login", "")
+			_ = loginCmd.Flags().Set("token", "mul_fake_login")
+			return runAuthLogin(loginCmd, nil)
+		},
 		"logout": func() error { return runAuthLogout(testCmd(), nil) },
 	} {
 		err := run()
@@ -467,6 +470,103 @@ func TestHumanAuthCommandsFailClosedInTaskContext(t *testing.T) {
 	}
 	if string(after) != string(ownerBytes) {
 		t.Fatalf("owner config content changed: got %q", after)
+	}
+}
+
+func TestHumanLoginGuardAllowsDaemonPortWithoutTaskMarkers(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_DAEMON_PORT", "20032")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+
+	// runAuthLogin applies this guard before choosing token or interactive
+	// login, so both human login modes must remain available in a daemon
+	// container that only carries the health-port override.
+	if err := requireHumanLocalCommand("login"); err != nil {
+		t.Fatalf("login guard rejected daemon port without task markers: %v", err)
+	}
+}
+
+func TestHumanLoginGuardRejectsAuthoritativeTaskMarkers(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*testing.T)
+	}{
+		{
+			name: "task id",
+			setup: func(t *testing.T) {
+				t.Setenv("MULTICA_TASK_ID", "task-test")
+			},
+		},
+		{
+			name: "task config root",
+			setup: func(t *testing.T) {
+				t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-config"))
+			},
+		},
+		{
+			name: "daemon workdir marker",
+			setup: func(t *testing.T) {
+				chdirWithDaemonTaskMarker(t)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			t.Setenv("MULTICA_AGENT_ID", "")
+			t.Setenv("MULTICA_TASK_ID", "")
+			t.Setenv("MULTICA_DAEMON_PORT", "")
+			t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+			tc.setup(t)
+
+			if err := requireHumanLocalCommand("login"); err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+				t.Fatalf("login guard error = %v, want daemon-managed task rejection", err)
+			}
+		})
+	}
+}
+
+func TestRunAuthLoginTokenAllowsDaemonPortWithoutTaskMarkers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_DAEMON_PORT", "20032")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+
+	const fakeToken = "mul_local_test_token"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/me" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer "+fakeToken {
+			t.Errorf("Authorization = %q, want local fake token", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"name": "Local User", "email": "local@example.test"})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	cmd := testCmd()
+	cmd.Flags().String("token", fakeToken, "")
+	if err := cmd.Flags().Set("token", fakeToken); err != nil {
+		t.Fatalf("set token flag: %v", err)
+	}
+	if err := runAuthLogin(cmd, nil); err != nil {
+		t.Fatalf("runAuthLogin: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".multica", "config.json"))
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if !strings.Contains(string(data), fakeToken) || !strings.Contains(string(data), srv.URL) {
+		t.Fatalf("saved config missing local login values: %s", data)
 	}
 }
 

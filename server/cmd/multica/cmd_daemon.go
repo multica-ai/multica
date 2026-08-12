@@ -1369,14 +1369,13 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	// not running, and the port is simply occupied. Say exactly that, and keep
 	// the top-level verdict "stopped" so scripts reading it stay correct.
 	//
-	// Only outside a daemon-managed task. There the port comes from the host
-	// daemon's own injection rather than a profile hash, so no collision is
-	// possible — and the task's profile is necessarily empty (--profile is
-	// rejected) while the host may run a named one, which would make every
-	// named-profile host look like a conflict and break the standing contract
-	// that `daemon status` in a task reports on the daemon hosting it.
+	// Only when the port came from the profile hash. An explicit
+	// MULTICA_DAEMON_PORT selects the endpoint directly, both in a task and in
+	// an ordinary daemon container. Comparing that daemon to the default
+	// profile would manufacture a conflict whenever the endpoint belongs to a
+	// named-profile daemon.
 	var conflict *daemonProfileMismatchError
-	if daemonAlive(health) && !inDaemonManagedExecutionContext() {
+	if daemonAlive(health) && strings.TrimSpace(os.Getenv("MULTICA_DAEMON_PORT")) == "" {
 		errors.As(daemonIdentityMismatch(health, profile, healthPort), &conflict)
 	}
 
@@ -1412,28 +1411,30 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// daemonStatusHealthPort resolves which daemon `status` should probe. Outside a
-// task that is the --profile-derived port. Inside a managed task it is the
-// daemon-injected MULTICA_DAEMON_PORT and nothing else: healthPortForProfile
-// hashes whatever profile name the caller passes, so deriving the port there
-// would let a task report on a daemon that is not the one hosting it — and for
-// a task hosted by a named-profile daemon it would silently probe the default
-// daemon instead. A missing port fails closed rather than guessing.
+// daemonStatusHealthPort resolves which daemon `status` should probe. An
+// explicit MULTICA_DAEMON_PORT is a health endpoint override in ordinary
+// environments and the daemon-injected endpoint inside a managed task. A task
+// may not replace it with --profile, because that could probe an unrelated
+// daemon; a missing task port fails closed rather than guessing.
 func daemonStatusHealthPort(cmd *cobra.Command) (int, error) {
 	profile := resolveProfile(cmd)
-	if !inDaemonManagedExecutionContext() {
+	taskContext := inDaemonManagedExecutionContext()
+	raw := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_PORT"))
+	if !taskContext && raw == "" {
 		return healthPortForProfile(profile), nil
 	}
-	if profile != "" {
+	if taskContext && profile != "" {
 		return 0, fmt.Errorf("daemon status --profile is not available inside a daemon-managed task")
 	}
-	raw := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_PORT"))
 	if raw == "" {
 		return 0, fmt.Errorf("daemon status inside a daemon-managed task requires the daemon-injected MULTICA_DAEMON_PORT")
 	}
 	port, err := strconv.Atoi(raw)
 	if err != nil || port <= 0 {
-		return 0, fmt.Errorf("invalid MULTICA_DAEMON_PORT %q inside a daemon-managed task", raw)
+		if taskContext {
+			return 0, fmt.Errorf("invalid MULTICA_DAEMON_PORT %q inside a daemon-managed task", raw)
+		}
+		return 0, fmt.Errorf("invalid MULTICA_DAEMON_PORT %q", raw)
 	}
 	return port, nil
 }

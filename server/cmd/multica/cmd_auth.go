@@ -76,8 +76,8 @@ func resolveToken(cmd *cobra.Command) string {
 	}
 	// Inside a daemon-managed task, never fall back to the user-global config
 	// token: that silent fallback is how agent writes land as the wrong actor.
-	// inDaemonManagedExecutionContext already covers the MULTICA_DAEMON_PORT
-	// signal for subprocesses that lost MULTICA_AGENT_ID / MULTICA_TASK_ID.
+	// The predicate covers task identity, isolation root, and workdir marker
+	// signals without confusing the daemon health endpoint with task identity.
 	if inDaemonManagedExecutionContext() {
 		return ""
 	}
