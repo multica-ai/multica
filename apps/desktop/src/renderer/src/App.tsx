@@ -17,6 +17,10 @@ import { DesktopAuthRecoveryPage } from "./pages/auth-recovery";
 import { DesktopShell } from "./components/desktop-layout";
 import { UpdateNotification } from "./components/update-notification";
 import { IssueWindow } from "./components/issue-window";
+import {
+  LocalStackOverlay,
+  useLocalStackState,
+} from "./components/local-stack-overlay";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useOpenSettingsShortcut } from "./hooks/use-open-settings-shortcut";
@@ -448,9 +452,19 @@ export default function App() {
     });
   }, [localeAdapter, locale]);
 
+  const localStackState = useLocalStackState();
+  const localStackBlocking =
+    windowContext.kind === "main" && localStackState.phase !== "ready";
+
   return (
     <ThemeProvider>
-      {runtimeConfigResult.ok ? (
+      {localStackBlocking ? (
+        <LocalStackOverlay
+          state={localStackState}
+          onRetry={() => void window.localStackAPI.retry()}
+          onSkip={() => void window.localStackAPI.skip()}
+        />
+      ) : runtimeConfigResult.ok ? (
         <CoreProvider
           apiBaseUrl={runtimeConfigResult.config.apiUrl}
           wsUrl={runtimeConfigResult.config.wsUrl}
