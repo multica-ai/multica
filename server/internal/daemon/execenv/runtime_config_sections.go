@@ -405,17 +405,21 @@ func writeInstructionPrecedence(b *strings.Builder) {
 //   - Slack: the conversation lives in the channel and `multica chat history` /
 //     `multica chat thread` can fetch it — see buildChatPrompt, which hands the
 //     agent exactly those commands. Recoverable, just from a different place.
-//   - Web chat and Feishu: nothing can fetch it. A web chat's history lived only
-//     in the provider session, and Multica ships no history reader for Feishu
-//     (handler/chat_history.go is hardwired to Slack), so the run has only the
-//     inbound context for this turn.
+//   - Web chat, Feishu, WeCom and DingTalk: the conversation is persisted in
+//     Multica's chat_message table and `multica chat history` reads it back —
+//     see handler/chat_history.go's chat_message fallback for non-Slack
+//     sessions. Recoverable, just from a different place. The readable set is
+//     decided in one place, SurfacePersistsTranscript.
 //
-// Only the last group warrants telling the user. On the first two the discussion
-// survives, so announcing "the previous context was lost" describes a loss that
-// did not happen — the user reasonably hears "the discussion is gone" when not a
-// word of it is. There the notice informs the agent and leaves mentioning it to
-// the agent's judgement. What is actually gone on every surface is the agent's
-// own unrecorded working memory, and each variant says so.
+// Only a surface whose conversation Multica never stored (so there is nothing
+// to read back) warrants telling the user; no current surface is in that
+// group, so SessionContinuityNoticeUnrecoverable is a defensive fallback. On
+// the readable ones the discussion survives, so announcing "the previous
+// context was lost" describes a loss that did not happen — the user reasonably
+// hears "the discussion is gone" when not a word of it is. There the notice
+// informs the agent and leaves mentioning it to the agent's judgement. What is
+// actually gone on every surface is the agent's own unrecorded working memory,
+// and each variant says so.
 //
 // Emitted into the per-turn user message rather than the runtime brief: it is
 // true of one run and false of the next on the same issue, so rendering it into
@@ -426,6 +430,17 @@ const SessionContinuityNoticeIssue = "## Session Continuity Notice\n\n" +
 const SessionContinuityNoticeChannelHistory = "## Session Continuity Notice\n\n" +
 	"This run was meant to continue an earlier conversation, but that provider session could not be restored, so you are on a fresh one. The channel conversation itself is unaffected — read it back with `multica chat history` / `multica chat thread` before acting, and treat what you find there as the authoritative version. What is gone is only your own working memory from earlier turns: what you already tried, what you ruled out, and how far you had got. Re-derive what you need instead of assuming it. Do not open your reply by announcing this — raise it only where it actually matters.\n\n"
 
+const SessionContinuityNoticeChatTranscript = "## Session Continuity Notice\n\n" +
+	"This run was meant to continue an earlier conversation, but that provider session could not be restored, so you are on a fresh one. The conversation itself is unaffected — Multica stored it, and you can read it back with `multica chat history` before acting; treat what you find there as the authoritative version. What is gone is only your own working memory from earlier turns: what you already tried, what you ruled out, and how far you had got. Re-derive what you need instead of assuming it. Do not open your reply by announcing this — raise it only where it actually matters.\n\n"
+
+// SessionContinuityNoticeUnrecoverable is the defensive fallback for a surface
+// whose conversation Multica never stored and cannot read back. Every current
+// chat surface (web chat, Feishu, WeCom, DingTalk, Slack) persists a transcript
+// that `multica chat history` can fetch, so no surface routes here today — it
+// exists so a future channel that stores no transcript degrades to an honest
+// "this is a new session" instead of silently pretending continuity. Unlike the
+// readable variants it scripts the user-facing disclosure, because here the
+// loss is real and the user must hear it.
 const SessionContinuityNoticeUnrecoverable = "## Session Continuity Notice\n\n" +
 	"This run was meant to continue an earlier conversation, but that session's context could NOT be restored — you are starting fresh with no memory of the previous turns. That history is not readable from anywhere now: there is no command that fetches it, and only the context already in this message survives. **When you reply, tell the user up front (one short sentence) that the previous conversation context was unavailable and this is a new session**, so they understand why the thread did not carry over.\n\n"
 

@@ -528,9 +528,14 @@ const (
 	// quantity: a turn holds admission for its whole life but claims a pending
 	// slot only once its lookup has found a file, so a backlog of
 	// file-carrying turns meets the pending cap first — the ordering that
-	// keeps the user-facing shed on the path that can name a real file. A
-	// backlog of turns carrying no file reaches this cap with nothing pending
-	// (TestDeliverAttachments_AdmissionBoundsTheLookupStage).
+	// keeps the user-facing shed on the path that can name a real file.
+	//
+	// So reaching THIS cap does not imply the pending one is full: turns still
+	// inside their lookup hold admission and no pending slot, and turns that
+	// find no file hold admission for their whole life and never claim one.
+	// TestDeliverAttachments_AdmissionBoundsTheLookupStage is the first of
+	// those — it parks every goroutine in the lookup and reaches the admitted
+	// cap with pending at zero.
 	maxAdmittedAttachmentDeliveries = 2 * maxPendingAttachmentDeliveries
 )
 

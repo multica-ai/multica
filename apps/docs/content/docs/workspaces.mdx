@@ -20,12 +20,13 @@ A workspace is Multica's top-level boundary. Members, issues, projects, agents, 
 
 ## Create a workspace
 
-Creating a workspace asks for two things:
+Creating a workspace asks for three things:
 
 - **Name**: shown to members; can be changed later.
 - **Workspace URL**: the slug in the address — the `my-team` in `multica.ai/my-team`. Lowercase letters, digits, and hyphens only; it cannot collide with an existing workspace or a reserved address, and it cannot be changed after creation.
+- **Issue prefix**: pre-filled from the workspace URL and editable before you create — with the prefix `MUL`, issue numbers appear as `MUL-1`, `MUL-2`, counting up independently within the workspace. Uppercase letters and digits, up to 10 characters; it can be changed later in settings.
 
-The creator automatically becomes an `owner`. The issue prefix is generated from the workspace name — with the prefix `MUL`, issue numbers appear as `MUL-1`, `MUL-2`, counting up independently within the workspace.
+The creator automatically becomes an `owner`.
 
 ## Change settings
 

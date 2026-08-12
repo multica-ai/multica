@@ -3,9 +3,12 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -14,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // ChatChannelHistoryReader reads a chat session's bound IM-channel history. The
@@ -44,17 +48,144 @@ type ChatChannelHistoryResponse struct {
 // GetChatChannelHistory serves `multica chat history` — the channel overview:
 // recent top-level messages, each thread tagged with its id + reply count (no
 // thread contents). The agent drills into a thread with `multica chat thread`.
+//
+// A chat session that is NOT backed by an IM channel has no channel overview to
+// read — its history is the chat_message table itself (web chat, Feishu). For
+// those, this endpoint falls back to returning that transcript, so the agent can
+// reconstruct the conversation after a lost resume instead of being told nothing
+// is readable (see the continuity-notice split in execenv).
 func (h *Handler) GetChatChannelHistory(w http.ResponseWriter, r *http.Request) {
 	sessionID, ok := h.chatHistorySession(w, r)
 	if !ok {
 		return
 	}
+	var page channel.HistoryPage
+	var err error
 	if h.SlackHistory == nil {
-		h.writeNoChannelIntegration(w)
-		return
+		// No Slack integration configured, so the session cannot be Slack-backed:
+		// serve the stored transcript directly. Without this a no-Slack deployment
+		// — the exact one this feature targets — would dead-end on a "no channel
+		// integration" note and never reach the transcript.
+		page, err = h.chatMessageHistory(r, sessionID)
+	} else {
+		page, err = h.SlackHistory.ChannelOverview(r.Context(), sessionID, historyOptionsFrom(r))
+		if errors.Is(err, slack.ErrNoSlackSession) {
+			// Not Slack-backed: read the session's own stored transcript instead.
+			page, err = h.chatMessageHistory(r, sessionID)
+		}
 	}
-	page, err := h.SlackHistory.ChannelOverview(r.Context(), sessionID, historyOptionsFrom(r))
 	h.respondChatHistory(w, r, sessionID, page, err)
+}
+
+// chatMessageHistory reads a chat session's own stored transcript (chat_message)
+// as a channel.HistoryPage, oldest-first, honoring the shared ?limit / ?before
+// paging contract. It backs `multica chat history` for sessions with no IM
+// channel (web chat, Feishu, WeCom, DingTalk), whose history lives only in
+// Multica — there is no platform to read back. It pages through the same
+// (created_at, id) cursor the frontend's message list uses, so an agent can walk
+// a long session back without re-reading the recent window each time.
+func (h *Handler) chatMessageHistory(r *http.Request, sessionID pgtype.UUID) (channel.HistoryPage, error) {
+	limit := clampTranscriptLimit(parseHistoryLimit(r.URL.Query().Get("limit")))
+	beforeCreatedAt, beforeID := parseTranscriptCursor(r.URL.Query().Get("before"))
+	messages, err := h.Queries.ListChatMessagesPage(r.Context(), db.ListChatMessagesPageParams{
+		ChatSessionID:   sessionID,
+		Limit:           int32(limit),
+		BeforeCreatedAt: beforeCreatedAt,
+		BeforeID:        beforeID,
+	})
+	if err != nil {
+		return channel.HistoryPage{}, err
+	}
+	// ListChatMessagesPage returns newest-first; the channel contract is
+	// oldest-first, so emit the rows in reverse.
+	out := make([]channel.HistoryMessage, 0, len(messages))
+	for i := len(messages) - 1; i >= 0; i-- {
+		m := messages[i]
+		role := channel.HistoryRoleUser
+		if m.Role == "assistant" {
+			role = channel.HistoryRoleAssistant
+		}
+		out = append(out, channel.HistoryMessage{
+			ID:     uuidToString(m.ID),
+			Role:   role,
+			Text:   m.Content,
+			Author: transcriptAuthor(role),
+			TS:     m.CreatedAt.Time.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	// Name the platform the transcript came from. HistoryPage.ChannelType is
+	// documented as empty ONLY for a session bound to no channel, so leaving it
+	// unset here would tell a Feishu/WeCom/DingTalk agent it is in a web-only
+	// chat — and would disagree with the empty-read path below, which already
+	// reports the bound platform for the very same session.
+	channelType, err := h.sessionChannelType(r.Context(), sessionID)
+	if err != nil {
+		return channel.HistoryPage{}, fmt.Errorf("%w: %w", errChannelBindingRead, err)
+	}
+	page := channel.HistoryPage{ChannelType: channelType, Messages: out}
+	// Advertise a cursor when a full page came back, so the agent can page to
+	// older messages (mirrors the Slack reader's "more may exist" signal).
+	if len(messages) == limit && len(out) > 0 {
+		oldest := messages[len(messages)-1]
+		page.NextCursor = transcriptCursor(oldest.CreatedAt.Time, oldest.ID)
+	}
+	return page, nil
+}
+
+// Transcript paging bounds, mirroring the Slack reader's clamp so an agent
+// cannot dump a long session's whole transcript into its context.
+const (
+	defaultTranscriptLimit = 30
+	maxTranscriptLimit     = 50
+)
+
+func clampTranscriptLimit(n int) int {
+	if n <= 0 {
+		return defaultTranscriptLimit
+	}
+	if n > maxTranscriptLimit {
+		return maxTranscriptLimit
+	}
+	return n
+}
+
+// transcriptCursor encodes a (created_at, id) pair into the opaque ?before
+// cursor the channel contract uses. The transcript pages by the same
+// (created_at, id) tuple as the frontend's message list, so the cursor must
+// carry both halves; RFC3339Nano keeps the timestamp lossless and readable to
+// an agent that inspects it.
+func transcriptCursor(createdAt time.Time, id pgtype.UUID) string {
+	return createdAt.UTC().Format(time.RFC3339Nano) + "|" + uuidToString(id)
+}
+
+// parseTranscriptCursor splits a ?before cursor back into the (created_at, id)
+// tuple ListChatMessagesPage pages by. A missing or malformed cursor returns
+// zero values so the read starts at the most recent messages.
+func parseTranscriptCursor(before string) (pgtype.Timestamptz, pgtype.UUID) {
+	ts, id, ok := strings.Cut(before, "|")
+	if !ok {
+		return pgtype.Timestamptz{}, pgtype.UUID{}
+	}
+	t, err := time.Parse(time.RFC3339Nano, ts)
+	if err != nil {
+		return pgtype.Timestamptz{}, pgtype.UUID{}
+	}
+	uid, err := util.ParseUUID(id)
+	if err != nil {
+		return pgtype.Timestamptz{}, pgtype.UUID{}
+	}
+	return pgtype.Timestamptz{Time: t, Valid: true}, uid
+}
+
+// transcriptAuthor labels a chat_message row with the channel vocabulary
+// ("Bot" / "User") rather than the raw role string, so an agent reading the
+// transcript sees the same author kinds as the Slack path instead of literal
+// "user" / "assistant".
+func transcriptAuthor(role channel.HistoryRole) string {
+	if role == channel.HistoryRoleAssistant {
+		return "Bot"
+	}
+	return "User"
 }
 
 // GetChatThread serves `multica chat thread [id]` — one thread's messages. With
@@ -143,6 +274,12 @@ func (h *Handler) respondChatHistory(w http.ResponseWriter, r *http.Request, ses
 			})
 			return
 		}
+		if errors.Is(err, errChannelBindingRead) {
+			slog.Error("chat session channel binding read failed", append(logger.RequestAttrs(r),
+				"error", err, "chat_session_id", uuidToString(sessionID))...)
+			writeError(w, http.StatusInternalServerError, "failed to read chat session channel binding")
+			return
+		}
 		slog.Error("chat channel history read failed", append(logger.RequestAttrs(r),
 			"error", err, "chat_session_id", uuidToString(sessionID))...)
 		writeError(w, http.StatusBadGateway, "failed to read channel history")
@@ -204,6 +341,13 @@ func noHistoryNote(channelType string) string {
 	}
 	return "This conversation is on " + channelType + ", whose backlog this server cannot read. You can see the messages addressed to you in this session, but not the rest of the room."
 }
+
+// errChannelBindingRead marks a transcript read whose MESSAGES were fetched but
+// whose channel binding could not be. It is not an upstream channel failure, so
+// respondChatHistory answers it like the empty-read path answers the same
+// failure — one status code for one cause, whether or not the session happened
+// to have messages.
+var errChannelBindingRead = errors.New("chat session channel binding read failed")
 
 // sessionChannelType names the platform behind a session, or "" when there is
 // none. Channel-agnostic on purpose: a per-platform lookup here would go blind
