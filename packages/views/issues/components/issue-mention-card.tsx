@@ -21,12 +21,14 @@ interface IssueMentionCardProps {
  * per-preference override.
  *
  * Hovering opens IssueHoverCard, which shows the detail the chip has no room
- * for. No `delay` is passed, so it opens on Base UI's default dwell.
+ * for. No `delay` is passed, so it opens on Base UI's default dwell. The same
+ * `fallbackLabel` the chip degrades to names the card when the detail fetch
+ * fails.
  */
 export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardProps) {
   const p = useWorkspacePaths();
   return (
-    <IssueHoverCard issueId={issueId}>
+    <IssueHoverCard issueId={issueId} fallbackLabel={fallbackLabel}>
       <AppLink
         href={p.issueDetail(issueId)}
         newTabTitle={fallbackLabel}

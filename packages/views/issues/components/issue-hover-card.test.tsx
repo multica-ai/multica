@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { useQuery } from "@tanstack/react-query";
+import { renderWithI18n } from "../../test/i18n";
 import { IssueHoverCard } from "./issue-hover-card";
 
 vi.mock("@tanstack/react-query", () => ({
@@ -80,31 +81,71 @@ const BASE_ISSUE: Issue = {
   priority: "none",
 };
 
+const NOT_FOUND_TEXT = "This issue does not exist or has been deleted in this workspace.";
+
+/** The three query states the card body branches on, as react-query reports them. */
+type DetailState =
+  | { phase: "pending" }
+  | { phase: "error" }
+  | { phase: "success"; issue: Issue | undefined };
+
 /**
  * Routes each query the card body makes to its own fixture, keyed by the first
- * segment of the query key the mocked options factories produce.
+ * segment of the query key the mocked options factories produce. The detail
+ * fixture carries `isPending`/`isError` explicitly because the body branches on
+ * them, not on `data` alone.
  */
 function mockQueries(
-  issue: Issue | undefined,
+  detail: DetailState,
   progress?: Map<string, { done: number; total: number }>,
 ): void {
   mockUseQuery.mockImplementation((options: unknown) => {
     const [key] = (options as { queryKey: string[] }).queryKey;
-    if (key === "issue") return { data: issue } as ReturnType<typeof useQuery>;
-    if (key === "child-progress") return { data: progress } as ReturnType<typeof useQuery>;
+    if (key === "issue") {
+      return {
+        data: detail.phase === "success" ? detail.issue : undefined,
+        isPending: detail.phase === "pending",
+        isError: detail.phase === "error",
+      } as unknown as ReturnType<typeof useQuery>;
+    }
+    if (key === "child-progress") {
+      return { data: progress, isPending: false, isError: false } as unknown as ReturnType<
+        typeof useQuery
+      >;
+    }
     throw new Error(`Unexpected query key: ${String(key)}`);
   });
 }
 
-async function openCard(): Promise<void> {
-  const user = userEvent.setup();
-  render(
-    <IssueHoverCard issueId="issue-1" delay={0}>
+/** Shorthand for the common case: the detail query settled with an issue. */
+function mockIssue(
+  issue: Issue,
+  progress?: Map<string, { done: number; total: number }>,
+): void {
+  mockQueries({ phase: "success", issue }, progress);
+}
+
+function renderCard(fallbackLabel?: string): void {
+  renderWithI18n(
+    <IssueHoverCard issueId="issue-1" delay={0} fallbackLabel={fallbackLabel}>
       <span>MUL-3405</span>
     </IssueHoverCard>,
   );
+}
+
+async function openCard(): Promise<void> {
+  const user = userEvent.setup();
+  renderCard();
   await user.hover(screen.getByText("MUL-3405"));
   await screen.findByTestId("status-icon");
+}
+
+/** Opens a card whose detail query never resolves into an issue. */
+async function openFailedCard(fallbackLabel = "MUL-7"): Promise<void> {
+  const user = userEvent.setup();
+  renderCard(fallbackLabel);
+  await user.hover(screen.getByText("MUL-3405"));
+  await screen.findByText(NOT_FOUND_TEXT);
 }
 
 /** Paragraphs inside the open card: the title, plus the snippet when shown. */
@@ -116,15 +157,11 @@ function paragraphCount(): number {
 describe("IssueHoverCard", () => {
   beforeEach(() => {
     mockUseQuery.mockReset();
-    mockQueries(BASE_ISSUE);
+    mockIssue(BASE_ISSUE);
   });
 
   it("does not fetch issue detail until the card opens", () => {
-    render(
-      <IssueHoverCard issueId="issue-1" delay={0}>
-        <span>MUL-3405</span>
-      </IssueHoverCard>,
-    );
+    renderCard();
 
     // Assert the trigger actually rendered BEFORE asserting the absent fetch.
     // Without this, a component that throws or renders nothing would satisfy
@@ -135,11 +172,7 @@ describe("IssueHoverCard", () => {
 
   it("reveals the full title on hover", async () => {
     const user = userEvent.setup();
-    render(
-      <IssueHoverCard issueId="issue-1" delay={0}>
-        <span>MUL-3405</span>
-      </IssueHoverCard>,
-    );
+    renderCard();
 
     await user.hover(screen.getByText("MUL-3405"));
 
@@ -150,7 +183,7 @@ describe("IssueHoverCard", () => {
   });
 
   it("shows the priority glyph ahead of the status icon", async () => {
-    mockQueries({ ...BASE_ISSUE, priority: "high" });
+    mockIssue({ ...BASE_ISSUE, priority: "high" });
 
     await openCard();
 
@@ -161,7 +194,7 @@ describe("IssueHoverCard", () => {
   });
 
   it("omits the priority glyph when the issue has no priority", async () => {
-    mockQueries({ ...BASE_ISSUE, priority: "none" });
+    mockIssue({ ...BASE_ISSUE, priority: "none" });
 
     await openCard();
 
@@ -170,7 +203,7 @@ describe("IssueHoverCard", () => {
   });
 
   it("shows the assignee avatar and name, without nesting another hover card", async () => {
-    mockQueries({ ...BASE_ISSUE, assignee_type: "member", assignee_id: "user-9" });
+    mockIssue({ ...BASE_ISSUE, assignee_type: "member", assignee_id: "user-9" });
 
     await openCard();
 
@@ -183,7 +216,7 @@ describe("IssueHoverCard", () => {
   });
 
   it("omits the assignee when the issue is unassigned", async () => {
-    mockQueries({ ...BASE_ISSUE, assignee_type: null, assignee_id: null });
+    mockIssue({ ...BASE_ISSUE, assignee_type: null, assignee_id: null });
 
     await openCard();
 
@@ -192,7 +225,7 @@ describe("IssueHoverCard", () => {
   });
 
   it("shows sub-issue progress when the workspace map has an entry", async () => {
-    mockQueries(BASE_ISSUE, new Map([["issue-1", { done: 2, total: 5 }]]));
+    mockIssue(BASE_ISSUE, new Map([["issue-1", { done: 2, total: 5 }]]));
 
     await openCard();
 
@@ -200,7 +233,7 @@ describe("IssueHoverCard", () => {
   });
 
   it("omits progress when the issue has no children", async () => {
-    mockQueries(BASE_ISSUE, new Map([["other-issue", { done: 1, total: 3 }]]));
+    mockIssue(BASE_ISSUE, new Map([["other-issue", { done: 1, total: 3 }]]));
 
     await openCard();
 
@@ -208,7 +241,7 @@ describe("IssueHoverCard", () => {
   });
 
   it("omits progress when the issue has an entry with no children counted", async () => {
-    mockQueries(BASE_ISSUE, new Map([["issue-1", { done: 0, total: 0 }]]));
+    mockIssue(BASE_ISSUE, new Map([["issue-1", { done: 0, total: 0 }]]));
 
     await openCard();
 
@@ -216,7 +249,7 @@ describe("IssueHoverCard", () => {
   });
 
   it("shows a flattened description snippet clamped to two lines", async () => {
-    mockQueries({
+    mockIssue({
       ...BASE_ISSUE,
       description: "**Set up** your first runtime so [Mika](/agents/mika) can pick up work",
     });
@@ -231,7 +264,7 @@ describe("IssueHoverCard", () => {
   // text: an always-rendered block would emit an empty <p>, which no text query
   // can see. The title is the only paragraph a description-less card may have.
   it("omits the description block when there is no description", async () => {
-    mockQueries({ ...BASE_ISSUE, description: null });
+    mockIssue({ ...BASE_ISSUE, description: null });
 
     await openCard();
 
@@ -242,7 +275,7 @@ describe("IssueHoverCard", () => {
   it("omits the description block when the description flattens to nothing", async () => {
     // An image-only description: every visible token is stripped by the
     // preview, so rendering it would leave an empty paragraph.
-    mockQueries({
+    mockIssue({
       ...BASE_ISSUE,
       description: "![](/api/attachments/abc/download)",
     });
@@ -251,5 +284,34 @@ describe("IssueHoverCard", () => {
 
     expect(screen.getByText(BASE_ISSUE.title)).toBeInTheDocument();
     expect(paragraphCount()).toBe(1);
+  });
+
+  it("keeps the skeleton while the detail query is pending", async () => {
+    mockQueries({ phase: "pending" });
+    const user = userEvent.setup();
+    renderCard("MUL-7");
+
+    await user.hover(screen.getByText("MUL-3405"));
+
+    expect(await screen.findByTestId("issue-hover-card-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText(NOT_FOUND_TEXT)).not.toBeInTheDocument();
+  });
+
+  it("replaces the skeleton with the not-found state when the detail query fails", async () => {
+    mockQueries({ phase: "error" });
+
+    await openFailedCard();
+
+    expect(screen.queryByTestId("issue-hover-card-skeleton")).not.toBeInTheDocument();
+    expect(screen.getByText("MUL-7")).toBeInTheDocument();
+  });
+
+  it("replaces the skeleton with the not-found state when the query settles with no issue", async () => {
+    mockQueries({ phase: "success", issue: undefined });
+
+    await openFailedCard();
+
+    expect(screen.queryByTestId("issue-hover-card-skeleton")).not.toBeInTheDocument();
+    expect(screen.getByText("MUL-7")).toBeInTheDocument();
   });
 });

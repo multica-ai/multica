@@ -11,6 +11,7 @@ import {
   HoverCardContent,
 } from "@multica/ui/components/ui/hover-card";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { useT } from "../../i18n";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { descriptionPreview } from "./description-preview";
 import { PriorityIcon } from "./priority-icon";
@@ -20,6 +21,12 @@ import { StatusIcon } from "./status-icon";
 interface IssueHoverCardProps {
   issueId: string;
   children: ReactNode;
+  /**
+   * Identifier to name the issue with when the detail fetch fails (e.g.
+   * "MUL-7"). The same label the chip degrades to, so a card that cannot load
+   * still says which issue it is about.
+   */
+  fallbackLabel?: string;
   /**
    * Open delay override, in milliseconds. Exists for tests only — production
    * passes nothing, so the card uses Base UI's default of 600ms. Tests pass 0
@@ -47,7 +54,12 @@ interface IssueHoverCardProps {
  * would fire one per mention on render. (The chip inside the trigger has its
  * own unresolved-issue fetch; that is independent of this.)
  */
-export function IssueHoverCard({ issueId, children, delay }: IssueHoverCardProps) {
+export function IssueHoverCard({
+  issueId,
+  children,
+  fallbackLabel,
+  delay,
+}: IssueHoverCardProps) {
   return (
     <HoverCard>
       {/* Rendered as a span, not the trigger's default anchor: the children are
@@ -56,29 +68,55 @@ export function IssueHoverCard({ issueId, children, delay }: IssueHoverCardProps
         {children}
       </HoverCardTrigger>
       <HoverCardContent align="start" className="w-auto min-w-56 max-w-80">
-        <IssueHoverCardBody issueId={issueId} />
+        <IssueHoverCardBody issueId={issueId} fallbackLabel={fallbackLabel} />
       </HoverCardContent>
     </HoverCard>
   );
 }
 
-function IssueHoverCardBody({ issueId }: { issueId: string }) {
+function IssueHoverCardBody({
+  issueId,
+  fallbackLabel,
+}: {
+  issueId: string;
+  fallbackLabel?: string;
+}) {
   const wsId = useWorkspaceId();
-  const { data: issue } = useQuery(issueDetailOptions(wsId, issueId));
+  const detail = useQuery(issueDetailOptions(wsId, issueId));
   // One workspace-wide progress snapshot shared with the issues list and issue
   // detail, not a per-issue children fetch: opening a card reuses the cache.
   const { data: childProgress } = useQuery(childIssueProgressOptions(wsId));
+  const { t } = useT("issues");
   const { getActorName } = useActorName();
 
-  // A skeleton rather than localized loading text — the card carries no copy of
-  // its own, so it needs no translation keys.
-  if (!issue) {
+  // A skeleton rather than localized loading text: only the pending phase gets
+  // it, so a settled query never animates forever.
+  if (detail.isPending) {
     return (
-      <div className="flex flex-col gap-1.5">
+      <div data-testid="issue-hover-card-skeleton" className="flex flex-col gap-1.5">
         <Skeleton className="h-3 w-20" />
         <Skeleton className="h-4 w-48" />
         <Skeleton className="mt-1.5 h-3 w-44" />
         <Skeleton className="mt-1.5 h-4 w-24" />
+      </div>
+    );
+  }
+
+  const issue = detail.data;
+
+  // Terminal state for every way the detail can fail to arrive: an error after
+  // retries, a deleted issue, or a mention the viewer cannot read. Named with
+  // the identifier the way the chip degrades, so the card still says which
+  // issue it is about.
+  if (detail.isError || !issue) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        {fallbackLabel && (
+          <span className="text-caption font-medium text-muted-foreground">
+            {fallbackLabel}
+          </span>
+        )}
+        <p className="text-caption text-muted-foreground">{t(($) => $.detail.not_found)}</p>
       </div>
     );
   }
