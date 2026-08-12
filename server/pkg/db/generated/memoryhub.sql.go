@@ -355,10 +355,11 @@ const createReviewerTask = `-- name: CreateReviewerTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_summary,
     memory_policy, review_policy, reviewer_agent_id, review_of_execution_id
-) VALUES (
+)
+SELECT
     $1, $2, $6, 'queued', $3, $4,
     'optional', 'none', $1, $5
-)
+WHERE lock_task_owner_rows($1, $6, $2)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, memory_gate_state, memory_gate_error_code, memory_gate_evidence_ref, memory_gate_next_wakeup, memory_gate_lease_id, memory_gate_lease_expires_at, memoryhub_run_id, execution_id, memory_policy, memory_attachment_ref, review_policy, reviewer_agent_id, review_of_execution_id
 `
 
@@ -374,6 +375,10 @@ type CreateReviewerTaskParams struct {
 // V5-7.2 dispatching -> queued: creates the reviewer's agent_task_queue row.
 // review_policy is frozen to 'none' so a reviewer run never requests its own
 // reviewer (recursion guard). memory_policy is 'optional' (refs-only evidence).
+// Fenced against workspace teardown: lock_task_owner_rows (migration 284)
+// locks the owners' workspace rows in the writer's own transaction and returns
+// false once they are gone, so this statement writes no row instead of stranding
+// a task in a workspace that has just been deleted (MUL-5999).
 func (q *Queries) CreateReviewerTask(ctx context.Context, arg CreateReviewerTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createReviewerTask,
 		arg.AgentID,

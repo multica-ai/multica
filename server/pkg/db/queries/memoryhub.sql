@@ -557,13 +557,18 @@ WHERE review_lease_owner IS NOT NULL
 -- V5-7.2 dispatching -> queued: creates the reviewer's agent_task_queue row.
 -- review_policy is frozen to 'none' so a reviewer run never requests its own
 -- reviewer (recursion guard). memory_policy is 'optional' (refs-only evidence).
+-- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
+-- locks the owners' workspace rows in the writer's own transaction and returns
+-- false once they are gone, so this statement writes no row instead of stranding
+-- a task in a workspace that has just been deleted (MUL-5999).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_summary,
     memory_policy, review_policy, reviewer_agent_id, review_of_execution_id
-) VALUES (
+)
+SELECT
     $1, $2, sqlc.narg(issue_id), 'queued', $3, $4,
     'optional', 'none', $1, $5
-)
+WHERE lock_task_owner_rows($1, sqlc.narg(issue_id), $2)
 RETURNING *;
 
 -- name: ResetExpiredDispatchingReviewCAS :one
