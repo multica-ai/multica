@@ -74,6 +74,41 @@ export function IssueHoverCard({
   );
 }
 
+/**
+ * Assignee row of the card.
+ *
+ * Its own component so `useActorName` — which subscribes to the workspace
+ * member list, a query nothing else on this path warms — mounts only for cards
+ * that actually have an assignee to name. Inlining it back into the body would
+ * make the first hover on any mention pull the member directory.
+ */
+function IssueHoverCardAssignee({
+  actorType,
+  actorId,
+}: {
+  actorType: string;
+  actorId: string;
+}) {
+  const { getActorName } = useActorName();
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      {/* This is already a hover card, and the agent live-peek variant would
+          fire its own request — so no nested card, no link. */}
+      <ActorAvatar
+        actorType={actorType}
+        actorId={actorId}
+        size="sm"
+        enableHoverCard={false}
+        profileLink={false}
+        className="shrink-0"
+      />
+      <span className="min-w-0 truncate text-caption text-foreground">
+        {getActorName(actorType, actorId)}
+      </span>
+    </span>
+  );
+}
+
 function IssueHoverCardBody({
   issueId,
   fallbackLabel,
@@ -87,7 +122,6 @@ function IssueHoverCardBody({
   // detail, not a per-issue children fetch: opening a card reuses the cache.
   const { data: childProgress } = useQuery(childIssueProgressOptions(wsId));
   const { t } = useT("issues");
-  const { getActorName } = useActorName();
 
   // A skeleton rather than localized loading text: only the pending phase gets
   // it, so a settled query never animates forever.
@@ -168,21 +202,7 @@ function IssueHoverCardBody({
       {(hasAssignee || hasProgress) && (
         <div className="mt-1 flex items-center justify-between gap-3">
           {hasAssignee ? (
-            <span className="flex min-w-0 items-center gap-1.5">
-              {/* This is already a hover card, and the agent live-peek variant
-                  would fire its own request — so no nested card, no link. */}
-              <ActorAvatar
-                actorType={assigneeType}
-                actorId={assigneeId}
-                size="sm"
-                enableHoverCard={false}
-                profileLink={false}
-                className="shrink-0"
-              />
-              <span className="min-w-0 truncate text-caption text-foreground">
-                {getActorName(assigneeType, assigneeId)}
-              </span>
-            </span>
+            <IssueHoverCardAssignee actorType={assigneeType} actorId={assigneeId} />
           ) : (
             <span />
           )}

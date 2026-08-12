@@ -46,8 +46,13 @@ vi.mock("../../common/actor-avatar", () => ({
   ),
 }));
 
+// A spy, not a stub: `useActorName` subscribes to the workspace member list,
+// so "was this hook mounted at all" is the assertion that keeps the assignee
+// row from being inlined back into the card body.
+const mockUseActorName = vi.hoisted(() => vi.fn(() => ({ getActorName: () => "zain" })));
+
 vi.mock("@multica/core/workspace/hooks", () => ({
-  useActorName: () => ({ getActorName: () => "zain" }),
+  useActorName: mockUseActorName,
 }));
 
 vi.mock("./status-icon", () => ({
@@ -157,6 +162,7 @@ function paragraphCount(): number {
 describe("IssueHoverCard", () => {
   beforeEach(() => {
     mockUseQuery.mockReset();
+    mockUseActorName.mockClear();
     mockIssue(BASE_ISSUE);
   });
 
@@ -231,6 +237,7 @@ describe("IssueHoverCard", () => {
     expect(avatar).toHaveAttribute("data-hover-card", "false");
     expect(avatar).toHaveAttribute("data-profile-link", "false");
     expect(screen.getByText("zain")).toBeInTheDocument();
+    expect(mockUseActorName).toHaveBeenCalled();
   });
 
   it("omits the assignee when the issue is unassigned", async () => {
@@ -240,6 +247,8 @@ describe("IssueHoverCard", () => {
 
     expect(screen.queryByTestId("actor-avatar")).not.toBeInTheDocument();
     expect(screen.queryByText("zain")).not.toBeInTheDocument();
+    // The member directory stays unfetched: the row that reads it never mounts.
+    expect(mockUseActorName).not.toHaveBeenCalled();
   });
 
   it("shows sub-issue progress when the workspace map has an entry", async () => {
