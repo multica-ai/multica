@@ -171,3 +171,56 @@ func (q *Queries) RevokeShareLink(ctx context.Context, arg RevokeShareLinkParams
 	_, err := q.db.Exec(ctx, revokeShareLink, arg.ID, arg.WorkspaceID)
 	return err
 }
+
+const getShareLinkInfoByCode = `-- name: GetShareLinkInfoByCode :one
+SELECT wsl.id, wsl.workspace_id, wsl.code, wsl.created_by, wsl.role, wsl.expires_at, wsl.max_uses, wsl.use_count, wsl.is_active, wsl.created_at,
+       w.name  AS workspace_name,
+       w.slug  AS workspace_slug,
+       u.name  AS creator_name,
+       u.email AS creator_email
+FROM workspace_share_link wsl
+JOIN workspace w ON w.id = wsl.workspace_id
+JOIN "user" u ON u.id = wsl.created_by
+WHERE wsl.code = $1 AND wsl.is_active = true
+  AND (wsl.expires_at IS NULL OR wsl.expires_at > now())
+  AND (wsl.max_uses IS NULL OR wsl.use_count < wsl.max_uses)
+`
+
+type GetShareLinkInfoByCodeRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Code          string             `json:"code"`
+	CreatedBy     pgtype.UUID        `json:"created_by"`
+	Role          string             `json:"role"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	MaxUses       pgtype.Int4        `json:"max_uses"`
+	UseCount      int32              `json:"use_count"`
+	IsActive      bool               `json:"is_active"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	WorkspaceName string             `json:"workspace_name"`
+	WorkspaceSlug string             `json:"workspace_slug"`
+	CreatorName   string             `json:"creator_name"`
+	CreatorEmail  string             `json:"creator_email"`
+}
+
+func (q *Queries) GetShareLinkInfoByCode(ctx context.Context, code string) (GetShareLinkInfoByCodeRow, error) {
+	row := q.db.QueryRow(ctx, getShareLinkInfoByCode, code)
+	var i GetShareLinkInfoByCodeRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Code,
+		&i.CreatedBy,
+		&i.Role,
+		&i.ExpiresAt,
+		&i.MaxUses,
+		&i.UseCount,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.WorkspaceName,
+		&i.WorkspaceSlug,
+		&i.CreatorName,
+		&i.CreatorEmail,
+	)
+	return i, err
+}

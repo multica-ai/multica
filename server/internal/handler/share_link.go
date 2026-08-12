@@ -170,6 +170,46 @@ func (h *Handler) RevokeShareLink(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ShareLinkInfoResponse is the public, pre-join preview of a share link:
+// the workspace name/slug and the inviting user. It deliberately excludes
+// the link code itself and any usage/expiry internals.
+type ShareLinkInfoResponse struct {
+	WorkspaceID   string `json:"workspace_id"`
+	WorkspaceName string `json:"workspace_name"`
+	WorkspaceSlug string `json:"workspace_slug"`
+	CreatorName   string `json:"creator_name,omitempty"`
+	CreatorEmail  string `json:"creator_email,omitempty"`
+	Role          string `json:"role"`
+}
+
+// GetShareLinkInfo — public preview of a workspace share link. No auth is
+// required so a not-yet-logged-in visitor can see what they're joining before
+// signing in. Only the workspace name/slug and inviter are exposed.
+// GET /api/share-links/{code}
+func (h *Handler) GetShareLinkInfo(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	code = strings.TrimSpace(code)
+	if code == "" {
+		writeError(w, http.StatusBadRequest, "code is required")
+		return
+	}
+
+	row, err := h.Queries.GetShareLinkInfoByCode(r.Context(), code)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "share link not found or expired")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ShareLinkInfoResponse{
+		WorkspaceID:   uuidToString(row.WorkspaceID),
+		WorkspaceName: row.WorkspaceName,
+		WorkspaceSlug: row.WorkspaceSlug,
+		CreatorName:   row.CreatorName,
+		CreatorEmail:  row.CreatorEmail,
+		Role:          row.Role,
+	})
+}
+
 // JoinByShareLink — authenticated user joins a workspace via a share link.
 // POST /api/share-links/join
 func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {

@@ -1035,6 +1035,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Public API
 	r.Get("/api/config", h.GetConfig)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
+	// Public share-link preview — no auth: shows the workspace name/slug and
+	// inviter so a not-yet-logged-in visitor can see what they're joining.
+	r.Get("/api/share-links/{code}", h.GetShareLinkInfo)
 
 	// Webhook ingress for autopilots. Outside the authenticated group on
 	// purpose: the bearer token in the URL path IS the credential. Workspace

@@ -8,7 +8,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import type { Workspace } from "@multica/core/types";
+import type { ShareLinkInfo, Workspace } from "@multica/core/types";
 
 function JoinInner() {
   const router = useRouter();
@@ -16,38 +16,57 @@ function JoinInner() {
   const code = searchParams.get("code");
   const user = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
-  const [status, setStatus] = useState<"loading" | "error" | "success">("loading");
-  const [message, setMessage] = useState("Joining workspace...");
 
+  const [info, setInfo] = useState<ShareLinkInfo | null>(null);
+  const [infoError, setInfoError] = useState<string | null>(null);
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joined, setJoined] = useState(false);
+
+  // Load the share-link preview once. No auth needed: this endpoint only
+  // exposes the workspace name/slug and the inviter.
   useEffect(() => {
     if (!code) {
-      setStatus("error");
-      setMessage("No invite code found. Please use a valid share link.");
+      setInfoError("No invite code found. Please use a valid share link.");
       return;
     }
+    let cancelled = false;
+    api
+      .getShareLinkInfo(code)
+      .then((data) => {
+        if (!cancelled) setInfo(data);
+      })
+      .catch(() => {
+        if (!cancelled) setInfoError("This invite link is invalid or has expired.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [code]);
 
+  const handleJoin = () => {
+    if (!code) return;
     if (!user) {
-      // Redirect to login with return URL
+      // Not logged in: send them to login, then return here to join.
       router.push(`/login?next=${encodeURIComponent(`/join?code=${code}`)}`);
       return;
     }
-
-    api.joinByShareLink(code)
+    setJoining(true);
+    setJoinError(null);
+    api
+      .joinByShareLink(code)
       .then(async (result) => {
-        setStatus("success");
-        setMessage("You've joined the workspace!");
-        await useAuthStore.getState().refreshMe();
+        setJoined(true);
         const list = await api.listWorkspaces().catch(() => [] as Workspace[]);
         queryClient.setQueryData(workspaceKeys.list(), list);
         setTimeout(() => {
           router.push(`/${result.workspace_slug || result.workspace_id}/issues`);
-        }, 1500);
+        }, 1200);
       })
       .catch(async (e) => {
         const msg = e instanceof Error ? e.message : "";
         if (msg.includes("already a member")) {
-          setMessage("Already a member — redirecting...");
-          await useAuthStore.getState().refreshMe();
+          // Already joined: bounce to the first workspace.
           try {
             const workspaces = await api.listWorkspaces();
             queryClient.setQueryData(workspaceKeys.list(), workspaces as any);
@@ -60,33 +79,56 @@ function JoinInner() {
           router.push("/");
           return;
         }
-        setStatus("error");
-        setMessage(msg || "Failed to join workspace. The link may have expired.");
+        setJoining(false);
+        setJoinError(msg || "Failed to join the workspace. The link may have expired.");
       });
-  }, [code, user, router]);
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
       <Card className="w-full max-w-md">
         <CardContent className="space-y-4 pt-6">
-          <h1 className="text-xl font-semibold text-center">
-            {status === "loading" ? "Joining..." : status === "success" ? "Joined!" : "Oops"}
-          </h1>
-          <p className="text-center text-muted-foreground">{message}</p>
-          {status === "success" && (
-            <p className="text-center text-sm text-muted-foreground">Redirecting...</p>
-          )}
-          {status === "error" && (
-            <div className="flex justify-center gap-2">
-              <Button variant="outline" onClick={() => router.push("/")}>
-                Go Home
-              </Button>
-              {!user && (
-                <Button onClick={() => router.push(`/login?next=${encodeURIComponent(`/join?code=${code}`)}`)}>
-                  Log In
+          {joined ? (
+            <>
+              <h1 className="text-xl font-semibold text-center">Joined!</h1>
+              <p className="text-center text-muted-foreground">Redirecting to your workspace...</p>
+            </>
+          ) : infoError ? (
+            <>
+              <h1 className="text-xl font-semibold text-center">Oops</h1>
+              <p className="text-center text-muted-foreground">{infoError}</p>
+              <div className="flex justify-center pt-2">
+                <Button variant="outline" onClick={() => router.push("/")}>
+                  Go Home
                 </Button>
+              </div>
+            </>
+          ) : !info ? (
+            <div className="py-6 text-center text-muted-foreground">Loading invite details...</div>
+          ) : (
+            <>
+              <h1 className="text-xl font-semibold text-center">
+                You&apos;re invited to {info.workspace_name}
+              </h1>
+              {info.creator_name && (
+                <p className="text-center text-muted-foreground">
+                  Invited by {info.creator_name}
+                </p>
               )}
-            </div>
+              {!user && (
+                <p className="text-center text-sm text-muted-foreground">
+                  You&apos;ll need to log in to join this workspace.
+                </p>
+              )}
+              {joinError && (
+                <p className="text-center text-sm text-destructive">{joinError}</p>
+              )}
+              <div className="flex justify-center gap-2 pt-2">
+                <Button onClick={handleJoin} disabled={joining}>
+                  {joining ? "Joining..." : user ? "Join Workspace" : "Log In to Join"}
+                </Button>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

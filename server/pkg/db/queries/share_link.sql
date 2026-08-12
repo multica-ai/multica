@@ -9,6 +9,20 @@ WHERE code = $1 AND is_active = true
   AND (expires_at IS NULL OR expires_at > now())
   AND (max_uses IS NULL OR use_count < max_uses);
 
+-- name: GetShareLinkInfoByCode :one
+SELECT wsl.id, wsl.workspace_id, wsl.code, wsl.created_by, wsl.role,
+       wsl.expires_at, wsl.max_uses, wsl.use_count, wsl.is_active, wsl.created_at,
+       w.name  AS workspace_name,
+       w.slug  AS workspace_slug,
+       u.name  AS creator_name,
+       u.email AS creator_email
+FROM workspace_share_link wsl
+JOIN workspace w ON w.id = wsl.workspace_id
+JOIN "user" u ON u.id = wsl.created_by
+WHERE wsl.code = $1 AND wsl.is_active = true
+  AND (wsl.expires_at IS NULL OR wsl.expires_at > now())
+  AND (wsl.max_uses IS NULL OR wsl.use_count < wsl.max_uses);
+
 -- name: ListShareLinksByWorkspace :many
 SELECT wsl.*,
        u.name  AS creator_name,

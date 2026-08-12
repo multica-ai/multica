@@ -125,6 +125,7 @@ import type {
   ReorderPinsRequest,
   Invitation,
   ShareLink,
+  ShareLinkInfo,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -2579,6 +2580,10 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ code }),
     });
+  }
+
+  async getShareLinkInfo(code: string): Promise<ShareLinkInfo> {
+    return this.fetch(`/api/share-links/${encodeURIComponent(code)}`);
   }
 
   async deleteWorkspace(workspaceId: string): Promise<void> {
