@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewReturnsDimBackend(t *testing.T) {
@@ -44,7 +45,16 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentInfo":{"name":"dimcode","version":"0.3.10"},"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":false}}}}\n' "$id"
+      if [ -n "$DIM_INIT_FAIL_HANG" ]; then
+        # Return an error, then ignore TERM and hang so the process does not
+        # exit on stdin EOF — exercises the force-kill cleanup path.
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"initialize failed"}}\n' "$id"
+        trap '' TERM
+        sleep 60 &
+        wait
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentInfo":{"name":"dimcode","version":"0.3.10"},"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":false}}}}\n' "$id"
+      fi
       ;;
     *'"method":"session/new"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_dim_new","models":{"availableModels":[{"modelId":"dim/model-a","name":"Model A"}],"currentModelId":"dim/model-a"}}}\n' "$id"
@@ -67,7 +77,14 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":20}}}\n' "$id"
+      # When DIM_PROMPT_NO_STOP is set, omit stopReason so extractPromptResult
+      # never fires onPromptDone — exercises the bounded final-notification
+      # wait (the backend must still complete, not hang on a missing notify).
+      if [ -n "$DIM_PROMPT_NO_STOP" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"usage":{"inputTokens":10,"outputTokens":20}}}\n' "$id"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":20}}}\n' "$id"
+      fi
       ;;
     *'"method":"session/close"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
@@ -248,5 +265,76 @@ func TestDimResumeNotFound(t *testing.T) {
 	}
 	if strings.Contains(reqs, "session/new") {
 		t.Fatal("backend must not fall through to session/new itself; the daemon owns the fresh retry")
+	}
+}
+
+// TestDimCleanupKillsHangingChild verifies the deferred cleanup force-kills a
+// child that ignores stdin EOF and SIGTERM after an early RPC failure, so
+// Result still closes (review #3 failure-path race). Without the bounded
+// force-kill, cmd.Wait() would hang forever and resCh would never close.
+func TestDimCleanupKillsHangingChild(t *testing.T) {
+	t.Parallel()
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	b := newDimTestBackendWithEnv(t, requestsFile, map[string]string{"DIM_INIT_FAIL_HANG": "1"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 20 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	// Result must close within a bounded window — the force-kill (bounded by
+	// dimProcessWaitTimeout) guarantees the hung child cannot block it.
+	select {
+	case result := <-session.Result:
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed from the initialize error, got %q", result.Status)
+		}
+	case <-time.After(dimProcessWaitTimeout + 10*time.Second):
+		t.Fatal("Result never closed: the hanging child was not force-killed within the cleanup timeout")
+	}
+}
+
+// TestDimPromptMissingNotificationStillCompletes verifies the success path
+// does not hang when the runtime returns session/prompt without a stopReason
+// (so onPromptDone never fires). The bounded final-notification wait must
+// fall through and let Result close (review #3 success-path race).
+func TestDimPromptMissingNotificationStillCompletes(t *testing.T) {
+	t.Parallel()
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	b := newDimTestBackendWithEnv(t, requestsFile, map[string]string{"DIM_PROMPT_NO_STOP": "1"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 20 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
+		// The turn completed (session/prompt returned ok); the missing
+		// stopReason only means no usage/stopReason was captured. Status must
+		// still be completed, not hang or fail.
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+		}
+	case <-time.After(dimNotificationQuietTime + 15*time.Second):
+		t.Fatal("Result never closed: the missing prompt notification was not bounded by the quiet-time wait")
 	}
 }
