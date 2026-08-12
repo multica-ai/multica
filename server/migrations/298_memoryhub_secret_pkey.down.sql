@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS memoryhub_secret_pkey;

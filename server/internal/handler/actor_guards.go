@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+
+	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 // RequireHumanActor is a chi-style middleware that rejects requests
@@ -105,4 +107,42 @@ func RequireHumanActor(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// RequireWorkspaceOwnerOrAdmin rejects every actor except a human workspace
+// owner/admin. It is the V6-1 actor guard for the review-repair surface: agent,
+// task-token, daemon, runtime, project-lead, subject-owner, and ordinary-member
+// actors receive 403 before any execution lookup is exposed (V6-1.1).
+//
+// It runs AFTER a workspace membership middleware that has resolved the
+// workspace and stamped the member into the request context (the memoryhub
+// route group uses middleware.RequireWorkspaceRole(queries, "owner", "admin"),
+// which sets that context). allowedWorkspaceID, when non-empty, restricts the
+// resolved workspace to that exact id.
+func RequireWorkspaceOwnerOrAdmin(allowedWorkspaceID string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Machine credentials (task token / cloud PAT) are never owners.
+			switch r.Header.Get("X-Actor-Source") {
+			case "task_token", "cloud_pat":
+				writeError(w, http.StatusForbidden, "workspace owner or admin role is required")
+				return
+			}
+			member, ok := middleware.MemberFromContext(r.Context())
+			if !ok {
+				writeError(w, http.StatusForbidden, "workspace owner or admin role is required")
+				return
+			}
+			ws := middleware.WorkspaceIDFromContext(r.Context())
+			if allowedWorkspaceID != "" && ws != allowedWorkspaceID {
+				writeError(w, http.StatusForbidden, "workspace owner or admin role is required")
+				return
+			}
+			if member.Role != "owner" && member.Role != "admin" {
+				writeError(w, http.StatusForbidden, "workspace owner or admin role is required")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

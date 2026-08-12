@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY execution_evidence_record_review_due_idx ON execution_evidence_record (review_state, review_next_wakeup, review_lease_expires_at) WHERE review_state IN ('pending', 'dispatching', 'retry_wait');

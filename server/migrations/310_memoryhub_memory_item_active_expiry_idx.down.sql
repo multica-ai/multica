@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS memoryhub_memory_item_active_expiry_idx;

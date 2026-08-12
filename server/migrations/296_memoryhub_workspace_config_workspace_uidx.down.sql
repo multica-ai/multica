@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS memoryhub_workspace_config_workspace_uidx;

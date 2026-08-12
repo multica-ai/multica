@@ -418,6 +418,41 @@ deleted_lark_user_bindings AS (
 ),
 deleted_lark_binding_tokens AS (
     DELETE FROM lark_binding_token WHERE workspace_id = $1
+),
+deleted_memoryhub_bindings AS (
+    DELETE FROM memoryhub_binding WHERE workspace_id = $1
+),
+deleted_memoryhub_compensations AS (
+    DELETE FROM memoryhub_compensation WHERE workspace_id = $1
+),
+deleted_memoryhub_secrets AS (
+    DELETE FROM memoryhub_secret WHERE workspace_id = $1
+),
+deleted_memoryhub_workspace_configs AS (
+    DELETE FROM memoryhub_workspace_config WHERE workspace_id = $1
+),
+deleted_memoryhub_memory_dockets AS (
+    DELETE FROM memoryhub_memory_docket WHERE workspace_id = $1
+),
+deleted_memoryhub_memory_items AS (
+    DELETE FROM memoryhub_memory_item
+    WHERE docket_id IN (SELECT id FROM memoryhub_memory_docket WHERE workspace_id = $1)
+),
+deleted_execution_ledgers AS (
+    DELETE FROM execution_ledger WHERE workspace_id = $1
+),
+deleted_guardian_states AS (
+    DELETE FROM guardian_state WHERE workspace_id = $1
+),
+deleted_evidence_events AS (
+    DELETE FROM execution_evidence_event WHERE workspace_id = $1
+),
+deleted_evidence_records AS (
+    DELETE FROM execution_evidence_record WHERE workspace_id = $1
+),
+deleted_evidence_scores AS (
+    DELETE FROM execution_evidence_score
+    WHERE execution_id IN (SELECT execution_id FROM execution_evidence_record WHERE workspace_id = $1)
 )
 UPDATE channel_media_pending_object
 SET state = CASE
@@ -443,6 +478,10 @@ WHERE channel_media_pending_object.workspace_id = $1
 // Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
 // than the session set because that column exists precisely so this statement
 // does not have to join through chat_session, which it deletes in this same CTE.
+// ALL-16 workspace-scoped data (additive registration; no existing entry
+// changed). memoryhub_memory_item links through memoryhub_memory_docket;
+// execution_evidence_score links through execution_evidence_record, which is
+// deleted in the same CTE so its execution ids are captured first.
 // Keep the two-system cleanup ledger until object storage has been settled.
 // Moving every row out of pending also prevents a concurrent media bind from
 // attaching an object after the workspace teardown commits. The reconciler

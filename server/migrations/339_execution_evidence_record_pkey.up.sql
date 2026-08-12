@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY execution_evidence_record_pkey ON execution_evidence_record (execution_id);

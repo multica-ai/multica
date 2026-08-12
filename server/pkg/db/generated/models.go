@@ -156,11 +156,24 @@ type AgentTaskQueue struct {
 	// The row id referenced by trigger_evidence_kind (a comment id, autopilot_run id, rule_version id, source task id, ...). No FK; resolvable per-kind in the app layer (MUL-4302 §2).
 	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
 	// The one human accountable for this run, for audit / visibility / cost only — NEVER consulted for authorization (that is originator_user_id). Invariant: when originator_user_id IS NOT NULL, this equals it; the two diverge only when originator_user_id IS NULL (autopilot rule_owner / degraded owner_fallback name an accountable human while authorization carries none). No FK, no cascade (MUL-4302 §1/§7). NULL means no accountable human was resolved: a pre-migration row, OR a NEW row whose audit source is not-yet-resolved / unattributed (e.g. run_only autopilot until rule_owner lands) — NOT pre-migration only.
-	AccountableUserID         pgtype.UUID `json:"accountable_user_id"`
-	SessionRolloutMissing     bool        `json:"session_rollout_missing"`
-	RetiredSessionID          pgtype.Text `json:"retired_session_id"`
-	QuickActionsDisabled      bool        `json:"quick_actions_disabled"`
-	RegenerateQuickActionsFor pgtype.UUID `json:"regenerate_quick_actions_for"`
+	AccountableUserID         pgtype.UUID        `json:"accountable_user_id"`
+	SessionRolloutMissing     bool               `json:"session_rollout_missing"`
+	RetiredSessionID          pgtype.Text        `json:"retired_session_id"`
+	QuickActionsDisabled      bool               `json:"quick_actions_disabled"`
+	RegenerateQuickActionsFor pgtype.UUID        `json:"regenerate_quick_actions_for"`
+	MemoryGateState           pgtype.Text        `json:"memory_gate_state"`
+	MemoryGateErrorCode       pgtype.Text        `json:"memory_gate_error_code"`
+	MemoryGateEvidenceRef     pgtype.Text        `json:"memory_gate_evidence_ref"`
+	MemoryGateNextWakeup      pgtype.Timestamptz `json:"memory_gate_next_wakeup"`
+	MemoryGateLeaseID         pgtype.Text        `json:"memory_gate_lease_id"`
+	MemoryGateLeaseExpiresAt  pgtype.Timestamptz `json:"memory_gate_lease_expires_at"`
+	MemoryhubRunID            pgtype.Text        `json:"memoryhub_run_id"`
+	ExecutionID               pgtype.UUID        `json:"execution_id"`
+	MemoryPolicy              string             `json:"memory_policy"`
+	MemoryAttachmentRef       pgtype.Text        `json:"memory_attachment_ref"`
+	ReviewPolicy              pgtype.Text        `json:"review_policy"`
+	ReviewerAgentID           pgtype.UUID        `json:"reviewer_agent_id"`
+	ReviewOfExecutionID       pgtype.UUID        `json:"review_of_execution_id"`
 }
 
 type AgentToLabel struct {
@@ -508,6 +521,101 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ExecutionEvidenceEvent struct {
+	ID             pgtype.UUID        `json:"id"`
+	SchemaVersion  int32              `json:"schema_version"`
+	ExecutionID    pgtype.UUID        `json:"execution_id"`
+	RunID          string             `json:"run_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	RuntimeID      pgtype.UUID        `json:"runtime_id"`
+	Model          string             `json:"model"`
+	Sequence       int64              `json:"sequence"`
+	Kind           string             `json:"kind"`
+	PayloadRef     []byte             `json:"payload_ref"`
+	PayloadSha256  string             `json:"payload_sha256"`
+	OccurredAt     pgtype.Timestamptz `json:"occurred_at"`
+	RetentionUntil pgtype.Timestamptz `json:"retention_until"`
+}
+
+type ExecutionEvidenceRecord struct {
+	ExecutionID          pgtype.UUID        `json:"execution_id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	SchemaVersion        int32              `json:"schema_version"`
+	RuntimeEvidenceState string             `json:"runtime_evidence_state"`
+	OutputRef            []byte             `json:"output_ref"`
+	MessageRefs          []byte             `json:"message_refs"`
+	UsageRefs            []byte             `json:"usage_refs"`
+	ArtifactRefs         []byte             `json:"artifact_refs"`
+	TestRefs             []byte             `json:"test_refs"`
+	ReviewPolicy         string             `json:"review_policy"`
+	ReviewState          string             `json:"review_state"`
+	ReviewVersion        int32              `json:"review_version"`
+	ReviewerAgentID      pgtype.UUID        `json:"reviewer_agent_id"`
+	ReviewTaskID         pgtype.UUID        `json:"review_task_id"`
+	ReviewOutputRef      []byte             `json:"review_output_ref"`
+	ReviewAttempt        int32              `json:"review_attempt"`
+	MaxReviewAttempts    int32              `json:"max_review_attempts"`
+	ReviewNextWakeup     pgtype.Timestamptz `json:"review_next_wakeup"`
+	ReviewLeaseOwner     pgtype.Text        `json:"review_lease_owner"`
+	ReviewLeaseExpiresAt pgtype.Timestamptz `json:"review_lease_expires_at"`
+	ReviewFailureCode    pgtype.Text        `json:"review_failure_code"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ExecutionEvidenceScore struct {
+	ExecutionID      pgtype.UUID        `json:"execution_id"`
+	AlgorithmVersion string             `json:"algorithm_version"`
+	InputDigest      string             `json:"input_digest"`
+	Availability     int32              `json:"availability"`
+	Isolation        int32              `json:"isolation"`
+	Security         int32              `json:"security"`
+	Recovery         int32              `json:"recovery"`
+	Performance      int32              `json:"performance"`
+	Observability    int32              `json:"observability"`
+	Overall          int32              `json:"overall"`
+	Eligible         bool               `json:"eligible"`
+	InputSnapshot    []byte             `json:"input_snapshot"`
+	ComputedAt       pgtype.Timestamptz `json:"computed_at"`
+	EvidenceRefs     []pgtype.UUID      `json:"evidence_refs"`
+}
+
+type ExecutionLedger struct {
+	ExecutionID         pgtype.UUID        `json:"execution_id"`
+	Attempt             int32              `json:"attempt"`
+	TaskID              pgtype.UUID        `json:"task_id"`
+	TaskVersion         int32              `json:"task_version"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	ScopeKind           string             `json:"scope_kind"`
+	IssueID             pgtype.UUID        `json:"issue_id"`
+	RunID               string             `json:"run_id"`
+	AgentID             pgtype.UUID        `json:"agent_id"`
+	RuntimeID           pgtype.UUID        `json:"runtime_id"`
+	Model               string             `json:"model"`
+	State               string             `json:"state"`
+	LeaseOwner          pgtype.Text        `json:"lease_owner"`
+	LeaseExpiresAt      pgtype.Timestamptz `json:"lease_expires_at"`
+	Version             int32              `json:"version"`
+	RetryOf             pgtype.UUID        `json:"retry_of"`
+	RerunOf             pgtype.UUID        `json:"rerun_of"`
+	DelegatedFrom       pgtype.UUID        `json:"delegated_from"`
+	HandoffOf           pgtype.UUID        `json:"handoff_of"`
+	Origin              pgtype.Text        `json:"origin"`
+	StartedAt           pgtype.Timestamptz `json:"started_at"`
+	FinishedAt          pgtype.Timestamptz `json:"finished_at"`
+	StopReason          pgtype.Text        `json:"stop_reason"`
+	IdempotencyKey      string             `json:"idempotency_key"`
+	MergedFrom          []pgtype.UUID      `json:"merged_from"`
+	ReviewPolicy        string             `json:"review_policy"`
+	ReviewerAgentID     pgtype.UUID        `json:"reviewer_agent_id"`
+	ReviewOfExecutionID pgtype.UUID        `json:"review_of_execution_id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -603,6 +711,26 @@ type GithubPullRequestCheckSuite struct {
 	Conclusion pgtype.Text        `json:"conclusion"`
 	Status     string             `json:"status"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type GuardianState struct {
+	ID                 pgtype.UUID        `json:"id"`
+	ExecutionID        pgtype.UUID        `json:"execution_id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	State              string             `json:"state"`
+	Fingerprint        string             `json:"fingerprint"`
+	LeaseOwner         pgtype.Text        `json:"lease_owner"`
+	LeaseExpiresAt     pgtype.Timestamptz `json:"lease_expires_at"`
+	NextWakeup         pgtype.Timestamptz `json:"next_wakeup"`
+	Version            int32              `json:"version"`
+	Score              pgtype.Int4        `json:"score"`
+	HandoffOf          pgtype.UUID        `json:"handoff_of"`
+	CandidateAgentID   pgtype.UUID        `json:"candidate_agent_id"`
+	CandidateRuntimeID pgtype.UUID        `json:"candidate_runtime_id"`
+	EvidenceRef        pgtype.Text        `json:"evidence_ref"`
+	FailureCode        pgtype.Text        `json:"failure_code"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type InboxItem struct {
@@ -841,6 +969,110 @@ type Member struct {
 	UserID      pgtype.UUID        `json:"user_id"`
 	Role        string             `json:"role"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type MemoryhubBinding struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ScopeKind      string             `json:"scope_kind"`
+	ScopeID        pgtype.UUID        `json:"scope_id"`
+	SubjectType    string             `json:"subject_type"`
+	SubjectID      pgtype.UUID        `json:"subject_id"`
+	Status         string             `json:"status"`
+	Version        int32              `json:"version"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	RemoteTeamID   pgtype.Text        `json:"remote_team_id"`
+	RemoteAgentID  pgtype.Text        `json:"remote_agent_id"`
+	RemoteTaskID   pgtype.Text        `json:"remote_task_id"`
+	RemoteName     pgtype.Text        `json:"remote_name"`
+	EvidenceRef    pgtype.UUID        `json:"evidence_ref"`
+	NextWakeup     pgtype.Timestamptz `json:"next_wakeup"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MemoryhubCompensation struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	BindingID      pgtype.UUID        `json:"binding_id"`
+	Op             string             `json:"op"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	RemoteRef      []byte             `json:"remote_ref"`
+	State          string             `json:"state"`
+	Attempt        int32              `json:"attempt"`
+	MaxAttempt     int32              `json:"max_attempt"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	LeaseOwner     pgtype.Text        `json:"lease_owner"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	Version        int32              `json:"version"`
+	LastError      string             `json:"last_error"`
+	EvidenceRef    pgtype.Text        `json:"evidence_ref"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MemoryhubMemoryDocket struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ScopeKind   string             `json:"scope_kind"`
+	ScopeID     pgtype.UUID        `json:"scope_id"`
+	SubjectType string             `json:"subject_type"`
+	SubjectID   pgtype.UUID        `json:"subject_id"`
+	Policy      string             `json:"policy"`
+	Revision    int32              `json:"revision"`
+	GeneratedAt pgtype.Timestamptz `json:"generated_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MemoryhubMemoryItem struct {
+	ID          pgtype.UUID        `json:"id"`
+	DocketID    pgtype.UUID        `json:"docket_id"`
+	State       string             `json:"state"`
+	Kind        string             `json:"kind"`
+	Summary     string             `json:"summary"`
+	SourceRef   string             `json:"source_ref"`
+	EvidenceRef pgtype.UUID        `json:"evidence_ref"`
+	Priority    int32              `json:"priority"`
+	DedupeKey   string             `json:"dedupe_key"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	WithdrawnAt pgtype.Timestamptz `json:"withdrawn_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MemoryhubSecret struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	CredentialRef     string             `json:"credential_ref"`
+	Kind              string             `json:"kind"`
+	EnvelopeVersion   int32              `json:"envelope_version"`
+	KeyID             string             `json:"key_id"`
+	Nonce             []byte             `json:"nonce"`
+	Ciphertext        []byte             `json:"ciphertext"`
+	Aad               string             `json:"aad"`
+	UserKeyHash       pgtype.Text        `json:"user_key_hash"`
+	State             string             `json:"state"`
+	StateVersion      int32              `json:"state_version"`
+	LeaseOwner        pgtype.Text        `json:"lease_owner"`
+	LeaseExpiresAt    pgtype.Timestamptz `json:"lease_expires_at"`
+	LastErrorCode     pgtype.Text        `json:"last_error_code"`
+	LastErrorAt       pgtype.Timestamptz `json:"last_error_at"`
+	RotationFromKeyID pgtype.Text        `json:"rotation_from_key_id"`
+	RevokedAt         pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MemoryhubWorkspaceConfig struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	CredentialRef pgtype.Text        `json:"credential_ref"`
+	UserKeyHash   pgtype.Text        `json:"user_key_hash"`
+	ServiceID     pgtype.Text        `json:"service_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type NotificationPreference struct {

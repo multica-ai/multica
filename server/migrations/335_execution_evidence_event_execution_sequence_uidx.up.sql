@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY execution_evidence_event_execution_sequence_uidx ON execution_evidence_event (execution_id, sequence);

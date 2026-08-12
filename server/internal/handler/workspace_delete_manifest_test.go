@@ -108,6 +108,17 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"webhook_delivery":                workspaceDelete,
 	"workspace":                       workspaceDelete,
 	"workspace_invitation":            workspaceDelete,
+	"execution_evidence_event":        workspaceDelete,
+	"execution_evidence_record":       workspaceDelete,
+	"execution_evidence_score":        workspaceDelete,
+	"execution_ledger":                workspaceDelete,
+	"guardian_state":                  workspaceDelete,
+	"memoryhub_binding":               workspaceDelete,
+	"memoryhub_compensation":          workspaceDelete,
+	"memoryhub_memory_docket":         workspaceDelete,
+	"memoryhub_memory_item":           workspaceDelete,
+	"memoryhub_secret":                workspaceDelete,
+	"memoryhub_workspace_config":      workspaceDelete,
 }
 
 func TestWorkspaceDeletionManifestCoversPublicSchema(t *testing.T) {

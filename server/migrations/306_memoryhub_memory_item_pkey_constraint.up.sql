@@ -1,0 +1,1 @@
+ALTER TABLE memoryhub_memory_item ADD CONSTRAINT memoryhub_memory_item_pkey PRIMARY KEY USING INDEX memoryhub_memory_item_pkey;

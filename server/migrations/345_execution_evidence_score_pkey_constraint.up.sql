@@ -1,0 +1,1 @@
+ALTER TABLE execution_evidence_score ADD CONSTRAINT execution_evidence_score_pkey PRIMARY KEY USING INDEX execution_evidence_score_pkey;

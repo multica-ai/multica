@@ -1,0 +1,1 @@
+ALTER TABLE execution_evidence_score DROP CONSTRAINT IF EXISTS execution_evidence_score_pkey;

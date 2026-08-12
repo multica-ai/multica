@@ -1,0 +1,1 @@
+ALTER TABLE memoryhub_memory_docket DROP CONSTRAINT IF EXISTS memoryhub_memory_docket_pkey;

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY memoryhub_workspace_config_workspace_uidx ON memoryhub_workspace_config (workspace_id);

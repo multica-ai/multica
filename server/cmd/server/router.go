@@ -29,6 +29,7 @@ import (
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/memoryhub"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -241,6 +242,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
+	// Wire the MemoryHub service (V6-1/V6-2). The DB-backed review-repair
+	// flow needs no remote client; remote operations use the configured
+	// client when present and fail closed otherwise. The routes are always
+	// registered so owner repair is reachable regardless of remote config.
+	h.MemoryHubSvc = service.NewMemoryHubService(queries, buildMemoryHubRemoteClient())
 	if opts.BusinessMetrics != nil {
 		// Wire the BusinessMetrics receiver into the cloud runtime client
 		// so every outbound Fleet/Gateway request feeds the
@@ -1094,6 +1100,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
+
+		// --- MemoryHub routes (ALL-16) ---
+		// Registered only when the MemoryHub service is wired (nil-safe).
+		if h.MemoryHubSvc != nil {
+			r.Route("/api/memoryhub", func(r chi.Router) {
+				r.Get("/health", h.HandleMemoryHubHealth)
+				r.Get("/evidence/{execution_id}", h.HandleGetExecutionEvidence)
+				r.Get("/evidence/{execution_id}/score", h.HandleGetExecutionEvidenceScore)
+				// V6-1/V6-2 owner repair surface: only workspace owner/admin.
+				// RequireWorkspaceMember resolves the workspace (slug or id
+				// header/query), loads the member, and stamps the member
+				// context; RequireWorkspaceOwnerOrAdmin then enforces the
+				// owner/admin role fail-closed. The handler reads the
+				// workspace from the same context.
+				r.With(middleware.RequireWorkspaceMember(queries), handler.RequireWorkspaceOwnerOrAdmin("")).
+					Post("/evidence/{execution_id}/review-repair", h.HandleRepairBlockedReviewer)
+			})
+		}
 
 		// --- User-scoped routes (no workspace context required) ---
 		r.Get("/api/me", h.GetMe)
@@ -1952,4 +1976,25 @@ func wecomMetricsOrNil(m *obsmetrics.WecomMetrics) wecom.Metrics {
 		return nil
 	}
 	return m
+}
+
+// buildMemoryHubRemoteClient constructs the RemoteClient boundary for the
+// MemoryHub service. It reads the same env knobs as the M0 contract probe
+// (MEMORYHUB_CORE_URL / MEMORYHUB_PROXY_URL / TDAI_USER_KEY /
+// TDAI_SERVICE_ID). When none is configured the nil-safe unconfigured
+// remote is returned so the DB-backed review-repair flow still works.
+func buildMemoryHubRemoteClient() service.RemoteClient {
+	coreURL := strings.TrimRight(strings.TrimSpace(os.Getenv("MEMORYHUB_CORE_URL")), "/")
+	if coreURL == "" {
+		coreURL = strings.TrimRight(strings.TrimSpace(os.Getenv("MEMORYHUB_PROXY_URL")), "/")
+	}
+	if coreURL == "" {
+		return service.NewMemoryHubRemoteClient(nil)
+	}
+	client := memoryhub.New(memoryhub.Options{
+		BaseURL:   coreURL,
+		ServiceID: strings.TrimSpace(os.Getenv("TDAI_SERVICE_ID")),
+		UserKey:   strings.TrimSpace(os.Getenv("TDAI_USER_KEY")),
+	})
+	return service.NewMemoryHubRemoteClient(client)
 }

@@ -1,0 +1,1 @@
+ALTER TABLE execution_evidence_event DROP CONSTRAINT IF EXISTS execution_evidence_event_pkey;

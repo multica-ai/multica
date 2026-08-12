@@ -1,0 +1,1 @@
+ALTER TABLE execution_evidence_record ADD CONSTRAINT execution_evidence_record_pkey PRIMARY KEY USING INDEX execution_evidence_record_pkey;

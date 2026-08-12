@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY memoryhub_compensation_idempotency_uidx ON memoryhub_compensation (idempotency_key);

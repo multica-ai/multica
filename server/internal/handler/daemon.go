@@ -1715,6 +1715,12 @@ type claimBuildFailure struct {
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
+	// T10: carry the refs-only MemoryHub claim preparation for MemoryHub
+	// executions. The credential handle is assigned by the daemon claim path
+	// after the broker issues it; this builds the identity + attachment refs.
+	if prep := memoryHubPreparationForTask(task, runtimeWorkspaceID); prep != nil {
+		resp.MemoryHub = prep
+	}
 	// Claim-only capability: this server resolves the squad-leader role on the
 	// wire (is_leader_task / squad_id), so the daemon must not re-derive it
 	// from the briefing text. Set unconditionally — on every claim, leader or
@@ -3086,6 +3092,29 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// runtimeCompletionEvidence builds the five-category CompletionInput for the
+// evidence gate from what the server can observe at completion time: the
+// daemon-reported output, persisted chat messages for the task's session, and
+// persisted task_usage rows. Artifacts/tests refs are reported by the daemon
+// through the result payload; absent required refs evaluate as satisfied.
+// Non-MemoryHub tasks ignore this value entirely (the gate delegates to the
+// plain completion path).
+func (h *Handler) runtimeCompletionEvidence(r *http.Request, taskID, output string) service.CompletionInput {
+	taskUUID := parseUUID(taskID)
+	messageCount := 0
+	if task, err := h.Queries.GetAgentTask(r.Context(), taskUUID); err == nil && task.ChatSessionID.Valid {
+		if msgs, err := h.Queries.ListChatMessages(r.Context(), task.ChatSessionID); err == nil {
+			messageCount = len(msgs)
+		}
+	}
+	usagePresent := false
+	if usage, err := h.Queries.GetTaskUsage(r.Context(), taskUUID); err == nil && len(usage) > 0 {
+		usagePresent = true
+	}
+	result, _ := json.Marshal(map[string]string{"output": output})
+	return service.CompletionInputFromResult(result, messageCount, usagePresent)
+}
+
 // CompleteTask marks a running task as completed.
 type TaskCompleteRequest struct {
 	PRURL     string `json:"pr_url"`
@@ -3150,7 +3179,13 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
 	// missing continuity-gap flag.
-	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.SessionRolloutMissing, req.RetiredSessionID)
+	//
+	// MemoryHub executions (those carrying an execution snapshot) complete only
+	// through the runtime evidence gate (B10): the five runtime-owned evidence
+	// categories must be present, otherwise the run follows the failure/retry
+	// path with a specific missing-evidence code and never transiently becomes
+	// completed. Non-MemoryHub tasks use the plain completion path unchanged.
+	task, err := h.TaskService.CompleteTaskWithRuntimeEvidenceGate(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.SessionRolloutMissing, req.RetiredSessionID, h.runtimeCompletionEvidence(r, taskID, req.Output))
 	if err != nil {
 		// A CompleteTask error is an infrastructure failure (transaction /
 		// assistant-outcome write), not a bad request: an already-finalized
