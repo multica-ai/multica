@@ -144,15 +144,20 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to load dingtalk group route")
 		return
 	}
-	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-		ID: agentUUID, WorkspaceID: wsUUID,
-	})
+	// Load without a kind filter so the explicit non-user validation below is
+	// reachable. Keep the workspace boundary fail-closed in the handler: an
+	// Agent from another workspace remains indistinguishable from a missing ID.
+	agent, err := h.Queries.GetAgent(r.Context(), agentUUID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "agent not found in this workspace")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to load agent")
+		return
+	}
+	if agent.WorkspaceID != wsUUID {
+		writeError(w, http.StatusNotFound, "agent not found in this workspace")
 		return
 	}
 	if agent.Kind != "user" {
@@ -183,10 +188,8 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 			// The query re-checks and locks the target agent so a concurrent
 			// archive cannot land an assignment from a stale active snapshot.
 			// Distinguish that lifecycle conflict from a genuinely missing route.
-			currentAgent, agentErr := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-				ID: agentUUID, WorkspaceID: wsUUID,
-			})
-			if agentErr == nil && currentAgent.ArchivedAt.Valid {
+			currentAgent, agentErr := h.Queries.GetAgent(r.Context(), agentUUID)
+			if agentErr == nil && currentAgent.WorkspaceID == wsUUID && currentAgent.Kind == "user" && currentAgent.ArchivedAt.Valid {
 				writeError(w, http.StatusConflict, "an archived agent cannot handle a DingTalk group")
 				return
 			}

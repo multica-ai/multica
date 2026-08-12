@@ -114,6 +114,13 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 // delay dwarfs every pipeline budget.
 const DefaultMediaTimeout = 45 * time.Second
 
+// Dedup finalization is a short durability step after the claimed pipeline has
+// selected a terminal outcome. The request context may already be cancelled
+// (notably after repeated route conflicts), so preserve its values while giving
+// Mark/Release a bounded opportunity to commit instead of stranding a claim
+// until stale reclaim.
+const dedupFinalizeTimeout = time.Second
+
 type mediaQueueEntry struct {
 	tail chan struct{}
 }
@@ -273,8 +280,10 @@ func (r *Router) dispatch(ctx context.Context, set ResolverSet, msg channel.Inbo
 
 	res, finalize, err := r.processClaimed(ctx, set, msg, inst, claimToken, bareFresh)
 
-	if claimed {
-		r.applyFinalize(ctx, set, inst.ID, msg.MessageID, claimToken, finalize)
+	if claimed && finalize != finalizeNone {
+		finalizeCtx, finalizeCancel := context.WithTimeout(context.WithoutCancel(ctx), dedupFinalizeTimeout)
+		r.applyFinalize(finalizeCtx, set, inst.ID, msg.MessageID, claimToken, finalize)
+		finalizeCancel()
 	}
 
 	// ErrClaimLost: another worker holds the claim. Surface as duplicate.
@@ -396,6 +405,9 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	var sessionID pgtype.UUID
 	var appendRes AppendResult
 	for {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return Result{}, finalizeRelease, ctxErr
+		}
 		sessionID, err = set.Session.EnsureSession(ctx, EnsureSessionParams{
 			Installation: inst,
 			Sender:       sessionCreator,

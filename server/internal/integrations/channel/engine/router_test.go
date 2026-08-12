@@ -42,6 +42,7 @@ type fakeValidatedInbound struct {
 	inst   ResolvedInstallation
 	insts  []ResolvedInstallation
 	err    error
+	errs   []error
 	callsN int
 }
 
@@ -49,13 +50,18 @@ func (f *fakeValidatedInbound) ResolveValidatedInbound(_ context.Context, inst R
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.callsN++
+	call := f.callsN - 1
+	resolveErr := f.err
+	if call < len(f.errs) {
+		resolveErr = f.errs[call]
+	}
 	if len(f.insts) >= f.callsN {
-		return f.insts[f.callsN-1], f.err
+		return f.insts[call], resolveErr
 	}
 	if f.inst.ID.Valid || f.inst.AgentID.Valid {
 		inst = f.inst
 	}
-	return inst, f.err
+	return inst, resolveErr
 }
 
 func (f *fakeValidatedInbound) calls() int {
@@ -68,6 +74,8 @@ type fakeDedup struct {
 	mu         sync.Mutex
 	token      pgtype.UUID
 	claimErr   error
+	respectCtx bool
+	releaseErr error
 	markCalls  int
 	relCalls   int
 	claimCalls int
@@ -82,30 +90,48 @@ func (f *fakeDedup) Claim(_ context.Context, _ pgtype.UUID, _ string) (pgtype.UU
 	}
 	return f.token, nil
 }
-func (f *fakeDedup) Mark(_ context.Context, _ pgtype.UUID, _ string, _ pgtype.UUID) error {
+func (f *fakeDedup) Mark(ctx context.Context, _ pgtype.UUID, _ string, _ pgtype.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.respectCtx && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	f.markCalls++
 	return nil
 }
-func (f *fakeDedup) Release(_ context.Context, _ pgtype.UUID, _ string, _ pgtype.UUID) error {
+func (f *fakeDedup) Release(ctx context.Context, _ pgtype.UUID, _ string, _ pgtype.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.respectCtx && ctx.Err() != nil {
+		f.releaseErr = ctx.Err()
+		return ctx.Err()
+	}
 	f.relCalls++
 	return nil
 }
 func (f *fakeDedup) marks() int    { f.mu.Lock(); defer f.mu.Unlock(); return f.markCalls }
 func (f *fakeDedup) releases() int { f.mu.Lock(); defer f.mu.Unlock(); return f.relCalls }
+func (f *fakeDedup) releaseError() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.releaseErr
+}
 
 type fakeBinder struct {
 	mu           sync.Mutex
 	ensureID     pgtype.UUID
 	ensureErr    error
+	ensureErrs   []error
+	ensureCalls  int
+	ensureParams []EnsureSessionParams
+	ensureHook   func(int)
 	appendResult AppendResult
 	parseIssue   bool
 	appendErr    error
 	appendErrs   []error
 	appendCalls  int
+	appended     []AppendParams
+	appendHook   func(int)
 	appendDelay  time.Duration
 	bindErr      error
 	lastEnsure   EnsureSessionParams
@@ -116,8 +142,21 @@ type fakeBinder struct {
 }
 
 func (f *fakeBinder) EnsureSession(_ context.Context, p EnsureSessionParams) (pgtype.UUID, error) {
+	f.mu.Lock()
 	f.lastEnsure = p
-	return f.ensureID, f.ensureErr
+	f.ensureCalls++
+	f.ensureParams = append(f.ensureParams, p)
+	err := f.ensureErr
+	if len(f.ensureErrs) > 0 {
+		err = f.ensureErrs[0]
+		f.ensureErrs = f.ensureErrs[1:]
+	}
+	call, hook := f.ensureCalls, f.ensureHook
+	f.mu.Unlock()
+	if hook != nil {
+		hook(call)
+	}
+	return f.ensureID, err
 }
 func (f *fakeBinder) MarkPendingFresh(_ context.Context, _ pgtype.UUID) error {
 	f.mu.Lock()
@@ -142,7 +181,14 @@ func (f *fakeBinder) AppendMessage(_ context.Context, p AppendParams) (AppendRes
 		}
 		res.IssueCommand, _ = ParseIssueCommand(commandSource)
 	}
+	if err == nil {
+		f.appended = append(f.appended, p)
+	}
+	call, hook := f.appendCalls, f.appendHook
 	f.mu.Unlock()
+	if hook != nil {
+		hook(call)
+	}
 	if delay > 0 {
 		time.Sleep(delay)
 	}
@@ -153,6 +199,21 @@ func (f *fakeBinder) appends() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.appendCalls
+}
+func (f *fakeBinder) ensures() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ensureCalls
+}
+func (f *fakeBinder) ensureAttempts() []EnsureSessionParams {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]EnsureSessionParams(nil), f.ensureParams...)
+}
+func (f *fakeBinder) successfulAppends() []AppendParams {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]AppendParams(nil), f.appended...)
 }
 func (f *fakeBinder) BindMedia(_ context.Context, p BindMediaParams) error {
 	f.mu.Lock()
@@ -444,10 +505,15 @@ func newHarness(t *testing.T) *harness {
 		reader:  &fakeReader{ws: db.Workspace{IssuePrefix: "MUL"}},
 	}
 	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{Logger: discardLogger()})
+	h.register(h.validated)
+	return h
+}
+
+func (h *harness) register(validated ValidatedInboundResolver) {
 	h.router.Register(channel.TypeFeishu, ResolverSet{
 		Installation: h.inst,
 		Identity:     h.ident,
-		Validated:    h.validated,
+		Validated:    validated,
 		Dedup:        h.dedup,
 		Session:      h.binder,
 		Audit:        h.audit,
@@ -456,7 +522,6 @@ func newHarness(t *testing.T) *harness {
 		Media:        h.media,
 		OriginType:   "lark_chat",
 	})
-	return h
 }
 
 func TestRouter_NoResolverSet_ReturnsError(t *testing.T) {
@@ -636,8 +701,193 @@ func TestRouter_RouteFenceConflictRefreshesAndRetriesSameClaim(t *testing.T) {
 	if h.binder.lastAppend.AgentID != newRoute.AgentID || h.binder.lastAppend.RouteRevision != 2 {
 		t.Fatalf("retry append route = agent %v revision %d, want agent %v revision 2", h.binder.lastAppend.AgentID, h.binder.lastAppend.RouteRevision, newRoute.AgentID)
 	}
-	if h.dedup.releases() != 0 {
-		t.Fatalf("route retry released already-ACKed claim %d times", h.dedup.releases())
+	appended := h.binder.successfulAppends()
+	if len(appended) != 1 || appended[0].AgentID != newRoute.AgentID || appended[0].ClaimToken != h.dedup.token {
+		t.Fatalf("durable appends = %+v, want one append on the new route with the original claim", appended)
+	}
+	if h.dedup.marks() != 0 || h.dedup.releases() != 0 {
+		t.Fatalf("successful in-tx retry finalization = marks %d releases %d, want 0/0", h.dedup.marks(), h.dedup.releases())
+	}
+}
+
+func TestRouter_EnsureSessionConflictRefreshesAndRetriesSameClaim(t *testing.T) {
+	h := newHarness(t)
+	oldRoute := activeResolved(t)
+	oldRoute.RouteRevision = 1
+	newRoute := oldRoute
+	newRoute.AgentID = uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+	newRoute.RouteRevision = 2
+	h.inst.inst = oldRoute
+	h.validated.insts = []ResolvedInstallation{oldRoute, newRoute}
+	h.binder.ensureErrs = []error{ErrRouteChanged, nil}
+
+	msg := p2pMessage(t)
+	msg.Source.ChatType = channel.ChatTypeGroup
+	msg.AddressedToBot = true
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("ensure-session route retry: %v", err)
+	}
+
+	ensures := h.binder.ensureAttempts()
+	if len(ensures) != 2 || ensures[0].Installation.AgentID != oldRoute.AgentID || ensures[1].Installation.AgentID != newRoute.AgentID {
+		t.Fatalf("ensure attempts = %+v, want old route then new route", ensures)
+	}
+	appended := h.binder.successfulAppends()
+	if len(appended) != 1 || appended[0].AgentID != newRoute.AgentID || appended[0].ClaimToken != h.dedup.token {
+		t.Fatalf("durable appends = %+v, want one append on the new route with the original claim", appended)
+	}
+	if h.dedup.marks() != 0 || h.dedup.releases() != 0 {
+		t.Fatalf("successful in-tx retry finalization = marks %d releases %d, want 0/0", h.dedup.marks(), h.dedup.releases())
+	}
+}
+
+func TestRouter_RouteConflictRefreshTerminalPaths(t *testing.T) {
+	refreshInfraErr := errors.New("route refresh database unavailable")
+	for _, tc := range []struct {
+		name        string
+		phase       string
+		refreshErr  error
+		wantError   bool
+		wantMarks   int
+		wantRelease int
+	}{
+		{name: "ensure conflict archived target", phase: "ensure", refreshErr: ErrTargetAgentArchived, wantMarks: 1},
+		{name: "ensure conflict refresh infrastructure error", phase: "ensure", refreshErr: refreshInfraErr, wantError: true, wantRelease: 1},
+		{name: "append conflict archived target", phase: "append", refreshErr: ErrTargetAgentArchived, wantMarks: 1},
+		{name: "append conflict refresh infrastructure error", phase: "append", refreshErr: refreshInfraErr, wantError: true, wantRelease: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.dedup.respectCtx = true
+			oldRoute := activeResolved(t)
+			oldRoute.RouteRevision = 1
+			refreshedRoute := oldRoute
+			refreshedRoute.AgentID = uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+			refreshedRoute.RouteRevision = 2
+			h.inst.inst = oldRoute
+			h.validated.insts = []ResolvedInstallation{oldRoute, refreshedRoute}
+			h.validated.errs = []error{nil, tc.refreshErr}
+			if tc.phase == "ensure" {
+				h.binder.ensureErr = ErrRouteChanged
+			} else {
+				h.binder.appendErr = ErrRouteChanged
+			}
+
+			msg := p2pMessage(t)
+			msg.Source.ChatType = channel.ChatTypeGroup
+			msg.AddressedToBot = true
+			err := h.router.Handle(context.Background(), msg)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("Handle error = %v, wantError %v", err, tc.wantError)
+			}
+			if tc.wantError && !errors.Is(err, tc.refreshErr) {
+				t.Fatalf("Handle error = %v, want wrapped refresh error %v", err, tc.refreshErr)
+			}
+			if h.validated.calls() != 2 {
+				t.Fatalf("validated route resolutions = %d, want initial + refresh", h.validated.calls())
+			}
+			if got := len(h.binder.successfulAppends()); got != 0 {
+				t.Fatalf("old route received %d successful appends, want 0", got)
+			}
+			if h.dedup.marks() != tc.wantMarks || h.dedup.releases() != tc.wantRelease {
+				t.Fatalf("claim finalization = marks %d releases %d, want %d/%d", h.dedup.marks(), h.dedup.releases(), tc.wantMarks, tc.wantRelease)
+			}
+			if errors.Is(tc.refreshErr, ErrTargetAgentArchived) && !waitFor(time.Second, func() bool {
+				for _, result := range h.replier.calls() {
+					if result.Outcome == OutcomeAgentArchived {
+						return true
+					}
+				}
+				return false
+			}) {
+				t.Fatal("archived refresh did not emit the archived-agent outcome")
+			}
+		})
+	}
+}
+
+func TestRouter_RouteConflictWithoutValidatedResolverReleasesClaim(t *testing.T) {
+	h := newHarness(t)
+	h.register(nil)
+	h.binder.ensureErr = ErrRouteChanged
+
+	err := h.router.Handle(context.Background(), p2pMessage(t))
+	if !errors.Is(err, ErrRouteChanged) {
+		t.Fatalf("missing validated resolver error = %v, want route changed", err)
+	}
+	if h.dedup.marks() != 0 || h.dedup.releases() != 1 {
+		t.Fatalf("claim finalization = marks %d releases %d, want 0/1", h.dedup.marks(), h.dedup.releases())
+	}
+	if got := len(h.binder.successfulAppends()); got != 0 {
+		t.Fatalf("old route received %d successful appends, want 0", got)
+	}
+}
+
+func TestRouter_SessionAppendLockFailureReleasesClaimWithoutAppending(t *testing.T) {
+	h := newHarness(t)
+	oldRoute := activeResolved(t)
+	oldRoute.RouteRevision = 1
+	h.inst.inst = oldRoute
+	h.validated.inst = oldRoute
+	h.binder.appendErr = errors.New("append route lock unavailable")
+
+	msg := p2pMessage(t)
+	msg.Source.ChatType = channel.ChatTypeGroup
+	msg.AddressedToBot = true
+	if err := h.router.Handle(context.Background(), msg); err == nil {
+		t.Fatal("append-lock infrastructure error must surface")
+	}
+	if h.dedup.marks() != 0 || h.dedup.releases() != 1 {
+		t.Fatalf("claim finalization = marks %d releases %d, want 0/1", h.dedup.marks(), h.dedup.releases())
+	}
+	if got := len(h.binder.successfulAppends()); got != 0 {
+		t.Fatalf("failed append lock recorded %d successful appends, want 0", got)
+	}
+}
+
+func TestRouter_RepeatedRouteConflictsTerminateOnContextCancellation(t *testing.T) {
+	for _, phase := range []string{"ensure", "append"} {
+		t.Run(phase, func(t *testing.T) {
+			h := newHarness(t)
+			h.dedup.respectCtx = true
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if phase == "ensure" {
+				h.binder.ensureErr = ErrRouteChanged
+				h.binder.ensureHook = func(call int) {
+					if call == 3 {
+						cancel()
+					}
+				}
+			} else {
+				h.binder.appendErr = ErrRouteChanged
+				h.binder.appendHook = func(call int) {
+					if call == 3 {
+						cancel()
+					}
+				}
+			}
+
+			err := h.router.Handle(ctx, p2pMessage(t))
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("repeated %s conflicts error = %v, want context cancellation", phase, err)
+			}
+			if h.dedup.marks() != 0 || h.dedup.releases() != 1 {
+				t.Fatalf("claim finalization = marks %d releases %d, want 0/1", h.dedup.marks(), h.dedup.releases())
+			}
+			if err := h.dedup.releaseError(); err != nil {
+				t.Fatalf("dedup Release inherited cancelled request context: %v", err)
+			}
+			if got := len(h.binder.successfulAppends()); got != 0 {
+				t.Fatalf("old route received %d successful appends, want 0", got)
+			}
+			if phase == "ensure" && h.binder.ensures() != 3 {
+				t.Fatalf("ensure conflicts = %d, want 3 before cancellation", h.binder.ensures())
+			}
+			if phase == "append" && h.binder.appends() != 3 {
+				t.Fatalf("append conflicts = %d, want 3 before cancellation", h.binder.appends())
+			}
+		})
 	}
 }
 

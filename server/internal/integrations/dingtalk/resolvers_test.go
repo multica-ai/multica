@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -18,49 +19,74 @@ type fakeInstallationQueries struct {
 	params db.GetChannelInstallationByAppIDParams
 	row    db.ChannelInstallation
 	err    error
+	calls  int
 }
 
 type fakeValidatedInboundQueries struct {
 	params db.DiscoverDingTalkGroupRouteParams
 	row    db.DiscoverDingTalkGroupRouteRow
 	err    error
+	calls  int
 }
 
 type fakeSessionQueries struct {
-	params     db.DeleteDingTalkStaleGroupChatBindingParams
-	matches    []bool
-	matchCalls int
+	params       db.DeleteDingTalkStaleGroupChatBindingParams
+	matches      []bool
+	matchErrs    []error
+	matchCalls   int
+	deleteCounts []int64
+	deleteErrs   []error
+	deleteCalls  int
 }
 
 func (f *fakeSessionQueries) DingTalkGroupRouteMatchesAgent(context.Context, db.DingTalkGroupRouteMatchesAgentParams) (bool, error) {
-	if f.matchCalls < len(f.matches) {
-		match := f.matches[f.matchCalls]
-		f.matchCalls++
-		return match, nil
-	}
+	call := f.matchCalls
 	f.matchCalls++
-	return true, nil
+	var err error
+	if call < len(f.matchErrs) {
+		err = f.matchErrs[call]
+	}
+	match := true
+	if call < len(f.matches) {
+		match = f.matches[call]
+	}
+	return match, err
 }
 
 func (f *fakeSessionQueries) DeleteDingTalkStaleGroupChatBinding(_ context.Context, params db.DeleteDingTalkStaleGroupChatBindingParams) (int64, error) {
 	f.params = params
-	return 0, nil
+	call := f.deleteCalls
+	f.deleteCalls++
+	var count int64
+	if call < len(f.deleteCounts) {
+		count = f.deleteCounts[call]
+	}
+	var err error
+	if call < len(f.deleteErrs) {
+		err = f.deleteErrs[call]
+	}
+	return count, err
 }
 
 func (f *fakeInstallationQueries) GetChannelInstallationByAppID(_ context.Context, params db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error) {
 	f.params = params
+	f.calls++
 	return f.row, f.err
 }
 
 func (f *fakeValidatedInboundQueries) DiscoverDingTalkGroupRoute(_ context.Context, params db.DiscoverDingTalkGroupRouteParams) (db.DiscoverDingTalkGroupRouteRow, error) {
 	f.params = params
+	f.calls++
 	return f.row, f.err
 }
 
 type captureChatSession struct {
 	ensure      engine.EnsureSessionInput
 	ensureCalls int
+	ensureErr   error
 	append      engine.AppendInput
+	appendCalls int
+	appended    int
 	runGuard    bool
 	media       engine.BindMediaInput
 }
@@ -68,14 +94,18 @@ type captureChatSession struct {
 func (c *captureChatSession) EnsureSession(_ context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error) {
 	c.ensure = in
 	c.ensureCalls++
-	return pgtype.UUID{}, nil
+	return pgtype.UUID{}, c.ensureErr
 }
 func (c *captureChatSession) MarkPendingFresh(context.Context, pgtype.UUID) error { return nil }
-func (c *captureChatSession) AppendUserMessage(_ context.Context, in engine.AppendInput) (engine.AppendResult, error) {
+func (c *captureChatSession) AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error) {
 	c.append = in
+	c.appendCalls++
 	if c.runGuard && in.BeforeWrite != nil {
-		return engine.AppendResult{}, in.BeforeWrite(context.Background(), nil)
+		if err := in.BeforeWrite(ctx, nil); err != nil {
+			return engine.AppendResult{}, err
+		}
 	}
+	c.appended++
 	return engine.AppendResult{}, nil
 }
 func (c *captureChatSession) BindMediaRefs(_ context.Context, in engine.BindMediaInput) error {
@@ -115,6 +145,99 @@ func TestInstallationResolverGroupLookupIsReadOnly(t *testing.T) {
 	platform, ok := resolved.Platform.(db.ChannelInstallation)
 	if !ok || platform.AgentID != defaultAgentID {
 		t.Fatalf("platform installation must retain default agent: %#v", resolved.Platform)
+	}
+}
+
+func TestDingTalkResolversRejectMalformedCallbackRaw(t *testing.T) {
+	t.Run("installation", func(t *testing.T) {
+		fake := &fakeInstallationQueries{}
+		_, err := (&installationResolver{q: fake}).ResolveInstallation(context.Background(), channel.InboundMessage{Raw: []byte("{")})
+		if err == nil || fake.calls != 0 {
+			t.Fatalf("malformed installation callback error=%v query calls=%d, want decode error before query", err, fake.calls)
+		}
+	})
+
+	t.Run("validated group route", func(t *testing.T) {
+		fake := &fakeValidatedInboundQueries{}
+		_, err := (&validatedInboundResolver{q: fake}).ResolveValidatedInbound(
+			context.Background(), engine.ResolvedInstallation{}, engine.ResolvedIdentity{},
+			channel.InboundMessage{Source: channel.Source{ChatType: channel.ChatTypeGroup}, Raw: []byte("{")},
+		)
+		if err == nil || fake.calls != 0 {
+			t.Fatalf("malformed discovery callback error=%v query calls=%d, want decode error before query", err, fake.calls)
+		}
+	})
+}
+
+func TestValidatedInboundResolverReturnsDiscoveryQueryErrorWithoutChangingRoute(t *testing.T) {
+	queryErr := errors.New("discover route database unavailable")
+	fake := &fakeValidatedInboundQueries{err: queryErr}
+	inst := engine.ResolvedInstallation{AgentID: pgtype.UUID{Bytes: [16]byte{3}, Valid: true}, RouteRevision: 4}
+	raw, _ := json.Marshal(dingtalkRawEvent{ConversationTitle: "Platform team"})
+
+	resolved, err := (&validatedInboundResolver{q: fake}).ResolveValidatedInbound(
+		context.Background(), inst, engine.ResolvedIdentity{},
+		channel.InboundMessage{Source: channel.Source{ChatID: "cid-platform", ChatType: channel.ChatTypeGroup}, Raw: raw},
+	)
+	if !errors.Is(err, queryErr) {
+		t.Fatalf("discovery query error = %v, want %v", err, queryErr)
+	}
+	if resolved.AgentID != inst.AgentID || resolved.RouteRevision != inst.RouteRevision || fake.calls != 1 {
+		t.Fatalf("failed discovery changed route: resolved=%+v calls=%d", resolved, fake.calls)
+	}
+}
+
+func TestDingTalkP2PSkipsGroupDiscoveryAndUsesDefaultAgentSession(t *testing.T) {
+	var installationID, workspaceID, defaultAgentID, senderID pgtype.UUID
+	installationID.Bytes[0], workspaceID.Bytes[0], defaultAgentID.Bytes[0], senderID.Bytes[0] = 1, 2, 3, 4
+	installationID.Valid, workspaceID.Valid, defaultAgentID.Valid, senderID.Valid = true, true, true, true
+	inst := engine.ResolvedInstallation{ID: installationID, WorkspaceID: workspaceID, AgentID: defaultAgentID}
+	msg := channel.InboundMessage{Source: channel.Source{
+		ChatID: "cid-direct", ChatType: channel.ChatTypeP2P, SenderID: "staff-7",
+	}}
+	discovery := &fakeValidatedInboundQueries{err: errors.New("must not query group routes for p2p")}
+
+	resolved, err := (&validatedInboundResolver{q: discovery}).ResolveValidatedInbound(
+		context.Background(), inst, engine.ResolvedIdentity{}, msg,
+	)
+	if err != nil || resolved.AgentID != defaultAgentID || discovery.calls != 0 {
+		t.Fatalf("p2p validated resolution = %+v err=%v discovery calls=%d", resolved, err, discovery.calls)
+	}
+
+	queries := &fakeSessionQueries{matchErrs: []error{errors.New("must not query group route session fence for p2p")}}
+	capture := &captureChatSession{}
+	appendFenceCalls := 0
+	binder := &sessionBinder{
+		q: queries, session: capture,
+		lockRouteForAppend: func(context.Context, pgx.Tx, db.LockDingTalkGroupRouteForAppendParams) error {
+			appendFenceCalls++
+			return errors.New("must not lock group route for p2p")
+		},
+	}
+	if _, err := binder.EnsureSession(context.Background(), engine.EnsureSessionParams{
+		Installation: inst,
+		Sender:       senderID,
+		Message:      msg,
+	}); err != nil {
+		t.Fatalf("p2p EnsureSession: %v", err)
+	}
+	if queries.matchCalls != 0 || queries.deleteCalls != 0 || capture.ensureCalls != 1 {
+		t.Fatalf("p2p route calls = match %d delete %d ensure %d, want 0/0/1", queries.matchCalls, queries.deleteCalls, capture.ensureCalls)
+	}
+	if capture.ensure.AgentID != defaultAgentID || capture.ensure.BindingKey != "cid-direct" || capture.ensure.ChatType != channel.ChatTypeP2P {
+		t.Fatalf("p2p session input = %+v, want default agent and direct-message binding", capture.ensure)
+	}
+	if _, err := binder.AppendMessage(context.Background(), engine.AppendParams{
+		SessionID:      pgtype.UUID{Bytes: [16]byte{5}, Valid: true},
+		InstallationID: installationID,
+		AgentID:        defaultAgentID,
+		Message:        msg,
+	}); err != nil {
+		t.Fatalf("p2p AppendMessage: %v", err)
+	}
+	hasBeforeWrite := capture.append.BeforeWrite != nil
+	if appendFenceCalls != 0 || capture.appended != 1 || hasBeforeWrite {
+		t.Fatalf("p2p append = fence calls %d durable appends %d has beforeWrite %t, want 0/1/false", appendFenceCalls, capture.appended, hasBeforeWrite)
 	}
 }
 
@@ -302,6 +425,88 @@ func TestSessionBinder_StopsWhenGroupRouteChanged(t *testing.T) {
 	}
 }
 
+func TestSessionBinder_GroupRouteFailureMatrix(t *testing.T) {
+	queryErr := errors.New("route query failed")
+	cleanupErr := errors.New("stale binding cleanup failed")
+	ensureErr := errors.New("ensure session failed")
+	for _, tc := range []struct {
+		name         string
+		queries      *fakeSessionQueries
+		ensureErr    error
+		wantErr      error
+		wantContains string
+		wantEnsures  int
+	}{
+		{name: "initial route query error", queries: &fakeSessionQueries{matchErrs: []error{queryErr}}, wantErr: queryErr, wantContains: "verify dingtalk group route"},
+		{name: "initial stale binding cleanup error", queries: &fakeSessionQueries{matches: []bool{true}, deleteErrs: []error{cleanupErr}}, wantErr: cleanupErr, wantContains: "retire stale dingtalk group session"},
+		{name: "underlying ensure session error", queries: &fakeSessionQueries{matches: []bool{true}}, ensureErr: ensureErr, wantErr: ensureErr, wantEnsures: 1},
+		{name: "recheck route query error", queries: &fakeSessionQueries{matches: []bool{true, true}, matchErrs: []error{nil, queryErr}}, wantErr: queryErr, wantContains: "recheck dingtalk group route", wantEnsures: 1},
+		{name: "recheck stale binding cleanup error", queries: &fakeSessionQueries{matches: []bool{true, true}, deleteErrs: []error{nil, cleanupErr}}, wantErr: cleanupErr, wantContains: "recheck dingtalk group session", wantEnsures: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			capture := &captureChatSession{ensureErr: tc.ensureErr}
+			_, err := (&sessionBinder{q: tc.queries, session: capture}).EnsureSession(context.Background(), dingtalkGroupEnsureParams())
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("EnsureSession error = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantContains != "" && !strings.Contains(err.Error(), tc.wantContains) {
+				t.Fatalf("EnsureSession error = %q, want context %q", err, tc.wantContains)
+			}
+			if capture.ensureCalls != tc.wantEnsures {
+				t.Fatalf("underlying ensure calls = %d, want %d", capture.ensureCalls, tc.wantEnsures)
+			}
+			if capture.appendCalls != 0 {
+				t.Fatalf("failed session resolution appended %d messages, want 0", capture.appendCalls)
+			}
+		})
+	}
+}
+
+func TestSessionBinder_RouteChangesAfterSessionCreation(t *testing.T) {
+	queries := &fakeSessionQueries{matches: []bool{true, false}}
+	capture := &captureChatSession{}
+	_, err := (&sessionBinder{q: queries, session: capture}).EnsureSession(context.Background(), dingtalkGroupEnsureParams())
+	if !errors.Is(err, engine.ErrRouteChanged) {
+		t.Fatalf("post-create route conflict = %v, want route changed", err)
+	}
+	if capture.ensureCalls != 1 {
+		t.Fatalf("underlying ensure calls = %d, want 1 before recheck conflict", capture.ensureCalls)
+	}
+	if capture.appendCalls != 0 {
+		t.Fatalf("post-create route conflict appended %d messages, want 0", capture.appendCalls)
+	}
+}
+
+func TestSessionBinder_RetryExhaustionReturnsRouteChanged(t *testing.T) {
+	queries := &fakeSessionQueries{
+		matches:      []bool{true, true, true, true, true, true},
+		deleteCounts: []int64{0, 1, 0, 1, 0, 1},
+	}
+	capture := &captureChatSession{}
+	_, err := (&sessionBinder{q: queries, session: capture}).EnsureSession(context.Background(), dingtalkGroupEnsureParams())
+	if !errors.Is(err, engine.ErrRouteChanged) {
+		t.Fatalf("retry exhaustion error = %v, want route changed", err)
+	}
+	if capture.ensureCalls != 3 || queries.matchCalls != 6 || queries.deleteCalls != 6 {
+		t.Fatalf("retry attempts = ensure %d match %d cleanup %d, want 3/6/6", capture.ensureCalls, queries.matchCalls, queries.deleteCalls)
+	}
+	if capture.appendCalls != 0 {
+		t.Fatalf("retry exhaustion appended %d messages, want 0", capture.appendCalls)
+	}
+}
+
+func dingtalkGroupEnsureParams() engine.EnsureSessionParams {
+	return engine.EnsureSessionParams{
+		Installation: engine.ResolvedInstallation{
+			ID:      pgtype.UUID{Bytes: [16]byte{8}, Valid: true},
+			AgentID: pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
+		},
+		Message: channel.InboundMessage{Source: channel.Source{
+			ChatID: "cid-routed", ChatType: channel.ChatTypeGroup,
+		}},
+	}
+}
+
 func TestSessionBinder_AppendFenceMapsStaleRevisionToRouteChanged(t *testing.T) {
 	var installationID, agentID pgtype.UUID
 	installationID.Bytes[0], agentID.Bytes[0] = 8, 9
@@ -328,5 +533,31 @@ func TestSessionBinder_AppendFenceMapsStaleRevisionToRouteChanged(t *testing.T) 
 	}
 	if got.InstallationID != installationID || got.AgentID != agentID || got.ConversationID != "cid-fenced" || got.RouteRevision != 11 {
 		t.Fatalf("append fence params = %+v", got)
+	}
+}
+
+func TestSessionBinder_AppendFenceReturnsInfrastructureErrorWithoutAppend(t *testing.T) {
+	lockErr := errors.New("route lock database unavailable")
+	capture := &captureChatSession{runGuard: true}
+	binder := &sessionBinder{
+		session: capture,
+		lockRouteForAppend: func(context.Context, pgx.Tx, db.LockDingTalkGroupRouteForAppendParams) error {
+			return lockErr
+		},
+	}
+
+	_, err := binder.AppendMessage(context.Background(), engine.AppendParams{
+		InstallationID: pgtype.UUID{Bytes: [16]byte{8}, Valid: true},
+		AgentID:        pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
+		RouteRevision:  11,
+		Message: channel.InboundMessage{Source: channel.Source{
+			ChatID: "cid-fenced", ChatType: channel.ChatTypeGroup,
+		}},
+	})
+	if !errors.Is(err, lockErr) || !strings.Contains(err.Error(), "lock dingtalk group route for append") {
+		t.Fatalf("append fence error = %v, want wrapped infrastructure error", err)
+	}
+	if capture.appendCalls != 1 || capture.appended != 0 {
+		t.Fatalf("append calls=%d durable appends=%d, want 1/0", capture.appendCalls, capture.appended)
 	}
 }
