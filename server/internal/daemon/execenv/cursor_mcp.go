@@ -32,9 +32,17 @@ type cursorMcpConfigFile struct {
 }
 
 type cursorStdioMcpApprovalServer struct {
+	Type    json.RawMessage `json:"type,omitempty"`
 	Command json.RawMessage `json:"command"`
 	Args    json.RawMessage `json:"args,omitempty"`
 	Env     json.RawMessage `json:"env,omitempty"`
+	Cwd     json.RawMessage `json:"cwd,omitempty"`
+}
+
+type cursorRemoteMcpApprovalServer struct {
+	Type    json.RawMessage `json:"type,omitempty"`
+	URL     json.RawMessage `json:"url"`
+	Headers json.RawMessage `json:"headers,omitempty"`
 }
 
 // prepareCursorMcpConfig writes the Cursor-native MCP sidecars for agents that
@@ -275,18 +283,26 @@ func marshalCursorMcpApprovalServer(raw json.RawMessage) ([]byte, error) {
 	if err := json.Unmarshal(compact.Bytes(), &fields); err != nil {
 		return nil, err
 	}
-	command, isStdio := fields["command"]
-	if !isStdio {
-		return compact.Bytes(), nil
+	if command, isStdio := fields["command"]; isStdio {
+		// Cursor normalizes stdio servers to this exact field set and order
+		// before hashing; unknown fields are dropped and absent fields omitted.
+		return marshalJSONStringifyCompatible(cursorStdioMcpApprovalServer{
+			Type:    fields["type"],
+			Command: command,
+			Args:    fields["args"],
+			Env:     fields["env"],
+			Cwd:     fields["cwd"],
+		})
 	}
-
-	// Cursor parses stdio configs into command, args, and env fields before it
-	// computes approval keys, so the source JSON's object order must not leak in.
-	return marshalJSONStringifyCompatible(cursorStdioMcpApprovalServer{
-		Command: command,
-		Args:    fields["args"],
-		Env:     fields["env"],
-	})
+	if url, isRemote := fields["url"]; isRemote {
+		// Remote servers use a separate normalized shape before hashing.
+		return marshalJSONStringifyCompatible(cursorRemoteMcpApprovalServer{
+			Type:    fields["type"],
+			URL:     url,
+			Headers: fields["headers"],
+		})
+	}
+	return compact.Bytes(), nil
 }
 
 // marshalJSONStringifyCompatible serializes a value without Go's default HTML

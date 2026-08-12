@@ -53,6 +53,38 @@ func TestCursorMcpApprovalKeyMatchesJSONStringifyWithHTMLCharacters(t *testing.T
 	}
 }
 
+func TestCursorMcpApprovalKeyMatchesCursorAgentWithStdioTypeAndCwd(t *testing.T) {
+	t.Parallel()
+
+	keys, err := cursorMcpApprovalKeys("/private/tmp/work", map[string]json.RawMessage{
+		"withtypecwd": json.RawMessage(`{"enabled":true,"cwd":"/tmp/probe","timeout":30,"args":["mcp"],"command":"uvx","type":"stdio"}`),
+	})
+	if err != nil {
+		t.Fatalf("cursorMcpApprovalKeys: %v", err)
+	}
+	// Captured from cursor-agent 2026.08.04-aaa8809 via mcp enable.
+	want := []string{"withtypecwd-ba71d2f70913528e"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("approval keys = %v, want %v", keys, want)
+	}
+}
+
+func TestCursorMcpApprovalKeyMatchesCursorAgentForRemoteServer(t *testing.T) {
+	t.Parallel()
+
+	keys, err := cursorMcpApprovalKeys("/private/tmp/work", map[string]json.RawMessage{
+		"remote": json.RawMessage(`{"enabled":true,"headers":{"Authorization":"Bearer x"},"timeout":30,"url":"https://mcp.example.com","type":"http"}`),
+	})
+	if err != nil {
+		t.Fatalf("cursorMcpApprovalKeys: %v", err)
+	}
+	// Captured from cursor-agent 2026.08.04-aaa8809 via mcp enable.
+	want := []string{"remote-abc2ffe78532b37e"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("approval keys = %v, want %v", keys, want)
+	}
+}
+
 func TestPrepareCursorMcpConfigWritesProjectConfigAndApprovals(t *testing.T) {
 	t.Parallel()
 
