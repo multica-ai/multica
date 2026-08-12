@@ -1820,6 +1820,9 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		QueuedOnly:                 queuedOnly,
 		ExpectedChatSession:        expectedSession,
 		QueueAction:                queueAction,
+		// User-initiated cancel: replay any @agent hand-off deferred while this
+		// run held the active slot (#5278). No-op for chat-only tasks.
+		ReconcileDeferredComments: true,
 	})
 	if errors.Is(err, service.ErrTaskNoLongerQueued) {
 		writeError(w, http.StatusConflict, err.Error())
