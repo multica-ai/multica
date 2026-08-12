@@ -111,6 +111,11 @@ export default function ChatTab() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const [editingOutbox, setEditingOutbox] = useState<{
+    clientId: string;
+    draftKey: string;
+    previousDraft: string;
+  } | null>(null);
 
   // Bridge to the chat-sessions formSheet route. Mirror local
   // activeSessionId into the store so the picker can render the current
@@ -213,6 +218,14 @@ export default function ChatTab() {
   const enqueueOutbox = useChatOutboxStore((s) => s.enqueue);
   const updateOutbox = useChatOutboxStore((s) => s.update);
   const removeOutbox = useChatOutboxStore((s) => s.remove);
+
+  // Session switches cannot leave another session's queued text in the
+  // composer. Put the draft that preceded editing back where it came from.
+  useEffect(() => {
+    if (!editingOutbox || editingOutbox.draftKey === draftKey) return;
+    setDraft(editingOutbox.draftKey, editingOutbox.previousDraft);
+    setEditingOutbox(null);
+  }, [draftKey, editingOutbox, setDraft]);
 
   // ── Realtime ───────────────────────────────────────────────────────────
   useChatSessionRealtime(activeSessionId, () => {
@@ -329,8 +342,8 @@ export default function ChatTab() {
           error.status >= 400 &&
           error.status < 500
         ) {
-          // A 401 clears this user partition through auth-store. Marking it
-          // failed first avoids a retry race while that cleanup runs.
+          // Auth expiry must retain unsent content. Mark this local item
+          // failed and let the user authenticate again before a manual retry.
           updateOutbox(head.clientId, (item) =>
             permanentlyFailedChatOutboxItem(item, message),
           );
@@ -371,6 +384,34 @@ export default function ChatTab() {
       }
       if (!userId || !wsSlug) return;
 
+      if (editingOutbox) {
+        const item = useChatOutboxStore
+          .getState()
+          .items.find((candidate) => candidate.clientId === editingOutbox.clientId);
+        if (!item || item.status === "sending") {
+          setEditingOutbox(null);
+          return;
+        }
+
+        // An edited instruction is logically a new manual-delivery attempt.
+        // Keep its queue position, but give it a new local id and clear retry
+        // state so it cannot be mistaken for an earlier payload.
+        updateOutbox(item.clientId, (current) => ({
+          ...current,
+          content,
+          attachmentIds: [...new Set([...current.attachmentIds, ...attachmentIds])],
+          clientId: createChatOutboxClientId(),
+          status: "queued",
+          attemptCount: 0,
+          retryable: true,
+          lastError: null,
+          nextAttemptAt: null,
+        }));
+        clearDraft(editingOutbox.draftKey);
+        setEditingOutbox(null);
+        return;
+      }
+
       const isNewSession = !activeSessionId;
       const sessionId = await ensureSession(content);
       if (!sessionId) return;
@@ -409,6 +450,8 @@ export default function ChatTab() {
       promoteNewDraft,
       clearDraft,
       enqueueOutbox,
+      editingOutbox,
+      updateOutbox,
       netInfo.isConnected,
       userId,
       wsSlug,
@@ -426,35 +469,21 @@ export default function ChatTab() {
   const editOutboxItem = useCallback(
     (item: ChatOutboxItem) => {
       if (item.status === "sending") return;
-      Alert.prompt(
-        "Edit unsent message",
-        undefined,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Save",
-            onPress: (content?: string) => {
-              const next = content?.trim();
-              if (!next) return;
-              updateOutbox(item.clientId, (current) => ({
-                ...current,
-                content: next,
-                clientId: createChatOutboxClientId(),
-                status: "queued",
-                attemptCount: 0,
-                retryable: true,
-                lastError: null,
-                nextAttemptAt: null,
-              }));
-            },
-          },
-        ],
-        "plain-text",
-        item.content,
-      );
+      setEditingOutbox({
+        clientId: item.clientId,
+        draftKey,
+        previousDraft: draft,
+      });
+      setDraft(draftKey, item.content);
     },
-    [updateOutbox],
+    [draft, draftKey, setDraft],
   );
+
+  const cancelOutboxEdit = useCallback(() => {
+    if (!editingOutbox) return;
+    setDraft(editingOutbox.draftKey, editingOutbox.previousDraft);
+    setEditingOutbox(null);
+  }, [editingOutbox, setDraft]);
 
   const handleOutboxPress = useCallback(
     (item: ChatOutboxItem) => {
@@ -620,6 +649,7 @@ export default function ChatTab() {
         <ChatMessageList
           messages={visibleMessages}
           outboxItems={activeOutboxItems}
+          editingOutboxClientId={editingOutbox?.clientId}
           loading={messagesLoading}
           hasSessions={sessions.length > 0}
           agentName={currentAgent?.name}
@@ -650,6 +680,8 @@ export default function ChatTab() {
           allowStop={pendingTask?.status !== "queued"}
           disabled={disabled}
           disabledReason={disabledReason}
+          editingOutboxClientId={editingOutbox?.clientId}
+          onCancelOutboxEdit={cancelOutboxEdit}
         />
       </KeyboardAvoidingView>
 

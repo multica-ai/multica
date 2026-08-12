@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ChatOutboxItem } from "./chat-outbox";
 
 const backingStore = new Map<string, string>();
 const storage = {
@@ -19,7 +20,7 @@ const { clearChatOutbox, hydrateChatOutbox, useChatOutboxStore } =
 const keyFor = (userId: string, workspaceSlug: string) =>
   `multica_draft:outbox:${userId}:${workspaceSlug}`;
 
-const queuedItem = {
+const queuedItem: ChatOutboxItem = {
   clientId: "00000000-0000-4000-8000-000000000001",
   sessionId: "session-1",
   workspaceSlug: "workspace-a",
@@ -84,5 +85,26 @@ describe("chat outbox persistence", () => {
 
     expect(useChatOutboxStore.getState().items).toEqual([]);
     expect(storage.setItem).not.toHaveBeenCalled();
+  });
+
+  it("persists an enqueued message across a simulated process restart", async () => {
+    const key = keyFor("user-a", "workspace-a");
+    await hydrateChatOutbox("user-a", "workspace-a");
+
+    useChatOutboxStore.getState().enqueue(queuedItem);
+
+    await vi.waitFor(() =>
+      expect(JSON.parse(backingStore.get(key) ?? "")).toMatchObject({
+        state: { items: [queuedItem] },
+      }),
+    );
+
+    // `resetModules` gives the second hydrate a fresh Zustand store while
+    // retaining the AsyncStorage backing map, like a full app relaunch.
+    vi.resetModules();
+    const reloaded = await import("./chat-outbox-store");
+    await reloaded.hydrateChatOutbox("user-a", "workspace-a");
+
+    expect(reloaded.useChatOutboxStore.getState().items).toEqual([queuedItem]);
   });
 });

@@ -23,7 +23,8 @@ const { hydrateNewIssueDraft, useNewIssueDraftStore } =
   await import("./new-issue-draft-store");
 const { hydrateNewProjectDraft, useNewProjectDraftStore } =
   await import("./new-project-draft-store");
-const { clearDraftsForUser } = await import("./draft-persistence");
+const { clearChatOutboxForUser, clearDraftsForUser } =
+  await import("./draft-persistence");
 
 const keyFor = (kind: string, userId: string, workspaceSlug: string) =>
   `multica_draft:${kind}:${userId}:${workspaceSlug}`;
@@ -97,15 +98,27 @@ describe("scoped draft persistence", () => {
     });
   });
 
-  it("clears every draft partition when a 401 has no cached user id", async () => {
+  it("does not clear any partition without a user id", async () => {
     backingStore.set(keyFor("chat", "user-a", "workspace-a"), persist({ drafts: {} }));
     backingStore.set(keyFor("outbox", "user-b", "workspace-b"), persist({ items: [] }));
     backingStore.set("unrelated", "keep");
 
     await clearDraftsForUser(null);
 
-    expect(backingStore.has(keyFor("chat", "user-a", "workspace-a"))).toBe(false);
-    expect(backingStore.has(keyFor("outbox", "user-b", "workspace-b"))).toBe(false);
+    expect(backingStore.has(keyFor("chat", "user-a", "workspace-a"))).toBe(true);
+    expect(backingStore.has(keyFor("outbox", "user-b", "workspace-b"))).toBe(true);
     expect(backingStore.get("unrelated")).toBe("keep");
+  });
+
+  it("clears the outbox only for an explicit logout of that user", async () => {
+    const ownOutbox = keyFor("outbox", "user-a", "workspace-a");
+    const otherOutbox = keyFor("outbox", "user-b", "workspace-b");
+    backingStore.set(ownOutbox, persist({ items: [] }));
+    backingStore.set(otherOutbox, persist({ items: [] }));
+
+    await clearChatOutboxForUser("user-a");
+
+    expect(backingStore.has(ownOutbox)).toBe(false);
+    expect(backingStore.has(otherOutbox)).toBe(true);
   });
 });

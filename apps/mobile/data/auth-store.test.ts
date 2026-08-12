@@ -26,6 +26,7 @@ const secureStorage = {
 const restoreQueryCacheForUser = vi.fn();
 const clearQueryCacheForUser = vi.fn();
 const clearDraftsForUser = vi.fn();
+const clearChatOutboxForUser = vi.fn();
 const clearChatOutbox = vi.fn();
 
 vi.mock("./api", () => ({ api, ApiError }));
@@ -37,7 +38,10 @@ vi.mock("./query-persistence", () => ({
   restoreQueryCacheForUser,
   clearQueryCacheForUser,
 }));
-vi.mock("./stores/draft-persistence", () => ({ clearDraftsForUser }));
+vi.mock("./stores/draft-persistence", () => ({
+  clearDraftsForUser,
+  clearChatOutboxForUser,
+}));
 vi.mock("./stores/chat-outbox-store", () => ({ clearChatOutbox }));
 
 const { useAuthStore } = await import("./auth-store");
@@ -53,6 +57,7 @@ describe("useAuthStore.initialize", () => {
     restoreQueryCacheForUser.mockResolvedValue(undefined);
     clearQueryCacheForUser.mockResolvedValue(undefined);
     clearDraftsForUser.mockResolvedValue(undefined);
+    clearChatOutboxForUser.mockResolvedValue(undefined);
     clearChatOutbox.mockReset();
     useAuthStore.setState({
       user: null,
@@ -105,7 +110,7 @@ describe("useAuthStore.initialize", () => {
     });
   });
 
-  it("clears the token, cached user, query cache, and drafts on a real 401", async () => {
+  it("keeps drafts and the outbox when a cold start receives a real 401", async () => {
     secureStorage.getToken.mockResolvedValue("expired-token");
     secureStorage.getCachedUser.mockResolvedValue(USER);
     api.getMe.mockRejectedValue(new ApiError("expired", 401));
@@ -115,8 +120,9 @@ describe("useAuthStore.initialize", () => {
     expect(secureStorage.clearToken).toHaveBeenCalledOnce();
     expect(secureStorage.clearCachedUser).toHaveBeenCalledOnce();
     expect(clearQueryCacheForUser).toHaveBeenCalledWith(USER.id);
-    expect(clearDraftsForUser).toHaveBeenCalledWith(USER.id);
-    expect(clearChatOutbox).toHaveBeenCalledOnce();
+    expect(clearDraftsForUser).not.toHaveBeenCalled();
+    expect(clearChatOutboxForUser).not.toHaveBeenCalled();
+    expect(clearChatOutbox).not.toHaveBeenCalled();
     expect(useAuthStore.getState()).toMatchObject({
       user: null,
       hasToken: false,
@@ -125,12 +131,23 @@ describe("useAuthStore.initialize", () => {
     });
   });
 
-  it("clears every draft partition when a 401 has no cached user snapshot", async () => {
+  it("does not clear any local partition when a 401 has no cached user snapshot", async () => {
     secureStorage.getToken.mockResolvedValue("expired-token");
     api.getMe.mockRejectedValue(new ApiError("expired", 401));
 
     await useAuthStore.getState().initialize();
 
-    expect(clearDraftsForUser).toHaveBeenCalledWith(null);
+    expect(clearDraftsForUser).not.toHaveBeenCalled();
+    expect(clearChatOutboxForUser).not.toHaveBeenCalled();
+  });
+
+  it("clears this user's drafts and outbox only on explicit logout", async () => {
+    useAuthStore.setState({ user: USER, hasToken: true });
+
+    await useAuthStore.getState().logout();
+
+    expect(clearDraftsForUser).toHaveBeenCalledWith(USER.id);
+    expect(clearChatOutboxForUser).toHaveBeenCalledWith(USER.id);
+    expect(clearChatOutbox).toHaveBeenCalledOnce();
   });
 });

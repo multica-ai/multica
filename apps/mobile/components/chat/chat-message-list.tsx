@@ -102,6 +102,8 @@ interface Props {
   availability?: AgentAvailability;
   /** Locally persisted sends that have not been confirmed by the server. */
   outboxItems?: ChatOutboxItem[];
+  /** The queued item whose content is loaded into the bottom composer. */
+  editingOutboxClientId?: string | null;
   onOutboxPress?: (item: ChatOutboxItem) => void;
 }
 
@@ -117,6 +119,7 @@ export function ChatMessageList({
   liveTaskMessages,
   availability,
   outboxItems = [],
+  editingOutboxClientId,
   onOutboxPress,
 }: Props) {
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
@@ -236,7 +239,11 @@ export function ChatMessageList({
             quickActionsDisabled={quickActionsDisabled}
           />
         ) : (
-          <OutboxMessageRow item={item.item} onPress={onOutboxPress} />
+          <OutboxMessageRow
+            item={item.item}
+            editing={item.item.clientId === editingOutboxClientId}
+            onPress={onOutboxPress}
+          />
         )
       }
       ItemSeparatorComponent={MessageSeparator}
@@ -291,13 +298,17 @@ export function ChatMessageList({
 
 function OutboxMessageRow({
   item,
+  editing,
   onPress,
 }: {
   item: ChatOutboxItem;
+  editing: boolean;
   onPress?: (item: ChatOutboxItem) => void;
 }) {
   const status =
-    item.status === "sending"
+    editing
+      ? "Editing in composer"
+      : item.status === "sending"
       ? "Sending…"
       : item.status === "failed"
         ? item.lastError ?? "Could not send"
@@ -314,7 +325,9 @@ function OutboxMessageRow({
         <View className="flex-row items-center gap-1">
           <Ionicons
             name={
-              item.status === "failed"
+              editing
+                ? "create-outline"
+                : item.status === "failed"
                 ? "alert-circle-outline"
                 : "time-outline"
             }

@@ -25,7 +25,10 @@ import {
   clearQueryCacheForUser,
   restoreQueryCacheForUser,
 } from "./query-persistence";
-import { clearDraftsForUser } from "./stores/draft-persistence";
+import {
+  clearChatOutboxForUser,
+  clearDraftsForUser,
+} from "./stores/draft-persistence";
 import { clearChatOutbox } from "./stores/chat-outbox-store";
 
 interface AuthState {
@@ -75,8 +78,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         await clearToken();
         await clearCachedUser();
         await clearQueryCacheForUser(cachedUser?.id ?? null);
-        await clearDraftsForUser(cachedUser?.id ?? null);
-        clearChatOutbox();
+        // A 401 invalidates server access, not the user's unsent work. Keep
+        // drafts and outbox entries so signing in again can restore them.
         api.setToken(null);
         set({ user: null, hasToken: false, isLoading: false, isOffline: false });
         return;
@@ -116,6 +119,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await clearCachedUser();
     await clearQueryCacheForUser(userId);
     await clearDraftsForUser(userId);
+    await clearChatOutboxForUser(userId);
     clearChatOutbox();
     api.setToken(null);
     set({ user: null, hasToken: false, isOffline: false });

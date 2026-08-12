@@ -41,14 +41,37 @@ export async function readDraftPartition<T extends object>(
   }
 }
 
-/** Clear every workspace draft and unsent message owned by a user on logout/401. */
+function isOwnedDraftKey(key: string, userId: string): boolean {
+  return key.startsWith(DRAFT_PREFIX) && key.includes(`:${userId}:`);
+}
+
+/**
+ * Clear text/form drafts for an explicit logout. Unsent chat outbox entries
+ * are intentionally excluded: a 401 must never erase a user's message.
+ */
 export async function clearDraftsForUser(userId: string | null): Promise<void> {
+  if (!userId) {
+    console.warn("Skipping local draft cleanup without a user id");
+    return;
+  }
   const keys = await AsyncStorage.getAllKeys();
-  const prefix = `${DRAFT_PREFIX}`;
   const ownedKeys = keys.filter(
-    (key) =>
-      key.startsWith(prefix) &&
-      (userId === null || key.includes(`:${userId}:`)),
+    (key) => isOwnedDraftKey(key, userId) && !key.startsWith(`${DRAFT_PREFIX}outbox:`),
   );
   if (ownedKeys.length > 0) await AsyncStorage.multiRemove(ownedKeys);
+}
+
+/** Remove one user's unsent messages only during an explicit logout. */
+export async function clearChatOutboxForUser(userId: string | null): Promise<void> {
+  if (!userId) {
+    console.warn("Skipping local outbox cleanup without a user id");
+    return;
+  }
+  const keys = await AsyncStorage.getAllKeys();
+  const ownedOutboxKeys = keys.filter(
+    (key) =>
+      key.startsWith(`${DRAFT_PREFIX}outbox:`) &&
+      isOwnedDraftKey(key, userId),
+  );
+  if (ownedOutboxKeys.length > 0) await AsyncStorage.multiRemove(ownedOutboxKeys);
 }
