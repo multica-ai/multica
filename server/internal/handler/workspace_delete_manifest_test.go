@@ -125,6 +125,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"webhook_delivery":                  workspaceDelete,
 	"workspace":                         workspaceDelete,
 	"workspace_invitation":              workspaceDelete,
+	"workspace_share_link":              workspaceDelete,
 }
 
 func TestWorkspaceDeletionManifestCoversPublicSchema(t *testing.T) {

@@ -75,7 +75,9 @@ function JoinInner() {
               router.push(`/${first.slug}/issues`);
               return;
             }
-          } catch {}
+          } catch {
+            // Fall through to the home redirect below.
+          }
           router.push("/");
           return;
         }
@@ -90,12 +92,12 @@ function JoinInner() {
         <CardContent className="space-y-4 pt-6">
           {joined ? (
             <>
-              <h1 className="text-xl font-semibold text-center">Joined!</h1>
+              <h1 className="text-title-lg font-semibold text-center">Joined!</h1>
               <p className="text-center text-muted-foreground">Redirecting to your workspace...</p>
             </>
           ) : infoError ? (
             <>
-              <h1 className="text-xl font-semibold text-center">Oops</h1>
+              <h1 className="text-title-lg font-semibold text-center">Oops</h1>
               <p className="text-center text-muted-foreground">{infoError}</p>
               <div className="flex justify-center pt-2">
                 <Button variant="outline" onClick={() => router.push("/")}>
@@ -107,7 +109,7 @@ function JoinInner() {
             <div className="py-6 text-center text-muted-foreground">Loading invite details...</div>
           ) : (
             <>
-              <h1 className="text-xl font-semibold text-center">
+              <h1 className="text-title-lg font-semibold text-center">
                 You&apos;re invited to {info.workspace_name}
               </h1>
               {info.creator_name && (
@@ -116,12 +118,12 @@ function JoinInner() {
                 </p>
               )}
               {!user && (
-                <p className="text-center text-sm text-muted-foreground">
+                <p className="text-center text-body text-muted-foreground">
                   You&apos;ll need to log in to join this workspace.
                 </p>
               )}
               {joinError && (
-                <p className="text-center text-sm text-destructive">{joinError}</p>
+                <p className="text-center text-body text-destructive">{joinError}</p>
               )}
               <div className="flex justify-center gap-2 pt-2">
                 <Button onClick={handleJoin} disabled={joining}>
