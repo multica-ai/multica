@@ -3,9 +3,11 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,6 +78,27 @@ func TestCanonicalExecutablePathFallsBackForMissingExecutable(t *testing.T) {
 
 	if got := canonicalExecutablePath(missing); got != want {
 		t.Fatalf("canonicalExecutablePath() = %q, want fallback %q", got, want)
+	}
+}
+
+func TestCanonicalExecutablePathLogsFallbackError(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	missing := filepath.Join(t.TempDir(), "missing", "codex.exe")
+	canonicalExecutablePath(missing)
+
+	got := logs.String()
+	if !strings.Contains(got, "canonicalize agent executable path failed") {
+		t.Fatalf("canonicalization fallback log = %q, want failure message", got)
+	}
+	if !strings.Contains(got, missing) {
+		t.Fatalf("canonicalization fallback log = %q, want path %q", got, missing)
+	}
+	if !strings.Contains(got, "error=") {
+		t.Fatalf("canonicalization fallback log = %q, want error attribute", got)
 	}
 }
 

@@ -749,10 +749,13 @@ func samePathDir(a, b string) bool {
 func canonicalExecutablePath(path string) string {
 	abs, err := filepath.Abs(path)
 	if err != nil {
+		slog.Debug("make agent executable path absolute failed; keeping configured path", "path", path, "error", err)
 		return path
 	}
 	if real, err := canonicalPath(abs); err == nil {
 		return real
+	} else {
+		slog.Debug("canonicalize agent executable path failed; keeping absolute path", "path", abs, "error", err)
 	}
 	return abs
 }
