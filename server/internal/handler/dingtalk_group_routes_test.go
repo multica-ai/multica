@@ -15,6 +15,8 @@ import (
 
 	dingtalkintegration "github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/util/secretbox"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 type dingtalkGroupRouteHandlerFixture struct {
@@ -238,6 +240,58 @@ func TestDingTalkGroupRoutePatchSerializesWithRevoke(t *testing.T) {
 		t.Fatal("PATCH did not resume after controlled revoke committed")
 	}
 	assertDingTalkGroupRouteBindingUnchanged(t, fx, sessionID, revision)
+}
+
+func TestListDingTalkInstallationsAdvertisesGroupRoutingCapability(t *testing.T) {
+	t.Run("disabled deployment", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		(&Handler{}).ListDingTalkInstallations(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("disabled installations status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			GroupRoutingSupported bool `json:"group_routing_supported"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode disabled installations response: %v", err)
+		}
+		if body.GroupRoutingSupported {
+			t.Fatal("disabled deployment advertised group routing")
+		}
+	})
+
+	t.Run("configured deployment", func(t *testing.T) {
+		_ = newDingTalkGroupRouteHandlerFixture(t)
+		box, err := secretbox.New(make([]byte, secretbox.KeySize))
+		if err != nil {
+			t.Fatalf("create DingTalk test secret box: %v", err)
+		}
+		service, err := dingtalkintegration.NewInstallService(db.New(testPool), testPool, box, nil)
+		if err != nil {
+			t.Fatalf("create DingTalk install service: %v", err)
+		}
+		testHandler.DingTalkInstall = service
+
+		req := requestWithRouteParams(
+			httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/installations", nil),
+			testWorkspaceID,
+			"",
+		)
+		rec := httptest.NewRecorder()
+		testHandler.ListDingTalkInstallations(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("configured installations status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			GroupRoutingSupported bool `json:"group_routing_supported"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode configured installations response: %v", err)
+		}
+		if !body.GroupRoutingSupported {
+			t.Fatal("configured deployment did not advertise group routing")
+		}
+	})
 }
 
 func TestDingTalkGroupRouteHandlersValidationAndErrors(t *testing.T) {

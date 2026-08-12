@@ -91,6 +91,7 @@ export function DingTalkTab() {
   });
   const installations = data?.installations ?? [];
   const configured = data?.configured === true;
+  const groupRoutingSupported = data?.group_routing_supported === true;
   const hasActiveInstallation = installations.some(
     (installation) => installation.status === "active",
   );
@@ -102,7 +103,7 @@ export function DingTalkTab() {
     refetch: retryGroupRoutes,
   } = useQuery({
     ...dingtalkGroupRoutesOptions(wsId),
-    enabled: configured && hasActiveInstallation && !!wsId,
+    enabled: configured && groupRoutingSupported && hasActiveInstallation && !!wsId,
   });
   const groupRoutes = groupRouteData?.routes ?? [];
   const activeAgents = (agents ?? []).filter((agent) => !agent.archived_at);
@@ -197,7 +198,7 @@ export function DingTalkTab() {
         </section>
       )}
 
-      {configured && hasActiveInstallation && (
+      {configured && groupRoutingSupported && hasActiveInstallation && (
         <section className="space-y-3">
           <div className="space-y-1">
             <h2 className="text-body font-semibold">
@@ -248,50 +249,45 @@ export function DingTalkTab() {
                 </p>
               </CardContent>
             </Card>
-          ) : agentsLoading ? (
-            <Card>
-              <CardContent>
-                <p className="text-body text-muted-foreground">
-                  {t(($) => $.dingtalk.group_routes_agents_loading)}
-                </p>
-              </CardContent>
-            </Card>
-          ) : agentsError ? (
-            <Card>
-              <CardContent className="space-y-3" role="alert">
-                <div className="space-y-1">
-                  <p className="text-body font-medium">
-                    {t(($) => $.dingtalk.group_routes_agents_error_title)}
-                  </p>
-                  <p className="text-caption text-muted-foreground">
-                    {t(($) => $.dingtalk.group_routes_agents_error_description)}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={agentsFetching}
-                  onClick={() => void retryAgents()}
-                >
-                  {t(($) => $.dingtalk.group_routes_agents_retry)}
-                </Button>
-              </CardContent>
-            </Card>
-          ) : agentsLoaded && activeAgents.length === 0 ? (
-            <Card>
-              <CardContent className="space-y-1">
-                <p className="text-body font-medium">
-                  {t(($) => $.dingtalk.group_routes_agents_empty_title)}
-                </p>
-                <p className="text-caption text-muted-foreground">
-                  {t(($) => $.dingtalk.group_routes_agents_empty_description)}
-                </p>
-              </CardContent>
-            </Card>
           ) : (
             <Card>
               <CardContent className="divide-y">
+                {agentsLoading ? (
+                  <div className="pb-3">
+                    <p className="text-body text-muted-foreground">
+                      {t(($) => $.dingtalk.group_routes_agents_loading)}
+                    </p>
+                  </div>
+                ) : agentsError ? (
+                  <div className="space-y-3 pb-3" role="alert">
+                    <div className="space-y-1">
+                      <p className="text-body font-medium">
+                        {t(($) => $.dingtalk.group_routes_agents_error_title)}
+                      </p>
+                      <p className="text-caption text-muted-foreground">
+                        {t(($) => $.dingtalk.group_routes_agents_error_description)}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={agentsFetching}
+                      onClick={() => void retryAgents()}
+                    >
+                      {t(($) => $.dingtalk.group_routes_agents_retry)}
+                    </Button>
+                  </div>
+                ) : agentsLoaded && activeAgents.length === 0 ? (
+                  <div className="space-y-1 pb-3">
+                    <p className="text-body font-medium">
+                      {t(($) => $.dingtalk.group_routes_agents_empty_title)}
+                    </p>
+                    <p className="text-caption text-muted-foreground">
+                      {t(($) => $.dingtalk.group_routes_agents_empty_description)}
+                    </p>
+                  </div>
+                ) : null}
                 {groupRoutes.map((route) => (
                   <GroupRouteRow
                     key={route.id}
@@ -299,7 +295,8 @@ export function DingTalkTab() {
                     agents={activeAgents}
                     selectedAgentName={agents?.find((agent) => agent.id === route.agent_id)?.name}
                     canManage={canManage}
-                    updating={updatingRouteId === route.id}
+                    selectorAvailable={agentsLoaded && activeAgents.length > 0}
+                    updating={updatingRouteId !== null}
                     onAgentChange={(agentId) => handleRouteAgentChange(route, agentId)}
                   />
                 ))}
@@ -345,6 +342,7 @@ function GroupRouteRow({
   agents,
   selectedAgentName,
   canManage,
+  selectorAvailable,
   updating,
   onAgentChange,
 }: {
@@ -352,6 +350,7 @@ function GroupRouteRow({
   agents: Array<{ id: string; name: string }>;
   selectedAgentName?: string;
   canManage: boolean;
+  selectorAvailable: boolean;
   updating: boolean;
   onAgentChange: (agentId: string) => void;
 }) {
@@ -378,7 +377,7 @@ function GroupRouteRow({
           onValueChange={(agentId) => {
             if (agentId) onAgentChange(agentId);
           }}
-          disabled={updating}
+          disabled={!selectorAvailable || updating}
         >
           <SelectTrigger className="w-full sm:w-56" aria-label={t(($) => $.dingtalk.group_routes_agent_label)}>
             <SelectValue>

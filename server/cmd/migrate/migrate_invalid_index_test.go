@@ -96,6 +96,149 @@ func TestRunMigrationsRepairsInvalidConcurrentIndexBeforeRetry(t *testing.T) {
 	}
 }
 
+func TestRunMigrationsRepairsDingTalkGroupRouteIndexesBeforeRetry(t *testing.T) {
+	pool := openTestPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	tests := []struct {
+		version    string
+		index      string
+		columns    string
+		wantUnique bool
+	}{
+		{
+			version:    "274_dingtalk_group_route_installation_conversation_unique",
+			index:      "idx_dingtalk_group_route_installation_conversation",
+			columns:    "installation_id, conversation_id",
+			wantUnique: true,
+		},
+		{
+			version: "275_dingtalk_group_route_workspace_index",
+			index:   "idx_dingtalk_group_route_workspace",
+			columns: "workspace_id",
+		},
+		{
+			version:    "276_dingtalk_group_route_id_unique",
+			index:      "idx_dingtalk_group_route_id_unique",
+			columns:    "id",
+			wantUnique: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			if preMigrationHooks[tt.version] == nil {
+				t.Fatalf("production hook is not registered for %s", tt.version)
+			}
+
+			suffix := fmt.Sprintf("%d_%d", time.Now().UnixNano(), rand.Uint32())
+			schema := "migrate_dingtalk_idx_" + suffix
+			schemaIdent := pgx.Identifier{schema}.Sanitize()
+			if _, err := pool.Exec(ctx, "CREATE SCHEMA "+schemaIdent); err != nil {
+				t.Fatalf("create schema: %v", err)
+			}
+			t.Cleanup(func() {
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cleanupCancel()
+				if _, err := pool.Exec(cleanupCtx, "DROP SCHEMA IF EXISTS "+schemaIdent+" CASCADE"); err != nil {
+					t.Logf("drop schema %s: %v", schema, err)
+				}
+			})
+
+			tableName := pgx.Identifier{schema, "dingtalk_group_route"}.Sanitize()
+			indexName := pgx.Identifier{tt.index}.Sanitize()
+			indexRegclass := pgx.Identifier{schema, tt.index}.Sanitize()
+			if _, err := pool.Exec(ctx, "CREATE TABLE "+tableName+` (
+				id TEXT NOT NULL,
+				workspace_id TEXT NOT NULL,
+				installation_id TEXT NOT NULL,
+				conversation_id TEXT NOT NULL
+			)`); err != nil {
+				t.Fatalf("create DingTalk route table: %v", err)
+			}
+			if _, err := pool.Exec(ctx, "INSERT INTO "+tableName+` (
+				id, workspace_id, installation_id, conversation_id
+			) VALUES
+				('route-1', 'workspace-1', 'installation-1', 'conversation-1'),
+				('route-1', 'workspace-1', 'installation-1', 'conversation-1')`); err != nil {
+				t.Fatalf("seed duplicate DingTalk routes: %v", err)
+			}
+
+			// Duplicate keys make the concurrent UNIQUE build fail after Postgres
+			// has registered the index relation, reproducing the INVALID leftover
+			// an interrupted production build leaves behind. For the workspace
+			// index the retry intentionally rebuilds the intended non-unique form.
+			if _, err := pool.Exec(ctx, "CREATE UNIQUE INDEX CONCURRENTLY "+indexName+" ON "+tableName+" ("+tt.columns+")"); err == nil {
+				t.Fatal("failure injection unexpectedly built the index")
+			}
+			assertIndexReadyAndValid(t, pool, schema, tt.index, false)
+
+			if _, err := pool.Exec(ctx, "DELETE FROM "+tableName+" WHERE ctid = (SELECT max(ctid) FROM "+tableName+")"); err != nil {
+				t.Fatalf("remove duplicate route before retry: %v", err)
+			}
+
+			unique := ""
+			if tt.wantUnique {
+				unique = "UNIQUE "
+			}
+			migrationSQL := "CREATE " + unique + "INDEX CONCURRENTLY IF NOT EXISTS " + indexName +
+				" ON " + tableName + " (" + tt.columns + ");\n"
+			migrationPath := filepath.Join(t.TempDir(), tt.version+".up.sql")
+			if err := os.WriteFile(migrationPath, []byte(migrationSQL), 0o600); err != nil {
+				t.Fatalf("write retry migration: %v", err)
+			}
+
+			opts := runOptions{
+				Direction:             "up",
+				Files:                 []string{migrationPath},
+				SchemaMigrationsTable: schema + ".schema_migrations",
+				AdvisoryLockKey:       int64(rand.Uint64()&0x7fffffffffffffff) | 1,
+				Hooks: map[string]preMigrationHook{
+					tt.version: cleanupInvalidConcurrentIndexHook(indexRegclass),
+				},
+			}
+			if err := runMigrations(ctx, pool, opts); err != nil {
+				t.Fatalf("retry migration with invalid-index cleanup: %v", err)
+			}
+
+			assertIndexReadyAndValid(t, pool, schema, tt.index, true)
+			var recorded bool
+			migrationsTable := pgx.Identifier{schema, "schema_migrations"}.Sanitize()
+			if err := pool.QueryRow(ctx,
+				"SELECT EXISTS (SELECT 1 FROM "+migrationsTable+" WHERE version = $1)",
+				tt.version,
+			).Scan(&recorded); err != nil {
+				t.Fatalf("read migration version: %v", err)
+			}
+			if !recorded {
+				t.Fatal("repaired migration was not recorded")
+			}
+
+			// Reproduce the other non-transactional boundary: CREATE INDEX
+			// CONCURRENTLY committed, then the process exited before recording the
+			// version. A valid leftover must be a safe no-op on the next run, and
+			// the retry must still record the migration.
+			if _, err := pool.Exec(ctx, "DELETE FROM "+migrationsTable+" WHERE version = $1", tt.version); err != nil {
+				t.Fatalf("simulate missing migration record: %v", err)
+			}
+			if err := runMigrations(ctx, pool, opts); err != nil {
+				t.Fatalf("retry migration with valid index already present: %v", err)
+			}
+			assertIndexReadyAndValid(t, pool, schema, tt.index, true)
+			if err := pool.QueryRow(ctx,
+				"SELECT EXISTS (SELECT 1 FROM "+migrationsTable+" WHERE version = $1)",
+				tt.version,
+			).Scan(&recorded); err != nil {
+				t.Fatalf("read retried migration version: %v", err)
+			}
+			if !recorded {
+				t.Fatal("valid-index retry did not record the migration")
+			}
+		})
+	}
+}
+
 // TestRunMigrationsRepairsInvalidTerminalCompletedAtIndex is the MUL-5823
 // counterpart of the test above, for the 261/262 partial-index swap.
 //
@@ -277,5 +420,32 @@ func assertIndexValidity(t *testing.T, pool interface {
 	}
 	if valid != want {
 		t.Fatalf("index %s.%s validity = %v, want %v", schema, index, valid, want)
+	}
+}
+
+func assertIndexReadyAndValid(t *testing.T, pool interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, schema, index string, want bool) {
+	t.Helper()
+	var ready, valid bool
+	if err := pool.QueryRow(context.Background(), `
+		SELECT i.indisready, i.indisvalid
+		FROM pg_index i
+		JOIN pg_class c ON c.oid = i.indexrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1 AND c.relname = $2
+	`, schema, index).Scan(&ready, &valid); err != nil {
+		t.Fatalf("read readiness/validity for %s.%s: %v", schema, index, err)
+	}
+	if ready != want || valid != want {
+		t.Fatalf(
+			"index %s.%s readiness/validity = %v/%v, want %v/%v",
+			schema,
+			index,
+			ready,
+			valid,
+			want,
+			want,
+		)
 	}
 }

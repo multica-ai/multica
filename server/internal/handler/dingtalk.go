@@ -216,12 +216,16 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 //   - configured: at-rest encryption key is set (DingTalkInstall != nil).
 //   - install_supported: kept for the management UI; true whenever configured,
 //     since a BYO install needs only the at-rest key.
+//   - group_routing_supported: explicit capability gate for version-skewed
+//     Web/Desktop clients. Older backends omit it, so newer clients must require
+//     an exact true before calling the group-routes endpoints.
 func (h *Handler) ListDingTalkInstallations(w http.ResponseWriter, r *http.Request) {
 	if h.DingTalkInstall == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"installations":     []DingTalkInstallationResponse{},
-			"configured":        false,
-			"install_supported": false,
+			"installations":           []DingTalkInstallationResponse{},
+			"configured":              false,
+			"install_supported":       false,
+			"group_routing_supported": false,
 		})
 		return
 	}
@@ -239,9 +243,10 @@ func (h *Handler) ListDingTalkInstallations(w http.ResponseWriter, r *http.Reque
 		out = append(out, dingtalkInstallationToResponse(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"installations":     out,
-		"configured":        true,
-		"install_supported": true,
+		"installations":           out,
+		"configured":              true,
+		"install_supported":       true,
+		"group_routing_supported": true,
 	})
 }
 

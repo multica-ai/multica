@@ -28,6 +28,10 @@ export interface ListDingTalkInstallationsResponse {
    * compat; optional so an older desktop build that predates it treats it as
    * off. */
   install_supported?: boolean;
+  /** Whether this backend exposes DingTalk group routing. Optional and gated
+   * with `=== true` so newer Web/Desktop clients do not call a route that an
+   * older or version-skewed backend does not have. */
+  group_routing_supported?: boolean;
 }
 
 /** A DingTalk group observed by one Stream-mode robot and routed to a fixed

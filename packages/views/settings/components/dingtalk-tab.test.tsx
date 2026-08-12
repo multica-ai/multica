@@ -18,6 +18,7 @@ const installationsRef = vi.hoisted(() => ({
     installations: [] as unknown[],
     configured: true,
     install_supported: true,
+    group_routing_supported: true,
   },
 }));
 const agentsRef = vi.hoisted(() => ({
@@ -139,7 +140,12 @@ function renderUI(children: ReactNode) {
 function resetFixtures() {
   vi.clearAllMocks();
   membersRef.current = [{ user_id: "user-1", role: "owner" }];
-  installationsRef.current = { installations: [], configured: true, install_supported: true };
+  installationsRef.current = {
+    installations: [],
+    configured: true,
+    install_supported: true,
+    group_routing_supported: true,
+  };
   agentsRef.current = [
     { id: "agent-1", name: "Agent One", archived_at: null },
     { id: "agent-2", name: "Agent Two", archived_at: null },
@@ -152,6 +158,7 @@ function setConnectedGroupRoute() {
     installations: [{ id: "i1", agent_id: "agent-1", status: "active" }],
     configured: true,
     install_supported: true,
+    group_routing_supported: true,
   };
   groupRoutesRef.current = {
     routes: [{
@@ -204,6 +211,7 @@ describe("DingTalkAgentBindButton", () => {
       installations: [{ id: "i1", agent_id: "agent-1", status: "active" }],
       configured: true,
       install_supported: true,
+      group_routing_supported: true,
     };
     renderUI(<DingTalkAgentBindButton agentId="agent-1" />);
     expect(screen.getByTestId("dingtalk-agent-bot-connected")).toBeTruthy();
@@ -218,7 +226,12 @@ describe("DingTalkAgentBindButton", () => {
   });
 
   it("renders nothing when install is unavailable and the agent is unbound", () => {
-    installationsRef.current = { installations: [], configured: true, install_supported: false };
+    installationsRef.current = {
+      installations: [],
+      configured: true,
+      install_supported: false,
+      group_routing_supported: true,
+    };
     const { container } = renderUI(<DingTalkAgentBindButton agentId="agent-1" />);
     expect(container).toBeEmptyDOMElement();
   });
@@ -228,7 +241,12 @@ describe("DingTalkTab", () => {
   beforeEach(resetFixtures);
 
   it("surfaces the not-enabled notice when the deployment has no DingTalk key", () => {
-    installationsRef.current = { installations: [], configured: false, install_supported: false };
+    installationsRef.current = {
+      installations: [],
+      configured: false,
+      install_supported: false,
+      group_routing_supported: false,
+    };
     renderUI(<DingTalkTab />);
     expect(screen.getByText(/DingTalk integration not enabled/i)).toBeTruthy();
   });
@@ -243,6 +261,7 @@ describe("DingTalkTab", () => {
       installations: [{ id: "i1", agent_id: "agent-7", status: "active" }],
       configured: true,
       install_supported: true,
+      group_routing_supported: true,
     };
     renderUI(<DingTalkTab />);
     expect(screen.getByText("Agent agent-7")).toBeTruthy();
@@ -257,6 +276,7 @@ describe("DingTalkTab", () => {
       ],
       configured: true,
       install_supported: true,
+      group_routing_supported: true,
     };
     renderUI(<DingTalkTab />);
     expect(screen.queryByText(/Invalid Date/i)).toBeNull();
@@ -290,6 +310,35 @@ describe("DingTalkTab", () => {
       queryKey: ["dingtalk", "group-routes", "workspace-1"],
     });
     expect(mockToastSuccess).toHaveBeenCalled();
+  });
+
+  it("disables every route selector while one route update is pending", async () => {
+    setConnectedGroupRoute();
+    groupRoutesRef.current = {
+      routes: [
+        ...groupRoutesRef.current.routes,
+        {
+          id: "route-2",
+          installation_id: "i1",
+          conversation_id: "cid-security",
+          conversation_title: "Security team",
+          agent_id: "agent-2",
+        },
+      ],
+    };
+    mockUpdateGroupRoute.mockImplementation(() => new Promise(() => {}));
+    const user = userEvent.setup();
+    renderUI(<DingTalkTab />);
+
+    const selectors = screen.getAllByRole("combobox", { name: "Agent for this group" });
+    expect(selectors).toHaveLength(2);
+    await user.click(selectors[0]!);
+    await user.click(await screen.findByRole("option", { name: "Agent One" }));
+
+    await waitFor(() => expect(mockUpdateGroupRoute).toHaveBeenCalledTimes(1));
+    const pendingSelectors = screen.getAllByRole("combobox", { name: "Agent for this group" });
+    expect(pendingSelectors[0]).toBeDisabled();
+    expect(pendingSelectors[1]).toBeDisabled();
   });
 
   it("renders group routing read-only for a non-manager", () => {

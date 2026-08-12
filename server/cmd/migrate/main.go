@@ -75,18 +75,21 @@ type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 // records the migration as applied, and the queries that need the index silently
 // stay on a full scan — the exact regression these migrations exist to fix.
 var concurrentIndexCleanups = map[string]string{
-	"257_agent_task_queue_channel_media_pending_unique_v2": "idx_one_pending_task_per_issue_agent_v2",
-	"261_agent_task_queue_terminal_completed_at_v2":        "idx_agent_task_queue_terminal_completed_at_v2",
-	"273_agent_task_queue_runtime_id_index":                "idx_agent_task_queue_runtime_id",
-	"274_task_token_workspace_id_index":                    "idx_task_token_workspace_id",
-	"275_task_token_agent_id_index":                        "idx_task_token_agent_id",
-	"276_chat_draft_restore_task_id_index":                 "idx_chat_draft_restore_task_id",
-	"277_autopilot_run_task_id_index":                      "idx_autopilot_run_task_id",
-	"278_agent_task_queue_agent_id_keyset_index":           "idx_agent_task_queue_agent_id_keyset",
-	"279_agent_task_queue_issue_id_keyset_index":           "idx_agent_task_queue_issue_id_keyset",
-	"281_agent_workspace_id_keyset_index":                  "idx_agent_workspace_id_keyset",
-	"282_issue_workspace_id_keyset_index":                  "idx_issue_workspace_id_keyset",
-	"283_agent_runtime_workspace_id_keyset_index":          "idx_agent_runtime_workspace_id_keyset",
+	"257_agent_task_queue_channel_media_pending_unique_v2":      "idx_one_pending_task_per_issue_agent_v2",
+	"261_agent_task_queue_terminal_completed_at_v2":             "idx_agent_task_queue_terminal_completed_at_v2",
+	"273_agent_task_queue_runtime_id_index":                     "idx_agent_task_queue_runtime_id",
+	"274_task_token_workspace_id_index":                         "idx_task_token_workspace_id",
+	"275_task_token_agent_id_index":                             "idx_task_token_agent_id",
+	"276_chat_draft_restore_task_id_index":                      "idx_chat_draft_restore_task_id",
+	"277_autopilot_run_task_id_index":                           "idx_autopilot_run_task_id",
+	"278_agent_task_queue_agent_id_keyset_index":                "idx_agent_task_queue_agent_id_keyset",
+	"279_agent_task_queue_issue_id_keyset_index":                "idx_agent_task_queue_issue_id_keyset",
+	"281_agent_workspace_id_keyset_index":                       "idx_agent_workspace_id_keyset",
+	"282_issue_workspace_id_keyset_index":                       "idx_issue_workspace_id_keyset",
+	"283_agent_runtime_workspace_id_keyset_index":               "idx_agent_runtime_workspace_id_keyset",
+	"286_dingtalk_group_route_installation_conversation_unique": "idx_dingtalk_group_route_installation_conversation",
+	"287_dingtalk_group_route_workspace_index":                  "idx_dingtalk_group_route_workspace",
+	"288_dingtalk_group_route_id_unique":                        "idx_dingtalk_group_route_id_unique",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {
