@@ -39,21 +39,45 @@ func seedBlockedReviewRecord(t *testing.T, wsID string, version int32) string {
 }
 
 // seedActiveReviewerAgent inserts an active (idle) reviewer agent in the
-// workspace and returns its id.
+// workspace and returns its id. The agent gets a real runtime row so its
+// runtime_id is never NULL: the shared integration workspace is also used by
+// the sweeper fixture queries (SELECT ... FROM agent ... LIMIT 1), and a NULL
+// runtime_id there would break their scan. Both rows are removed on test end
+// so reviewer agents never accumulate in the shared integration workspace.
 func seedActiveReviewerAgent(t *testing.T, wsID string) string {
 	t.Helper()
 	ctx := context.Background()
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'cloud', 'integration_test_runtime', 'online', $3, '{}'::jsonb, now())
+		RETURNING id
+	`, wsID, "Reviewer Runtime "+fmt.Sprintf("%d", time.Now().UnixNano()), "Integration test runtime").Scan(&runtimeID); err != nil {
+		t.Fatalf("seed reviewer runtime: %v", err)
+	}
 	var reviewerID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
-			visibility, status, max_concurrent_tasks, owner_id
+			runtime_id, visibility, status, max_concurrent_tasks, owner_id
 		)
-		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, 'private', 'idle', 1, $3)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 'idle', 1, $4)
 		RETURNING id
-	`, wsID, "Reviewer Agent "+fmt.Sprintf("%d", time.Now().UnixNano()), testUserID).Scan(&reviewerID); err != nil {
+	`, wsID, "Reviewer Agent "+fmt.Sprintf("%d", time.Now().UnixNano()), runtimeID, testUserID).Scan(&reviewerID); err != nil {
 		t.Fatalf("seed reviewer agent: %v", err)
 	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		if _, err := testPool.Exec(cleanupCtx, `DELETE FROM agent WHERE id = $1`, reviewerID); err != nil {
+			t.Logf("cleanup reviewer agent %s: %v", reviewerID, err)
+		}
+		if _, err := testPool.Exec(cleanupCtx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID); err != nil {
+			t.Logf("cleanup reviewer runtime %s: %v", runtimeID, err)
+		}
+	})
 	return reviewerID
 }
 
@@ -282,6 +306,17 @@ func TestMemoryHubReviewRepairErrors(t *testing.T) {
 		`, testWorkspaceID, "Offline Reviewer", testUserID).Scan(&offlineAgent); err != nil {
 			t.Fatalf("seed offline agent: %v", err)
 		}
+		// Remove the offline agent on test end: it lives in the shared
+		// integration workspace, and the sweeper/rerun fixtures select the
+		// integration agent with LIMIT 1 — an extra agent whose runtime_id is
+		// NULL breaks their scan.
+		t.Cleanup(func() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cleanupCancel()
+			if _, err := testPool.Exec(cleanupCtx, `DELETE FROM agent WHERE id = $1`, offlineAgent); err != nil {
+				t.Logf("cleanup offline agent %s: %v", offlineAgent, err)
+			}
+		})
 		resp := reviewRepairRequest(t, execID, map[string]any{
 			"schema_version":         1,
 			"expected_review_version": 1,
