@@ -273,53 +273,41 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 }
 
 // TestTaskTempBaseDir covers the MULTICA_AGENT_TEMP_BASE validation contract:
-// unset keeps the platform default, a valid absolute directory is honored,
-// and invalid values produce errors (which ensureTaskTempDir surfaces as a
-// task-startup failure) instead of a silent fallback to /tmp.
+// Windows ignores it, while Unix honors a valid absolute directory and reports
+// unusable configured bases from the real task-directory creation instead of
+// silently falling back to /tmp.
 func TestTaskTempBaseDir(t *testing.T) {
-	validBase := t.TempDir()
-	notDir := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(notDir, []byte("x"), 0o600); err != nil {
-		t.Fatalf("write notDir fixture: %v", err)
+	if runtime.GOOS == "windows" {
+		t.Setenv("MULTICA_AGENT_TEMP_BASE", `C:\configured-but-ignored`)
+		got, configured, err := taskTempBaseDir()
+		if err != nil {
+			t.Fatalf("taskTempBaseDir(): %v", err)
+		}
+		if configured {
+			t.Fatal("taskTempBaseDir() marked Windows override as configured")
+		}
+		if got != socketSafeTempBaseDir() {
+			t.Fatalf("taskTempBaseDir() = %q, want platform default %q", got, socketSafeTempBaseDir())
+		}
+		return
 	}
-	readOnlyBase := filepath.Join(t.TempDir(), "read-only")
-	if err := os.Mkdir(readOnlyBase, 0o500); err != nil {
-		t.Fatalf("mkdir readOnlyBase fixture: %v", err)
-	}
-	// t.TempDir cleanup needs to descend into it again.
-	t.Cleanup(func() { _ = os.Chmod(readOnlyBase, 0o700) })
 
+	validBase := t.TempDir()
 	cases := []struct {
-		name    string
-		value   string
-		set     bool
-		skip    func() string // non-empty reason skips the case
-		want    string        // expected base when wantErr is false
-		wantErr bool
+		name           string
+		value          string
+		set            bool
+		want           string
+		wantConfigured bool
+		wantErr        bool
 	}{
 		{name: "unset keeps platform default", set: false, want: socketSafeTempBaseDir()},
 		{name: "empty keeps platform default", set: true, value: "  ", want: socketSafeTempBaseDir()},
-		{name: "valid absolute dir is honored", set: true, value: validBase, want: validBase},
-		{name: "relative path rejected", set: true, value: "relative/base", wantErr: true},
-		{name: "missing dir rejected", set: true, value: filepath.Join(validBase, "missing"), wantErr: true},
-		{name: "non-directory rejected", set: true, value: notDir, wantErr: true},
-		{
-			name: "non-writable dir rejected", set: true, value: readOnlyBase, wantErr: true,
-			skip: func() string {
-				if os.Geteuid() == 0 {
-					return "root bypasses directory write permissions"
-				}
-				return ""
-			},
-		},
+		{name: "valid absolute dir is honored", set: true, value: validBase, want: validBase, wantConfigured: true},
+		{name: "relative path rejected", set: true, value: "relative/base", wantConfigured: true, wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.skip != nil {
-				if reason := tc.skip(); reason != "" {
-					t.Skip(reason)
-				}
-			}
 			// Register the restore hook in both branches: t.Setenv remembers
 			// whether the variable was originally set and undoes either case.
 			t.Setenv("MULTICA_AGENT_TEMP_BASE", tc.value)
@@ -328,7 +316,10 @@ func TestTaskTempBaseDir(t *testing.T) {
 					t.Fatalf("unset MULTICA_AGENT_TEMP_BASE: %v", err)
 				}
 			}
-			got, err := taskTempBaseDir()
+			got, configured, err := taskTempBaseDir()
+			if configured != tc.wantConfigured {
+				t.Fatalf("taskTempBaseDir() configured = %v, want %v", configured, tc.wantConfigured)
+			}
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("taskTempBaseDir() = %q, want error", got)
@@ -337,12 +328,6 @@ func TestTaskTempBaseDir(t *testing.T) {
 				// failure is actionable rather than a bare mkdir/stat error.
 				if !strings.Contains(err.Error(), "MULTICA_AGENT_TEMP_BASE") {
 					t.Fatalf("error %q does not mention MULTICA_AGENT_TEMP_BASE", err)
-				}
-				// ensureTaskTempDir must propagate the failure so the task
-				// start fails clearly instead of falling back to /tmp.
-				dir, e := ensureTaskTempDir("root", "ws", "task")
-				if e == nil {
-					t.Fatalf("ensureTaskTempDir() = %q with invalid MULTICA_AGENT_TEMP_BASE, want error", dir)
 				}
 				return
 			}
@@ -355,13 +340,55 @@ func TestTaskTempBaseDir(t *testing.T) {
 		})
 	}
 
-	// The writability probe must not leave anything behind in the base.
-	entries, err := os.ReadDir(validBase)
-	if err != nil {
-		t.Fatalf("read validBase: %v", err)
+	t.Run("configured base creates private 0700 task dir", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_TEMP_BASE", validBase)
+		dir, err := ensureTaskTempDir("root", "ws", "task")
+		if err != nil {
+			t.Fatalf("ensureTaskTempDir(): %v", err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("stat task temp dir: %v", err)
+		}
+		if info.Mode().Perm() != 0o700 {
+			t.Fatalf("task temp dir mode = %o, want 0700", info.Mode().Perm())
+		}
+	})
+
+	notDir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notDir, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write notDir fixture: %v", err)
 	}
-	if len(entries) != 0 {
-		t.Fatalf("validBase is not empty after probing, entries=%v", entries)
+	readOnlyBase := filepath.Join(t.TempDir(), "read-only")
+	if err := os.Mkdir(readOnlyBase, 0o500); err != nil {
+		t.Fatalf("mkdir readOnlyBase fixture: %v", err)
+	}
+	// t.TempDir cleanup needs to descend into it again.
+	t.Cleanup(func() { _ = os.Chmod(readOnlyBase, 0o700) })
+
+	for _, tc := range []struct {
+		name string
+		base string
+	}{
+		{name: "missing dir rejected", base: filepath.Join(validBase, "missing")},
+		{name: "non-directory rejected", base: notDir},
+		{name: "non-writable dir rejected", base: readOnlyBase},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MULTICA_AGENT_TEMP_BASE", tc.base)
+			dir, err := ensureTaskTempDir("root", "ws", "task")
+			if err == nil {
+				_ = os.RemoveAll(dir)
+				if tc.base == readOnlyBase {
+					t.Skip("process can write to the read-only fixture")
+				}
+				t.Fatalf("ensureTaskTempDir() = %q with unusable MULTICA_AGENT_TEMP_BASE, want error", dir)
+			}
+			if !strings.Contains(err.Error(), "MULTICA_AGENT_TEMP_BASE") {
+				t.Fatalf("error %q does not mention MULTICA_AGENT_TEMP_BASE", err)
+			}
+		})
 	}
 }
 
