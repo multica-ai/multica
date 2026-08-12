@@ -3,6 +3,7 @@ import {
   ActionSheetIOS,
   Alert,
   FlatList,
+  Platform,
   View,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
@@ -15,6 +16,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Header } from "@/components/ui/header";
 import { IconButton } from "@/components/ui/icon-button";
 import { HeaderActions } from "@/components/ui/app-header-actions";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SwipeableInboxRow } from "@/components/inbox/swipeable-inbox-row";
 import { inboxListOptions } from "@/data/queries/inbox";
 import {
@@ -34,6 +42,7 @@ export default function Inbox() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { colorScheme } = useColorScheme();
+  const theme = THEME[colorScheme];
   const { data: rawItems, isLoading, error, refetch, isRefetching } = useQuery(
     inboxListOptions(wsId),
   );
@@ -71,11 +80,24 @@ export default function Inbox() {
     }
   };
 
-  // Trailing batch menu — mirrors web's dropdown
-  // (packages/views/inbox/components/inbox-page.tsx). "Mark all read" is
-  // first (most common batch op); "Archive all" is destructive so it gets
-  // the iOS red treatment + Alert confirm.
-  const onPressMenu = () => {
+  const confirmArchiveAll = () => {
+    Alert.alert(
+      "Archive all?",
+      "This archives every inbox item, read or unread. You can still find them via the issue pages.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Archive all",
+          style: "destructive",
+          onPress: () => archiveAll.mutate(),
+        },
+      ],
+    );
+  };
+
+  // iOS has a native one-of-N action sheet. Android does not, so its header
+  // renders the shared DropdownMenu below instead of calling this iOS-only API.
+  const onPressIOSMenu = () => {
     const options = [
       "Cancel",
       "Mark all read",
@@ -94,23 +116,80 @@ export default function Inbox() {
         if (i === 1) markAllRead.mutate();
         else if (i === 2) archiveAllRead.mutate();
         else if (i === 3) archiveCompleted.mutate();
-        else if (i === 4) {
-          Alert.alert(
-            "Archive all?",
-            "This archives every inbox item, read or unread. You can still find them via the issue pages.",
-            [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Archive all",
-                style: "destructive",
-                onPress: () => archiveAll.mutate(),
-              },
-            ],
-          );
-        }
+        else if (i === 4) confirmArchiveAll();
       },
     );
   };
+
+  // Trailing batch menu — mirrors web's dropdown
+  // (packages/views/inbox/components/inbox-page.tsx). "Mark all read" is
+  // first (most common batch op); "Archive all" remains destructive and asks
+  // for confirmation on every platform.
+  const batchMenu =
+    Platform.OS === "ios" ? (
+      <IconButton
+        name="ellipsis-horizontal"
+        onPress={onPressIOSMenu}
+        accessibilityLabel="Inbox actions"
+      />
+    ) : (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <IconButton
+            name="ellipsis-horizontal"
+            accessibilityLabel="Inbox actions"
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onPress={() => markAllRead.mutate()}
+            accessibilityLabel="Mark all read"
+          >
+            <Ionicons
+              name="checkmark-done"
+              size={18}
+              color={theme.foreground}
+            />
+            <Text>Mark all read</Text>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onPress={() => archiveAllRead.mutate()}
+            accessibilityLabel="Archive all read"
+          >
+            <Ionicons
+              name="mail-open-outline"
+              size={18}
+              color={theme.foreground}
+            />
+            <Text>Archive all read</Text>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onPress={() => archiveCompleted.mutate()}
+            accessibilityLabel="Archive completed"
+          >
+            <Ionicons
+              name="checkmark-circle-outline"
+              size={18}
+              color={theme.foreground}
+            />
+            <Text>Archive completed</Text>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            variant="destructive"
+            onPress={confirmArchiveAll}
+            accessibilityLabel="Archive all"
+          >
+            <Ionicons
+              name="archive-outline"
+              size={18}
+              color={theme.destructive}
+            />
+            <Text>Archive all</Text>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
 
   return (
     <View className="flex-1 bg-background">
@@ -118,11 +197,7 @@ export default function Inbox() {
         title="Inbox"
         right={
           <>
-            <IconButton
-              name="ellipsis-horizontal"
-              onPress={onPressMenu}
-              accessibilityLabel="Inbox actions"
-            />
+            {batchMenu}
             <HeaderActions />
           </>
         }
@@ -140,7 +215,7 @@ export default function Inbox() {
           </Button>
         </View>
       ) : !data || data.length === 0 ? (
-        <InboxEmpty iconColor={THEME[colorScheme].mutedForeground} />
+        <InboxEmpty iconColor={theme.mutedForeground} />
       ) : (
         <FlatList
           data={data}
