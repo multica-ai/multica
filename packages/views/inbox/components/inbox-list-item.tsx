@@ -132,8 +132,8 @@ export function InboxListItem({
           <div className="flex shrink-0 items-center gap-1">
             {/* Pointer-only affordance: revealed on hover, and on keyboard
                 focus anywhere in the row so it is reachable by Tab. Touch has
-                neither, so it stays hidden below `md` and the compact menu
-                below carries the same action. */}
+                neither, so it stays hidden on a pointer that cannot hover and
+                the compact menu below carries the same action. */}
             <button
               type="button"
               title={actionLabel}
@@ -142,7 +142,7 @@ export function InboxListItem({
                 e.stopPropagation();
                 onAction();
               }}
-              className="hidden rounded p-0.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring md:group-hover:inline-flex md:group-focus-within:inline-flex"
+              className="hidden rounded p-0.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [@media(hover:hover)]:group-hover:inline-flex [@media(hover:hover)]:group-focus-within:inline-flex"
             >
               <ActionIcon className="h-3.5 w-3.5" />
             </button>

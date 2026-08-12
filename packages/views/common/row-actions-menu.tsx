@@ -38,9 +38,13 @@ export function handleRowActivationKey(
  *
  * This is the touch counterpart of the hover controls list rows reveal on a
  * pointer surface: a coarse pointer has neither hover nor right-click, so it
- * would otherwise never reach them. It renders below `md` and hides from `md`
- * up, where the hover controls take over — the two must therefore offer the
- * same actions.
+ * would otherwise never reach them. It renders where the primary pointer
+ * cannot hover and hides where it can, letting the hover controls take over —
+ * the two must therefore offer the same actions.
+ *
+ * The switch is `hover`, not a width breakpoint: a phone in landscape clears
+ * `md` while still having no hover, which would otherwise leave it with the
+ * hover controls it can never trigger.
  *
  * `groups` are rendered in order with a separator between them.
  */
@@ -65,7 +69,7 @@ export function RowActionsMenu({
             // The row owns click-to-select; opening the menu must not select it.
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-popup-open:bg-accent data-popup-open:text-foreground md:hidden"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-popup-open:bg-accent data-popup-open:text-foreground [@media(hover:hover)]:hidden"
           >
             <MoreHorizontal className="size-4" />
           </button>

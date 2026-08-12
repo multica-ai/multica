@@ -260,8 +260,8 @@ export function ChatThreadList({
       previewNode = <span className="block truncate text-muted-foreground">{t(($) => $.list.no_messages)}</span>;
     }
 
-    // One list drives both action surfaces — the compact menu below `md` and
-    // the hover strip from `md` up — so they cannot drift. The archived view
+    // One list drives both action surfaces — the compact menu without hover
+    // and the hover strip with it — so they cannot drift. The archived view
     // is the only place hard-delete lives; the history view offers the
     // reversible archive instead.
     const rowActions: RowActionItem[] =
@@ -432,7 +432,7 @@ export function ChatThreadList({
         {/* Compact action menu — the touch equivalent of the hover strip
             below, which a pointer without hover can never reach. It takes real
             layout space (rather than overlaying the preview) and gives way to
-            the hover strip from `md` up. */}
+            the hover strip on a hover-capable pointer. */}
         {!isConfirmingAction && (
           <RowActionsMenu
             label={t(($) => $.list.row_actions_aria)}
@@ -444,7 +444,7 @@ export function ChatThreadList({
             changes the row height (which was making the list jump). Keyboard
             focus reveals them too, so they are reachable without a mouse. */}
         {!isConfirmingAction && (
-          <div className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l from-accent from-40% to-transparent pl-10 pr-1 md:group-hover/row:flex md:group-focus-within/row:flex">
+          <div className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l from-accent from-40% to-transparent pl-10 pr-1 [@media(hover:hover)]:group-hover/row:flex [@media(hover:hover)]:group-focus-within/row:flex">
             {rowActions.map((action) => (
               <RowAction
                 key={action.key}

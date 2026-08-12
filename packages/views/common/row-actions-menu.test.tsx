@@ -47,7 +47,10 @@ describe("RowActionsMenu", () => {
     expect(onRowClick).not.toHaveBeenCalled();
   });
 
-  it("hides from `md` up, where hover controls take over", () => {
+  it("hides only where the pointer can hover, never by viewport width", () => {
+    // A width breakpoint would strand every wide touch surface — a phone in
+    // landscape clears `md` while still having no hover, so it would lose this
+    // menu and get hover controls it cannot trigger.
     render(
       <RowActionsMenu
         label="Chat actions"
@@ -55,9 +58,10 @@ describe("RowActionsMenu", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Chat actions" }).className).toContain(
-      "md:hidden",
-    );
+    const trigger = screen.getByRole("button", { name: "Chat actions" });
+
+    expect(trigger.className).toContain("[@media(hover:hover)]:hidden");
+    expect(trigger.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):hidden/);
   });
 
   it("renders nothing when every group is empty", () => {

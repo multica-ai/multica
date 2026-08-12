@@ -176,6 +176,21 @@ describe("InboxListItem keyboard semantics", () => {
     expect(container.querySelector("button")).not.toBeNull();
   });
 
+  it("gates the archive affordance on hover capability, not viewport width", () => {
+    // A width breakpoint hides this button on every wide surface, touch or
+    // not. On a pointer that cannot hover — a phone in landscape clears `md` —
+    // that left the row with no reachable archive at all, which is the whole
+    // problem the compact menu exists to solve.
+    const { container } = renderRow({ item: item(), view: "inbox" });
+
+    const actionButton = container.querySelector("button")!;
+
+    expect(actionButton.className).toContain(
+      "[@media(hover:hover)]:group-hover:inline-flex",
+    );
+    expect(actionButton.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):group-/);
+  });
+
   it("activates on Enter like the button it replaces", () => {
     const onClick = vi.fn();
     renderRow({ item: item(), view: "inbox", onClick });

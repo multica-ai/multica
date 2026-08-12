@@ -23,8 +23,9 @@ export interface InboxRowActions {
  * The actions an inbox row offers, grouped the way separators divide them.
  *
  * Shared by the desktop right-click menu and the compact per-row menu that
- * replaces the hover button below `md`, so the two can never drift: a pointer
- * with no hover state gets exactly the actions a right-click gives.
+ * stands in for the hover button wherever the pointer cannot hover, so the two
+ * can never drift: a pointer with no hover state gets exactly the actions a
+ * right-click gives.
  *
  * `actions` may be null (no provider); the row then has nothing to offer.
  */

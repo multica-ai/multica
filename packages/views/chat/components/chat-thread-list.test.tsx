@@ -211,6 +211,25 @@ describe("ChatThreadList compact row menu", () => {
 
     expect(onSelectSession).not.toHaveBeenCalled();
   });
+
+  it("stays reachable on a wide viewport that cannot hover", () => {
+    // The menu and the hover strip must both switch on hover capability. Gating
+    // either on width strands a landscape phone: past `md` the menu would be
+    // hidden and the strip would wait for a hover that never arrives.
+    renderList(null);
+
+    const trigger = screen.getAllByRole("button", {
+      name: enChat.list.row_actions_aria,
+    })[0]!;
+    const strip = trigger.parentElement!.querySelector(
+      "[class*='group-hover/row']",
+    )!;
+
+    expect(trigger.className).toContain("[@media(hover:hover)]:hidden");
+    expect(trigger.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):hidden/);
+    expect(strip.className).toContain("[@media(hover:hover)]:group-hover/row:flex");
+    expect(strip.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):group-/);
+  });
 });
 
 describe("ChatThreadList row keyboard semantics", () => {
