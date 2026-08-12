@@ -121,6 +121,9 @@ interface DaemonAPI {
   restart: () => Promise<{ success: boolean; error?: string }>;
   getStatus: () => Promise<DaemonStatus>;
   probeRuntimes: () => Promise<LocalRuntimeProbe>;
+  installRuntime: (
+    provider: string,
+  ) => Promise<{ success: boolean; error?: string }>;
   getHostName: () => Promise<string>;
   onStatusChange: (callback: (status: DaemonStatus) => void) => () => void;
   setTargetApiUrl: (url: string) => Promise<void>;

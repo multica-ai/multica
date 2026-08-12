@@ -17,6 +17,7 @@ interface DaemonStatusLike {
     | "starting"
     | "stopping"
     | "installing_cli"
+    | "installing_runtime"
     | "cli_not_found"
     | "auth_expired";
   daemonId?: string;
@@ -26,7 +27,8 @@ interface DaemonStatusLike {
  * Merges a local DaemonStatus into an AgentRuntime row. Only the `status`
  * field is overridden; other fields (name, provider, last_seen_at, etc)
  * remain server-authoritative. We deliberately ignore intermediate states
- * (starting / stopping / installing_cli / cli_not_found) so the cache
+ * (starting / stopping / installing_cli / installing_runtime / cli_not_found)
+ * so the cache
  * doesn't flap during boot — if the daemon is in such a state, the runtime
  * is effectively offline anyway, and the server-side sweeper will mark it
  * within 75s.

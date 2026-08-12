@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
-import type { DaemonStatus } from "../../../shared/daemon-types";
+import type {
+  DaemonStatus,
+  ManagedRuntimeSetupStatus,
+} from "../../../shared/daemon-types";
 
 export interface DesktopRuntimeContext {
   localDaemonId: string | null;
   localMachineName: string | null;
   bootstrapping: boolean;
+  managedRuntimeSetup: ManagedRuntimeSetupStatus | null;
 }
 
 interface DaemonIdentity {
@@ -50,7 +54,9 @@ export function useDesktopRuntimeContext(): DesktopRuntimeContext {
       status.deviceName ?? lastIdentity.deviceName ?? hostName,
     bootstrapping:
       status.state === "installing_cli" ||
+      status.state === "installing_runtime" ||
       status.state === "starting" ||
       status.state === "running",
+    managedRuntimeSetup: status.managedRuntimeSetup ?? null,
   };
 }

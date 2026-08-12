@@ -526,6 +526,7 @@ var piBlockedArgs = map[string]blockedArgMode{
 	"--mode":     blockedWithValue,  // "json" event stream protocol
 	"--session":  blockedWithValue,  // daemon manages the session path
 	"--thinking": blockedWithValue,  // owned by agent.thinking_level
+	"--api-key":  blockedWithValue,  // secrets come from per-agent env, never process argv
 }
 
 // piCustomArgModes mirrors Pi 0.83's built-in parser closely enough to

@@ -241,6 +241,10 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:get-status"),
   probeRuntimes: (): Promise<LocalRuntimeProbe> =>
     ipcRenderer.invoke("daemon:probe-runtimes"),
+  installRuntime: (
+    provider: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("daemon:install-runtime", provider),
   getHostName: (): Promise<string> =>
     ipcRenderer.invoke("daemon:get-host-name"),
   onStatusChange: (callback: (status: DaemonStatus) => void) => {

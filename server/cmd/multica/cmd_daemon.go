@@ -23,8 +23,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
 	logger_pkg "github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/managedruntime"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 var daemonCmd = &cobra.Command{
@@ -56,6 +58,13 @@ var daemonProbeRuntimesCmd = &cobra.Command{
 	Short:  "Probe locally configured runtimes for the Desktop app",
 	Hidden: true,
 	RunE:   runDaemonProbeRuntimes,
+}
+
+var daemonInstallRuntimeCmd = &cobra.Command{
+	Use:   "install-runtime <provider>",
+	Short: "Install a supported agent runtime into Multica's managed directory",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runDaemonInstallRuntime,
 }
 
 var daemonRestartCmd = &cobra.Command{
@@ -136,13 +145,117 @@ func init() {
 	df.String("workspaces-root", "", "Override the workspaces root path (default: same as the daemon)")
 	df.Bool("all-profiles", false, "Scan every workspace root (default root + all ~/.multica/profiles/* roots, incl. the Desktop app's) and report a combined total")
 
+	daemonInstallRuntimeCmd.Flags().String("output", "table", "Output format: table or json")
+	daemonInstallRuntimeCmd.Flags().Duration("timeout", 3*time.Minute, "Maximum time for download, extraction, and verification")
+
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonProbeRuntimesCmd)
+	daemonCmd.AddCommand(daemonInstallRuntimeCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonDiskUsageCmd)
+}
+
+type managedRuntimeInstaller interface {
+	Install(context.Context, string) (managedruntime.InstallResult, error)
+}
+
+var (
+	newManagedRuntimeInstaller = func() (managedRuntimeInstaller, error) {
+		return managedruntime.DefaultInstaller()
+	}
+	probeInstallRuntimeCandidates = daemon.ProbeAgentCLIs
+)
+
+type daemonRuntimeInstallOutput struct {
+	Provider  string `json:"provider"`
+	Version   string `json:"version,omitempty"`
+	Path      string `json:"path"`
+	Source    string `json:"source"`
+	Installed bool   `json:"installed"`
+}
+
+func runDaemonInstallRuntime(cmd *cobra.Command, args []string) error {
+	provider := strings.ToLower(strings.TrimSpace(args[0]))
+	descriptor, supported := managedruntime.DescriptorFor(provider)
+	if !supported {
+		return fmt.Errorf("managed runtime %q is not supported", provider)
+	}
+	timeout, _ := cmd.Flags().GetDuration("timeout")
+	if timeout <= 0 {
+		return fmt.Errorf("timeout must be greater than zero")
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+	defer cancel()
+
+	if entry, exists := probeInstallRuntimeCandidates()[provider]; exists {
+		// A user installation always wins and is never shadowed. A managed
+		// installation, however, must flow through Installer so a later Desktop
+		// release can advance the compiled latest-supported version atomically.
+		if !managedruntime.IsManagedExecutable(provider, entry.Path) {
+			version, err := detectInstalledRuntimeVersion(ctx, provider, entry.Path, descriptor.Verify.Args)
+			if err == nil {
+				return writeDaemonRuntimeInstallOutput(cmd, daemonRuntimeInstallOutput{
+					Provider: provider,
+					Version:  version,
+					Path:     entry.Path,
+					Source:   "user",
+				})
+			}
+			fmt.Fprintf(
+				cmd.ErrOrStderr(),
+				"existing %s runtime at %s is not usable (%v); installing Multica-managed runtime instead\n",
+				provider,
+				entry.Path,
+				err,
+			)
+		}
+	}
+
+	installer, err := newManagedRuntimeInstaller()
+	if err != nil {
+		return err
+	}
+	result, err := installer.Install(ctx, provider)
+	if err != nil {
+		return err
+	}
+	return writeDaemonRuntimeInstallOutput(cmd, daemonRuntimeInstallOutput{
+		Provider:  result.Provider,
+		Version:   result.Version,
+		Path:      result.Path,
+		Source:    "managed",
+		Installed: result.Installed,
+	})
+}
+
+func detectInstalledRuntimeVersion(ctx context.Context, provider, path string, args []string) (string, error) {
+	versionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(versionCtx, path, args...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("existing %s runtime at %s failed version detection: %w", provider, path, err)
+	}
+	version := strings.TrimSpace(string(out))
+	if err := agent.CheckMinVersion(provider, version); err != nil {
+		return "", fmt.Errorf("existing %s runtime at %s is not usable: %w", provider, path, err)
+	}
+	return version, nil
+}
+
+func writeDaemonRuntimeInstallOutput(cmd *cobra.Command, result daemonRuntimeInstallOutput) error {
+	output, _ := cmd.Flags().GetString("output")
+	switch output {
+	case "json":
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+	case "table":
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s (%s)\n%s\n", result.Provider, result.Version, result.Source, result.Path)
+		return err
+	default:
+		return fmt.Errorf("unsupported output format %q", output)
+	}
 }
 
 type daemonRuntimeProbe struct {

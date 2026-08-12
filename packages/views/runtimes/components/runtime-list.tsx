@@ -29,7 +29,10 @@ import {
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import {
   deriveRuntimeHealth,
+  isPiRuntimeModelConfigured,
+  runtimeModelsOptions,
   runtimeProfileListOptions,
+  runtimeSupportsDefaultModelConnection,
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -72,6 +75,11 @@ import {
   isPendingCustomRuntimeWarning,
   pendingRuntimeCommandName,
 } from "./pending-runtime";
+import {
+  isPendingManagedRuntime,
+  managedRuntimeSetupPhase,
+  managedRuntimeSetupVersion,
+} from "./managed-runtime-setup";
 import { useT, useTimeAgo } from "../../i18n";
 
 // The machine detail's runtimes table on the shared ListGrid. Paradigm
@@ -300,6 +308,45 @@ function HealthCell({
   const { t: tAgents } = useT("agents");
   const labelOf = useHealthLabel();
   const timeAgo = useTimeAgo();
+  const health = deriveRuntimeHealth(runtime, now);
+  const shouldCheckPiLocalModels =
+    health === "online" &&
+    runtime.provider === "pi" &&
+    runtimeSupportsDefaultModelConnection(runtime) &&
+    !isPiRuntimeModelConfigured(runtime);
+  const piModelsQuery = useQuery(
+    runtimeModelsOptions(shouldCheckPiLocalModels ? runtime.id : null),
+  );
+  const managedSetupPhase = managedRuntimeSetupPhase(runtime);
+  if (managedSetupPhase) {
+    return (
+      <ListGridCell className="gap-1.5">
+        {managedSetupPhase === "installing" ? (
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-info" />
+        ) : managedSetupPhase === "failed" ? (
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
+        ) : (
+          <span
+            aria-hidden="true"
+            className="h-2 w-2 shrink-0 rounded-full bg-success"
+          />
+        )}
+        <span
+          className={
+            managedSetupPhase === "failed"
+              ? "block min-w-0 truncate text-caption text-destructive"
+              : "block min-w-0 truncate text-caption"
+          }
+        >
+          {managedSetupPhase === "installing"
+            ? t(($) => $.list.managed_health_installing)
+            : managedSetupPhase === "ready"
+              ? t(($) => $.list.managed_health_ready)
+              : t(($) => $.list.managed_health_failed)}
+        </span>
+      </ListGridCell>
+    );
+  }
   if (isDisabledCustomRuntime(runtime)) {
     return (
       <ListGridCell>
@@ -341,10 +388,26 @@ function HealthCell({
     );
   }
 
-  const health = deriveRuntimeHealth(runtime, now);
   const offline = health === "offline" || health === "about_to_gc";
   const lastSeen = runtime.last_seen_at ? timeAgo(runtime.last_seen_at) : null;
   const active = workload.runningCount + workload.queuedCount;
+  const piModelDiscoveryComplete = piModelsQuery.isSuccess;
+  const piHasLocalModels = (piModelsQuery.data?.models.length ?? 0) > 0;
+
+  if (
+    shouldCheckPiLocalModels &&
+    piModelDiscoveryComplete &&
+    !piHasLocalModels
+  ) {
+    return (
+      <ListGridCell className="gap-1.5">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warning" />
+        <span className="block min-w-0 truncate text-caption text-warning">
+          {t(($) => $.list.needs_model_setup)}
+        </span>
+      </ListGridCell>
+    );
+  }
 
   return (
     <ListGridCell className="gap-1.5">
@@ -430,6 +493,16 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
 
 export function CliCell({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
+  if (isPendingManagedRuntime(runtime)) {
+    const version = managedRuntimeSetupVersion(runtime);
+    return version ? (
+      <span className="truncate font-mono text-caption text-muted-foreground">
+        {version}
+      </span>
+    ) : (
+      <span className="text-caption text-faint-foreground">—</span>
+    );
+  }
   const failure = customRuntimeRegistrationFailure(runtime);
   if (failure) {
     const command = pendingRuntimeCommandName(runtime);
@@ -721,10 +794,12 @@ export function RuntimeList({
           ? memberById.get(runtime.owner_id) ?? null
           : null,
         workload: workloadIndex.get(runtime.id) ?? EMPTY_WORKLOAD,
-        canDelete: isCustomRuntime
-          ? isAdmin && !!profile
-          : !isPendingCustomRuntime(runtime) &&
-            (isAdmin || (!!user && runtime.owner_id === user.id)),
+        canDelete: isPendingManagedRuntime(runtime)
+          ? false
+          : isCustomRuntime
+            ? isAdmin && !!profile
+            : !isPendingCustomRuntime(runtime) &&
+              (isAdmin || (!!user && runtime.owner_id === user.id)),
       };
     });
   }, [runtimes, profileById, memberById, workloadIndex, isAdmin, user]);
@@ -763,7 +838,9 @@ export function RuntimeList({
           <span aria-hidden="true" />
         </ListGridHeader>
         {rows.map((row) => {
-          const pending = isPendingCustomRuntime(row.runtime);
+          const pending =
+            isPendingCustomRuntime(row.runtime) ||
+            isPendingManagedRuntime(row.runtime);
           const detailHref = pending
             ? undefined
             : runtimeHref?.(row.runtime.id) ??

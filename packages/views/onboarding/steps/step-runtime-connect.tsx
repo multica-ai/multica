@@ -20,6 +20,12 @@ import {
 } from "../components/step-shell";
 import { useRuntimePicker } from "../components/use-runtime-picker";
 import { MikaRuntimeChoice } from "../../runtimes/components/mika-runtime-choice";
+import { BuiltInRuntimeOffer } from "../../runtimes/components/built-in-runtime-offer";
+import {
+  BUILT_IN_RUNTIME_PROVIDER,
+  builtInRuntimeSetupPhase,
+} from "../../runtimes/components/built-in-runtime-setup";
+import type { ManagedRuntimeSetupStatus } from "../../runtimes/components/managed-runtime-setup";
 import { useT } from "../../i18n";
 
 /**
@@ -44,8 +50,16 @@ export function StepRuntimeConnect({
   onRefresh,
   runtimesPending,
   currentUserId,
+  onInstallBuiltInRuntime,
+  managedRuntimeSetup,
 }: {
   wsId: string;
+  /** Desktop-only: installs the Multica-managed runtime on this machine.
+   *  Omitted on web, which cannot install anything locally and keeps the
+   *  "connect a CLI" path as its only exit. */
+  onInstallBuiltInRuntime?: () => Promise<{ success: boolean; error?: string }>;
+  /** Desktop-only local install state; never written into the server cache. */
+  managedRuntimeSetup?: ManagedRuntimeSetupStatus | null;
   /** Slug of the target workspace. Sent explicitly so the runtime list reads
    *  the workspace being set up rather than whichever one the app is currently
    *  showing. */
@@ -79,6 +93,8 @@ export function StepRuntimeConnect({
       currentUserId={currentUserId}
       onRefresh={onRefresh}
       runtimesPending={runtimesPending}
+      onInstallBuiltInRuntime={onInstallBuiltInRuntime}
+      managedRuntimeSetup={managedRuntimeSetup}
     />
   );
 }
@@ -87,7 +103,10 @@ export function StepRuntimeConnect({
 // Fancy desktop view
 // ============================================================
 
-type Phase = "scanning" | "found" | "empty";
+// "built_in" is the opted-in Multica-managed path: once the user asks for it,
+// the step stays on it through install → connect a model, and does not jump to
+// "found" the moment the runtime registers (it cannot run anything yet).
+type Phase = "scanning" | "found" | "empty" | "built_in";
 
 /** Idle ms before an empty list flips from "scanning" to "empty" — unless the
  *  platform reports runtimes are still pending (see `runtimesPending`). */
@@ -108,6 +127,8 @@ function FancyView({
   onRefresh,
   runtimesPending,
   currentUserId,
+  onInstallBuiltInRuntime,
+  managedRuntimeSetup,
 }: {
   wsId: string;
   runtimes: AgentRuntime[];
@@ -120,6 +141,8 @@ function FancyView({
   /** Runtime picker labels rows by owner; injected so this step does not read
    *  the auth store (six tests render it without one). */
   currentUserId?: string | null;
+  onInstallBuiltInRuntime?: () => Promise<{ success: boolean; error?: string }>;
+  managedRuntimeSetup?: ManagedRuntimeSetupStatus | null;
 }) {
   const { t } = useT("onboarding");
   const qc = useQueryClient();
@@ -157,8 +180,25 @@ function FancyView({
     };
   }, [runtimes.length, scanEpoch]);
 
-  const phase: Phase =
-    runtimes.length > 0
+  // The built-in path is opt-in, and stays selected until it can actually run
+  // work. Deriving it purely from "a Pi runtime exists" would also capture a
+  // user who installed Pi themselves and configured it natively, and drag them
+  // into a key form they never asked for.
+  const [builtInOptedIn, setBuiltInOptedIn] = useState(false);
+  const [builtInDeferred, setBuiltInDeferred] = useState(false);
+  const builtInActive =
+    (builtInOptedIn ||
+      managedRuntimeSetup?.provider === BUILT_IN_RUNTIME_PROVIDER) &&
+    !builtInDeferred;
+  const builtInPhase = builtInRuntimeSetupPhase({
+    runtimes,
+    setup: managedRuntimeSetup,
+  });
+  const builtInInProgress = builtInActive && builtInPhase !== "ready";
+
+  const phase: Phase = builtInInProgress
+    ? "built_in"
+    : runtimes.length > 0
       ? "found"
       : hardTimedOut || (softTimedOut && runtimesPending !== true)
         ? "empty"
@@ -218,7 +258,7 @@ function FancyView({
         })
       : phase === "found"
         ? t(($) => $.step_runtime.hint_pick)
-        : phase === "scanning"
+        : phase === "scanning" || phase === "built_in"
           ? t(($) => $.step_runtime.hint_waiting)
           : t(($) => $.step_runtime.hint_skip_or_refresh);
 
@@ -248,8 +288,29 @@ function FancyView({
             currentUserId={currentUserId ?? null}
           />
         )}
+        {phase === "built_in" && onInstallBuiltInRuntime && (
+          <BuiltInRuntimeView
+            wsId={wsId}
+            runtimes={runtimes}
+            setup={managedRuntimeSetup}
+            onInstall={onInstallBuiltInRuntime}
+            onSkipKey={() => setBuiltInDeferred(true)}
+          />
+        )}
         {phase === "empty" && (
           <EmptyView
+            wsId={wsId}
+            runtimes={runtimes}
+            setup={managedRuntimeSetup}
+            onInstallBuiltInRuntime={
+              onInstallBuiltInRuntime
+                ? async () => {
+                    setBuiltInDeferred(false);
+                    setBuiltInOptedIn(true);
+                    return onInstallBuiltInRuntime();
+                  }
+                : undefined
+            }
             onSkip={handleSkip}
             onRefresh={handleRefresh}
             refreshing={refreshing}
@@ -398,11 +459,27 @@ function FoundView({
   );
 }
 
+/**
+ * The exit for a machine with no coding CLI on it.
+ *
+ * Used to offer only "skip" (into a shell tutorial on an issue board) and a
+ * dimmed "coming soon" card — so a user who does not already own a coding CLI
+ * had no working path at all. The built-in runtime is now the lead option, and
+ * the CLI instructions became the alternative rather than the only door.
+ */
 function EmptyView({
+  wsId,
+  runtimes,
+  setup,
+  onInstallBuiltInRuntime,
   onSkip,
   onRefresh,
   refreshing,
 }: {
+  wsId: string;
+  runtimes: AgentRuntime[];
+  setup?: ManagedRuntimeSetupStatus | null;
+  onInstallBuiltInRuntime?: () => Promise<{ success: boolean; error?: string }>;
   onSkip: () => void;
   onRefresh: () => void;
   refreshing: boolean;
@@ -432,17 +509,21 @@ function EmptyView({
       </p>
 
       <div className="mt-10 flex flex-col gap-3.5">
+        {onInstallBuiltInRuntime && (
+          <BuiltInRuntimeOffer
+            wsId={wsId}
+            runtimes={runtimes}
+            setup={setup}
+            onInstall={onInstallBuiltInRuntime}
+            onConnected={() => {}}
+          />
+        )}
+
         <EmptyCard
           title={t(($) => $.step_runtime.empty_skip_title)}
           subtitle={t(($) => $.step_runtime.empty_skip_subtitle)}
           actionLabel={t(($) => $.step_runtime.empty_skip_action)}
           onAction={onSkip}
-        />
-
-        <ComingSoonCard
-          title={t(($) => $.step_runtime.empty_waitlist_title)}
-          subtitle={t(($) => $.step_runtime.empty_waitlist_subtitle)}
-          badgeLabel={t(($) => $.step_runtime.empty_waitlist_action)}
         />
       </div>
     </div>
@@ -450,37 +531,39 @@ function EmptyView({
 }
 
 /**
- * Static, non-interactive variant of EmptyCard used for the cloud-computer
- * row. The card is dimmed and the pill is rendered as a badge so the user
- * understands the option exists but isn't actionable yet. Mirrors the
- * "Coming soon" treatment on the web platform fork.
+ * Install → connect a model, once the user has opted into the built-in path.
+ * Owns the whole sequence so the step never advertises a runtime that has no
+ * model behind it.
  */
-function ComingSoonCard({
-  title,
-  subtitle,
-  badgeLabel,
+function BuiltInRuntimeView({
+  wsId,
+  runtimes,
+  setup,
+  onInstall,
+  onSkipKey,
 }: {
-  title: string;
-  subtitle: string;
-  badgeLabel: string;
+  wsId: string;
+  runtimes: AgentRuntime[];
+  setup?: ManagedRuntimeSetupStatus | null;
+  onInstall: () => Promise<{ success: boolean; error?: string }>;
+  onSkipKey: () => void;
 }) {
+  const { t } = useT("onboarding");
   return (
-    <div
-      aria-disabled
-      className="flex items-center justify-between gap-4 rounded-lg border border-dashed bg-muted/20 px-5 py-4 opacity-70"
-    >
-      <div className="min-w-0">
-        <div className="text-body font-medium text-foreground">{title}</div>
-        <p className="mt-1 text-caption leading-[1.55] text-muted-foreground">
-          {subtitle}
-        </p>
+    <div>
+      <h2 className="text-title-sm font-medium tracking-tight text-foreground">
+        {t(($) => $.step_runtime.empty_headline)}
+      </h2>
+      <div className="mt-8">
+        <BuiltInRuntimeOffer
+          wsId={wsId}
+          runtimes={runtimes}
+          setup={setup}
+          onInstall={onInstall}
+          onConnected={() => {}}
+          onSkipKey={onSkipKey}
+        />
       </div>
-      <span
-        aria-hidden
-        className="inline-flex shrink-0 items-center rounded-full border bg-background px-3 py-1.5 text-caption font-medium uppercase tracking-wide text-muted-foreground"
-      >
-        {badgeLabel}
-      </span>
     </div>
   );
 }

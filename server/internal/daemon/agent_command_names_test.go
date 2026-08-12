@@ -54,12 +54,12 @@ func TestDefaultAgentCommandNamesCoversAllProbes(t *testing.T) {
 		if !ok || ident.Name != "probe" {
 			return true
 		}
-		// probe(envPathVar, commandName, envModelVar): the command name is the
-		// second argument and is the value pre-fetched by the shell fallback.
-		if len(call.Args) < 2 {
+		// probe(provider, envPathVar, commandName, envModelVar): the command name
+		// is the third argument and is pre-fetched by the shell fallback.
+		if len(call.Args) < 3 {
 			return true
 		}
-		lit, ok := call.Args[1].(*ast.BasicLit)
+		lit, ok := call.Args[2].(*ast.BasicLit)
 		if !ok || lit.Kind != token.STRING {
 			return true
 		}

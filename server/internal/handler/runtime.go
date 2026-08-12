@@ -35,7 +35,12 @@ type AgentRuntimeResponse struct {
 	Status       string  `json:"status"`
 	DeviceInfo   string  `json:"device_info"`
 	Metadata     any     `json:"metadata"`
-	OwnerID      *string `json:"owner_id"`
+	// DefaultModelConfig is safe, non-secret model routing metadata. The API
+	// key lives in a separate column and is represented only by the boolean
+	// below so ordinary runtime reads can never expose it.
+	DefaultModelConfig    map[string]any `json:"default_model_config"`
+	HasDefaultModelAPIKey bool           `json:"has_default_model_api_key"`
+	OwnerID               *string        `json:"owner_id"`
 	// Visibility is "private" (default — only the owner / workspace admins
 	// can bind agents) or "public" (any workspace member can). See migration
 	// 083 and canUseRuntimeForAgent.
@@ -56,25 +61,34 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
+	defaultModelConfig := map[string]any{}
+	if rt.DefaultModelConfig != nil {
+		_ = json.Unmarshal(rt.DefaultModelConfig, &defaultModelConfig)
+	}
+	if defaultModelConfig == nil {
+		defaultModelConfig = map[string]any{}
+	}
 
 	return AgentRuntimeResponse{
-		ID:           uuidToString(rt.ID),
-		WorkspaceID:  uuidToString(rt.WorkspaceID),
-		DaemonID:     textToPtr(rt.DaemonID),
-		Name:         rt.Name,
-		CustomName:   textToPtr(rt.CustomName),
-		RuntimeMode:  rt.RuntimeMode,
-		Provider:     rt.Provider,
-		LaunchHeader: agent.LaunchHeader(rt.Provider),
-		Status:       rt.Status,
-		DeviceInfo:   rt.DeviceInfo,
-		Metadata:     metadata,
-		OwnerID:      uuidToPtr(rt.OwnerID),
-		Visibility:   rt.Visibility,
-		ProfileID:    uuidToPtr(rt.ProfileID),
-		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
-		CreatedAt:    timestampToString(rt.CreatedAt),
-		UpdatedAt:    timestampToString(rt.UpdatedAt),
+		ID:                    uuidToString(rt.ID),
+		WorkspaceID:           uuidToString(rt.WorkspaceID),
+		DaemonID:              textToPtr(rt.DaemonID),
+		Name:                  rt.Name,
+		CustomName:            textToPtr(rt.CustomName),
+		RuntimeMode:           rt.RuntimeMode,
+		Provider:              rt.Provider,
+		LaunchHeader:          agent.LaunchHeader(rt.Provider),
+		Status:                rt.Status,
+		DeviceInfo:            rt.DeviceInfo,
+		Metadata:              metadata,
+		DefaultModelConfig:    defaultModelConfig,
+		HasDefaultModelAPIKey: rt.DefaultModelApiKey.Valid && strings.TrimSpace(rt.DefaultModelApiKey.String) != "",
+		OwnerID:               uuidToPtr(rt.OwnerID),
+		Visibility:            rt.Visibility,
+		ProfileID:             uuidToPtr(rt.ProfileID),
+		LastSeenAt:            timestampToPtr(rt.LastSeenAt),
+		CreatedAt:             timestampToString(rt.CreatedAt),
+		UpdatedAt:             timestampToString(rt.UpdatedAt),
 	}
 }
 

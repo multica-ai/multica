@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,6 +22,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
+	"github.com/multica-ai/multica/server/internal/managedruntime"
 )
 
 // TestDaemonAlive locks in the liveness predicate the lifecycle commands rely
@@ -819,6 +823,158 @@ func writeDiskUsageFile(t *testing.T, path string) {
 	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+type fakeManagedRuntimeInstaller struct {
+	result managedruntime.InstallResult
+	err    error
+	calls  int
+}
+
+func (f *fakeManagedRuntimeInstaller) Install(_ context.Context, _ string) (managedruntime.InstallResult, error) {
+	f.calls++
+	return f.result, f.err
+}
+
+func TestRunDaemonInstallRuntimeKeepsUsableUserPi(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-only")
+	}
+	bin := filepath.Join(t.TempDir(), "pi")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '0.70.0\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	originalProbe := probeInstallRuntimeCandidates
+	originalFactory := newManagedRuntimeInstaller
+	t.Cleanup(func() {
+		probeInstallRuntimeCandidates = originalProbe
+		newManagedRuntimeInstaller = originalFactory
+	})
+	probeInstallRuntimeCandidates = func() map[string]daemon.AgentEntry {
+		return map[string]daemon.AgentEntry{"pi": {Path: bin, Command: "pi"}}
+	}
+	fake := &fakeManagedRuntimeInstaller{}
+	newManagedRuntimeInstaller = func() (managedRuntimeInstaller, error) { return fake, nil }
+
+	cmd, out := newInstallRuntimeTestCommand(t)
+	if err := runDaemonInstallRuntime(cmd, []string{"pi"}); err != nil {
+		t.Fatalf("runDaemonInstallRuntime: %v", err)
+	}
+	var result daemonRuntimeInstallOutput
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if result.Source != "user" || result.Path != bin || result.Version != "0.70.0" {
+		t.Fatalf("result = %+v", result)
+	}
+	if fake.calls != 0 {
+		t.Fatalf("installer called %d times for usable user Pi", fake.calls)
+	}
+}
+
+func TestRunDaemonInstallRuntimeInstallsPiWhenMissing(t *testing.T) {
+	originalProbe := probeInstallRuntimeCandidates
+	originalFactory := newManagedRuntimeInstaller
+	t.Cleanup(func() {
+		probeInstallRuntimeCandidates = originalProbe
+		newManagedRuntimeInstaller = originalFactory
+	})
+	probeInstallRuntimeCandidates = func() map[string]daemon.AgentEntry { return nil }
+	fake := &fakeManagedRuntimeInstaller{result: managedruntime.InstallResult{
+		Provider: "pi", Version: "0.83.0", Path: "/managed/pi", Installed: true,
+	}}
+	newManagedRuntimeInstaller = func() (managedRuntimeInstaller, error) { return fake, nil }
+
+	cmd, out := newInstallRuntimeTestCommand(t)
+	if err := runDaemonInstallRuntime(cmd, []string{"pi"}); err != nil {
+		t.Fatalf("runDaemonInstallRuntime: %v", err)
+	}
+	var result daemonRuntimeInstallOutput
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if result.Source != "managed" || !result.Installed || result.Path != "/managed/pi" {
+		t.Fatalf("result = %+v", result)
+	}
+	if fake.calls != 1 {
+		t.Fatalf("installer calls = %d, want 1", fake.calls)
+	}
+}
+
+func TestRunDaemonInstallRuntimeRefreshesExistingManagedPi(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	t.Setenv("MULTICA_MANAGED_RUNTIME_DIR", runtimeRoot)
+	managedPath := filepath.Join(runtimeRoot, "pi", "current", "pi")
+	originalProbe := probeInstallRuntimeCandidates
+	originalFactory := newManagedRuntimeInstaller
+	t.Cleanup(func() {
+		probeInstallRuntimeCandidates = originalProbe
+		newManagedRuntimeInstaller = originalFactory
+	})
+	probeInstallRuntimeCandidates = func() map[string]daemon.AgentEntry {
+		return map[string]daemon.AgentEntry{"pi": {Path: managedPath, Command: managedPath}}
+	}
+	fake := &fakeManagedRuntimeInstaller{result: managedruntime.InstallResult{
+		Provider: "pi", Version: "0.83.0", Path: managedPath, Installed: true,
+	}}
+	newManagedRuntimeInstaller = func() (managedRuntimeInstaller, error) { return fake, nil }
+
+	cmd, _ := newInstallRuntimeTestCommand(t)
+	if err := runDaemonInstallRuntime(cmd, []string{"pi"}); err != nil {
+		t.Fatalf("runDaemonInstallRuntime: %v", err)
+	}
+	if fake.calls != 1 {
+		t.Fatalf("installer calls = %d, want managed runtime refresh", fake.calls)
+	}
+}
+
+func TestRunDaemonInstallRuntimeFallsBackToManagedWhenUserPiIsOld(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-only")
+	}
+	bin := filepath.Join(t.TempDir(), "pi")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '0.10.0\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	originalProbe := probeInstallRuntimeCandidates
+	originalFactory := newManagedRuntimeInstaller
+	t.Cleanup(func() {
+		probeInstallRuntimeCandidates = originalProbe
+		newManagedRuntimeInstaller = originalFactory
+	})
+	probeInstallRuntimeCandidates = func() map[string]daemon.AgentEntry {
+		return map[string]daemon.AgentEntry{"pi": {Path: bin, Command: "pi"}}
+	}
+	fake := &fakeManagedRuntimeInstaller{result: managedruntime.InstallResult{
+		Provider: "pi", Version: "0.83.0", Path: "/managed/pi", Installed: true,
+	}}
+	newManagedRuntimeInstaller = func() (managedRuntimeInstaller, error) { return fake, nil }
+
+	cmd, out := newInstallRuntimeTestCommand(t)
+	if err := runDaemonInstallRuntime(cmd, []string{"pi"}); err != nil {
+		t.Fatalf("runDaemonInstallRuntime: %v", err)
+	}
+	var result daemonRuntimeInstallOutput
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if result.Source != "managed" || !result.Installed || result.Path != "/managed/pi" {
+		t.Fatalf("result = %+v", result)
+	}
+	if fake.calls != 1 {
+		t.Fatalf("installer calls = %d, want managed fallback", fake.calls)
+	}
+}
+
+func newInstallRuntimeTestCommand(t *testing.T) (*cobra.Command, *bytes.Buffer) {
+	t.Helper()
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().Duration("timeout", time.Minute, "")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	return cmd, &out
 }
 
 // TestVersionTemplateMatchesDaemonProbe pins a contract that spans two packages

@@ -32,6 +32,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/piagent"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
@@ -186,6 +187,14 @@ type Handler struct {
 	// (stale-while-revalidate, MUL-5444). Nil-safe: every call site treats a nil
 	// cache as a permanent miss and falls back to the full discovery flow.
 	ModelCatalogCache ModelCatalogCache
+	// PiProber verifies a candidate Pi model connection by calling the
+	// provider once. An interface so tests can exercise the handler's
+	// authorization and URL guards without making a real request; the
+	// transport-level behavior is covered in the piagent package.
+	PiProber ModelConnectionProber
+	// ModelProbeRateLimiter bounds how often one user can make the server
+	// issue outbound provider requests. Nil disables the gate (tests).
+	ModelProbeRateLimiter WebhookRateLimiter
 	// Metrics is the shared business-metrics collector built by main.go.
 	// May be nil in tests / self-hosted with the metrics listener disabled;
 	// every Record* method is nil-safe and obsmetrics.RecordEvent treats a
@@ -392,6 +401,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		UpdateStore:                  NewInMemoryUpdateStore(),
 		ModelListStore:               NewInMemoryModelListStore(),
 		ModelCatalogCache:            NewInMemoryModelCatalogCache(),
+		PiProber:                     piagent.NewProber(),
+		ModelProbeRateLimiter:        NewMemoryWebhookRateLimiter(DefaultModelProbeRateLimit()),
 		LocalSkillListStore:          NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore:        NewInMemoryLocalSkillImportStore(),
 		LivenessStore:                NewNoopLivenessStore(),

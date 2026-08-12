@@ -77,6 +77,18 @@ func TestBuildPiArgsCustomArgsAppended(t *testing.T) {
 	}
 }
 
+func TestBuildPiArgsDropsAPIKeyFromCustomArgs(t *testing.T) {
+	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{
+		CustomArgs: []string{"--api-key", "super-secret", "--tools", "read"},
+	}, slog.Default())
+
+	for _, arg := range args {
+		if arg == "--api-key" || arg == "super-secret" {
+			t.Fatalf("API key leaked into Pi argv: %v", args)
+		}
+	}
+}
+
 func TestBuildPiArgsFiltersCustomInputButKeepsOptionValues(t *testing.T) {
 	t.Parallel()
 

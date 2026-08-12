@@ -7,6 +7,7 @@ import { paths } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 import { useLocalRuntimesPending } from "../platform/use-local-runtimes-pending";
+import { useDesktopRuntimeContext } from "./use-desktop-runtime-context";
 
 /**
  * Window-level transition overlay: renders above the tab system when the
@@ -40,6 +41,9 @@ function WindowOverlayInner() {
   // Live local-daemon signal for the onboarding runtime step so it doesn't
   // flash "no runtime found" while the daemon is still probing CLI versions.
   const runtimesPending = useLocalRuntimesPending();
+  // Live install state for the Multica-managed runtime, so the runtime step
+  // can show progress and the reason behind a failure.
+  const { managedRuntimeSetup } = useDesktopRuntimeContext();
 
   if (!overlay) return null;
 
@@ -56,6 +60,11 @@ function WindowOverlayInner() {
     await window.daemonAPI?.restart?.();
   };
 
+  // Only ever called from the runtime step's explicit "install" action —
+  // Desktop no longer downloads a runtime on startup.
+  const installBuiltInRuntime = () =>
+    window.daemonAPI.installRuntime("pi");
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col overflow-auto bg-background">
       {/* Creating a workspace is the onboarding flow entered at the
@@ -67,6 +76,8 @@ function WindowOverlayInner() {
           onCancel={onBack}
           onRuntimeRefresh={restartDaemon}
           runtimesPending={runtimesPending}
+          onInstallBuiltInRuntime={installBuiltInRuntime}
+          managedRuntimeSetup={managedRuntimeSetup}
           onComplete={(ws, destination) => {
             close();
             if (ws && destination?.kind === "chat") {
@@ -107,6 +118,8 @@ function WindowOverlayInner() {
           // Restart the bundled daemon when the user hits Refresh on
           onRuntimeRefresh={restartDaemon}
           runtimesPending={runtimesPending}
+          onInstallBuiltInRuntime={installBuiltInRuntime}
+          managedRuntimeSetup={managedRuntimeSetup}
         />
       )}
     </div>

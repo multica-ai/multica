@@ -25,6 +25,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/managedruntime"
+	"github.com/multica-ai/multica/server/internal/piagent"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -5875,11 +5877,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
+	var piConfig piagent.Config
+	var piConfigValid bool
+	if task.Agent != nil && provider == "pi" {
+		piConfig, piConfigValid = decodePiRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
+	}
 	var agentEnvOverrides map[string]string
 	var agentCustomArgs []string
 	if task.Agent != nil {
 		agentEnvOverrides = task.Agent.CustomEnv
 		agentCustomArgs = task.Agent.CustomArgs
+	}
+	if piConfigValid && strings.TrimSpace(agentEnvOverrides[piagent.APIKeyEnv]) == "" {
+		return TaskResult{}, fmt.Errorf("Pi runtime configuration requires %s in the agent environment", piagent.APIKeyEnv)
+	}
+	if piConfigValid && task.Agent != nil {
+		piConfig = applyPiAgentModelOverride(piConfig, task.Agent.Model, d.logger)
 	}
 	// Effective Codex CLI args the task will launch with, normalized through the
 	// same agent.NormalizeCodexLaunchArgs pipeline buildCodexArgs uses (shell
@@ -6013,6 +6026,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.RootDir != predictedRoot && env.RootDir != "" {
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
+	}
+	var piHome string
+	if piConfigValid {
+		sourceHome := ""
+		if agentEnvOverrides != nil {
+			sourceHome = agentEnvOverrides["PI_CODING_AGENT_DIR"]
+		}
+		var piErr error
+		piHome, piErr = execenv.PreparePiHome(env.RootDir, sourceHome, piConfig, d.logger)
+		if piErr != nil {
+			return TaskResult{}, fmt.Errorf("prepare Pi configuration: %w", piErr)
+		}
 	}
 	taskTempDir, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
 	if err != nil {
@@ -6183,6 +6208,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	// The task-scoped Pi home must win over custom_env so a configured model
+	// cannot be redirected back to the user's mutable global models.json. The
+	// API key remains in custom_env and is referenced by name from that overlay.
+	if piHome != "" {
+		agentEnv["PI_CODING_AGENT_DIR"] = piHome
+	}
+	// Managed binaries use deterministic non-interactive defaults. Do not apply
+	// these to a user-managed Pi install: user installations keep native behavior.
+	if provider == "pi" && managedruntime.IsManagedExecutable(provider, entry.Path) {
+		for key, value := range managedruntime.LaunchEnv(provider) {
+			agentEnv[key] = value
+		}
+	}
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
@@ -6253,6 +6291,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if model == "" {
 		model = entry.Model
+	}
+	if piConfigValid {
+		model = piConfig.Provider + "/" + piConfig.Model
 	}
 	thinkingLevel := ""
 	serviceTier := ""

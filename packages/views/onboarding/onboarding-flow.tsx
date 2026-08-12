@@ -21,6 +21,7 @@ import { StepAboutYou } from "./steps/step-about-you";
 import { StepWorkspace } from "./steps/step-workspace";
 import { StepRuntimeConnect } from "./steps/step-runtime-connect";
 import { StepPlatformFork } from "./steps/step-platform-fork";
+import type { ManagedRuntimeSetupStatus } from "../runtimes/components/managed-runtime-setup";
 import { OnboardingLogoutButton } from "./components/onboarding-logout-button";
 import { getMikaOnboarding, pickContentLang } from "./templates";
 import { useT } from "../i18n";
@@ -123,6 +124,12 @@ interface OnboardingFlowProps {
    *  step doesn't flash "no runtime found" while the daemon is still booting
    *  or probing CLI versions (MUL-5119). Web omits it. */
   runtimesPending?: boolean;
+  /** Desktop wires this to the managed-runtime installer so a machine with no
+   *  coding CLI still has a working path. Web omits it: it cannot install
+   *  anything locally, so its only exit stays "connect a CLI". */
+  onInstallBuiltInRuntime?: () => Promise<{ success: boolean; error?: string }>;
+  /** Desktop-only live install state for the built-in runtime. */
+  managedRuntimeSetup?: ManagedRuntimeSetupStatus | null;
 }
 
 export function OnboardingFlow(props: OnboardingFlowProps) {
@@ -136,6 +143,8 @@ function OnboardingStepFlow({
   runtimeInstructions,
   onRuntimeRefresh,
   runtimesPending,
+  onInstallBuiltInRuntime,
+  managedRuntimeSetup,
 }: OnboardingFlowProps) {
   const { t, i18n } = useT("onboarding");
   const user = useAuthStore((s) => s.user);
@@ -415,6 +424,8 @@ function OnboardingStepFlow({
             onNext={handleRuntimeNext}
             onRefresh={onRuntimeRefresh}
             runtimesPending={runtimesPending}
+            onInstallBuiltInRuntime={onInstallBuiltInRuntime}
+            managedRuntimeSetup={managedRuntimeSetup}
           />
         ) : (
           <StepPlatformFork

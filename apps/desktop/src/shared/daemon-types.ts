@@ -4,11 +4,28 @@ export type DaemonState =
   | "starting"
   | "stopping"
   | "installing_cli"
+  | "installing_runtime"
   | "cli_not_found"
   // The daemon can't start because the server rejected its credentials (the
   // cached PAT expired / was revoked, or the session token is dead). Without
   // this, an auth failure silently sticks at "starting" forever — see #3512.
   | "auth_expired";
+
+export type ManagedRuntimeSetupPhase = "installing" | "ready" | "failed";
+
+export interface ManagedRuntimeSetupStatus {
+  provider: string;
+  phase: ManagedRuntimeSetupPhase;
+  startedAt: string;
+  version?: string;
+  source?: "user" | "managed";
+  /**
+   * Why the install failed, in the provider's own words. Set only on the
+   * "failed" phase — without it the UI can say nothing beyond "failed", and
+   * a dead network looks identical to a full disk.
+   */
+  error?: string;
+}
 
 export interface DaemonStatus {
   state: DaemonState;
@@ -32,6 +49,8 @@ export interface DaemonStatus {
    * never disables the toggles for a normally-managed native daemon. See #3916.
    */
   externallyManaged?: boolean;
+  /** Local-only setup state for a Desktop-managed agent runtime. */
+  managedRuntimeSetup?: ManagedRuntimeSetupStatus;
 }
 
 export interface DaemonPrefs {
@@ -55,6 +74,7 @@ export const DAEMON_STATE_COLORS: Record<DaemonState, string> = {
   starting: "bg-amber-500 animate-pulse",
   stopping: "bg-amber-500 animate-pulse",
   installing_cli: "bg-sky-500 animate-pulse",
+  installing_runtime: "bg-sky-500 animate-pulse",
   cli_not_found: "bg-red-500",
   auth_expired: "bg-red-500",
 };
@@ -65,6 +85,7 @@ export const DAEMON_STATE_LABELS: Record<DaemonState, string> = {
   starting: "Starting…",
   stopping: "Stopping…",
   installing_cli: "Setting up…",
+  installing_runtime: "Installing runtime…",
   cli_not_found: "Setup Failed",
   auth_expired: "Sign-in required",
 };
@@ -118,6 +139,8 @@ export function daemonStateDescription(state: DaemonState, runtimeCount: number)
       return "Shutting down the local daemon…";
     case "installing_cli":
       return "Setting up the runtime for the first time. Only happens once.";
+    case "installing_runtime":
+      return "Checking managed runtimes and installing them when needed…";
     case "cli_not_found":
       return "Setup failed · couldn't download the runtime. Check your network.";
     case "auth_expired":

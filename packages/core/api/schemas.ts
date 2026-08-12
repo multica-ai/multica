@@ -1032,6 +1032,46 @@ export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
   updated_at: "",
 };
 
+export const RuntimeModelConnectionSchema = z.object({
+  runtime_id: z.string(),
+  config: z.object({
+    provider: z.string().optional(),
+    api: z.string().optional(),
+    base_url: z.string().optional(),
+    model: z.string().optional(),
+  }).default({}),
+  has_api_key: z.boolean().default(false),
+  configured: z.boolean().default(false),
+}).loose();
+
+const MODEL_CONNECTION_PROBE_OUTCOMES = [
+  "invalid_key",
+  "insufficient_quota",
+  "rate_limited",
+  "model_not_found",
+  "endpoint_not_found",
+  "provider_error",
+  "network_unreachable",
+] as const;
+
+export const ModelConnectionValidationSchema = z.object({
+  valid: z.boolean().default(false),
+  // A newer backend may add outcomes this build has no copy for. Fold those
+  // into "unknown" rather than failing the whole parse and losing `valid`.
+  outcome: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value === undefined || value === ""
+        ? undefined
+        : (MODEL_CONNECTION_PROBE_OUTCOMES as readonly string[]).includes(value)
+          ? (value as (typeof MODEL_CONNECTION_PROBE_OUTCOMES)[number])
+          : ("unknown" as const),
+    ),
+  status: z.number().optional(),
+  detail: z.string().optional(),
+}).loose();
+
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
 //

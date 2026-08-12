@@ -33,6 +33,14 @@ func DefaultWebhookIPRateLimit() WebhookRateLimit {
 	return WebhookRateLimit{Limit: 30, Window: time.Minute}
 }
 
+// DefaultModelProbeRateLimit bounds per-user model-connection verification.
+// Each allowed request makes the server call a third-party provider with a
+// user-supplied URL, so the budget is deliberately small: a person fixing a
+// mistyped key needs a handful of attempts, not hundreds.
+func DefaultModelProbeRateLimit() WebhookRateLimit {
+	return WebhookRateLimit{Limit: 20, Window: time.Minute}
+}
+
 // DefaultWebhookAbsoluteIPRateLimit is the high emergency ceiling applied to
 // every webhook request before token lookup. Normal valid traffic should sit
 // far below this budget; unlike the lower bad-credential debt limiter it is

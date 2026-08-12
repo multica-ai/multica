@@ -1619,8 +1619,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Get("/", h.ListAgentRuntimes)
+				// Static segment must stay registered alongside the
+				// {runtimeId} route below; chi gives static children
+				// priority, so "model-connection" is never read as an ID.
+				r.Post("/model-connection/validate", h.ValidateRuntimeModelConnection)
 				r.Route("/{runtimeId}", func(r chi.Router) {
 					r.Patch("/", h.UpdateAgentRuntime)
+					r.Get("/model-connection", h.GetRuntimeModelConnection)
+					r.Put("/model-connection", h.UpdateRuntimeModelConnection)
+					r.Delete("/model-connection", h.DeleteRuntimeModelConnection)
 					r.Get("/usage", h.GetRuntimeUsage)
 					r.Get("/usage/by-agent", h.GetRuntimeUsageByAgent)
 					r.Get("/usage/by-hour", h.GetRuntimeUsageByHour)

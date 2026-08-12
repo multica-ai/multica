@@ -53,6 +53,9 @@ import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
 import { pendingRuntimeFromProfile } from "./pending-runtime";
+import { BuiltInRuntimeOffer } from "./built-in-runtime-offer";
+import { builtInRuntimeSetupPhase } from "./built-in-runtime-setup";
+import type { ManagedRuntimeSetupStatus } from "./managed-runtime-setup";
 import { buildRuntimeMachines, type RuntimeMachine } from "./runtime-machines";
 import { HealthDot, HealthIcon, useHealthLabel } from "./shared";
 import { useT, useTimeAgo } from "../../i18n";
@@ -69,6 +72,12 @@ export interface RuntimesPageProps {
   bootstrapping?: boolean;
   /** Web SaaS-only Cloud Runtime entrypoint. */
   cloudRuntimeEnabled?: boolean;
+  /** Desktop-only: installs the Multica-managed runtime on this machine.
+   *  Present here as well as in onboarding so declining the offer once is
+   *  never permanent — otherwise that user is back in the old dead end. */
+  onInstallBuiltInRuntime?: () => Promise<{ success: boolean; error?: string }>;
+  /** Desktop-only live install state for the built-in runtime. */
+  managedRuntimeSetup?: ManagedRuntimeSetupStatus | null;
 }
 
 function useNowTick(intervalMs = 30_000): number {
@@ -86,6 +95,8 @@ export function RuntimesPage({
   hasLocalMachine,
   bootstrapping,
   cloudRuntimeEnabled = false,
+  onInstallBuiltInRuntime,
+  managedRuntimeSetup,
 }: RuntimesPageProps = {}) {
   const isAuthLoading = useAuthStore((state) => state.isLoading);
   const currentUserId = useAuthStore((state) => state.user?.id);
@@ -157,6 +168,28 @@ export function RuntimesPage({
     return <RuntimesPageSkeleton />;
   }
 
+  // Shown until the built-in runtime can actually execute work: as the offer
+  // when nothing is installed, and as the key form when it is installed but
+  // has no model. Desktop-only — web cannot install a local runtime.
+  const builtInPhase = builtInRuntimeSetupPhase({
+    runtimes,
+    setup: managedRuntimeSetup,
+  });
+  const builtInOffer =
+    onInstallBuiltInRuntime && builtInPhase !== "ready" ? (
+      <div className="w-full max-w-[560px]">
+        <BuiltInRuntimeOffer
+          wsId={wsId}
+          runtimes={runtimes}
+          setup={managedRuntimeSetup}
+          onInstall={onInstallBuiltInRuntime}
+          onConnected={() => {
+            qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+          }}
+        />
+      </div>
+    ) : null;
+
   const showEmpty =
     machines.length === 0 &&
     orphanProfileRuntimes.length === 0 &&
@@ -173,12 +206,14 @@ export function RuntimesPage({
       />
 
       {showEmpty ? (
-        <div className="flex flex-1 items-center justify-center p-6">
+        <div className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
+          {builtInOffer}
           <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-[1440px] flex-col p-4 sm:p-6">
+          <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4 p-4 sm:p-6">
+            {builtInOffer}
             {!agentsLoading &&
               !chatSessionsLoading &&
               memberNeedsMikaSetup(agents, chatSessions) &&

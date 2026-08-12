@@ -1781,6 +1781,23 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
 			runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 		}
+		// Pi runtimes own a default model connection so a newly-bound agent is
+		// runnable without repeating provider credentials. A valid per-agent
+		// runtime_config remains the explicit override; malformed or absent agent
+		// config falls back to the runtime default. The runtime key follows only
+		// the default config, so an agent overriding the provider must supply its
+		// own key rather than silently spending through an unrelated account.
+		if runtime.Provider == "pi" {
+			var agentPiErr, runtimePiErr error
+			runtimeConfig, customEnv, _, agentPiErr, runtimePiErr =
+				resolvePiRuntimeModelConnection(runtimeConfig, customEnv, runtime)
+			if agentPiErr != nil {
+				slog.Warn("daemon claim: invalid agent Pi config; trying runtime default", "agent_id", uuidToString(agent.ID), "error", agentPiErr)
+			}
+			if runtimePiErr != nil {
+				slog.Warn("daemon claim: invalid runtime Pi config; using native Pi configuration", "runtime_id", runtimeID, "error", runtimePiErr)
+			}
+		}
 		resp.Agent = &TaskAgentData{
 			ID:                    uuidToString(agent.ID),
 			Name:                  agent.Name,

@@ -268,6 +268,7 @@ export function AgentDetailInspector({
             <ModelPicker
               variant="field"
               showLabel={false}
+              runtime={runtime}
               runtimeId={agent.runtime_id}
               runtimeOnline={!!isOnline}
               value={agent.model ?? ""}
