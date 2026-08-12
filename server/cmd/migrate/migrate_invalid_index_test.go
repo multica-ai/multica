@@ -108,18 +108,18 @@ func TestRunMigrationsRepairsDingTalkGroupRouteIndexesBeforeRetry(t *testing.T) 
 		wantUnique bool
 	}{
 		{
-			version:    "274_dingtalk_group_route_installation_conversation_unique",
+			version:    "286_dingtalk_group_route_installation_conversation_unique",
 			index:      "idx_dingtalk_group_route_installation_conversation",
 			columns:    "installation_id, conversation_id",
 			wantUnique: true,
 		},
 		{
-			version: "275_dingtalk_group_route_workspace_index",
+			version: "287_dingtalk_group_route_workspace_index",
 			index:   "idx_dingtalk_group_route_workspace",
 			columns: "workspace_id",
 		},
 		{
-			version:    "276_dingtalk_group_route_id_unique",
+			version:    "288_dingtalk_group_route_id_unique",
 			index:      "idx_dingtalk_group_route_id_unique",
 			columns:    "id",
 			wantUnique: true,
