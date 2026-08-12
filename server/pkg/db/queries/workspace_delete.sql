@@ -432,3 +432,33 @@ detached_client_usage AS (
 )
 DELETE FROM workspace_invitation
 WHERE workspace_invitation.workspace_id = $1;
+
+-- name: DeleteWorkspaceAutomation :exec
+-- Event Hooks teardown (MUL-4332). All six tables are workspace-owned, so they are
+-- deleted with the workspace. hook_revision and hook_action_effect carry no
+-- workspace_id — they are children of hook / hook_execution — so they are selected
+-- through their parent, which is itself workspace-scoped. Children are removed
+-- before parents so no row is orphaned mid-teardown; there are no FKs or cascades
+-- (workspace DB rule), so this relationship graph is explicit.
+WITH deleted_effects AS (
+    DELETE FROM hook_action_effect
+    WHERE execution_id IN (
+        SELECT id FROM hook_execution WHERE hook_execution.workspace_id = $1
+    )
+),
+deleted_executions AS (
+    DELETE FROM hook_execution WHERE hook_execution.workspace_id = $1
+),
+deleted_revisions AS (
+    DELETE FROM hook_revision
+    WHERE hook_id IN (
+        SELECT id FROM hook WHERE hook.workspace_id = $1
+    )
+),
+deleted_hooks AS (
+    DELETE FROM hook WHERE hook.workspace_id = $1
+),
+deleted_automation_state AS (
+    DELETE FROM automation_state WHERE automation_state.workspace_id = $1
+)
+DELETE FROM domain_event WHERE domain_event.workspace_id = $1;

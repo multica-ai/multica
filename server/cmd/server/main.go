@@ -433,6 +433,15 @@ func main() {
 
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
+	// Domain event retention (MUL-4332) — still an explicit no-op, wired for
+	// visibility; the real sweep needs the terminal-execution predicate (TTL=90d).
+	go runDomainEventRetention(sweepCtx)
+	// Event Hooks matcher/executor (MUL-4332). The matcher always polls: both flags
+	// are evaluated PER WORKSPACE against the row in hand, so one process-wide answer
+	// cannot gate the loop. With the flags off it still drains the outbox, recording
+	// no decisions and running no actions.
+	go runHookMatcher(sweepCtx, h.HookService, flags)
+	go runHookExecutor(sweepCtx, h.HookService, flags)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)

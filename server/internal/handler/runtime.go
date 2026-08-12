@@ -942,6 +942,21 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
+	// Workspace mutex FIRST, before any runtime or task row (MUL-4332 review:
+	// sweeper vs teardown lock order). This teardown walks runtime -> task while the
+	// bulk sweepers walk task -> runtime; the two orders deadlock (40P01) unless they
+	// are mutually exclusive. This FOR UPDATE conflicts with the FOR KEY SHARE the
+	// sweepers take on the same row, so only one of the two can be in flight per
+	// workspace. No rows means the workspace is already gone, and so are its runtimes.
+	if _, err := qtx.LockWorkspaceForRuntimeTeardown(r.Context(), rt.WorkspaceID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "runtime not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		return
+	}
+
 	// Revalidate under the runtime row lock. Agent/task inserts take a
 	// KEY SHARE lock through their runtime FK, so no active agent can appear
 	// after this check and then be silently unbound by the teardown.
@@ -1134,7 +1149,22 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
-	// Lock the runtime row first. PostgreSQL's FK validation on
+	// Workspace mutex FIRST, before any runtime or task row (MUL-4332 review:
+	// sweeper vs teardown lock order). This teardown walks runtime -> task while the
+	// bulk sweepers walk task -> runtime; the two orders deadlock (40P01) unless they
+	// are mutually exclusive. This FOR UPDATE conflicts with the FOR KEY SHARE the
+	// sweepers take on the same row, so only one of the two can be in flight per
+	// workspace. No rows means the workspace is already gone, and so are its runtimes.
+	if _, err := qtx.LockWorkspaceForRuntimeTeardown(r.Context(), rt.WorkspaceID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "runtime not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		return
+	}
+
+	// Lock the runtime row next. PostgreSQL's FK validation on
 	// agent.runtime_id requires FOR KEY SHARE on the parent runtime row,
 	// which conflicts with FOR UPDATE — so any concurrent INSERT or
 	// UPDATE that would point a new/moved agent at this runtime now

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/domainevent"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
@@ -338,6 +339,13 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if err != nil {
 			return IssueCreateResult{}, fmt.Errorf("create deferred channel issue task: %w", err)
 		}
+	}
+
+	// Transactional outbox (MUL-4332): the issue.created fact and its domain
+	// event commit atomically. The payload carries the birth assignee so a hook
+	// can react to assignment-at-create without a separate issue.assigned event.
+	if _, err := domainevent.Write(ctx, qtx, domainevent.IssueCreatedFromRow(issue)); err != nil {
+		return IssueCreateResult{}, fmt.Errorf("write issue.created event: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

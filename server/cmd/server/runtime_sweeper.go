@@ -77,6 +77,12 @@ const (
 	chatFinalizeGraceSeconds = 60.0
 	// chatFinalizeBatchSize caps deferred finalizations per tick.
 	chatFinalizeBatchSize = 100
+	// bulkFailBatchSize caps how many tasks a single offline-runtime or
+	// stale-task sweep fails per tick (MUL-4332 review point 2). Bounding the
+	// candidate SELECT keeps the FOR UPDATE lock hold short even if a large
+	// backlog of orphans accumulates; the rest drain on later ticks. 500 mirrors
+	// queuedExpireBatchSize — far above any realistic per-tick orphan count.
+	bulkFailBatchSize = 500
 )
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
@@ -100,6 +106,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			return
 		case <-ticker.C:
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
+			sweepOfflineRuntimeTasks(ctx, taskSvc)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			sweepDeferredChatFinalizations(ctx, queries, taskSvc)
@@ -168,14 +175,11 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, liveness handl
 
 	slog.Info("runtime sweeper: marked stale runtimes offline", "count", len(staleRows), "workspaces", len(workspaces))
 
-	// Fail orphaned tasks (dispatched/running) whose runtimes just went offline.
-	failedTasks, err := queries.FailTasksForOfflineRuntimes(ctx)
-	if err != nil {
-		slog.Warn("runtime sweeper: failed to clean up stale tasks", "error", err)
-	} else if len(failedTasks) > 0 {
-		slog.Info("runtime sweeper: failed orphaned tasks", "count", len(failedTasks))
-		taskSvc.HandleFailedTasks(ctx, failedTasks)
-	}
+	// Orphaned tasks whose runtimes just went offline are reclaimed by
+	// sweepOfflineRuntimeTasks, which runs every tick against ALL offline
+	// runtimes (MUL-4332 review point 2) — not only the ones flipped this tick —
+	// so a rolled-back batch or a runtime that went offline via another path is
+	// still retried on the next tick rather than stranded here.
 
 	// Notify frontend clients so they re-fetch runtime list.
 	for wsID := range workspaces {
@@ -270,24 +274,101 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 // edge where a runtime row lingers online-with-stale-heartbeat past the
 // wall clock (MUL-4107).
 func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
-	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
-		DispatchTimeoutSecs: dispatchTimeoutSeconds,
-		RunningTimeoutSecs:  runningTimeoutSeconds,
-		// Reuse the runtime stale window so the running-task backstop
-		// exactly matches what sweepStaleRuntimes considers "not alive".
-		RuntimeStaleSecs: staleThresholdSeconds,
-	})
+	// Select a bounded batch of stale candidates, then fail the resolvable ones
+	// with their task.failed events atomically (MUL-4332 review point 2).
+	failedTasks, err := taskSvc.FailBulkTasksWithEvents(ctx,
+		// UNLOCKED peek: the workspace is locked before these tasks are re-locked
+		// (MUL-4332 review: bulk workspace-first).
+		func(q *db.Queries) ([]db.AgentTaskQueue, error) {
+			return q.PeekStaleTasksToFail(ctx, db.PeekStaleTasksToFailParams{
+				DispatchedTimeoutSecs: dispatchTimeoutSeconds,
+				RunningTimeoutSecs:    runningTimeoutSeconds,
+				// Reuse the runtime stale window so the running-task backstop
+				// exactly matches what sweepStaleRuntimes considers "not alive".
+				RuntimeStaleSecs: staleThresholdSeconds,
+				MaxPerTick:       bulkFailBatchSize,
+			})
+		},
+		// Re-lock under the SAME stale predicate: between the unlocked peek and this
+		// lock a daemon may have refreshed its prepare lease or bumped the runtime
+		// heartbeat, which makes the task alive again and must NOT be failed.
+		func(qtx *db.Queries, ids []pgtype.UUID) ([]db.AgentTaskQueue, error) {
+			return qtx.LockStaleTasksByIDsForFail(ctx, db.LockStaleTasksByIDsForFailParams{
+				Ids:                   ids,
+				DispatchedTimeoutSecs: dispatchTimeoutSeconds,
+				RunningTimeoutSecs:    runningTimeoutSeconds,
+				RuntimeStaleSecs:      staleThresholdSeconds,
+			})
+		},
+		// The task row lock does NOT cover agent_runtime.last_seen_at, so the fail
+		// itself repeats the full predicate and holds the runtime row — otherwise a
+		// heartbeat landing after the re-lock would still lose its live task.
+		func(qtx *db.Queries, ids []pgtype.UUID) ([]db.AgentTaskQueue, error) {
+			return qtx.FailStaleTasksByIDs(ctx, db.FailStaleTasksByIDsParams{
+				Ids:                   ids,
+				DispatchedTimeoutSecs: dispatchTimeoutSeconds,
+				RunningTimeoutSecs:    runningTimeoutSeconds,
+				RuntimeStaleSecs:      staleThresholdSeconds,
+				Error:                 pgtype.Text{String: "task timed out", Valid: true},
+				FailureReason:         pgtype.Text{String: "timeout", Valid: true},
+			})
+		})
+	// Partial success is real: err can be non-nil while OTHER workspaces committed
+	// their fails. Those rows are already terminal and will never be re-selected, so
+	// dispatch their post-commit side effects FIRST — logging the error and returning
+	// early would silently drop their retry / reconcile / realtime forever
+	// (MUL-4332 review: partial success).
+	if len(failedTasks) > 0 {
+		slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
+		taskSvc.CaptureLeaseExpiredTasks(ctx, failedTasks)
+		taskSvc.HandleFailedTasks(ctx, failedTasks)
+	}
 	if err != nil {
 		slog.Warn("task sweeper: failed to clean up stale tasks", "error", err)
-		return
 	}
-	if len(failedTasks) == 0 {
-		return
-	}
+}
 
-	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
-	taskSvc.CaptureLeaseExpiredTasks(ctx, failedTasks)
-	taskSvc.HandleFailedTasks(ctx, failedTasks)
+// sweepOfflineRuntimeTasks fails orphaned dispatched/running/waiting tasks whose
+// runtime is offline, then runs the standard post-fail side effects. Unlike the
+// old placement inside sweepStaleRuntimes (which only fired when a runtime was
+// flipped offline THIS tick), it runs EVERY tick against ALL offline runtimes
+// (MUL-4332 review point 2): a rolled-back batch, a transient event failure, or a
+// runtime taken offline via another path is retried on the next tick instead of
+// stranding its `waiting_local_directory` orphans. Poison rows are isolated
+// inside FailBulkTasksWithEvents so one corrupt row never blocks the rest.
+func sweepOfflineRuntimeTasks(ctx context.Context, taskSvc *service.TaskService) {
+	if taskSvc == nil {
+		return
+	}
+	failedTasks, err := taskSvc.FailBulkTasksWithEvents(ctx,
+		// UNLOCKED peek; see sweepStaleTasks.
+		func(q *db.Queries) ([]db.AgentTaskQueue, error) {
+			return q.PeekTasksForOfflineRuntimes(ctx, bulkFailBatchSize)
+		},
+		// Re-lock under the SAME offline-runtime predicate: a runtime that came back
+		// online between the peek and here makes its tasks eligible again, and killing
+		// them would fail work a live daemon is actively running.
+		func(qtx *db.Queries, ids []pgtype.UUID) ([]db.AgentTaskQueue, error) {
+			return qtx.LockOfflineRuntimeTasksByIDsForFail(ctx, ids)
+		},
+		// Same atomic boundary as the stale sweeper: the runtime's status is re-checked
+		// (and its row held) by the statement that actually fails the task, so a daemon
+		// coming back online after the re-lock cannot lose the task it is running.
+		func(qtx *db.Queries, ids []pgtype.UUID) ([]db.AgentTaskQueue, error) {
+			return qtx.FailOfflineRuntimeTasksByIDs(ctx, db.FailOfflineRuntimeTasksByIDsParams{
+				Ids:           ids,
+				Error:         pgtype.Text{String: "runtime went offline", Valid: true},
+				FailureReason: pgtype.Text{String: "runtime_offline", Valid: true},
+			})
+		})
+	// Dispatch the committed rows before surfacing the error; see sweepStaleTasks.
+	if len(failedTasks) > 0 {
+		slog.Info("runtime sweeper: failed orphaned tasks", "count", len(failedTasks))
+		taskSvc.HandleFailedTasks(ctx, failedTasks)
+	}
+	if err != nil {
+		slog.Warn("runtime sweeper: failed to clean up offline-runtime tasks", "error", err)
+	}
 }
 
 // sweepExpiredQueuedTasks fails tasks that have been sitting in 'queued' for
@@ -297,21 +378,41 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 // a task is already queued. Capped to queuedExpireBatchSize per tick so a
 // big backlog can't monopolise the DB.
 func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService) {
-	failedTasks, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
-		TtlSecs:    queuedTTLSeconds,
-		MaxPerTick: queuedExpireBatchSize,
-	})
+	// Select a bounded batch of TTL-expired queued candidates, then fail the
+	// resolvable ones with their events atomically (MUL-4332 review point 2).
+	failedTasks, err := taskSvc.FailBulkTasksWithEvents(ctx,
+		// UNLOCKED peek; see sweepStaleTasks.
+		func(q *db.Queries) ([]db.AgentTaskQueue, error) {
+			return q.PeekExpiredQueuedTasks(ctx, db.PeekExpiredQueuedTasksParams{
+				TtlSecs:    queuedTTLSeconds,
+				MaxPerTick: queuedExpireBatchSize,
+			})
+		},
+		// Re-lock under the SAME queued-TTL predicate. This is the window the review
+		// reproduced: a daemon commits queued -> dispatched between the peek and here,
+		// and a broad status re-lock would kill the task it just started.
+		func(qtx *db.Queries, ids []pgtype.UUID) ([]db.AgentTaskQueue, error) {
+			return qtx.LockExpiredQueuedTasksByIDsForFail(ctx, db.LockExpiredQueuedTasksByIDsForFailParams{
+				Ids:     ids,
+				TtlSecs: queuedTTLSeconds,
+			})
+		},
+		func(qtx *db.Queries, ids []pgtype.UUID) ([]db.AgentTaskQueue, error) {
+			return qtx.FailAgentTasksByIDs(ctx, db.FailAgentTasksByIDsParams{
+				Ids:           ids,
+				Error:         pgtype.Text{String: "task expired in queue", Valid: true},
+				FailureReason: pgtype.Text{String: "queued_expired", Valid: true},
+			})
+		})
+	// Dispatch the committed rows before surfacing the error; see sweepStaleTasks.
+	if len(failedTasks) > 0 {
+		slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
+		taskSvc.CaptureQueuedExpiredTasks(ctx, failedTasks)
+		taskSvc.HandleFailedTasks(ctx, failedTasks)
+	}
 	if err != nil {
 		slog.Warn("task sweeper: failed to expire stale queued tasks", "error", err)
-		return
 	}
-	if len(failedTasks) == 0 {
-		return
-	}
-
-	slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
-	taskSvc.CaptureQueuedExpiredTasks(ctx, failedTasks)
-	taskSvc.HandleFailedTasks(ctx, failedTasks)
 }
 
 // sweepDeferredChatFinalizations settles cancelled chat tasks whose deferred

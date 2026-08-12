@@ -79,6 +79,32 @@ RETURNING issue_counter;
 -- workspace, so this cannot deadlock against it.
 SELECT id FROM workspace WHERE id = $1 FOR UPDATE;
 
+-- name: LockWorkspaceForRuntimeTeardown :one
+-- The EXCLUSIVE half of the automation protocol, taken first by every runtime /
+-- runtime-profile teardown (MUL-4332 review: sweeper vs teardown lock order).
+--
+-- Those teardowns walk agent_runtime -> agent_task_queue: they take FOR UPDATE on
+-- the runtime rows (LockAgentRuntime / ListAgentRuntimeIDsByProfile) and only then
+-- cancel that runtime's tasks. The bulk sweepers walk the OTHER way — they lock the
+-- candidate task rows and then take FOR SHARE on each task's runtime row, because
+-- the runtime is where their eligibility actually lives. Two paths acquiring the
+-- same two tables in opposite orders is a genuine deadlock cycle (40P01), not a
+-- theoretical one: whoever PostgreSQL picks as victim surfaces either a 500 on the
+-- delete or a rolled-back sweep tick.
+--
+-- Rather than invert one of the two walks — both orders are load-bearing where they
+-- are — the two paths are made mutually exclusive one level up, reusing the
+-- workspace row that already serves as the automation mutex. This FOR UPDATE
+-- conflicts with LockWorkspaceForAutomationWrite's FOR KEY SHARE (and with the
+-- non-blocking TryLock the sweepers use), so a teardown and a sweep can never both
+-- be past their first lock in the same workspace: the sweep skips a workspace under
+-- teardown and retries next tick, and a teardown waits for the in-flight sweep
+-- before it touches a single runtime row. Neither can be holding one of the two
+-- tables while waiting for the other, so no cycle can form.
+--
+-- Returns no rows when the workspace is already gone (its runtimes went with it).
+SELECT id FROM workspace WHERE id = $1 FOR UPDATE;
+
 -- name: LockWorkspaceForChatSessionCreate :one
 -- The creator half of the workspace delete/create protocol (#5219). Every
 -- production path that inserts a chat_session takes this FOR KEY SHARE lock on the
@@ -89,6 +115,43 @@ SELECT id FROM workspace WHERE id = $1 FOR UPDATE;
 -- makes the mutual exclusion explicit rather than leaning on the workspace FK's
 -- implicit FOR KEY SHARE, which would vanish if that FK is dropped.
 SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE;
+
+-- name: LockWorkspaceForAutomationWrite :one
+-- The writer half of the workspace delete/create protocol for Event Hooks data
+-- (MUL-4332), mirroring LockWorkspaceForChatSessionCreate (#5219).
+--
+-- The six Event Hooks tables (hook, hook_revision, hook_execution,
+-- hook_action_effect, automation_state, domain_event) carry NO foreign key to
+-- workspace — the workspace DB rule forbids FKs — so, unlike the CASCADE-backed
+-- tables, they get no implicit FOR KEY SHARE on the parent workspace row. Without
+-- this explicit lock a writer can commit inside DeleteWorkspace's window: the
+-- automation sweep runs, sees nothing, and the writer's rows survive their
+-- workspace as orphans (the data-modifying CTEs in DeleteWorkspaceAutomation share
+-- one statement snapshot, so they are not a barrier against concurrent commits).
+--
+-- Every transaction that INSERTS any of those six tables takes this FOR KEY SHARE
+-- lock FIRST, before any other lock it needs. FOR KEY SHARE conflicts with
+-- LockWorkspaceForDelete's FOR UPDATE (so a write is blocked while a delete is in
+-- progress, and vice versa) but not with other writers, so concurrent automation
+-- writes stay unserialized. Taking it first also fixes the lock order as
+-- workspace -> (member | hook | issue | ...), matching the delete's own order, so
+-- the two can never deadlock.
+--
+-- Returns no rows when the workspace is already gone; callers treat that as
+-- "the workspace is being torn down" and abort rather than writing orphans.
+SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE;
+
+-- name: TryLockWorkspaceForAutomationWrite :one
+-- Non-blocking variant of LockWorkspaceForAutomationWrite for BULK, best-effort
+-- sweeps (MUL-4332 review). A periodic global sweep spans many workspaces, so it
+-- must not queue behind one workspace that a teardown is holding: SKIP LOCKED makes
+-- a contended workspace return no rows, and the sweeper simply moves to the next
+-- workspace this tick (that workspace's tasks are being removed by the teardown
+-- anyway, and an uncontended retry happens on the next tick).
+--
+-- Interactive, single-target writers keep using the blocking variant: they must
+-- either win the lock or fail closed, never silently skip their own write.
+SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE SKIP LOCKED;
 
 -- name: DeleteWorkspace :exec
 -- The channel_* tables (MUL-3515 §4), resource-label junctions, custom issue

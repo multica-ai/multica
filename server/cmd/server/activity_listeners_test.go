@@ -7,6 +7,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -88,8 +89,8 @@ func TestActivityIssueUpdated_StatusChanged(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:          issueID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "activity test issue",
@@ -98,8 +99,9 @@ func TestActivityIssueUpdated_StatusChanged(t *testing.T) {
 				CreatorType: "member",
 				CreatorID:   testUserID,
 			},
-			"status_changed": true,
-			"prev_status":    "todo",
+			StatusChanged:      true,
+			PrevStatus:         "todo",
+			TriggerSideEffects: true,
 		},
 	})
 
@@ -144,8 +146,8 @@ func TestActivityIssueUpdated_AssigneeChanged(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:           issueID,
 				WorkspaceID:  testWorkspaceID,
 				Title:        "activity test issue",
@@ -156,9 +158,10 @@ func TestActivityIssueUpdated_AssigneeChanged(t *testing.T) {
 				AssigneeType: &assigneeType,
 				AssigneeID:   &assigneeID,
 			},
-			"assignee_changed":   true,
-			"prev_assignee_type": (*string)(nil),
-			"prev_assignee_id":   (*string)(nil),
+			AssigneeChanged:    true,
+			PrevAssigneeType:   (*string)(nil),
+			PrevAssigneeID:     (*string)(nil),
+			TriggerSideEffects: true,
 		},
 	})
 
@@ -199,8 +202,8 @@ func TestActivityIssueUpdated_NoChangeFlags(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:          issueID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "activity test issue",
@@ -209,9 +212,10 @@ func TestActivityIssueUpdated_NoChangeFlags(t *testing.T) {
 				CreatorType: "member",
 				CreatorID:   testUserID,
 			},
-			"assignee_changed":    false,
-			"status_changed":      false,
-			"description_changed": false,
+			AssigneeChanged:    false,
+			StatusChanged:      false,
+			DescriptionChanged: false,
+			TriggerSideEffects: true,
 		},
 	})
 
@@ -237,8 +241,8 @@ func TestActivityIssueUpdated_TitleChanged(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:          issueID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "renamed issue",
@@ -247,8 +251,9 @@ func TestActivityIssueUpdated_TitleChanged(t *testing.T) {
 				CreatorType: "member",
 				CreatorID:   testUserID,
 			},
-			"title_changed": true,
-			"prev_title":    "activity test issue",
+			TitleChanged:       true,
+			PrevTitle:          "activity test issue",
+			TriggerSideEffects: true,
 		},
 	})
 

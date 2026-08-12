@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -659,20 +660,17 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 
 	// issue:updated — handle assignee changes, status changes, priority, due date
 	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
-		payload, ok := e.Payload.(map[string]any)
-		if !ok {
+		payload, ok := e.Payload.(issueevent.IssueUpdatedPayload)
+		if !ok || !payload.TriggerSideEffects {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
-		if !ok {
-			return
-		}
-		assigneeChanged, _ := payload["assignee_changed"].(bool)
-		statusChanged, _ := payload["status_changed"].(bool)
-		descriptionChanged, _ := payload["description_changed"].(bool)
-		prevAssigneeType, _ := payload["prev_assignee_type"].(*string)
-		prevAssigneeID, _ := payload["prev_assignee_id"].(*string)
-		prevDescription, _ := payload["prev_description"].(*string)
+		issue := payload.Snapshot
+		assigneeChanged := payload.AssigneeChanged
+		statusChanged := payload.StatusChanged
+		descriptionChanged := payload.DescriptionChanged
+		prevAssigneeType := payload.PrevAssigneeType
+		prevAssigneeID := payload.PrevAssigneeID
+		prevDescription := payload.PrevDescription
 
 		if assigneeChanged {
 			// Build structured details for assignee change.
@@ -741,7 +739,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		if statusChanged {
-			prevStatus, _ := payload["prev_status"].(string)
+			prevStatus := payload.PrevStatus
 			statusDetails, _ := json.Marshal(map[string]string{
 				"from": prevStatus,
 				"to":   issue.Status,
@@ -760,8 +758,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			}
 		}
 
-		if priorityChanged, _ := payload["priority_changed"].(bool); priorityChanged {
-			prevPriority, _ := payload["prev_priority"].(string)
+		if payload.PriorityChanged {
+			prevPriority := payload.PrevPriority
 			priorityDetails, _ := json.Marshal(map[string]string{
 				"from": prevPriority,
 				"to":   issue.Priority,
@@ -772,9 +770,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				priorityDetails)
 		}
 
-		if startDateChanged, _ := payload["start_date_changed"].(bool); startDateChanged {
+		if payload.StartDateChanged {
 			prevStartDateStr := ""
-			if prevStartDate, ok := payload["prev_start_date"].(*string); ok && prevStartDate != nil {
+			if prevStartDate := payload.PrevStartDate; prevStartDate != nil {
 				prevStartDateStr = *prevStartDate
 			}
 			newStartDateStr := ""
@@ -791,9 +789,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				startDateDetails)
 		}
 
-		if dueDateChanged, _ := payload["due_date_changed"].(bool); dueDateChanged {
+		if payload.DueDateChanged {
 			prevDueDateStr := ""
-			if prevDueDate, ok := payload["prev_due_date"].(*string); ok && prevDueDate != nil {
+			if prevDueDate := payload.PrevDueDate; prevDueDate != nil {
 				prevDueDateStr = *prevDueDate
 			}
 			newDueDateStr := ""

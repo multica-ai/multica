@@ -8,6 +8,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -69,28 +70,25 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 
 	// issue:updated — subscribe new assignee or @mentioned users
 	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
-		payload, ok := e.Payload.(map[string]any)
-		if !ok {
+		payload, ok := e.Payload.(issueevent.IssueUpdatedPayload)
+		if !ok || !payload.TriggerSideEffects {
 			return
 		}
-		issue, ok := extractIssueFields(payload["issue"])
-		if !ok {
-			return
-		}
+		issue := payload.Snapshot
 
 		// Subscribe new assignee if assignee changed
-		if assigneeChanged, _ := payload["assignee_changed"].(bool); assigneeChanged {
+		if payload.AssigneeChanged {
 			if issue.AssigneeType != nil && issue.AssigneeID != nil && isAssignmentRecipientType(*issue.AssigneeType) {
 				addSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
 			}
 		}
 
 		// Subscribe newly @mentioned users in description
-		if descriptionChanged, _ := payload["description_changed"].(bool); descriptionChanged && issue.Description != nil {
+		if payload.DescriptionChanged && issue.Description != nil {
 			newMentions := parseMentions(*issue.Description)
 			if len(newMentions) > 0 {
 				prevMentioned := map[string]bool{}
-				if prevDescription, _ := payload["prev_description"].(*string); prevDescription != nil {
+				if prevDescription := payload.PrevDescription; prevDescription != nil {
 					for _, m := range parseMentions(*prevDescription) {
 						prevMentioned[m.Type+":"+m.ID] = true
 					}

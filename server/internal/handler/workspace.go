@@ -922,6 +922,14 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceComments(ctx, requester.WorkspaceID) },
 		},
 		{
+			// Event Hooks data (MUL-4332): executions/effects/revisions/hooks,
+			// automation state and the domain-event outbox. Swept before the issue
+			// roots they reference, matching the children-before-parents order the
+			// rest of this graph uses.
+			name: "delete automation data",
+			run:  func() error { return qtx.DeleteWorkspaceAutomation(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete issue roots",
 			run:  func() error { return qtx.DeleteWorkspaceIssueRoots(ctx, requester.WorkspaceID) },
 		},
