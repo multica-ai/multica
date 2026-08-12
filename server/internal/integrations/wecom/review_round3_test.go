@@ -33,7 +33,7 @@ func TestARevokedInstallationIsWrittenToByNothing(t *testing.T) {
 
 	// Permission is withdrawn while the run is in flight. The socket is still
 	// registered: the reaper has not got to it.
-	rig.q.installation.Status = "revoked"
+	rig.q.revoke()
 
 	rig.answer(t, "the answer", "task-1")
 
@@ -56,7 +56,7 @@ func TestARetryAsksAgainRatherThanInheritingPermission(t *testing.T) {
 	rig.ran(t, "REQ-LATE", 1, "task-1")
 	opened := len(rig.conn.streamFrames(t))
 
-	rig.q.installation.Status = "revoked"
+	rig.q.revoke()
 
 	// Straight at the entry point a booked attempt uses, bypassing everything
 	// processEvent asks on the first pass.

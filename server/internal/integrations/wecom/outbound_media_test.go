@@ -784,6 +784,83 @@ func TestDeliverAttachments_AdmissionBoundsTheLookupStage(t *testing.T) {
 	o.releaseAttachmentAdmission()
 }
 
+// A revoke that lands while this delivery is waiting has to stop all of it.
+//
+// Nothing a file delivery does happens promptly. The permission is read before
+// the handoff, and then the worker waits: on the attachment lookup, on a pending
+// slot, on the concurrency semaphore. A withdrawal landing in any of those used
+// to arrive at a worker with nothing left to consult — and the socket is still
+// there to carry the result, because the registry holds it until the reaper
+// runs. The lookup is what this drives, being the wait the stub can hold open.
+//
+// Two endings, because two separate guards stand between them and the chat: a
+// file reaching the send loop, and an apology reaching tellUser. Both have to be
+// silent afterwards. A notice is a message in somebody's chat like any other, so
+// after a withdrawal "文件发送失败" is the same trespass as the file, minus the
+// file.
+func TestARevokeWhileTheLookupIsBlockedStopsEverything(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		// whatTheLookupFinds decides which of the two ways out the worker takes
+		// once the query finally answers.
+		whatTheLookupFinds func(q *fakeOutboundQueries)
+	}{
+		{
+			name:               "a file waiting to be sent",
+			whatTheLookupFinds: func(*fakeOutboundQueries) {},
+		},
+		{
+			name:               "a lookup that failed, which would otherwise apologise",
+			whatTheLookupFinds: func(q *fakeOutboundQueries) { q.attachmentsErr = errors.New("connection reset") },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := oneAttachmentQueries(t, db.Attachment{
+				ID: mustTestUUID(t), Filename: "a.txt", Url: "u", SizeBytes: 1,
+			})
+			q.lookupGate = make(chan struct{})
+			tc.whatTheLookupFinds(q)
+			objects := &fakeObjectStore{key: "u", data: []byte("X")}
+			o, instID, conn := newOutboundWithMedia(t, q, objects)
+			q.sessionBinding.InstallationID = instID
+			q.installation.ID = instID
+
+			// A real goroutine, not the inline spawn: the premise is a worker
+			// parked in the query when permission is taken away.
+			done := make(chan struct{})
+			o.spawn = func(f func()) { go func() { defer close(done); f() }() }
+			o.deliverAttachments(chatDoneEvent("here it is"), attachmentTarget{
+				InstallationID: instID, ChatID: "CHAT_1", ChatType: chatTypeGroupInt,
+			})
+			waitFor(t, "the delivery to park in the attachment lookup", func() bool {
+				return q.lookupsEntered.Load() >= 1
+			})
+
+			// The person removes the bot. The socket stays registered — that is
+			// what makes this reachable rather than theoretical.
+			q.revoke()
+			close(q.lookupGate)
+			<-done
+
+			if n := objects.readCount(); n != 0 {
+				t.Errorf("read the object %d time(s) for an installation that was revoked while the lookup was blocked", n)
+			}
+			if n := len(conn.cmdFrames(cmdUploadMediaInit)); n != 0 {
+				t.Errorf("uploaded %d file(s) over a connection the user had withdrawn", n)
+			}
+			if got := mediaSends(t, conn); len(got) != 0 {
+				t.Errorf("sent %d file(s) into a chat whose owner had removed the bot — nothing takes a file back", len(got))
+			}
+			if got := markdownSends(t, conn); len(got) != 0 {
+				t.Errorf("wrote %q after the installation was revoked — the apology travels over the same connection the user withdrew, so the answer is silence", got)
+			}
+		})
+	}
+}
+
 // framedThenBrokenConn takes the frame and then fails, which is what a
 // half-closed socket does: the bytes are gone, the error is real, and neither
 // of those says what the peer received.

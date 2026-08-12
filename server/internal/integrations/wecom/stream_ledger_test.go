@@ -270,6 +270,11 @@ func TestEveryTerminalPathEndsInWordsOrLeavesTheRunOwed(t *testing.T) {
 		t.Run(p.name+"/a refused delivery is not a delivery", func(t *testing.T) {
 			t.Parallel()
 			rig := setUpTwoRounds(t, p, controlRounds()[0])
+			// The second attempt below is this test's own. The subscriber's
+			// booked one is a different subject, and left enabled it outlives
+			// the test by fifteen seconds — a goroutine still reading the fake
+			// after the test that owns it has returned.
+			rig.out.retryAfter = -1
 			before := len(said(t, rig.conn))
 
 			rig.senders.clear(rig.instID, rig.conn.sender)

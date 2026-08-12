@@ -385,7 +385,9 @@ func (o *Outbound) sayTheAnswer(ctx context.Context, e events.Event, sessionID p
 		// somebody's chat, and nothing takes it back.
 		//
 		// Re-checked rather than inherited: the send may have taken a while and
-		// the answer's own gate was passed before it.
+		// the answer's own gate was passed before it. It is not the last check
+		// either — everything past this handoff waits, so the delivery asks
+		// again before each file and before each sentence (outbound_media.go).
 		// Re-read on a budget of its own. The words may have taken most of the
 		// caller's, and a read that ran out of time would otherwise look like a
 		// permission that was withdrawn — the same conflation this gate exists
@@ -439,10 +441,29 @@ const (
 	// write to it again, and an answer held for it is not owed to anyone.
 	installationGone
 	// installationUnreadable — the read itself failed. Nothing is established.
-	// Refuse this attempt, and do NOT report the work finished: the answer is
-	// still the only copy and still this subscriber's to deliver.
+	// Refuse this attempt either way; what differs is what the caller owes
+	// afterwards. An answer must NOT be reported finished — it is still the only
+	// copy and still this subscriber's to deliver. An attachment has nowhere to
+	// report to and nothing to lose by waiting: the file stays in object storage
+	// and the user can ask again, so the delivery simply stops.
 	installationUnreadable
 )
+
+// String names the outcomes for the log, so a line saying a delivery stopped
+// also says whether anything is coming back — gone is final, unreadable is this
+// read and no more. Same reason deliveryState carries one (outbound_media.go).
+func (c installationCheck) String() string {
+	switch c {
+	case installationOK:
+		return "ok"
+	case installationGone:
+		return "gone"
+	case installationUnreadable:
+		return "unreadable"
+	default:
+		return "invalid"
+	}
+}
 
 // mayStillWrite reads the installation's permission for one attempt.
 //

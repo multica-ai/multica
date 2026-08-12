@@ -34,6 +34,10 @@ import (
 type fakeOutboundQueries struct {
 	sessionBinding db.ChannelChatSessionBinding
 	sessionErr     error
+	// The installation row and the two knobs that shape a read of it, all
+	// guarded by mu: an answer's retries read this row from their own timer
+	// goroutines, and a test that withdraws permission mid-delivery writes it
+	// from a third.
 	installation   db.ChannelInstallation
 	installErr     error
 	installErrFor  int // 1-based read to fail; 0 fails none
@@ -56,9 +60,9 @@ type fakeOutboundQueries struct {
 	// cancelled and reaped while its ending was in flight.
 	tasks   map[string]db.AgentTaskQueue
 	taskErr error
-	// mu guards the counters and the hook below. task:failed has two publishers
-	// and the bus is synchronous, so a test modelling both of them runs this
-	// fake on two goroutines at once.
+	// mu guards the counters, the installation row above and the hook below.
+	// task:failed has two publishers and the bus is synchronous, so a test
+	// modelling both of them runs this fake on two goroutines at once.
 	mu       sync.Mutex
 	taskGets int
 	// atBinding runs on every chat-binding lookup, which is the first round trip
@@ -103,6 +107,8 @@ func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Cont
 	return f.sessionBinding, f.sessionErr
 }
 func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	// installErrFor lets a test fail one read and not the rest, which is the
 	// shape a transient database blip actually has — the retry behind it has to
 	// find the row there.
@@ -216,6 +222,16 @@ func (f *fakeOutboundQueries) taskRowReads() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.taskGets
+}
+
+// revoke withdraws the installation the way a person does, and from whichever
+// goroutine the test is on. Every reader of this row runs somewhere else — an
+// attachment delivery on its own goroutine, an answer retry on a timer — so the
+// write goes under the same lock the read takes.
+func (f *fakeOutboundQueries) revoke() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.installation.Status = "revoked"
 }
 
 func newOutboundWithConn(t *testing.T, q outboundQueries) (*Outbound, pgtype.UUID, *recordingConn) {

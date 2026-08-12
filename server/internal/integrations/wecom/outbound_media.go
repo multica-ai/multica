@@ -223,12 +223,15 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 		return
 	}
 	// Past here a file is known to be waiting, so every way out of this
-	// function has to end in either a delivery or a sentence to the user.
+	// function ends in either a delivery or a sentence to the user — with one
+	// exception, and it is the installation itself being withdrawn. That
+	// silences both (tellUser).
 
 	// Shed when too many deliveries that found a file are already outstanding.
 	// The semaphore below bounds how many RUN at once; this bounds how many
-	// wait for it, and unlike admission it can name what was dropped, so the
-	// user hears about it.
+	// wait for it, and unlike admission it can name what was dropped — so the
+	// user hears about it, unless they are the one who withdrew the connection
+	// it would be said over (tellUser).
 	if !o.claimAttachmentSlot() {
 		o.logger.WarnContext(ctx, "wecom outbound: attachment delivery shed, too many already pending",
 			"installation_id", uuidStringPub(to.InstallationID),
@@ -267,7 +270,33 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 		return
 	}
 	failed, unknown := 0, 0
-	for _, row := range rows {
+	for i, row := range rows {
+		// Asked once per file, not once per turn. Every one of them is its own
+		// irreversible act — a file in somebody's chat, and nothing takes it
+		// back — so a withdrawal landing mid-loop has to stop the ones that
+		// have not gone yet, and the loop is minutes long when the files are
+		// large.
+		//
+		// This is also the gate that covers everything above it. The permission
+		// was read before the handoff (sayTheAnswer), and since then this
+		// goroutine has waited on the lookup, on a pending slot and on the
+		// concurrency semaphore — three waits a revoke can land in, with a
+		// socket that stays in the registry until the reaper clears it.
+		//
+		// Fail-closed on both refusals. A revoked row is a person taking the
+		// connection back; a read that failed establishes nothing, and nothing
+		// is not permission to upload. The cost of being wrong is asymmetric —
+		// the file stays in object storage and the user can ask again, while a
+		// file sent into a chat that said no cannot be recalled.
+		if check := o.mayStillWrite(ctx, to.InstallationID); check != installationOK {
+			o.logger.WarnContext(ctx, "wecom outbound: file delivery stopped, the installation may no longer be written to",
+				"installation_id", uuidStringPub(to.InstallationID),
+				"permission", check,
+				"sent", i, "withheld", len(rows)-i)
+			// Nothing is said about the ones already tried: the sentence would
+			// travel over the same connection this check just refused.
+			return
+		}
 		state, err := o.sendAttachment(ctx, sender, row, to)
 		switch state {
 		case deliveryDefinitelyFailed:
@@ -307,8 +336,21 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 // tellUser puts one sentence into the conversation, best effort. Every caller
 // is already on a path where something went wrong, so a failure here is logged
 // and dropped rather than propagated — there is nothing further to try.
+//
+// The permission is read here rather than at the four call sites, because every
+// one of them arrives after a wait long enough for a revoke to land in, and an
+// apology is a message in somebody's chat like any other. After a withdrawal the
+// right answer is silence: mediaSendFailedText pushed through a connection its
+// owner has just taken back is the same trespass as the file would have been,
+// minus the file.
 func (o *Outbound) tellUser(ctx context.Context, to attachmentTarget, text string) {
 	if o.senders == nil {
+		return
+	}
+	if check := o.mayStillWrite(ctx, to.InstallationID); check != installationOK {
+		o.logger.WarnContext(ctx, "wecom outbound: the user was told nothing about their file, the installation may no longer be written to",
+			"installation_id", uuidStringPub(to.InstallationID),
+			"permission", check)
 		return
 	}
 	sender := o.senders.get(to.InstallationID)
