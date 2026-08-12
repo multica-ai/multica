@@ -371,7 +371,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "qwenpaw":
 		return &qwenpawBackend{cfg: cfg}, nil
 	case "zcode":
-		return &zcodeBackend{cfg: cfg}, nil
+		return &zcodeStreamBackend{cfg: cfg}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, zcode)", agentType)
 	}
@@ -409,7 +409,7 @@ var launchHeaders = map[string]string{
 	"grok":        "grok agent stdio",
 	"qwen":        "qwen -p (stream-json)",
 	"qwenpaw":     "qwenpaw acp",
-	"zcode":       "zcode --prompt --json",
+		"zcode":       "zcode --prompt --stream-json",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

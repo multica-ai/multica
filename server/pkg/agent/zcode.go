@@ -26,10 +26,16 @@ var zcodeBlockedArgs = map[string]blockedArgMode{
 // mode (`zcode --prompt <prompt> --json [--resume <sessionId>] [--cwd <dir>]`)
 // and parsing the single JSON object it prints on stdout when the turn ends.
 //
+// This is the LEGACY non-streaming backend, retained for reference. The
+// agent.New() factory now returns zcodeStreamBackend (zcode_stream.go), which
+// drives `--stream-json` and surfaces tool calls / thinking / incremental text
+// as live Messages. This file documents the original --json contract and keeps
+// the zcodeJSONResult shape available should a fallback to the summary mode
+// ever be needed (e.g. for an older zcode-cli that lacks --stream-json).
+//
 // ZCode is a terminal client for the official ZCode Desktop agent runtime
-// (a GLM-family runtime). Unlike the streaming backends (pi emits one JSON
-// event per line, codex drives a JSON-RPC app-server), zcode's `--prompt
-// --json` mode runs a whole turn and prints one summary object:
+// (a GLM-family runtime). The legacy `--prompt --json` mode runs a whole turn
+// and prints one summary object:
 //
 //	{"sessionId":"sess_...","response":"<final text>","usage":{...}}
 //
