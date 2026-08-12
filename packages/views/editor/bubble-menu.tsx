@@ -493,9 +493,13 @@ function EditorBubbleMenu({
       bulletList: e.isActive("bulletList"),
       orderedList: e.isActive("orderedList"),
       taskList: e.isActive("taskList"),
-      heading1: e.isActive("heading", { level: 1 }),
-      heading2: e.isActive("heading", { level: 2 }),
-      heading3: e.isActive("heading", { level: 3 }),
+      // The level itself, not one boolean per offered level: the schema accepts
+      // h1-h6 so the cursor can sit in an H4-H6 that Markdown brought in, and
+      // the dropdown has to report that honestly instead of falling through to
+      // "Normal text". It still only offers H1-H3 as choices (MUL-6060).
+      headingLevel: e.isActive("heading")
+        ? (e.getAttributes("heading").level as number | undefined)
+        : undefined,
     }),
   });
 
@@ -620,7 +624,7 @@ function EditorBubbleMenu({
               <TooltipContent side="top" sideOffset={8}>{t(($) => $.bubble_menu.link)}</TooltipContent>
             </Tooltip>
             <Separator orientation="vertical" className="mx-0.5 h-5" />
-            <HeadingDropdown editor={editor} onOpenChange={handleMenuOpenChange} activeLevel={fmt.heading1 ? 1 : fmt.heading2 ? 2 : fmt.heading3 ? 3 : undefined} />
+            <HeadingDropdown editor={editor} onOpenChange={handleMenuOpenChange} activeLevel={fmt.headingLevel} />
             <ListDropdown editor={editor} onOpenChange={handleMenuOpenChange} isBullet={fmt.bulletList} isOrdered={fmt.orderedList} isTask={fmt.taskList} />
             {/* Dedicated one-click toggle for checkbox task lists — turns the
                 current line(s) into a `- [ ]` task item or back to a paragraph.

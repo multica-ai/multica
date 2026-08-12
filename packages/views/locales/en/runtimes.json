@@ -283,6 +283,13 @@
   "charts": {
     "heatmap_less": "Less",
     "heatmap_more": "More",
+    "heatmap_no_activity": "No activity",
+    "heatmap_busiest_day": "Busiest day",
+    "heatmap_most_active_weekday": "Most active weekday",
+    "heatmap_quietest_weekday": "Quietest weekday",
+    "heatmap_average": "avg {{value}}",
+    "heatmap_window_total_one": "{{count}}-day total",
+    "heatmap_window_total_other": "{{count}}-day total",
     "tooltip_total": "Total"
   },
   "list": {
