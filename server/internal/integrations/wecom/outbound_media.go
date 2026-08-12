@@ -292,7 +292,13 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 			o.logger.WarnContext(ctx, "wecom outbound: file delivery stopped, the installation may no longer be written to",
 				"installation_id", uuidStringPub(to.InstallationID),
 				"permission", check,
-				"sent", i, "withheld", len(rows)-i)
+				// i is how many rows were ATTEMPTED, not how many landed: this
+				// gate sits at the top of the iteration, so a row whose send
+				// failed a moment ago is already behind it. failed and unknown
+				// are the loop's own tallies, so delivered costs nothing to
+				// state and an operator reading "delivered=0 attempted=1" is
+				// not misled into thinking a file went out.
+				"attempted", i, "delivered", i-failed-unknown, "withheld", len(rows)-i)
 			// Nothing is said about the ones already tried: the sentence would
 			// travel over the same connection this check just refused.
 			return
