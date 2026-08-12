@@ -152,13 +152,6 @@ func WithAttachments(objects mediaObjectStore) OutboundOption {
 	return func(o *Outbound) { o.objects = objects }
 }
 
-// mayCarryAttachments reports whether this turn is worth the lookups even
-// though the agent said nothing. Everything it checks is already in hand, so a
-// deployment with no storage — or an event naming no message — costs no query.
-func (o *Outbound) mayCarryAttachments(e events.Event) bool {
-	return o.objects != nil && e.WorkspaceID != "" && chatDoneMessageID(e.Payload) != ""
-}
-
 // deliverAttachments hands the answer's files to a goroutine of their own, if
 // there are any to hand over. It is called after the words are out, and
 // returns immediately.

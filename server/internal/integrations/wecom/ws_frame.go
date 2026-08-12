@@ -776,7 +776,9 @@ func defuseThinkTags(s string) string {
 	if !strings.Contains(s, "<") {
 		return s
 	}
-	const zwsp = "​"
+	// U+200B, written as an escape: the literal is invisible in source, and an
+	// invisible character is one nobody can review.
+	const zwsp = "\u200b"
 	var b strings.Builder
 	last := 0
 	// Indexing s directly, never a case-folded copy of it. Walking s while

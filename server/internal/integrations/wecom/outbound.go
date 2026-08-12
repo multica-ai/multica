@@ -411,11 +411,7 @@ func (o *Outbound) sayTheAnswer(ctx context.Context, e events.Event, sessionID p
 			// of its own to give.
 			target := fallback
 			if delivered {
-				target = attachmentTarget{
-					InstallationID: deliveredTo.InstallationID,
-					ChatID:         deliveredTo.ChatID,
-					ChatType:       deliveredTo.ChatType,
-				}
+				target = attachmentTarget(deliveredTo)
 			}
 			o.deliverAttachments(e, target)
 		}

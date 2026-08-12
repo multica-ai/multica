@@ -1947,16 +1947,6 @@ func (s *streamStore) knowsSession(sessionID pgtype.UUID) bool {
 	return ok && s.now().Sub(note.at) <= roundMemory
 }
 
-// remembered reports how many SESSIONS hold a note — one per session, however
-// many of its rounds are on it. Diagnostics, and the "this process knows
-// nothing at all" check at the head of the two ending subscribers; neither
-// wants a round count, so none is kept.
-func (s *streamStore) remembered() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.ended)
-}
-
 // drop forgets a round without sending anything — used when the opening frame
 // was refused and the bubble the handle describes never existed.
 func (s *streamStore) drop(sessionID pgtype.UUID, batch engine.RunBatchID) {
