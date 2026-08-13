@@ -13,6 +13,27 @@ go test ./internal/service -run TestCreatingAgentsSkillCoversAgentCreationContra
 go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 ```
 
+## Native config inheritance — `server/internal/daemon/execenv`
+
+| Contract | Source | Behavior |
+|---|---|---|
+| Per-task Codex home allowlists | `codex_home.go` `codexSymlinkedFiles`, `codexCopiedFiles`, `prepareCodexHomeWithOpts` | Only `auth.json` is linked; `config.json`, `config.toml`, and `instructions.md` are copied. This explicit list is why arbitrary Desktop state and databases do not become agent configuration. |
+| Copied config is isolated and daemon-managed | `codex_home.go` `prepareCodexHomeWithOpts` | After copying config, the daemon sanitizes the skill registry, follows only approved referenced files, then writes managed sandbox, multi-agent, and memory blocks. Ordinary config/feature flags survive unless one of those policies owns the key. |
+| Desktop skill registry removed | `codex_skill_strip.go` `stripSkillsConfigEntries` / `sanitizeCopiedCodexConfig` | Every `[[skills.config]]` block is removed; all other config lines are preserved. This avoids plugin-only entries that Codex CLI cannot parse. |
+| User skills plus workspace precedence | `codex_user_skills.go` `seedUserCodexSkills`; `execenv.go` `hydrateCodexSkills` | Eligible shared user skill directories are linked into the task home; names reserved by workspace-assigned skills are skipped, then workspace skills are written last. |
+| Plugin cache exposure | `codex_home.go` `exposeSharedCodexPluginCache` | The shared `plugins/cache` directory is exposed through a directory link, separate from the stripped Desktop skill registry. |
+| Auth inheritance | `codex_home.go` `codexSymlinkedFiles`; `ensureSymlink`; `logCodexAuthState` | `auth.json` tracks the runtime host's shared login state; config files remain copies, not shared mutable files. |
+| Goals/logs/memories/state databases are task-local | `codex_home.go` `codexSessionStateGlobs` / `resetCodexSessionState` | Session-derived `state_*` indexes can be rebuilt when a legacy shared-session link is removed. Sibling `goals_*`, `logs_*`, and `memories_*` databases are explicitly left intact inside that task home; none are seeded from the shared home allowlists. |
+| Machine-wide session history is excluded | `codex_home.go` `prepareCodexSessionsDir`, `linkCodexSessionsToStore`, `exposeResumeRollout` | A fresh task gets an empty local session directory or a scoped per-conversation store. Only an explicitly resumed rollout may be exposed; the whole shared `~/.codex/sessions` tree is never mounted. |
+| Native memory disabled by default | `codex_memory.go` `ensureCodexMemoryConfig`, `MulticaCodexMemoryEnv` | Managed config disables both `features.memories` and memory generation/consumption. `MULTICA_CODEX_MEMORY` is an explicit leak-risk escape hatch, not the durable-state recommendation. |
+| Sandbox is daemon-owned | `codex_sandbox.go` `codexSandboxPolicyFor`, `codexSandboxPolicyForConfig`; `codex_home.go` `ensureCodexSandboxConfig` call | Platform/runtime policy rewrites the task config. Linux uses `danger-full-access`; current macOS falls back likewise while the network sandbox bug remains; Windows keeps a valid native opt-in or applies its documented fail-closed/compatibility branch. |
+| Agent-level alternatives | `handler/agent.go` `CreateAgentRequest`; `handler/daemon.go` `TaskAgentData`; `runtime_config_sections.go` `writeProjectContext` / `writeIssueMetadata` | `instructions`, `model`, `thinking_level`, and `service_tier` are explicit agent fields delivered at claim time. Project context and issue metadata are explicit task context, independent of Codex Desktop UI state. |
+
+There is intentionally no Codex Desktop goal, plan-mode, GUI-state, sandbox,
+or session-history import field in `CreateAgentRequest` or `TaskAgentData`.
+Combined with the native-home allowlists above, that absence is the source
+boundary behind the non-inheritance rows in the skill matrix.
+
 ## CLI entry points — `server/cmd/multica/cmd_agent.go`
 
 | Contract | Line | Behavior | Safe check |

@@ -373,6 +373,18 @@ func TestCreatingAgentsSkillCoversAgentCreationContracts(t *testing.T) {
 		"not a parameter manual",
 		"`description` is a catalog summary",
 		"`instructions` is the runtime behavior contract",
+		"## Native config inheritance per provider",
+		"`config.toml`, `config.json`, `instructions.md`",
+		"`auth.json`",
+		"Goals / goal databases",
+		"Plan mode / GUI plan preference",
+		"Do not set or recommend `MULTICA_CODEX_MEMORY=1`",
+		"GUI/runtime state",
+		"Sandbox selection",
+		"Session history",
+		"workspace skill bindings",
+		"Use Multica projects,",
+		"short metadata, and repository context files",
 		"`avatar_url` → a random `emoji:<glyph>`",
 		"multica agent create --name <name> --runtime-id <runtime-id>",
 		"`model` is a first-class persisted column",
@@ -411,6 +423,27 @@ func TestCreatingAgentsSkillCoversAgentCreationContracts(t *testing.T) {
 
 	if !skillHasFile(skill, "references/creating-agents-source-map.md") {
 		t.Errorf("creating-agents skill missing supporting file references/creating-agents-source-map.md")
+	}
+
+	var sourceMap string
+	for _, f := range skill.Files {
+		if f.Path == "references/creating-agents-source-map.md" {
+			sourceMap = f.Content
+			break
+		}
+	}
+	for _, want := range []string{
+		"## Native config inheritance",
+		"`codexSymlinkedFiles`, `codexCopiedFiles`",
+		"`stripSkillsConfigEntries` / `sanitizeCopiedCodexConfig`",
+		"`prepareCodexSessionsDir`, `linkCodexSessionsToStore`, `exposeResumeRollout`",
+		"`ensureCodexMemoryConfig`, `MulticaCodexMemoryEnv`",
+		"`codexSandboxPolicyFor`, `codexSandboxPolicyForConfig`",
+		"There is intentionally no Codex Desktop goal, plan-mode, GUI-state, sandbox,",
+	} {
+		if !strings.Contains(sourceMap, want) {
+			t.Errorf("creating-agents source map missing native-inheritance evidence %q", want)
+		}
 	}
 }
 

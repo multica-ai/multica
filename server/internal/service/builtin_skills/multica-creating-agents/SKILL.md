@@ -51,6 +51,40 @@ Two distinct text fields, often confused:
   Persona, responsibilities, boundaries, output and escalation rules go here,
   not in `description`.
 
+## Native config inheritance per provider
+
+An agent definition and a provider's native home are different configuration
+layers. For Codex, the daemon creates an isolated, per-task `CODEX_HOME` and
+seeds only an explicit subset of the machine's shared Codex home. A setting
+visible in Codex Desktop is therefore inherited only when it lives in one of
+the seeded native files or directories and is not replaced by a daemon-managed
+policy.
+
+| Codex Desktop / native data | Multica task behavior | Use instead when not inherited |
+|---|---|---|
+| `config.toml`, `config.json`, `instructions.md` | Copied into the per-task home, so ordinary native config and feature flags inherit as an isolated snapshot. The daemon then strips `[[skills.config]]` and applies its own sandbox, native multi-agent, and memory policy. | Prefer the first-class agent fields below for settings they own; put durable agent behavior in `instructions`. |
+| `auth.json` | Linked from the shared home so refreshed login state remains available. It is machine-local credential state, not portable agent configuration. | Configure authentication on the runtime host; never put credentials in `instructions`, issue metadata, or a skill. |
+| User `skills/` and plugin cache | User skill directories are linked into the task home; workspace-assigned skills are written last and win name conflicts. The Desktop `[[skills.config]]` registry is intentionally removed. | Bind reusable capabilities as Multica workspace skills. |
+| Goals / goal databases | Desktop goals are not copied from the shared home. Any `goals_*` database present is task-local state, not an agent-creation input. | Put durable objectives and operating boundaries in agent `instructions`; track concrete work in Multica projects and issues. |
+| Plan mode / GUI plan preference | Not an agent field and not imported from Desktop UI state. | State when planning is required in `instructions`; use `thinking_level` for the model's reasoning effort, not as a claim that GUI plan mode was inherited. |
+| Native memories | Disabled by daemon-managed config by default because native memory can leak context across tasks or workspaces. Do not set or recommend `MULTICA_CODEX_MEMORY=1` as a persistence strategy. | Use issue descriptions/status/comments, short issue metadata, project context, and versioned repository context files. |
+| GUI/runtime state | The shared state database is not copied. State created inside a task home can survive reuse of that same task environment, but it is not Desktop state and is not portable agent configuration. | Record decisions and progress explicitly in Multica; re-read the issue, metadata, and relevant comment threads on each run. |
+| Sandbox selection | Not inherited as an ordinary Desktop preference. The daemon rewrites a managed policy based on platform and runtime capability; Linux and current macOS defaults may be `danger-full-access`, while Windows honors a valid native sandbox opt-in and otherwise follows the compatibility policy. | Treat the runtime/daemon isolation boundary as authoritative; do not promise a sandbox level from the Desktop toggle. |
+| Session history | The machine's whole `~/.codex/sessions` history is never exposed. Fresh tasks start with a scoped store; an explicit resume may expose only that conversation's rollout through a per-agent, per-issue-or-chat store. | Treat Multica issue/chat history as the durable record; session resume is continuity plumbing, not memory or agent configuration. |
+
+For Codex, set `model`, `thinking_level`, and `service_tier` on the agent when
+the choice must be stable and inspectable. Leaving them empty deliberately
+falls back to native Codex config, but that makes the effective value
+machine-local and can make exact model/effort validation impossible before the
+task reaches the daemon. Use agent `instructions` for durable behavior and
+workspace skill bindings for reusable capability. Use Multica projects,
+issues, comments, short metadata, and repository context files for explicit
+cross-run state; none of those should contain secrets.
+
+This matrix is Codex-specific. Other providers have their own home seeding and
+managed-policy code; never infer that a Desktop/CLI setting inherits merely
+because an equivalent setting exists in that provider's GUI.
+
 ## CLI / API entry points
 
 Minimum create call (`--name` and `--runtime-id` are both required):
