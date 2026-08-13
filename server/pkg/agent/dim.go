@@ -310,7 +310,7 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			// so we own all signalling. If we close stdin first, the shell
 			// exits on EOF and its process group dissolves before we can
 			// SIGKILL the descendants, orphaning them to PPID=1.
-			signalProcessGroup(cmd.Process, syscall.SIGKILL)
+			signalProcessGroup(cmd, syscall.SIGKILL)
 			cancel()
 			stdin.Close()
 			waitDone := make(chan struct{})
@@ -319,7 +319,7 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			case <-waitDone:
 			case <-time.After(dimProcessWaitTimeout):
 			}
-			waitProcessGroupGone(cmd.Process, dimProcessWaitTimeout)
+			waitProcessGroupGone(cmd, dimProcessWaitTimeout)
 		}()
 
 		startTime := time.Now()
