@@ -17,8 +17,17 @@ import (
 // the user's stored user.timezone, else UTC), so a fixture anchored in one
 // zone and a window opened in another sit an offset apart. Without the
 // `?tz=` these requests would inherit whatever user.timezone holds — NULL in
-// the handler fixture, hence UTC, but nothing here should rest on that.
-const dashboardFixtureTZ = "UTC"
+// the handler fixture, hence UTC.
+//
+// The zone is deliberately EAST of UTC, and that is what makes the pin
+// load-bearing rather than decorative. A fixture built in UTC survives losing
+// its `?tz=`: the fallback is UTC too, so the window opens where the fixture
+// already sits and nothing notices. Built in Asia/Tokyo the run finishes at
+// 15:10 UTC the previous day, so a request that falls back to UTC opens its
+// window after the run ended and the assertions go red — which is the whole
+// point of pinning it. Verified by mutation: dropping the parameter, and
+// pinning it to UTC, both fail.
+const dashboardFixtureTZ = "Asia/Tokyo"
 
 // dashboardFixtureTZParam is dashboardFixtureTZ as a query fragment, so a
 // request cannot pin a zone the fixture was not built in.
