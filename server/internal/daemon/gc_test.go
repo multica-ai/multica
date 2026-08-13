@@ -1188,7 +1188,7 @@ func TestPruneWorktree_LegacyCacheFallbackSerializesWithCreateWorktree(t *testin
 
 	d := newGCTestDaemon(t, http.NewServeMux())
 	sourceRepo := createGCGitRepo(t)
-	cache := repocache.New(filepath.Join(d.cfg.WorkspacesRoot, ".repos"), slog.Default())
+	cache := repocache.New(filepath.Join(d.cfg.WorkspacesRoot, ".repos"), slog.Default(), 0)
 	if err := cache.Sync("ws1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("cache sync failed: %v", err)
 	}
@@ -1315,7 +1315,7 @@ func TestPruneWorktreePreemptionCleansLocksBeforeTaskStarts(t *testing.T) {
 
 	d := newGCTestDaemon(t, http.NewServeMux())
 	sourceRepo := createGCGitRepo(t)
-	cache := repocache.New(filepath.Join(d.cfg.WorkspacesRoot, ".repos"), slog.Default())
+	cache := repocache.New(filepath.Join(d.cfg.WorkspacesRoot, ".repos"), slog.Default(), 0)
 	if err := cache.Sync("ws1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("cache sync failed: %v", err)
 	}

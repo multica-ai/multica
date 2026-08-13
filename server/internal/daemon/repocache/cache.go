@@ -66,7 +66,18 @@ var agentGitExcludePatterns = []string{
 	".codebuddy",
 }
 
-const repoCacheGitTimeout = 10 * time.Minute
+// DefaultGitTimeout is the fallback ceiling for a single git subprocess run
+// through the repo cache's default (non-explicit-timeout) wrappers (fetch,
+// worktree add, reset, etc.).
+const DefaultGitTimeout = 10 * time.Minute
+
+// repoCacheGitTimeout backs every runGit*Context wrapper below. It is a
+// package var (not a Cache field) because those wrappers are free functions
+// shared across every Cache instance and have no *Cache receiver. New sets
+// it once, before the returned Cache serves any request — there is no
+// concurrent-write hazard in practice because exactly one Cache is
+// constructed per daemon process.
+var repoCacheGitTimeout = DefaultGitTimeout
 
 func newGitCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
@@ -292,8 +303,14 @@ func (l *repoLock) cancelMaintenanceAndWait() {
 	l.mu.Unlock()
 }
 
-// New creates a new repo cache rooted at the given directory.
-func New(root string, logger *slog.Logger) *Cache {
+// New creates a new repo cache rooted at the given directory. gitTimeout
+// bounds every git subprocess run through the cache's default wrappers
+// (fetch, worktree add, reset, etc.); pass 0 to use DefaultGitTimeout.
+func New(root string, logger *slog.Logger, gitTimeout time.Duration) *Cache {
+	if gitTimeout <= 0 {
+		gitTimeout = DefaultGitTimeout
+	}
+	repoCacheGitTimeout = gitTimeout
 	return &Cache{root: root, logger: logger}
 }
 
@@ -881,44 +898,63 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// If worktree already exists (reused environment from a prior task),
 	// update it to the latest remote code instead of creating a new one.
 	if isGitWorktree(worktreePath) {
-		actualBranch, err := updateExistingWorktreeContext(ctx, worktreePath, branchName, baseRef)
-		if err != nil {
-			return nil, fmt.Errorf("update existing worktree: %w", err)
-		}
-
-		for _, pattern := range agentGitExcludePatterns {
-			_ = excludeFromGitContext(ctx, worktreePath, pattern)
-		}
-
-		// Install or remove the Co-authored-by hook based on the workspace
-		// setting. The hook lives in the bare repo's shared hooks dir, so we
-		// must actively remove it when disabled — otherwise a previously
-		// installed hook keeps appending the trailer to every commit even
-		// after the user toggles the setting off.
-		if params.CoAuthoredByEnabled {
-			if err := installCoAuthoredByHookContext(ctx, worktreePath); err != nil {
-				c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
+		if gitWorktreeAdminIntact(worktreePath) {
+			actualBranch, err := updateExistingWorktreeContext(ctx, worktreePath, branchName, baseRef)
+			if err != nil {
+				return nil, fmt.Errorf("update existing worktree: %w", err)
 			}
-		} else {
-			if err := removeCoAuthoredByHookContext(ctx, worktreePath); err != nil {
-				c.logger.Warn("repo checkout: remove co-authored-by hook failed (non-fatal)", "error", err)
+
+			for _, pattern := range agentGitExcludePatterns {
+				_ = excludeFromGitContext(ctx, worktreePath, pattern)
 			}
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, context.Cause(ctx)
+
+			// Install or remove the Co-authored-by hook based on the workspace
+			// setting. The hook lives in the bare repo's shared hooks dir, so we
+			// must actively remove it when disabled — otherwise a previously
+			// installed hook keeps appending the trailer to every commit even
+			// after the user toggles the setting off.
+			if params.CoAuthoredByEnabled {
+				if err := installCoAuthoredByHookContext(ctx, worktreePath); err != nil {
+					c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
+				}
+			} else {
+				if err := removeCoAuthoredByHookContext(ctx, worktreePath); err != nil {
+					c.logger.Warn("repo checkout: remove co-authored-by hook failed (non-fatal)", "error", err)
+				}
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, context.Cause(ctx)
+			}
+
+			c.logger.Info("repo checkout: existing worktree updated",
+				"url", params.RepoURL,
+				"path", worktreePath,
+				"branch", actualBranch,
+				"base", baseRef,
+			)
+
+			return &WorktreeResult{
+				Path:       worktreePath,
+				BranchName: actualBranch,
+			}, nil
 		}
 
-		c.logger.Info("repo checkout: existing worktree updated",
+		// Corrupted admin metadata from a canceled checkout (see
+		// multica-ai/multica#6879) — recover instead of failing every retry
+		// with an opaque git error. Remove the broken checkout and the bare
+		// repo's dangling worktree registration, then fall through to the
+		// normal fresh-create path below.
+		c.logger.Warn("repo checkout: existing worktree has corrupted admin metadata, recreating",
 			"url", params.RepoURL,
 			"path", worktreePath,
-			"branch", actualBranch,
-			"base", baseRef,
 		)
-
-		return &WorktreeResult{
-			Path:       worktreePath,
-			BranchName: actualBranch,
-		}, nil
+		if err := os.RemoveAll(worktreePath); err != nil {
+			return nil, fmt.Errorf("remove corrupted worktree: %w", err)
+		}
+		if out, err := runGitCombinedOutputContext(ctx, "-C", barePath, "worktree", "prune"); err != nil {
+			c.logger.Warn("repo checkout: prune stale worktree registration failed (non-fatal)",
+				"path", worktreePath, "error", err, "output", strings.TrimSpace(string(out)))
+		}
 	}
 
 	// Create a new worktree. createWorktree may rename the branch to avoid
@@ -1409,6 +1445,36 @@ func isBranchCollisionError(err error) bool {
 func isGitWorktree(path string) bool {
 	info, err := os.Stat(filepath.Join(path, ".git"))
 	return err == nil && !info.IsDir()
+}
+
+// gitWorktreeAdminIntact reports whether an existing linked worktree's admin
+// directory (referenced by its .git file) is structurally complete. A
+// checkout canceled mid `git worktree add` / `git reset --hard` (e.g. by the
+// CLI's own request timeout racing the daemon's internal git timeout — see
+// multica-ai/multica#6879) can leave the .git file present but the admin
+// directory missing required bookkeeping files, in which case every later
+// git command routed through this worktree fails immediately with an opaque
+// "fatal: not a git repository" instead of something recoverable.
+func gitWorktreeAdminIntact(path string) bool {
+	data, err := os.ReadFile(filepath.Join(path, ".git"))
+	if err != nil {
+		return false
+	}
+	const prefix = "gitdir:"
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(line, prefix) {
+		return false
+	}
+	adminDir := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if !filepath.IsAbs(adminDir) {
+		adminDir = filepath.Join(path, adminDir)
+	}
+	for _, required := range []string{"HEAD", "commondir", "gitdir"} {
+		if _, err := os.Stat(filepath.Join(adminDir, required)); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // updateExistingWorktree resets the worktree to a clean state and checks out a

@@ -57,6 +57,32 @@ var repoCheckoutCmd = &cobra.Command{
 
 var repoCheckoutRef string
 
+// defaultRepoCheckoutTimeout bounds how long the CLI waits for the daemon's
+// /repo/checkout to finish. It must stay comfortably above the daemon's own
+// internal git timeout (MULTICA_REPO_GIT_TIMEOUT, default 10m — see
+// repocache.DefaultGitTimeout) so a legitimately slow checkout of a large
+// repo is bounded by the daemon's timeout, not cut off early by this one
+// with a confusing "context deadline exceeded" (multica-ai/multica#6879).
+const defaultRepoCheckoutTimeout = 15 * time.Minute
+
+// repoCheckoutTimeout returns the CLI's wait budget for a single checkout
+// request, honoring MULTICA_REPO_CHECKOUT_TIMEOUT (a Go duration string,
+// e.g. "20m", or a plain integer number of seconds). Invalid or
+// non-positive values fall back to the default.
+func repoCheckoutTimeout() time.Duration {
+	v := strings.TrimSpace(os.Getenv("MULTICA_REPO_CHECKOUT_TIMEOUT"))
+	if v == "" {
+		return defaultRepoCheckoutTimeout
+	}
+	if d, err := time.ParseDuration(v); err == nil && d > 0 {
+		return d
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return defaultRepoCheckoutTimeout
+}
+
 func init() {
 	repoListCmd.Flags().String("output", "table", "Output format: table or json")
 
@@ -370,7 +396,7 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(parentCtx, repoCheckoutTimeout())
 	defer cancel()
 	client := &http.Client{}
 	checkoutURL := fmt.Sprintf("http://127.0.0.1:%s/repo/checkout", daemonPort)

@@ -591,7 +591,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d := &Daemon{
 		cfg:                       cfg,
 		client:                    client,
-		repoCache:                 repocache.New(cacheRoot, logger),
+		repoCache:                 repocache.New(cacheRoot, logger, cfg.RepoGitTimeout),
 		skillCache:                NewSkillBundleCache(skillCacheRoot),
 		logger:                    logger,
 		workspaces:                make(map[string]*workspaceState),

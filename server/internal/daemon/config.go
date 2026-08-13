@@ -14,6 +14,7 @@ import (
 	"github.com/mattn/go-shellwords"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -105,6 +106,7 @@ type Config struct {
 	GCArtifactTTL                  time.Duration         // once a task has been completed for at least this long, drop regenerable artifacts: pattern-matched build outputs when the parent record keeps the directory (an open issue), and the exact daemon-managed Codex cache for every task kind (default: 12h, set 0 to disable both)
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
 	GCRepoTTL                      time.Duration         // evict a cached bare repo under .repos once no task has created a worktree from it for this long, it has no worktrees left, and it is no longer attached to any watched workspace (default: 30d, set 0 to disable)
+	RepoGitTimeout                 time.Duration         // ceiling for a single git subprocess in the repo cache: fetch, worktree add, reset, etc. (default: 10m, configurable via MULTICA_REPO_GIT_TIMEOUT)
 	GCRepoMaintenanceEnabled       bool                  // run reflog expiry and git gc after stale agent refs are removed (default: true; disable independently as an operational kill switch)
 	GCCodexSessionTTL              time.Duration         // reclaim a per-issue Codex session store (~/.codex/multica-sessions/<agent>/<issue>) untouched for at least this long, so a done/abandoned issue's conversation history does not accumulate forever (default: 14d, set 0 to disable)
 	GCHermesMemoryTTL              time.Duration         // reclaim a per-agent Hermes memory store (<profile dir>/hermes-state/<agent>/<profile>) untouched for at least this long, so a deleted agent's memory does not sit on disk forever (default: 90d, set 0 to disable)
@@ -407,6 +409,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	repoGitTimeout, err := durationFromEnv("MULTICA_REPO_GIT_TIMEOUT", repocache.DefaultGitTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	if repoGitTimeout <= 0 {
+		repoGitTimeout = repocache.DefaultGitTimeout
+	}
 	gcTTL, err := durationFromEnv("MULTICA_GC_TTL", DefaultGCTTL)
 	if err != nil {
 		return Config{}, err
@@ -483,6 +492,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCArtifactTTL:                  gcArtifactTTL,
 		GCArtifactPatterns:             gcArtifactPatterns,
 		GCRepoTTL:                      gcRepoTTL,
+		RepoGitTimeout:                 repoGitTimeout,
 		GCRepoMaintenanceEnabled:       gcRepoMaintenanceEnabled,
 		GCCodexSessionTTL:              gcCodexSessionTTL,
 		GCHermesMemoryTTL:              gcHermesMemoryTTL,

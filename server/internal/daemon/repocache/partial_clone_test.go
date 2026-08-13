@@ -100,7 +100,7 @@ func assertCheckoutIsComplete(t *testing.T, checkoutPath string) {
 func TestCreateIsolatedCheckoutFromPartialCacheHasFileContents(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createFilterableTestRepo(t)
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	seedBloblessCache(t, cache, "ws-1", sourceRepo)
 
 	result, err := cache.CreateWorktree(WorktreeParams{
@@ -137,7 +137,7 @@ func TestCreateIsolatedCheckoutFromPartialCacheHasFileContents(t *testing.T) {
 func TestReusedIsolatedCheckoutRepairsPromisorConfig(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createFilterableTestRepo(t)
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	seedBloblessCache(t, cache, "ws-1", sourceRepo)
 
 	params := WorktreeParams{
@@ -173,7 +173,7 @@ func TestReusedIsolatedCheckoutRepairsPromisorConfig(t *testing.T) {
 func TestCreateWorktreeFromPartialCacheHasFileContents(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createFilterableTestRepo(t)
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	seedBloblessCache(t, cache, "ws-1", sourceRepo)
 
 	result, err := cache.CreateWorktree(WorktreeParams{
@@ -192,7 +192,7 @@ func TestCreateWorktreeFromPartialCacheHasFileContents(t *testing.T) {
 func TestIsPartialClone(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createFilterableTestRepo(t)
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
@@ -201,7 +201,7 @@ func TestIsPartialClone(t *testing.T) {
 		t.Fatal("an ordinary full cache must not be reported as a partial clone")
 	}
 
-	blobless := seedBloblessCache(t, New(t.TempDir(), testLogger()), "ws-2", sourceRepo)
+	blobless := seedBloblessCache(t, New(t.TempDir(), testLogger(), 0), "ws-2", sourceRepo)
 	if !isPartialClone(blobless) {
 		t.Fatal("a blobless cache must be reported as a partial clone")
 	}
