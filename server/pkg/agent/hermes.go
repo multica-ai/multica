@@ -1224,22 +1224,16 @@ func (e *acpRPCError) Error() string {
 }
 
 // isACPSessionNotFound reports whether err is the agent rejecting a
-// session id it no longer knows. Runtimes signal this with codes and
-// wording that vary — Hermes says "Session not found" under -32603
-// (Internal error), Kiro puts "No session found with id ..." in
-// `data` under -32603, and kimi-cli raises invalid_params (-32602)
-// with {"session_id": "Session not found"} in `data` for every
-// unknown-session path (src/kimi_cli/acp/server.py), while Reasonix says
-// "session/resume: unknown session <id>" under -32602 — so neither the
-// code nor one runtime's exact wording is discriminating and both are matched.
 // isACPSessionNotFound reports whether an ACP RPC error means the requested
-// session no longer exists on the agent side. Different runtimes use different
-// JSON-RPC error codes for the same condition: -32602 (invalid params, used by
-// hermes/kiro/traecli/qoder when the session id is absent or malformed),
-// -32603 (internal error, used by grok whose adapter wraps the lookup), and
-// -32002 (dim's application-level "ACP session not found"). The message/data
-// text is the disambiguator across all three so a generic -32603 transport
-// fault is not mistaken for a missing session.
+// session no longer exists on the agent side. Runtimes signal this with codes
+// and wording that vary: Hermes says "Session not found" under -32603
+// (Internal error), Kiro puts "No session found with id ..." in `data` under
+// -32603, kimi-cli raises invalid_params (-32602) with {"session_id": "Session
+// not found"} in `data`, Reasonix says "session/resume: unknown session <id>"
+// under -32602, and dim uses -32002 ("ACP session not found"). Neither the code
+// nor one runtime's exact wording is discriminating, so both code and message
+// are matched: a generic -32603 transport fault is not mistaken for a missing
+// session because the text must also contain a session-not-found phrase.
 func isACPSessionNotFound(err error) bool {
 	var rpcErr *acpRPCError
 	if !errors.As(err, &rpcErr) {

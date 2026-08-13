@@ -44,8 +44,8 @@ var dimBlockedArgs = map[string]blockedArgMode{
 //     spawn. The backend therefore issues `session/set_config_option`
 //     (permission → full-access, mode → agent) right after session/new so
 //     Multica agents can do real work. A resumed session retains these
-//     settings across `session/load`, so the config block runs only on fresh
-//     sessions. Model override is handled through the standard
+//     settings across `session/load`, so set_config_option is re-applied on
+//     both fresh and resumed sessions (idempotent). Model override is handled through the standard
 //     `session/set_model` RPC; the model catalog is advertised by
 //     `session/new` under models.availableModels / configOptions.
 //   - `session/load` resumes a prior session across processes: dim 0.3.10+
@@ -413,6 +413,9 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 					select {
 					case <-time.After(dimSessionLoadRetryDelay):
 					case <-runCtx.Done():
+						// Context cancelled during the retry delay; stop
+						// retrying and let the error path below handle it.
+						loadErr = fmt.Errorf("dim session/load cancelled: %w", runCtx.Err())
 						break
 					}
 				}
@@ -490,17 +493,12 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		msgStream.send(Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 		b.cfg.Logger.Info("dim session ready", "session_id", sessionID, "resumed", !freshSession)
 
-		// Dim's ACP server hardcodes a read-only permission preset when a
-		// session is created, which would silently deny file writes and
-		// process spawns. Raise it to full-access and pin agent mode so the
-		// headless task can do real work. This runs on BOTH fresh and resumed
-		// sessions: a resumed session whose first run failed partway through
-		// config (permission set, but mode not yet) would otherwise carry a
-		// half-configured state into the resume, silently denying writes.
-		// set_config_option is idempotent, so re-applying on a fully
-		// configured session is harmless. If either call fails we close the
-		// session (so a partially configured one is not left for the next
-		// resume) and abort rather than run a turn that is guaranteed to fail.
+		// Dim's ACP server hardcodes a read-only permission preset at session
+		// creation. Raise it to full-access and pin agent mode. This runs on
+		// BOTH fresh and resumed sessions (review #4): a resumed session whose
+		// first run failed partway through config would carry a half-configured
+		// state into the resume. set_config_option is idempotent. On failure we
+		// close the session and abort.
 		for _, cfgOpt := range []struct {
 			id    string
 			value string
