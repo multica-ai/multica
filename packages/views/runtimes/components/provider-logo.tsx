@@ -2,6 +2,7 @@ import { useId } from "react";
 import { Monitor } from "lucide-react";
 import qwenLogo from "./qwen-logo.svg";
 import reasonixLogo from "./reasonix-logo.svg";
+import dshLogo from "./dsh-logo.svg";
 
 // Next.js exposes static imports as objects while Vite exposes URL strings.
 // Normalize both shapes here so shared provider logos work in web and desktop.
@@ -311,6 +312,16 @@ function QwenPawLogo({ className }: { className: string }) {
   );
 }
 
+// DeepSeek Harness — official mark copied from deepseek-ai/deepseek-harness
+// (apps/web/public/favicon.svg, MIT — Copyright 2026 DeepSeek), adapted to use
+// currentColor so it follows the app theme instead of the upstream file's
+// prefers-color-scheme block.
+const dshLogoSrc = staticAssetSrc(dshLogo);
+
+function DshLogo({ className }: { className: string }) {
+  return <img src={dshLogoSrc} alt="DeepSeek Harness" className={className} />;
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -360,6 +371,8 @@ export function ProviderLogo({
       return <QwenLogo className={className} />;
     case "qwenpaw":
       return <QwenPawLogo className={className} />;
+    case "dsh":
+      return <DshLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

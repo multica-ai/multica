@@ -35,6 +35,16 @@ describe("ProviderLogo", () => {
     expect(logo?.classList.contains("runtime-logo")).toBe(true);
   });
 
+  it("renders the official DeepSeek Harness mark instead of the generic fallback", () => {
+    const { container } = render(
+      <ProviderLogo provider="dsh" className="runtime-logo" />,
+    );
+
+    const logo = container.querySelector('img[alt="DeepSeek Harness"]');
+    expect(logo?.getAttribute("src")).toBeTruthy();
+    expect(logo?.classList.contains("runtime-logo")).toBe(true);
+  });
+
   it("renders the QwenPaw mark instead of the generic fallback", () => {
     const { container } = render(
       <ProviderLogo provider="qwenpaw" className="runtime-logo" />,
