@@ -44,6 +44,7 @@ import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
 import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useT } from "../../i18n";
+import { resolveSettingsTab } from "../settings-tab";
 
 const ACCOUNT_TAB_KEYS = ["profile", "preferences", "shortcuts", "issue", "chat", "notifications", "tokens"] as const;
 const ACCOUNT_TAB_ICONS = {
@@ -93,16 +94,7 @@ const WORKSPACE_TAB_ICONS = {
   plugins: Blocks,
 } as const;
 
-const DEFAULT_TAB = "profile";
 const TAB_QUERY_KEY = "tab";
-
-// Legacy `?tab=…` values that have been collapsed into another tab. Old
-// bookmarks still land on the correct surface without us preserving a
-// dead TabsContent entry. Lark used to be its own top-level workspace
-// tab; it now lives inside Integrations.
-const LEGACY_WORKSPACE_TAB_REDIRECTS: Record<string, string> = {
-  lark: "integrations",
-};
 
 const SETTINGS_TAB_TRIGGER_CLASS =
   "h-8 shrink-0 px-2.5 hover:bg-surface-hover data-active:!bg-surface-selected data-active:!text-surface-selected-foreground data-active:hover:!bg-surface-selected md:!w-full md:px-2 md:after:hidden";
@@ -145,11 +137,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   );
 
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
-  const candidateTab = tabFromUrl
-    ? LEGACY_WORKSPACE_TAB_REDIRECTS[tabFromUrl] ?? tabFromUrl
-    : null;
-  const activeTab =
-    candidateTab && validTabs.has(candidateTab) ? candidateTab : DEFAULT_TAB;
+  const activeTab = resolveSettingsTab(tabFromUrl, validTabs);
 
   // replace (not push) so settings tab switches don't pollute browser history.
   // Preserve any other query params the page may carry.
