@@ -28,15 +28,35 @@ export interface TabMemento {
    * for diagnostics and future pre-sizing heuristics.
    */
   scroll: Record<string, { top: number; height: number }>;
+  /**
+   * Generic restorable view-state entries, keyed like `scroll`
+   * (`${routePathname}::${entryKey}`). The memento's second kind of cargo:
+   * state that must survive the active tab's unmount but is not a scroll
+   * offset — e.g. "this route's comment-highlight deep link already
+   * landed". Unlike scroll these are not captured by DOM scan; views write
+   * them through the restoration adapter when the state changes
+   * (commitViewState) and read them back at mount.
+   */
+  view: Record<string, string>;
 }
 
 export function emptyMemento(): TabMemento {
-  return { scroll: {} };
+  return { scroll: {}, view: {} };
 }
 
 export function scrollMementoKey(routeKey: string, containerKey: string): string {
   return `${routeKey}::${containerKey}`;
 }
+
+/**
+ * Upper bound on a tab's view-state entries. Scroll entries are bounded by
+ * REPLACE-per-route, but view entries are only cleared by the views that own
+ * them — a long-lived (persisted) tab would otherwise accumulate one entry
+ * per notification ever opened in it. Oldest-written entries evict first;
+ * losing one merely re-runs a deep-link landing that old. Same bound as the
+ * in-session scroll cache (use-issue-detail-scroll-restore).
+ */
+const VIEW_MEMENTO_MAX_ENTRIES = 100;
 
 export interface TabSession {
   id: string;
@@ -182,6 +202,19 @@ interface TabStore {
     tabId: string,
     routeKey: string,
     entries: Record<string, { top: number; height: number }>,
+  ) => void;
+  /**
+   * Write (string) or clear (undefined) one generic view-state entry for one
+   * route of a tab (views, through the restoration adapter, at the moment
+   * the state changes). Unlike scroll there is no capture pass and no
+   * per-route REPLACE: each entry's lifecycle is owned by the view that
+   * writes it.
+   */
+  commitViewState: (
+    tabId: string,
+    routeKey: string,
+    entryKey: string,
+    value: string | undefined,
   ) => void;
   /**
    * Force-remount the active tab at the same URL: bump mountGeneration.
@@ -535,12 +568,29 @@ export const useTabStore = create<TabStore>()(
         }
 
         const tab = makeSession(clean, title);
+        // Insert immediately right of the opener (the active tab) — browser
+        // convention for cmd/middle/menu opens (MUL-5860) — rather than
+        // appending. The pinned-first invariant caps the left edge: a pinned
+        // opener's "right" is the start of the unpinned zone. The explicit
+        // "+" button appends instead (see addTab).
+        const activeIndex = group.tabs.findIndex(
+          (t) => t.id === group.activeTabId,
+        );
+        const insertAt =
+          activeIndex >= 0
+            ? Math.max(activeIndex + 1, pinnedBoundary(group.tabs))
+            : group.tabs.length;
+        const nextTabs = [
+          ...group.tabs.slice(0, insertAt),
+          tab,
+          ...group.tabs.slice(insertAt),
+        ];
         set({
           byWorkspace: {
             ...byWorkspace,
             [activeWorkspaceSlug]: reconcileGroup(
               group,
-              [...group.tabs, tab],
+              nextTabs,
               opts?.activate === true ? tab.id : group.activeTabId,
             ),
           },
@@ -728,7 +778,49 @@ export const useTabStore = create<TabStore>()(
         if (unchanged) return;
 
         const nextTabs = [...group.tabs];
-        nextTabs[index] = { ...current, memento: { scroll: nextScroll } };
+        nextTabs[index] = {
+          ...current,
+          memento: { ...current.memento, scroll: nextScroll },
+        };
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [slug]: { ...group, tabs: nextTabs },
+          },
+        });
+      },
+
+      commitViewState(tabId, routeKey, entryKey, value) {
+        const { byWorkspace } = get();
+        const hit = findTabLocation(byWorkspace, tabId);
+        if (!hit) return;
+        const { slug, group, index } = hit;
+        const current = group.tabs[index];
+
+        const key = scrollMementoKey(routeKey, entryKey);
+        // Skip the write when nothing changed (covers clearing an absent
+        // entry) — avoids a re-entrant store tick from inside a view effect.
+        if (current.memento.view[key] === value) return;
+
+        const nextView = { ...current.memento.view };
+        if (value === undefined) {
+          delete nextView[key];
+        } else {
+          // Re-writing an existing key refreshes its age (delete-then-set
+          // moves it to the end of the insertion order the eviction reads).
+          delete nextView[key];
+          nextView[key] = value;
+          const keys = Object.keys(nextView);
+          for (let i = 0; i < keys.length - VIEW_MEMENTO_MAX_ENTRIES; i++) {
+            delete nextView[keys[i]];
+          }
+        }
+
+        const nextTabs = [...group.tabs];
+        nextTabs[index] = {
+          ...current,
+          memento: { ...current.memento, view: nextView },
+        };
         set({
           byWorkspace: {
             ...byWorkspace,
@@ -976,7 +1068,15 @@ export function mergePersistedTabs<T extends PersistedTabState>(
         history: { stack, index },
         memento:
           pTab.memento && typeof pTab.memento.scroll === "object"
-            ? pTab.memento
+            ? {
+                scroll: pTab.memento.scroll,
+                // Persisted by builds that predate the generic view-state
+                // entries — normalize to the current shape.
+                view:
+                  typeof pTab.memento.view === "object" && pTab.memento.view
+                    ? pTab.memento.view
+                    : {},
+              }
             : emptyMemento(),
       });
     }
@@ -1107,7 +1207,9 @@ interface V4PersistedTab {
   icon?: string;
   pinned: boolean;
   history: { stack: string[]; index: number };
-  memento: TabMemento;
+  /** `view` is absent in payloads written before the generic view-state
+   *  entries existed; rehydration normalizes it to `{}`. */
+  memento: { scroll: TabMemento["scroll"]; view?: TabMemento["view"] };
 }
 
 interface V4PersistedGroup {

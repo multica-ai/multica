@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -349,7 +350,7 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	reqBody := map[string]string{
+	reqBody := map[string]any{
 		"url":           repoURL,
 		"workspace_id":  workspaceID,
 		"workdir":       workDir,
@@ -357,6 +358,7 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		"agent_name":    agentName,
 		"task_id":       taskID,
 		"checkout_mode": strings.TrimSpace(os.Getenv("MULTICA_REPO_CHECKOUT_MODE")),
+		"retry_busy":    true,
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -364,21 +366,48 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("encode request: %w", err)
 	}
 
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Post(
-		fmt.Sprintf("http://127.0.0.1:%s/repo/checkout", daemonPort),
-		"application/json",
-		bytes.NewReader(data),
-	)
-	if err != nil {
-		return fmt.Errorf("connect to daemon: %w", err)
+	parentCtx := cmd.Context()
+	if parentCtx == nil {
+		parentCtx = context.Background()
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("checkout failed: %s", string(body))
+	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Minute)
+	defer cancel()
+	client := &http.Client{}
+	checkoutURL := fmt.Sprintf("http://127.0.0.1:%s/repo/checkout", daemonPort)
+	var body []byte
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, checkoutURL, bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("create daemon checkout request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("connect to daemon: %w", err)
+		}
+		body, err = io.ReadAll(resp.Body)
+		closeErr := resp.Body.Close()
+		if err != nil {
+			return fmt.Errorf("read daemon checkout response: %w", err)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close daemon checkout response: %w", closeErr)
+		}
+		if resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get("X-Multica-Retryable") == "repo-busy" {
+			delay := repoCheckoutRetryDelay(resp.Header.Get("Retry-After"), time.Now())
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return fmt.Errorf("connect to daemon: %w", context.Cause(ctx))
+			case <-timer.C:
+				continue
+			}
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("checkout failed: %s", string(body))
+		}
+		break
 	}
 
 	var result struct {
@@ -393,4 +422,19 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "Checked out %s → %s (branch: %s)\n", repoURL, result.Path, result.BranchName)
 
 	return nil
+}
+
+func repoCheckoutRetryDelay(value string, now time.Time) time.Duration {
+	const (
+		defaultDelay = time.Second
+		maxDelay     = 30 * time.Second
+	)
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+		return min(time.Duration(seconds)*time.Second, maxDelay)
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		return min(max(retryAt.Sub(now), time.Duration(0)), maxDelay)
+	}
+	return defaultDelay
 }

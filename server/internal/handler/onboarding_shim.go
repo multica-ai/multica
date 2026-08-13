@@ -49,9 +49,9 @@ const runtimeBootstrapBodyLimit = 8 * 1024
 const maxStarterPromptLen = 2 * 1024
 
 const (
-	onboardingAssistantName = "Multica Helper"
-	onboardingIssueTitle    = "Start here: learn Multica with Multica Helper"
-	onboardingAgentTemplate = "multica_helper"
+	onboardingAssistantName       = "Multica Helper"
+	onboardingIssueTitle          = "Start here: learn Multica with Multica Helper"
+	onboardingAgentCreationSource = "multica_helper"
 
 	// noRuntimeIssueTitle MUST match the pre-v3 service constant so
 	// LockAndFindActiveDuplicate dedupes correctly across desktop versions.
@@ -308,7 +308,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		h.publish(protocol.EventAgentCreated, req.WorkspaceID, "member", userID, map[string]any{"agent": resp})
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(
 			userID, req.WorkspaceID, uuidToString(assistant.ID),
-			runtime.Provider, runtime.RuntimeMode, onboardingAgentTemplate, isFirstAgent,
+			runtime.Provider, runtime.RuntimeMode, onboardingAgentCreationSource, isFirstAgent,
 		))
 	}
 	if issueCreated {

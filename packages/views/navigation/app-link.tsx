@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef } from "react";
+import { resolveClickIntent } from "./click-intent";
 import { useNavigation } from "./context";
 
 interface AppLinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
@@ -31,16 +32,37 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
     const { push, openInNewTab, prefetch } = useNavigation();
 
     const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-      if (e.metaKey || e.ctrlKey || e.shiftKey) {
+      // Caller's onClick runs BEFORE any navigation, on every path, so:
+      //   - synchronous side effects (close popover, clear selection, blur
+      //     the trigger) land in the same tick rather than getting deferred
+      //     behind the transition, and
+      //   - calling preventDefault() inside it cancels the navigation
+      //     entirely — the escape hatch drag guards and permission gates
+      //     need, and the same one onAuxClick already offers.
+      onClick?.(e);
+      if (e.defaultPrevented) return;
+      const intent = resolveClickIntent(e);
+      if (intent !== "push") {
         if (openInNewTab) {
           e.preventDefault();
-          openInNewTab(href, newTabTitle);
+          if (intent === "foreground-tab") {
+            openInNewTab(href, newTabTitle, { activate: true });
+          } else {
+            openInNewTab(href, newTabTitle);
+          }
         }
+        // Web: no adapter — the browser's native anchor handling already
+        // implements the spec (cmd = background tab, cmd+shift = foreground).
+        return;
+      }
+      if (e.shiftKey && !openInNewTab) {
+        // Web shift-click is the browser's "new window". Shift alone is not a
+        // spec modifier (it resolves to "push"), but fighting the native
+        // behavior with an in-place push would swallow a deliberate gesture.
+        // Desktop has no native path, so it falls through to a plain push.
         return;
       }
       if (target === "_blank") {
-        // Caller's onClick runs first — same contract as the push path below.
-        onClick?.(e);
         if (openInNewTab) {
           // Desktop: foreground app tab. target="_blank" carries "take me
           // there" intent, matching the browser's foreground-tab behavior.
@@ -52,10 +74,6 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
         return;
       }
       e.preventDefault();
-      // Caller's onClick runs BEFORE push so any synchronous side effect
-      // (close popover, clear selection, blur the trigger) lands in the
-      // same tick rather than getting deferred behind the transition.
-      onClick?.(e);
       push(href);
     };
 

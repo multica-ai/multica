@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -339,11 +341,12 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			"MULTICA_LLM_API_KEY=daemon-secret",
 		}
 		agentEnv := map[string]string{
-			"CUSTOM_ACCESS_TOKEN": "agent-secret",
-			"CUSTOM_FLAG":         "enabled",
-			"UNAUTHORIZED_TOKEN":  "daemon-secret",
-			"MULTICA_SERVER_URL":  "https://task.example",
-			"MULTICA_TOKEN":       "mat_task",
+			"CUSTOM_ACCESS_TOKEN":      "agent-secret",
+			"CUSTOM_FLAG":              "enabled",
+			"UNAUTHORIZED_TOKEN":       "daemon-secret",
+			"MULTICA_TASK_CONFIG_ROOT": "/task/multica-config",
+			"MULTICA_SERVER_URL":       "https://task.example",
+			"MULTICA_TOKEN":            "mat_task",
 		}
 		agentCustomEnv := map[string]string{
 			"CUSTOM_ACCESS_TOKEN": "agent-secret",
@@ -357,7 +360,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			t.Fatalf("read config.toml: %v", err)
 		}
 		config := string(data)
-		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
+		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_TASK_CONFIG_ROOT", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
 			if !strings.Contains(config, want) {
 				t.Errorf("config.toml missing %q:\n%s", want, config)
 			}
@@ -401,9 +404,10 @@ func TestCodexTaskShellEnvInheritsRealHome(t *testing.T) {
 	// What runTask layers on top for a Codex task: task identity plus the
 	// task-scoped CODEX_HOME, and — since MUL-5578 — no HOME/XDG entry.
 	explicit := map[string]string{
-		"CODEX_HOME":         codexHome,
-		"MULTICA_TOKEN":      "mat_task",
-		"MULTICA_SERVER_URL": "https://task.example",
+		"CODEX_HOME":               codexHome,
+		"MULTICA_TASK_CONFIG_ROOT": "/task/multica-config",
+		"MULTICA_TOKEN":            "mat_task",
+		"MULTICA_SERVER_URL":       "https://task.example",
 	}
 
 	if err := configureCodexTaskShellEnvironment("codex", codexHome, inherited, explicit, nil, slog.Default()); err != nil {
@@ -434,6 +438,9 @@ func TestCodexTaskShellEnvInheritsRealHome(t *testing.T) {
 	// CODEX_HOME is the one home-shaped variable the daemon does own.
 	if !slices.Contains(include, "CODEX_HOME") {
 		t.Errorf("include_only missing CODEX_HOME, got %v", include)
+	}
+	if !slices.Contains(include, "MULTICA_TASK_CONFIG_ROOT") {
+		t.Errorf("include_only missing MULTICA_TASK_CONFIG_ROOT, got %v", include)
 	}
 }
 
@@ -502,6 +509,56 @@ func TestTaskScopedAuthToken(t *testing.T) {
 				t.Fatalf("taskScopedAuthToken() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
+	t.Parallel()
+
+	const (
+		fakeToken      = "mat_task_environment_sentinel"
+		taskRoot       = "/task/private-multica-config"
+		workspacesRoot = "/daemon/multica_workspaces_staging"
+	)
+	task := Task{
+		ID:          "task-test",
+		AgentID:     "agent-test",
+		WorkspaceID: "workspace-test",
+	}
+	env := taskMulticaEnvironment(task, "agent-name", fakeToken, taskRoot, workspacesRoot, "https://task.example", 19514, 3, "/task/tmp")
+
+	want := map[string]string{
+		"MULTICA_TOKEN":                fakeToken,
+		"MULTICA_TASK_CONFIG_ROOT":     taskRoot,
+		"MULTICA_TASK_WORKSPACES_ROOT": workspacesRoot,
+		"MULTICA_SERVER_URL":           "https://task.example",
+		"MULTICA_DAEMON_PORT":          "19514",
+		"MULTICA_WORKSPACE_ID":         "workspace-test",
+		"MULTICA_AGENT_NAME":           "agent-name",
+		"MULTICA_AGENT_ID":             "agent-test",
+		"MULTICA_TASK_ID":              "task-test",
+		"MULTICA_TASK_SLOT":            "3",
+		"TMPDIR":                       "/task/tmp",
+		"TMP":                          "/task/tmp",
+		"TEMP":                         "/task/tmp",
+	}
+	if !maps.Equal(env, want) {
+		t.Fatalf("taskMulticaEnvironment() = %#v, want %#v", env, want)
+	}
+
+	layerCustomEnvAndHermesHome(env, map[string]string{
+		"MULTICA_TASK_CONFIG_ROOT":     "/owner/config",
+		"MULTICA_TASK_WORKSPACES_ROOT": "/owner/multica_workspaces",
+		"MULTICA_TOKEN":                "mul_owner_sentinel",
+	}, "", nil)
+	if env["MULTICA_TASK_CONFIG_ROOT"] != taskRoot {
+		t.Fatalf("custom env replaced task config root: %q", env["MULTICA_TASK_CONFIG_ROOT"])
+	}
+	if env[TaskWorkspacesRootEnv] != workspacesRoot {
+		t.Fatalf("custom env replaced task workspaces root: %q", env[TaskWorkspacesRootEnv])
+	}
+	if env["MULTICA_TOKEN"] != fakeToken {
+		t.Fatal("custom env replaced task-scoped token")
 	}
 }
 
@@ -755,10 +812,12 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 // TestSessionContinuityNoticeMatchesSurface locks the MUL-5722 split. The same
 // event costs each surface something different, so it cannot be reported with
 // one sentence. The dividing question is whether the conversation can still be
-// READ, not whether it is a chat: an issue's comments and a Slack channel's
-// history both can, a web chat's and a Feishu channel's cannot. Announcing a
-// loss on the first two describes something that did not happen — the user
-// hears "the discussion is gone" when every word survives.
+// READ, not whether it is a chat: an issue's comments, a Slack channel's
+// history, and a web chat's / Feishu's / WeCom's / DingTalk's stored
+// chat_message transcript all can; only a surface Multica stores no transcript
+// for cannot. Announcing a loss on the readable ones describes something that
+// did not happen — the user hears "the discussion is gone" when every word
+// survives.
 func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 	t.Parallel()
 
@@ -784,19 +843,37 @@ func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 			wantMentions: "multica chat history",
 		},
 		{
-			// Web chat history lived only in the provider session.
-			name:         "web chat is unrecoverable",
+			// Web chat history is persisted in chat_message, which `multica chat
+			// history` reads back — recoverable, just from Multica's store.
+			name:         "web chat rebuilds from the stored transcript",
 			task:         Task{ChatSessionID: "chat-1"},
-			tellUser:     true,
-			wantMentions: "not readable from anywhere",
+			tellUser:     false,
+			wantMentions: "multica chat history",
 		},
 		{
-			// Multica ships no history reader for Feishu, so despite being a
-			// channel it is in the same position as a web chat.
-			name:         "feishu has no history reader",
+			// Feishu's conversation is persisted to chat_message too, and the
+			// handler's non-Slack fallback reads it back via `multica chat history`.
+			name:         "feishu rebuilds from the stored transcript",
 			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeFeishu},
-			tellUser:     true,
-			wantMentions: "not readable from anywhere",
+			tellUser:     false,
+			wantMentions: "multica chat history",
+		},
+		{
+			// WeCom is fully wired on main (persists chat_message, stamps
+			// ChatChannelType="wecom"), so its transcript is readable too — the
+			// handler's non-Slack fallback serves it just like Feishu's.
+			name:         "wecom rebuilds from the stored transcript",
+			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeWecom},
+			tellUser:     false,
+			wantMentions: "multica chat history",
+		},
+		{
+			// DingTalk persists to chat_message through the same AppendUserMessage
+			// path as Feishu/WeCom, so its transcript is readable the same way.
+			name:         "dingtalk rebuilds from the stored transcript",
+			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeDingtalk},
+			tellUser:     false,
+			wantMentions: "multica chat history",
 		},
 	}
 
@@ -1928,10 +2005,10 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 // store guard initialised — enough to exercise the reserve-vs-mark protocol.
 func newCodexStoreGuardDaemon() *Daemon {
 	d := &Daemon{
-		activeCodexStores:   map[string]int{},
-		deletingCodexStores: map[string]bool{},
+		activeStores:   map[string]int{},
+		deletingStores: map[string]bool{},
 	}
-	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
+	d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
 	return d
 }
 
@@ -1943,13 +2020,13 @@ func TestCodexStoreGuard_MarkBeforeReserveBlocksDeletion(t *testing.T) {
 	d := newCodexStoreGuardDaemon()
 	const store = "/stores/agent/issue"
 
-	d.markActiveCodexStore(store)
-	if _, ok := d.reserveCodexStoreForDeletion(store); ok {
+	d.markActiveStore(store)
+	if _, ok := d.reserveStoreForDeletion(store); ok {
 		t.Fatal("reserve must refuse a store a live task already holds")
 	}
-	d.unmarkActiveCodexStore(store)
+	d.unmarkActiveStore(store)
 
-	commit, ok := d.reserveCodexStoreForDeletion(store)
+	commit, ok := d.reserveStoreForDeletion(store)
 	if !ok {
 		t.Fatal("reserve should succeed once the store is inactive")
 	}
@@ -1964,20 +2041,20 @@ func TestCodexStoreGuard_ReserveBlocksMarkUntilCommit(t *testing.T) {
 	d := newCodexStoreGuardDaemon()
 	const store = "/stores/agent/issue"
 
-	commit, ok := d.reserveCodexStoreForDeletion(store)
+	commit, ok := d.reserveStoreForDeletion(store)
 	if !ok {
 		t.Fatal("reserve should succeed on an inactive store")
 	}
 
 	marked := make(chan struct{})
 	go func() {
-		d.markActiveCodexStore(store)
+		d.markActiveStore(store)
 		close(marked)
 	}()
 
 	select {
 	case <-marked:
-		t.Fatal("markActiveCodexStore must block while the store is reserved for deletion")
+		t.Fatal("markActiveStore must block while the store is reserved for deletion")
 	case <-time.After(100 * time.Millisecond):
 	}
 
@@ -1986,10 +2063,10 @@ func TestCodexStoreGuard_ReserveBlocksMarkUntilCommit(t *testing.T) {
 	select {
 	case <-marked:
 	case <-time.After(2 * time.Second):
-		t.Fatal("markActiveCodexStore must proceed after the reservation is committed")
+		t.Fatal("markActiveStore must proceed after the reservation is committed")
 	}
 	// The store is now active, so a fresh reserve must be refused.
-	if _, ok := d.reserveCodexStoreForDeletion(store); ok {
+	if _, ok := d.reserveStoreForDeletion(store); ok {
 		t.Fatal("store must be active after the blocked mark proceeds")
 	}
 }
@@ -2001,15 +2078,15 @@ func TestCodexStoreGuard_SecondReserveRefusedWhileDeleting(t *testing.T) {
 	d := newCodexStoreGuardDaemon()
 	const store = "/stores/agent/issue"
 
-	commit, ok := d.reserveCodexStoreForDeletion(store)
+	commit, ok := d.reserveStoreForDeletion(store)
 	if !ok {
 		t.Fatal("first reserve should succeed")
 	}
-	if _, ok := d.reserveCodexStoreForDeletion(store); ok {
+	if _, ok := d.reserveStoreForDeletion(store); ok {
 		t.Fatal("a second reserve must be refused while a removal is in flight")
 	}
 	commit()
-	commit2, ok := d.reserveCodexStoreForDeletion(store)
+	commit2, ok := d.reserveStoreForDeletion(store)
 	if !ok {
 		t.Fatal("reserve should succeed again after the prior removal committed")
 	}
@@ -2314,6 +2391,83 @@ func TestExecuteAndDrain_NetworkFailureKeepsResumeSession(t *testing.T) {
 	}
 }
 
+// TestExecuteAndDrain_AuthResolutionOnResumeRecoversInTurn is the GH #6777
+// regression, driven through the same two-attempt sequence the daemon runs.
+//
+// The reported symptom was a Chat that alternated success / failure forever:
+// turn 1 opened a session and worked; turn 2 resumed it and died with the
+// provider's auth-resolution error; the server-side resume guards then
+// blacklisted that session so turn 3 started fresh and worked again, and so on.
+// Server-side blacklisting alone can only produce that alternation — curing the
+// FAILING turn needs the in-turn fresh retry, which never fired because nothing
+// identified the error as fatal-to-resume. This asserts the whole recovery:
+// the gate opens on attempt 1, and a cold attempt 2 succeeds with its own
+// session id.
+func TestExecuteAndDrain_AuthResolutionOnResumeRecoversInTurn(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+
+	const authErr = `hermes provider error: "Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the X-Api-Key or Authorization headers to be explicitly omitted"`
+
+	fb := &fakeBackend{
+		results: []agent.Result{
+			// Attempt 1: resumed session, provider identity unusable.
+			{Status: "failed", Error: authErr, SessionID: "ses_resumed"},
+			// Attempt 2: cold session re-resolves the provider from config.
+			{Status: "completed", Output: "hello", SessionID: "ses_fresh"},
+		},
+	}
+
+	opts := agent.ExecOptions{ResumeSessionID: "ses_resumed"}
+	result, tools, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", "", new(atomic.Int32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The adapter must NOT claim the resume was rejected — nothing rejected it,
+	// and Result.ResumeRejected is documented as excluding auth failures. The
+	// recovery has to come from the gate instead.
+	if result.ResumeRejected {
+		t.Fatal("an auth-resolution failure must not be reported as a rejected resume")
+	}
+	if !shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools, "hermes") {
+		t.Fatal("a resumed session that cannot resolve auth must retry once from a fresh session; without this the failing turn is never cured and the user sees alternating failures")
+	}
+
+	// What runTask does on that verdict: retire the prior session and re-run
+	// cold. Mirrored here so the sequence — not just the predicate — is pinned.
+	retired := opts.ResumeSessionID
+	freshOpts := opts
+	freshOpts.ResumeSessionID = ""
+	retry, retryTools, err := d.executeAndDrain(context.Background(), fb, "p", freshOpts, slog.Default(), "t", "", new(atomic.Int32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, _ := reconcileFreshRetryResult(result, result.Usage, tools, retry, retryTools, nil)
+
+	if final.Status != "completed" {
+		t.Fatalf("status = %q, want completed — the user's message must succeed on this turn", final.Status)
+	}
+	if final.SessionID != "ses_fresh" {
+		t.Fatalf("session id = %q, want ses_fresh so the next turn resumes the working session", final.SessionID)
+	}
+	if final.SessionID == retired {
+		t.Fatal("the dead session must not become the resume pointer again")
+	}
+	if int(fb.idx.Load()) != 2 {
+		t.Fatalf("expected exactly 2 attempts (one retry, not a loop), got %d", fb.idx.Load())
+	}
+	if fb.calls[1].ResumeSessionID != "" {
+		t.Fatalf("retry asked to resume %q; it must be a cold start", fb.calls[1].ResumeSessionID)
+	}
+	// The server-side half of the fix still has to hold: even though this turn
+	// recovered, the failed attempt's error must keep that session out of every
+	// later resume lookup.
+	if !taskfailure.AuthMethodUnresolved(result.Error) {
+		t.Fatal("the failed attempt's error must still be recognised so ResumeUnsafeFailure and the resume queries retire the dead session")
+	}
+}
+
 func TestShouldRetryWithFreshSession(t *testing.T) {
 	t.Parallel()
 
@@ -2596,6 +2750,89 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			provider:       "codex",
 			want:           false,
 		},
+		{
+			// GH #6777: the alternating Chat failure. Hermes rebuilds the
+			// resumed session but persists a normalised provider identity that
+			// can no longer resolve its credentials, so the turn dies with the
+			// SDK's auth-resolution message. Nothing rejected the resume, so
+			// ResumeRejected is false and correctly so — the adapter cannot
+			// tell this from a bad credential. Only this gate knows the run was
+			// a resume, and a fresh session re-resolves the provider from
+			// current config.
+			name: "hermes resumed session that cannot resolve auth retries",
+			result: agent.Result{
+				Status:    "failed",
+				Error:     `hermes provider error: "Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the X-Api-Key or Authorization headers to be explicitly omitted"`,
+				SessionID: "ses_resumed",
+			},
+			priorSessionID: "ses_resumed",
+			provider:       "hermes",
+			want:           true,
+		},
+		{
+			// The same failure surfacing one ACP step earlier: a resumed
+			// session whose persisted provider was flattened gets a
+			// non-redundant session/set_model, which re-runs provider
+			// auto-detection and mis-routes (MUL-5029). The adapter wraps the
+			// message instead of replacing it, which is why matching the
+			// phrase here covers all three lifecycle steps at once.
+			name: "hermes set_model auth-resolution failure on resume retries",
+			result: agent.Result{
+				Status:    "failed",
+				Error:     `hermes could not switch to model "custom:deepseek-v4-pro": session/set_model: Could not resolve authentication method. Expected either api_key or auth_token to be set.`,
+				SessionID: "ses_resumed",
+			},
+			priorSessionID: "ses_resumed",
+			provider:       "hermes",
+			want:           true,
+		},
+		{
+			// The tools gate is untouched by the new evidence, exactly as for
+			// the poisoned-history branch above: a turn that already acted is
+			// never replayed. Its session is still retired at report time by
+			// ResumeUnsafeFailure's matching text guard.
+			name: "hermes auth-resolution failure after a tool ran never retries",
+			result: agent.Result{
+				Status:    "failed",
+				Error:     `hermes provider error: "Could not resolve authentication method. Expected either api_key or auth_token to be set."`,
+				SessionID: "ses_resumed",
+			},
+			priorSessionID: "ses_resumed",
+			tools:          1,
+			provider:       "hermes",
+			want:           false,
+		},
+		{
+			// The load-bearing scope limit: on a COLD run the same message
+			// means the agent's provider config really is incomplete. There is
+			// no session to blame and no fresh session to fall back to, so the
+			// error must reach the user instead of burning a second run. The
+			// priorSessionID gate is what encodes that distinction.
+			name: "cold run that cannot resolve auth does not retry",
+			result: agent.Result{
+				Status: "failed",
+				Error:  `hermes provider error: "Could not resolve authentication method. Expected either api_key or auth_token to be set."`,
+			},
+			priorSessionID: "",
+			provider:       "hermes",
+			want:           false,
+		},
+		{
+			// Narrowness guard, mirroring the SQL side's auth-adjacent test: a
+			// rejected credential is about the credential, not the session's
+			// copy of the provider, and a fresh session replays it verbatim.
+			// Widening the phrase to any authentication-shaped error would
+			// discard healthy conversation pointers on every such failure.
+			name: "hermes rejected credential on resume keeps the session",
+			result: agent.Result{
+				Status:    "failed",
+				Error:     `hermes provider error: "401 authentication_error: invalid x-api-key"`,
+				SessionID: "ses_resumed",
+			},
+			priorSessionID: "ses_resumed",
+			provider:       "hermes",
+			want:           false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -2634,7 +2871,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 		})
 	}
 
-	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "reasonix", "kiro", "qoder", "qoderclicn", "traecli", "pi", "openclaw"}
+	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "reasonix", "kiro", "qoder", "qoderclicn", "traecli", "pi", "omp", "openclaw"}
 	for _, provider := range detectable {
 		t.Run(provider+" does not retry", func(t *testing.T) {
 			t.Parallel()
@@ -3575,6 +3812,26 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 	if got := refreshCalls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 refresh call, got %d", got)
 	}
+}
+
+func TestContextLockCancelsWaitWithoutConsumingToken(t *testing.T) {
+	t.Parallel()
+
+	var lock contextLock
+	if err := lock.Lock(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := lock.Lock(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Lock error = %v, want deadline exceeded", err)
+	}
+	lock.Unlock()
+
+	if err := lock.Lock(context.Background()); err != nil {
+		t.Fatalf("Lock after cancelled waiter: %v", err)
+	}
+	lock.Unlock()
 }
 
 func TestShellArgsFromEnv(t *testing.T) {

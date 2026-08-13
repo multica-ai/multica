@@ -168,6 +168,9 @@ type registeredCall struct {
 	// versions maps runtime type -> the version that call reported, so a test
 	// can assert the server was told about an in-place CLI upgrade.
 	versions map[string]string
+	// names maps runtime type -> the display name that call reported, so a
+	// test can assert the name a user will see for a runtime identity.
+	names map[string]string
 }
 
 func (fx *batchFixture) setWorkspaces(ws ...WorkspaceInfo) {
@@ -207,6 +210,20 @@ func (fx *batchFixture) setProbeErr(fn func(path string, attempt int) error) {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
 	fx.probeErr = fn
+}
+
+// registeredNameFor returns the display name the last Register call for a
+// workspace reported for a runtime type.
+func (fx *batchFixture) registeredNameFor(workspaceID, runtimeType string) string {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	var name string
+	for _, call := range fx.registered {
+		if call.workspaceID == workspaceID {
+			name = call.names[runtimeType]
+		}
+	}
+	return name
 }
 
 // registrationFor returns the runtime types registered for a workspace, and
@@ -339,12 +356,17 @@ func newBatchFixture(t *testing.T) *batchFixture {
 				_, _ = w.Write([]byte(`{"error":"injected register failure"}`))
 				return
 			}
-			call := registeredCall{workspaceID: body.WorkspaceID, versions: map[string]string{}}
+			call := registeredCall{
+				workspaceID: body.WorkspaceID,
+				versions:    map[string]string{},
+				names:       map[string]string{},
+			}
 			var resp RegisterResponse
 			fx.mu.Lock()
 			for _, rt := range body.Runtimes {
 				call.types = append(call.types, rt["type"])
 				call.versions[rt["type"]] = rt["version"]
+				call.names[rt["type"]] = rt["name"]
 				// Mirror UpsertAgentRuntime: a re-register of a row that already
 				// exists returns that row's ID rather than minting a new one.
 				id := "rt-" + strconv.Itoa(int(runtimeSeq.Add(1)))

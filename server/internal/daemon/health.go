@@ -25,18 +25,40 @@ type HealthResponse struct {
 	// lifecycle CLI (`daemon start/stop`) acts on the host process namespace,
 	// so a foreign-OS daemon can't be started/stopped by the app even though
 	// /health is reachable. See #3916.
-	OS         string `json:"os"`
-	Uptime     string `json:"uptime"`
+	OS     string `json:"os"`
+	Uptime string `json:"uptime"`
+	// Profile names the CLI profile this daemon was started with, empty for
+	// the default profile. Health ports are derived by hashing the profile
+	// name into a 1000-port range, so two names can collide and a caller has
+	// no other way to tell whose daemon answered: `--profile a daemon stop`
+	// would happily kill profile b's daemon (#6694).
+	//
+	// Deliberately NOT omitempty. The empty string is a real answer — "I am
+	// the default profile's daemon" — and must stay distinguishable from a
+	// pre-#6694 daemon that cannot identify itself at all. Callers key off
+	// the field's presence, so collapsing the two would make every default
+	// daemon look unidentifiable.
+	Profile    string `json:"profile"`
 	DaemonID   string `json:"daemon_id"`
 	DeviceName string `json:"device_name"`
 	ServerURL  string `json:"server_url"`
 	CLIVersion string `json:"cli_version"`
+	// LaunchedBy is "desktop" when the Electron app spawned this daemon, empty
+	// for a standalone one. Already reported to the server on registration;
+	// surfaced here so `daemon status` can say who manages the daemon instead
+	// of leaving the user to guess why a daemon they never started is running.
+	LaunchedBy string `json:"launched_by,omitempty"`
 	// ActiveTaskCount remains the compatibility/safety count of every claimed
 	// handleTask lifecycle. The additive counters split actual provider
 	// execution from local-directory parking for throughput and diagnostics.
-	ActiveTaskCount       int64    `json:"active_task_count"`
-	RunningTaskCount      int64    `json:"running_task_count"`
-	ResourceWaitTaskCount int64    `json:"resource_wait_task_count"`
+	ActiveTaskCount       int64 `json:"active_task_count"`
+	RunningTaskCount      int64 `json:"running_task_count"`
+	ResourceWaitTaskCount int64 `json:"resource_wait_task_count"`
+	// Repo maintenance stays a liveness-safe background activity, so health
+	// remains HTTP 200/running. These additive counters explain degraded repo
+	// checkout capacity to operators without exposing local cache paths.
+	RepoMaintenanceActive int      `json:"repo_maintenance_active,omitempty"`
+	RepoCheckoutWaiters   int      `json:"repo_checkout_waiters,omitempty"`
 	Agents                []string `json:"agents"`
 	// SkippedAgents maps a provider that WAS discovered on this machine to the
 	// reason the last registration round dropped it (version undetectable,
@@ -80,7 +102,17 @@ type repoCheckoutRequest struct {
 	AgentName    string `json:"agent_name"`
 	TaskID       string `json:"task_id"`
 	CheckoutMode string `json:"checkout_mode,omitempty"`
+	// RetryBusy is sent by clients that understand 503 + Retry-After. Older
+	// clients omit it and retain their historical unbounded lock-wait behavior.
+	RetryBusy bool `json:"retry_busy,omitempty"`
 }
+
+const (
+	repoCheckoutLockWaitTimeout = 10 * time.Second
+	repoCheckoutRetryAfter      = 2 * time.Second
+	repoCheckoutRetryHeader     = "X-Multica-Retryable"
+	repoCheckoutRetryValueBusy  = "repo-busy"
+)
 
 // healthHandler returns the /health HTTP handler. Extracted from serveHealth
 // so tests can exercise it without spinning up a listener.
@@ -117,6 +149,8 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			PID:                   os.Getpid(),
 			OS:                    runtime.GOOS,
 			Uptime:                time.Since(startedAt).Truncate(time.Second).String(),
+			Profile:               d.cfg.Profile,
+			LaunchedBy:            d.cfg.LaunchedBy,
 			DaemonID:              d.cfg.DaemonID,
 			DeviceName:            d.cfg.DeviceName,
 			ServerURL:             d.cfg.ServerBaseURL,
@@ -129,6 +163,11 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 
 			ReloadPendingReason: d.reloadPending(),
 			Workspaces:          wsList,
+		}
+		if reporter, ok := d.repoCache.(interface{ Activity() repocache.Activity }); ok {
+			activity := reporter.Activity()
+			resp.RepoMaintenanceActive = activity.MaintenanceActive
+			resp.RepoCheckoutWaiters = activity.ForegroundWaiters
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -215,6 +254,10 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		}
 
 		if err := d.ensureRepoReady(r.Context(), req.WorkspaceID, req.URL); err != nil {
+			if r.Context().Err() != nil {
+				d.logger.Debug("repo checkout readiness cancelled", "url", req.URL, "error", err)
+				return
+			}
 			statusCode := http.StatusInternalServerError
 			if errors.Is(err, ErrRepoNotConfigured) {
 				statusCode = http.StatusBadRequest
@@ -229,7 +272,7 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			checkoutRef = d.taskRepoDefaultRef(req.WorkspaceID, req.TaskID, req.URL)
 		}
 
-		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
+		params := repocache.WorktreeParams{
 			WorkspaceID:         req.WorkspaceID,
 			RepoURL:             req.URL,
 			WorkDir:             req.WorkDir,
@@ -238,8 +281,30 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			TaskID:              req.TaskID,
 			CoAuthoredByEnabled: d.workspaceCoAuthoredByEnabled(req.WorkspaceID),
 			IsolatedGitMetadata: req.CheckoutMode == repoCheckoutModeIsolated,
-		})
+		}
+		if req.RetryBusy {
+			params.LockWaitTimeout = repoCheckoutLockWaitTimeout
+		}
+		var result *repocache.WorktreeResult
+		var err error
+		if cache, ok := d.repoCache.(interface {
+			CreateWorktreeContext(context.Context, repocache.WorktreeParams) (*repocache.WorktreeResult, error)
+		}); ok {
+			result, err = cache.CreateWorktreeContext(r.Context(), params)
+		} else {
+			result, err = d.repoCache.CreateWorktree(params)
+		}
 		if err != nil {
+			if errors.Is(err, repocache.ErrRepoBusy) && req.RetryBusy {
+				w.Header().Set(repoCheckoutRetryHeader, repoCheckoutRetryValueBusy)
+				w.Header().Set("Retry-After", fmt.Sprintf("%.0f", repoCheckoutRetryAfter.Seconds()))
+				http.Error(w, "repository is busy with another operation; retry later", http.StatusServiceUnavailable)
+				return
+			}
+			if r.Context().Err() != nil {
+				d.logger.Debug("repo checkout cancelled", "url", req.URL, "error", err)
+				return
+			}
 			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

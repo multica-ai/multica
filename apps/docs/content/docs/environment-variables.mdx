@@ -107,6 +107,10 @@ For the exact allowlist evaluation order, see [Sign-in and signup](/auth-setup#s
 
 When `S3_BUCKET` is unset, Multica uses local disk.
 
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | Maximum attachment body loaded into memory for inline text preview; accepts bytes or `KB`/`MB` and `KiB`/`MiB`, up to `16MiB`. Larger files remain downloadable. |
+
 ### S3 or compatible storage
 
 | Variable | Default | Description |

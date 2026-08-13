@@ -8,11 +8,9 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os"
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -33,30 +31,7 @@ var extContentTypes = map[string]string{
 	".wasm": "application/wasm",
 }
 
-// defaultMaxUploadSize is the cap for POST /api/upload-file bodies when
-// MULTICA_MAX_UPLOAD_SIZE is unset or invalid.
-const defaultMaxUploadSize = 100 << 20 // 100 MB
-
-// maxUploadSizeBytes is the cached result of maxUploadSize(); it is set once
-// on first call and never re-read, mirroring AuthTokenTTL().
-var maxUploadSizeBytes int64
-
-// maxUploadSizeOnce guards maxUploadSizeBytes.
-var maxUploadSizeOnce sync.Once
-
-// maxUploadSize returns the maximum accepted upload body size in bytes.
-// It reads MULTICA_MAX_UPLOAD_SIZE (plain byte count) on first call and
-// caches the value. When unset or not a positive integer the default of
-// 100 MB is used.
-func maxUploadSize() int64 {
-	maxUploadSizeOnce.Do(func() {
-		maxUploadSizeBytes = defaultMaxUploadSize
-		if n, ok := parseByteSize("MULTICA_MAX_UPLOAD_SIZE"); ok {
-			maxUploadSizeBytes = n
-		}
-	})
-	return maxUploadSizeBytes
-}
+const maxUploadSize = 100 << 20 // 100 MB
 
 const defaultAttachmentDownloadURLTTL = 30 * time.Minute
 
@@ -68,49 +43,6 @@ const (
 	attachmentDownloadModePresign    attachmentDownloadMode = "presign"
 	attachmentDownloadModeProxy      attachmentDownloadMode = "proxy"
 )
-
-// defaultMaxPreviewTextSize caps the body the preview proxy will load into
-// memory for text-based types. Anything larger returns 413 and the UI falls
-// back to "please download". Sized so a typical README/source-file fits but
-// a 100 MB log dump can't blow up the renderer.
-const defaultMaxPreviewTextSize = 2 << 20 // 2 MB
-
-// maxPreviewTextSizeBytes is the cached result of maxPreviewTextSize(); it is
-// set once on first call and never re-read.
-var maxPreviewTextSizeBytes int64
-
-// maxPreviewTextSizeOnce guards maxPreviewTextSizeBytes.
-var maxPreviewTextSizeOnce sync.Once
-
-// maxPreviewTextSize returns the maximum inline-preview body size in bytes.
-// It reads MULTICA_MAX_PREVIEW_SIZE (plain byte count) on first call and
-// caches the value. Unset or invalid falls back to the default of 2 MB.
-func maxPreviewTextSize() int64 {
-	maxPreviewTextSizeOnce.Do(func() {
-		maxPreviewTextSizeBytes = defaultMaxPreviewTextSize
-		if n, ok := parseByteSize("MULTICA_MAX_PREVIEW_SIZE"); ok {
-			maxPreviewTextSizeBytes = n
-		}
-	})
-	return maxPreviewTextSizeBytes
-}
-
-// parseByteSize parses an environment variable containing a plain byte-count
-// integer (no suffixes — e.g. "5242880" for 5 MiB). Returns the parsed value
-// and false when the variable is empty, zero, negative, or non-numeric. On
-// invalid input the caller falls back to its default and logs a warning.
-func parseByteSize(envVar string) (int64, bool) {
-	raw := strings.TrimSpace(os.Getenv(envVar))
-	if raw == "" {
-		return 0, false
-	}
-	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || n <= 0 {
-		slog.Warn("invalid byte-size env, using default", "env", envVar, "value", raw)
-		return 0, false
-	}
-	return n, true
-}
 
 // ---------------------------------------------------------------------------
 // Response types
@@ -128,6 +60,16 @@ type AttachmentResponse struct {
 	Filename      string  `json:"filename"`
 	URL           string  `json:"url"`
 	DownloadURL   string  `json:"download_url"`
+	// AttachmentDownloadURL is a credential-free URL that forces a
+	// Content-Disposition: attachment across every storage mode, for the
+	// download BUTTON — unlike DownloadURL, which is load-intent and keeps
+	// serving media inline so the preview path (resolvePreviewMediaUrl) can
+	// render it. Like DownloadURL it can be short-lived (a 60s proxy capability,
+	// a presigned URL) and therefore MUST NOT be persisted, and it is emitted
+	// ONLY by the single-attachment endpoint (GetAttachmentByID), never in list
+	// responses. Empty when the server cannot mint one for the object's storage
+	// mode; clients fall back to DownloadURL. (MUL follow-up to #6092 / #6713.)
+	AttachmentDownloadURL string `json:"attachment_download_url,omitempty"`
 	// MarkdownURL is the durable, absolute-when-possible URL the client
 	// SHOULD persist into markdown bodies (issue descriptions, comments,
 	// chat messages). It is computed per deployment policy by
@@ -441,9 +383,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := h.resolveWorkspaceID(r)
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize())
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
 
-	if err := r.ParseMultipartForm(maxUploadSize()); err != nil {
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
 		writeError(w, http.StatusBadRequest, "file too large or invalid multipart form")
 		return
 	}
@@ -701,8 +643,26 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	// stored Content-Disposition (inline for media, attachment otherwise), which
 	// keeps images renderable inline while preserving the original download
 	// filename.
-	switch mode := h.resolveAttachmentDownloadMode(att.Url); {
-	case h.CFSigner == nil && mode == attachmentDownloadModePresign:
+	switch mode := h.resolveAttachmentDownloadMode(att.Url); mode {
+	case attachmentDownloadModeCloudFront:
+		// CloudFront mode: attachmentToResponse already set DownloadURL to an
+		// inline-intent signed URL. The download button needs the forced-
+		// attachment sibling. response-content-disposition is folded into the
+		// signed Resource (SignedURLWithContentDisposition), so a client cannot
+		// strip or alter it without invalidating the signature. Keying on the
+		// resolved mode (not h.CFSigner != nil) lets an explicit proxy/presign
+		// override take effect even when a signer is configured; the nil guard
+		// keeps an explicit cloudfront mode without a configured signer from
+		// panicking — the field is left empty and the client falls back to
+		// download_url, the same graceful degrade attachmentToResponse uses.
+		if h.CFSigner != nil {
+			resp.AttachmentDownloadURL = h.CFSigner.SignedURLWithContentDisposition(
+				att.Url,
+				storage.AttachmentContentDisposition(att.Filename),
+				time.Now().Add(h.attachmentDownloadURLTTL()),
+			)
+		}
+	case attachmentDownloadModePresign:
 		if presigner, ok := h.Storage.(storage.DownloadPresigner); ok {
 			key := h.Storage.KeyFromURL(att.Url)
 			signedURL, err := presigner.PresignGetWithContentDisposition(r.Context(), key, h.attachmentDownloadURLTTL(), "")
@@ -711,8 +671,17 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 			} else {
 				resp.DownloadURL = signedURL
 			}
+			// Download-intent sibling: the same presigned object, but with a
+			// forced attachment disposition so the download button saves the
+			// file instead of previewing it. Independent of DownloadURL's inline
+			// signature above; either may be present without the other.
+			if dlURL, err := presigner.PresignGetWithContentDisposition(r.Context(), key, h.attachmentDownloadURLTTL(), storage.AttachmentContentDisposition(att.Filename)); err != nil {
+				slog.Warn("failed to presign attachment download URL", "id", uuidToString(att.ID), "key", key, "error", err)
+			} else {
+				resp.AttachmentDownloadURL = dlURL
+			}
 		}
-	case h.CFSigner == nil && mode == attachmentDownloadModeProxy:
+	case attachmentDownloadModeProxy:
 		// Proxy mode has no signed storage URL to offer, so this response
 		// would otherwise hand back the auth-gated API path — which a
 		// native download on a token-mode client cannot authenticate,
@@ -724,12 +693,10 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		// Only here, never in attachmentToResponse: list responses are held
 		// far longer than the TTL, so a capability embedded in one would be
 		// expired by the time anything used it.
-		//
-		// Gated on CFSigner being nil for the same reason as the presign
-		// branch above: when a signer is configured attachmentToResponse has
-		// already produced a credential-free signed URL, which solves the
-		// native-download problem without a capability.
 		resp.DownloadURL = attachmentCapabilityPath(resp.ID, time.Now())
+		// Download-intent sibling capability (dl=1): the redemption route turns
+		// it into a Content-Disposition: attachment, for the download button.
+		resp.AttachmentDownloadURL = attachmentDownloadCapabilityPath(resp.ID, time.Now())
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -882,7 +849,7 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 		h.setAttachmentPreviewSecurityHeaders(w)
 		http.Redirect(w, r, signedURL, http.StatusFound)
 	case attachmentDownloadModeProxy:
-		h.proxyAttachmentDownload(w, r, att, key)
+		h.proxyAttachmentDownload(w, r, att, key, false)
 	default:
 		writeError(w, http.StatusInternalServerError, "invalid attachment download mode")
 	}
@@ -974,7 +941,7 @@ func (h *Handler) ServeLocalUpload(w http.ResponseWriter, r *http.Request) {
 //     (serveProxyRange). Multi-range is not implemented on this path; per
 //     RFC 7233 it is ignored and the full body is served (200), matching the
 //     seekable path's successful outcome rather than failing with 416.
-func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string) {
+func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string, forceAttachment bool) {
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {
 		slog.Error("failed to open attachment for download", "id", uuidToString(att.ID), "key", key, "error", err)
@@ -988,7 +955,13 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 	} else {
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}
-	w.Header().Set("Content-Disposition", storage.ContentDisposition(att.ContentType, att.Filename))
+	disposition := storage.ContentDisposition(att.ContentType, att.Filename)
+	if forceAttachment {
+		// Download-intent capability (dl=1): override the media-aware inline
+		// disposition so the browser saves the file instead of previewing it.
+		disposition = storage.AttachmentContentDisposition(att.Filename)
+	}
+	w.Header().Set("Content-Disposition", disposition)
 	// no-store predates Range support; keep it. Range/206 semantics are
 	// independent of caching — clients resume via Content-Range, not the cache.
 	w.Header().Set("Cache-Control", "no-store")
@@ -1260,8 +1233,8 @@ func normalizeFrameAncestorSource(raw string) (string, bool) {
 // the explicit /download route signs redirects as attachment downloads and
 // proxy mode streams with the same media-type policy as storage uploads.
 //
-// Hard cap: 2 MB. Larger files return 413. Anything outside the text
-// whitelist returns 415.
+// Files above the configured inline-preview limit return 413. Anything outside
+// the text whitelist returns 415.
 // ---------------------------------------------------------------------------
 
 func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
@@ -1280,6 +1253,14 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "storage not configured")
 		return
 	}
+	limit := h.maxPreviewSizeBytes()
+	// The recorded size lets known-oversized objects fail before opening remote
+	// storage. A value at or below the limit is not trusted to admit the object;
+	// the bounded read below still enforces the limit against the actual body.
+	if att.SizeBytes > limit {
+		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
+		return
+	}
 	key := h.Storage.KeyFromURL(att.Url)
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {
@@ -1289,15 +1270,15 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer reader.Close()
 
-	// LimitReader to maxPreviewTextSize()+1 so we can detect "exactly at the
-	// limit" vs "exceeds the limit" by checking the returned length.
-	body, err := io.ReadAll(io.LimitReader(reader, maxPreviewTextSize()+1))
+	// Read one byte beyond the limit so the exact boundary remains valid. The
+	// configured hard maximum guarantees that limit+1 cannot overflow.
+	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
 	if err != nil {
 		slog.Error("failed to read attachment body for preview", "id", attachmentID, "error", err)
 		writeError(w, http.StatusBadGateway, "failed to read attachment body")
 		return
 	}
-	if len(body) > int(maxPreviewTextSize()) {
+	if int64(len(body)) > limit {
 		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
 		return
 	}
@@ -1310,8 +1291,8 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	// No-store: workspace membership / attachment ACL can change between
 	// requests (member removed, attachment deleted). A cached body would
 	// stay readable past the revocation window. The redundant request is
-	// fine here — bodies are capped at 2 MB and the endpoint is only hit
-	// when a user explicitly opens a preview.
+	// fine here — bodies are bounded by the configured inline-preview limit
+	// and the endpoint is only hit when a user explicitly opens a preview.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	h.setAttachmentPreviewSecurityHeaders(w)

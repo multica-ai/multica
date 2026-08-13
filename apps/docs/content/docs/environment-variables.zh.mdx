@@ -107,6 +107,10 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 没有设置 `S3_BUCKET` 时，Multica 使用本地磁盘。
 
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | 内联文本预览时载入内存的最大附件正文大小；支持字节数以及 `KB`/`MB`、`KiB`/`MiB` 后缀，最大 `16MiB`。超限文件仍可下载。 |
+
 ### S3 或兼容存储
 
 | 变量 | 默认值 | 说明 |

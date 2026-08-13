@@ -41,18 +41,6 @@ func TestParseIssueCommand(t *testing.T) {
 	}
 }
 
-func TestTitleFromPreviousMessage(t *testing.T) {
-	if got := titleFromPreviousMessage("/issue Real title"); got != "Real title" {
-		t.Errorf("prev /issue should strip prefix: %q", got)
-	}
-	if got := titleFromPreviousMessage("\n  first line\nsecond"); got != "first line" {
-		t.Errorf("prev plain should take first non-empty line: %q", got)
-	}
-	if got := titleFromPreviousMessage("   \n  "); got != "" {
-		t.Errorf("blank prev → empty: %q", got)
-	}
-}
-
 func TestIssueDescriptionFromCommandBodyPreservesInlineLayout(t *testing.T) {
 	body := "/issue explain below questions\nWhat is this?\n[Image]\nAnd what is this?\n[Image]"
 	want := "What is this?\n[Image]\nAnd what is this?\n[Image]"

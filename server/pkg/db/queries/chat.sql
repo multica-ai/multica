@@ -353,6 +353,47 @@ SELECT id FROM chat_session
 WHERE id = $1
 FOR UPDATE;
 
+-- name: LockChatSessionForEnqueue :one
+-- The chat-task enqueue's answer to archiving, and the one lock on this row
+-- that a concurrent inbound message must NOT wait behind.
+--
+-- The channel run trigger is debounced, so the message is persisted the moment
+-- it arrives and the task row is created a window later. An archive committing
+-- inside that window cancels the tasks it can see — there are none yet — and
+-- deletes the channel binding, and the flush then enqueues onto a conversation
+-- the user closed. ClaimAgentTask does not read chat_session.status, so the
+-- daemon runs it. Taking this lock as the enqueue transaction's first
+-- statement and re-reading status under it makes both interleavings safe:
+-- enqueue-then-archive is caught by the archive's cancel, archive-then-enqueue
+-- is refused here.
+--
+-- FOR NO KEY UPDATE, not the FOR UPDATE the delete / runtime-bind / draft locks
+-- take, and the difference is the point. Those three want to block concurrent
+-- INSERTs that reference this row: FOR UPDATE conflicts with the FOR KEY SHARE
+-- an FK insert takes on its parent, which is exactly how LockChatSessionForDelete
+-- stops a send from slipping a task in between its cancel and its delete. This
+-- lock wants the opposite. Every inbound channel message is an INSERT into
+-- chat_message, FK'd to this same row, and the flush it eventually triggers
+-- holds this lock for the whole enqueue — under FOR UPDATE the room's next
+-- message would block behind the previous message's enqueue. FOR NO KEY UPDATE
+-- does not conflict with FOR KEY SHARE, so appends keep flowing, while it still
+-- conflicts with FOR UPDATE and with FOR NO KEY UPDATE — which is what
+-- SetChatSessionArchived's UPDATE (status is not a key column) and the delete
+-- path's lock take. So the archive and the delete still serialise against this
+-- enqueue in both directions, which is all this guard needs.
+--
+-- Returns the whole row, not just the id, for the same reason
+-- LockChatSessionForDraftWrite does: the caller must re-check status INSIDE the
+-- transaction, because an enqueue blocked here resumes holding the row it read
+-- before blocking — and the archive is what it was blocked on.
+--
+-- Same row and same position (first statement) as the other three, so the
+-- repo-wide chat_session -> agent_task_queue order is unchanged and no new
+-- deadlock edge is introduced.
+SELECT * FROM chat_session
+WHERE id = $1
+FOR NO KEY UPDATE;
+
 -- name: LockChatSessionForDraftWrite :one
 -- The autosave half of the agent_builder_draft protocol, and the writer's
 -- answer to LockChatSessionForDelete.
@@ -864,6 +905,10 @@ SELECT * FROM chat_message
 WHERE id = $1;
 
 -- name: CreateChatTask :one
+-- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
+-- locks the owners' workspace rows in the writer's own transaction and returns
+-- false once they are gone, so this statement writes no row instead of stranding
+-- a task in a workspace that has just been deleted (MUL-5999).
 -- The chat sender (initiator) is a direct_human originator and accountable;
 -- attribution provenance is stamped so this path is not a NULL-source enqueue
 -- bypass (MUL-4302 §2).
@@ -873,7 +918,7 @@ INSERT INTO agent_task_queue (
     runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
     fire_at
 )
-VALUES (
+SELECT
     $1, $2, NULL,
     CASE WHEN sqlc.narg('fire_at')::timestamptz IS NULL THEN 'queued' ELSE 'deferred' END,
     $3, $4, $5,
@@ -886,7 +931,7 @@ VALUES (
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     sqlc.narg('fire_at')::timestamptz
-)
+WHERE lock_task_owner_rows($1, NULL, $2)
 RETURNING *;
 
 -- name: PromoteChannelChatTasksIfMediaReady :many
@@ -1002,6 +1047,9 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
       -- text guard keeps the dead session from being replayed. This and
       -- GetLastTaskSession must move together.
       -- Keep in sync with ResumeUnsafeFailure and GetLastTaskSession.
+      -- The phrase itself lives in taskfailure.AuthMethodUnresolved, which the
+      -- daemon's in-turn fresh-session retry reads (GH #6777). This guard stays
+      -- because it is the only protection for rows an older daemon wrote.
       AND NOT (COALESCE(error, '') ILIKE '%could not resolve authentication method%')
       AND NOT (COALESCE(error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
                AND COALESCE(error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
@@ -1204,17 +1252,6 @@ SELECT EXISTS (
 -- Advances the read cursor to now, dropping the session's unread_count to 0.
 UPDATE chat_session SET last_read_at = now()
 WHERE id = $1;
-
--- name: GetMostRecentUserChatMessage :one
--- Returns the most recent role='user' message in a session. Used by the
--- Lark `/issue` command parser: when the user types `/issue` with no
--- title, the spec falls back to "use the previous user message as the
--- title". Bot replies (role='assistant') are excluded — only human
--- input qualifies as a fallback title source.
-SELECT * FROM chat_message
-WHERE chat_session_id = $1 AND role = 'user'
-ORDER BY created_at DESC
-LIMIT 1;
 
 -- name: ChatSessionHasUserMessage :one
 -- Reports whether a session has any human (role='user') message yet. Used to

@@ -136,6 +136,9 @@ backend:
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
     localUploadBaseUrl: http://api.multica.dev.lan
+    # Maximum attachment body buffered for inline text preview. The backend
+    # rejects values above its 16 MiB hard safety limit.
+    maxPreviewSize: 2MiB
   resources:
     requests:
       cpu: 100m

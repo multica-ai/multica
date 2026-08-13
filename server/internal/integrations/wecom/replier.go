@@ -24,6 +24,8 @@ import (
 const (
 	agentOfflineText  = "⚠️ 智能体当前不在线，你的消息已收到，等它上线后会处理。"
 	agentArchivedText = "⚠️ 该智能体已归档，无法回复。请联系工作区管理员。"
+	freshPendingText  = "✅ 已准备开始新对话。你的下一条聊天消息将不带之前的上下文运行。"
+	issueUsageText    = "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）"
 )
 
 // OutboundReplier implements engine.OutboundReplier for WeCom.
@@ -114,14 +116,36 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			r.logger.WarnContext(ctx, "wecom replier: archived notice failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
+	case engine.OutcomeFreshPending:
+		if err := r.post(ctx, inst, msg, freshPendingText); err != nil {
+			r.logger.WarnContext(ctx, "wecom replier: fresh-start confirmation failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeIssueUsage:
+		if err := r.post(ctx, inst, msg, issueUsageText); err != nil {
+			r.logger.WarnContext(ctx, "wecom replier: issue usage reply failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	case engine.OutcomeIngested:
 		// Only a /issue-created message warrants a confirmation; a plain
 		// chat message stays silent (the agent's own reply lands via
 		// EventChatDone / Channel.Send).
 		if res.IssueID.Valid {
-			if err := r.post(ctx, inst, msg, issueCreatedText(res)); err != nil {
-				r.logger.WarnContext(ctx, "wecom replier: issue-created confirmation failed",
-					"installation_id", util.UUIDToString(inst.ID), "error", err)
+			// The engine reports a duplicate by carrying the OTHER issue's
+			// id, number and title with IssueDuplicate set. Answering both
+			// cases with the created copy told the reporter their bug was
+			// filed under a number somebody else opened, under a title they
+			// never wrote — so they stopped chasing it and the report was
+			// lost. slack/replier.go:125 and dingtalk/replier.go:125 both
+			// branch here; WeCom was the one that did not.
+			text := issueCreatedText(res)
+			if res.IssueDuplicate {
+				text = issueDuplicateText(res)
+			}
+			if err := r.post(ctx, inst, msg, text); err != nil {
+				r.logger.WarnContext(ctx, "wecom replier: issue confirmation failed",
+					"installation_id", util.UUIDToString(inst.ID),
+					"duplicate", res.IssueDuplicate, "error", err)
 			}
 		}
 	}
@@ -224,6 +248,29 @@ func (r *OutboundReplier) post(ctx context.Context, inst engine.ResolvedInstalla
 	}
 	chatType := aibotChatTypeFromChannel(msg.Source.ChatType)
 	return sender.sendTextCtx(ctx, chatID, chatType, text)
+}
+
+// issueDuplicateText answers a /issue the engine refused because an active
+// issue already covers it. It names the OTHER issue, which is the whole point:
+// the reporter needs to know where the discussion already is, not to be handed
+// an id they will read as their own.
+//
+// That title belongs to the pre-existing issue, so it is text some *other*
+// member wrote — not even the reporter's own, which is what makes this the
+// worse of the two /issue call sites — and the reply ships as markdown. Hence
+// breakMemberLinks, the same entry point issueCreatedText runs its title
+// through: it breaks the inline "](" form and the link reference definition a
+// multi-line title can smuggle instead. See markdown.go.
+func issueDuplicateText(res engine.Result) string {
+	id := res.IssueIdentifier
+	if id == "" {
+		id = fmt.Sprintf("#%d", res.IssueNumber)
+	}
+	title := breakMemberLinks(strings.TrimSpace(res.IssueTitle))
+	if title == "" {
+		return "⚠️ 未创建 —— 已存在进行中的 " + id
+	}
+	return "⚠️ 未创建 —— 已存在进行中的 " + id + " — " + title
 }
 
 func issueCreatedText(res engine.Result) string {

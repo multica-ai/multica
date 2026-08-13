@@ -133,6 +133,24 @@ func taskScopedAuthToken(task Task) (string, error) {
 	return token, nil
 }
 
+func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesRoot, serverURL string, healthPort, slot int, tempDir string) map[string]string {
+	return map[string]string{
+		"MULTICA_TOKEN":        token,
+		cli.TaskConfigRootEnv:  configRoot,
+		TaskWorkspacesRootEnv:  workspacesRoot,
+		"MULTICA_SERVER_URL":   serverURL,
+		"MULTICA_DAEMON_PORT":  strconv.Itoa(healthPort),
+		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
+		"MULTICA_AGENT_NAME":   agentName,
+		"MULTICA_AGENT_ID":     task.AgentID,
+		"MULTICA_TASK_ID":      task.ID,
+		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+		"TMPDIR":               tempDir,
+		"TMP":                  tempDir,
+		"TEMP":                 tempDir,
+	}
+}
+
 // taskRunner executes a single agent task and returns the result.
 // Extracted as an interface so tests can inject a fake without spawning real
 // agent processes, while keeping test scaffolding out of the production struct.
@@ -254,7 +272,7 @@ type workspaceState struct {
 	taskRepoRefs    map[string]map[string]string // taskID -> repo URL -> checkout ref
 	settings        json.RawMessage              // workspace settings (JSONB)
 	lastRepoSyncErr string
-	repoRefreshMu   sync.Mutex
+	repoRefreshMu   contextLock
 	// profileSetSig is a content hash of the workspace's custom runtime
 	// profile list (MUL-3332) as last seen from the server. An on-demand
 	// refresh compares the live signature with this cached value; any drift
@@ -277,6 +295,38 @@ type workspaceState struct {
 	// revisits it. A failed register records nothing, so the workspace stays
 	// behind and is retried. Guarded by Daemon.mu.
 	builtinVersions map[string]string
+}
+
+// contextLock is a zero-value-ready mutex whose wait can be cancelled. Repo
+// checkout requests use it for workspace refresh coalescing so disconnecting a
+// client never leaves the handler stuck behind another cold-cache refresh.
+type contextLock struct {
+	once  sync.Once
+	token chan struct{}
+}
+
+func (l *contextLock) Lock(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	l.once.Do(func() {
+		l.token = make(chan struct{}, 1)
+		l.token <- struct{}{}
+	})
+	select {
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	case <-l.token:
+		if err := ctx.Err(); err != nil {
+			l.token <- struct{}{}
+			return context.Cause(ctx)
+		}
+		return nil
+	}
+}
+
+func (l *contextLock) Unlock() {
+	l.token <- struct{}{}
 }
 
 type repoCacheBackend interface {
@@ -493,10 +543,10 @@ type Daemon struct {
 	activeEnvRoots     map[string]int  // env root path -> reference count (handles reuse paths marked twice)
 	deletingEnvRoots   map[string]bool // env roots reserved by GC; new tasks wait until the mutation finishes
 
-	activeCodexStoresMu   sync.Mutex
-	activeCodexStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
-	activeCodexStores     map[string]int  // per-issue Codex session store path -> live-task refcount; guards the store from GC mid-task (MUL-4424)
-	deletingCodexStores   map[string]bool // store paths a GC delete has reserved; markActive waits these out so a task never mounts a store mid-removal
+	activeStoresMu   sync.Mutex
+	activeStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
+	activeStores     map[string]int  // persistent store path (per-conversation Codex sessions, per-agent Hermes memories) -> live-task refcount; guards the store from GC mid-task (MUL-4424)
+	deletingStores   map[string]bool // store paths a GC delete has reserved; markActive waits these out so a task never mounts a store mid-removal
 
 	// localPathLocks serialises agent tasks whose project resource is a
 	// local_directory pinned to this daemon. Two tasks targeting the same
@@ -557,8 +607,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
 		deletingEnvRoots:          make(map[string]bool),
-		activeCodexStores:         make(map[string]int),
-		deletingCodexStores:       make(map[string]bool),
+		activeStores:              make(map[string]int),
+		deletingStores:            make(map[string]bool),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		pendingWorkInflight:       make(map[string]struct{}),
@@ -572,7 +622,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
 	}
 	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
-	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
+	d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
 	// Seed the copy-on-write availability set from the startup probe. Callers
 	// must go through d.agents() from here on; cfg.Agents is the initial value
 	// only and does not track later refreshes.
@@ -2758,10 +2808,22 @@ func (d *Daemon) waitBackgroundSyncs() {
 }
 
 func (d *Daemon) syncWorkspaceRepos(workspaceID string, repos []RepoData) {
+	d.syncWorkspaceReposContext(context.Background(), workspaceID, repos)
+}
+
+func (d *Daemon) syncWorkspaceReposContext(ctx context.Context, workspaceID string, repos []RepoData) {
 	if d.repoCache == nil {
 		return
 	}
-	if err := d.repoCache.Sync(workspaceID, repoDataToInfo(repos)); err != nil {
+	var err error
+	if cache, ok := d.repoCache.(interface {
+		SyncContext(context.Context, string, []repocache.RepoInfo) error
+	}); ok {
+		err = cache.SyncContext(ctx, workspaceID, repoDataToInfo(repos))
+	} else {
+		err = d.repoCache.Sync(workspaceID, repoDataToInfo(repos))
+	}
+	if err != nil {
 		d.setWorkspaceRepoSyncError(workspaceID, err.Error())
 		d.logger.Warn("repo cache sync failed", "workspace_id", workspaceID, "error", err)
 		return
@@ -3008,7 +3070,9 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	//     sibling's refresh is fresh enough for our gate read.
 	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
 
-	ws.repoRefreshMu.Lock()
+	if err := ws.repoRefreshMu.Lock(ctx); err != nil {
+		return err
+	}
 	defer ws.repoRefreshMu.Unlock()
 
 	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
@@ -3028,7 +3092,10 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return nil
 	}
 
-	d.syncWorkspaceRepos(workspaceID, resp.Repos)
+	d.syncWorkspaceReposContext(ctx, workspaceID, resp.Repos)
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
 
 	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
 		return nil
@@ -4406,6 +4473,13 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			d.logger.Info("task received", "task", shortID(t.ID), "target", taskTarget)
 			taskWG.Add(1)
 			d.activeTasks.Add(1)
+			if cache, ok := d.repoCache.(interface{ CancelMaintenance() }); ok {
+				// A task can reuse an existing worktree and never enter the
+				// checkout path that normally preempts repository maintenance.
+				// Cancel all low-priority maintenance before the agent starts so
+				// direct Git operations cannot overlap it.
+				cache.CancelMaintenance()
+			}
 			go func(t Task, slot int) {
 				defer taskWG.Done()
 				defer d.activeTasks.Add(-1)
@@ -5112,12 +5186,23 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 // runtimeDisplayNameOverrides maps a provider key to the human-facing runtime
 // name when simple title-casing would read awkwardly. Providers not listed
 // here fall back to capitalizing the key (claude → "Claude", codex → "Codex").
+// Built-in runtime identities (from agent.BuiltinRuntimes) are seeded into
+// this map at init so their display names stay in lockstep with the
+// descriptor.
 var runtimeDisplayNameOverrides = map[string]string{
 	"traecli":    "Trae",
 	"grok":       "Grok",
 	"qoderclicn": "Qoder CN",
 	"qwen":       "Qwen Code",
 	"qwenpaw":    "QwenPaw",
+}
+
+func init() {
+	// Seed built-in runtime identity display names from the descriptor so
+	// adding a new fork doesn't require editing this map by hand.
+	for _, desc := range agent.BuiltinRuntimes {
+		runtimeDisplayNameOverrides[desc.ID] = desc.DisplayName
+	}
 }
 
 // providerDisplayName returns the human-facing runtime name for a provider key.
@@ -5443,10 +5528,14 @@ func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRe
 		return SkillData{}, fmt.Errorf("resolve skill bundle returned wrong skill: requested source=%s id=%s, got source=%s id=%s", ref.Source, ref.ID, bundle.Source, bundle.ID)
 	}
 	bundleRef := skillRefFromBundle(bundle)
-	if !validateSkillBundle(bundleRef, bundle) {
+	validationRef := bundleRef
+	if ref.Source == skillbundle.SourcePlugin {
+		validationRef = ref
+	}
+	if !validateSkillBundle(validationRef, bundle) {
 		return SkillData{}, fmt.Errorf("resolve skill bundle returned invalid bundle: skill_id=%s source=%s hash=%s", bundle.ID, bundle.Source, bundle.Hash)
 	}
-	if err := d.skillCache.WithRefLock(task.WorkspaceID, bundleRef, func() error {
+	if err := d.skillCache.WithRefLock(task.WorkspaceID, validationRef, func() error {
 		return d.skillCache.Store(task.WorkspaceID, bundle)
 	}); err != nil {
 		return SkillData{}, fmt.Errorf("store skill bundle cache: %w", err)
@@ -5696,6 +5785,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
 		ChatChannelType:                  task.ChatChannelType,
+		ChatChannelDeliversFiles:         task.ChatChannelDeliversFiles,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
 		AutopilotTitle:                   task.AutopilotTitle,
@@ -5818,6 +5908,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var hermesSourceHome string
 	var hermesSourceMustExist bool
 	var hermesEnv map[string]string
+	var hermesMemoryStore string
 	if provider == "hermes" {
 		sel := agent.ParseHermesProfileArgs(agentCustomArgs)
 		res := execenv.ResolveHermesProfile(agentEnvOverrides["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
@@ -5831,15 +5922,35 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			hermesEnv = map[string]string{}
 		}
 		hermesEnv["HERMES_HOME"] = res.SourceHome
+		// The overlay links memories/ here so the agent's long-term memory
+		// survives the task instead of being reset by every run (#6638). Keyed on
+		// the resolved source home so switching an agent's profile switches its
+		// memory line, matching Hermes' own "a profile is an isolated instance"
+		// model. Guarded from the GC for the whole task, as the Codex store below.
+		if store := execenv.HermesMemoryStorePath(d.cfg.Profile, task.AgentID, res.SourceHome); store != "" {
+			hermesMemoryStore = store
+			d.markActiveStore(store)
+			defer d.unmarkActiveStore(store)
+		}
+	}
+	// Reasonix locates its user config from the environment (REASONIX_HOME, and
+	// the platform config dirs behind it), which an agent's custom_env may
+	// re-point or clear. The per-task reasonix.toml has to restate the
+	// permissions from whichever config the child ends up loading, so the deny
+	// rules the runtime owner set there survive the task-scoped config that
+	// overrides them — hence the same sanitized env the child is launched with.
+	var reasonixEnv map[string]string
+	if provider == "reasonix" {
+		reasonixEnv = sanitizeAgentEnv(agentEnvOverrides)
 	}
 	// Guard this task's per-issue Codex session store from the GC for the whole
 	// task, starting before Prepare/Reuse mounts it — so a prune that samples the
 	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
 	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
 	if provider == "codex" {
-		if store := execenv.CodexSessionStorePath(d.cfg.Profile, task.AgentID, task.IssueID); store != "" {
-			d.markActiveCodexStore(store)
-			defer d.unmarkActiveCodexStore(store)
+		if store := execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx); store != "" {
+			d.markActiveStore(store)
+			defer d.unmarkActiveStore(store)
 		}
 	}
 	if shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
@@ -5858,6 +5969,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
+			HermesMemoryStore:     hermesMemoryStore,
+			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		})
@@ -5882,6 +5995,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
+			HermesMemoryStore:     hermesMemoryStore,
+			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}
@@ -5990,19 +6105,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
 		return TaskResult{}, err
 	}
-	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        agentToken,
-		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
-		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
-		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
-		"MULTICA_AGENT_NAME":   agentName,
-		"MULTICA_AGENT_ID":     task.AgentID,
-		"MULTICA_TASK_ID":      task.ID,
-		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
-		"TMPDIR":               taskTempDir,
-		"TMP":                  taskTempDir,
-		"TEMP":                 taskTempDir,
-	}
+	agentEnv := taskMulticaEnvironment(task, agentName, agentToken, env.MulticaConfigRoot, d.cfg.WorkspacesRoot, d.cfg.ServerBaseURL, d.cfg.HealthPort, slot, taskTempDir)
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode
 	}
@@ -6039,10 +6142,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
-	// HOME and the XDG base dirs are deliberately not touched here: tasks run
-	// with the daemon user's real home on every platform, so host CLI config
-	// and credentials resolve inside a task exactly as they do in the daemon
-	// user's shell (MUL-5578).
+	// HOME and the XDG base dirs are deliberately not touched here: provider
+	// tools such as gh, aws, kubectl, and npm continue resolving the daemon
+	// user's existing state (MUL-5578). The Multica CLI is the exception:
+	// MULTICA_TASK_CONFIG_ROOT above redirects its implicit profile lookup to
+	// private task-local state and prevents Owner-profile fallback.
 	// (Hermes HERMES_HOME is applied after custom_env below so the per-task
 	// overlay can win over a user-set HERMES_HOME; see
 	// layerCustomEnvAndHermesHome.)
@@ -6089,7 +6193,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
 	}
-	backend, err := agent.New(provider, agent.Config{
+	// Resolve the backend through the unified runtime resolver: built-in
+	// runtime identities (e.g. "omp") dispatch through NewRuntime, protocol
+	// families go through New. This is the single production boundary — the
+	// daemon never calls agent.New or agent.NewRuntime directly, so the two
+	// factories stay meaning exactly one thing each.
+	backend, err := agent.ResolveBackend(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		CLIVersion:     resolvedVersion,
 		Env:            agentEnv,
@@ -6662,6 +6771,35 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 	// gets its session retired, just by classifyPoisonedError at report time
 	// rather than by an in-turn retry.
 	if taskfailure.UnresumableHistory(result.Error) {
+		return true
+	}
+	// Third form of positive evidence, and the same shape of argument: the
+	// resume was not refused — the runtime happily rebuilt the session — but
+	// the provider identity it rebuilt can no longer resolve its own
+	// credentials, so the turn dies with "Could not resolve authentication
+	// method" (GH #6777). The credentials are fine; only the session's copy of
+	// the provider is broken, which is precisely what a fresh session
+	// re-resolves from current config.
+	//
+	// This is the exception the Result.ResumeRejected doc calls out: adapters
+	// must NOT flag auth errors, because a genuine credential failure keeps the
+	// session so the platform's own retry can continue the conversation. The
+	// distinction is resume-vs-fresh, not the error text — and priorSessionID
+	// above already establishes that this run WAS a resume. On a cold run the
+	// same error means the config really is wrong and this gate never sees it.
+	//
+	// Deciding here rather than in each ACP adapter is what makes it correct
+	// for every step of the ACP lifecycle: the failure surfaces at
+	// session/resume, at session/set_model (a resumed session whose persisted
+	// provider was normalised gets a redundant set_model that re-routes to the
+	// wrong provider — MUL-5029) or at session/prompt, and only two of those
+	// three carry any resume-failure signal today. The final error text carries
+	// the phrase on all three.
+	//
+	// Worst case, the config genuinely is broken: the fresh attempt fails the
+	// same way, the user sees the same error once, and the single-retry budget
+	// bounds the cost. That is the same trade the branch above already makes.
+	if taskfailure.AuthMethodUnresolved(result.Error) {
 		return true
 	}
 	// Everything below is a bounded compatibility path for the backends that
@@ -7327,56 +7465,58 @@ func (d *Daemon) reserveEnvRootForGC(envRoot string) (release func(), ok bool) {
 	}, true
 }
 
-// markActiveCodexStore records that a task is about to use the given per-issue
-// Codex session store, so the GC never reclaims it mid-task — the store lives
-// outside the env root, so isActiveEnvRoot does not cover it (MUL-4424). If a GC
+// markActiveStore records that a task is about to use the given persistent
+// store — a per-issue Codex session store or a per-agent Hermes memory store —
+// so the GC never reclaims it mid-task. These stores live outside the env root,
+// so isActiveEnvRoot does not cover them (MUL-4424). If a GC
 // delete has already reserved this store, we wait for that removal to finish
 // before claiming it, so a task never mounts a store mid-removal; the store is
 // then recreated fresh by Prepare. Reference-counted like the env-root guard.
-func (d *Daemon) markActiveCodexStore(store string) {
+func (d *Daemon) markActiveStore(store string) {
 	if store == "" {
 		return
 	}
-	d.activeCodexStoresMu.Lock()
-	defer d.activeCodexStoresMu.Unlock()
-	for d.deletingCodexStores[store] {
-		d.activeCodexStoresCond.Wait()
+	d.activeStoresMu.Lock()
+	defer d.activeStoresMu.Unlock()
+	for d.deletingStores[store] {
+		d.activeStoresCond.Wait()
 	}
-	d.activeCodexStores[store]++
+	d.activeStores[store]++
 }
 
-func (d *Daemon) unmarkActiveCodexStore(store string) {
+func (d *Daemon) unmarkActiveStore(store string) {
 	if store == "" {
 		return
 	}
-	d.activeCodexStoresMu.Lock()
-	defer d.activeCodexStoresMu.Unlock()
-	if d.activeCodexStores[store] <= 1 {
-		delete(d.activeCodexStores, store)
+	d.activeStoresMu.Lock()
+	defer d.activeStoresMu.Unlock()
+	if d.activeStores[store] <= 1 {
+		delete(d.activeStores, store)
 		return
 	}
-	d.activeCodexStores[store]--
+	d.activeStores[store]--
 }
 
-// reserveCodexStoreForDeletion atomically checks that no live task holds store
+// reserveStoreForDeletion atomically checks that no live task holds store
 // and, if so, marks it reserved so no task can claim it until the caller runs
 // the returned commit (after the actual removal). ok=false means a task holds it
-// — do not delete. This is the exclusive protocol PruneCodexSessionStores needs:
+// — do not delete. This is the exclusive protocol the store pruners
+// (PruneCodexSessionStores, PruneHermesMemoryStores) need:
 // the "confirm inactive" and the mark happen under one lock acquisition, so a
-// markActiveCodexStore either loses the check (store stays) or blocks on the
+// markActiveStore either loses the check (store stays) or blocks on the
 // reservation, closing the stat->remove race (MUL-4424).
-func (d *Daemon) reserveCodexStoreForDeletion(store string) (commit func(), ok bool) {
-	d.activeCodexStoresMu.Lock()
-	defer d.activeCodexStoresMu.Unlock()
-	if d.activeCodexStores[store] > 0 || d.deletingCodexStores[store] {
+func (d *Daemon) reserveStoreForDeletion(store string) (commit func(), ok bool) {
+	d.activeStoresMu.Lock()
+	defer d.activeStoresMu.Unlock()
+	if d.activeStores[store] > 0 || d.deletingStores[store] {
 		return nil, false
 	}
-	d.deletingCodexStores[store] = true
+	d.deletingStores[store] = true
 	return func() {
-		d.activeCodexStoresMu.Lock()
-		delete(d.deletingCodexStores, store)
-		d.activeCodexStoresCond.Broadcast()
-		d.activeCodexStoresMu.Unlock()
+		d.activeStoresMu.Lock()
+		delete(d.deletingStores, store)
+		d.activeStoresCond.Broadcast()
+		d.activeStoresMu.Unlock()
 	}, true
 }
 

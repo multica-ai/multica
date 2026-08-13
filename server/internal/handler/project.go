@@ -613,6 +613,15 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to clear project chat context")
 		return
 	}
+	// Project-scoped saved views live on the project page; once the project
+	// is gone they are unreachable, so they go in the same transaction.
+	if err := qtx.DeleteIssueViewsByProjectScope(r.Context(), db.DeleteIssueViewsByProjectScopeParams{
+		WorkspaceID: project.WorkspaceID,
+		ScopeID:     project.ID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project views")
+		return
+	}
 	if err := qtx.DeleteProject(r.Context(), db.DeleteProjectParams{
 		ID:          project.ID,
 		WorkspaceID: project.WorkspaceID,

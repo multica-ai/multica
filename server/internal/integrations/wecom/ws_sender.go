@@ -247,14 +247,35 @@ func (s *wsSender) write(frame map[string]any) error {
 	traceOutAttempt(s.log, s.seq, t)
 
 	stage := traceStageDeadline
+	attempted := false
 	err = s.conn.SetWriteDeadline(time.Now().Add(writeDeadline))
 	if err == nil {
 		stage = traceStageWrite
+		attempted = true
 		err = s.conn.WriteMessage(websocket.TextMessage, payload)
 	}
 	traceOutResult(s.log, s.seq, t, stage, err)
+	if err != nil && attempted {
+		return fmt.Errorf("%w: %w", errWriteAttempted, err)
+	}
 	return err
 }
+
+// errWriteAttempted marks a failure raised by the socket write itself, as
+// opposed to one raised before any byte could leave: a marshal error, or a
+// deadline the connection refused to set.
+//
+// The distinction is the caller's, not this function's. Once WriteMessage has
+// been entered, the frame may have reached the peer and been acknowledged at
+// the TCP layer before the local side surfaced a failure — a half-closed
+// connection reports "broken pipe" to the writer for bytes the reader already
+// has. So a failure past this point is not proof of non-delivery, and a caller
+// that treats it as one will either deny a delivery that happened or resend a
+// frame WeCom already acted on.
+//
+// Nothing before the write carries this: those failures are provably local,
+// and a caller may report them as definite.
+var errWriteAttempted = errors.New("wecom: frame write attempted")
 
 // sendText pushes an aibot_send_msg (proactive push) with plain text to a
 // specific chat. Callers pass channel.ChatType so the aibot chat_type int

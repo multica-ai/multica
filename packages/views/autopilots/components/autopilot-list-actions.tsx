@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  ExternalLink,
   Loader2,
   MoreHorizontal,
   Pause,
@@ -15,6 +16,7 @@ import {
   useDeleteAutopilot,
   useUpdateAutopilot,
 } from "@multica/core/autopilots";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -32,6 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../../i18n";
+import { useIntentNavigate } from "../../navigation";
 
 // ---------------------------------------------------------------------------
 // Delete dialog — single row (kebab) and batch share one implementation.
@@ -143,12 +146,17 @@ function useSetStatus() {
 
 export function AutopilotRowActions({ row }: { row: Autopilot }) {
   const { t } = useT("autopilots");
+  const { t: tCommon } = useT("common");
+  const wsPaths = useWorkspacePaths();
+  const intentNavigate = useIntentNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const setStatus = useSetStatus();
 
-  // The kebab only holds write actions (pause/resume/delete). Hide it entirely
-  // for members without write access; an absent can_write (older server) keeps
-  // the menu visible and lets the backend remain the gate.
+  // Apart from the navigation entry the kebab only holds write actions
+  // (pause/resume/delete), so hide it entirely for members without write
+  // access — they still reach a new tab through a modified row click. An
+  // absent can_write (older server) keeps the menu visible and lets the
+  // backend remain the gate.
   if (row.can_write === false) return null;
 
   return (
@@ -169,6 +177,19 @@ export function AutopilotRowActions({ row }: { row: Autopilot }) {
           }
         />
         <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem
+            onClick={() =>
+              intentNavigate(
+                wsPaths.autopilotDetail(row.id),
+                "foreground-tab",
+                row.title,
+              )
+            }
+          >
+            <ExternalLink className="size-3.5" />
+            {tCommon(($) => $.navigation.open_in_new_tab)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           {row.status === "active" && (
             <DropdownMenuItem onClick={() => setStatus([row], "paused")}>
               <Pause className="size-3.5" />

@@ -383,77 +383,6 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
-  // Agent template catalog is hit by the desktop create-agent picker.
-  // Installed desktop builds outlive any given server, so the shape MUST
-  // survive future field renames / wrapping without crashing. Each test
-  // here mirrors a concrete future drift we want to absorb.
-  describe("listAgentTemplates", () => {
-    it("falls back to [] when the body is null", async () => {
-      stubFetchJson(null);
-      const client = new ApiClient("https://api.example.test");
-      const tmpls = await client.listAgentTemplates();
-      expect(tmpls).toEqual([]);
-    });
-
-    it("defaults skills to [] when the field is missing from a template", async () => {
-      // Future server: drops `skills` because the picker no longer reads
-      // them. Picker code calls `template.skills.length` — must not throw.
-      stubFetchJson([{ slug: "x", name: "X" }]);
-      const client = new ApiClient("https://api.example.test");
-      const tmpls = await client.listAgentTemplates();
-      expect(tmpls).toHaveLength(1);
-      expect(tmpls[0]?.skills).toEqual([]);
-    });
-
-    it("accepts the bare-array shape (current contract)", async () => {
-      stubFetchJson([
-        { slug: "a", name: "A", description: "", skills: [] },
-        { slug: "b", name: "B", description: "", skills: [] },
-      ]);
-      const client = new ApiClient("https://api.example.test");
-      const tmpls = await client.listAgentTemplates();
-      expect(tmpls.map((t) => t.slug)).toEqual(["a", "b"]);
-    });
-
-    it("accepts a future {templates: [...]} envelope without breaking", async () => {
-      // Server migrates to a paginated envelope. We unwrap so the picker
-      // keeps working on the older bare-array consumer.
-      stubFetchJson({
-        templates: [{ slug: "a", name: "A", description: "", skills: [] }],
-        total: 1,
-      });
-      const client = new ApiClient("https://api.example.test");
-      const tmpls = await client.listAgentTemplates();
-      expect(tmpls).toHaveLength(1);
-      expect(tmpls[0]?.slug).toBe("a");
-    });
-  });
-
-  describe("getAgentTemplate", () => {
-    it("falls back to a minimal record carrying the requested slug", async () => {
-      // Slug is part of the URL the user clicked — the fallback round-
-      // trips it so the page header still makes sense after a parse miss.
-      stubFetchJson({ wrong: "shape" });
-      const client = new ApiClient("https://api.example.test");
-      const detail = await client.getAgentTemplate("code-reviewer");
-      expect(detail.slug).toBe("code-reviewer");
-      expect(detail.skills).toEqual([]);
-      expect(detail.instructions).toBe("");
-    });
-
-    it("defaults instructions to '' when the field is missing", async () => {
-      stubFetchJson({
-        slug: "code-reviewer",
-        name: "Code Reviewer",
-        description: "",
-        skills: [],
-      });
-      const client = new ApiClient("https://api.example.test");
-      const detail = await client.getAgentTemplate("code-reviewer");
-      expect(detail.instructions).toBe("");
-    });
-  });
-
   describe("listAutopilotDeliveries", () => {
     it("falls back to an empty list when the body is null", async () => {
       stubFetchJson(null);
@@ -547,37 +476,6 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
-  describe("createAgentFromTemplate", () => {
-    it("falls back to an empty agent when the response is malformed", async () => {
-      // The agent was created server-side even though the client can't
-      // parse the response — UI code reads `agent.id === ""` and skips
-      // the navigation step rather than landing on `/agents/`.
-      stubFetchJson({ unexpected: "shape" });
-      const client = new ApiClient("https://api.example.test");
-      const resp = await client.createAgentFromTemplate({
-        template_slug: "x",
-        name: "X",
-        runtime_id: "rt-1",
-      });
-      expect(resp.agent.id).toBe("");
-      expect(resp.imported_skill_ids).toEqual([]);
-      expect(resp.reused_skill_ids).toEqual([]);
-    });
-
-    it("defaults imported_skill_ids / reused_skill_ids to [] when missing", async () => {
-      stubFetchJson({ agent: { id: "agent-1" } });
-      const client = new ApiClient("https://api.example.test");
-      const resp = await client.createAgentFromTemplate({
-        template_slug: "x",
-        name: "X",
-        runtime_id: "rt-1",
-      });
-      expect(resp.agent.id).toBe("agent-1");
-      expect(resp.imported_skill_ids).toEqual([]);
-      expect(resp.reused_skill_ids).toEqual([]);
-    });
-  });
-
   describe("cronPreview", () => {
     it("returns the parsed next runs", async () => {
       stubFetchJson({
@@ -624,6 +522,100 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.cronPreview({ expr: "0 9 * * *", tz: "UTC" });
       expect(res).toEqual({ next_runs: null });
+    });
+  });
+
+  describe("cloud billing", () => {
+    it("falls back to an empty balance when the response is malformed", async () => {
+      stubFetchJson({ balance_micro: "not-a-number" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getCloudBillingBalance()).resolves.toEqual({
+        owner_id: "",
+        balance_micro: 0,
+        balance_credit: 0,
+        updated_at: "",
+      });
+    });
+
+    it("falls back to an empty transactions page when items are malformed", async () => {
+      stubFetchJson({ items: "not-an-array", total: 1, page: 1, page_size: 20 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listCloudBillingTransactions()).resolves.toEqual({
+        items: [],
+        total: 0,
+        page: 1,
+        page_size: 20,
+      });
+    });
+
+    it("falls back to an empty batches page when items are malformed", async () => {
+      stubFetchJson({ items: "not-an-array", total: 1, page: 1, page_size: 20 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listCloudBillingBatches()).resolves.toEqual({
+        items: [],
+        total: 0,
+        page: 1,
+        page_size: 20,
+      });
+    });
+
+    it("falls back to an empty top-ups page when items are malformed", async () => {
+      stubFetchJson({ items: "not-an-array", total: 1, page: 1, page_size: 20 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listCloudBillingTopups()).resolves.toEqual({
+        items: [],
+        total: 0,
+        page: 1,
+        page_size: 20,
+      });
+    });
+
+    it("falls back to no price tiers when the response is not an array", async () => {
+      stubFetchJson({ tiers: [] });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listCloudBillingPriceTiers()).resolves.toEqual([]);
+    });
+
+    it("falls back to an empty checkout session when the response is malformed", async () => {
+      stubFetchJson({ order_id: 123 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.createCloudBillingCheckoutSession({ tier_id: "starter" }),
+      ).resolves.toEqual({
+        order_id: "",
+        session_id: "",
+        url: "",
+      });
+    });
+
+    it("falls back to a pending checkout status when the response is malformed", async () => {
+      stubFetchJson({ status: 123 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getCloudBillingCheckoutSession("cs_test")).resolves.toEqual({
+        order_id: "",
+        status: "pending",
+        amount_cents: 0,
+        credits: 0,
+        bonus_credits: 0,
+        currency: "usd",
+        tier_id: "",
+      });
+    });
+
+    it("falls back to an empty portal URL when the response is malformed", async () => {
+      stubFetchJson({ url: 123 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.createCloudBillingPortalSession()).resolves.toEqual({
+        url: "",
+      });
     });
   });
 });

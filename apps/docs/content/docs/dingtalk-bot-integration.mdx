@@ -75,7 +75,7 @@ Setting this up for **multiple agents**? Repeat the whole flow once per agent �
 | **@-mention in a group** | Add the bot to the group and @-mention it. Only the mentioning message is read — the bot does not listen to the whole group. |
 | **Send images** | Images in a DM, or sent alongside a group @-mention, land in the conversation for the agent to see — PNG, JPEG, GIF, WebP, or BMP, up to 4 images per message and 10 MB each. Each image is copied into Multica storage, so it stays visible in the chat after DingTalk's temporary link expires. Images sent with `/issue` go to the created issue instead of the chat turn. Files and voice messages aren't supported. |
 | **`/issue` command** | Starting a message with `/issue <title>` creates a Multica issue directly from your input, attributed to you, and posts the issue ID and title back into the same conversation. Put the description on following lines. Images sent in the same DingTalk message are attached to the created issue. The command itself does not appear in Multica Chat; the created issue is the result recorded in Multica. |
-| **`/new` command** | Starting a message with `/new <your message>` runs that message without prior conversation context. Sending `/new` by itself records the same fresh-start intent for your next non-empty message without creating an empty turn. The conversation history remains intact. |
+| **`/new` command** | Starting a message with `/new <your message>` runs that message without prior conversation context. Sending `/new` by itself records the same fresh-start intent for your next non-empty message without creating an empty turn, and the bot confirms when that intent is ready. The pending intent remains active until a later chat task is successfully queued. The conversation history remains intact. |
 | **Reply** | The agent's answer is posted back into the same 1:1 chat or group. |
 
 ## Use the bot (members)
@@ -94,7 +94,7 @@ Only **members of the workspace** can use the bot. If you aren't a member, or yo
 - **In a 1:1 chat** — open the bot and message it directly; no mention needed, every message is read.
 - **Send images** — send screenshots or photos, with or without text; they show up in the conversation for the agent to work with. PNG, JPEG, GIF, WebP, or BMP; up to 4 images per message, 10 MB each.
 - **File an issue** — send `/issue the login redirect is broken on Safari`; add the description on following lines if needed. Multica creates the issue synchronously, attaches images from that message to it, and posts its ID and title back into the chat.
-- **Start fresh** — send `/new <your message>` to run that message without prior context, or send `/new` by itself to apply the fresh start to your next non-empty message. Neither form removes the existing conversation history.
+- **Start fresh** — send `/new <your message>` to run that message without prior context, or send `/new` by itself to apply the fresh start to your next non-empty message. A bare `/new` gets a confirmation, and its pending intent remains active until a later chat task is successfully queued. Neither form removes the existing conversation history.
 
 ## Manage and disconnect
 

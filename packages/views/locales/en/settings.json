@@ -77,10 +77,6 @@
     "sticky_comment_bar": {
       "title": "Sticky comment bar",
       "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
-    },
-    "issue_link_new_tab": {
-      "title": "Open issue links in new tab",
-      "hint": "Issue links in descriptions, comments, and chat open in a new tab instead of navigating in place."
     }
   },
   "shortcuts": {
@@ -120,6 +116,8 @@
       "findInIssue": { "label": "Find in issue", "description": "Search within the open issue detail." },
       "openThreadNav": { "label": "Open thread navigator", "description": "List, search, and jump between the comment threads of the open issue." },
       "send": { "label": "Send", "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog." },
+      "goBack": { "label": "Go back", "description": "Navigate back through history, like a browser." },
+      "goForward": { "label": "Go forward", "description": "Navigate forward through history, like a browser." },
       "goInbox": { "label": "Go to Inbox", "description": "Open the workspace inbox." },
       "goChat": { "label": "Go to Chat", "description": "Open workspace chat." },
       "goMyIssues": { "label": "Go to My Issues", "description": "Open issues assigned to you." },

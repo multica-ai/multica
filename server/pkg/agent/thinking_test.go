@@ -251,6 +251,18 @@ func TestParseCodexModelCatalog(t *testing.T) {
 				]
 			},
 			{
+				"slug": "gpt-5.6-terra",
+				"display_name": "GPT-5.6-Terra",
+				"visibility": "list",
+				"supported_reasoning_levels": []
+			},
+			{
+				"slug": "gpt-5.6-luna",
+				"display_name": "GPT-5.6-Luna",
+				"visibility": "list",
+				"supported_reasoning_levels": []
+			},
+			{
 				"slug": "hidden-model",
 				"display_name": "Hidden",
 				"visibility": "hide",
@@ -268,11 +280,34 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseCodexModelCatalog: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("expected two visible models, got %+v", got)
+	if len(got) != 4 {
+		t.Fatalf("expected four visible models, got %+v", got)
 	}
-	if got[0].ID != "gpt-5.6-sol" || got[0].Label != "GPT-5.6-Sol" || !got[0].Default {
+	if got[0].ID != "gpt-5.6-sol" || got[0].Label != "GPT-5.6 Sol" || !got[0].Default {
 		t.Errorf("unexpected first model: %+v", got[0])
+	}
+	for _, want := range []struct {
+		id    string
+		label string
+	}{
+		{"gpt-5.6-sol", "GPT-5.6 Sol"},
+		{"gpt-5.6-terra", "GPT-5.6 Terra"},
+		{"gpt-5.6-luna", "GPT-5.6 Luna"},
+	} {
+		var found *Model
+		for i := range got {
+			if got[i].ID == want.id {
+				found = &got[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Errorf("missing %s in dynamic Codex catalog: %+v", want.id, got)
+			continue
+		}
+		if found.Label != want.label {
+			t.Errorf("%s dynamic label = %q, want %q", want.id, found.Label, want.label)
+		}
 	}
 	if got[0].Thinking == nil || got[0].Thinking.DefaultLevel != "low" || !hasThinkingLevel(got[0].Thinking, "max") || !hasThinkingLevel(got[0].Thinking, "ultra") || !hasThinkingLevel(got[0].Thinking, "future") {
 		t.Errorf("unexpected per-model thinking catalog: %+v", got[0].Thinking)
@@ -280,8 +315,8 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	if len(got[0].ServiceTiers) != 1 || got[0].ServiceTiers[0].ID != "priority" || got[0].ServiceTiers[0].Name != "Fast" {
 		t.Errorf("unexpected service-tier catalog: %+v", got[0].ServiceTiers)
 	}
-	if got[1].ID != "no-reasoning" || got[1].Thinking != nil {
-		t.Errorf("model without reasoning should remain selectable without a thinking picker: %+v", got[1])
+	if got[3].ID != "no-reasoning" || got[3].Thinking != nil {
+		t.Errorf("model without reasoning should remain selectable without a thinking picker: %+v", got[3])
 	}
 }
 
@@ -473,6 +508,12 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"pi", "max", true},
 		{"pi", "ultra", false},
 		{"pi", "future-level", false},
+		{"kimi", "", true},
+		{"kimi", "low", true},
+		{"kimi", "max", true},
+		{"kimi", "future-level", true}, // exact support is checked against the daemon catalog
+		{"kimi", ".hidden", false},
+		{"kimi", "bad value", false},
 		{"hermes", "", true},
 		{"hermes", "low", false}, // hermes' ACP surface exposes no effort dial
 		{"grok", "", true},
@@ -509,7 +550,7 @@ func TestThinkingControlSupported(t *testing.T) {
 		{"opencode", true}, // dynamic variant names from opencode.json
 		{"pi", true},       // fixed tokens, per-model subset discovered over RPC
 		{"hermes", false},  // ACP adapter drops reasoning entirely (MUL-5770)
-		{"kimi", false},
+		{"kimi", true},     // dynamic catalog; ACP session/set_config_option applies it
 		{"qwenpaw", false},
 		{"", false},
 		{"not-a-runtime", false},
@@ -680,8 +721,37 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 		}
 	}
 
+	// Claude Code appends a bracketed context-window tag to the model ID for
+	// long-context sessions. Capability validation must inherit the base
+	// model's effort catalog without rewriting the model passed to the CLI.
+	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-5[1m]", "xhigh")
+	if err != nil {
+		t.Fatalf("unexpected err for context-tagged opus-5: %v", err)
+	}
+	if !ok {
+		t.Error("xhigh should be valid on the opus-5[1m] context variant")
+	}
+
+	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-5[500k]", "high")
+	if err != nil {
+		t.Fatalf("unexpected err for future context-tag shape: %v", err)
+	}
+	if !ok {
+		t.Error("high should be valid on a syntactically valid opus-5 context variant")
+	}
+
+	// Arbitrary bracket suffixes are not context-window tags. Keep malformed
+	// variants fail-closed even when their apparent base model is known.
+	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-5[weird]", "high")
+	if err != nil {
+		t.Fatalf("unexpected err for malformed context tag: %v", err)
+	}
+	if ok {
+		t.Error("malformed context tag must fail closed")
+	}
+
 	// xhigh is NOT valid on Sonnet — should fail.
-	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-sonnet-4-6", "xhigh")
+	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-sonnet-4-6[1m]", "xhigh")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -1175,6 +1245,35 @@ func TestBuildClaudeArgs_InjectsEffort(t *testing.T) {
 	effortIdx := argIndexOf(args, "--effort")
 	if modelIdx < 0 || effortIdx < 0 || modelIdx > effortIdx {
 		t.Errorf("expected --model before --effort: %v", args)
+	}
+}
+
+func TestBuildClaudeArgs_ContextTaggedModelKeepsModelAndEffort(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		resumeID string
+	}{
+		{name: "fresh"},
+		{name: "resume", resumeID: "session-123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			args := buildClaudeArgs(ExecOptions{
+				Model:           "claude-opus-5[1m]",
+				ThinkingLevel:   "xhigh",
+				ResumeSessionID: tc.resumeID,
+			}, slog.Default())
+			if !containsAdjacent(args, "--model", "claude-opus-5[1m]") {
+				t.Errorf("expected original context-tagged --model value: %v", args)
+			}
+			if !containsAdjacent(args, "--effort", "xhigh") {
+				t.Errorf("expected --effort xhigh: %v", args)
+			}
+			if tc.resumeID != "" && !containsAdjacent(args, "--resume", tc.resumeID) {
+				t.Errorf("expected --resume %s: %v", tc.resumeID, args)
+			}
+		})
 	}
 }
 

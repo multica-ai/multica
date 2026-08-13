@@ -1,11 +1,13 @@
 package wecom
 
-// trace_test.go — guards for the MULTICA_WECOM_TRACE operator switch. Five
+// trace_test.go — guards for the MULTICA_WECOM_TRACE operator switch. Six
 // things have to hold or the switch is not shippable: it records nothing at
 // all when off, it records enough to be worth turning on, what it records is
 // never a credential, the order it records outbound frames in is the order
-// they reached the socket, and a frame that failed to go out does not read
-// like one that went.
+// they reached the socket, a frame that failed to go out does not read like
+// one that went, and the one line whose value is its exact bytes — an
+// attachment's Content-Disposition — is not cut down to the message preview's
+// cap.
 //
 // These tests do NOT call t.Parallel: `tracing` is a package-level atomic and
 // the assertions are about whether a log line exists. `go test` runs top-level
@@ -767,5 +769,84 @@ func TestTraceOffRecordsNoOutcomeEither(t *testing.T) {
 
 	if lines := h.snapshot(); len(lines) != 0 {
 		t.Errorf("tracing is off but %d trace lines were written: %v", len(lines), lines)
+	}
+}
+
+// TestTheMediaHeaderIsNotCutToTheMessagePreviewCap is the case traceMediaHeaders
+// was added for, and the one the message preview cap silently failed.
+//
+// A non-ASCII filename cannot sit in the plain filename= parameter, so it
+// arrives as nothing but percent escapes: nine runes per Chinese character,
+// after 23 runes of `attachment; filename=""` scaffolding. Under
+// tracePreviewRunes (120) an eleven-character name is already over, and the
+// cut lands inside an escape — so an operator who turned MULTICA_WECOM_TRACE
+// on precisely to learn how the CDN encodes a Chinese name got a prefix
+// ending in half an escape, which cannot even be decoded back into the
+// character it stood for.
+func TestTheMediaHeaderIsNotCutToTheMessagePreviewCap(t *testing.T) {
+	withTrace(t, true)
+
+	const name = "季度经营分析报告最终版本二零二六.docx"
+	encoded := url.QueryEscape(name)
+	// Both forms together, which is what a server sends when it offers a
+	// legacy fallback beside the extended parameter — the longest shape this
+	// line has to carry in practice.
+	raw := `attachment; filename="` + encoded + `"; filename*=UTF-8''` + encoded
+
+	if n := utf8.RuneCountInString(raw); n <= tracePreviewRunes {
+		t.Fatalf("fixture proves nothing: the header is %d runes, under the preview cap of %d", n, tracePreviewRunes)
+	}
+
+	logger, buf := capturingLogger()
+	traceMediaHeaders(logger, "MSGID-MEDIA", 0, mediaHeaders{Disposition: raw, Filename: name})
+	logged := buf.String()
+
+	// slog's TextHandler quotes the value and escapes the quotes inside it,
+	// so the assertion is on the escaped name — which is the part that
+	// matters and contains no character the handler rewrites. Both parameters
+	// carry it, so it must appear twice.
+	if n := strings.Count(logged, encoded); n != 2 {
+		t.Fatalf("the escaped name appears %d times, want both parameters intact: %s", n, logged)
+	}
+	if strings.Contains(logged, "…") {
+		t.Fatalf("the header was truncated, which is the whole failure: %s", logged)
+	}
+}
+
+// TestTheMediaHeaderIsStillBounded keeps the larger cap a runaway guard rather
+// than an open door. The value is a remote string on a log line; no real
+// Content-Disposition approaches traceHeaderRunes, so anything that does is
+// not a filename and must not be written whole.
+func TestTheMediaHeaderIsStillBounded(t *testing.T) {
+	withTrace(t, true)
+
+	logger, buf := capturingLogger()
+	runaway := `attachment; filename="` + strings.Repeat("A", traceHeaderRunes*2) + `"`
+	traceMediaHeaders(logger, "MSGID-MEDIA", 0, mediaHeaders{Disposition: runaway, Filename: runaway})
+	logged := buf.String()
+
+	if !strings.Contains(logged, "…") {
+		t.Fatalf("a %d-rune header was written without a cut: %d bytes logged",
+			utf8.RuneCountInString(runaway), len(logged))
+	}
+	if n := utf8.RuneCountInString(logged); n > 4*traceHeaderRunes {
+		t.Fatalf("the line grew to %d runes; both fields are meant to be capped at %d", n, traceHeaderRunes)
+	}
+}
+
+// TestTheMediaHeaderStaysOnOneLine keeps a header carrying a newline from
+// splitting one attachment across two log records. net/http rejects a
+// response header with a bare LF in it today, so this guards the flattening
+// rather than a reachable input — but the trace's whole contract is one line
+// per event, and traceBound is shared with the message preview.
+func TestTheMediaHeaderStaysOnOneLine(t *testing.T) {
+	withTrace(t, true)
+
+	logger, buf := capturingLogger()
+	traceMediaHeaders(logger, "MSGID-MEDIA", 0, mediaHeaders{
+		Disposition: "attachment;\r\n filename=\"a.docx\"",
+	})
+	if got := strings.TrimSuffix(buf.String(), "\n"); strings.ContainsAny(got, "\n\r") {
+		t.Fatalf("the media line was split across records: %q", got)
 	}
 }

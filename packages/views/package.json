@@ -104,9 +104,11 @@
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",
     "remark-breaks": "^4.0.0",
+    "remark-cjk-friendly": "^2.3.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "catalog:",
-    "sonner": "^2.0.7"
+    "sonner": "^2.0.7",
+    "unist-util-visit": "^5.1.0"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",
@@ -124,6 +126,7 @@
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@testing-library/user-event": "catalog:",
+    "@types/mdast": "^4.0.4",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",

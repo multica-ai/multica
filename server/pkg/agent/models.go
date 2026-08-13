@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -121,14 +122,30 @@ const modelCacheTTL = 60 * time.Second
 // pi, openclaw) it shells out with caching and falls back where the
 // provider has a safe static catalog.
 //
-// For claude, codex, opencode, and pi, the catalog is augmented with per-model
-// thinking-level options discovered from the local CLI. Codex discovery
-// failures fall back to a model + thinking snapshot; providers without a safe
-// fallback leave Thinking nil, which makes the UI hide the thinking picker.
+// For claude, codex, opencode, pi, and kimi, the catalog is augmented with
+// per-model thinking-level options discovered from the local CLI. Codex
+// discovery failures fall back to a model + thinking snapshot; providers
+// without a safe fallback leave Thinking nil, which makes the UI hide the
+// thinking picker.
 //
 // executablePath lets the caller point at a non-default binary; pass
 // "" to use the provider's default name on PATH.
 func ListModels(ctx context.Context, providerType, executablePath string) (Catalog, error) {
+	// Built-in runtime identities (e.g. "omp") declare their model discovery
+	// strategy in the descriptor. Resolve generically before the protocol-
+	// family switch so no runtime-specific case is needed below. When the
+	// descriptor has no ModelDiscovery strategy, return an empty catalog
+	// (not the family's default) — running a semantically incompatible
+	// discovery command (e.g. omp rejecting --list-models) is worse than
+	// degrading to manual entry.
+	if desc, ok := BuiltinRuntimeByID(providerType); ok {
+		if desc.ModelDiscovery != nil {
+			return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
+				return discovered(desc.ModelDiscovery(ctx, executablePath))
+			})
+		}
+		return Catalog{Models: []Model{}}, nil
+	}
 	switch providerType {
 	case "claude":
 		models := claudeStaticModels()
@@ -273,10 +290,28 @@ func ModelKnownIncompatibleWithProvider(providerType, model string) bool {
 	if !ok {
 		return false
 	}
-	if accepted[model] {
+	if accepted[modelIDForCapabilityLookup(providerType, model)] {
 		return false
 	}
 	return isRuntimeSpecificModelID(model)
+}
+
+// claudeContextWindowTagRe recognises Claude Code's trailing context-window
+// model modifier (for example, claude-opus-5[1m]). Keep this narrower than a
+// generic bracket suffix: capability lookup may inherit the base model's
+// effort catalog only when the modifier is syntactically a context size.
+var claudeContextWindowTagRe = regexp.MustCompile(`\[[1-9][0-9]*[km]\]$`)
+
+// modelIDForCapabilityLookup returns the catalog identity for a runtime-native
+// model string. It never changes the value persisted on the agent or passed to
+// the provider CLI. Claude context-window variants share their base model's
+// capabilities; every other provider and malformed/unknown modifier retains
+// exact-match behavior.
+func modelIDForCapabilityLookup(providerType, model string) string {
+	if providerType != "claude" {
+		return model
+	}
+	return claudeContextWindowTagRe.ReplaceAllString(model, "")
 }
 
 func acceptedModelIDsForProvider(providerType string) (map[string]bool, bool) {
@@ -434,9 +469,9 @@ func codexStaticModels() []Model {
 		}
 	}
 	return []Model{
-		{ID: "gpt-5.6-sol", Label: "GPT-5.6-Sol", Provider: "openai", Default: true, Thinking: standardThinking("low", true, true)},
-		{ID: "gpt-5.6-terra", Label: "GPT-5.6-Terra", Provider: "openai", Thinking: standardThinking("medium", true, true)},
-		{ID: "gpt-5.6-luna", Label: "GPT-5.6-Luna", Provider: "openai", Thinking: standardThinking("medium", true, false)},
+		{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol", Provider: "openai", Default: true, Thinking: standardThinking("low", true, true)},
+		{ID: "gpt-5.6-terra", Label: "GPT-5.6 Terra", Provider: "openai", Thinking: standardThinking("medium", true, true)},
+		{ID: "gpt-5.6-luna", Label: "GPT-5.6 Luna", Provider: "openai", Thinking: standardThinking("medium", true, false)},
 		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai", Thinking: standardThinking("medium", false, false)},
 		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai", Thinking: standardThinking("medium", false, false)},
 		{ID: "gpt-5.4-mini", Label: "GPT-5.4-Mini", Provider: "openai", Thinking: standardThinking("medium", false, false)},
@@ -1132,6 +1167,87 @@ func isPiDiscoveryNoise(line string) bool {
 		strings.Contains(lower, "unknown command")
 }
 
+// discoverOmpModels runs `omp models --json` and parses the JSON catalog.
+// omp (oh-my-pi) rejects `--list-models` — a pi flag it never adopted, and it
+// exits non-zero on it — so its native discovery is `omp models --json`, which
+// prints a `{"models":[...]}` object; parseOmpModels documents the entry shape.
+// An empty catalog (an omp with no provider credentials configured prints
+// `{"models":[]}`) or a non-zero exit (binary missing, omp too old) falls back
+// to an empty list so the UI degrades to manual entry instead of erroring.
+func discoverOmpModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "omp"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return []Model{}, nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "models", "--json")
+	hideAgentWindow(cmd)
+	stdout, err := cmd.Output()
+	if err != nil || len(stdout) == 0 {
+		return []Model{}, nil
+	}
+	return parseOmpModels(stdout)
+}
+
+// parseOmpModels parses the JSON output from `omp models --json`. omp emits
+// an object wrapper with a `models` array — NOT a bare top-level array:
+//
+//	{"models":[{"provider":"anthropic","id":"claude-sonnet-5","selector":"anthropic/claude-sonnet-5","name":"Claude Sonnet 5",...}]}
+//
+// The persistable Model.ID is the selector (provider/id), matching the
+// convention parsePiModels uses: buildPiArgs splits Model.ID on "/" and
+// emits --provider + --model. Using the bare id would drop --provider and
+// let omp's internal provider priority ranking pick a different backend
+// for the same model id. Provider is kept for UI grouping. The dedup key
+// is the selector when present, falling back to provider/id.
+func parseOmpModels(data []byte) ([]Model, error) {
+	var wrapper struct {
+		Models []struct {
+			ID       string `json:"id"`
+			Provider string `json:"provider"`
+			Selector string `json:"selector"`
+			Name     string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return []Model{}, nil
+	}
+	var models []Model
+	seen := map[string]bool{}
+	for _, e := range wrapper.Models {
+		bareID := strings.TrimSpace(e.ID)
+		if bareID == "" {
+			continue
+		}
+		provider := strings.TrimSpace(e.Provider)
+		// Model.ID is the qualified selector (provider/id) so buildPiArgs
+		// emits both --provider and --model. When selector is absent, fall
+		// back to provider/id; when provider is also absent, the bare id is
+		// the only form available.
+		selector := strings.TrimSpace(e.Selector)
+		if selector == "" {
+			if provider != "" {
+				selector = provider + "/" + bareID
+			} else {
+				selector = bareID
+			}
+		}
+		if seen[selector] {
+			continue
+		}
+		seen[selector] = true
+		label := strings.TrimSpace(e.Name)
+		if label == "" {
+			label = selector
+		}
+		models = append(models, Model{ID: selector, Label: label, Provider: provider})
+	}
+	return models, nil
+}
+
 // discoverHermesModels spins up a throwaway `hermes acp` process,
 // drives just enough of the protocol to receive the model list
 // advertised in the `session/new` response, and shuts it down. The
@@ -1151,27 +1267,277 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 	})
 }
 
-// discoverKimiModels spins up a throwaway `kimi acp` process and
-// drives the same minimal ACP handshake as Hermes to surface the
-// model catalog advertised by Kimi's `session/new` response. Kimi
-// ≤0.28 returns a `models` block (`availableModels`/`currentModelId`);
-// 0.29 moved the same catalog into `configOptions` (MUL-5239). The
-// shared parser accepts both, so the discovery path stays identical.
+// discoverKimiModels combines Kimi's ACP model catalog with the structured
+// per-model effort data from `kimi provider list --json`. The provider catalog
+// is the only authoritative source for per-model supportEfforts/defaultEffort,
+// because a session/new response only ever describes the single model that
+// session was created with.
 //
-// Failure modes (kimi missing, not logged in, config error) all
-// return an empty list so the UI falls back to manual entry.
+// Reading the effort catalog out of the session instead does not work, even
+// though Kimi (0.33.0) does refresh the thinking option after
+// session/set_model. The refreshed option arrives as a `session/update`
+// notification (`sessionUpdate: "config_option_update"`), and the requestACP
+// helper this file shares matches responses by id and drops notifications.
+// Consuming that notification would not be enough either: the option list Kimi
+// sends after switching to a low/high/max model still carries the previous
+// model's currentValue as a trailing entry (`[low, high, max, on]`), so using
+// it as a catalog would render a phantom level. supportEfforts has no such
+// residue.
+//
+// The ACP side is unchanged: Kimi ≤0.28 returns a `models` block
+// (`availableModels`/`currentModelId`) and 0.29 moved the same catalog into
+// `configOptions` (MUL-5239); the shared parser still accepts both, so the
+// discovery path stays identical. See parseACPConfigOptionModels.
+//
+// Effort selection is gated on the CLI build, because provider-list alone
+// cannot tell whether the runtime can act on what it advertises. Verified
+// against real binaries: 0.28.1 reports supportEfforts [low high max] for K3
+// exactly like 0.33.0 does, but its ACP only implements the on/off toggle, so
+// set_config_option("max") returns success while confirming "on". Gating on the
+// session's `thinking` config id cannot separate the two — 0.28.1 advertises
+// that id too. The version is the only honest signal, and the initialize
+// response already carries it, so this costs no extra process.
+//
+// Above that, support is decided per model and nothing else: a model that
+// provider-list does not list, or lists without efforts, keeps Thinking nil,
+// which hides the control for that model alone.
+//
+// Failure modes (kimi missing, not logged in, config error) return an empty
+// list so the UI falls back to manual entry.
 func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, error) {
-	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+	var acpVersion string
+	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:   "kimi",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kimi-discovery-",
+		inspectInit: func(initResult json.RawMessage) {
+			acpVersion = acpAgentInfoVersion(initResult)
+		},
 	})
+	if err != nil || len(models) == 0 {
+		return models, err
+	}
+	if !kimiSupportsThinkingEfforts(acpVersion) {
+		// Not an error and not worth a Warn: an older CLI still lists models and
+		// runs tasks, it just cannot be told which effort to use. Model discovery
+		// re-runs on every cache miss, so a Warn here would repeat forever.
+		slog.Debug("kimi CLI predates ACP effort selection; hiding thinking controls",
+			"detected_version", acpVersion,
+			"required_version", kimiMinThinkingEffortVersion,
+		)
+		return models, nil
+	}
+
+	perModel, err := discoverKimiProviderThinking(ctx, executablePath)
+	if err != nil {
+		// Do not include err or command output here: provider JSON can contain
+		// credentials. The fixed reason explains why thinking controls are hidden
+		// without leaking host or account data. Debug, not Warn: model discovery
+		// re-runs on every cache miss, so an older CLI would log this forever.
+		slog.Debug("kimi per-model thinking discovery unavailable; hiding thinking controls",
+			"reason", "provider_list_unavailable",
+		)
+		return models, nil
+	}
+	for i := range models {
+		if thinking, ok := perModel[models[i].ID]; ok {
+			models[i].Thinking = thinking
+		}
+	}
+	return models, nil
+}
+
+// kimiMinThinkingEffortVersion is the first Kimi Code CLI whose ACP surface
+// applies an effort level instead of a plain on/off toggle (upstream 0.29.0,
+// released 2026-07-22). Below it, `session/set_config_option` accepts
+// "low"/"high"/"max" without error and leaves the session on "on", so
+// advertising those levels would promise something the runtime cannot deliver.
+const kimiMinThinkingEffortVersion = "0.29.0"
+
+// kimiSupportsThinkingEfforts reports whether an ACP-reported Kimi version can
+// act on an effort level. An empty or unparsable version answers no: a build we
+// cannot identify (a fork, a wrapper, a future format) is not one we can
+// promise effort selection for, and hiding the picker only costs that build a
+// control it may not honour anyway. Tasks still run either way.
+func kimiSupportsThinkingEfforts(version string) bool {
+	detected, err := parseSemver(strings.TrimSpace(version))
+	if err != nil {
+		return false
+	}
+	minimum, err := parseSemver(kimiMinThinkingEffortVersion)
+	if err != nil {
+		return false
+	}
+	return !detected.lessThan(minimum)
+}
+
+// acpAgentInfoVersion pulls `agentInfo.version` out of an ACP initialize
+// result. ACP agents report their own build here (Kimi sends
+// {"name":"Kimi Code CLI","version":"0.33.0"}); an agent that omits it yields
+// "", which every caller must treat as "unknown", never as "new enough".
+func acpAgentInfoVersion(raw json.RawMessage) string {
+	var response struct {
+		AgentInfo struct {
+			Version string `json:"version"`
+		} `json:"agentInfo"`
+		AgentInfoSnake struct {
+			Version string `json:"version"`
+		} `json:"agent_info"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return ""
+	}
+	if version := strings.TrimSpace(response.AgentInfo.Version); version != "" {
+		return version
+	}
+	return strings.TrimSpace(response.AgentInfoSnake.Version)
+}
+
+func discoverKimiProviderThinking(ctx context.Context, executablePath string) (map[string]*ModelThinking, error) {
+	if executablePath == "" {
+		executablePath = "kimi"
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(runCtx, executablePath, "provider", "list", "--json")
+	hideAgentWindow(cmd)
+	cmd.Stderr = io.Discard
+	raw, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("kimi provider list: %w", err)
+	}
+	return parseKimiProviderThinking(raw)
+}
+
+type kimiProviderModel struct {
+	SupportEfforts      []string `json:"supportEfforts"`
+	SupportEffortsSnake []string `json:"support_efforts"`
+	DefaultEffort       string   `json:"defaultEffort"`
+	DefaultEffortSnake  string   `json:"default_effort"`
+}
+
+func parseKimiProviderThinking(raw []byte) (map[string]*ModelThinking, error) {
+	var response struct {
+		Models map[string]kimiProviderModel `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, fmt.Errorf("parse kimi provider catalog: %w", err)
+	}
+	if len(response.Models) == 0 {
+		return nil, fmt.Errorf("kimi provider catalog contained no models")
+	}
+
+	result := make(map[string]*ModelThinking, len(response.Models))
+	for modelID, model := range response.Models {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			continue
+		}
+		efforts := model.SupportEfforts
+		if len(efforts) == 0 {
+			efforts = model.SupportEffortsSnake
+		}
+		seen := make(map[string]bool, len(efforts))
+		levels := make([]ThinkingLevel, 0, len(efforts))
+		for _, rawEffort := range efforts {
+			effort := strings.TrimSpace(rawEffort)
+			if effort == "" || seen[effort] || !isValidDynamicThinkingValue(effort) {
+				continue
+			}
+			seen[effort] = true
+			levels = append(levels, ThinkingLevel{
+				Value: effort,
+				Label: kimiThinkingLabel(effort),
+			})
+		}
+		if len(levels) == 0 {
+			continue
+		}
+
+		defaultEffort := strings.TrimSpace(model.DefaultEffort)
+		if defaultEffort == "" {
+			defaultEffort = strings.TrimSpace(model.DefaultEffortSnake)
+		}
+		if !seen[defaultEffort] {
+			defaultEffort = ""
+		}
+		result[modelID] = &ModelThinking{
+			SupportedLevels: levels,
+			DefaultLevel:    defaultEffort,
+		}
+	}
+	return result, nil
+}
+
+func kimiThinkingLabel(value string) string {
+	switch value {
+	case "low":
+		return "Low"
+	case "medium":
+		return "Medium"
+	case "high":
+		return "High"
+	case "max":
+		return "Max"
+	default:
+		return strings.Title(value) //nolint:staticcheck
+	}
+}
+
+type acpConfigOptionState struct {
+	ID                string `json:"id"`
+	CurrentValue      string `json:"currentValue"`
+	CurrentValueSnake string `json:"current_value"`
+}
+
+// findACPConfigOption returns one exact config-id match from an ACP response.
+// Config ids are protocol identifiers, not display labels: category-only or
+// case-insensitive matches would advertise a control that execution cannot set.
+// Both camelCase and snake_case field spellings are accepted because ACP agents
+// in the wild emit both.
+func findACPConfigOption(raw json.RawMessage, configID string) (acpConfigOptionState, bool) {
+	var response struct {
+		ConfigOptions      []acpConfigOptionState `json:"configOptions"`
+		ConfigOptionsSnake []acpConfigOptionState `json:"config_options"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return acpConfigOptionState{}, false
+	}
+	options := append(response.ConfigOptions, response.ConfigOptionsSnake...)
+	for _, option := range options {
+		if option.ID == configID {
+			return option, true
+		}
+	}
+	return acpConfigOptionState{}, false
+}
+
+func acpConfigOptionCurrentValue(raw json.RawMessage, configID string) (string, bool) {
+	option, ok := findACPConfigOption(raw, configID)
+	if !ok {
+		return "", false
+	}
+	value := strings.TrimSpace(option.CurrentValue)
+	if value == "" {
+		value = strings.TrimSpace(option.CurrentValueSnake)
+	}
+	return value, value != ""
 }
 
 // discoverReasonixModels drives a short Reasonix ACP session and parses the
 // model configOptions advertised by session/new. Authentication and provider
 // configuration remain owned by `reasonix setup`; discovery failure therefore
 // falls back to manual model entry like the other ACP runtimes.
+//
+// The same handshake carries the effort selector, so annotate picks it up for
+// free — no second process and no reasonix-specific parser.
+//
+// Only the session's current model gets a catalog: reasonix derives the effort
+// vocabulary from the current model's provider entry, so the advertised list
+// describes that model alone. Every other model keeps a nil Thinking and shows
+// no picker until per-model probing exists. See
+// annotateACPThinkingForSessionModel.
 func discoverReasonixModels(ctx context.Context, executablePath string) ([]Model, error) {
 	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:       "reasonix",
@@ -1179,6 +1545,7 @@ func discoverReasonixModels(ctx context.Context, executablePath string) ([]Model
 		acpArgs:          reasonixACPLaunchArgs(),
 		tmpdirPrefix:     "multica-reasonix-discovery-",
 		isolatedStateEnv: "REASONIX_STATE_HOME",
+		annotate:         annotateACPThinkingForSessionModel,
 	})
 }
 
@@ -1271,6 +1638,13 @@ type acpDiscoveryProvider struct {
 	// ignores. CodeBuddy uses it to read its effort catalog out of the same
 	// handshake, which is why it needs no separate discovery call at all.
 	annotate func([]Model, json.RawMessage)
+	// inspectInit receives the raw initialize result before any session is
+	// created. It is for reading capability facts the handshake already
+	// carries — Kimi reads `agentInfo.version` to gate a feature on the CLI
+	// build — so a provider does not have to spend a second process asking the
+	// binary what it is. It cannot fail discovery: a provider that learns
+	// nothing useful here must degrade, not abort.
+	inspectInit func(json.RawMessage)
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
@@ -1409,6 +1783,9 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	})
 	if err != nil {
 		return fail("initialize", err)
+	}
+	if p.inspectInit != nil {
+		p.inspectInit(initResult)
 	}
 
 	// session/new requires a valid cwd — use a temp directory we

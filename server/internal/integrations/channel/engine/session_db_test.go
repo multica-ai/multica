@@ -295,6 +295,72 @@ func TestBindMediaRefs_IssueAttachmentSurvivesChatSessionDeletion(t *testing.T) 
 	}
 }
 
+func TestBindMediaRefs_EmptyRefsCreateNoAttachmentAndClearPending(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.Type("dingtalk"), SessionTitles{})
+	ctx := context.Background()
+
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'Existing issue', 'todo', 'none', 'member', $2, 1)
+		RETURNING id
+	`, fixture.workspaceID, fixture.userID).Scan(&issueID); err != nil {
+		t.Fatalf("create existing issue: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO attachment (
+			workspace_id, issue_id, uploader_type, uploader_id,
+			filename, url, content_type, size_bytes
+		) VALUES ($1, $2, 'member', $3, 'original.png',
+			'https://cdn.example.test/original-issue-image', 'image/png', 3)
+	`, fixture.workspaceID, issueID, fixture.userID); err != nil {
+		t.Fatalf("create original issue attachment: %v", err)
+	}
+	appendRes, err := session.AppendUserMessage(ctx, AppendInput{
+		SessionID:           fixture.sessionID,
+		Sender:              fixture.userID,
+		Body:                "/issue Existing issue\n[Image]",
+		CommandText:         "/issue Existing issue",
+		MediaPendingSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("append duplicate issue command: %v", err)
+	}
+
+	if err := session.BindMediaRefs(ctx, BindMediaInput{
+		MessageID:   appendRes.MessageID,
+		SessionID:   fixture.sessionID,
+		WorkspaceID: fixture.workspaceID,
+		Sender:      fixture.userID,
+		Body:        "/issue Existing issue\n[Image]",
+	}); err != nil {
+		t.Fatalf("finalize duplicate issue media: %v", err)
+	}
+
+	var issueAttachmentCount, workspaceAttachmentCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attachment WHERE issue_id = $1`, issueID).Scan(&issueAttachmentCount); err != nil {
+		t.Fatalf("count existing issue attachments: %v", err)
+	}
+	if issueAttachmentCount != 1 {
+		t.Fatalf("existing issue attachment rows = %d, want unchanged count 1", issueAttachmentCount)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attachment WHERE workspace_id = $1`, fixture.workspaceID).Scan(&workspaceAttachmentCount); err != nil {
+		t.Fatalf("count workspace attachments: %v", err)
+	}
+	if workspaceAttachmentCount != 1 {
+		t.Fatalf("workspace attachment rows = %d, want no new rows beyond the original", workspaceAttachmentCount)
+	}
+	var mediaPendingUntil pgtype.Timestamptz
+	if err := pool.QueryRow(ctx, `SELECT channel_media_pending_until FROM chat_message WHERE id = $1`, appendRes.MessageID).Scan(&mediaPendingUntil); err != nil {
+		t.Fatalf("load duplicate command media marker: %v", err)
+	}
+	if mediaPendingUntil.Valid {
+		t.Fatalf("duplicate command kept media pending until %v", mediaPendingUntil.Time)
+	}
+}
+
 func TestBindMediaRefs_MaterializesIssueImagesInOriginalRichTextOrder(t *testing.T) {
 	pool := sessionPersistenceTestDB(t)
 	fixture := seedSessionPersistenceFixture(t, pool)

@@ -33,6 +33,8 @@ import (
 const (
 	agentOfflineText  = "⚠️ The agent is offline right now. Your message was received and will be handled once it's back online."
 	agentArchivedText = "⚠️ This agent has been archived and can't respond. Please contact your workspace admin."
+	freshPendingText  = "✅ Fresh start ready. Your next chat message will run without previous context."
+	issueUsageText    = "Please include an issue title. Use:\n\n`/issue <title>`\n`[description]` (optional)"
 )
 
 // bindingMinter is the binding-token surface the replier needs.
@@ -117,6 +119,16 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			r.logger.WarnContext(ctx, "slack replier: archived notice failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
+	case engine.OutcomeFreshPending:
+		if err := r.post(ctx, inst, msg, freshPendingText); err != nil {
+			r.logger.WarnContext(ctx, "slack replier: fresh-start confirmation failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeIssueUsage:
+		if err := r.post(ctx, inst, msg, issueUsageText); err != nil {
+			r.logger.WarnContext(ctx, "slack replier: issue usage reply failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	case engine.OutcomeIngested:
 		// Only an /issue product result warrants an immediate reply; a plain
 		// chat message stays silent (the agent's own reply lands via ChatDone).
@@ -183,7 +195,7 @@ func (r *OutboundReplier) post(ctx context.Context, inst engine.ResolvedInstalla
 
 func issueCreatedText(res engine.Result) string {
 	id := issueResultIdentifier(res)
-	title := strings.TrimSpace(res.IssueTitle)
+	title := memberIssueTitle(strings.TrimSpace(res.IssueTitle))
 	if title == "" {
 		return "✅ Created " + id
 	}
@@ -192,11 +204,19 @@ func issueCreatedText(res engine.Result) string {
 
 func issueDuplicateText(res engine.Result) string {
 	id := issueResultIdentifier(res)
-	title := strings.TrimSpace(res.IssueTitle)
+	title := memberIssueTitle(strings.TrimSpace(res.IssueTitle))
 	if title == "" {
 		return "⚠️ Not created — active issue " + id + " already exists."
 	}
 	return "⚠️ Not created — active issue " + id + " already exists: " + title
+}
+
+func memberIssueTitle(title string) string {
+	title = channel.BreakMarkdownLinkAdjacency(title)
+	// formatMrkdwn deliberately preserves existing Slack entities such as
+	// <url|label> and <@user>. Encode their opening delimiter before that pass
+	// so member-authored links and mentions are handled as visible text.
+	return strings.ReplaceAll(title, "<", "&lt;")
 }
 
 func issueResultIdentifier(res engine.Result) string {

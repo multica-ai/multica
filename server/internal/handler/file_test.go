@@ -55,6 +55,7 @@ func createHandlerTestChatSession(t *testing.T, agentID string) string {
 type mockStorage struct {
 	mu                  sync.Mutex
 	files               map[string][]byte
+	getReaderCalls      int
 	presignCalls        []string
 	presignDispositions []string
 }
@@ -107,10 +108,16 @@ func (m *mockStorageNoCdn) CdnDomain() string { return "" }
 func (m *mockStorage) GetReader(_ context.Context, key string) (io.ReadCloser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.getReaderCalls++
 	if data, ok := m.files[key]; ok {
 		return io.NopCloser(bytes.NewReader(data)), nil
 	}
 	return nil, fmt.Errorf("mockStorage GetReader: key not found: %q", key)
+}
+func (m *mockStorage) GetReaderCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getReaderCalls
 }
 func (m *mockStorage) PresignGet(_ context.Context, key string, _ time.Duration) (string, error) {
 	m.mu.Lock()
@@ -455,6 +462,11 @@ func TestUploadFile_RejectsForeignChatSession(t *testing.T) {
 // installing the mockStorage on testHandler before calling.
 func seedPreviewAttachment(t *testing.T, store *mockStorage, key, filename, contentType string, body []byte) string {
 	t.Helper()
+	return seedPreviewAttachmentWithSize(t, store, key, filename, contentType, body, int64(len(body)))
+}
+
+func seedPreviewAttachmentWithSize(t *testing.T, store *mockStorage, key, filename, contentType string, body []byte, sizeBytes int64) string {
+	t.Helper()
 	// Register the body so GetReader can find it via KeyFromURL → key.
 	url, err := store.Upload(context.Background(), key, body, contentType, filename)
 	if err != nil {
@@ -466,7 +478,7 @@ func seedPreviewAttachment(t *testing.T, store *mockStorage, key, filename, cont
 		INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
 		VALUES ($1, 'member', $2, $3, $4, $5, $6)
 		RETURNING id::text
-	`, testWorkspaceID, testUserID, filename, url, contentType, len(body)).Scan(&id); err != nil {
+	`, testWorkspaceID, testUserID, filename, url, contentType, sizeBytes).Scan(&id); err != nil {
 		t.Fatalf("seed attachment row: %v", err)
 	}
 	t.Cleanup(func() {
@@ -500,6 +512,13 @@ func newPreviewRequest(t *testing.T, attachmentID, workspaceID string) (*http.Re
 	rctx.URLParams.Add("id", attachmentID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	return req, httptest.NewRecorder()
+}
+
+func previewHandlerWithLimit(store storage.Storage, limit int64) *Handler {
+	h := *testHandler
+	h.Storage = store
+	h.cfg.MaxPreviewSizeBytes = limit
+	return &h
 }
 
 func newDownloadRequest(t *testing.T, attachmentID, workspaceID string) (*http.Request, *httptest.ResponseRecorder) {
@@ -702,8 +721,99 @@ func TestGetAttachmentByID_AutoPublicEndpointReturnsPresignedDownloadURL(t *test
 	if want := "/api/attachments/" + id + "/download"; resp.MarkdownURL != want {
 		t.Fatalf("markdown_url = %q, want stable URL %q", resp.MarkdownURL, want)
 	}
-	if len(store.presignCalls) != 1 || store.presignCalls[0] != key {
-		t.Fatalf("presign calls = %v, want [%s]", store.presignCalls, key)
+	// The single-attachment endpoint presigns the object twice: once inline for
+	// download_url (asserted above) and once with a forced attachment disposition
+	// for attachment_download_url.
+	if len(store.presignCalls) != 2 || store.presignCalls[0] != key || store.presignCalls[1] != key {
+		t.Fatalf("presign calls = %v, want [%s %s]", store.presignCalls, key, key)
+	}
+	dl, err := url.Parse(resp.AttachmentDownloadURL)
+	if err != nil {
+		t.Fatalf("parse attachment_download_url: %v", err)
+	}
+	if got := dl.Query().Get("X-Amz-Signature"); got != "mock" {
+		t.Fatalf("attachment_download_url = %q, want an S3 presigned URL", resp.AttachmentDownloadURL)
+	}
+	if got := dl.Query().Get("response-content-disposition"); !strings.HasPrefix(got, "attachment") {
+		t.Fatalf("attachment_download_url response-content-disposition = %q, want a forced attachment disposition", got)
+	}
+}
+
+// TestGetAttachmentByID_CloudFrontModeSignsForcedAttachmentDownloadURL pins the
+// CloudFront arm of GetAttachmentByID's download-URL switch — the one storage
+// mode still unexercised at this layer. It asserts attachment_download_url is a
+// CloudFront-signed URL carrying response-content-disposition=attachment, which
+// SignedURLWithContentDisposition sets on the URL BEFORE signing, so the
+// disposition is folded into the signed Resource (a client cannot strip or alter
+// it without invalidating the Signature — that property is unit-tested in
+// cloudfront_test.go). It also asserts the load-intent download_url sibling does
+// NOT force an attachment, so the two intents stay distinct.
+func TestGetAttachmentByID_CloudFrontModeSignsForcedAttachmentDownloadURL(t *testing.T) {
+	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
+	origSigner := testHandler.CFSigner
+	testHandler.Storage = &mockStorage{}
+	testHandler.cfg.AttachmentDownloadMode = "cloudfront"
+	testHandler.CFSigner = testCloudFrontSigner(t)
+	t.Cleanup(func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+		testHandler.CFSigner = origSigner
+	})
+
+	id := seedAttachmentURL(
+		t,
+		"https://static.example.test/downloads/cf-report.md",
+		"cf report.md",
+		"text/markdown",
+		12,
+	)
+
+	req := httptest.NewRequest("GET", "/api/attachments/"+id, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", id)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	w := httptest.NewRecorder()
+
+	testHandler.GetAttachmentByID(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var resp AttachmentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, w.Body.String())
+	}
+
+	dl, err := url.Parse(resp.AttachmentDownloadURL)
+	if err != nil {
+		t.Fatalf("parse attachment_download_url: %v", err)
+	}
+	if dl.Host != "static.example.test" {
+		t.Fatalf("attachment_download_url host = %q, want the CloudFront domain", dl.Host)
+	}
+	if got := dl.Query().Get("response-content-disposition"); got != `attachment; filename="cf report.md"` {
+		t.Fatalf("attachment_download_url response-content-disposition = %q, want a forced attachment disposition", got)
+	}
+	// Signed as a whole: Key-Pair-Id + Signature present. Because the disposition
+	// was set before signing, it is inside the signed Resource, so a client cannot
+	// strip or alter it without invalidating this Signature.
+	if got := dl.Query().Get("Key-Pair-Id"); got != "KTEST" {
+		t.Fatalf("attachment_download_url Key-Pair-Id = %q, want KTEST (CloudFront-signed)", got)
+	}
+	if dl.Query().Get("Signature") == "" {
+		t.Fatalf("attachment_download_url missing CloudFront Signature: %q", resp.AttachmentDownloadURL)
+	}
+
+	// The load-intent sibling must NOT force an attachment, or inline preview breaks.
+	inline, err := url.Parse(resp.DownloadURL)
+	if err != nil {
+		t.Fatalf("parse download_url: %v", err)
+	}
+	if got := inline.Query().Get("response-content-disposition"); strings.HasPrefix(got, "attachment") {
+		t.Fatalf("download_url must stay load-intent, got forced attachment disposition %q", got)
 	}
 }
 
@@ -1461,18 +1571,86 @@ func TestGetAttachmentContent_Unsupported_PDF(t *testing.T) {
 
 func TestGetAttachmentContent_TooLarge(t *testing.T) {
 	store := &mockStorage{}
-	origStorage := testHandler.Storage
-	testHandler.Storage = store
-	defer func() { testHandler.Storage = origStorage }()
+	h := previewHandlerWithLimit(store, 0)
 
 	// One byte over the limit. Allocate ASCII so io.ReadAll has work to do.
-	big := bytes.Repeat([]byte("a"), int(maxPreviewTextSize()+1))
+	big := bytes.Repeat([]byte("a"), int(DefaultMaxPreviewSizeBytes+1))
 	id := seedPreviewAttachment(t, store, "huge-key.txt", "huge.txt", "text/plain", big)
 
 	req, w := newPreviewRequest(t, id, testWorkspaceID)
-	testHandler.GetAttachmentContent(w, req)
+	h.GetAttachmentContent(w, req)
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_CustomLimitBoundary(t *testing.T) {
+	const limit = int64(8)
+	tests := []struct {
+		name       string
+		body       []byte
+		wantStatus int
+	}{
+		{name: "exact boundary", body: []byte("12345678"), wantStatus: http.StatusOK},
+		{name: "one byte over", body: []byte("123456789"), wantStatus: http.StatusRequestEntityTooLarge},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &mockStorage{}
+			h := previewHandlerWithLimit(store, limit)
+			sizeBytes := int64(len(tt.body))
+			if tt.wantStatus == http.StatusRequestEntityTooLarge {
+				// Under-report the metadata so the bounded object read, rather than
+				// the metadata fast path, must detect the oversized body.
+				sizeBytes = limit
+			}
+			id := seedPreviewAttachmentWithSize(t, store, "custom-limit.txt", "custom-limit.txt", "text/plain", tt.body, sizeBytes)
+
+			req, w := newPreviewRequest(t, id, testWorkspaceID)
+			h.GetAttachmentContent(w, req)
+			if w.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", w.Code, tt.wantStatus, w.Body.String())
+			}
+			if tt.wantStatus == http.StatusOK && !bytes.Equal(w.Body.Bytes(), tt.body) {
+				t.Fatalf("body = %q, want %q", w.Body.Bytes(), tt.body)
+			}
+			if calls := store.GetReaderCallCount(); calls != 1 {
+				t.Fatalf("GetReader calls = %d, want 1", calls)
+			}
+		})
+	}
+}
+
+func TestGetAttachmentContent_MetadataOverLimitSkipsStorageRead(t *testing.T) {
+	const limit = int64(8)
+	store := &mockStorage{}
+	h := previewHandlerWithLimit(store, limit)
+	id := seedPreviewAttachmentWithSize(t, store, "metadata-over.txt", "metadata-over.txt", "text/plain", []byte("small"), limit+1)
+
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	h.GetAttachmentContent(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%s", w.Code, w.Body.String())
+	}
+	if calls := store.GetReaderCallCount(); calls != 0 {
+		t.Fatalf("GetReader calls = %d, want 0", calls)
+	}
+}
+
+func TestGetAttachmentContent_ExtremeConfigFallsBackWithoutOverflow(t *testing.T) {
+	store := &mockStorage{}
+	h := previewHandlerWithLimit(store, int64(1<<63-1))
+	body := []byte("preview remains intact")
+	id := seedPreviewAttachment(t, store, "extreme-config.md", "extreme-config.md", "text/markdown", body)
+
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	h.GetAttachmentContent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if !bytes.Equal(w.Body.Bytes(), body) {
+		t.Fatalf("body = %q, want %q", w.Body.Bytes(), body)
 	}
 }
 
@@ -1833,32 +2011,5 @@ func TestServeLocalUpload_NonLocalStorage404(t *testing.T) {
 	h.ServeLocalUpload(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
-	}
-}
-
-func TestParseByteSize(t *testing.T) {
-	cases := []struct {
-		name   string
-		val    string
-		wantN  int64
-		wantOK bool
-	}{
-		{"valid bytes", "104857600", 104857600, true},
-		{"empty", "", 0, false},
-		{"whitespace only", "   ", 0, false},
-		{"zero", "0", 0, false},
-		{"negative", "-500", 0, false},
-		{"non-numeric", "100MB", 0, false},
-		{"invalid syntax", "abc", 0, false},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("TEST_PARSE_BYTE_SIZE_VAR", tc.val)
-			gotN, gotOK := parseByteSize("TEST_PARSE_BYTE_SIZE_VAR")
-			if gotN != tc.wantN || gotOK != tc.wantOK {
-				t.Errorf("parseByteSize() = (%v, %v), want (%v, %v)", gotN, gotOK, tc.wantN, tc.wantOK)
-			}
-		})
 	}
 }

@@ -119,7 +119,7 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 | `avatar_url` | `agent.avatar_url` | none; an explicit non-empty value is preserved, while omitted/empty creates a random `emoji:<glyph>` avatar | catalog/listing UI only — NOT the runtime prompt |
 | `runtime_id` | `agent.runtime_id` (nullable) | required at create (400) + must resolve to a runtime in this workspace | selects runtime/provider; `NULL` means unbound — see below |
 | `model` | `agent.model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |
-| `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum/safe-token gate; unknown literal → 400. Pi accepts only `off|minimal|low|medium|high|xhigh|max`, then the daemon checks the selected model's RPC-discovered subset. A runtime with no reasoning control (e.g. `hermes`) rejects EVERY non-empty value and says so — that 400 is a capability answer, not a bad token | daemon; empty = runtime default |
+| `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum/safe-token gate; unknown literal → 400. Pi accepts only `off|minimal|low|medium|high|xhigh|max`, then the daemon checks the selected model's RPC-discovered subset. ACP runtimes that advertise an effort selector in `session/new` (currently `reasonix`) take the safe-token path and are checked against the discovered catalog by the daemon; that catalog covers only the model the discovery session was on, so other models show no picker until per-model probing exists. A runtime with no reasoning control (e.g. `hermes`) rejects EVERY non-empty value and says so — that 400 is a capability answer, not a bad token | daemon; empty = runtime default |
 | `service_tier` | `agent.service_tier` (nullable) | Codex-only safe token; other providers reject; exact model/tier pair checked by daemon | daemon → Codex app-server; empty = local Codex config |
 | `custom_args` | `agent.custom_args` (JSON array) | JSON shape checked CLI-side; server stores as-is | daemon (extra CLI switches); defaults to `[]` |
 | `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
@@ -136,11 +136,10 @@ Other defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
 are typed `[]string`/`any` and marshaled as-is — the JSON-shape rejection
 happens in the CLI, not the create handler.
 
-The 1–50 concurrency range applies consistently to manual create, update, and
-the create-from-template HTTP path. On create paths, an omitted field defaults
-to 6 while an explicitly supplied 0 is rejected; on update, omission preserves
-the current value. The CLI performs the same range check before sending create
-or update requests.
+The 1–50 concurrency range applies consistently to create and update. On
+create, an omitted field defaults to 6 while an explicitly supplied 0 is
+rejected; on update, omission preserves the current value. The CLI performs the
+same range check before sending create or update requests.
 
 `thinking_level` is validated only at the provider level: fixed-vocabulary
 providers reject an unrecognized literal, while dynamic-vocabulary providers
