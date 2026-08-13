@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -80,6 +82,18 @@ func probeZcodeStreamCapability(execName string) bool {
 	return strings.Contains(string(out), "--stream-json")
 }
 
+// zcodeTerminateGraceNanos optionally overrides, in nanoseconds, how long a
+// cancelled zcode process group is given to exit after SIGTERM before it is
+// SIGKILLed. Set via atomic store in tests; zero keeps the default.
+var zcodeTerminateGraceNanos atomic.Int64
+
+func zcodeTerminateGrace() time.Duration {
+	if n := zcodeTerminateGraceNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return 5 * time.Second
+}
+
 // buildZcodeStreamArgs constructs the argv for a streaming zcode turn.
 func buildZcodeStreamArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"--prompt", prompt, "--stream-json"}
@@ -129,6 +143,19 @@ func (b *zcodeStreamBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 	cmd := exec.CommandContext(runCtx, execName, args...)
 	hideAgentWindow(cmd)
+	// Run zcode in its own process group so cancellation reaches the whole
+	// tree — the zcode CLI plus any tool subprocess it spawns — not just the
+	// direct child. The default CommandContext behaviour SIGKILLs only the
+	// leader, orphaning descendants that keep the stdout pipe open and keep
+	// running after the task is cancelled. This mirrors the fix already made
+	// for claude (#5918), codex (#4520), and opencode (#4533).
+	configureProcessGroup(cmd)
+	// Take over context cancellation: the default would SIGKILL only the leader
+	// the instant runCtx is done. We instead drive a graceful group-wide
+	// SIGTERM→SIGKILL from the cancellation goroutine below and close stdout
+	// only after the tree has been signalled. Returning nil keeps os/exec from
+	// racing us with its own kill; WaitDelay remains the hard backstop.
+	cmd.Cancel = func() error { return nil }
 	// args contain the task prompt; never expose it in daemon logs.
 	b.cfg.Logger.Info("agent command", "exec", execName, "provider", "zcode")
 	cmd.WaitDelay = 10 * time.Second
@@ -152,6 +179,11 @@ func (b *zcodeStreamBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
+
+	// procDone closes once cmd.Wait() returns, letting the cancellation handler
+	// skip a process that already exited and avoid signalling a dead/reused pid.
+	procDone := make(chan struct{})
+
 	go func() {
 		defer cancel()
 		defer close(msgCh)
@@ -159,8 +191,33 @@ func (b *zcodeStreamBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 		started := time.Now()
 		state := zcodeStreamState{usage: make(map[string]TokenUsage)}
+
+		// On cancellation / timeout, terminate zcode (and every tool subprocess
+		// it spawned) BEFORE unblocking the scanner. SIGTERM the whole process
+		// group, give it a grace period, then SIGKILL the group if any member
+		// is still alive. SIGKILL is uncatchable, so once delivered no group
+		// member can write again — only then is it safe to close the stdout
+		// read end as a last-resort unblock for a scanner a wedged descendant
+		// still keeps open. WaitDelay is the final backstop.
 		go func() {
-			<-runCtx.Done()
+			select {
+			case <-procDone:
+				return // finished on its own; nothing to terminate
+			case <-runCtx.Done():
+			}
+			if cmd.Process != nil {
+				signalProcessGroup(cmd.Process, syscall.SIGTERM)
+				// Escalate to a group SIGKILL unless the WHOLE process group
+				// has exited within the grace window. This must key off the
+				// process group, not procDone: procDone only means cmd.Wait()
+				// returned for the leader, so a SIGTERM-ignoring descendant
+				// that does not hold zcode's stdout would let the leader exit,
+				// close procDone, and skip the SIGKILL — leaking exactly the
+				// orphan this fix targets.
+				if !waitProcessGroupGone(cmd.Process, zcodeTerminateGrace()) {
+					signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				}
+			}
 			_ = stdout.Close()
 		}()
 
@@ -183,9 +240,13 @@ func (b *zcodeStreamBackend) Execute(ctx context.Context, prompt string, opts Ex
 		}
 		scanErr := scanner.Err()
 		if scanErr != nil {
+			// Scanner stopped consuming stdout. Close the pipe before Wait so a
+			// child still writing a malformed/oversized event cannot deadlock
+			// on the full OS pipe; the scanner error remains the primary failure.
 			_ = stdout.Close()
 		}
 		exitErr := cmd.Wait()
+		close(procDone)
 		duration := time.Since(started)
 
 		status, output, errMsg := finalizeStreamResult("zcode", timeout, runCtx.Err(), nil, exitErr, state.sessionID, streamTerminalState{
