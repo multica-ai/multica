@@ -12,13 +12,27 @@ import (
 
 // zcodeBlockedArgs are the flags the daemon hardcodes for every zcode turn.
 // User-configured custom_args cannot override them, because doing so would
-// break the daemon↔zcode communication contract: --prompt carries the turn,
-// --json selects the machine-readable summary the backend parses, and
-// --resume pins the conversation the daemon expects to continue.
+// break the daemon↔zcode communication contract. Both the long forms and the
+// short aliases are covered so callers cannot smuggle in an override via the
+// alias of a managed flag; the value-taking flags are blocked in both the
+// "--flag value" and "--flag=value" forms (filterCustomArgs handles both).
+//
+//	--prompt / -p / --print  : carries the turn text (managed)
+//	--json / --stream-json   : selects the output protocol the backend parses
+//	--resume / -c / --continue : pins the conversation the daemon continues
+//	--cwd                    : the work directory (managed via opts.Cwd)
+//	--max-turns              : turn budget (managed via opts.MaxTurns)
 var zcodeBlockedArgs = map[string]blockedArgMode{
-	"--prompt": blockedWithValue,
-	"--json":   blockedStandalone,
-	"--resume": blockedWithValue,
+	"--prompt":      blockedWithValue,
+	"-p":            blockedWithValue,
+	"--print":       blockedWithValue,
+	"--json":        blockedStandalone,
+	"--stream-json": blockedStandalone,
+	"--resume":      blockedWithValue,
+	"-c":            blockedStandalone,
+	"--continue":    blockedStandalone,
+	"--cwd":         blockedWithValue,
+	"--max-turns":   blockedWithValue,
 }
 
 // zcodeBackend implements Backend by spawning the ZCode CLI in non-interactive

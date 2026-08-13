@@ -287,3 +287,68 @@ func TestZcodeStreamBackendFallsBackToJSONWhenStreamUnsupported(t *testing.T) {
 		t.Fatalf("usage = %+v, want zcode{in=10,out=2}", result.Usage)
 	}
 }
+
+// TestZcodeBlockedArgsCoverManagedFlags is the table-driven regression guard
+// for the daemon-owned argument blocklist. Every managed flag (and its short
+// alias) must be stripped from user-configured custom_args in BOTH the
+// "--flag value" and "--flag=value" forms, so callers cannot override the
+// work directory, turn budget, output protocol, or the resume/session contract.
+func TestZcodeBlockedArgsCoverManagedFlags(t *testing.T) {
+	t.Parallel()
+
+	// managedFlags lists each managed flag → an example value the standalone
+	// form would otherwise smuggle through as the next arg.
+	managedFlags := []struct {
+		flag   string
+		value  string // only for blockedWithValue; "" for standalone
+		takesV bool
+	}{
+		{"--prompt", "evil", true},
+		{"-p", "evil", true},
+		{"--print", "evil", true},
+		{"--json", "", false},
+		{"--stream-json", "", false},
+		{"--resume", "sess_other", true},
+		{"-c", "", false},
+		{"--continue", "", false},
+		{"--cwd", "/elsewhere", true},
+		{"--max-turns", "1", true},
+	}
+
+	for _, m := range managedFlags {
+		m := m
+		// "--flag value" form (only meaningful for value-taking flags).
+		if m.takesV {
+			t.Run(m.flag+"/space", func(t *testing.T) {
+				t.Parallel()
+				args := buildZcodeStreamArgs("task", ExecOptions{
+					CustomArgs: []string{m.flag, m.value, "--harmless"},
+				}, slog.Default())
+				joined := strings.Join(args, " ")
+				if strings.Contains(joined, m.value) {
+					t.Errorf("blocked value %q leaked via %q: %v", m.value, m.flag, args)
+				}
+				if !strings.Contains(joined, "--harmless") {
+					t.Errorf("non-managed --harmless dropped: %v", args)
+				}
+			})
+		}
+		// "--flag=value" form (works for both standalone — value ignored — and
+		// value-taking flags; the flag token itself must be stripped).
+		t.Run(m.flag+"/equals", func(t *testing.T) {
+			t.Parallel()
+			combined := m.flag + "=evil"
+			args := buildZcodeStreamArgs("task", ExecOptions{
+				CustomArgs: []string{combined, "--harmless"},
+			}, slog.Default())
+			for _, a := range args {
+				if a == combined {
+					t.Errorf("blocked flag %q leaked: %v", combined, args)
+				}
+			}
+			if !strings.Contains(strings.Join(args, " "), "--harmless") {
+				t.Errorf("non-managed --harmless dropped: %v", args)
+			}
+		})
+	}
+}
