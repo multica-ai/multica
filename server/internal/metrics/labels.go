@@ -143,6 +143,7 @@ var (
 		"qoderclicn":    "qoderclicn",
 		"qwen":          "qwen",
 		"traecli":       "traecli",
+		"dsh":           "dsh",
 		"other":         "other",
 	}
 	knownTerminalStatuses = map[string]string{

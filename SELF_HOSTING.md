@@ -129,6 +129,7 @@ You also need at least one AI agent CLI installed:
 - [Grok Build CLI](https://docs.x.ai/) (`grok` on PATH)
 - Qwen Code (`qwen` on PATH)
 - [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (`qwenpaw` on PATH; pick its model in QwenPaw's own configuration)
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh` on PATH; install with `npm install -g @deepseek-ai/dsh` and set `DEEPSEEK_API_KEY`)
 
 ### b) One-command setup
 

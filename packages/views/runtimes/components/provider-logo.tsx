@@ -311,6 +311,28 @@ function QwenPawLogo({ className }: { className: string }) {
   );
 }
 
+// DeepSeek Harness — no official square mark is shipped with the npm CLI, so
+// this is a simple DeepSeek-blue tile with the product initials, matching the
+// tile style of the other provider marks in this file.
+function DshLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-label="DeepSeek Harness">
+      <rect width="24" height="24" rx="5" fill="#4D6BFE" />
+      <text
+        x="12"
+        y="16.5"
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill="white"
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+      >
+        DSH
+      </text>
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -360,6 +382,8 @@ export function ProviderLogo({
       return <QwenLogo className={className} />;
     case "qwenpaw":
       return <QwenPawLogo className={className} />;
+    case "dsh":
+      return <DshLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

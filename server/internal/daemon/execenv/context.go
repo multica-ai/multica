@@ -425,6 +425,11 @@ func skillsDirPath(workDir, provider string) string {
 		// (and also scans .agents/skills/). Prefer the native .grok tree.
 		// See Grok user-guide skills.md.
 		return filepath.Join(workDir, ".grok", "skills")
+	case "dsh":
+		// DeepSeek Harness discovers project-level skills from .dsh/skills/
+		// in the workdir (user skills live under $DSH_HOME/skills, i.e.
+		// ~/.dsh/skills). See @deepseek-ai/dsh-skill-filesystem.
+		return filepath.Join(workDir, ".dsh", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		return filepath.Join(workDir, ".agent_context", "skills")

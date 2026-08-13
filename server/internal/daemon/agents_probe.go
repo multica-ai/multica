@@ -249,5 +249,14 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
 		agents["qwenpaw"] = e
 	}
+	// DeepSeek Harness CLI ("dsh", from the @deepseek-ai/dsh npm package),
+	// driven through its one-shot headless profile
+	// ("dsh --profile headless <task>"). MULTICA_DSH_MODEL seeds the
+	// daemon-wide default model (a DeepSeek model id such as deepseek-chat);
+	// the backend forwards it to dsh as a --patch override of the
+	// agent-default-model row.
+	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok {
+		agents["dsh"] = e
+	}
 	return agents
 }

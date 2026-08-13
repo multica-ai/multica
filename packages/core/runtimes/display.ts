@@ -46,6 +46,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   qwen: "Qwen Code",
   qwenpaw: "QwenPaw",
   omp: "Oh-My-Pi",
+  dsh: "DeepSeek Harness",
 };
 
 /**

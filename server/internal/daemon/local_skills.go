@@ -196,6 +196,14 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				grokHome = filepath.Join(home, ".grok")
 			}
 			providerRoot = filepath.Join(grokHome, "skills")
+		case "dsh":
+			// DeepSeek Harness user-level skills live in $DSH_HOME/skills
+			// (default ~/.dsh/skills); the home can be relocated via DSH_HOME.
+			dshHome := strings.TrimSpace(os.Getenv("DSH_HOME"))
+			if dshHome == "" {
+				dshHome = filepath.Join(home, ".dsh")
+			}
+			providerRoot = filepath.Join(dshHome, "skills")
 		case "qwen":
 			// QWEN_HOME replaces Qwen Code's global ~/.qwen directory. It owns
 			// settings, sessions, credentials and personal skills; project

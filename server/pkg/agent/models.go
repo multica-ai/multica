@@ -227,6 +227,12 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
 		return Catalog{Models: []Model{}}, nil
+	case "dsh":
+		// DeepSeek Harness has no model catalog command: the headless profile
+		// takes its model from the agent-default-model config (overridable per
+		// run via --patch). An empty list keeps manual model entry available
+		// and lets the runtime default apply when no model is selected.
+		return Catalog{Models: []Model{}}, nil
 	case "qwenpaw":
 		// QwenPaw's model selection is unsupported (session/set_model
 		// persists to agent scope, not session scope), so there is no

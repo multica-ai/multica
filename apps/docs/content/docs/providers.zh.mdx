@@ -41,6 +41,7 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 | QwenPaw | `qwenpaw` | ✓ | ✓ | 单次执行的工作区 `skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
+| DeepSeek Harness | `dsh` | — | — | `.dsh/skills/` |
 
 "Multica 管理 MCP" 表示你可以在智能体配置中填写 MCP server，由 Multica 在执行前传给对应工具。它不代表该工具本身没有其他 MCP 配置方式。
 
@@ -52,13 +53,15 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 
 QwenPaw 是唯一的例外：它不接受在 Multica 侧选择的模型，因此选择框不可用，显示为"由运行时管理"。请改在 QwenPaw 自身的配置里选择模型。它的模型列表为空属于正常情况，并不表示运行时离线。
 
+DeepSeek Harness 同样没有模型列表命令，因此列表为空：请手动输入 DeepSeek 模型 id（例如 `deepseek-chat`），或者留空以使用 DeepSeek Harness 自身配置的模型。
+
 <Callout type="info">
 不同工具可能使用不同的模型名称。更换 AI 编程工具后，原有的模型值在新工具中无效，需要重新选择。
 </Callout>
 
 ## 会话恢复
 
-这些工具都支持在后续执行中继续已有会话。前提是原来的会话仍然存在，并且任务由能够访问它的运行时执行。
+除 DeepSeek Harness 外，这些工具都支持在后续执行中继续已有会话（`dsh --profile headless` 每次任务都会开启全新会话）。前提是原来的会话仍然存在，并且任务由能够访问它的运行时执行。
 
 Multica 会保存工具返回的会话标识。下一次在同一 issue 中继续工作时，运行时会尝试恢复这段会话；无法恢复时，会创建一个新会话继续执行。Pi 保存的是本地会话文件路径，因此更依赖原来的电脑和文件。
 
