@@ -79,7 +79,10 @@ while IFS= read -r line; do
       fi
       ;;
     *'"method":"session/set_config_option"'*)
-      if [ -n "$DIM_CONFIG_FAIL" ]; then
+      if [ -n "$DIM_CONFIG_FAIL_ONCE" ] && [ ! -f "$DIM_CONFIG_FAIL_ONCE" ]; then
+        printf '%s' x > "$DIM_CONFIG_FAIL_ONCE"
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"config set failed"}}\n' "$id"
+      elif [ -n "$DIM_CONFIG_FAIL" ]; then
         printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"config set failed"}}\n' "$id"
       else
         printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
@@ -210,9 +213,9 @@ func TestDimSessionNew(t *testing.T) {
 
 // TestDimResumeLoadsSession verifies that when the daemon asks to resume a
 // prior session, the backend resumes it via the standard ACP session/load,
-// reuses the resumed session id, and does NOT re-issue set_config_option
-// (a loaded session retains its permission/mode). ResumeRejected must stay
-// false because the resume succeeded.
+// reuses the resumed session id, and re-issues set_config_option (fail-closed
+// against a partially configured session — review #4). ResumeRejected must
+// stay false because the resume succeeded.
 func TestDimResumeLoadsSession(t *testing.T) {
 	t.Parallel()
 	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
@@ -486,5 +489,76 @@ func TestDimConfigFailClosesSession(t *testing.T) {
 	// session so it is not resumed later without full-access.
 	if !strings.Contains(reqs, "session/close") {
 		t.Fatal("expected session/close after config failure to prevent a partially configured resume")
+	}
+}
+
+// TestDimConfigFailThenResumeReestablishes verifies the "first setup fails →
+// next run resumes" path (review #4): when the first run's set_config_option
+// fails, session/close is sent; a second run that resumes the same session
+// re-applies set_config_option (fail-closed) and succeeds.
+func TestDimConfigFailThenResumeReestablishes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	requestsFile := filepath.Join(dir, "requests.jsonl")
+	failFlag := filepath.Join(dir, "config_failed")
+	b := newDimTestBackendWithEnv(t, requestsFile, map[string]string{
+		"DIM_CONFIG_FAIL_ONCE": failFlag,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Run A: fresh session, set_config_option fails on the first call.
+	sessionA, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 20 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute A: %v", err)
+	}
+	go func() {
+		for range sessionA.Messages {
+		}
+	}()
+	resultA := <-sessionA.Result
+	if resultA.Status != "failed" {
+		t.Fatalf("run A: expected status=failed, got %q", resultA.Status)
+	}
+	if resultA.SessionID == "" {
+		t.Fatal("run A: expected a session id despite the config failure")
+	}
+
+	// Run B: resume the same session. set_config_option should succeed this
+	// time (DIM_CONFIG_FAIL_ONCE only fails once) and the run should complete.
+	sessionB, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:             t.TempDir(),
+		Timeout:         20 * time.Second,
+		ResumeSessionID: resultA.SessionID,
+	})
+	if err != nil {
+		t.Fatalf("execute B: %v", err)
+	}
+	go func() {
+		for range sessionB.Messages {
+		}
+	}()
+	resultB := <-sessionB.Result
+	if resultB.Status != "completed" {
+		t.Fatalf("run B: expected status=completed, got %q (error=%q)", resultB.Status, resultB.Error)
+	}
+	if resultB.ResumeRejected {
+		t.Fatal("run B: ResumeRejected should be false — the session was loadable after session/close")
+	}
+
+	// Verify run B re-applied set_config_option (fail-closed on resume).
+	reqs := readDimRequests(t, requestsFile)
+	if !strings.Contains(reqs, "session/load") {
+		t.Fatal("run B: expected session/load")
+	}
+	// set_config_option should appear at least 3 times: 1 failed in run A,
+	// 2 successful in run B (permission + mode).
+	count := strings.Count(reqs, "set_config_option")
+	if count < 3 {
+		t.Fatalf("expected at least 3 set_config_option calls (1 fail + 2 re-apply on resume), got %d", count)
 	}
 }

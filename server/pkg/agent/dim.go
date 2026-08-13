@@ -377,9 +377,10 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		// the daemon retry on a fresh session.
 		//
 		// A loaded session retains its permission/mode config (verified: a
-		// full-access session stays full-access after load), so the
-		// set_config_option block below runs only for freshly created
-		// sessions.
+		// full-access session stays full-access after load), but
+		// set_config_option is re-applied on both fresh and resumed sessions
+		// to guard against a partially configured session being resumed
+		// (review #4).
 		var freshSession bool
 		if opts.ResumeSessionID != "" {
 			// Retry session/load when the prior process's lock has not been
@@ -532,6 +533,11 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 				b.cfg.Logger.Warn("dim set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("dim could not switch to model %q: %v", opts.Model, err)
+				// Close the session so a partially configured one (permission/mode
+				// set, model not) is not left for the next resume to inherit.
+				closeCtx, closeCancel := context.WithTimeout(context.Background(), dimSessionCloseTimeout)
+				_, _ = c.request(closeCtx, "session/close", map[string]any{"sessionId": sessionID})
+				closeCancel()
 				resCh <- Result{
 					Status:         finalStatus,
 					Error:          finalError,
