@@ -12,6 +12,7 @@ export type ShortcutActionId =
   | "toggleChat"
   | "findInIssue"
   | "openThreadNav"
+  | "archiveInboxItem"
   | "send"
   | "goInbox"
   | "goChat"
@@ -99,6 +100,16 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     category: "general",
     defaultShortcut: createShortcutChord("O", { primary: true, shift: true }),
     allowInEditable: true,
+  },
+  // Plain E is the archive key mail clients have trained users on, and the
+  // inbox is the only screen that binds it. Not `allowInEditable`: the open
+  // notification hosts a comment composer, and typing an "e" there must never
+  // file the notification away.
+  {
+    id: "archiveInboxItem",
+    category: "general",
+    defaultShortcut: createShortcutChord("E"),
+    allowInEditable: false,
   },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
   { id: "goInbox", category: "navigation", defaultShortcut: null, allowInEditable: false },

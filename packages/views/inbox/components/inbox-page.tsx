@@ -6,6 +6,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
+import {
+  getShortcut,
+  isEditableShortcutTarget,
+  shortcutMatchesEvent,
+} from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   inboxListOptions,
@@ -343,6 +349,39 @@ export function InboxPage() {
         ),
     });
   };
+
+  // The shortcut always does what the row action of the view on screen does:
+  // archive from the main inbox, restore from the archive. Held in a ref so the
+  // document listener below can stay mounted once — both handlers are rebuilt
+  // on every render, and re-subscribing each pass would drop keypresses.
+  const actionOnSelectedRef = useRef<(() => void) | null>(null);
+  actionOnSelectedRef.current = selected
+    ? () => (isArchivedView ? handleUnarchive(selected.id) : handleArchive(selected.id))
+    : null;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Same gate the global shortcut handler uses: a handler closer to the
+      // focused control already had its say, held keys must not archive a run
+      // of notifications, and an IME keystroke is text being composed.
+      if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
+      // Plain `E` is a letter first: the composer in the open issue, the search
+      // field and any other control take it as text, not as an action.
+      if (isEditableShortcutTarget(event.target)) return;
+      // A dialog over the page owns the keyboard. Archiving underneath it would
+      // be an invisible, silently destructive edit.
+      if (useModalStore.getState().modal) return;
+      if (!shortcutMatchesEvent(getShortcut("archiveInboxItem"), event)) return;
+      const run = actionOnSelectedRef.current;
+      // Nothing open means nothing to archive — leave the key its normal
+      // meaning rather than swallowing it for a no-op.
+      if (!run) return;
+      event.preventDefault();
+      run();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // Batch operations
   const handleMarkAllRead = () => {

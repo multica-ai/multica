@@ -34,8 +34,14 @@ vi.mock("@multica/core/paths", () => ({
   }),
 }));
 
+// Mutable so a test can put a dialog over the page: the archive shortcut has
+// to stand down while one owns the keyboard.
+const modalState: { modal: string | null; open: ReturnType<typeof vi.fn> } = {
+  modal: null,
+  open: vi.fn(),
+};
 vi.mock("@multica/core/modals", () => ({
-  useModalStore: { getState: () => ({ open: vi.fn() }) },
+  useModalStore: { getState: () => modalState },
 }));
 
 vi.mock("@multica/core/issues/stores/draft-store", () => ({
@@ -54,14 +60,16 @@ vi.mock("@multica/core/inbox/queries", () => ({
 // fresh `vi.fn()` per render would make the effect's deps churn.
 const markReadMutate = vi.fn();
 const markUnreadMutate = vi.fn();
+const archiveMutate = vi.fn();
+const unarchiveMutate = vi.fn();
 
 vi.mock("@multica/core/inbox/mutations", () => {
   const mutation = () => ({ mutate: vi.fn() });
   return {
     useMarkInboxRead: () => ({ mutate: markReadMutate }),
     useMarkInboxUnread: () => ({ mutate: markUnreadMutate }),
-    useArchiveInbox: mutation,
-    useUnarchiveInbox: mutation,
+    useArchiveInbox: () => ({ mutate: archiveMutate }),
+    useUnarchiveInbox: () => ({ mutate: unarchiveMutate }),
     useMarkAllInboxRead: mutation,
     useArchiveAllInbox: mutation,
     useArchiveAllReadInbox: mutation,
@@ -186,6 +194,9 @@ function reset() {
   replace.mockClear();
   markReadMutate.mockClear();
   markUnreadMutate.mockClear();
+  archiveMutate.mockClear();
+  unarchiveMutate.mockClear();
+  modalState.modal = null;
   rowActions = null;
   issueDetailProps.length = 0;
   layout.width = PHONE;
@@ -405,6 +416,143 @@ describe("InboxPage", () => {
     fireEvent.click(screen.getByTestId("row"));
 
     expect(screen.queryByTestId("list")).not.toBeNull();
+  });
+
+  describe("archive shortcut", () => {
+    // Fires on `document`, so an editable target has to be a real focused
+    // element in the page rather than a made-up event target.
+    function pressArchiveKey(target: Element | Document = document) {
+      fireEvent.keyDown(target, { key: "e" });
+    }
+
+    function typeArchiveKeyInto(element: Element) {
+      document.body.appendChild(element);
+      pressArchiveKey(element);
+      element.remove();
+    }
+
+    it("archives the open notification", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+      pressArchiveKey();
+
+      expect(archiveMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    });
+
+    it("restores the open notification while reading the archive", () => {
+      // The shortcut mirrors the row action of the view on screen, the same
+      // way the detail's own button does.
+      reset();
+      layout.width = DESKTOP;
+      searchParams = new URLSearchParams("view=archived");
+      listData.archived = [
+        item({ id: "archived-1", issue_id: "issue-9", archived: true }),
+      ];
+
+      render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+      pressArchiveKey();
+
+      expect(unarchiveMutate).toHaveBeenCalledWith("archived-1", expect.anything());
+      expect(archiveMutate).not.toHaveBeenCalled();
+    });
+
+    it("leaves the selection on the next notification", () => {
+      // Same move the row action makes: the list is newest-first, so archiving
+      // hands the reader the next (older) item instead of an empty pane.
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [
+        item({ id: "inbox-a", issue_id: "issue-a" }),
+        item({ id: "inbox-b", issue_id: "issue-b" }),
+      ];
+
+      render(<InboxPage />);
+      fireEvent.click(screen.getAllByTestId("row")[0]!);
+      replace.mockClear();
+      pressArchiveKey();
+
+      expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-b");
+    });
+
+    it("does not fire while typing in an editable control", () => {
+      // The open notification hosts a comment composer, and every "e" typed
+      // there would otherwise file the notification away mid-sentence.
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+
+      typeArchiveKeyInto(document.createElement("input"));
+      typeArchiveKeyInto(document.createElement("textarea"));
+      const richText = document.createElement("div");
+      richText.setAttribute("contenteditable", "true");
+      typeArchiveKeyInto(richText);
+
+      expect(archiveMutate).not.toHaveBeenCalled();
+    });
+
+    it("stands down while a dialog is open", () => {
+      // A dialog over the page owns the keyboard; archiving underneath it
+      // would be an invisible edit to a list the user cannot see.
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+      modalState.modal = "create-issue";
+      pressArchiveKey();
+
+      expect(archiveMutate).not.toHaveBeenCalled();
+    });
+
+    it("ignores an auto-repeated key", () => {
+      // Holding the key down archives one notification, not a run of them.
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+      fireEvent.keyDown(document, { key: "e", repeat: true });
+
+      expect(archiveMutate).not.toHaveBeenCalled();
+    });
+
+    it("ignores a press a nearer handler already consumed", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+
+      const consumer = document.createElement("button");
+      consumer.addEventListener("keydown", (event) => event.preventDefault());
+      document.body.appendChild(consumer);
+      pressArchiveKey(consumer);
+      consumer.remove();
+
+      expect(archiveMutate).not.toHaveBeenCalled();
+    });
+
+    it("does nothing when no notification is open", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      render(<InboxPage />);
+      pressArchiveKey();
+
+      expect(archiveMutate).not.toHaveBeenCalled();
+    });
   });
 
   it("does not swallow a deep link to an issue that is not in the archive", () => {
