@@ -261,7 +261,10 @@ describe("TabBar merged-tab chrome", () => {
     );
   });
 
-  // The opaque sidebar backing keeps the flare and card keylines from stacking.
+  // The opaque backing keeps the flare and card keylines from stacking, and
+  // must equal the strip's backdrop on both sides of the compact breakpoint:
+  // the wrapper paints bg-sidebar only while an inset sidebar is mounted, so
+  // the flare mirrors that condition instead of pinning one token.
   it("paints each flare on an opaque layer matching the strip backdrop", () => {
     const { getByLabelText } = render(<TabBar />);
     const flares = getByLabelText("Issues")
@@ -270,9 +273,14 @@ describe("TabBar merged-tab chrome", () => {
 
     expect(flares).toHaveLength(2);
     for (const flare of flares ?? []) {
-      expect(flare.getAttribute("style")).toContain(
-        "var(--page-canvas) 10.2px), var(--sidebar)",
+      expect(flare).toHaveClass(
+        "bg-app-shell",
+        "group-has-data-[variant=inset]/sidebar-wrapper:bg-sidebar",
       );
+      // The gradient itself carries no backing layer; the classes above own it.
+      expect(flare.getAttribute("style")).toContain("var(--page-canvas) 10.2px)");
+      expect(flare.getAttribute("style")).not.toContain("var(--sidebar)");
+      expect(flare.getAttribute("style")).not.toContain("var(--app-shell)");
     }
   });
 

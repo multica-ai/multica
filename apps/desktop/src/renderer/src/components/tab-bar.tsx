@@ -47,12 +47,18 @@ const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
 
 // The active tab flares into the content surface through concave corners.
-// An opaque sidebar backing prevents its translucent arc from stacking with
-// the content card's top ring.
+// An opaque backing (the flare's background-color) prevents its translucent
+// arc from stacking with the content card's top ring. The backing must equal
+// the strip's backdrop, which is the sidebar wrapper's fill: bg-sidebar while
+// an inset sidebar is mounted, bg-app-shell otherwise (compact widths render
+// the sidebar as a sheet). TAB_FLARE_BACKDROP mirrors the wrapper's own
+// has-data-[variant=inset]:bg-sidebar condition so the two cannot drift.
 const TAB_FLARE_RADIUS = 10;
-const tabFlareBackground = (side: "left" | "right") => {
+const TAB_FLARE_BACKDROP =
+  "bg-app-shell group-has-data-[variant=inset]/sidebar-wrapper:bg-sidebar";
+const tabFlareGradient = (side: "left" | "right") => {
   const r = TAB_FLARE_RADIUS;
-  return `radial-gradient(circle at top ${side}, transparent ${r - 1.2}px, var(--surface-border) ${r - 0.8}px, var(--surface-border) ${r - 0.2}px, var(--page-canvas) ${r + 0.2}px), var(--sidebar)`;
+  return `radial-gradient(circle at top ${side}, transparent ${r - 1.2}px, var(--surface-border) ${r - 0.8}px, var(--surface-border) ${r - 0.2}px, var(--page-canvas) ${r + 0.2}px)`;
 };
 
 type TabSnapshot = {
@@ -340,12 +346,12 @@ function SortableTabItem({
             <span className="absolute inset-x-0 top-0 bottom-2.5 rounded-t-lg border border-b-0 border-surface-border bg-page-canvas bg-clip-padding" />
             <span className="absolute inset-x-0 bottom-0 h-2.5 bg-page-canvas" />
             <span
-              className="absolute bottom-0 size-2.5"
-              style={{ left: -TAB_FLARE_RADIUS + 1, background: tabFlareBackground("left") }}
+              className={cn("absolute bottom-0 size-2.5", TAB_FLARE_BACKDROP)}
+              style={{ left: -TAB_FLARE_RADIUS + 1, backgroundImage: tabFlareGradient("left") }}
             />
             <span
-              className="absolute bottom-0 size-2.5"
-              style={{ right: -TAB_FLARE_RADIUS + 1, background: tabFlareBackground("right") }}
+              className={cn("absolute bottom-0 size-2.5", TAB_FLARE_BACKDROP)}
+              style={{ right: -TAB_FLARE_RADIUS + 1, backgroundImage: tabFlareGradient("right") }}
             />
           </span>
         ) : (
