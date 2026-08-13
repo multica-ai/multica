@@ -242,6 +242,7 @@
     "back": "戻る",
     "title_placeholder": "タスクのタイトル",
     "desc_placeholder": "説明を追加...",
+    "current_issue": "現在のタスク",
     "sub_issues_label": "サブタスク",
     "sub_issue_of": "親タスク",
     "add_sub_issues": "サブタスクを追加",
