@@ -6,6 +6,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
+import {
+  getShortcut,
+  isEditableShortcutTarget,
+  shortcutMatchesEvent,
+} from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   inboxListOptions,
@@ -343,6 +349,27 @@ export function InboxPage() {
         ),
     });
   };
+
+  // Keep the listener stable while using the latest selected-item action.
+  const actionOnSelectedRef = useRef<(() => void) | null>(null);
+  actionOnSelectedRef.current = selected
+    ? () => (isArchivedView ? handleUnarchive(selected.id) : handleArchive(selected.id))
+    : null;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
+      if (isEditableShortcutTarget(event.target)) return;
+      if (useModalStore.getState().modal) return;
+      if (!shortcutMatchesEvent(getShortcut("archiveInboxItem"), event)) return;
+      const run = actionOnSelectedRef.current;
+      if (!run) return;
+      event.preventDefault();
+      run();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // Batch operations
   const handleMarkAllRead = () => {
