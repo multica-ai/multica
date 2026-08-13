@@ -1027,6 +1027,15 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		cancel()
 		return nil, fmt.Errorf("start codex: %w", err)
 	}
+	// Claim the process tree now that there is a process to claim. On Windows
+	// this is what lets the cleanup below reach the Node wrapper, the native
+	// app-server, and the sandbox helpers underneath them; on Unix the process
+	// group set before Start already covers that and this is a no-op. A failure
+	// is not fatal — cleanup degrades to terminating the direct child.
+	if err := attachProcessGroup(cmd); err != nil {
+		b.cfg.Logger.Warn("codex: could not take ownership of the process tree; descendant cleanup will be best-effort",
+			"error", err, "pid", cmd.Process.Pid, "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID)
+	}
 	activeLaunches := activeCodexLaunches.Add(1)
 	for {
 		maxSeen := maxActiveCodexLaunchesObserved.Load()
@@ -1274,6 +1283,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				"stderr_bytes", stderrBuf.TotalBytes(),
 				"stderr_truncated", stderrBuf.TotalBytes() > codexStderrTailBytes,
 			)
+			// The tree has been reaped and observed; drop ownership. This is
+			// the only safe point to do so on Windows, where releasing kills
+			// whatever is still inside the job — which is precisely what should
+			// happen to anything that outlived the reap above. waitOnce makes it
+			// exactly-once per launch attempt.
+			releaseProcessGroup(cmd)
 		})
 	}
 

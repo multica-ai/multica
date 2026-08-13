@@ -26,6 +26,15 @@ func configureProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setpgid = true
 }
 
+// attachProcessGroup is a no-op on non-Windows platforms: configureProcessGroup
+// already put the child in its own process group before Start, so there is
+// nothing left to claim once it is running.
+func attachProcessGroup(cmd *exec.Cmd) error { return nil }
+
+// releaseProcessGroup is a no-op on non-Windows platforms: a process group needs
+// no handle and is gone once its members are.
+func releaseProcessGroup(cmd *exec.Cmd) {}
+
 func codexInitializeRetrySupported() bool { return true }
 
 // signalProcessGroup sends sig to the whole process group led by p (when the
