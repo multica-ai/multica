@@ -829,6 +829,19 @@ func usesDynamicThinkingCatalog(providerType string) bool {
 	return thinkingDynamicCatalogProviders[providerType] || acpCatalogThinkingProviders[providerType]
 }
 
+// UsesACPCatalogThinking reports whether a provider's effort support is decided
+// per session by what its ACP handshake advertises, rather than by the provider
+// name alone.
+//
+// Callers that can reach a discovered catalog should use it to answer the
+// capability question for a specific runtime: `hermes` covers both jcode (which
+// advertises and applies an effort) and Hermes Agent (which advertises none), so
+// the provider name is not a sufficient answer for either. See
+// acpCatalogThinkingProviders.
+func UsesACPCatalogThinking(providerType string) bool {
+	return acpCatalogThinkingProviders[providerType]
+}
+
 // ThinkingControlSupported reports whether Multica can deliver a per-agent
 // reasoning effort to this runtime at all. False means the answer to any
 // thinking_level is "no", regardless of the token: the runtime exposes no

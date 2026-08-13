@@ -1130,6 +1130,14 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
 		return
 	}
+	// For ACP-catalog providers the provider name is not the capability answer
+	// — this runtime's own discovered catalog is. Keeps a Hermes Agent user's
+	// clear "no reasoning control" 400 instead of accepting a level the daemon
+	// would later drop.
+	if req.ThinkingLevel != "" && h.acpRuntimeHasNoEffortControl(r.Context(), runtime.Provider, runtime.ID) {
+		writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
+		return
+	}
 	if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtime.Provider))
 		return
@@ -1720,6 +1728,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, thinkingLevelRejection(provider, value))
 				return
 			}
+			if h.acpRuntimeHasNoEffortControl(r.Context(), provider, targetRuntimeID) {
+				writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(provider))
+				return
+			}
 			params.ThinkingLevel = pgtype.Text{String: value, Valid: true}
 		}
 	} else if req.RuntimeID != nil && existing.ThinkingLevel.Valid && existing.ThinkingLevel.String != "" {
@@ -1741,6 +1753,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		if !agent.IsKnownThinkingValue(provider, existing.ThinkingLevel.String) {
 			writeError(w, http.StatusBadRequest, existingThinkingLevelRejection(provider, existing.ThinkingLevel.String))
+			return
+		}
+		if h.acpRuntimeHasNoEffortControl(r.Context(), provider, targetRuntimeID) {
+			writeError(w, http.StatusBadRequest, existingThinkingCapabilityRejection(provider, existing.ThinkingLevel.String))
 			return
 		}
 	}
@@ -1972,12 +1988,61 @@ func (h *Handler) resolveAgentProvider(r *http.Request, workspaceID pgtype.UUID,
 // so it now names the capability gap instead.
 func thinkingLevelRejection(provider, value string) string {
 	if !agent.ThinkingControlSupported(provider) {
-		return fmt.Sprintf(
-			"runtime %q does not support a per-agent reasoning effort; leave thinking_level empty to use the runtime default",
-			provider,
-		)
+		return thinkingCapabilityRejection(provider)
 	}
 	return fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", value, provider)
+}
+
+// existingThinkingCapabilityRejection is the carry-over path's capability
+// sentence — same answer as thinkingCapabilityRejection, but it names the value
+// already on the agent and the escape hatch that clears it.
+func existingThinkingCapabilityRejection(provider, value string) string {
+	return fmt.Sprintf(
+		"runtime %q does not support a per-agent reasoning effort; pass thinking_level=\"\" to clear the existing %q",
+		provider, value,
+	)
+}
+
+// thinkingCapabilityRejection is the "this runtime has no reasoning dial"
+// sentence. Split out because the same answer can now be reached two ways: from
+// the provider name alone, or — for ACP-catalog providers, where the provider
+// name is not decisive — from a discovered catalog that advertises no effort.
+func thinkingCapabilityRejection(provider string) string {
+	return fmt.Sprintf(
+		"runtime %q does not support a per-agent reasoning effort; leave thinking_level empty to use the runtime default",
+		provider,
+	)
+}
+
+// acpRuntimeHasNoEffortControl reports whether this specific runtime is known
+// to expose no reasoning-effort control, using the model catalog its daemon
+// already reported.
+//
+// The `hermes` provider is why this exists. It covers two unrelated binaries:
+// jcode advertises an effort option and applies it, Hermes Agent advertises
+// none. ThinkingControlSupported answers per provider and so must say "yes" for
+// both, which would leave a Hermes Agent user's `--thinking-level high` accepted
+// at the API and then silently dropped by the daemon. The discovered catalog is
+// the only thing at this layer that can tell the two apart.
+//
+// Fails open: a cold cache, an offline daemon, or a runtime that has never been
+// discovered all return false, so a valid agent is never blocked by a missing
+// snapshot. The daemon's own pre-execution guard still drops a level the runtime
+// turns out not to take.
+func (h *Handler) acpRuntimeHasNoEffortControl(ctx context.Context, provider string, runtimeID pgtype.UUID) bool {
+	if !agent.UsesACPCatalogThinking(provider) {
+		return false
+	}
+	snapshot := h.cachedModelCatalog(ctx, uuidToString(runtimeID))
+	if snapshot == nil || len(snapshot.Models) == 0 {
+		return false
+	}
+	for _, m := range snapshot.Models {
+		if m.Thinking != nil && len(m.Thinking.SupportedLevels) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // existingThinkingLevelRejection is thinkingLevelRejection for the carry-over
@@ -1986,10 +2051,7 @@ func thinkingLevelRejection(provider, value string) string {
 // user does not have to guess that clearing is allowed.
 func existingThinkingLevelRejection(provider, value string) string {
 	if !agent.ThinkingControlSupported(provider) {
-		return fmt.Sprintf(
-			"runtime %q does not support a per-agent reasoning effort; pass thinking_level=\"\" to clear the existing %q",
-			provider, value,
-		)
+		return existingThinkingCapabilityRejection(provider, value)
 	}
 	return fmt.Sprintf(
 		"existing thinking_level %q is not valid for runtime %q; pass thinking_level=\"\" to clear or set a value valid for the new runtime",
