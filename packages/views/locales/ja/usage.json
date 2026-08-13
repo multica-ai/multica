@@ -92,6 +92,8 @@
     "header_agent": "エージェント",
     "header_tokens": "トークン",
     "header_cost": "コスト",
+    "cost_unpriced": "価格未登録",
+    "cost_unpriced_hint": "トークンは記録されていますが、一部のモデル価格が未登録のため、コストは不完全な可能性があります。",
     "header_time": "時間",
     "header_tasks": "作業",
     "show_all": "すべて表示",

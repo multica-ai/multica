@@ -115,6 +115,61 @@ describe("aggregateAgentTokens", () => {
     // big-spender across two models — verify cost > small-spender's.
     expect(rows[0]!.cost).toBeGreaterThan(rows[1]!.cost);
   });
+
+  it("marks recorded tokens whose model has no maintained price", () => {
+    const rows = aggregateAgentTokens([
+      {
+        agent_id: "gemini-agent",
+        provider: "antigravity",
+        model: "Gemini 3.6 Flash (High)",
+        input_tokens: 20_200,
+        output_tokens: 43,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        uncosted_input_tokens: 20_200,
+        uncosted_output_tokens: 43,
+        uncosted_cache_read_tokens: 0,
+        uncosted_cache_write_tokens: 0,
+        cost_usd_ticks: 0,
+        task_count: 1,
+      },
+    ]);
+
+    expect(rows).toEqual([
+      {
+        agentId: "gemini-agent",
+        tokens: 20_243,
+        cost: 0,
+        taskCount: 1,
+        costUnpriced: true,
+      },
+    ]);
+  });
+
+  it("does not label a zero-usage row as unpriced", () => {
+    const rows = aggregateAgentTokens([
+      {
+        agent_id: "no-usage-agent",
+        provider: "antigravity",
+        model: "Gemini 3.6 Flash (High)",
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        cost_usd_ticks: 0,
+        task_count: 1,
+      },
+    ]);
+
+    expect(rows).toEqual([
+      {
+        agentId: "no-usage-agent",
+        tokens: 0,
+        cost: 0,
+        taskCount: 1,
+      },
+    ]);
+  });
 });
 
 describe("computeDailyTotals", () => {
@@ -143,7 +198,27 @@ describe("computeDailyTotals", () => {
     ]);
     expect(totals.input).toBe(3_000_000);
     expect(totals.cost).toBe(9); // 3M × $3/M
+    expect(totals.costUnpriced).toBe(false);
     expect(totals.taskCount).toBe(5);
+  });
+
+  it("marks non-zero usage whose model has no maintained price", () => {
+    const totals = computeDailyTotals([
+      {
+        date: "2026-05-10",
+        provider: "antigravity",
+        model: "Gemini 3.6 Flash (High)",
+        input_tokens: 20_200,
+        output_tokens: 43,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        cost_usd_ticks: 0,
+        task_count: 1,
+      },
+    ]);
+
+    expect(totals.cost).toBe(0);
+    expect(totals.costUnpriced).toBe(true);
   });
 });
 
@@ -186,6 +261,31 @@ describe("mergeAgentDashboardRows", () => {
     );
     expect(merged[0]!.taskCount).toBe(1);
     expect(merged[0]!.seconds).toBe(0);
+  });
+
+  it("preserves the unpriced sentinel while merging run-time data", () => {
+    const merged = mergeAgentDashboardRows(
+      [
+        {
+          agentId: "agent-b",
+          tokens: 100,
+          cost: 0,
+          taskCount: 1,
+          costUnpriced: true,
+        },
+      ],
+      [
+        {
+          agent_id: "agent-b",
+          total_seconds: 30,
+          task_count: 1,
+          failed_count: 0,
+          cancelled_count: 0,
+        },
+      ],
+    );
+
+    expect(merged[0]?.costUnpriced).toBe(true);
   });
 
   it("includes agents that have run-time but no tokens", () => {
@@ -256,6 +356,20 @@ describe("bucketUnknownAgentRows", () => {
     // `agent`, so deleted agents contribute nothing to those columns.
     expect(bucket.seconds).toBe(0);
     expect(bucket.taskCount).toBe(0);
+  });
+
+  it("preserves the unpriced sentinel in the deleted-agents bucket", () => {
+    const out = bucketUnknownAgentRows(
+      [{ ...deletedA, cost: 0, costUnpriced: true }],
+      new Set(),
+    );
+
+    expect(out).toEqual([
+      expect.objectContaining({
+        agentId: DELETED_AGENTS_ROW_ID,
+        costUnpriced: true,
+      }),
+    ]);
   });
 
   it("keeps the bucket total reconciled with the top-line spend", () => {

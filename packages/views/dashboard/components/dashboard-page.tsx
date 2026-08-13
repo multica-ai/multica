@@ -389,6 +389,16 @@ export function DashboardPage() {
   );
   const weeklyCost = weekly.weeklyCostStack;
   const weeklyTokens = weekly.weeklyTokens;
+  const weeklyCostUnpriced = useMemo(() => {
+    const first = weeklyCost[0];
+    const last = weeklyCost.at(-1);
+    if (!first || !last) return false;
+    return computeDailyTotals(
+      dailyUsage.filter(
+        (row) => row.date >= first.weekStart && row.date <= last.weekEnd,
+      ),
+    ).costUnpriced;
+  }, [dailyUsage, weeklyCost]);
   const weeklyTime = useMemo(
     () => aggregateWeeklyTime(runTimeDailyRows, viewTZ, weekCount),
     [runTimeDailyRows, viewTZ, weekCount],
@@ -536,7 +546,30 @@ export function DashboardPage() {
                 <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
                   <KpiCard
                     label={t(($) => $.kpi.cost_label, { days })}
-                    value={<CurrencyNumberFlow value={totals.cost} locales={locales} />}
+                    value={
+                      totals.costUnpriced ? (
+                        <span title={t(($) => $.leaderboard.cost_unpriced_hint)}>
+                          {totals.cost > 0 ? (
+                            <>
+                              <CurrencyNumberFlow
+                                value={totals.cost}
+                                locales={locales}
+                              />
+                              +
+                            </>
+                          ) : (
+                            t(($) => $.leaderboard.cost_unpriced)
+                          )}
+                        </span>
+                      ) : (
+                        <CurrencyNumberFlow value={totals.cost} locales={locales} />
+                      )
+                    }
+                    hint={
+                      totals.costUnpriced
+                        ? t(($) => $.leaderboard.cost_unpriced_hint)
+                        : undefined
+                    }
                   />
                   <KpiCard
                     label={t(($) => $.kpi.tokens_label, { days })}
@@ -594,10 +627,12 @@ export function DashboardPage() {
                 <UsageTrendCard
                   allowedDims={allowedDims}
                   dailyCost={dailyCost}
+                  dailyCostUnpriced={totals.costUnpriced}
                   dailyTokens={dailyTokens}
                   dailyTime={dailyTime}
                   dailyTasks={dailyTasks}
                   weeklyCost={weeklyCost}
+                  weeklyCostUnpriced={weeklyCostUnpriced}
                   weeklyTokens={weeklyTokens}
                   weeklyTime={weeklyTime}
                   weeklyTasks={weeklyTasks}

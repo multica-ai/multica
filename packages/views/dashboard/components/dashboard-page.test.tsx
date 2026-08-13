@@ -23,6 +23,7 @@ const manyAgentsRef = vi.hoisted(() => ({ current: false }));
 // — what a plain member actually receives once the backend folds the agents
 // they may not view (MUL-5409).
 const restrictedBucketRef = vi.hoisted(() => ({ current: false }));
+const unpricedUsageRef = vi.hoisted(() => ({ current: false }));
 
 // Kept out of the fixture ternary so the sentinel's shape reads at a glance.
 // Unlike the deleted-agents bucket this one carries real seconds / tasks: the
@@ -131,17 +132,43 @@ vi.mock("@tanstack/react-query", async () => {
         const data =
           kind === "daily"
             ? [
-                {
-                  date: todayIso(),
-                  provider: "anthropic",
-                  model: "claude-sonnet-4-6",
-                  input_tokens: 1_000,
-                  output_tokens: 2_000,
-                  cache_read_tokens: 0,
-                  cache_write_tokens: 0,
-                  task_count: 2,
-                },
+                unpricedUsageRef.current
+                  ? {
+                      date: todayIso(),
+                      provider: "antigravity",
+                      model: "Gemini 3.6 Flash (High)",
+                      input_tokens: 20_200,
+                      output_tokens: 43,
+                      cache_read_tokens: 0,
+                      cache_write_tokens: 0,
+                      cost_usd_ticks: 0,
+                      task_count: 1,
+                    }
+                  : {
+                      date: todayIso(),
+                      provider: "anthropic",
+                      model: "claude-sonnet-4-6",
+                      input_tokens: 1_000,
+                      output_tokens: 2_000,
+                      cache_read_tokens: 0,
+                      cache_write_tokens: 0,
+                      task_count: 2,
+                    },
               ]
+            : kind === "by-agent" && unpricedUsageRef.current
+              ? [
+                  {
+                    agent_id: "agent-1",
+                    provider: "antigravity",
+                    model: "Gemini 3.6 Flash (High)",
+                    input_tokens: 20_200,
+                    output_tokens: 43,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cost_usd_ticks: 0,
+                    task_count: 1,
+                  },
+                ]
             : kind === "agent-runtime"
               ? [
                   {
@@ -243,10 +270,14 @@ vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
       sel ? sel(state()) : state(),
     { getState: state },
   );
-  return { useCustomPricingStore };
+  return { getCustomPricing: () => undefined, useCustomPricingStore };
 });
 
 import { DashboardPage } from "./dashboard-page";
+
+afterEach(() => {
+  unpricedUsageRef.current = false;
+});
 
 const replaceSpy = vi.fn();
 
@@ -378,6 +409,39 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
             .respectMotionPreference === true,
       ),
     ).toBe(true);
+  });
+});
+
+describe("DashboardPage — unpriced usage is not zero usage", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    manyAgentsRef.current = false;
+    restrictedBucketRef.current = false;
+    unpricedUsageRef.current = true;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+
+  it("marks the KPI, trend, and leaderboard as unpriced", async () => {
+    const user = userEvent.setup();
+    const { container } = renderDashboard();
+
+    const costKpi = screen.getByText("Cost · 30D").parentElement as HTMLElement;
+    expect(within(costKpi).getByText("Unpriced")).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("$0.00");
+
+    const leaderboard = within(screen.getByRole("list", { name: "Leaderboard" }));
+    expect(leaderboard.getByText("Unpriced")).toBeInTheDocument();
+
+    await user.click(
+      within(screen.getByRole("group", { name: "Metric" })).getByRole(
+        "button",
+        { name: "Cost" },
+      ),
+    );
+    expect(screen.getByText("Daily cost")).toBeInTheDocument();
+    expect(screen.getAllByText("Unpriced")).toHaveLength(3);
   });
 });
 

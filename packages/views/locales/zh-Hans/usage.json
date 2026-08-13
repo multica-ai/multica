@@ -92,6 +92,8 @@
     "header_agent": "智能体",
     "header_tokens": "Token",
     "header_cost": "费用",
+    "cost_unpriced": "未计价",
+    "cost_unpriced_hint": "Token 已记录，但部分模型没有维护价格，费用可能不完整。",
     "header_time": "运行时长",
     "header_tasks": "task 数",
     "show_all": "展开全部",

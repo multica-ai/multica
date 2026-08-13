@@ -218,7 +218,15 @@ export function Leaderboard({
                   <div
                     className={`text-right tabular-nums ${sortBy === "cost" ? "text-body font-medium" : "text-caption text-muted-foreground"}`}
                   >
-                    ${row.cost.toFixed(2)}
+                    {row.costUnpriced === true ? (
+                      <span title={t(($) => $.leaderboard.cost_unpriced_hint)}>
+                        {row.cost > 0
+                          ? `$${row.cost.toFixed(2)}+`
+                          : t(($) => $.leaderboard.cost_unpriced)}
+                      </span>
+                    ) : (
+                      `$${row.cost.toFixed(2)}`
+                    )}
                   </div>
                   <div
                     className={`text-right text-caption tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}

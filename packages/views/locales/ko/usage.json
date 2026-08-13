@@ -92,6 +92,8 @@
     "header_agent": "에이전트",
     "header_tokens": "토큰",
     "header_cost": "비용",
+    "cost_unpriced": "가격 미등록",
+    "cost_unpriced_hint": "토큰은 기록되었지만 일부 모델 가격이 없어 비용이 불완전할 수 있습니다.",
     "header_time": "시간",
     "header_tasks": "작업",
     "show_all": "전체 보기",

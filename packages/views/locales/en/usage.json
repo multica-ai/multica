@@ -92,6 +92,8 @@
     "header_agent": "Agent",
     "header_tokens": "Tokens",
     "header_cost": "Cost",
+    "cost_unpriced": "Unpriced",
+    "cost_unpriced_hint": "Tokens are recorded, but some model prices are missing; the cost may be incomplete.",
     "header_time": "Time",
     "header_tasks": "Tasks",
     "show_all": "Show all",

@@ -40,10 +40,12 @@ type UsageMetric = "tokens" | "cost" | "time" | "tasks";
 export function UsageTrendCard({
   allowedDims,
   dailyCost,
+  dailyCostUnpriced,
   dailyTokens,
   dailyTime,
   dailyTasks,
   weeklyCost,
+  weeklyCostUnpriced,
   weeklyTokens,
   weeklyTime,
   weeklyTasks,
@@ -51,10 +53,12 @@ export function UsageTrendCard({
 }: {
   allowedDims: readonly Dim[];
   dailyCost: ReturnType<typeof aggregateDailyCost>;
+  dailyCostUnpriced: boolean;
   dailyTokens: ReturnType<typeof aggregateDailyTokens>;
   dailyTime: ReturnType<typeof aggregateDailyTime>;
   dailyTasks: ReturnType<typeof aggregateDailyTasks>;
   weeklyCost: ReturnType<typeof aggregateByWeek>["weeklyCostStack"];
+  weeklyCostUnpriced: boolean;
   weeklyTokens: ReturnType<typeof aggregateByWeek>["weeklyTokens"];
   weeklyTime: ReturnType<typeof aggregateWeeklyTime>;
   weeklyTasks: ReturnType<typeof aggregateWeeklyTasks>;
@@ -79,6 +83,7 @@ export function UsageTrendCard({
   const tasksData = weekly ? weeklyTasks : dailyTasks;
 
   const totalCost = costData.reduce((sum, d) => sum + d.total, 0);
+  const costUnpriced = weekly ? weeklyCostUnpriced : dailyCostUnpriced;
   const totalTokens = tokensData.reduce(
     (sum, d) => sum + d.input + d.output + d.cacheRead + d.cacheWrite,
     0,
@@ -87,7 +92,7 @@ export function UsageTrendCard({
   const totalTasks = tasksData.reduce((sum, d) => sum + d.completed + d.failed, 0);
   const isEmpty =
     metric === "cost"
-      ? totalCost === 0
+      ? totalCost === 0 && !costUnpriced
       : metric === "tokens"
         ? totalTokens === 0
         : metric === "time"
@@ -130,6 +135,21 @@ export function UsageTrendCard({
         </div>
       </div>
       <div className="min-h-[240px]">
+        {metric === "cost" && costUnpriced && (
+          <div
+            className={`rounded-md border border-dashed bg-muted/20 p-3 text-center ${totalCost === 0 ? "flex aspect-[3/1] flex-col items-center justify-center gap-2" : "mb-3"}`}
+            title={t(($) => $.leaderboard.cost_unpriced_hint)}
+          >
+            <p className="text-body font-medium">
+              {totalCost > 0
+                ? `$${totalCost.toFixed(2)}+`
+                : t(($) => $.leaderboard.cost_unpriced)}
+            </p>
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.leaderboard.cost_unpriced_hint)}
+            </p>
+          </div>
+        )}
         {isEmpty ? (
           <div className="flex aspect-[3/1] flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-muted/20 p-6 text-center">
             <BarChart3 className="h-5 w-5 text-faint-foreground" />
@@ -137,7 +157,7 @@ export function UsageTrendCard({
               {t(($) => $.daily.no_data)}
             </p>
           </div>
-        ) : weekly ? (
+        ) : metric === "cost" && costUnpriced && totalCost === 0 ? null : weekly ? (
           metric === "cost" ? (
             <WeeklyCostChart data={weeklyCost} />
           ) : metric === "tokens" ? (

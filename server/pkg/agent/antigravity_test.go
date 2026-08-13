@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -30,6 +31,7 @@ func TestBuildAntigravityArgsBasic(t *testing.T) {
 	want := []string{
 		"-p", "hello",
 		"--dangerously-skip-permissions",
+		"--output-format", "stream-json",
 		"--print-timeout", "20m0s",
 		"--log-file", "/tmp/agy.log",
 		"--add-dir", "/work",
@@ -56,6 +58,7 @@ func TestBuildAntigravityArgsModel(t *testing.T) {
 	want := []string{
 		"-p", "hello",
 		"--dangerously-skip-permissions",
+		"--output-format", "stream-json",
 		"--model", "Claude Opus 4.6 (Thinking)",
 		"--print-timeout", "20m0s",
 		"--log-file", "/tmp/agy.log",
@@ -91,6 +94,7 @@ func TestBuildAntigravityArgsNoCapUsesLargePrintTimeout(t *testing.T) {
 	want := []string{
 		"-p", "hello",
 		"--dangerously-skip-permissions",
+		"--output-format", "stream-json",
 		"--print-timeout", antigravityFormatTimeout(antigravityNoCapPrintTimeout),
 		"--log-file", "/tmp/agy.log",
 		"--add-dir", "/work",
@@ -364,6 +368,62 @@ exit 0
 `
 }
 
+// fakeAgyStreamJSONScript replays the stream-json envelope emitted by agy
+// 1.1.12. The result usage is the authoritative per-turn aggregate; the two
+// step_update usage objects are per-step increments and must not be added on
+// top of it.
+func fakeAgyStreamJSONScript() string {
+	return `#!/bin/sh
+log=""
+stream_json="false"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) log="$2"; shift 2 ;;
+    --output-format)
+      [ "$2" = "stream-json" ] && stream_json="true"
+      shift 2
+      ;;
+    *) shift ;;
+  esac
+done
+if [ "$stream_json" != "true" ]; then
+  echo "missing --output-format stream-json" >&2
+  exit 2
+fi
+if [ -n "$log" ]; then
+  printf 'I0813 18:11:14.880592 1 model_config_manager.go:311] Propagating selected model override to backend: label="Gemini 3.6 Flash (High)"\n' >> "$log"
+  printf 'I0813 18:11:20.881571 1 printmode.go:340] Print mode: conversation=b4083a09-b108-4540-9152-fba1347ebf64, sending message\n' >> "$log"
+fi
+printf '%s\n' '{"event":"init","conversation_id":"b4083a09-b108-4540-9152-fba1347ebf64","init":{"cwd":"/work","tools":[],"permission_mode":"always-proceed"}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"b4083a09-b108-4540-9152-fba1347ebf64","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"PONG"}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"b4083a09-b108-4540-9152-fba1347ebf64","step_index":2,"state":"DONE","step_type":"agent_response","text_delta":"\n","duration_seconds":1.371262,"usage":{"input_tokens":20099,"output_tokens":39,"thinking_tokens":37,"cache_read_tokens":0,"total_tokens":20138}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"b4083a09-b108-4540-9152-fba1347ebf64","step_index":3,"state":"DONE","step_type":"checkpoint","duration_seconds":0.643365,"usage":{"input_tokens":101,"output_tokens":4,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":105}}}'
+printf '%s\n' '{"event":"result","result":{"conversation_id":"b4083a09-b108-4540-9152-fba1347ebf64","status":"SUCCESS","response":"PONG\n","duration_seconds":2.074131,"num_turns":1,"usage":{"input_tokens":20200,"output_tokens":43,"thinking_tokens":37,"cache_read_tokens":0,"total_tokens":20243}}}'
+`
+}
+
+func fakeAgyFailedStreamJSONScript() string {
+	return `#!/bin/sh
+[ "$1" = "models" ] && exit 0
+printf '%s\n' '{"event":"result","result":{"conversation_id":"a4083a09-b108-4540-9152-fba1347ebf64","status":"ERROR","response":"","error":"provider failed","duration_seconds":0.5,"usage":{"input_tokens":12,"output_tokens":3,"thinking_tokens":2,"cache_read_tokens":7,"cache_write_tokens":2,"total_tokens":24}}}'
+`
+}
+
+func fakeAgyTerminalResultScript(status string) string {
+	return fmt.Sprintf(`#!/bin/sh
+[ "$1" = "models" ] && exit 0
+printf '%%s\n' '{"event":"result","result":{"conversation_id":"d4083a09-b108-4540-9152-fba1347ebf64","status":"%s","response":"","duration_seconds":0.5,"usage":{"input_tokens":12,"output_tokens":3,"cache_read_tokens":7,"total_tokens":22}}}'
+`, status)
+}
+
+func fakeAgyCancelledStreamJSONScript() string {
+	return `#!/bin/sh
+[ "$1" = "models" ] && exit 0
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"c4083a09-b108-4540-9152-fba1347ebf64","step_index":2,"state":"DONE","step_type":"agent_response","text_delta":"working","usage":{"input_tokens":21,"output_tokens":5,"thinking_tokens":3,"cache_read_tokens":4,"cache_write_tokens":1,"total_tokens":31}}}'
+sleep 60
+`
+}
+
 // TestAntigravityBackendPrintTimeoutSurfacesAsTimeout is the end-to-end guard for
 // MUL-3570: agy aborts a long turn by printing its timeout sentinel and exiting
 // 0, so the backend must classify the result as a timeout (not a truncated
@@ -454,6 +514,168 @@ func TestAntigravityBackendProviderErrorSurfacesAsFailed(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestAntigravityBackendParsesStreamJSONUsage(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyStreamJSONScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if result.Output != "PONG\n" {
+			t.Fatalf("result output = %q, want %q", result.Output, "PONG\n")
+		}
+		if result.SessionID != "b4083a09-b108-4540-9152-fba1347ebf64" {
+			t.Fatalf("session id = %q", result.SessionID)
+		}
+		usage, ok := result.Usage["Gemini 3.6 Flash (High)"]
+		if !ok {
+			t.Fatalf("expected usage under selected model, got %+v", result.Usage)
+		}
+		want := TokenUsage{InputTokens: 20200, OutputTokens: 43}
+		if usage != want {
+			t.Fatalf("usage = %+v, want %+v", usage, want)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestAntigravityBackendReportsUsageOnStructuredFailure(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyFailedStreamJSONScript()))
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{Model: "Gemini 3.1 Pro"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" || result.Error != "provider failed" {
+		t.Fatalf("result = %+v", result)
+	}
+	want := TokenUsage{InputTokens: 12, OutputTokens: 3, CacheReadTokens: 7, CacheWriteTokens: 2}
+	if got := result.Usage["Gemini 3.1 Pro"]; got != want {
+		t.Fatalf("usage = %+v, want %+v", got, want)
+	}
+}
+
+func TestAntigravityBackendMapsProviderTerminalStatusesWithUsage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		providerStatus string
+		wantStatus     string
+	}{
+		{providerStatus: "CANCELLED", wantStatus: "cancelled"},
+		{providerStatus: "CANCELED", wantStatus: "cancelled"},
+		{providerStatus: "ABORTED", wantStatus: "aborted"},
+		{providerStatus: "TIMEOUT", wantStatus: "timeout"},
+		{providerStatus: "TIMED_OUT", wantStatus: "timeout"},
+		{providerStatus: "UNKNOWN_STATUS", wantStatus: "failed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.providerStatus, func(t *testing.T) {
+			t.Parallel()
+			fakePath := filepath.Join(t.TempDir(), "agy")
+			writeTestExecutable(t, fakePath, []byte(fakeAgyTerminalResultScript(tt.providerStatus)))
+			backend, err := New("antigravity", Config{
+				ExecutablePath: fakePath,
+				Logger:         quietAntigravityLogger(),
+			})
+			if err != nil {
+				t.Fatalf("new antigravity backend: %v", err)
+			}
+			session, err := backend.Execute(
+				context.Background(),
+				"prompt-ignored",
+				ExecOptions{Model: "Gemini 3.1 Pro"},
+			)
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+
+			result := <-session.Result
+			if result.Status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", result.Status, tt.wantStatus)
+			}
+			if result.Error == "" {
+				t.Fatal("expected provider terminal status to surface an error")
+			}
+			wantUsage := TokenUsage{InputTokens: 12, OutputTokens: 3, CacheReadTokens: 7}
+			if got := result.Usage["Gemini 3.1 Pro"]; got != wantUsage {
+				t.Fatalf("usage = %+v, want %+v", got, wantUsage)
+			}
+		})
+	}
+}
+
+func TestAntigravityBackendReportsCompletedStepUsageWhenCancelled(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyCancelledStreamJSONScript()))
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Model: "Gemini 3.1 Pro"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	for msg := range session.Messages {
+		if msg.Type == MessageText && msg.Content == "working" {
+			cancel()
+		}
+	}
+	result := <-session.Result
+	if result.Status != "aborted" {
+		t.Fatalf("status = %q, want aborted (error=%q)", result.Status, result.Error)
+	}
+	want := TokenUsage{InputTokens: 21, OutputTokens: 5, CacheReadTokens: 4, CacheWriteTokens: 1}
+	if got := result.Usage["Gemini 3.1 Pro"]; got != want {
+		t.Fatalf("usage = %+v, want %+v", got, want)
 	}
 }
 

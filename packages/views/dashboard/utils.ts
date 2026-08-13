@@ -13,6 +13,7 @@ import {
 } from "@multica/core/dashboard";
 import {
   addDaysIso,
+  collectUnmappedModels,
   estimateCost,
   estimateCostBreakdown,
   formatShortDate,
@@ -134,7 +135,19 @@ export interface DashboardTokenTotals {
   cacheRead: number;
   cacheWrite: number;
   cost: number;
+  costUnpriced: boolean;
   taskCount: number;
+}
+
+function rowHasUnpricedCost(
+  row: DashboardUsageDaily | DashboardUsageByAgent,
+): boolean {
+  const tokens =
+    row.input_tokens +
+    row.output_tokens +
+    row.cache_read_tokens +
+    row.cache_write_tokens;
+  return tokens > 0 && collectUnmappedModels([row]).length > 0;
 }
 
 // Whole-window totals for the KPI tiles. taskCount sums DISTINCT task counts
@@ -150,9 +163,18 @@ export function computeDailyTotals(usage: DashboardUsageDaily[]): DashboardToken
       cacheRead: acc.cacheRead + u.cache_read_tokens,
       cacheWrite: acc.cacheWrite + u.cache_write_tokens,
       cost: acc.cost + estimateCost(u),
+      costUnpriced: acc.costUnpriced || rowHasUnpricedCost(u),
       taskCount: acc.taskCount + u.task_count,
     }),
-    { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, taskCount: 0 },
+    {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: 0,
+      costUnpriced: false,
+      taskCount: 0,
+    },
   );
 }
 
@@ -161,6 +183,7 @@ export interface AgentCostRow {
   tokens: number;
   cost: number;
   taskCount: number;
+  costUnpriced?: boolean;
 }
 
 // Fold per-(agent, model) rows into one row per agent. Cost is the sum
@@ -175,10 +198,14 @@ export function aggregateAgentTokens(rows: DashboardUsageByAgent[]): AgentCostRo
       cost: 0,
       taskCount: 0,
     };
-    entry.tokens +=
+    const rowTokens =
       r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    entry.tokens += rowTokens;
     entry.cost += estimateCost(r);
     entry.taskCount += r.task_count;
+    if (rowHasUnpricedCost(r)) {
+      entry.costUnpriced = true;
+    }
     map.set(r.agent_id, entry);
   }
   return Array.from(map.values()).toSorted((a, b) => b.cost - a.cost);
@@ -190,6 +217,7 @@ export interface AgentDashboardRow {
   cost: number;
   seconds: number;
   taskCount: number;
+  costUnpriced?: boolean;
 }
 
 // Merge per-agent token totals with per-agent run-time totals into one
@@ -211,13 +239,15 @@ export function mergeAgentDashboardRows(
   const merged = new Map<string, AgentDashboardRow>();
   for (const r of tokenRows) {
     const rt = runTimeByAgent.get(r.agentId);
-    merged.set(r.agentId, {
+    const row: AgentDashboardRow = {
       agentId: r.agentId,
       tokens: r.tokens,
       cost: r.cost,
       seconds: rt?.total_seconds ?? 0,
       taskCount: rt ? rt.task_count : r.taskCount,
-    });
+    };
+    if (r.costUnpriced === true) row.costUnpriced = true;
+    merged.set(r.agentId, row);
   }
   // Agents with run-time rows but zero tokens still belong on the list
   // (a task that errored before producing usage). Their token columns
@@ -300,6 +330,7 @@ export function bucketUnknownAgentRows(
     hasDeleted = true;
     bucket.tokens += r.tokens;
     bucket.cost += r.cost;
+    if (r.costUnpriced === true) bucket.costUnpriced = true;
   }
   return hasDeleted ? [...known, bucket] : known;
 }
