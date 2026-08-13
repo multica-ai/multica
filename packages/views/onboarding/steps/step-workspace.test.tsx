@@ -206,16 +206,29 @@ describe("StepWorkspace — issue prefix", () => {
     expect(screen.getByText("ACME-123")).toBeInTheDocument();
   });
 
-  // Reported against the first cut of this fix: typing a Chinese name and
-  // stopping there still showed "WS" — the placeholder invented one because a
-  // CJK-only name derives no slug. Nothing may advertise a prefix before there
-  // is one to derive from; "WS" in particular is the string this issue exists
-  // to remove.
-  it("shows no prefix at all while a CJK-only name leaves the slug empty", () => {
+  // A Chinese name fills the whole form on its own: the URL romanizes from
+  // the name, and the prefix follows the URL like any other name would.
+  it("fills the URL and prefix from a Chinese name", () => {
     renderStep({ existing: null, disabled: false });
 
     fireEvent.change(screen.getByLabelText("Workspace name"), {
       target: { value: "蜘蛛侠" },
+    });
+
+    expect(screen.getByLabelText("URL")).toHaveValue("zhizhuxia");
+    expect(prefixInput()).toHaveValue("ZHIZ");
+    expect(screen.getByText("ZHIZ-123")).toBeInTheDocument();
+    expect(screen.queryByText(/WS/)).not.toBeInTheDocument();
+  });
+
+  // Romanization only covers Han, so kana / Hangul / emoji names still reach
+  // the empty state. Nothing may advertise a prefix there — "WS" in
+  // particular is the string this issue exists to remove.
+  it("shows no prefix at all when the name romanizes to nothing", () => {
+    renderStep({ existing: null, disabled: false });
+
+    fireEvent.change(screen.getByLabelText("Workspace name"), {
+      target: { value: "スパイダーマン" },
     });
 
     expect(screen.getByLabelText("URL")).toHaveValue("");
@@ -238,14 +251,15 @@ describe("StepWorkspace — issue prefix", () => {
     expect(screen.getByText("SPID-123")).toBeInTheDocument();
   });
 
-  it("gives a Chinese-named workspace a slug-derived prefix instead of WS", () => {
+  it("follows a hand-typed URL over the romanized one", () => {
     renderStep({ existing: null, disabled: false });
 
-    // A CJK-only name produces no slug, so the user types one — that ASCII
-    // choice is what the prefix now follows.
     fireEvent.change(screen.getByLabelText("Workspace name"), {
       target: { value: "前端团队" },
     });
+    expect(prefixInput().value).toBe("QIAN");
+
+    // Overriding the URL re-derives the prefix from what the user chose.
     fireEvent.change(screen.getByLabelText("URL"), {
       target: { value: "frontend" },
     });

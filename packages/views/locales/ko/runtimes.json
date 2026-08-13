@@ -271,6 +271,12 @@
   "charts": {
     "heatmap_less": "적음",
     "heatmap_more": "많음",
+    "heatmap_no_activity": "활동 없음",
+    "heatmap_busiest_day": "가장 활발한 날짜",
+    "heatmap_most_active_weekday": "가장 활발한 요일",
+    "heatmap_quietest_weekday": "가장 한산한 요일",
+    "heatmap_average": "평균 {{value}}",
+    "heatmap_window_total_other": "{{count}}일 합계",
     "tooltip_total": "합계"
   },
   "list": {

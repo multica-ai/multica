@@ -294,11 +294,12 @@ type ProjectResourceData struct {
 type ConnectedAppData = runtimeapps.ConnectedApp
 
 type AgentTaskResponse struct {
-	ID          string `json:"id"`
-	AgentID     string `json:"agent_id"`
-	RuntimeID   string `json:"runtime_id"`
-	IssueID     string `json:"issue_id"`
-	WorkspaceID string `json:"workspace_id"`
+	ID                      string                               `json:"id"`
+	AgentID                 string                               `json:"agent_id"`
+	RuntimeID               string                               `json:"runtime_id"`
+	IssueID                 string                               `json:"issue_id"`
+	WorkspaceID             string                               `json:"workspace_id"`
+	PluginExecutionManifest *service.PluginExecutionManifestData `json:"plugin_execution_manifest,omitempty"`
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
 	// as `## Workspace Context` so every agent running in this workspace —

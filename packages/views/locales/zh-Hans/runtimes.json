@@ -271,6 +271,12 @@
   "charts": {
     "heatmap_less": "少",
     "heatmap_more": "多",
+    "heatmap_no_activity": "无活动",
+    "heatmap_busiest_day": "最活跃日期",
+    "heatmap_most_active_weekday": "最活跃星期",
+    "heatmap_quietest_weekday": "最不活跃星期",
+    "heatmap_average": "平均 {{value}}",
+    "heatmap_window_total_other": "{{count}} 天总计",
     "tooltip_total": "总计"
   },
   "list": {

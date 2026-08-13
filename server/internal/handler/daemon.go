@@ -30,6 +30,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
+	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -1730,6 +1731,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if composioMCPEnabled {
 		resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(task.RuntimeConnectedApps, task.ID)
 	}
+	_, pluginSkillRefs, pluginManifest, pluginErr := h.TaskService.LoadTaskPluginSkillBundles(r.Context(), task.ID)
+	if pluginErr != nil {
+		slog.Error("daemon claim: load pinned plugin contributions failed", "task_id", uuidToString(task.ID), "error", pluginErr)
+		return resp, deliveredCommentIDs, 0, 0, &claimBuildFailure{status: http.StatusInternalServerError, message: "pinned plugin contributions are unavailable"}
+	}
+	resp.PluginExecutionManifest = pluginManifest
+	if len(pluginSkillRefs) > 0 && (!requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1) ||
+		!requestHasClientCapability(r, protocol.DaemonCapabilityExecutionManifestV1) ||
+		!requestHasClientCapability(r, protocol.DaemonCapabilityAgentSkillV1)) {
+		return resp, deliveredCommentIDs, 0, 0, &claimBuildFailure{status: http.StatusConflict, message: "runtime does not support this task's plugin execution manifest"}
+	}
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 		var customEnv map[string]string
@@ -1796,6 +1808,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		if useSkillRefs {
 			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+			skillRefs = append(skillRefs, pluginSkillRefs...)
 			agentSkillCount = len(skillRefs)
 			resp.Agent.SkillRefs = skillRefs
 		} else {
@@ -2882,6 +2895,12 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 	}
 
 	bundles, _ := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+	pluginBundles, _, _, err := h.TaskService.LoadTaskPluginSkillBundles(r.Context(), task.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "pinned plugin contributions are unavailable")
+		return
+	}
+	bundles = append(bundles, pluginBundles...)
 	allowed := make(map[string]service.AgentSkillData, len(bundles))
 	for _, bundle := range bundles {
 		allowed[bundle.Source+"\x00"+bundle.ID] = bundle
@@ -2896,6 +2915,10 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 		bundle, ok := allowed[ref.Source+"\x00"+ref.ID]
 		if !ok {
 			writeError(w, http.StatusNotFound, "skill bundle not found")
+			return
+		}
+		if ref.Source == skillbundle.SourcePlugin && bundle.Hash != ref.Hash {
+			writeError(w, http.StatusConflict, "pinned plugin skill bundle hash mismatch")
 			return
 		}
 		resolved = append(resolved, bundle)

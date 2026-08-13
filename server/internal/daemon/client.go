@@ -187,6 +187,8 @@ func daemonClientCapabilities() string {
 	return strings.Join([]string{
 		protocol.DaemonCapabilitySkillBundlesV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
+		protocol.DaemonCapabilityExecutionManifestV1,
+		protocol.DaemonCapabilityAgentSkillV1,
 		protocol.DaemonCapabilityRPCV1,
 	}, ",")
 }

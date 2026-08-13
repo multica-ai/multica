@@ -150,12 +150,9 @@ export function ActorAvatar({
 
 /**
  * Not an `<a>` on purpose: the avatar is often composed inside menu items,
- * options and buttons, where it must yield the click to the surrounding
- * control untouched (no preventDefault — a real anchor would need one to
- * suppress its own navigation, and a pre-prevented click can change how the
- * host control behaves). The cost is no native context menu; modifier and
- * middle clicks are implemented here instead, with the same intent semantics
- * as AppLink.
+ * options and buttons, where it yields the click to the surrounding control.
+ * The cost is no native context menu, so modifier and middle clicks are
+ * implemented here with the same intent semantics as AppLink.
  */
 function ActorAvatarProfileLink({
   href,

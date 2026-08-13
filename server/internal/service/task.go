@@ -26,6 +26,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
+	"github.com/multica-ai/multica/server/pkg/plugincontract"
+	"github.com/multica-ai/multica/server/pkg/pluginruntime"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
@@ -4825,6 +4827,79 @@ func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.
 	skills := s.LoadAgentSkills(ctx, agentID)
 	skills = append(skills, s.BuiltinSkills()...)
 	return BuildAgentSkillBundles(skills)
+}
+
+type PluginExecutionManifestData struct {
+	ID                   string                        `json:"id"`
+	SnapshotID           string                        `json:"snapshot_id,omitempty"`
+	SnapshotRevision     int64                         `json:"snapshot_revision"`
+	SnapshotDigest       string                        `json:"snapshot_digest,omitempty"`
+	ComposerVersion      string                        `json:"composer_version"`
+	SchemaVersion        int32                         `json:"schema_version"`
+	OrderedContributions []pluginruntime.CompiledEntry `json:"ordered_contributions"`
+}
+
+// LoadTaskPluginSkillBundles resolves only the immutable artifact files named
+// by the task's enqueue-time execution manifest. It deliberately does not read
+// current installation state, so disable/upgrade cannot mutate an in-flight or
+// retried run's inputs.
+func (s *TaskService) LoadTaskPluginSkillBundles(ctx context.Context, taskID pgtype.UUID) ([]AgentSkillData, []AgentSkillRefData, *PluginExecutionManifestData, error) {
+	manifest, err := s.Queries.GetPluginExecutionManifestByTask(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("load plugin execution manifest: %w", err)
+	}
+	entries, err := pluginruntime.ParseEntries(manifest.OrderedContributions)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	data := &PluginExecutionManifestData{
+		ID:                   util.UUIDToString(manifest.ID),
+		SnapshotID:           util.UUIDToString(manifest.SnapshotID),
+		SnapshotRevision:     manifest.SnapshotRevision,
+		SnapshotDigest:       manifest.SnapshotDigest.String,
+		ComposerVersion:      manifest.ComposerVersion,
+		SchemaVersion:        manifest.SchemaVersion,
+		OrderedContributions: entries,
+	}
+	if len(entries) == 0 {
+		return nil, nil, data, nil
+	}
+
+	skills := make([]AgentSkillData, 0, len(entries))
+	for _, entry := range entries {
+		if entry.ContributionType != plugincontract.ContributionAgentSkillV1 || entry.ArtifactFileID == "" {
+			return nil, nil, nil, fmt.Errorf("execution manifest contains unsupported plugin contribution")
+		}
+		artifactFileID, parseErr := util.ParseUUID(entry.ArtifactFileID)
+		if parseErr != nil {
+			return nil, nil, nil, fmt.Errorf("execution manifest contains invalid artifact file id")
+		}
+		artifact, getErr := s.Queries.GetPluginArtifactFile(ctx, artifactFileID)
+		if getErr != nil {
+			return nil, nil, nil, fmt.Errorf("load pinned plugin artifact: %w", getErr)
+		}
+		releaseID, parseErr := util.ParseUUID(entry.ReleaseID)
+		if parseErr != nil || artifact.ReleaseID != releaseID || artifact.Path != entry.EntryPath || artifact.Digest != entry.EntryDigest || plugincontract.DigestBytes([]byte(artifact.Content)) != entry.EntryDigest {
+			return nil, nil, nil, fmt.Errorf("pinned plugin artifact failed digest validation")
+		}
+		skills = append(skills, AgentSkillData{
+			ID:          "plugin:" + entry.ContributionID,
+			Source:      skillbundle.SourcePlugin,
+			Name:        entry.ContributionKey,
+			Description: entry.Description,
+			Content:     artifact.Content,
+		})
+	}
+	bundles, refs := BuildAgentSkillBundles(skills)
+	for i := range refs {
+		if refs[i].Hash != entries[i].SkillBundleHash || refs[i].SizeBytes != entries[i].SkillSizeBytes || refs[i].FileCount != entries[i].SkillFileCount {
+			return nil, nil, nil, fmt.Errorf("pinned plugin skill bundle failed manifest validation")
+		}
+	}
+	return bundles, refs, data, nil
 }
 
 func BuildAgentSkillBundles(skills []AgentSkillData) ([]AgentSkillData, []AgentSkillRefData) {

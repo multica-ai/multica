@@ -421,16 +421,13 @@ type Daemon struct {
 	// newer than that verdict" a fact rather than a hope. Guarded by d.mu.
 	demotionSeq uint64
 
-	// resolvedPathsMu guards resolvedPaths, the self-healed executable paths.
-	// The daemon pins each agent's absolute path at startup so a later PATH
-	// change can't redirect a task launch. When that pinned path later vanishes
-	// (a version manager did an in-place upgrade — Homebrew Cask, nvm/fnm),
-	// resolveAgentEntry re-resolves the original command once and records the
-	// result here so subsequent launches, model lists, and registrations reuse
-	// it without re-resolving. Path and detected version are stored together so
-	// any reader that observes the new path also observes the matching version
-	// (no "new binary under stale version policy" window). Keyed by provider.
-	// See MUL-4486.
+	// resolvedPathsMu guards concrete executable paths paired with the version
+	// detected for each. On POSIX these are self-heals cached after a pinned path
+	// vanishes (MUL-4486). On Windows they are launch targets resolved from a
+	// stable installer junction; that junction is followed on every launch so a
+	// retarget takes effect even while the old release remains installed. Path
+	// and version are stored together so no reader can launch a new binary under
+	// stale version policy. Keyed by provider.
 	resolvedPathsMu sync.RWMutex
 	resolvedPaths   map[string]healedAgent
 	// healGroup coalesces concurrent self-heal re-resolutions per provider so a
@@ -821,11 +818,13 @@ type healedAgent struct {
 }
 
 // resolveAgentEntry returns entry with a usable executable path plus the CLI
-// version that corresponds to that path, self-healing the pinned Path when it
-// has vanished from disk (MUL-4486).
+// version that corresponds to that path. It resolves retargetable Windows
+// installer junctions per launch and self-heals vanished pinned paths on other
+// platforms (MUL-4486).
 //
-// The daemon pins each agent's absolute, symlink-resolved path at startup so a
-// later PATH change cannot redirect a task launch. But a version manager
+// The daemon pins each agent's discovered entry point at startup so a later
+// PATH change cannot redirect a task launch. POSIX discovery also resolves
+// symlinks to a concrete path. But a version manager
 // (Homebrew Cask, nvm/fnm) upgrading in place deletes the old versioned
 // directory that pinned path points into and repoints the stable command name
 // at the new version — leaving the daemon holding a path that no longer exists
@@ -839,6 +838,8 @@ type healedAgent struct {
 // updating.
 //
 // Behaviour:
+//   - A Windows stable entry point -> its final target is verified and returned
+//     with the detected version; a retarget publishes the new pair atomically.
 //   - A previous self-heal that is still live -> returned with its paired
 //     version. This is checked first so that once we've re-resolved to a new
 //     binary, a reappearing stale path (a downgrade / reinstall recreating the
@@ -862,6 +863,24 @@ func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry A
 	return resolved, version
 }
 
+// resolveAgentEntryForLaunch is the strict task-launch boundary. Windows
+// installer junctions must yield a verified final target before the first
+// launch; otherwise the stable entry could retarget after registration and run
+// a binary whose version and minimum-version policy were never checked.
+func (d *Daemon) resolveAgentEntryForLaunch(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, error) {
+	resolved, version, outcome := d.resolveAgentEntryWithHeal(ctx, provider, entry)
+	if outcome.rejected != nil {
+		return entry, d.agentVersion(provider), outcome.rejected
+	}
+	if outcome.failure != nil {
+		return entry, d.agentVersion(provider), fmt.Errorf("resolve agent executable %q for launch: %w", entry.Path, outcome.failure)
+	}
+	if outcome.adopted.path != "" {
+		return resolved, version, nil
+	}
+	return resolved, version, nil
+}
+
 // healOutcome is what one self-heal attempt concluded. At most one half is
 // meaningful: adopted names a binary that cleared the same gates registration
 // applies, while rejected carries the typed verdict for a candidate that was
@@ -872,6 +891,7 @@ func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry A
 type healOutcome struct {
 	adopted  healedAgent
 	rejected *agent.BelowMinimumError
+	failure  error
 }
 
 // resolveAgentEntryWithHeal is resolveAgentEntry plus what the self-heal
@@ -884,6 +904,25 @@ type healOutcome struct {
 // fails, and reports "version detection failed" — which by design leaves the
 // runtime online, claiming tasks for a CLI that cannot launch.
 func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, healOutcome) {
+	// Windows installer entry points are stable junctions whose final target can
+	// change while the old release remains installed. Resolve the final path on
+	// every launch and adopt a changed target only after pairing it with a freshly
+	// detected, supported version. Other platforms return handled=false and keep
+	// the existing pinned-path self-heal semantics below.
+	var launchOutcome healOutcome
+	if launchPath, handled, err := executablePathForLaunch(entry.Path); handled {
+		if err != nil {
+			d.logger.Warn("resolve agent executable for launch failed; keeping discovered path",
+				"provider", provider, "path", entry.Path, "error", err)
+			launchOutcome.failure = err
+		} else if outcome, ok := d.resolveAgentLaunchTarget(ctx, provider, entry, launchPath); ok {
+			entry.Path = outcome.adopted.path
+			return entry, outcome.adopted.version, outcome
+		} else {
+			launchOutcome = outcome
+		}
+	}
+
 	// A prior self-heal wins over the original pinned path: it carries a
 	// {path, version} pair we already verified together, so it can never regress
 	// to the mismatched pairing a reappearing stale path would produce.
@@ -892,11 +931,12 @@ func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string,
 	d.resolvedPathsMu.RUnlock()
 	if ok && agentExecutablePresent(healed.path) {
 		entry.Path = healed.path
-		return entry, healed.version, healOutcome{adopted: healed}
+		launchOutcome.adopted = healed
+		return entry, healed.version, launchOutcome
 	}
 
 	if agentExecutablePresent(entry.Path) {
-		return entry, d.agentVersion(provider), healOutcome{}
+		return entry, d.agentVersion(provider), launchOutcome
 	}
 
 	if entry.Command == "" {
@@ -916,6 +956,63 @@ func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string,
 	}
 	entry.Path = outcome.adopted.path
 	return entry, outcome.adopted.version, outcome
+}
+
+// resolveAgentLaunchTarget handles platforms whose stable discovered entry
+// point can retarget a different still-live executable. It returns ok only
+// when a verified {path, version} pair is available; a rejected or transiently
+// unreadable target falls through to the existing path handling so it is never
+// published under a stale version.
+func (d *Daemon) resolveAgentLaunchTarget(ctx context.Context, provider string, entry AgentEntry, launchPath string) (healOutcome, bool) {
+	const maxRetargetAttempts = 4
+	for attempt := 0; attempt < maxRetargetAttempts; attempt++ {
+		d.resolvedPathsMu.RLock()
+		cached, cachedOK := d.resolvedPaths[provider]
+		d.resolvedPathsMu.RUnlock()
+		if cachedOK && cached.path == launchPath && agentExecutablePresent(cached.path) {
+			return healOutcome{adopted: cached}, true
+		}
+
+		// Coalesce only callers that observed the same concrete release. A
+		// provider-only key can make a post-retarget caller inherit the previous
+		// release's result even though both files remain present.
+		key := provider + "\x00" + launchPath
+		v, _, _ := d.healGroup.Do(key, func() (any, error) {
+			d.resolvedPathsMu.RLock()
+			current, ok := d.resolvedPaths[provider]
+			d.resolvedPathsMu.RUnlock()
+			if ok && current.path == launchPath && agentExecutablePresent(current.path) {
+				return healOutcome{adopted: current}, nil
+			}
+			return d.adoptAgentPath(ctx, provider, entry.Command, launchPath, "resolved stable entry point for launch"), nil
+		})
+		outcome, _ := v.(healOutcome)
+
+		// The installer may retarget while version detection is running. Resolve
+		// again before returning and retry against the target visible now.
+		currentPath, _, err := executablePathForLaunch(entry.Path)
+		if err != nil {
+			if outcome.adopted.path != "" {
+				return outcome, true
+			}
+			outcome.failure = err
+			return outcome, false
+		}
+		if currentPath != launchPath {
+			launchPath = currentPath
+			continue
+		}
+		if outcome.adopted.path != "" {
+			return outcome, true
+		}
+		if cachedOK && agentExecutablePresent(cached.path) {
+			outcome.adopted = cached
+			return outcome, true
+		}
+		return outcome, false
+	}
+
+	return healOutcome{failure: errors.New("installer entry point changed repeatedly while resolving it")}, false
 }
 
 // healAgentPath re-resolves command for provider and, if a usable binary is
@@ -946,7 +1043,19 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 	if !found {
 		return healOutcome{}
 	}
+	if launchPath, handled, err := executablePathForLaunch(newPath); handled {
+		if err != nil {
+			d.logger.Warn("resolve re-discovered agent executable for launch failed; keeping discovered path",
+				"provider", provider, "path", newPath, "error", err)
+			return healOutcome{failure: err}
+		} else {
+			newPath = launchPath
+		}
+	}
+	return d.adoptAgentPath(ctx, provider, command, newPath, "re-resolved after pinned path vanished")
+}
 
+func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath, reason string) healOutcome {
 	// Verify before adopting. An in-place "upgrade" that actually repoints at an
 	// older or broken install must not be launched under the daemon's stale
 	// version policy, and must not slip past the minimum-version gate that the
@@ -955,7 +1064,7 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 	if err != nil {
 		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
 			"provider", provider, "command", command, "new_path", newPath, "error", err)
-		return healOutcome{}
+		return healOutcome{failure: err}
 	}
 	if err := checkAgentMinVersion(provider, version); err != nil {
 		var tooOld *agent.BelowMinimumError
@@ -966,7 +1075,7 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 			// transient case the below-minimum machinery must never act on.
 			d.logger.Warn("re-resolved agent executable version could not be validated; keeping pinned path",
 				"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
-			return healOutcome{}
+			return healOutcome{failure: err}
 		}
 		d.logger.Warn("re-resolved agent executable is below the minimum supported version; not adopting it",
 			"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
@@ -988,8 +1097,8 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 	// report and any future d.agentVersion reader.
 	d.setAgentVersion(provider, version)
 
-	d.logger.Info("re-resolved agent executable after pinned path vanished (in-place upgrade)",
-		"provider", provider, "command", command, "new_path", newPath, "version", version)
+	d.logger.Info("adopted resolved agent executable",
+		"provider", provider, "command", command, "new_path", newPath, "version", version, "reason", reason)
 	return healOutcome{adopted: adopted}
 }
 
@@ -5528,10 +5637,14 @@ func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRe
 		return SkillData{}, fmt.Errorf("resolve skill bundle returned wrong skill: requested source=%s id=%s, got source=%s id=%s", ref.Source, ref.ID, bundle.Source, bundle.ID)
 	}
 	bundleRef := skillRefFromBundle(bundle)
-	if !validateSkillBundle(bundleRef, bundle) {
+	validationRef := bundleRef
+	if ref.Source == skillbundle.SourcePlugin {
+		validationRef = ref
+	}
+	if !validateSkillBundle(validationRef, bundle) {
 		return SkillData{}, fmt.Errorf("resolve skill bundle returned invalid bundle: skill_id=%s source=%s hash=%s", bundle.ID, bundle.Source, bundle.Hash)
 	}
-	if err := d.skillCache.WithRefLock(task.WorkspaceID, bundleRef, func() error {
+	if err := d.skillCache.WithRefLock(task.WorkspaceID, validationRef, func() error {
 		return d.skillCache.Store(task.WorkspaceID, bundle)
 	}); err != nil {
 		return SkillData{}, fmt.Errorf("store skill bundle cache: %w", err)
@@ -5729,7 +5842,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// upgrade deleted (MUL-4486). Only reached when no custom profile owns
 		// the launch, so a custom runtime's path is never second-guessed and a
 		// custom-only host pays no wasted re-resolution.
-		entry, resolvedVersion = d.resolveAgentEntry(prepareCtx, provider, entry)
+		var resolveErr error
+		entry, resolvedVersion, resolveErr = d.resolveAgentEntryForLaunch(prepareCtx, provider, entry)
+		if resolveErr != nil {
+			return TaskResult{}, resolveErr
+		}
 	}
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
@@ -7622,14 +7739,43 @@ func ensureTaskTempDir(envRoot string, workspaceID string, taskID string) (strin
 	if taskID == "" {
 		return "", errors.New("task id is empty")
 	}
-	dir, err := os.MkdirTemp(socketSafeTempBaseDir(), "multica-task-")
+	base, overrideConfigured, err := taskTempBaseDir()
 	if err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp(base, "multica-task-")
+	if err != nil {
+		if overrideConfigured {
+			return "", fmt.Errorf("MULTICA_AGENT_TEMP_BASE: create task temp dir: %w", err)
+		}
 		return "", err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return "", err
 	}
 	return dir, nil
+}
+
+// taskTempBaseDir resolves the parent directory for private per-task temp
+// dirs on Linux and macOS. The daemon operator can relocate it with
+// MULTICA_AGENT_TEMP_BASE, which must be an absolute path to an existing,
+// writable directory; an invalid value fails task startup instead of silently
+// falling back. Windows ignores the variable. Unset keeps the platform default
+// exactly as before, down to the syscalls made.
+// Operators should pick a short path: child tools may bind AF_UNIX sockets
+// under $TMPDIR (sun_path is 108 bytes on Linux, 104 on macOS).
+func taskTempBaseDir() (string, bool, error) {
+	if runtime.GOOS == "windows" {
+		return socketSafeTempBaseDir(), false, nil
+	}
+	base := strings.TrimSpace(os.Getenv("MULTICA_AGENT_TEMP_BASE"))
+	if base == "" {
+		return socketSafeTempBaseDir(), false, nil
+	}
+	if !filepath.IsAbs(base) {
+		return "", true, fmt.Errorf("MULTICA_AGENT_TEMP_BASE must be an absolute path, got %q", base)
+	}
+	return base, true, nil
 }
 
 func socketSafeTempBaseDir() string {
