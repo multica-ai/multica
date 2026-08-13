@@ -87,14 +87,14 @@ func TestPrepareHermesHomeMemoryStorePersistsAcrossTasks(t *testing.T) {
 	skills := []SkillContextForEnv{{Name: "deploy", Content: "# Deploy"}}
 
 	firstTask := filepath.Join(t.TempDir(), "hermes-home")
-	if err := prepareHermesHome(firstTask, sharedHome, false, skills, nil, store, testLogger()); err != nil {
+	if _, err := prepareHermesHome(firstTask, sharedHome, false, skills, nil, store, "", testLogger()); err != nil {
 		t.Fatalf("prepare first task: %v", err)
 	}
 	// Hermes writes memory back into <HERMES_HOME>/memories during the run.
 	mustWrite(t, filepath.Join(firstTask, "memories", "MEMORY.md"), "prefers tabs")
 
 	secondTask := filepath.Join(t.TempDir(), "hermes-home")
-	if err := prepareHermesHome(secondTask, sharedHome, false, skills, nil, store, testLogger()); err != nil {
+	if _, err := prepareHermesHome(secondTask, sharedHome, false, skills, nil, store, "", testLogger()); err != nil {
 		t.Fatalf("prepare second task: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(secondTask, "memories", "MEMORY.md"))
@@ -125,13 +125,13 @@ func TestPrepareHermesHomeMemoryStoreIsolatesAgents(t *testing.T) {
 	skills := []SkillContextForEnv{{Name: "deploy", Content: "# Deploy"}}
 
 	homeA := filepath.Join(t.TempDir(), "hermes-home")
-	if err := prepareHermesHome(homeA, sharedHome, false, skills, nil, filepath.Join(stateRoot, "agent-a", "default"), testLogger()); err != nil {
+	if _, err := prepareHermesHome(homeA, sharedHome, false, skills, nil, filepath.Join(stateRoot, "agent-a", "default"), "", testLogger()); err != nil {
 		t.Fatalf("prepare agent A: %v", err)
 	}
 	mustWrite(t, filepath.Join(homeA, "memories", "MEMORY.md"), "agent A secret")
 
 	homeB := filepath.Join(t.TempDir(), "hermes-home")
-	if err := prepareHermesHome(homeB, sharedHome, false, skills, nil, filepath.Join(stateRoot, "agent-b", "default"), testLogger()); err != nil {
+	if _, err := prepareHermesHome(homeB, sharedHome, false, skills, nil, filepath.Join(stateRoot, "agent-b", "default"), "", testLogger()); err != nil {
 		t.Fatalf("prepare agent B: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(homeB, "memories", "MEMORY.md")); !os.IsNotExist(err) {
@@ -148,7 +148,7 @@ func TestPrepareHermesHomeWithoutStore(t *testing.T) {
 	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
 	skills := []SkillContextForEnv{{Name: "deploy", Content: "# Deploy"}}
 
-	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", testLogger()); err != nil {
+	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", "", testLogger()); err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
 	fi, err := os.Lstat(filepath.Join(hermesHome, "memories"))
@@ -177,13 +177,13 @@ func TestPrepareHermesHomeWithoutStoreDetachesExistingStoreLink(t *testing.T) {
 	skills := []SkillContextForEnv{{Name: "deploy", Content: "# Deploy"}}
 
 	// Run once with the store mounted.
-	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, store, testLogger()); err != nil {
+	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, store, "", testLogger()); err != nil {
 		t.Fatalf("prepare with store: %v", err)
 	}
 	mustWrite(t, filepath.Join(hermesHome, "memories", "MEMORY.md"), "persistent memory")
 
 	// The same overlay is reused by a task that resolves no store.
-	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", testLogger()); err != nil {
+	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", "", testLogger()); err != nil {
 		t.Fatalf("prepare without store: %v", err)
 	}
 
@@ -213,12 +213,12 @@ func TestPrepareHermesHomeWithoutStoreKeepsTaskLocalMemories(t *testing.T) {
 	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
 	skills := []SkillContextForEnv{{Name: "deploy", Content: "# Deploy"}}
 
-	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", testLogger()); err != nil {
+	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", "", testLogger()); err != nil {
 		t.Fatalf("first prepare: %v", err)
 	}
 	mustWrite(t, filepath.Join(hermesHome, "memories", "MEMORY.md"), "task memory")
 
-	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", testLogger()); err != nil {
+	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", "", testLogger()); err != nil {
 		t.Fatalf("reuse prepare: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(hermesHome, "memories", "MEMORY.md")); err != nil {
@@ -416,7 +416,7 @@ func TestPromoteHermesMemoryStagingClassifiesRemoveFailures(t *testing.T) {
 		staging := filepath.Join(parent, ".default.migrating-x")
 		mustWrite(t, filepath.Join(staging, "MEMORY.md"), "loser")
 
-		promoted, err := promoteHermesMemoryStaging(staging, storeDir)
+		promoted, err := promoteHermesStoreStaging(staging, storeDir, hermesStorePopulated)
 		if err != nil {
 			t.Fatalf("a populated store should be a lost race, not an error: %v", err)
 		}
@@ -448,7 +448,7 @@ func TestPromoteHermesMemoryStagingClassifiesRemoveFailures(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
 
-		promoted, err := promoteHermesMemoryStaging(staging, storeDir)
+		promoted, err := promoteHermesStoreStaging(staging, storeDir, hermesStorePopulated)
 		if promoted {
 			t.Fatalf("promote reported success against an unremovable store")
 		}
@@ -492,13 +492,13 @@ func TestPrepareHermesHomeMigratesTaskLocalMemories(t *testing.T) {
 	skills := []SkillContextForEnv{{Name: "deploy", Content: "# Deploy"}}
 
 	// Simulate the old layout: a task-local memories dir with accumulated state.
-	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", testLogger()); err != nil {
+	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", "", testLogger()); err != nil {
 		t.Fatalf("prepare pre-store overlay: %v", err)
 	}
 	mustWrite(t, filepath.Join(hermesHome, "memories", "MEMORY.md"), "carried over")
 
 	store := filepath.Join(t.TempDir(), "hermes-state", "agent-1", "default")
-	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, store, testLogger()); err != nil {
+	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, store, "", testLogger()); err != nil {
 		t.Fatalf("prepare with store: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(store, "MEMORY.md"))
@@ -519,7 +519,7 @@ func TestPrepareHermesHomeMigrationKeepsExistingStore(t *testing.T) {
 	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
 	skills := []SkillContextForEnv{{Name: "deploy", Content: "# Deploy"}}
 
-	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", testLogger()); err != nil {
+	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", "", testLogger()); err != nil {
 		t.Fatalf("prepare pre-store overlay: %v", err)
 	}
 	mustWrite(t, filepath.Join(hermesHome, "memories", "MEMORY.md"), "stale task copy")
@@ -527,7 +527,7 @@ func TestPrepareHermesHomeMigrationKeepsExistingStore(t *testing.T) {
 	store := filepath.Join(t.TempDir(), "hermes-state", "agent-1", "default")
 	mustWrite(t, filepath.Join(store, "MEMORY.md"), "authoritative agent memory")
 
-	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, store, testLogger()); err != nil {
+	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, store, "", testLogger()); err != nil {
 		t.Fatalf("prepare with store: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(store, "MEMORY.md"))

@@ -35,7 +35,22 @@ With the CLI, you can also import from a `.skill` or `.zip` file:
 multica skill import --file ./review-helper.skill
 ```
 
-If a skill with the same name already exists in the workspace, the import can stop, overwrite the existing content, save under a new name, or skip. Overwriting through import is limited to the skill's creator; a workspace `admin` who can edit the skill in the app still cannot overwrite it via import.
+If a skill with the same name already exists in the workspace, the import can stop, overwrite the existing content, save under a new name, or skip. Overwriting through import is limited to the skill's creator; a workspace `admin` who can edit the skill in the app still cannot overwrite it via import. To pull a newer version of a skill that is already in the workspace, use [Updating an imported skill](#updating-an-imported-skill) instead.
+
+## Updating an imported skill
+
+A skill imported from GitHub, ClawHub, or Skills.sh keeps a reference to its source. To pull the latest version, use **Update** on the skill page (or "Update from source" in the list's row menu), or the CLI:
+
+```bash
+multica skill refresh <skill-id>
+```
+
+The skill is re-downloaded from its source and replaced in place:
+
+- **Preserved**: the skill's identity — agent assignments, labels, creator, and creation date. Agents keep the skill without re-adding it.
+- **Replaced**: name (if the source renamed it), description, `SKILL.md`, and all supporting files. Local edits to the skill are overwritten.
+
+The skill's creator and workspace `owner`s / `admin`s can update from source. Skills created manually, imported from an archive file, or copied from a runtime have no hosted source and cannot be updated this way — re-import them instead.
 
 ## Skill contents
 

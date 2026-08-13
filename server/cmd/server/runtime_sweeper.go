@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -33,6 +36,19 @@ const (
 	// offlineRuntimeTTLSeconds deletes offline runtimes with no active agents
 	// after this duration. 7 days gives users plenty of time to restart daemons.
 	offlineRuntimeTTLSeconds = 7 * 24 * 3600.0
+	// runtimeGCBatchSize bounds both the candidate scan and the number of
+	// per-runtime transactions one sweeper tick may open.
+	runtimeGCBatchSize = 100
+	// runtimeGCBlockedScanLimit bounds the observability query as well. The
+	// gauge saturates at this value rather than turning a safety signal into an
+	// unbounded recurring scan when a large task backlog exists.
+	runtimeGCBlockedScanLimit = 1000
+	// runtimeGCTickTimeout bounds the whole GC stage so lock contention cannot
+	// starve the stale-runtime and task sweeps that run before it every 30s.
+	runtimeGCTickTimeout = 15 * time.Second
+	// runtimeGCOperationTimeout prevents one contended or unhealthy runtime from
+	// stalling every later sweeper stage indefinitely.
+	runtimeGCOperationTimeout = 5 * time.Second
 	// dispatchTimeoutSeconds fails tasks stuck in 'dispatched' beyond this.
 	// The dispatched→running transition should be near-instant, so 5 minutes
 	// means something went wrong (e.g. StartTask API call failed silently).
@@ -79,6 +95,10 @@ const (
 	chatFinalizeBatchSize = 100
 )
 
+type runtimeGCTxStarter interface {
+	Begin(context.Context) (pgx.Tx, error)
+}
+
 // runRuntimeSweeper periodically marks runtimes as offline if their
 // last_seen_at exceeds the stale threshold, and fails orphaned tasks.
 // This handles cases where the daemon crashes, is killed without calling
@@ -90,7 +110,7 @@ const (
 // hot heartbeat path; the DB is allowed to lag up to runtimeHeartbeatDBFlushInterval).
 // When liveness is unavailable or errors, we fall back to trusting the DB
 // stale window — that is the original behavior.
-func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus) {
+func runRuntimeSweeper(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 
@@ -103,7 +123,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			sweepDeferredChatFinalizations(ctx, queries, taskSvc)
-			gcRuntimes(ctx, queries, bus)
+			gcRuntimes(ctx, txStarter, queries, taskSvc.Metrics, bus)
 		}
 	}
 }
@@ -224,25 +244,89 @@ func filterStaleRuntimesByLiveness(ctx context.Context, candidates []db.SelectSt
 	return ids
 }
 
-// gcRuntimes deletes offline runtimes that have exceeded the TTL and have
-// no active (non-archived) agents. Before deleting, it cleans up any
-// archived agents so the FK constraint (ON DELETE RESTRICT) doesn't block.
-func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
-	deleted, err := queries.DeleteStaleOfflineRuntimes(ctx, offlineRuntimeTTLSeconds)
+// gcRuntimes deletes old offline runtimes without relying on the legacy
+// agent_task_queue.runtime_id ON DELETE CASCADE. Candidate discovery is bounded;
+// each runtime then gets an independent transaction so one bad row cannot abort
+// the whole sweep.
+func gcRuntimes(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, metrics *obsmetrics.BusinessMetrics, bus *events.Bus) {
+	gcRuntimesWithBudget(ctx, txStarter, queries, metrics, bus, runtimeGCTickTimeout)
+}
+
+func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, metrics *obsmetrics.BusinessMetrics, bus *events.Bus, budget time.Duration) {
+	gcCtx, cancelGC := context.WithTimeout(ctx, budget)
+	defer cancelGC()
+
+	countCtx, cancelCount := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
+	blocked, err := queries.CountStaleOfflineRuntimesBlockedByTasks(countCtx, db.CountStaleOfflineRuntimesBlockedByTasksParams{
+		StaleSeconds: offlineRuntimeTTLSeconds,
+		MaxRows:      runtimeGCBlockedScanLimit,
+	})
+	cancelCount()
 	if err != nil {
-		slog.Warn("runtime GC: failed to delete stale offline runtimes", "error", err)
+		slog.Warn("runtime GC: failed to count task-blocked runtimes", "error", err)
+		metrics.RecordRuntimeGCBlockedObservationFailed()
+	} else {
+		metrics.SetRuntimeGCBlocked(blocked)
+		if blocked > 0 {
+			slog.Debug("runtime GC: stale runtimes blocked by non-terminal tasks",
+				"count", blocked, "count_capped", blocked == runtimeGCBlockedScanLimit)
+		}
+	}
+
+	listCtx, cancelList := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
+	candidates, err := queries.ListStaleOfflineRuntimeGCCandidates(listCtx, db.ListStaleOfflineRuntimeGCCandidatesParams{
+		StaleSeconds: offlineRuntimeTTLSeconds,
+		MaxPerTick:   runtimeGCBatchSize,
+	})
+	cancelList()
+	if err != nil {
+		slog.Warn("runtime GC: failed to list stale offline runtimes", "error", err)
+		metrics.RecordRuntimeGCFailed()
 		return
 	}
-	if len(deleted) == 0 {
+	if len(candidates) == 0 {
 		return
 	}
 
 	gcWorkspaces := make(map[string]bool)
-	for _, row := range deleted {
-		gcWorkspaces[util.UUIDToString(row.WorkspaceID)] = true
+	deleted := 0
+	for i, runtimeID := range candidates {
+		if gcCtx.Err() != nil {
+			slog.Info("runtime GC: tick budget exhausted",
+				"deleted", deleted, "remaining_candidates", len(candidates)-i)
+			break
+		}
+		runtimeCtx, cancelRuntime := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
+		workspaceID, didDelete, taskBlocked, err := gcRuntime(runtimeCtx, txStarter, queries, runtimeID)
+		cancelRuntime()
+		if err != nil {
+			if gcCtx.Err() != nil {
+				slog.Info("runtime GC: tick budget exhausted",
+					"deleted", deleted, "remaining_candidates", len(candidates)-i)
+				break
+			}
+			slog.Warn("runtime GC: failed to delete stale offline runtime",
+				"runtime_id", util.UUIDToString(runtimeID), "error", err)
+			metrics.RecordRuntimeGCFailed()
+			continue
+		}
+		if taskBlocked {
+			slog.Warn("runtime GC: candidate gained a non-terminal task; skipping",
+				"runtime_id", util.UUIDToString(runtimeID))
+			continue
+		}
+		if !didDelete {
+			continue
+		}
+		deleted++
+		metrics.RecordRuntimeGCDeleted()
+		gcWorkspaces[workspaceID] = true
+	}
+	if deleted == 0 {
+		return
 	}
 
-	slog.Info("runtime GC: deleted stale offline runtimes", "count", len(deleted), "workspaces", len(gcWorkspaces))
+	slog.Info("runtime GC: deleted stale offline runtimes", "count", deleted, "workspaces", len(gcWorkspaces))
 
 	for wsID := range gcWorkspaces {
 		bus.Publish(events.Event{
@@ -254,6 +338,76 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 			},
 		})
 	}
+}
+
+// gcRuntime re-checks and deletes one candidate under a runtime-row FOR UPDATE
+// lock. Task ownership writes take FOR KEY SHARE on the same row through
+// lock_task_owner_rows, so a concurrent enqueue either commits before the
+// checks below and blocks deletion, or waits until deletion commits and then
+// observes that its runtime no longer exists.
+func gcRuntime(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, runtimeID pgtype.UUID) (workspaceID string, deleted bool, taskBlocked bool, err error) {
+	tx, err := txStarter.Begin(ctx)
+	if err != nil {
+		return "", false, false, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		// The operation context may already be cancelled on a timeout. Give
+		// rollback its own short window so the pool does not retain an open
+		// transaction/connection after a failed GC attempt.
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtimeGCOperationTimeout)
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
+	}()
+	qtx := queries.WithTx(tx)
+
+	runtime, err := qtx.LockAgentRuntime(ctx, runtimeID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, false, nil
+	}
+	if err != nil {
+		return "", false, false, fmt.Errorf("lock runtime: %w", err)
+	}
+
+	eligible, err := qtx.IsAgentRuntimeEligibleForGC(ctx, db.IsAgentRuntimeEligibleForGCParams{
+		ID:           runtimeID,
+		StaleSeconds: offlineRuntimeTTLSeconds,
+	})
+	if err != nil {
+		return "", false, false, fmt.Errorf("re-check eligibility: %w", err)
+	}
+	if !eligible {
+		return "", false, false, nil
+	}
+
+	undrained, err := qtx.CountUndrainedTasksByRuntimeOrAgent(ctx, db.CountUndrainedTasksByRuntimeOrAgentParams{
+		RuntimeIds: []pgtype.UUID{runtimeID},
+		AgentIds:   []pgtype.UUID{},
+	})
+	if err != nil {
+		return "", false, false, fmt.Errorf("count non-terminal tasks: %w", err)
+	}
+	if undrained > 0 {
+		return "", false, true, nil
+	}
+
+	if _, err := qtx.UnbindTasksFromRuntime(ctx, runtimeID); err != nil {
+		return "", false, false, fmt.Errorf("unbind task history: %w", err)
+	}
+	remaining, err := qtx.CountTasksByRuntime(ctx, runtimeID)
+	if err != nil {
+		return "", false, false, fmt.Errorf("confirm task history detached: %w", err)
+	}
+	if remaining != 0 {
+		return "", false, false, fmt.Errorf("task history still references runtime after detach: %d", remaining)
+	}
+	if err := qtx.DeleteAgentRuntime(ctx, runtimeID); err != nil {
+		return "", false, false, fmt.Errorf("delete runtime: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", false, false, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return util.UUIDToString(runtime.WorkspaceID), true, false, nil
 }
 
 // sweepStaleTasks fails tasks stuck in dispatched/running for too long,

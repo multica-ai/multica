@@ -1160,6 +1160,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/runtime-profiles", h.ListRuntimeProfiles)
 					r.Get("/runtime-profiles/{profileId}", h.GetRuntimeProfile)
 					r.Get("/plugins", h.ListPlugins)
+					r.Get("/plugins/catalog", h.ListPluginCatalog)
+					r.Get("/plugins/catalog/{pluginKey}", h.GetPluginCatalogRelease)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -1177,6 +1179,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
 					r.Put("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
 					r.Delete("/runtime-profiles/{profileId}", h.DeleteRuntimeProfile)
+					r.Post("/plugins/install", h.InstallPlugin)
+					r.Post("/plugins/{installationId}/upgrade", h.UpgradePlugin)
 					r.Post("/plugins/{installationId}/enable", h.EnablePlugin)
 					r.Post("/plugins/{installationId}/disable", h.DisablePlugin)
 					r.Post("/plugins/{installationId}/rollback", h.RollbackPlugin)
@@ -1247,11 +1251,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/dingtalk/installations", h.ListDingTalkInstallations)
+					r.Get("/dingtalk/group-routes", h.ListDingTalkGroupRoutes)
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/dingtalk/installations/{installationId}", h.RevokeDingTalkInstallation)
 					r.Post("/dingtalk/install/byo", h.RegisterDingTalkBYO)
+					r.Patch("/dingtalk/group-routes/{routeId}", h.UpdateDingTalkGroupRoute)
 				})
 			})
 		})
@@ -1337,6 +1343,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/checkout-sessions", h.CreateCloudBillingCheckoutSession)
 			r.Get("/checkout-sessions/{sessionId}", h.GetCloudBillingCheckoutSession)
 			r.Post("/portal-sessions", h.CreateCloudBillingPortalSession)
+		})
+
+		// Workspace subscriptions use the same cloud transport and Stripe
+		// webhook as the existing owner-credit billing surface, but every request
+		// is workspace-scoped. Entitlements are member-readable; Checkout, seat
+		// reconcile, and Portal mutations require owner/admin. The handlers also
+		// enforce billing_workspace_subscriptions so a route refactor cannot
+		// accidentally bypass the rollout flag.
+		r.Route("/api/cloud-subscriptions", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+
+			r.With(middleware.RequireWorkspaceMember(queries)).Get("/entitlements", h.GetCloudWorkspaceEntitlements)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+				r.Post("/checkout-sessions", h.CreateCloudWorkspaceSubscriptionCheckout)
+				r.Post("/seats/reconcile", h.ReconcileCloudWorkspaceSubscriptionSeats)
+				r.Post("/portal-sessions", h.CreateCloudWorkspaceSubscriptionPortal)
+			})
 		})
 
 		// --- Workspace-scoped routes (all require workspace membership) ---
@@ -1595,6 +1619,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetSkill)
 					r.Put("/", h.UpdateSkill)
 					r.Delete("/", h.DeleteSkill)
+					r.Post("/refresh", h.RefreshSkill)
 					r.Get("/labels", h.ListLabelsForSkill)
 					r.Post("/labels", h.AttachLabelToSkill)
 					r.Delete("/labels/{labelId}", h.DetachLabelFromSkill)

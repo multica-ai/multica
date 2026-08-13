@@ -838,7 +838,10 @@
     "details_cache_read": "Cache read",
     "details_cache_write": "Cache write",
     "details_cost": "Cost",
-    "usage_chip_title": "Tokens and estimated cost for this run"
+    "usage_chip_title": "Tokens and estimated cost for this run",
+    "details_branch": "Branch",
+    "details_reason": "Reason",
+    "copy_branch": "Copy branch name"
   },
   "task_failure": {
     "agent_error": "Agent execution error",

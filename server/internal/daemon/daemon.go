@@ -421,16 +421,13 @@ type Daemon struct {
 	// newer than that verdict" a fact rather than a hope. Guarded by d.mu.
 	demotionSeq uint64
 
-	// resolvedPathsMu guards resolvedPaths, the self-healed executable paths.
-	// The daemon pins each agent's absolute path at startup so a later PATH
-	// change can't redirect a task launch. When that pinned path later vanishes
-	// (a version manager did an in-place upgrade — Homebrew Cask, nvm/fnm),
-	// resolveAgentEntry re-resolves the original command once and records the
-	// result here so subsequent launches, model lists, and registrations reuse
-	// it without re-resolving. Path and detected version are stored together so
-	// any reader that observes the new path also observes the matching version
-	// (no "new binary under stale version policy" window). Keyed by provider.
-	// See MUL-4486.
+	// resolvedPathsMu guards concrete executable paths paired with the version
+	// detected for each. On POSIX these are self-heals cached after a pinned path
+	// vanishes (MUL-4486). On Windows they are launch targets resolved from a
+	// stable installer junction; that junction is followed on every launch so a
+	// retarget takes effect even while the old release remains installed. Path
+	// and version are stored together so no reader can launch a new binary under
+	// stale version policy. Keyed by provider.
 	resolvedPathsMu sync.RWMutex
 	resolvedPaths   map[string]healedAgent
 	// healGroup coalesces concurrent self-heal re-resolutions per provider so a
@@ -821,11 +818,13 @@ type healedAgent struct {
 }
 
 // resolveAgentEntry returns entry with a usable executable path plus the CLI
-// version that corresponds to that path, self-healing the pinned Path when it
-// has vanished from disk (MUL-4486).
+// version that corresponds to that path. It resolves retargetable Windows
+// installer junctions per launch and self-heals vanished pinned paths on other
+// platforms (MUL-4486).
 //
-// The daemon pins each agent's absolute, symlink-resolved path at startup so a
-// later PATH change cannot redirect a task launch. But a version manager
+// The daemon pins each agent's discovered entry point at startup so a later
+// PATH change cannot redirect a task launch. POSIX discovery also resolves
+// symlinks to a concrete path. But a version manager
 // (Homebrew Cask, nvm/fnm) upgrading in place deletes the old versioned
 // directory that pinned path points into and repoints the stable command name
 // at the new version — leaving the daemon holding a path that no longer exists
@@ -839,6 +838,8 @@ type healedAgent struct {
 // updating.
 //
 // Behaviour:
+//   - A Windows stable entry point -> its final target is verified and returned
+//     with the detected version; a retarget publishes the new pair atomically.
 //   - A previous self-heal that is still live -> returned with its paired
 //     version. This is checked first so that once we've re-resolved to a new
 //     binary, a reappearing stale path (a downgrade / reinstall recreating the
@@ -862,6 +863,24 @@ func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry A
 	return resolved, version
 }
 
+// resolveAgentEntryForLaunch is the strict task-launch boundary. Windows
+// installer junctions must yield a verified final target before the first
+// launch; otherwise the stable entry could retarget after registration and run
+// a binary whose version and minimum-version policy were never checked.
+func (d *Daemon) resolveAgentEntryForLaunch(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, error) {
+	resolved, version, outcome := d.resolveAgentEntryWithHeal(ctx, provider, entry)
+	if outcome.rejected != nil {
+		return entry, d.agentVersion(provider), outcome.rejected
+	}
+	if outcome.failure != nil {
+		return entry, d.agentVersion(provider), fmt.Errorf("resolve agent executable %q for launch: %w", entry.Path, outcome.failure)
+	}
+	if outcome.adopted.path != "" {
+		return resolved, version, nil
+	}
+	return resolved, version, nil
+}
+
 // healOutcome is what one self-heal attempt concluded. At most one half is
 // meaningful: adopted names a binary that cleared the same gates registration
 // applies, while rejected carries the typed verdict for a candidate that was
@@ -872,6 +891,7 @@ func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry A
 type healOutcome struct {
 	adopted  healedAgent
 	rejected *agent.BelowMinimumError
+	failure  error
 }
 
 // resolveAgentEntryWithHeal is resolveAgentEntry plus what the self-heal
@@ -884,6 +904,25 @@ type healOutcome struct {
 // fails, and reports "version detection failed" — which by design leaves the
 // runtime online, claiming tasks for a CLI that cannot launch.
 func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, healOutcome) {
+	// Windows installer entry points are stable junctions whose final target can
+	// change while the old release remains installed. Resolve the final path on
+	// every launch and adopt a changed target only after pairing it with a freshly
+	// detected, supported version. Other platforms return handled=false and keep
+	// the existing pinned-path self-heal semantics below.
+	var launchOutcome healOutcome
+	if launchPath, handled, err := executablePathForLaunch(entry.Path); handled {
+		if err != nil {
+			d.logger.Warn("resolve agent executable for launch failed; keeping discovered path",
+				"provider", provider, "path", entry.Path, "error", err)
+			launchOutcome.failure = err
+		} else if outcome, ok := d.resolveAgentLaunchTarget(ctx, provider, entry, launchPath); ok {
+			entry.Path = outcome.adopted.path
+			return entry, outcome.adopted.version, outcome
+		} else {
+			launchOutcome = outcome
+		}
+	}
+
 	// A prior self-heal wins over the original pinned path: it carries a
 	// {path, version} pair we already verified together, so it can never regress
 	// to the mismatched pairing a reappearing stale path would produce.
@@ -892,11 +931,12 @@ func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string,
 	d.resolvedPathsMu.RUnlock()
 	if ok && agentExecutablePresent(healed.path) {
 		entry.Path = healed.path
-		return entry, healed.version, healOutcome{adopted: healed}
+		launchOutcome.adopted = healed
+		return entry, healed.version, launchOutcome
 	}
 
 	if agentExecutablePresent(entry.Path) {
-		return entry, d.agentVersion(provider), healOutcome{}
+		return entry, d.agentVersion(provider), launchOutcome
 	}
 
 	if entry.Command == "" {
@@ -916,6 +956,63 @@ func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string,
 	}
 	entry.Path = outcome.adopted.path
 	return entry, outcome.adopted.version, outcome
+}
+
+// resolveAgentLaunchTarget handles platforms whose stable discovered entry
+// point can retarget a different still-live executable. It returns ok only
+// when a verified {path, version} pair is available; a rejected or transiently
+// unreadable target falls through to the existing path handling so it is never
+// published under a stale version.
+func (d *Daemon) resolveAgentLaunchTarget(ctx context.Context, provider string, entry AgentEntry, launchPath string) (healOutcome, bool) {
+	const maxRetargetAttempts = 4
+	for attempt := 0; attempt < maxRetargetAttempts; attempt++ {
+		d.resolvedPathsMu.RLock()
+		cached, cachedOK := d.resolvedPaths[provider]
+		d.resolvedPathsMu.RUnlock()
+		if cachedOK && cached.path == launchPath && agentExecutablePresent(cached.path) {
+			return healOutcome{adopted: cached}, true
+		}
+
+		// Coalesce only callers that observed the same concrete release. A
+		// provider-only key can make a post-retarget caller inherit the previous
+		// release's result even though both files remain present.
+		key := provider + "\x00" + launchPath
+		v, _, _ := d.healGroup.Do(key, func() (any, error) {
+			d.resolvedPathsMu.RLock()
+			current, ok := d.resolvedPaths[provider]
+			d.resolvedPathsMu.RUnlock()
+			if ok && current.path == launchPath && agentExecutablePresent(current.path) {
+				return healOutcome{adopted: current}, nil
+			}
+			return d.adoptAgentPath(ctx, provider, entry.Command, launchPath, "resolved stable entry point for launch"), nil
+		})
+		outcome, _ := v.(healOutcome)
+
+		// The installer may retarget while version detection is running. Resolve
+		// again before returning and retry against the target visible now.
+		currentPath, _, err := executablePathForLaunch(entry.Path)
+		if err != nil {
+			if outcome.adopted.path != "" {
+				return outcome, true
+			}
+			outcome.failure = err
+			return outcome, false
+		}
+		if currentPath != launchPath {
+			launchPath = currentPath
+			continue
+		}
+		if outcome.adopted.path != "" {
+			return outcome, true
+		}
+		if cachedOK && agentExecutablePresent(cached.path) {
+			outcome.adopted = cached
+			return outcome, true
+		}
+		return outcome, false
+	}
+
+	return healOutcome{failure: errors.New("installer entry point changed repeatedly while resolving it")}, false
 }
 
 // healAgentPath re-resolves command for provider and, if a usable binary is
@@ -946,7 +1043,19 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 	if !found {
 		return healOutcome{}
 	}
+	if launchPath, handled, err := executablePathForLaunch(newPath); handled {
+		if err != nil {
+			d.logger.Warn("resolve re-discovered agent executable for launch failed; keeping discovered path",
+				"provider", provider, "path", newPath, "error", err)
+			return healOutcome{failure: err}
+		} else {
+			newPath = launchPath
+		}
+	}
+	return d.adoptAgentPath(ctx, provider, command, newPath, "re-resolved after pinned path vanished")
+}
 
+func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath, reason string) healOutcome {
 	// Verify before adopting. An in-place "upgrade" that actually repoints at an
 	// older or broken install must not be launched under the daemon's stale
 	// version policy, and must not slip past the minimum-version gate that the
@@ -955,7 +1064,7 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 	if err != nil {
 		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
 			"provider", provider, "command", command, "new_path", newPath, "error", err)
-		return healOutcome{}
+		return healOutcome{failure: err}
 	}
 	if err := checkAgentMinVersion(provider, version); err != nil {
 		var tooOld *agent.BelowMinimumError
@@ -966,7 +1075,7 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 			// transient case the below-minimum machinery must never act on.
 			d.logger.Warn("re-resolved agent executable version could not be validated; keeping pinned path",
 				"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
-			return healOutcome{}
+			return healOutcome{failure: err}
 		}
 		d.logger.Warn("re-resolved agent executable is below the minimum supported version; not adopting it",
 			"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
@@ -988,8 +1097,8 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 	// report and any future d.agentVersion reader.
 	d.setAgentVersion(provider, version)
 
-	d.logger.Info("re-resolved agent executable after pinned path vanished (in-place upgrade)",
-		"provider", provider, "command", command, "new_path", newPath, "version", version)
+	d.logger.Info("adopted resolved agent executable",
+		"provider", provider, "command", command, "new_path", newPath, "version", version, "reason", reason)
 	return healOutcome{adopted: adopted}
 }
 
@@ -4794,11 +4903,25 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// Check if we were cancelled by the polling goroutine.
 	select {
 	case <-cancelledByPoll:
-		taskLog.Info("task cancelled during execution, discarding result")
+		taskLog.Info("task cancelled during execution, discarding result",
+			"branch_name", result.BranchName, "error", err)
 		// runner.run has returned, so the transcript flush is complete —
 		// tell the server it can settle its deferred chat finalization
-		// (#5219). Best-effort: the sweeper grace period covers a lost ack.
-		if ackErr := d.client.AckTaskCancelled(ctx, task.ID); ackErr != nil {
+		// (#5219). The sweeper grace period covers a lost ack's chat settle,
+		// but NOT the payload: the branch rides along because the worktree was
+		// already finalized before this check, and when Finalize instead
+		// ABORTED, the preserved-worktree error is the only pointer left to
+		// the agent's work — everything else on this path is discarded. Other
+		// run errors stay discarded: on a cancelled run they are expected
+		// noise (context canceled, killed process), and persisting them would
+		// stamp a bogus reason on every ordinary mid-run cancel.
+		ack := TaskCancelAck{BranchName: result.BranchName}
+		var preserved *worktreePreservedError
+		if errors.As(err, &preserved) {
+			ack.ErrorMessage = preserved.Error()
+			ack.FailureReason = "local_directory_error"
+		}
+		if ackErr := d.client.AckTaskCancelled(ctx, task.ID, ack); ackErr != nil {
 			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
 		}
 		return
@@ -4832,10 +4955,18 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// anyway. Reuse shouldInterruptAgent so this guard honors the same
 	// signals as the in-flight watcher.
 	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
-		taskLog.Info("task cancelled during execution, discarding result", "status", status, "error", err)
+		taskLog.Info("task cancelled during execution, discarding result",
+			"status", status, "error", err, "branch_name", result.BranchName)
 		// Same contract as the poll-cancelled path above: the transcript is
-		// flushed, so let the server settle its deferred chat finalization.
-		if ackErr := d.client.AckTaskCancelled(ctx, task.ID); ackErr != nil {
+		// flushed, so let the server settle its deferred chat finalization, and
+		// carry the finalized branch so cancelled work stays discoverable. No
+		// error to carry here — this branch is only reached with err == nil.
+		// This fires for ANY observed terminal status; the server applies the
+		// payload only to a cancelled row (status CAS), because for
+		// completed/failed rows the complete/fail callback is the
+		// authoritative channel and a stale run's late ack must not touch
+		// them.
+		if ackErr := d.client.AckTaskCancelled(ctx, task.ID, TaskCancelAck{BranchName: result.BranchName}); ackErr != nil {
 			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
 		}
 		return
@@ -4855,7 +4986,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			// sibling workdir (which is the user's path) or the envRoot
 			// itself (we want output/ and logs/ to linger for forensic
 			// access).
-			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID); assignment != nil {
+			//
+			// Worktree mode is excluded: its workdir is a disposable
+			// worktree INSIDE envRoot, already removed by Finalize, and
+			// the deliverable lives on as a branch in the user's repo.
+			// Stamping it would hand every worktree task a permanently
+			// exempt env root, so the directory would accumulate one env
+			// root per task forever — the exact cost the exemption was
+			// meant to trade away for a user's own files.
+			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID); assignment != nil && !assignment.UsesWorktree() {
 				meta.LocalDirectory = true
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
@@ -4864,6 +5003,16 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}
 }
+
+// worktreePreservedError marks a task error that must survive the cancel path:
+// its message names the preserved worktree holding the agent's uncommitted
+// work. Every other error on a cancelled run is expected noise (context
+// canceled, killed process) and stays discarded; this one is the only pointer
+// to real work and rides the cancel ack to the server.
+type worktreePreservedError struct{ err error }
+
+func (e *worktreePreservedError) Error() string { return e.err.Error() }
+func (e *worktreePreservedError) Unwrap() error { return e.err }
 
 func taskRunFailureReason(err error) string {
 	if errors.Is(err, errTaskPrepareTimeout) {
@@ -4918,6 +5067,21 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, false
 	}
 	taskLog = taskLog.With("local_directory", assignment.AbsPath)
+	// Check the mode before the path: a mode this daemon can't honour is a
+	// version-skew problem the user fixes by upgrading, and reporting a path
+	// complaint first would send them looking in the wrong place.
+	if err := assignment.ValidateExecutionMode(); err != nil {
+		taskLog.Error("local_directory: unsupported execution mode", "error", err)
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  err.Error(),
+			failureReason: "local_directory_error",
+		}); failErr != nil {
+			taskLog.Error("fail task after local_directory mode check", "error", failErr)
+		}
+		return nil, true
+	}
 	if err := validateLocalPath(assignment.AbsPath); err != nil {
 		taskLog.Error("local_directory: path validation failed", "error", err)
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
@@ -4929,6 +5093,17 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
 		return nil, true
+	}
+
+	// Worktree mode is the whole point of not serialising: each task gets its
+	// own checkout of the repo inside its env root, so there is no shared
+	// mutable state on the user's path to protect. Skipping the mutex here is
+	// what lets sibling tasks on one directory run concurrently. Path
+	// validation above still applies — git needs to write worktree
+	// registrations into the user's repo.
+	if assignment.UsesWorktree() {
+		taskLog.Info("local_directory: worktree mode, skipping path mutex")
+		return nil, false
 	}
 
 	// While the lock is contended the daemon would otherwise sit blocked on
@@ -5085,9 +5260,13 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		// "agent_error" coarse bucket.
 		fallbackErrMsg := fmt.Sprintf("complete task failed: %s", err.Error())
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:                  terminalTaskReportFail,
-			taskID:                taskID,
-			errorMessage:          fallbackErrMsg,
+			kind:         terminalTaskReportFail,
+			taskID:       taskID,
+			errorMessage: fallbackErrMsg,
+			// The agent succeeded here — only the server's complete callback was
+			// rejected. Its branch is real and already committed, so it must
+			// survive the downgrade to a failure report.
+			branchName:            result.BranchName,
 			sessionID:             result.SessionID,
 			workDir:               result.WorkDir,
 			failureReason:         taskfailure.Classify(fallbackErrMsg).String(),
@@ -5117,11 +5296,16 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		}
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
 		if err := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:                  terminalTaskReportFail,
-			taskID:                taskID,
-			errorMessage:          result.Comment,
-			sessionID:             result.SessionID,
-			workDir:               result.WorkDir,
+			kind:         terminalTaskReportFail,
+			taskID:       taskID,
+			errorMessage: result.Comment,
+			sessionID:    result.SessionID,
+			workDir:      result.WorkDir,
+			// Worktree mode commits the agent's leftovers before tearing the
+			// worktree down, so a failed run routinely still has a branch. This
+			// is the case where the user most needs it: the task went wrong and
+			// they want to see how far it got.
+			branchName:            result.BranchName,
 			failureReason:         failureReason,
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
@@ -5144,7 +5328,7 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 	case terminalTaskReportComplete:
 		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID)
 	case terminalTaskReportFail:
-		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID)
+		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID)
 	default:
 		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}
@@ -5244,23 +5428,37 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	}
 }
 
-// gateResumeToReusedWorkdir clears the task's prior session unless the task
-// runs in the exact workdir the session was recorded against, and reports
-// whether that workdir was reused. CLI backends key their session stores to
-// the cwd (Claude Code looks sessions up under ~/.claude/projects/<encoded-cwd>/),
-// so a session id from a different workdir can never resolve: the CLI exits
-// within a second and the run fails before doing any work — permanently,
-// because the failed run records no session and the next claim serves the
-// same stale pointer again. This fires whenever the prior workdir no longer
-// exists (GC'd after the issue went done, daemon reinstall, manual cleanup)
-// and execenv.Reuse fell back to a fresh Prepare (GitHub #3854).
-func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, envWorkDir string, taskLog *slog.Logger) bool {
-	reused := task.PriorWorkDir != "" && envWorkDir == task.PriorWorkDir
+// gateResumeToReusedWorkdir clears the task's prior session unless this run
+// can actually reach the store the session lives in, and reports whether that
+// held. CLI backends key their session stores to the cwd (Claude Code looks
+// sessions up under ~/.claude/projects/<encoded-cwd>/), so a session id from a
+// different workdir can never resolve: the CLI exits within a second and the
+// run fails before doing any work — permanently, because the failed run
+// records no session and the next claim serves the same stale pointer again.
+// This fires whenever the prior workdir no longer exists (GC'd after the issue
+// went done, daemon reinstall, manual cleanup) and execenv.Reuse fell back to a
+// fresh Prepare (GitHub #3854).
+//
+// A matching workdir is not sufficient on its own. Hermes keys its sessions to
+// HERMES_HOME — the per-task overlay under envRoot — not to the cwd, and the
+// two keys come apart precisely in the local_directory flow: reuse is disabled
+// there (shouldReusePriorWorkdir), so every task builds a fresh overlay with an
+// empty state.db, while envWorkDir stays the user's own directory and therefore
+// still equals PriorWorkDir. The gate read "reused" and forwarded a session id
+// that could not possibly resolve, and Hermes answers an unresolvable resume by
+// silently starting over (GH #6806). sessionHomeReachable is the provider's own
+// answer to "can a prior session still be found here?" — for Hermes, whether
+// the conversation's session store got mounted (execenv.Environment
+// HermesSessionStore) — and false drops the resume with the same disclosure as
+// a workdir mismatch.
+func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, envWorkDir string, sessionHomeReachable bool, taskLog *slog.Logger) bool {
+	reused := task.PriorWorkDir != "" && envWorkDir == task.PriorWorkDir && sessionHomeReachable
 	if !reused && task.PriorSessionID != "" {
-		taskLog.Info("dropping prior session: workdir not reused, per-cwd session cannot resolve",
+		taskLog.Info("dropping prior session: session store not reachable from this run",
 			"session_id", task.PriorSessionID,
 			"prior_workdir", task.PriorWorkDir,
 			"workdir", envWorkDir,
+			"session_home_reachable", sessionHomeReachable,
 		)
 		task.PriorSessionID = ""
 		taskCtx.PriorSessionResumed = false
@@ -5272,6 +5470,38 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 		task.PriorSessionResumeUnavailable = true
 	}
 	return reused
+}
+
+// sessionHomeReachable reports whether a session recorded by a prior task on
+// this conversation can still be found from THIS run's environment, for
+// providers that key their sessions somewhere other than the cwd.
+//
+// Only Hermes does today: its transcripts live in `<HERMES_HOME>/state.db`,
+// which is the per-task overlay under envRoot. Forwarding a session id into a
+// database that does not hold it is what produced a conversation restarting
+// from zero every turn (GH #6806), so the question has to be about the
+// database, not about the plumbing:
+//
+//   - With the conversation's session store mounted, the answer is whether that
+//     store actually holds a transcript. A mount onto an empty store is the
+//     normal shape of a first turn — and also of a store the GC reclaimed
+//     between turns, a switched Hermes profile, or a dangling link left by an
+//     older overlay. Reading "mounted" as "resumable" would forward a dead id
+//     into every one of those.
+//   - With no store, the transcript is the overlay's own task-local file, which
+//     survives exactly when this run reused the prior task's env root.
+//
+// Every other provider is keyed by cwd (or resolves its own store), so the
+// workdir comparison in gateResumeToReusedWorkdir remains the whole answer and
+// this returns true.
+func sessionHomeReachable(provider string, env *execenv.Environment, envReused bool) bool {
+	if provider != "hermes" {
+		return true
+	}
+	if env.HermesSessionStore != "" {
+		return env.HermesSessionHistoryPresent
+	}
+	return envReused
 }
 
 // shouldReusePriorWorkdir keeps the local_directory lock invariant without
@@ -5734,7 +5964,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// upgrade deleted (MUL-4486). Only reached when no custom profile owns
 		// the launch, so a custom runtime's path is never second-guessed and a
 		// custom-only host pays no wasted re-resolution.
-		entry, resolvedVersion = d.resolveAgentEntry(prepareCtx, provider, entry)
+		var resolveErr error
+		entry, resolvedVersion, resolveErr = d.resolveAgentEntryForLaunch(prepareCtx, provider, entry)
+		if resolveErr != nil {
+			return TaskResult{}, resolveErr
+		}
 	}
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
@@ -5910,6 +6144,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var hermesSourceMustExist bool
 	var hermesEnv map[string]string
 	var hermesMemoryStore string
+	var hermesSessionStore string
 	if provider == "hermes" {
 		sel := agent.ParseHermesProfileArgs(agentCustomArgs)
 		res := execenv.ResolveHermesProfile(agentEnvOverrides["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
@@ -5930,6 +6165,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// model. Guarded from the GC for the whole task, as the Codex store below.
 		if store := execenv.HermesMemoryStorePath(d.cfg.Profile, task.AgentID, res.SourceHome); store != "" {
 			hermesMemoryStore = store
+			d.markActiveStore(store)
+			defer d.unmarkActiveStore(store)
+		}
+		// The overlay links state.db here so the conversation transcript
+		// survives the task and a follow-up turn can actually resume it
+		// (GH #6806). Keyed on (agent, resolved source home, conversation):
+		// tasks of one conversation are serial, so the shard has a single
+		// writer, while two issues never share a database. Guarded from the GC
+		// for the whole task, as the stores above and below.
+		if store := execenv.HermesSessionStorePath(d.cfg.Profile, task.AgentID, res.SourceHome, taskCtx); store != "" {
+			hermesSessionStore = store
 			d.markActiveStore(store)
 			defer d.unmarkActiveStore(store)
 		}
@@ -5954,6 +6200,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			defer d.unmarkActiveStore(store)
 		}
 	}
+	envReused := false
 	if shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
 		var err error
 		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
@@ -5971,6 +6218,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
 			HermesMemoryStore:     hermesMemoryStore,
+			HermesSessionStore:    hermesSessionStore,
 			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
@@ -5978,6 +6226,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("reuse execution environment: %w", err)
 		}
+		// Reuse can decline (nil) and fall through to a fresh Prepare below.
+		// Whether it did decides whether an env-root-scoped session store — the
+		// Hermes overlay's task-local state.db — carried over from the prior task.
+		envReused = env != nil
 	}
 	if env == nil {
 		var err error
@@ -5997,16 +6249,86 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
 			HermesMemoryStore:     hermesMemoryStore,
+			HermesSessionStore:    hermesSessionStore,
 			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}
-		if localAssignment != nil {
-			prepParams.LocalWorkDir = localAssignment.AbsPath
-		}
-		env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
-		if err != nil {
-			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
+		if localAssignment.UsesWorktree() {
+			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
+			// Take the per-path mutex for the snapshot alone, then hand it
+			// straight back — long enough to read a consistent tree, short
+			// enough that worktree tasks still overlap for the run itself.
+			//
+			// A worktree task skips this lock for its execution, but the
+			// snapshot is the one moment it READS the user's directory, and the
+			// same real path can be attached to another project as an in_place
+			// resource (each project may attach it once, so several can).
+			// Snapshotting underneath a running in_place task would capture a
+			// half-written tree plus that task's in-flight sidecars.
+			//
+			// The wait gets the same visibility plumbing as the in-place
+			// acquire in acquireLocalDirectoryLockIfNeeded, because the holder
+			// can be an in-place task that runs for hours: without the status
+			// update the user sees a bare "preparing" with no hint the task is
+			// queued behind the directory, and without the poller a task the
+			// user cancels keeps its daemon slot pinned until the prepare
+			// timeout — the run-phase cancellation watcher only starts after
+			// launch. The prepare-lease extender is already running for this
+			// whole phase, so only status, accounting, and cancellation are
+			// mirrored here.
+			waitCtx, waitCancel := context.WithCancel(prepareCtx)
+			defer waitCancel()
+			pollInterval := d.cancelPollInterval
+			if pollInterval == 0 {
+				pollInterval = 5 * time.Second
+			}
+			// LocalPathLocker invokes onWait synchronously, in this goroutine,
+			// at most once per Acquire — see the in-place call site.
+			waitCounted := false
+			release, lockErr := d.localPathLocks.Acquire(waitCtx, localAssignment.RealPath, task.ID, func(holder string) {
+				d.resourceWaitTasks.Add(1)
+				waitCounted = true
+				reason := fmt.Sprintf("local_directory %s", localAssignment.AbsPath)
+				if holder != "" {
+					reason = fmt.Sprintf("%s (held by task %s)", reason, shortID(holder))
+				}
+				taskLog.Info("local_directory: worktree snapshot waiting for holder",
+					"holder", shortID(holder))
+				if waitErr := d.client.MarkTaskWaitingLocalDirectory(waitCtx, task.ID, reason); waitErr != nil {
+					// Non-fatal: the wait still happens, the UI just won't
+					// show the explicit "waiting" badge.
+					taskLog.Warn("local_directory: mark waiting status failed", "error", waitErr)
+				}
+				cancelled := d.watchTaskCancellation(waitCtx, task.ID, pollInterval, taskLog)
+				go func() {
+					select {
+					case <-cancelled:
+						waitCancel()
+					case <-waitCtx.Done():
+					}
+				}()
+			})
+			if waitCounted {
+				d.resourceWaitTasks.Add(-1)
+			}
+			if lockErr != nil {
+				return TaskResult{}, fmt.Errorf("local_directory worktree: wait for a consistent snapshot of %s: %w",
+					localAssignment.AbsPath, lockErr)
+			}
+			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
+			release()
+			if err != nil {
+				return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
+			}
+		} else {
+			if localAssignment != nil {
+				prepParams.LocalWorkDir = localAssignment.AbsPath
+			}
+			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
+			if err != nil {
+				return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
+			}
 		}
 	}
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
@@ -6014,6 +6336,110 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.RootDir != predictedRoot && env.RootDir != "" {
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
+	}
+	// Finalize the worktree on EVERY exit path, success or failure: commit
+	// whatever the agent left uncommitted, then unregister the worktree from
+	// the user's repo. Deferred against the named return so a task that fails
+	// mid-run still hands back the branch holding its partial work instead of
+	// letting `git worktree remove --force` delete it. A failing task is
+	// exactly when the user most wants to see how far the agent got.
+	if env.LocalWorktree != nil {
+		defer func() {
+			outcome, finalizeErr := env.LocalWorktree.Finalize(taskLog)
+			if outcome.Branch != "" {
+				taskResult.BranchName = outcome.Branch
+			}
+			if finalizeErr == nil {
+				return
+			}
+			// The agent's changes could not be committed, so Finalize kept the
+			// worktree instead of deleting them. Fail the task: a "completed"
+			// task whose branch is missing the work reads as success, and the
+			// user would never learn the changes are sitting in an env root the
+			// GC reclaims on a timer.
+			//
+			// Wrapped in worktreePreservedError so the cancel path can
+			// recognise it: a cancelled task discards its result and error, but
+			// THIS error names the preserved worktree holding the agent's work
+			// and must ride the cancel ack instead of vanishing into a log.
+			// Joined rather than replacing an earlier failure — that one is
+			// usually the more useful primary cause, but the preserved path
+			// must not be displaced by it.
+			taskLog.Error("local_directory: worktree finalize could not persist the agent's changes",
+				"error", finalizeErr, "preserved_path", outcome.PreservedPath)
+			wrapped := &worktreePreservedError{err: fmt.Errorf("local_directory worktree: %w", finalizeErr)}
+			if returnErr == nil {
+				returnErr = wrapped
+			} else {
+				returnErr = errors.Join(returnErr, wrapped)
+			}
+		}()
+	}
+	// Workdir is preserved for reuse by future tasks on the same (agent,
+	// issue) pair in cloud mode; the work_dir path is stored in DB on task
+	// completion and passed back via PriorWorkDir on the next claim, so
+	// rewriting the marker block in place is the right behavior.
+	//
+	// In local_directory mode the workdir is the user's own repo, reuse is
+	// already disabled above (see localAssignment == nil), and the brief
+	// would otherwise live on inside the user's repository — a subsequent
+	// manual `claude` / `codex` run in that directory would pick
+	// up stale Multica instructions (issue id, trigger comment id, reply
+	// rules) and start acting on the previous task's context. Excise the
+	// marker block on the way out instead.
+	//
+	// Worktree mode runs the same pass for a different reason: the worktree is
+	// disposable, but its branch is the deliverable, and Finalize commits
+	// whatever is still on disk. Without this the sidecars would land in every
+	// task's diff. The .git/info/exclude trick repocache uses for github_repo
+	// worktrees is not available here — a linked worktree resolves info/exclude
+	// to the user's own common git dir, so using it would silently change what
+	// `git status` hides in the user's checkout. Removing the files we wrote is
+	// both narrower and exact; it also leaves a genuine agent edit to a tracked
+	// CLAUDE.md intact, since CleanupRuntimeConfig only excises our marker block.
+	//
+	// Ordering: registered immediately after the Finalize defer above, so LIFO
+	// runs cleanup first and Finalize commits an already-clean worktree. It must
+	// also precede every early return between here and provider launch
+	// (temp-dir setup, StartTask): those paths still run Finalize, and without
+	// this pass Finalize would auto-commit the sidecars Prepare just wrote and
+	// deliver a branch whose only content is Multica's own runtime files — or,
+	// in place, leave them behind in the user's tree.
+	if env.LocalDirectory || env.LocalWorktree != nil {
+		defer func() {
+			var cleanupErr error
+			if cerr := execenv.CleanupRuntimeConfig(env.WorkDir, provider); cerr != nil {
+				cleanupErr = cerr
+				d.logger.Warn("execenv: cleanup runtime config failed", "error", cerr)
+			}
+			// Excise the sidecar tree (.agent_context/, .multica/,
+			// provider-specific .claude/skills/ etc.) that Prepare wrote
+			// into the user's repo. Without this pass the user's tree
+			// accumulates one directory layer per task — see MUL-2784.
+			// CleanupRuntimeConfig handles the runtime brief inside
+			// CLAUDE.md / AGENTS.md; CleanupSidecars handles
+			// every other file Prepare placed under WorkDir. Together
+			// they round-trip the workdir to its exact pre-task bytes.
+			if cerr := execenv.CleanupSidecars(env.RootDir); cerr != nil {
+				if cleanupErr == nil {
+					cleanupErr = cerr
+				}
+				d.logger.Warn("execenv: cleanup sidecars failed", "error", cerr)
+			}
+			// In worktree mode a failed cleanup is NOT survivable: Finalize is
+			// about to `git add -A`, so whatever the cleanup could not remove
+			// gets committed and delivered as the task's branch — a diff whose
+			// content is Multica's own runtime files, which is precisely what
+			// this mode promises never to produce. Tell Finalize to abort
+			// instead, so nothing is committed and the worktree is kept for
+			// inspection. (In place there is no commit and no branch, so a
+			// cleanup failure stays a warning: the leftover files are visible
+			// in the user's own tree and removable by hand.)
+			if cleanupErr != nil && env.LocalWorktree != nil {
+				env.LocalWorktree.AbortWithReason(fmt.Errorf(
+					"could not remove the runtime's own files from the worktree before committing: %w", cleanupErr))
+			}
+		}()
 	}
 	taskTempDir, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
 	if err != nil {
@@ -6045,7 +6471,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
-	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
+	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, sessionHomeReachable(provider, env, envReused), taskLog)
 	// A reused workdir is necessary but not sufficient for a Codex resume: the
 	// prior thread's rollout must actually be present in this task's CODEX_HOME
 	// sessions (MUL-4424 isolates them). Drop the resume before the brief is
@@ -6060,37 +6486,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
-	// Workdir is preserved for reuse by future tasks on the same (agent,
-	// issue) pair in cloud mode; the work_dir path is stored in DB on task
-	// completion and passed back via PriorWorkDir on the next claim, so
-	// rewriting the marker block in place is the right behavior.
-	//
-	// In local_directory mode the workdir is the user's own repo, reuse is
-	// already disabled above (see localAssignment == nil), and the brief
-	// would otherwise live on inside the user's repository — a subsequent
-	// manual `claude` / `codex` run in that directory would pick
-	// up stale Multica instructions (issue id, trigger comment id, reply
-	// rules) and start acting on the previous task's context. Excise the
-	// marker block on the way out instead.
-	if env.LocalDirectory {
-		defer func() {
-			if cerr := execenv.CleanupRuntimeConfig(env.WorkDir, provider); cerr != nil {
-				d.logger.Warn("execenv: cleanup runtime config failed (non-fatal)", "error", cerr)
-			}
-			// Excise the sidecar tree (.agent_context/, .multica/,
-			// provider-specific .claude/skills/ etc.) that Prepare wrote
-			// into the user's repo. Without this pass the user's tree
-			// accumulates one directory layer per task — see MUL-2784.
-			// CleanupRuntimeConfig handles the runtime brief inside
-			// CLAUDE.md / AGENTS.md; CleanupSidecars handles
-			// every other file Prepare placed under WorkDir. Together
-			// they round-trip the workdir to its exact pre-task bytes.
-			if cerr := execenv.CleanupSidecars(env.RootDir); cerr != nil {
-				d.logger.Warn("execenv: cleanup sidecars failed (non-fatal)", "error", cerr)
-			}
-		}()
-	}
-
 	prompt := BuildPrompt(task, provider)
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
@@ -7627,14 +8022,43 @@ func ensureTaskTempDir(envRoot string, workspaceID string, taskID string) (strin
 	if taskID == "" {
 		return "", errors.New("task id is empty")
 	}
-	dir, err := os.MkdirTemp(socketSafeTempBaseDir(), "multica-task-")
+	base, overrideConfigured, err := taskTempBaseDir()
 	if err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp(base, "multica-task-")
+	if err != nil {
+		if overrideConfigured {
+			return "", fmt.Errorf("MULTICA_AGENT_TEMP_BASE: create task temp dir: %w", err)
+		}
 		return "", err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return "", err
 	}
 	return dir, nil
+}
+
+// taskTempBaseDir resolves the parent directory for private per-task temp
+// dirs on Linux and macOS. The daemon operator can relocate it with
+// MULTICA_AGENT_TEMP_BASE, which must be an absolute path to an existing,
+// writable directory; an invalid value fails task startup instead of silently
+// falling back. Windows ignores the variable. Unset keeps the platform default
+// exactly as before, down to the syscalls made.
+// Operators should pick a short path: child tools may bind AF_UNIX sockets
+// under $TMPDIR (sun_path is 108 bytes on Linux, 104 on macOS).
+func taskTempBaseDir() (string, bool, error) {
+	if runtime.GOOS == "windows" {
+		return socketSafeTempBaseDir(), false, nil
+	}
+	base := strings.TrimSpace(os.Getenv("MULTICA_AGENT_TEMP_BASE"))
+	if base == "" {
+		return socketSafeTempBaseDir(), false, nil
+	}
+	if !filepath.IsAbs(base) {
+		return "", true, fmt.Errorf("MULTICA_AGENT_TEMP_BASE must be an absolute path, got %q", base)
+	}
+	return base, true, nil
 }
 
 func socketSafeTempBaseDir() string {

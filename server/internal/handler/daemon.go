@@ -27,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
+	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -2686,7 +2687,100 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		)
 	}
 
+	// Last gate before dispatch: refuse to hand a worktree-mode local_directory
+	// task to a daemon that cannot implement the mode.
+	//
+	// The save-time gate in project_resource.go cannot cover this. It checks the
+	// version at the moment the resource is written; a machine downgraded
+	// afterwards still claims tasks, and an old daemon json-skips execution_mode
+	// entirely — it would run the task IN PLACE, editing the working copy the
+	// user asked to isolate. That is the exact outcome worktree mode exists to
+	// prevent, so it fails closed here, against the version of the runtime that
+	// is actually claiming.
+	if reason := worktreeClaimBlockReason(resp.ProjectResources, runtime); reason != "" {
+		slog.Error("task claim: runtime too old for worktree mode; cancelling rather than running in place",
+			"task_id", uuidToString(task.ID),
+			"runtime_id", runtimeID,
+			"daemon_id", runtime.DaemonID.String,
+			"reason", reason,
+		)
+		// Cancel rather than leave it dispatched: the resource is pinned to this
+		// daemon, so redelivery would hand it straight back to the same too-old
+		// runtime forever.
+		//
+		// Cancel WITH the reason persisted on the row. The 4xx below only
+		// reaches the daemon's log, and the batch-claim path drops the task from
+		// its response entirely — so without this the user is left with a task
+		// that says "cancelled" and nothing else, for a condition only they can
+		// fix (update the app on that machine).
+		//
+		// Through the TaskService, not a raw query: cancellation has side
+		// effects beyond the row — audit capture, chat settle, agent status
+		// reconcile, the task:cancelled broadcast that clears live cards, and
+		// NotifyTaskFinished waking capacity/serial waiters. A direct query
+		// leaves all of those stale.
+		if _, cerr := h.TaskService.CancelTaskWithReason(r.Context(), task.ID, reason, "local_directory_error"); cerr != nil {
+			// The cancel did not commit, so the row is still claimed. The
+			// daemon is about to be refused, so left alone the task would
+			// strand in dispatched until stale reclaim, with no visible
+			// reason. Requeue it instead — the next claim re-runs this gate
+			// and retries the cancel — and report a 5xx so the daemon reads
+			// this as a transient server problem, not a claim refusal.
+			slog.Error("task claim: cancel after worktree version gate failed; requeueing so the gate can run again",
+				"task_id", uuidToString(task.ID), "error", cerr)
+			if _, rerr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); rerr != nil {
+				slog.Error("task claim: requeue after worktree-gate cancel failure failed; stale reclaim will recover it",
+					"task_id", uuidToString(task.ID), "error", rerr)
+			}
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_worktree_gate_cancel",
+				status:  http.StatusInternalServerError,
+				message: "failed to cancel a worktree task blocked by daemon version; task requeued",
+			}
+		}
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+			outcome: "error_worktree_daemon_version",
+			status:  http.StatusUnprocessableEntity,
+			message: reason,
+		}
+	}
+
 	return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil
+}
+
+// worktreeClaimBlockReason returns a user-facing reason when this runtime must
+// not run the task, or "" when it may proceed.
+//
+// Only resources bound to the claiming runtime's own daemon are considered: a
+// project may carry one local_directory per machine, and another machine's
+// worktree resource says nothing about this one's ability to run the task.
+func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime) string {
+	if !runtime.DaemonID.Valid || runtime.DaemonID.String == "" {
+		return ""
+	}
+	for _, res := range resources {
+		if res.ResourceType != "local_directory" {
+			continue
+		}
+		var ref localDirectoryRef
+		if err := json.Unmarshal(res.ResourceRef, &ref); err != nil {
+			continue
+		}
+		if ref.ExecutionMode != localDirectoryModeWorktree || ref.DaemonID != runtime.DaemonID.String {
+			continue
+		}
+		current := readRuntimeCLIVersion(runtime.Metadata)
+		if err := agentpkg.CheckMinCLIVersionFor(current, agentpkg.MinLocalWorktreeCLIVersion); err != nil {
+			shown := current
+			if strings.TrimSpace(shown) == "" {
+				shown = "unknown"
+			}
+			return fmt.Sprintf(
+				"this project's local directory %q is set to run tasks in isolated git worktrees, but the Multica runtime on that machine is %s and needs %s or newer; update it, or switch the resource back to in_place",
+				ref.LocalPath, shown, agentpkg.MinLocalWorktreeCLIVersion)
+		}
+	}
+	return ""
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.
@@ -3115,6 +3209,10 @@ type TaskCompleteRequest struct {
 	Output    string `json:"output"`
 	SessionID string `json:"session_id"` // Claude session ID for future resumption
 	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	// BranchName is the branch this run delivered its work on. Worktree-mode
+	// local_directory tasks never touch the user's working copy, so this is the
+	// only pointer to where the changes went. Empty for every other task kind.
+	BranchName string `json:"branch_name,omitempty"`
 	// SessionRolloutMissing: the daemon withheld this task's Codex session
 	// because its rollout was missing (MUL-5305). Clear the resume pointer and
 	// flag the continuity gap for the next claim.
@@ -3158,10 +3256,14 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			"failure_reason", taskfailure.ReasonAgentContextOverflow,
 		)
 		h.failTask(w, r, taskID, workspaceID, TaskFailRequest{
-			Error:                 req.Output,
-			FailureReason:         string(taskfailure.ReasonAgentContextOverflow),
-			SessionID:             req.SessionID,
-			WorkDir:               req.WorkDir,
+			Error:         req.Output,
+			FailureReason: string(taskfailure.ReasonAgentContextOverflow),
+			SessionID:     req.SessionID,
+			WorkDir:       req.WorkDir,
+			// Carry the branch across the reroute. The run still delivered one:
+			// it ran out of context, it did not fail to produce anything, and
+			// dropping the name here would hide the work it did commit.
+			BranchName:            req.BranchName,
 			SessionRolloutMissing: req.SessionRolloutMissing,
 			RetiredSessionID:      req.RetiredSessionID,
 		})
@@ -3173,7 +3275,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
 	// missing continuity-gap flag.
-	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.SessionRolloutMissing, req.RetiredSessionID)
+	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID)
 	if err != nil {
 		// A CompleteTask error is an infrastructure failure (transaction /
 		// assistant-outcome write), not a bad request: an already-finalized
@@ -3802,6 +3904,10 @@ type TaskFailRequest struct {
 	SessionID     string `json:"session_id,omitempty"`
 	WorkDir       string `json:"work_dir,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`
+	// BranchName: a failed run can still have produced a branch — worktree mode
+	// commits whatever the agent left before tearing the worktree down. Report
+	// it so a partially-successful run is still findable.
+	BranchName string `json:"branch_name,omitempty"`
 	// SessionRolloutMissing: the daemon withheld this task's Codex session
 	// because its rollout was missing (MUL-5305). Clear the resume pointer and
 	// flag the continuity gap for the next claim.
@@ -3842,7 +3948,7 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID)
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID)
 	if err != nil {
 		// A FailTask error is an infrastructure failure (the terminal
 		// transaction that also clears the withheld session, writes the
@@ -3955,11 +4061,75 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 // task cancellation and finished flushing the transcript. Settles the chat
 // finalization that CancelTaskWithResult deferred for a started-but-empty
 // transcript (#5219); idempotent when nothing was deferred.
+// TaskCancelAckRequest is the body of the daemon's cancel acknowledgement.
+type TaskCancelAckRequest struct {
+	// BranchName: a cancelled worktree task has already committed whatever the
+	// agent produced — the worktree is finalized before the daemon learns of
+	// the cancellation. The rest of the result is discarded on this path, so
+	// this is the only channel that can report where the work went.
+	BranchName string `json:"branch_name,omitempty"`
+	// ErrorMessage / FailureReason: set when the cancelled run's worktree
+	// Finalize ABORTED — there is no branch, and the error text naming the
+	// preserved worktree is the only pointer left to the agent's work.
+	ErrorMessage  string `json:"error_message,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty"`
+}
+
 func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
 	if !ok {
 		return
+	}
+	// Body is optional: older daemons send `{}`, and a decode failure must not
+	// break the cancellation contract this endpoint exists for.
+	var req TaskCancelAckRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	// Terminal deliveries first, failing LOUD on persistence errors: these
+	// fields are the only pointer to a cancelled task's work, and the daemon
+	// retries this ack on transient failures — a warn-and-200 would turn one
+	// DB blip into a permanently undiscoverable branch. Both writes never
+	// overwrite already-recorded values, so replays are idempotent — and both
+	// carry a status='cancelled' CAS, because the daemon acks on EVERY
+	// terminal status it observes: a late ack from a stale run must not stamp
+	// its branch or error onto a completed/failed row whose own callback is
+	// the authoritative channel. A CAS-refused write is a deliberate no-op
+	// (Exec reports no error), so the ack still returns 200 — there is
+	// nothing for the daemon to retry — and the rebroadcast below is guarded
+	// by the same status check inside RebroadcastCancelledTask.
+	delivered := false
+	if branch := strings.TrimSpace(req.BranchName); branch != "" {
+		if err := h.Queries.SetAgentTaskBranchName(r.Context(), db.SetAgentTaskBranchNameParams{
+			ID:         task.ID,
+			BranchName: pgtype.Text{String: branch, Valid: true},
+		}); err != nil {
+			slog.Error("cancel ack: record branch name failed",
+				"task_id", taskID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to record branch name")
+			return
+		}
+		delivered = true
+	}
+	if msg := strings.TrimSpace(req.ErrorMessage); msg != "" {
+		reason := strings.TrimSpace(req.FailureReason)
+		if err := h.Queries.SetAgentTaskErrorIfEmpty(r.Context(), db.SetAgentTaskErrorIfEmptyParams{
+			ID:            task.ID,
+			Error:         pgtype.Text{String: msg, Valid: true},
+			FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
+		}); err != nil {
+			slog.Error("cancel ack: record preserved-work error failed",
+				"task_id", taskID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to record task error")
+			return
+		}
+		delivered = true
+	}
+	if delivered {
+		// The task:cancelled broadcast fired at cancel time, before this ack —
+		// clients may already hold a refetched row without the branch/error
+		// and will not refetch again on their own.
+		h.TaskService.RebroadcastCancelledTask(r.Context(), task.ID)
 	}
 	h.TaskService.FinalizeDeferredCancelledChat(r.Context(), task.ID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

@@ -209,6 +209,10 @@ cleared_chat_sessions AS (
     WHERE installation_id IN (SELECT id FROM dead)
     RETURNING chat_session_id
 ),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route
+    WHERE installation_id IN (SELECT id FROM dead)
+),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no installation_id,
     -- no FK), so it is reached through the just-removed chat-session bindings. On an
@@ -259,6 +263,9 @@ WITH doomed AS (
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM doomed)
     RETURNING chat_session_id
+),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM doomed)
 ),
 cleared_outbound_cards AS (
     -- Reach channel_outbound_card_message (keyed by chat_session_id, no FK)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/pluginbundled"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
@@ -17,12 +18,132 @@ import (
 )
 
 type PluginService struct {
-	Queries   *db.Queries
-	TxStarter TxStarter
+	Queries        *db.Queries
+	TxStarter      TxStarter
+	BundledCatalog *pluginbundled.Catalog
 }
 
 func NewPluginService(queries *db.Queries, txStarter TxStarter) *PluginService {
-	return &PluginService{Queries: queries, TxStarter: txStarter}
+	return &PluginService{
+		Queries:        queries,
+		TxStarter:      txStarter,
+		BundledCatalog: pluginbundled.Load(),
+	}
+}
+
+type PluginErrorKind string
+
+const (
+	PluginErrorInvalid      PluginErrorKind = "invalid"
+	PluginErrorNotFound     PluginErrorKind = "not_found"
+	PluginErrorConflict     PluginErrorKind = "conflict"
+	PluginErrorIncompatible PluginErrorKind = "incompatible"
+)
+
+type PluginError struct {
+	Kind    PluginErrorKind
+	Message string
+	Err     error
+}
+
+func (e *PluginError) Error() string {
+	if e.Err != nil {
+		return e.Message + ": " + e.Err.Error()
+	}
+	return e.Message
+}
+
+func (e *PluginError) Unwrap() error { return e.Err }
+
+func newPluginError(kind PluginErrorKind, message string, err error) error {
+	return &PluginError{Kind: kind, Message: message, Err: err}
+}
+
+func (s *PluginService) CatalogEntries() []pluginbundled.CatalogEntry {
+	return s.BundledCatalog.List()
+}
+
+func (s *PluginService) CatalogDiagnostics() []pluginbundled.Diagnostic {
+	return s.BundledCatalog.Diagnostics()
+}
+
+func (s *PluginService) FindCatalogRelease(pluginKey, version string) (pluginbundled.CatalogEntry, bool) {
+	if version == "" {
+		return s.BundledCatalog.Latest(pluginKey)
+	}
+	return s.BundledCatalog.Find(pluginKey, version)
+}
+
+func (s *PluginService) InstallCatalogRelease(ctx context.Context, workspaceID, actorID pgtype.UUID, pluginKey, version string) (db.PluginInstallation, error) {
+	entry, ok := s.FindCatalogRelease(pluginKey, version)
+	if !ok {
+		return db.PluginInstallation{}, newPluginError(PluginErrorNotFound, "Plugin release not found", nil)
+	}
+	if !entry.Compatible {
+		return db.PluginInstallation{}, newPluginError(PluginErrorIncompatible, "Plugin release is incompatible with this Multica version", nil)
+	}
+	return s.InstallPluginRelease(ctx, workspaceID, actorID, PluginReleasePublication{
+		Release:       entry.Release,
+		PublisherType: entry.PublisherType,
+		TrustTier:     entry.TrustTier,
+	})
+}
+
+func (s *PluginService) UpgradeCatalogRelease(ctx context.Context, workspaceID, installationID, actorID pgtype.UUID, pluginKey, version string) (db.PluginInstallation, error) {
+	entry, ok := s.FindCatalogRelease(pluginKey, version)
+	if !ok {
+		return db.PluginInstallation{}, newPluginError(PluginErrorNotFound, "Plugin release not found", nil)
+	}
+	if !entry.Compatible {
+		return db.PluginInstallation{}, newPluginError(PluginErrorIncompatible, "Plugin release is incompatible with this Multica version", nil)
+	}
+
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.PluginInstallation{}, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	q := s.Queries.WithTx(tx)
+	installation, err := q.GetPluginInstallation(ctx, installationID)
+	if err != nil || installation.WorkspaceID != workspaceID {
+		return db.PluginInstallation{}, newPluginError(PluginErrorNotFound, "Plugin installation not found", nil)
+	}
+	identity, err := q.GetPluginIdentity(ctx, installation.PluginID)
+	if err != nil || identity.PluginKey != pluginKey {
+		return db.PluginInstallation{}, newPluginError(PluginErrorNotFound, "Plugin installation not found", nil)
+	}
+	currentRelease, err := q.GetPluginRelease(ctx, installation.DesiredReleaseID)
+	if err != nil {
+		return db.PluginInstallation{}, newPluginError(PluginErrorNotFound, "Plugin installation release not found", nil)
+	}
+	if !pluginbundled.IsNewerVersion(entry.Release.Manifest.Metadata.Version, currentRelease.Version) {
+		return db.PluginInstallation{}, newPluginError(PluginErrorConflict, "Target Plugin release is not newer than the installed release", nil)
+	}
+	_, release, err := ensurePluginRelease(ctx, q, PluginReleasePublication{
+		Release:       entry.Release,
+		PublisherType: entry.PublisherType,
+		TrustTier:     entry.TrustTier,
+	})
+	if err != nil {
+		return db.PluginInstallation{}, err
+	}
+	installation, err = q.SetPluginInstallationDesiredState(ctx, db.SetPluginInstallationDesiredStateParams{
+		Enabled:          installation.Enabled,
+		UpdatedBy:        actorID,
+		WorkspaceID:      workspaceID,
+		DesiredReleaseID: release.ID,
+		ID:               installationID,
+	})
+	if err != nil {
+		return db.PluginInstallation{}, fmt.Errorf("set Plugin desired release: %w", err)
+	}
+	if _, err := s.reconcileWorkspaceTx(ctx, q, workspaceID); err != nil {
+		return db.PluginInstallation{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.PluginInstallation{}, err
+	}
+	return s.Queries.GetPluginInstallation(ctx, installationID)
 }
 
 // PluginReleasePublication carries the trust decision made by the acquisition
@@ -49,11 +170,11 @@ func (s *PluginService) InstallPluginRelease(ctx context.Context, workspaceID, a
 	if err != nil {
 		return db.PluginInstallation{}, err
 	}
-	if existing, err := q.GetWorkspacePluginInstallation(ctx, db.GetWorkspacePluginInstallationParams{
+	if _, err := q.GetWorkspacePluginInstallation(ctx, db.GetWorkspacePluginInstallationParams{
 		WorkspaceID: workspaceID,
 		PluginID:    identity.ID,
 	}); err == nil {
-		return db.PluginInstallation{}, fmt.Errorf("plugin is already installed as %s", util.UUIDToString(existing.ID))
+		return db.PluginInstallation{}, newPluginError(PluginErrorConflict, "Plugin is already installed", nil)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return db.PluginInstallation{}, err
 	}
@@ -92,10 +213,10 @@ func ensurePluginRelease(ctx context.Context, q *db.Queries, publication PluginR
 	releaseData := publication.Release
 	manifest := releaseData.Manifest
 	if publication.PublisherType == "" || publication.TrustTier == "" {
-		return db.PluginIdentity{}, db.PluginRelease{}, fmt.Errorf("plugin publisher type and trust tier are required")
+		return db.PluginIdentity{}, db.PluginRelease{}, newPluginError(PluginErrorInvalid, "Plugin publisher trust is required", nil)
 	}
 	if len(releaseData.Files) == 0 {
-		return db.PluginIdentity{}, db.PluginRelease{}, fmt.Errorf("validated plugin release contains no artifact files")
+		return db.PluginIdentity{}, db.PluginRelease{}, newPluginError(PluginErrorInvalid, "Plugin release contains no artifact files", nil)
 	}
 	if err := q.LockPluginRegistryKey(ctx, manifest.Metadata.Key); err != nil {
 		return db.PluginIdentity{}, db.PluginRelease{}, fmt.Errorf("lock plugin registry key: %w", err)
@@ -115,7 +236,7 @@ func ensurePluginRelease(ctx context.Context, q *db.Queries, publication PluginR
 		return db.PluginIdentity{}, db.PluginRelease{}, fmt.Errorf("ensure plugin identity: %w", err)
 	}
 	if identity.PublisherID != manifest.Metadata.Publisher || identity.PublisherType != publication.PublisherType || identity.TrustTier != publication.TrustTier {
-		return db.PluginIdentity{}, db.PluginRelease{}, fmt.Errorf("plugin identity %q conflicts with its registered publisher", manifest.Metadata.Key)
+		return db.PluginIdentity{}, db.PluginRelease{}, newPluginError(PluginErrorConflict, "Plugin publisher conflicts with the registered identity", nil)
 	}
 
 	release, err := q.GetPluginReleaseByVersion(ctx, db.GetPluginReleaseByVersionParams{
@@ -182,7 +303,7 @@ func ensurePluginRelease(ctx context.Context, q *db.Queries, publication PluginR
 		return db.PluginIdentity{}, db.PluginRelease{}, fmt.Errorf("ensure plugin release: %w", err)
 	}
 	if release.ManifestDigest != releaseData.ManifestDigest || release.ArtifactDigest != releaseData.ArtifactDigest || release.ArchiveDigest != releaseData.ArchiveDigest {
-		return db.PluginIdentity{}, db.PluginRelease{}, fmt.Errorf("plugin release %s@%s conflicts with immutable registry content", manifest.Metadata.Key, manifest.Metadata.Version)
+		return db.PluginIdentity{}, db.PluginRelease{}, newPluginError(PluginErrorConflict, "Plugin release conflicts with immutable registry content", nil)
 	}
 	return identity, release, nil
 }
@@ -197,7 +318,7 @@ func (s *PluginService) DisablePlugin(ctx context.Context, workspaceID, installa
 
 func (s *PluginService) setPluginBinding(ctx context.Context, workspaceID, installationID, actorID pgtype.UUID, scopeType string, scopeID pgtype.UUID, enabled bool) (db.PluginInstallation, error) {
 	if scopeType != "workspace" && scopeType != "agent" {
-		return db.PluginInstallation{}, fmt.Errorf("scope_type must be workspace or agent")
+		return db.PluginInstallation{}, newPluginError(PluginErrorInvalid, "scope_type must be workspace or agent", nil)
 	}
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
@@ -207,21 +328,15 @@ func (s *PluginService) setPluginBinding(ctx context.Context, workspaceID, insta
 	q := s.Queries.WithTx(tx)
 	installation, err := q.GetPluginInstallation(ctx, installationID)
 	if err != nil || installation.WorkspaceID != workspaceID {
-		return db.PluginInstallation{}, fmt.Errorf("plugin installation not found")
+		return db.PluginInstallation{}, newPluginError(PluginErrorNotFound, "Plugin installation not found", nil)
 	}
-	globalEnabled := enabled || (scopeType == "agent" && installation.Enabled)
-	if scopeType == "agent" && !enabled {
-		globalEnabled = installation.Enabled
+	if scopeType == "workspace" && scopeID != workspaceID {
+		return db.PluginInstallation{}, newPluginError(PluginErrorNotFound, "Plugin binding target not found", nil)
 	}
-	installation, err = q.SetPluginInstallationDesiredState(ctx, db.SetPluginInstallationDesiredStateParams{
-		Enabled:          globalEnabled,
-		UpdatedBy:        actorID,
-		WorkspaceID:      workspaceID,
-		DesiredReleaseID: installation.DesiredReleaseID,
-		ID:               installationID,
-	})
-	if err != nil {
-		return db.PluginInstallation{}, fmt.Errorf("set plugin desired state: %w", err)
+	if scopeType == "agent" {
+		if _, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: scopeID, WorkspaceID: workspaceID}); err != nil {
+			return db.PluginInstallation{}, newPluginError(PluginErrorNotFound, "Plugin binding target not found", nil)
+		}
 	}
 	if _, err := q.CreatePluginBindingRevision(ctx, db.CreatePluginBindingRevisionParams{
 		ScopeType:      scopeType,
@@ -232,6 +347,27 @@ func (s *PluginService) setPluginBinding(ctx context.Context, workspaceID, insta
 		WorkspaceID:    workspaceID,
 	}); err != nil {
 		return db.PluginInstallation{}, fmt.Errorf("create plugin binding: %w", err)
+	}
+	bindings, err := q.ListLatestPluginBindings(ctx, installationID)
+	if err != nil {
+		return db.PluginInstallation{}, fmt.Errorf("list plugin bindings: %w", err)
+	}
+	globalEnabled := false
+	for _, binding := range bindings {
+		if binding.Enabled {
+			globalEnabled = true
+			break
+		}
+	}
+	installation, err = q.SetPluginInstallationDesiredState(ctx, db.SetPluginInstallationDesiredStateParams{
+		Enabled:          globalEnabled,
+		UpdatedBy:        actorID,
+		WorkspaceID:      workspaceID,
+		DesiredReleaseID: installation.DesiredReleaseID,
+		ID:               installationID,
+	})
+	if err != nil {
+		return db.PluginInstallation{}, fmt.Errorf("set plugin desired state: %w", err)
 	}
 	if _, err := s.reconcileWorkspaceTx(ctx, q, workspaceID); err != nil {
 		return db.PluginInstallation{}, err
@@ -251,7 +387,7 @@ func (s *PluginService) RollbackPlugin(ctx context.Context, workspaceID, install
 	q := s.Queries.WithTx(tx)
 	installation, err := q.GetPluginInstallation(ctx, installationID)
 	if err != nil || installation.WorkspaceID != workspaceID {
-		return db.PluginInstallation{}, fmt.Errorf("plugin installation not found")
+		return db.PluginInstallation{}, newPluginError(PluginErrorNotFound, "Plugin installation not found", nil)
 	}
 	identity, err := q.GetPluginIdentity(ctx, installation.PluginID)
 	if err != nil {
@@ -262,7 +398,7 @@ func (s *PluginService) RollbackPlugin(ctx context.Context, workspaceID, install
 		Version:   version,
 	})
 	if err != nil {
-		return db.PluginInstallation{}, fmt.Errorf("rollback release not found")
+		return db.PluginInstallation{}, newPluginError(PluginErrorNotFound, "Rollback release not found", nil)
 	}
 	installation, err = q.SetPluginInstallationDesiredState(ctx, db.SetPluginInstallationDesiredStateParams{
 		Enabled:          installation.Enabled,

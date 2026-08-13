@@ -4,7 +4,9 @@
 - The same file registers `project resource list/add/update/remove`.
 - `project create --repo` attaches `github_repo` resources during project creation.
 - `project create` / `project update` accept `--start-date` / `--due-date` (calendar days, `YYYY-MM-DD`), mapping to the project `start_date` / `due_date` columns (migration `166_project_dates`); an empty `--start-date ""`/`--due-date ""` on update clears the date, mirroring the issue date flags in `cmd_issue.go`.
-- `project resource add` supports shortcuts for `github_repo` (`--url`, non-JSON `--ref` for checkout ref, `--default-branch-hint`) and `local_directory` (`--local-path`, `--daemon-id`, `--ref-label`), or generic JSON `--ref '<json>'`.
+- `project resource add` supports shortcuts for `github_repo` (`--url`, non-JSON `--ref` for checkout ref, `--default-branch-hint`) and `local_directory` (`--local-path`, `--daemon-id`, `--ref-label`, `--execution-mode`), or generic JSON `--ref '<json>'`.
+- `local_directory.execution_mode` is validated in `server/internal/handler/project_resource.go` (`validateLocalDirectoryRef`); the daemon reads it in `server/internal/daemon/local_directory.go` (`localDirectoryAssignment.UsesWorktree`) and builds the per-task worktree in `server/internal/daemon/execenv/local_worktree.go`.
+- Saving `execution_mode=worktree` is gated on the daemon's registered `cli_version` by `requireWorktreeCapableDaemon` in `server/internal/handler/project_resource.go` (floor: `MinLocalWorktreeCLIVersion` in `server/pkg/agent/version.go`); too old → HTTP 422 `daemon_version_unsupported`.
 - `project resource update` merges shortcut edits with existing `resource_ref` so a partial edit does not clobber required fields; non-JSON `--ref` updates `github_repo.resource_ref.ref`.
 - `server/cmd/server/router.go` exposes `/api/projects` plus `/api/projects/{projectId}/resources` routes.
 - `server/pkg/db/queries/project_resource.sql` is the CRUD query surface for `project_resource` rows.

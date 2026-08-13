@@ -101,7 +101,23 @@ The daemon is the local agent runtime. It detects available AI CLIs on your mach
 multica daemon start
 ```
 
-By default, the daemon runs in the background and logs to `~/.multica/daemon.log`.
+By default, the daemon runs in the background and writes its log into the state
+directory of the profile it was started with — **not always `~/.multica/`**:
+
+| Profile | State directory |
+| --- | --- |
+| Default (no `--profile`) | `~/.multica/` |
+| Named (`--profile <name>`) | `~/.multica/profiles/<name>/` |
+
+That directory holds `daemon.log` (the log), `daemon.pid` (the background
+daemon's PID), and `daemon.err.log` (raw crash output; near-empty on a healthy
+daemon, since normal logging goes to `daemon.log`).
+
+The Desktop app runs its own named profile, so on a machine that has ever run
+both, `~/.multica/daemon.log` and `~/.multica/profiles/<name>/daemon.log` both
+exist and both read as plausible logs — only one is being written to. Don't
+guess: `multica daemon logs` prints the absolute path it resolved (see
+[Logs](#logs)).
 
 To run in the foreground (useful for debugging):
 
@@ -158,7 +174,29 @@ Shows PID, uptime, detected agents, and watched workspaces.
 multica daemon logs              # Last 50 lines
 multica daemon logs -f           # Follow (tail -f)
 multica daemon logs -n 100       # Last 100 lines
+multica daemon logs --profile staging
 ```
+
+Every run first prints the absolute path it resolved, so you always know which
+profile's log you are looking at:
+
+```
+$ multica daemon logs -n 100
+Reading /Users/you/.multica/profiles/desktop-mbp/daemon.log (profile: desktop-mbp)
+...
+```
+
+That line goes to stderr, before the tail starts — so it also shows up under
+`-f`, and piping or redirecting the command still yields log content only:
+
+```bash
+multica daemon logs -n 500 | grep ERROR   # the path line is not in the pipe
+```
+
+Without `--profile`, the default profile's log is read. If it doesn't exist the
+command says so and names the path it looked for, which is the fastest way to
+find out that the daemon you care about is running on a different profile —
+`multica daemon status --profile <name>` confirms which one is live.
 
 ### Supported Agents
 
@@ -222,6 +260,7 @@ Daemon behavior is configured via flags or environment variables:
 | GC repo cache TTL (`.repos`) | — | `MULTICA_GC_REPO_TTL` | `720h` (30d; set `0` to disable) |
 | GC repo maintenance | — | `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` (set `false`/`0` to disable heavy Git maintenance only) |
 | GC Hermes memory TTL (per-agent `memories/`) | — | `MULTICA_GC_HERMES_MEMORY_TTL` | `2160h` (90d; set `0` to disable) |
+| GC Hermes session TTL (per-conversation `state.db`) | — | `MULTICA_GC_HERMES_SESSION_TTL` | `336h` (14d; set `0` to disable) |
 
 #### Workspace garbage collection
 
@@ -236,6 +275,7 @@ The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and reclaims disk space 
 
   Short worktree cleanup and eligible cache eviction continue on every GC cycle, including while agents are active. Heavy repo maintenance (`reflog expire` and `git gc`) starts only while the daemon is otherwise idle. A checkout or newly claimed task cancels it and takes priority; interrupted work remains pending for a later idle GC cycle. Operators can disable only these heavy commands with `MULTICA_GC_REPO_MAINTENANCE_ENABLED=false` without disabling worktree cleanup or cache eviction.
 
+- **Hermes session store reclamation** — a conversation's Hermes transcript (`state.db`) lives at `<profile dir>/hermes-sessions/<agent-id>/<hermes-profile>/<conversation>/`, outside any task directory, so a follow-up turn can resume it (see [Hermes agent memory](#hermes-agent-memory)). A store untouched for `MULTICA_GC_HERMES_SESSION_TTL` is removed. The default matches the Codex session store rather than the memory store above: these hold full transcripts, and reclaiming an idle one costs a thread that starts fresh (with a continuity notice), not an agent that forgot what it learned. A store a running task holds is never reclaimed.
 - **Hermes memory store reclamation** — a Hermes agent's long-term memory (`memories/`) lives at `<profile dir>/hermes-state/<agent-id>/<hermes-profile>/`, outside any task directory, so it survives across tasks and issues (see [Hermes agent memory](#hermes-agent-memory)). A store untouched for `MULTICA_GC_HERMES_MEMORY_TTL` is removed, giving a deleted agent's memory an eventual-reclamation guarantee. The default is deliberately long: these are a handful of markdown files, and reclaiming one is user-visible amnesia rather than a cache miss. A store a running task holds is never reclaimed.
 
 Configured patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. The managed Codex cache is matched by its exact relative path, so a repository's own `.sandbox-bin` is not removed unless an operator explicitly adds that basename to `MULTICA_GC_ARTIFACT_PATTERNS`. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `MULTICA_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). To disable artifact cleanup entirely, including the managed Codex cache, set `MULTICA_GC_ARTIFACT_TTL=0`.
@@ -326,7 +366,7 @@ Consequences worth knowing:
 
 - **Memory is agent-scoped but runtime-local.** One agent's memory is never visible to another, and the user's own `~/.hermes/memories` is never read or written. The store lives in this runtime's Multica profile directory, so it does **not** follow the agent to another machine — an agent that runs on two runtimes has a separate memory line on each. Everything else in the home — auth, config, plugins — is still shared from the user's real home by symlink, so the agent does not need its own login.
 - **To carry existing local memory in**, copy it into the store once: `cp -R ~/.hermes/memories/. "<profile dir>/hermes-state/<agent-id>/default/"`. To wipe an agent's memory, delete that directory.
-- **Session history is not covered.** `state.db` and its WAL sidecars stay task-local: sharing a live SQLite database across one agent's concurrent tasks needs lock and consistency handling (plus Windows byte-range locks on `-shm`) that plain memory files do not. The agent remembers accumulated notes, not previous transcripts.
+- **Conversation history is covered too, in a separate store.** Hermes keeps every ACP session in `<HERMES_HOME>/state.db`, which the overlay links to a per-conversation store at `<profile dir>/hermes-sessions/<agent-id>/<hermes-profile>/<issue-id | chat_\<chat-session-id\>>/`, so a follow-up turn resumes the actual transcript. The shard is per conversation rather than per agent on purpose: tasks of one conversation run one after another, so a shard has a single writer at a time, while two issues never share a database. A host that cannot create the link (Windows without symlink privileges) keeps the database task-local instead, untouched — the link is proven creatable before anything is moved, and a copy is never used, because a copied SQLite database would absorb the turn's writes into a file the next task discards.
 - **Concurrent tasks of one agent are last-writer-wins.** Hermes rewrites its memory files whole, so two tasks writing memory at the same time can overwrite each other.
 - **Every Hermes agent gets the overlay in practice**, so every one of them gets a persistent memory store. The daemon builds the overlay only when a task carries skills, but the server appends Multica's built-in skills to every agent's skill set (`LoadAgentSkillBundles`), so that list is never empty — leaving an agent's own skill list empty does not opt out of the overlay, and is not a way to keep using the host's `~/.hermes/memories`.
 
@@ -374,7 +414,7 @@ multica daemon start --profile staging
 multica daemon start
 ```
 
-Each profile gets its own config directory (`~/.multica/profiles/<name>/`), daemon state, health port, and workspace root.
+Each profile gets its own config directory (`~/.multica/profiles/<name>/`), daemon state, health port, and workspace root. Daemon state means that profile's own `daemon.log`, `daemon.err.log`, and `daemon.pid` live in that directory too — see [Start](#start) for the layout, and pass `--profile <name>` to `daemon status` / `daemon logs` to act on it.
 
 ## Workspaces
 

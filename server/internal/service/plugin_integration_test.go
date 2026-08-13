@@ -143,6 +143,23 @@ func TestReferencePluginInstallEnablePinDisableAndRetry(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, newTaskID); err != nil {
 		t.Fatalf("complete disabled task: %v", err)
 	}
+	agentUUID := util.MustParseUUID(agentID)
+	installation, err = pluginService.EnablePlugin(ctx, workspaceUUID, installation.ID, actorUUID, "agent", agentUUID)
+	if err != nil || !installation.Enabled {
+		t.Fatalf("enable agent scope: installation=%+v err=%v", installation, err)
+	}
+	agentTaskID := createTask(nil)
+	agentBundles, _, _, err := taskService.LoadTaskPluginSkillBundles(ctx, util.MustParseUUID(agentTaskID))
+	if err != nil || len(agentBundles) != 1 {
+		t.Fatalf("agent-scoped Plugin missing from task: bundles=%d err=%v", len(agentBundles), err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, agentTaskID); err != nil {
+		t.Fatalf("complete agent-scoped task: %v", err)
+	}
+	installation, err = pluginService.DisablePlugin(ctx, workspaceUUID, installation.ID, actorUUID, "agent", agentUUID)
+	if err != nil || installation.Enabled {
+		t.Fatalf("disable last active binding: installation=%+v err=%v", installation, err)
+	}
 	retryTaskID := createTask(firstTaskID)
 	retryBundles, _, retryManifest, err := taskService.LoadTaskPluginSkillBundles(ctx, util.MustParseUUID(retryTaskID))
 	if err != nil || len(retryBundles) != 1 || retryManifest.SnapshotDigest != manifest.SnapshotDigest {

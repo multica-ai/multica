@@ -16,16 +16,16 @@ import (
 	"github.com/multica-ai/multica/server/internal/taskusagebackfill"
 )
 
-// preMigrationHook runs work that must happen before a specific
-// migration is applied during `migrate up`. Hooks are idempotent and
+// preMigrationHook runs work that must happen before a specific migration is
+// applied in the direction whose hook map selected it. Hooks are idempotent and
 // must not depend on the migration loop's session-pinned advisory lock
 // — they run on the pool, not on the loop's pinned conn, so they can
 // safely acquire other session-level locks (e.g. advisory lock 4246
 // for the task_usage hourly rollup).
 //
-// Returning an error aborts the migration run. The corresponding
-// migration is NOT recorded in schema_migrations, so the next run will
-// retry the hook + migration.
+// Returning an error aborts the migration run. The corresponding migration is
+// not added to (up) or removed from (down) schema_migrations, so the next run
+// retries the hook + migration.
 type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 
 // preMigrationHooks wires migration version → hook. The version key is
@@ -63,7 +63,7 @@ type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 // CREATE INDEX CONCURRENTLY. Every entry gets an invalid-index cleanup hook, so
 // an interrupted build cannot be mistaken for success on retry.
 //
-// The mapping is data rather than seven hand-written hook registrations so a
+// The mapping is data rather than individual hand-written hook registrations so a
 // test can check each entry against the index its migration file actually
 // creates — a typo here would be invisible at runtime, because a hook that names
 // a nonexistent index is a silent no-op.
@@ -75,31 +75,51 @@ type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 // records the migration as applied, and the queries that need the index silently
 // stay on a full scan — the exact regression these migrations exist to fix.
 var concurrentIndexCleanups = map[string]string{
-	"257_agent_task_queue_channel_media_pending_unique_v2": "idx_one_pending_task_per_issue_agent_v2",
-	"261_agent_task_queue_terminal_completed_at_v2":        "idx_agent_task_queue_terminal_completed_at_v2",
-	"273_agent_task_queue_runtime_id_index":                "idx_agent_task_queue_runtime_id",
-	"274_task_token_workspace_id_index":                    "idx_task_token_workspace_id",
-	"275_task_token_agent_id_index":                        "idx_task_token_agent_id",
-	"276_chat_draft_restore_task_id_index":                 "idx_chat_draft_restore_task_id",
-	"277_autopilot_run_task_id_index":                      "idx_autopilot_run_task_id",
-	"278_agent_task_queue_agent_id_keyset_index":           "idx_agent_task_queue_agent_id_keyset",
-	"279_agent_task_queue_issue_id_keyset_index":           "idx_agent_task_queue_issue_id_keyset",
-	"281_agent_workspace_id_keyset_index":                  "idx_agent_workspace_id_keyset",
-	"282_issue_workspace_id_keyset_index":                  "idx_issue_workspace_id_keyset",
-	"283_agent_runtime_workspace_id_keyset_index":          "idx_agent_runtime_workspace_id_keyset",
-	"286_plugin_identity_key_index":                        "idx_plugin_identity_key",
-	"287_plugin_release_version_index":                     "idx_plugin_release_version",
-	"288_plugin_installation_workspace_plugin_index":       "idx_plugin_installation_workspace_plugin_active",
-	"289_plugin_contribution_key_index":                    "idx_plugin_contribution_release_key",
-	"290_plugin_contribution_ordinal_index":                "idx_plugin_contribution_release_ordinal",
-	"291_plugin_grant_revision_index":                      "idx_plugin_grant_revision",
-	"292_plugin_binding_revision_index":                    "idx_plugin_binding_revision",
-	"293_plugin_installation_workspace_index":              "idx_plugin_installation_workspace",
-	"295_plugin_artifact_file_index":                       "idx_plugin_artifact_file_release_path",
-	"296_plugin_snapshot_revision_index":                   "idx_plugin_snapshot_workspace_revision",
-	"297_plugin_execution_task_index":                      "idx_plugin_execution_manifest_task",
-	"298_plugin_health_index":                              "idx_plugin_health_installation_observed",
-	"299_agent_task_plugin_manifest_index":                 "idx_agent_task_plugin_execution_manifest",
+	"257_agent_task_queue_channel_media_pending_unique_v2":      "idx_one_pending_task_per_issue_agent_v2",
+	"261_agent_task_queue_terminal_completed_at_v2":             "idx_agent_task_queue_terminal_completed_at_v2",
+	"273_agent_task_queue_runtime_id_index":                     "idx_agent_task_queue_runtime_id",
+	"274_task_token_workspace_id_index":                         "idx_task_token_workspace_id",
+	"275_task_token_agent_id_index":                             "idx_task_token_agent_id",
+	"276_chat_draft_restore_task_id_index":                      "idx_chat_draft_restore_task_id",
+	"277_autopilot_run_task_id_index":                           "idx_autopilot_run_task_id",
+	"278_agent_task_queue_agent_id_keyset_index":                "idx_agent_task_queue_agent_id_keyset",
+	"279_agent_task_queue_issue_id_keyset_index":                "idx_agent_task_queue_issue_id_keyset",
+	"281_agent_workspace_id_keyset_index":                       "idx_agent_workspace_id_keyset",
+	"282_issue_workspace_id_keyset_index":                       "idx_issue_workspace_id_keyset",
+	"283_agent_runtime_workspace_id_keyset_index":               "idx_agent_runtime_workspace_id_keyset",
+	"286_plugin_identity_key_index":                             "idx_plugin_identity_key",
+	"287_plugin_release_version_index":                          "idx_plugin_release_version",
+	"288_plugin_installation_workspace_plugin_index":            "idx_plugin_installation_workspace_plugin_active",
+	"289_plugin_contribution_key_index":                         "idx_plugin_contribution_release_key",
+	"290_plugin_contribution_ordinal_index":                     "idx_plugin_contribution_release_ordinal",
+	"291_plugin_grant_revision_index":                           "idx_plugin_grant_revision",
+	"292_plugin_binding_revision_index":                         "idx_plugin_binding_revision",
+	"293_plugin_installation_workspace_index":                   "idx_plugin_installation_workspace",
+	"295_plugin_artifact_file_index":                            "idx_plugin_artifact_file_release_path",
+	"296_plugin_snapshot_revision_index":                        "idx_plugin_snapshot_workspace_revision",
+	"297_plugin_execution_task_index":                           "idx_plugin_execution_manifest_task",
+	"298_plugin_health_index":                                   "idx_plugin_health_installation_observed",
+	"299_agent_task_plugin_manifest_index":                      "idx_agent_task_plugin_execution_manifest",
+	"305_dingtalk_group_route_installation_conversation_unique": "idx_dingtalk_group_route_installation_conversation",
+	"306_dingtalk_group_route_workspace_index":                  "idx_dingtalk_group_route_workspace",
+	"307_dingtalk_group_route_id_unique":                        "idx_dingtalk_group_route_id_unique",
+}
+
+// concurrentDownIndexCleanups covers every migration whose down direction
+// rebuilds an index with CREATE INDEX CONCURRENTLY. An interrupted rollback
+// can leave an INVALID relation behind. IF NOT EXISTS would then silently skip
+// the retry, while a bare CREATE would stay wedged on "already exists"; both
+// cases need direction-specific cleanup before the rollback can retry safely.
+var concurrentDownIndexCleanups = map[string]string{
+	"144_drop_agent_task_queue_chat_pending_v1":             "idx_agent_task_queue_chat_pending",
+	"171_drop_legacy_label_namespace_index":                 "issue_label_workspace_name_lower_idx",
+	"256_drop_agent_task_queue_chat_pending_v2":             "idx_agent_task_queue_chat_pending_v2",
+	"258_drop_pending_issue_agent_v1":                       "idx_one_pending_task_per_issue_agent",
+	"262_drop_agent_task_queue_terminal_completed_at_v1":    "idx_agent_task_queue_terminal_completed_at",
+	"300_drop_redundant_issue_workspace_number_index":       "idx_issue_workspace_number",
+	"301_drop_redundant_sys_cron_job_plan_index":            "idx_sys_cron_exec_job_plan",
+	"302_drop_redundant_channel_chat_session_binding_index": "idx_channel_chat_session_binding_session",
+	"303_drop_redundant_lark_chat_session_binding_index":    "idx_lark_chat_session_binding_session",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {
@@ -112,6 +132,25 @@ var preMigrationHooks = func() map[string]preMigrationHook {
 	}
 	return hooks
 }()
+
+var preRollbackHooks = func() map[string]preMigrationHook {
+	hooks := make(map[string]preMigrationHook, len(concurrentDownIndexCleanups))
+	for version, index := range concurrentDownIndexCleanups {
+		hooks[version] = cleanupInvalidConcurrentIndexHook(index)
+	}
+	return hooks
+}()
+
+func hooksForDirection(direction string) map[string]preMigrationHook {
+	switch direction {
+	case "up":
+		return preMigrationHooks
+	case "down":
+		return preRollbackHooks
+	default:
+		return nil
+	}
+}
 
 // cleanupInvalidConcurrentIndexHook removes an INVALID index left by an
 // interrupted or failed CREATE INDEX CONCURRENTLY before the migration retries.
@@ -225,7 +264,8 @@ type runOptions struct {
 	// receives the pool (not the loop's pinned conn) so it can take
 	// its own session-level locks. nil or missing entries mean "no
 	// hook" and the migration runs straight through. Production main()
-	// passes preMigrationHooks; tests leave this nil.
+	// passes the direction-specific hook map; tests leave this nil unless they
+	// exercise a hook.
 	Hooks map[string]preMigrationHook
 }
 
@@ -270,7 +310,7 @@ func main() {
 	if err := runMigrations(ctx, pool, runOptions{
 		Direction: direction,
 		Files:     files,
-		Hooks:     preMigrationHooks,
+		Hooks:     hooksForDirection(direction),
 	}); err != nil {
 		slog.Error("migration run failed", "error", err)
 		os.Exit(1)
@@ -388,12 +428,10 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 		// colliding with migrationAdvisoryLockKey. Hook failures
 		// abort the run before schema_migrations is updated, so the
 		// same version retries cleanly on the next invocation.
-		if opts.Direction == "up" {
-			if hook, ok := opts.Hooks[version]; ok && hook != nil {
-				slog.Info("running pre-migration hook", "version", version)
-				if err := hook(ctx, pool); err != nil {
-					return fmt.Errorf("pre-migration hook for %q: %w", version, err)
-				}
+		if hook, ok := opts.Hooks[version]; ok && hook != nil {
+			slog.Info("running pre-migration hook", "version", version, "direction", opts.Direction)
+			if err := hook(ctx, pool); err != nil {
+				return fmt.Errorf("pre-migration hook for %q (%s): %w", version, opts.Direction, err)
 			}
 		}
 

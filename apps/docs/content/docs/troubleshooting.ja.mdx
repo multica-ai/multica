@@ -203,6 +203,8 @@ netstat -ano | findstr :8080       # Windows
 | Docker backend | `docker compose -f docker-compose.selfhost.yml logs -f backend` |
 | ブラウザ | 開発者ツールの Console と Network |
 
+どのファイルが現在有効なログかは、デーモンを起動したプロファイルによって決まります。以前のデーモンが残した古いログもそのまま読めてしまうため、誤ったファイルを調べてしまいがちです。当て推量でファイルを開かないでください: `multica daemon logs` は内容を流す前に、解決した絶対パスを表示します。名前付きプロファイルのログを読むときは `--profile <name>` を付けます。
+
 デーモンの起動過程を直接観察したい場合は、フォアグラウンドで実行します:
 
 ```bash

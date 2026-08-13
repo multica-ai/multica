@@ -214,6 +214,7 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 		// — the upstream classification should win because the
 		// process_failure rule is checked last.
 		{"exit status with 401 upstream", "exit status 1: API Error: 401 Unauthorized", ReasonAgentProviderAuthOrAccess},
+		{"windows codex process start", "start codex: fork/exec C:\\invalid\\codex.exe: %1 is not a valid Win32 application.", ReasonAgentProcessFailure},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

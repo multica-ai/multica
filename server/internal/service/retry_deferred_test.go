@@ -132,7 +132,7 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 				pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id = $1 OR id = $1`, parentID)
 			})
 
-			if _, err := svc.FailTask(ctx, parentID, "API Error: Connection closed mid-response.", "src-session", "/tmp/src-workdir", "agent_error.provider_network", false, ""); err != nil {
+			if _, err := svc.FailTask(ctx, parentID, "API Error: Connection closed mid-response.", "src-session", "/tmp/src-workdir", "", "agent_error.provider_network", false, ""); err != nil {
 				t.Fatalf("FailTask: %v", err)
 			}
 

@@ -1,0 +1,7 @@
+{
+  "source_ref": "bundled://ai.multica.software-delivery/1.1.0",
+  "signature_key_id": "multica-plugin-release-2026-01",
+  "signature_file": "release.sig",
+  "publisher_type": "official",
+  "trust_tier": "official"
+}

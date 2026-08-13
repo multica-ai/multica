@@ -7,9 +7,8 @@
 -- (issue_id, id) serves every `issue_id = $1` predicate that the single-column
 -- index served, and additionally produces id order. The old index is left in
 -- place deliberately. Dropping it needs its own migration with a
--- direction-aware INVALID-index cleanup, because the down path of such a drop is
--- a CREATE INDEX CONCURRENTLY and the runner only runs cleanup hooks in the up
--- direction — an interrupted rollback would otherwise leave no usable issue_id
--- index at all.
+-- direction-aware INVALID-index cleanup, because the down path of such a drop
+-- is a CREATE INDEX CONCURRENTLY. An interrupted rollback would otherwise leave
+-- no usable issue_id index at all.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_agent_task_queue_issue_id_keyset
     ON agent_task_queue (issue_id, id);
