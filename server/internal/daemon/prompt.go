@@ -11,7 +11,7 @@ import (
 // actually lost. See the constants in execenv for the full reasoning; the
 // question is whether the conversation is still READABLE, not whether it is a
 // chat — an issue's comments, a Slack channel's history, and a web chat's /
-// Feishu's / WeCom's / DingTalk's chat_message transcript all are (MUL-5722).
+// Feishu's / WeCom's / DingTalk's / ShareCRM's chat_message transcript all are (MUL-5722).
 func sessionContinuityNoticeFor(task Task) string {
 	if task.ChatSessionID == "" {
 		return execenv.SessionContinuityNoticeIssue
@@ -20,7 +20,7 @@ func sessionContinuityNoticeFor(task Task) string {
 		return execenv.SessionContinuityNoticeChannelHistory
 	}
 	// Every other chat session that persists a transcript (web chat, Feishu,
-	// WeCom, DingTalk) reads it back via `multica chat history`; Slack alone
+	// WeCom, DingTalk, ShareCRM) reads it back via `multica chat history`; Slack alone
 	// reads the live channel. Only a surface that never stored a transcript
 	// falls through to Unrecoverable — see SurfacePersistsTranscript.
 	if execenv.SurfacePersistsTranscript(task.ChatChannelType) {

@@ -30,7 +30,7 @@ import { WecomMark } from "../../../settings/components/wecom-mark";
 import { TelegramAgentBindButton } from "../../../settings/components/telegram-tab";
 import { TelegramMark } from "../../../settings/components/telegram-mark";
 import { ShareCRMAgentBindButton } from "../../../settings/components/sharecrm-tab";
-import { MessagesSquare } from "lucide-react";
+import { ShareCRMMark } from "../../../settings/components/sharecrm-mark";
 import { useT } from "../../../i18n";
 
 /**
@@ -461,7 +461,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
       <section className="rounded-lg border">
         <div className="flex items-start gap-3 p-4">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
-            <MessagesSquare className="h-4 w-4" />
+            <ShareCRMMark className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1 space-y-1">
             <h3 className="text-body font-medium">{ts(($) => $.sharecrm.section_title)}</h3>

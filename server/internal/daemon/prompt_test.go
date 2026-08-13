@@ -567,6 +567,7 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 		execenv.ChannelTypeFeishu,
 		execenv.ChannelTypeWecom,
 		execenv.ChannelTypeDingtalk,
+		execenv.ChannelTypeSharecrm,
 	} {
 		t.Run(channelType+" transcript prompt does not contradict itself", func(t *testing.T) {
 			out := buildChatPrompt(Task{
