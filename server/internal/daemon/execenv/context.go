@@ -425,6 +425,14 @@ func skillsDirPath(workDir, provider string) string {
 		// (and also scans .agents/skills/). Prefer the native .grok tree.
 		// See Grok user-guide skills.md.
 		return filepath.Join(workDir, ".grok", "skills")
+	case "zcode":
+		// ZCode CLI (zcode-cli) auto-discovers project-level skills from
+		// .zcode/skills/ in the workdir (it also scans .agents/skills/).
+		// Prefer the native .zcode tree, mirroring the .zcode/ workspace
+		// metadata dir the CLI writes under the project root. Without this
+		// mapping the daemon fell back to .agent_context/skills/, which zcode
+		// never scans — so bound skills never reached the agent.
+		return filepath.Join(workDir, ".zcode", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		return filepath.Join(workDir, ".agent_context", "skills")
