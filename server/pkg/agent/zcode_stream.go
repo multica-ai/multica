@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -40,46 +39,65 @@ type zcodeStreamBackend struct {
 	cfg Config
 }
 
-// zcodeStreamCapability caches the --stream-json capability probe result per
-// executable path for the life of the process. --help output is a static
-// property of a binary, so re-running it per turn would add startup latency
-// for no benefit; the cache keys on the resolved path so two different builds
-// of zcode (one streaming, one not) never share a result.
-var zcodeStreamCapability sync.Map // execName (string) -> supports (bool)
+// zcodeHelpTextCache caches each zcode binary's --help output for the life of
+// the process. --help text is a static property of a binary, so re-running it
+// per turn would only add startup latency; the cache keys on the resolved path
+// so two different builds of zcode (a streaming fork and a stock app-cli)
+// installed side by side never share a result.
+var zcodeHelpTextCache sync.Map // execName (string) -> help text (string)
 
-// zcodeStreamCapabilityProbe is the function that actually probes a binary.
-// It is a package-level variable so tests can substitute a stub; production
-// code calls it through zcodeSupportsStreamJSON, which memoizes the result.
-var zcodeStreamCapabilityProbe = probeZcodeStreamCapability
+// zcodeHelpTextProbe is the function that actually fetches --help. It is a
+// package-level variable so tests can substitute a stub; production code calls
+// it through zcodeHelpText, which memoizes the result.
+var zcodeHelpTextProbe = fetchZcodeHelpText
 
-// zcodeSupportsStreamJSON reports whether the zcode binary at execName
-// advertises the --stream-json flag in its --help output. This is the
-// capability gate that selects the streaming path vs. the --json fallback.
-//
-// Failures (binary missing, --help non-zero, exec error) report false so the
-// backend degrades to the universally-supported --json mode rather than
-// failing every turn on an unknown flag. The result is cached: --help is a
-// static property of a binary, and re-running it per turn would only add
-// startup latency.
-func zcodeSupportsStreamJSON(execName string) bool {
-	if v, ok := zcodeStreamCapability.Load(execName); ok {
-		return v.(bool)
+// zcodeHelpText returns the cached --help text for the zcode binary at
+// execName, probing once on first use. Both capability gates
+// (zcodeSupportsStreamJSON, zcodeSupportsJSONSummary) share this single probe
+// so a turn never pays for it twice.
+func zcodeHelpText(execName string) string {
+	if v, ok := zcodeHelpTextCache.Load(execName); ok {
+		return v.(string)
 	}
-	supported := zcodeStreamCapabilityProbe(execName)
-	zcodeStreamCapability.Store(execName, supported)
-	return supported
+	text := zcodeHelpTextProbe(execName)
+	zcodeHelpTextCache.Store(execName, text)
+	return text
 }
 
-// probeZcodeStreamCapability runs `zcode --help` and reports whether the flag
-// is advertised. --help text is read from both stdout and stderr (CLIs differ
-// on which stream they use) and a non-zero exit is tolerated (some CLIs exit
-// non-zero on --help); the decision is purely whether the flag token appears.
-func probeZcodeStreamCapability(execName string) bool {
+// fetchZcodeHelpText runs `zcode --help` and returns its output. Text is read
+// from both stdout and stderr (CLIs differ on which stream they use) and a
+// non-zero exit is tolerated (some CLIs exit non-zero on --help); the gates
+// only care whether a flag token appears anywhere in the text.
+func fetchZcodeHelpText(execName string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, execName, "--help")
-	out, _ := cmd.CombinedOutput()
-	return strings.Contains(string(out), "--stream-json")
+	out, _ := exec.CommandContext(ctx, execName, "--help").CombinedOutput()
+	return string(out)
+}
+
+// zcodeSupportsStreamJSON reports whether the zcode binary at execName
+// advertises the --stream-json flag. This is the capability gate that selects
+// the streaming path vs. the --json fallback: the public zcode-app-cli does
+// NOT ship --stream-json (only a streaming-enabled fork does), so absence
+// routes every turn to the summary backend instead of failing on an unknown
+// flag.
+func zcodeSupportsStreamJSON(execName string) bool {
+	return strings.Contains(zcodeHelpText(execName), "--stream-json")
+}
+
+// zcodeSupportsJSONSummary reports whether the zcode binary advertises the
+// --json summary protocol that zcodeBackend drives. Every published
+// zcode-app-cli build supports it; an install that advertises neither
+// --stream-json nor --json is not a compatible ZCode build, and the JSON
+// backend fails closed instead of spawning a CLI that errors on --json.
+//
+// Capability-gating (rather than a minimum CLI version) is deliberate:
+// zcode-app-cli's version string is non-standard and drifts across releases
+// (e.g. 3.7.5-11, 3.7.6-12, CLI 0.16.x) while the flag surface is stable, so
+// the presence of --json is a more reliable compatibility signal than a
+// parsed semver floor.
+func zcodeSupportsJSONSummary(execName string) bool {
+	return strings.Contains(zcodeHelpText(execName), "--json")
 }
 
 // zcodeTerminateGraceNanos optionally overrides, in nanoseconds, how long a
@@ -145,17 +163,10 @@ func (b *zcodeStreamBackend) Execute(ctx context.Context, prompt string, opts Ex
 	hideAgentWindow(cmd)
 	// Run zcode in its own process group so cancellation reaches the whole
 	// tree — the zcode CLI plus any tool subprocess it spawns — not just the
-	// direct child. The default CommandContext behaviour SIGKILLs only the
-	// leader, orphaning descendants that keep the stdout pipe open and keep
-	// running after the task is cancelled. This mirrors the fix already made
-	// for claude (#5918), codex (#4520), and opencode (#4533).
-	configureProcessGroup(cmd)
-	// Take over context cancellation: the default would SIGKILL only the leader
-	// the instant runCtx is done. We instead drive a graceful group-wide
-	// SIGTERM→SIGKILL from the cancellation goroutine below and close stdout
-	// only after the tree has been signalled. Returning nil keeps os/exec from
-	// racing us with its own kill; WaitDelay remains the hard backstop.
-	cmd.Cancel = func() error { return nil }
+	// direct child. configureAgentProcessGroup + startAgentProcessGroupCancel
+	// (below) share the teardown logic with the --json fallback; see
+	// proc_cancel.go. Mirrors claude (#5918), codex (#4520), opencode (#4533).
+	configureAgentProcessGroup(cmd)
 	// args contain the task prompt; never expose it in daemon logs.
 	b.cfg.Logger.Info("agent command", "exec", execName, "provider", "zcode")
 	cmd.WaitDelay = 10 * time.Second
@@ -192,34 +203,9 @@ func (b *zcodeStreamBackend) Execute(ctx context.Context, prompt string, opts Ex
 		started := time.Now()
 		state := zcodeStreamState{usage: make(map[string]TokenUsage)}
 
-		// On cancellation / timeout, terminate zcode (and every tool subprocess
-		// it spawned) BEFORE unblocking the scanner. SIGTERM the whole process
-		// group, give it a grace period, then SIGKILL the group if any member
-		// is still alive. SIGKILL is uncatchable, so once delivered no group
-		// member can write again — only then is it safe to close the stdout
-		// read end as a last-resort unblock for a scanner a wedged descendant
-		// still keeps open. WaitDelay is the final backstop.
-		go func() {
-			select {
-			case <-procDone:
-				return // finished on its own; nothing to terminate
-			case <-runCtx.Done():
-			}
-			if cmd.Process != nil {
-				signalProcessGroup(cmd.Process, syscall.SIGTERM)
-				// Escalate to a group SIGKILL unless the WHOLE process group
-				// has exited within the grace window. This must key off the
-				// process group, not procDone: procDone only means cmd.Wait()
-				// returned for the leader, so a SIGTERM-ignoring descendant
-				// that does not hold zcode's stdout would let the leader exit,
-				// close procDone, and skip the SIGKILL — leaking exactly the
-				// orphan this fix targets.
-				if !waitProcessGroupGone(cmd.Process, zcodeTerminateGrace()) {
-					signalProcessGroup(cmd.Process, syscall.SIGKILL)
-				}
-			}
-			_ = stdout.Close()
-		}()
+		// Graceful group-wide teardown on cancellation/timeout (SIGTERM → grace
+		// → SIGKILL → close stdout), shared with the --json fallback.
+		startAgentProcessGroupCancel(cmd, runCtx, procDone, stdout, zcodeTerminateGrace())
 
 		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
