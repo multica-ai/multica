@@ -108,18 +108,18 @@ func TestRunMigrationsRepairsDingTalkGroupRouteIndexesBeforeRetry(t *testing.T) 
 		wantUnique bool
 	}{
 		{
-			version:    "301_dingtalk_group_route_installation_conversation_unique",
+			version:    "305_dingtalk_group_route_installation_conversation_unique",
 			index:      "idx_dingtalk_group_route_installation_conversation",
 			columns:    "installation_id, conversation_id",
 			wantUnique: true,
 		},
 		{
-			version: "302_dingtalk_group_route_workspace_index",
+			version: "306_dingtalk_group_route_workspace_index",
 			index:   "idx_dingtalk_group_route_workspace",
 			columns: "workspace_id",
 		},
 		{
-			version:    "303_dingtalk_group_route_id_unique",
+			version:    "307_dingtalk_group_route_id_unique",
 			index:      "idx_dingtalk_group_route_id_unique",
 			columns:    "id",
 			wantUnique: true,
@@ -236,6 +236,126 @@ func TestRunMigrationsRepairsDingTalkGroupRouteIndexesBeforeRetry(t *testing.T) 
 				t.Fatal("valid-index retry did not record the migration")
 			}
 		})
+	}
+}
+
+// TestRunMigrationsRepairsInvalidConcurrentIndexDuringRollback proves that
+// direction-specific hooks also protect CREATE INDEX CONCURRENTLY in down
+// migrations. Without the hook, an interrupted rollback leaves an INVALID
+// relation that IF NOT EXISTS accepts on retry, and the migration version is
+// removed even though the restored index remains unusable.
+func TestRunMigrationsRepairsInvalidConcurrentIndexDuringRollback(t *testing.T) {
+	pool := openTestPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	suffix := fmt.Sprintf("%d_%d", time.Now().UnixNano(), rand.Uint32())
+	schema := "migrate_down_invalid_idx_" + suffix
+	schemaIdent := pgx.Identifier{schema}.Sanitize()
+	if _, err := pool.Exec(ctx, "CREATE SCHEMA "+schemaIdent); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		if _, err := pool.Exec(cleanupCtx, "DROP SCHEMA IF EXISTS "+schemaIdent+" CASCADE"); err != nil {
+			t.Logf("drop schema %s: %v", schema, err)
+		}
+	})
+
+	const (
+		version   = "300_drop_redundant_issue_workspace_number_index"
+		indexName = "idx_issue_workspace_number"
+	)
+	tableName := pgx.Identifier{schema, "issue"}.Sanitize()
+	if _, err := pool.Exec(ctx, "CREATE TABLE "+tableName+` (
+		id BIGSERIAL PRIMARY KEY,
+		workspace_id UUID NOT NULL,
+		number INTEGER NOT NULL
+	)`); err != nil {
+		t.Fatalf("create issue table: %v", err)
+	}
+
+	qualifiedIndex := pgx.Identifier{schema, indexName}.Sanitize()
+	createIndex := "CREATE INDEX CONCURRENTLY IF NOT EXISTS " + pgx.Identifier{indexName}.Sanitize() +
+		" ON " + tableName + " (workspace_id, number)"
+
+	blocker, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire blocker conn: %v", err)
+	}
+	blockerTx, err := blocker.Begin(ctx)
+	if err != nil {
+		blocker.Release()
+		t.Fatalf("begin blocker tx: %v", err)
+	}
+	if _, err := blockerTx.Exec(ctx, "INSERT INTO "+tableName+" (workspace_id, number) VALUES (gen_random_uuid(), 1)"); err != nil {
+		blocker.Release()
+		t.Fatalf("blocker insert: %v", err)
+	}
+
+	builder, err := pool.Acquire(ctx)
+	if err != nil {
+		blocker.Release()
+		t.Fatalf("acquire builder conn: %v", err)
+	}
+	if _, err := builder.Exec(ctx, "SET statement_timeout = '2s'"); err != nil {
+		builder.Release()
+		blocker.Release()
+		t.Fatalf("set statement_timeout: %v", err)
+	}
+	_, buildErr := builder.Exec(ctx, createIndex)
+	if _, err := builder.Exec(ctx, "SET statement_timeout = DEFAULT"); err != nil {
+		t.Logf("reset statement_timeout: %v", err)
+	}
+	builder.Release()
+	if buildErr == nil {
+		blocker.Release()
+		t.Fatal("interrupted rollback build unexpectedly succeeded")
+	}
+	_ = blockerTx.Rollback(ctx)
+	blocker.Release()
+
+	assertIndexValidity(t, pool, schema, indexName, false)
+
+	migrationsTable := pgx.Identifier{schema, "schema_migrations"}.Sanitize()
+	if _, err := pool.Exec(ctx, "CREATE TABLE "+migrationsTable+` (
+		version TEXT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatalf("create migrations table: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO "+migrationsTable+" (version) VALUES ($1)", version); err != nil {
+		t.Fatalf("record applied migration: %v", err)
+	}
+
+	downPath := filepath.Join(t.TempDir(), version+".down.sql")
+	if err := os.WriteFile(downPath, []byte(createIndex+";\n"), 0o600); err != nil {
+		t.Fatalf("write rollback migration: %v", err)
+	}
+	if preRollbackHooks[version] == nil {
+		t.Fatalf("production rollback hook is not registered for %s", version)
+	}
+	opts := runOptions{
+		Direction:             "down",
+		Files:                 []string{downPath},
+		SchemaMigrationsTable: schema + ".schema_migrations",
+		AdvisoryLockKey:       int64(rand.Uint64()&0x7fffffffffffffff) | 1,
+		Hooks: map[string]preMigrationHook{
+			version: cleanupInvalidConcurrentIndexHook(qualifiedIndex),
+		},
+	}
+	if err := runMigrations(ctx, pool, opts); err != nil {
+		t.Fatalf("retry rollback with invalid-index cleanup: %v", err)
+	}
+
+	assertIndexValidity(t, pool, schema, indexName, true)
+	var recorded bool
+	if err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+migrationsTable+" WHERE version = $1)", version).Scan(&recorded); err != nil {
+		t.Fatalf("read migration version: %v", err)
+	}
+	if recorded {
+		t.Fatal("rolled-back migration version is still recorded")
 	}
 }
 
