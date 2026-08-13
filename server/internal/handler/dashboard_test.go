@@ -10,6 +10,112 @@ import (
 	"time"
 )
 
+// dashboardFixtureTZ is the zone the day-boundary fixtures in this file are
+// built in, and the zone their requests pin with `?tz=`. Both sides read this
+// one constant because they have to agree: every `days=N` endpoint opens its
+// window at start-of-day in the VIEWER's zone (resolveViewingTZ: `?tz=`, else
+// the user's stored user.timezone, else UTC), so a fixture anchored in one
+// zone and a window opened in another sit an offset apart. Without the
+// `?tz=` these requests would inherit whatever user.timezone holds — NULL in
+// the handler fixture, hence UTC, but nothing here should rest on that.
+const dashboardFixtureTZ = "UTC"
+
+// dashboardFixtureTZParam is dashboardFixtureTZ as a query fragment, so a
+// request cannot pin a zone the fixture was not built in.
+const dashboardFixtureTZParam = "tz=" + dashboardFixtureTZ
+
+// dashboardFixtureLoc resolves dashboardFixtureTZ.
+func dashboardFixtureLoc(t *testing.T) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(dashboardFixtureTZ)
+	if err != nil {
+		t.Fatalf("load fixture timezone %q: %v", dashboardFixtureTZ, err)
+	}
+	return loc
+}
+
+// runFinishedToday returns the started_at / completed_at of a ten-minute run
+// placed in the first ten minutes of the day `now` falls in, read in loc.
+//
+// Every endpoint these fixtures exercise filters on `completed_at >= @since`
+// — the END of the run, not its start — and for the per-agent rollups @since
+// is start of today in the viewer's zone (parseExactSinceParamInTZ at
+// days=1). Timestamps built as `now - 30m` therefore fall out of that window
+// for the first twenty minutes after midnight: the run finished yesterday,
+// the window opens today, and the assertions read the empty result as nothing
+// having happened. A handler job that ran at 00:13 UTC failed on exactly
+// that; the next one at 00:25 passed with nothing changed but the clock. The
+// date-bucketed halves ride out those twenty minutes on the extra day
+// parseSinceParamInTZ hands them, which is why only their per-agent siblings
+// went red. Anchoring the run on the boundary itself takes the time of day
+// out of the fixture rather than special-casing the twenty minutes it bites.
+//
+// Start-of-day is built the way sinceFromDays builds the cutoff, so fixture
+// and window agree instant for instant. In the first ten minutes after
+// midnight the run ends slightly in the future, which none of these queries
+// mind: they bound completed_at from below only, and the token rollup keys
+// off task_usage.created_at rather than the queue row.
+func runFinishedToday(now time.Time, loc *time.Location) (started, completed time.Time) {
+	local := now.In(loc)
+	started = time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
+	return started, started.Add(10 * time.Minute)
+}
+
+// TestDashboardFixtureRunLandsInsideTheWindow pins what runFinishedToday
+// promises the two DB fixtures that call it: at any hour, in any zone, the
+// run it places is inside the days=1 window the endpoints open. The window is
+// taken from sinceFromDays — the production cutoff itself — rather than from
+// a second copy of the helper's arithmetic.
+//
+// The midnight rows are the point of the table. A fixture built off the wall
+// clock is outside that window for the first twenty minutes of the day and
+// inside it for the other 23h40m, so only a synthetic clock can hold it to
+// account: the suite would otherwise have to run at midnight to see the
+// failure, which is how this reached CI in the first place.
+func TestDashboardFixtureRunLandsInsideTheWindow(t *testing.T) {
+	// Half-hour and negative offsets, so a helper that anchored on UTC
+	// midnight while the request asked for another zone cannot pass.
+	for _, tz := range []string{dashboardFixtureTZ, "Asia/Kolkata", "America/Los_Angeles"} {
+		loc, err := time.LoadLocation(tz)
+		if err != nil {
+			t.Fatalf("load %s: %v", tz, err)
+		}
+		for _, clock := range []string{
+			"2026-03-01 00:00:00",
+			"2026-03-01 00:05:00",
+			"2026-03-01 00:19:59",
+			"2026-03-01 12:00:00",
+			"2026-03-01 23:59:59",
+		} {
+			t.Run(tz+" "+clock, func(t *testing.T) {
+				now, err := time.ParseInLocation("2006-01-02 15:04:05", clock, loc)
+				if err != nil {
+					t.Fatalf("parse %s: %v", clock, err)
+				}
+				started, completed := runFinishedToday(now, loc)
+
+				// parseExactSinceParamInTZ trims a day off sinceFromDays, so
+				// the days=1 cutoff these endpoints use is start of today.
+				since := sinceFromDays(now, 0, loc)
+				tomorrow := since.AddDate(0, 0, 1)
+
+				if got := completed.Sub(started); got != 10*time.Minute {
+					t.Errorf("run lasted %s, want 10m — the >=600s the run-time assertion reads", got)
+				}
+				if completed.Before(since) {
+					t.Errorf("completed_at %s precedes the days=1 cutoff %s: `completed_at >= @since` drops the fixture", completed, since)
+				}
+				if !completed.Before(tomorrow) {
+					t.Errorf("completed_at %s is past the day that opened at %s", completed, since)
+				}
+				if started.Before(since) {
+					t.Errorf("started_at %s precedes the days=1 cutoff %s", started, since)
+				}
+			})
+		}
+	}
+}
+
 // TestDashboardEndpoints covers the workspace-dashboard rollups:
 //   - daily token usage with and without project filter
 //   - per-agent token usage with and without project filter
@@ -75,9 +181,10 @@ func TestDashboardEndpoints(t *testing.T) {
 	projectIssueID := mkIssue(true)
 	otherIssueID := mkIssue(false)
 
-	now := time.Now().UTC()
-	started := now.Add(-30 * time.Minute)
-	completed := started.Add(10 * time.Minute) // 600s run
+	// A 600s run that finished inside today's window at every hour of the
+	// clock — see runFinishedToday for what a `now - 30m` fixture does to the
+	// agent-runtime assertions just after midnight.
+	started, completed := runFinishedToday(time.Now(), dashboardFixtureLoc(t))
 
 	mkTaskWithUsage := func(issueID string, status string, tokens int64) {
 		var taskID string
@@ -129,7 +236,7 @@ func TestDashboardEndpoints(t *testing.T) {
 	// daily — workspace-wide
 	{
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardUsageDaily(w, newRequest("GET", "/api/dashboard/usage/daily?days=1", nil))
+		testHandler.GetDashboardUsageDaily(w, newRequest("GET", "/api/dashboard/usage/daily?days=1&"+dashboardFixtureTZParam, nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("daily ws: expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -149,7 +256,7 @@ func TestDashboardEndpoints(t *testing.T) {
 	// daily — project-scoped
 	{
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardUsageDaily(w, newRequest("GET", "/api/dashboard/usage/daily?days=1&project_id="+projectID, nil))
+		testHandler.GetDashboardUsageDaily(w, newRequest("GET", "/api/dashboard/usage/daily?days=1&"+dashboardFixtureTZParam+"&project_id="+projectID, nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("daily project: expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -175,7 +282,7 @@ func TestDashboardEndpoints(t *testing.T) {
 	// by-agent — project-scoped
 	{
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardUsageByAgent(w, newRequest("GET", "/api/dashboard/usage/by-agent?days=1&project_id="+projectID, nil))
+		testHandler.GetDashboardUsageByAgent(w, newRequest("GET", "/api/dashboard/usage/by-agent?days=1&"+dashboardFixtureTZParam+"&project_id="+projectID, nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("by-agent project: expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -195,7 +302,7 @@ func TestDashboardEndpoints(t *testing.T) {
 	// agent-runtime — project-scoped
 	{
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardAgentRunTime(w, newRequest("GET", "/api/dashboard/agent-runtime?days=1&project_id="+projectID, nil))
+		testHandler.GetDashboardAgentRunTime(w, newRequest("GET", "/api/dashboard/agent-runtime?days=1&"+dashboardFixtureTZParam+"&project_id="+projectID, nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("agent-runtime: expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -230,7 +337,7 @@ func TestDashboardEndpoints(t *testing.T) {
 	// the no-project-filter shape matches up.
 	{
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardUsageByAgent(w, newRequest("GET", "/api/dashboard/usage/by-agent?days=1", nil))
+		testHandler.GetDashboardUsageByAgent(w, newRequest("GET", "/api/dashboard/usage/by-agent?days=1&"+dashboardFixtureTZParam, nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("by-agent ws: expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -1542,9 +1649,11 @@ func TestDashboardFailuresCountNeverStartedTasks(t *testing.T) {
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
 
-	now := time.Now().UTC()
-	started := now.Add(-30 * time.Minute)
-	completed := started.Add(10 * time.Minute)
+	// Same window-safe fixture as TestDashboardEndpoints: the by-agent case
+	// below runs on the exact start-of-day cutoff and filters on
+	// completed_at, so a run timed off the wall clock disappears from it for
+	// the first twenty minutes of the day.
+	started, completed := runFinishedToday(time.Now(), dashboardFixtureLoc(t))
 
 	// startedAt is nullable so the queue-expiry case can be modelled exactly:
 	// completed_at set, started_at absent.
@@ -1588,10 +1697,10 @@ func TestDashboardFailuresCountNeverStartedTasks(t *testing.T) {
 		call func(w *httptest.ResponseRecorder)
 	}{
 		{"daily", func(w *httptest.ResponseRecorder) {
-			testHandler.GetDashboardFailuresDaily(w, newRequest("GET", "/api/dashboard/failures/daily?days=1", nil))
+			testHandler.GetDashboardFailuresDaily(w, newRequest("GET", "/api/dashboard/failures/daily?days=1&"+dashboardFixtureTZParam, nil))
 		}},
 		{"by-agent", func(w *httptest.ResponseRecorder) {
-			testHandler.GetDashboardFailuresByAgent(w, newRequest("GET", "/api/dashboard/failures/by-agent?days=1", nil))
+			testHandler.GetDashboardFailuresByAgent(w, newRequest("GET", "/api/dashboard/failures/by-agent?days=1&"+dashboardFixtureTZParam, nil))
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
