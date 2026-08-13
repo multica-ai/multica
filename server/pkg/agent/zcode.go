@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"strings"
@@ -102,30 +103,64 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		return nil, fmt.Errorf("zcode executable not found at %q: %w", execName, err)
 	}
 
+	// Capability gate: this backend drives the --json summary protocol
+	// (--prompt/--json/--resume and the {sessionId,response,usage} shape) that
+	// every published zcode-app-cli build supports. An install that advertises
+	// neither --json nor --stream-json is not a compatible ZCode build — fail
+	// closed with a clear message rather than spawning a CLI that errors on
+	// --json. Gated on the --help flag surface (not a semver floor) because
+	// zcode-app-cli's version string is non-standard and drifts across releases.
+	if !zcodeSupportsJSONSummary(execName) {
+		return nil, fmt.Errorf("zcode at %q does not advertise the --json summary protocol; install a compatible zcode-cli build (needs --prompt/--json)", execName)
+	}
+
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
-
 	args := buildZcodeArgs(prompt, opts, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, execName, args...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execName, "args", args)
+	// Run zcode in its own process group so cancellation reaches the whole
+	// tree — zcode plus any tool subprocess it spawns — not just the direct
+	// child. The teardown is shared with the streaming backend via
+	// startAgentProcessGroupCancel below; without it a grandchild holding the
+	// stdout pipe would keep the blocking read (and thus Result) pending after
+	// cancellation, leaving only the daemon's idle watchdog to end the run
+	// while the orphan kept running.
+	configureAgentProcessGroup(cmd)
+	// args contain the task prompt; never expose it in daemon logs.
+	b.cfg.Logger.Info("agent command", "exec", execName, "provider", "zcode")
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
 
-	// zcode writes its JSON summary to stdout and human-readable diagnostics
-	// to stderr. Capture stdout fully (it is the turn result) and tee stderr
-	// to the logger so failures are diagnosable without polluting the result
-	// path. cmd.CombinedOutput is not used because stderr noise would break
-	// JSON parsing.
-	stderr := newLogWriter(b.cfg.Logger, "[zcode:stderr] ")
-	cmd.Stderr = stderr
+	// zcode writes its JSON summary to stdout and human-readable diagnostics to
+	// stderr. Capture stdout fully via the pipe (it is the turn result) and
+	// capture stderr into both the daemon log and a bounded tail, so
+	// auth/config/network/invalid-resume failures surface to the user instead
+	// of an opaque exit status.
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("zcode stdout pipe: %w", err)
+	}
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[zcode:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("start zcode: %w", err)
+	}
+	b.cfg.Logger.Info("zcode started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
 	msgCh := make(chan Message, 1)
 	resCh := make(chan Result, 1)
+
+	// procDone closes once cmd.Wait() returns, letting the cancellation handler
+	// skip a process that already exited and avoid signalling a dead/reused pid.
+	procDone := make(chan struct{})
+	startAgentProcessGroupCancel(cmd, runCtx, procDone, stdout, zcodeTerminateGrace())
 
 	go func() {
 		defer cancel()
@@ -134,37 +169,52 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 		startTime := time.Now()
 
-		// zcode runs a full turn before exiting; Output() blocks until it is
-		// done (or the runCtx deadline kills it, in which case Output returns
-		// the partial stdout plus a context error).
-		stdout, err := cmd.Output()
+		// zcode runs a full turn before exiting; read stdout fully (the JSON
+		// summary is the turn result). EOF arrives once zcode AND every
+		// subprocess it spawned have closed stdout — the process-group teardown
+		// above guarantees that even under cancellation, so the read cannot hang
+		// on a wedged descendant.
+		stdoutBytes, readErr := io.ReadAll(stdout)
+		exitErr := cmd.Wait()
+		close(procDone)
 		durationMs := time.Since(startTime).Milliseconds()
+		stderrTail := stderrBuf.Tail()
 
-		if err != nil {
-			// A context-deadline exit is reported as a timeout so the daemon
-			// surfaces it correctly rather than as an opaque failure.
-			if runCtx.Err() == context.DeadlineExceeded {
-				resCh <- Result{
-					Status:     "timeout",
-					Error:      fmt.Sprintf("zcode timed out after %s", timeout),
-					DurationMs: durationMs,
-				}
-				return
-			}
-			resCh <- Result{
-				Status:     "failed",
-				Error:      fmt.Sprintf("zcode exited: %v; stdout=%q", err, truncateForLog(stdout)),
-				DurationMs: durationMs,
-			}
+		failed := exitErr != nil || readErr != nil
+		// resumeWasRejected inspects the failure text (error + stderr) for the
+		// phrases zcode prints when --resume points at a missing/dead session,
+		// so the daemon can fall back to a fresh session instead of looping on
+		// the rejected id. emitted="" because the JSON summary carries no
+		// session id on failure, so only the phrase match decides.
+		resumeRejected := resumeWasRejected(opts.ResumeSessionID, "", failed,
+			fmt.Sprintf("zcode exited: %v", exitErr), stderrTail)
+
+		// A context-deadline exit is reported as a timeout so the daemon
+		// surfaces it correctly rather than as an opaque failure.
+		if exitErr != nil && runCtx.Err() == context.DeadlineExceeded {
+			errMsg := withAgentStderr(fmt.Sprintf("zcode timed out after %s", timeout), "zcode", stderrTail)
+			resCh <- Result{Status: "timeout", Error: errMsg, DurationMs: durationMs, ResumeRejected: resumeRejected}
+			return
+		}
+		if exitErr != nil {
+			errMsg := withAgentStderr(fmt.Sprintf("zcode exited: %v", exitErr), "zcode", stderrTail)
+			resCh <- Result{Status: "failed", Error: errMsg, DurationMs: durationMs, ResumeRejected: resumeRejected}
+			return
+		}
+		if readErr != nil {
+			errMsg := withAgentStderr(fmt.Sprintf("zcode: read stdout: %v", readErr), "zcode", stderrTail)
+			resCh <- Result{Status: "failed", Error: errMsg, DurationMs: durationMs, ResumeRejected: resumeRejected}
 			return
 		}
 
 		var result zcodeJSONResult
-		if err := json.Unmarshal(stdout, &result); err != nil {
+		if err := json.Unmarshal(stdoutBytes, &result); err != nil {
+			// Malformed summary: surface the parse error with the bounded stdout
+			// sample and stderr tail so the user can see what zcode printed.
+			errMsg := withAgentStderr(fmt.Sprintf("zcode: parse JSON summary: %v", err), "zcode", stderrTail)
 			resCh <- Result{
-				Status:     "failed",
-				Error:      fmt.Sprintf("zcode: parse JSON summary: %v; stdout=%q", err, truncateForLog(stdout)),
-				DurationMs: durationMs,
+				Status: "failed", Output: truncateForLog(stdoutBytes), Error: errMsg,
+				DurationMs: durationMs, ResumeRejected: resumeRejected,
 			}
 			return
 		}
@@ -173,10 +223,7 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		// whole response at once; the daemon renders it the same way as a
 		// streamed final message.
 		if response := strings.TrimSpace(result.Response); response != "" {
-			select {
-			case msgCh <- Message{Type: MessageText, Content: response}:
-			case <-runCtx.Done():
-			}
+			trySend(msgCh, Message{Type: MessageText, Content: response})
 		}
 
 		usage := map[string]TokenUsage{}

@@ -67,6 +67,47 @@ func TestZcodeCancellationEscalatesToSIGKILL(t *testing.T) {
 	runZcodeCancellationTest(t, zcodeCancelFakeScript(true))
 }
 
+// zcodeJSONCancelFakeScript is the JSON-fallback counterpart of
+// zcodeCancelFakeScript: its --help advertises --json but NOT --stream-json, so
+// the capability gate routes the run through zcodeBackend (the public-CLI
+// production path) rather than the streaming backend. It still spawns a
+// grandchild that holds stdout and loops forever, so the JSON backend's
+// io.ReadAll blocks until cancellation reaps the whole group.
+func zcodeJSONCancelFakeScript(ignoreTerm bool) string {
+	trap := "trap 'exit 0' TERM\n"
+	if ignoreTerm {
+		trap = "trap '' TERM\n"
+	}
+	return "#!/bin/sh\n" + trap +
+		`# Capability probe: advertise --json only (no --stream-json) so the
+# run takes the public-CLI --json fallback path, not the streaming path.
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+  printf 'Usage: zcode --prompt <text> [--json]\n'
+  exit 0
+fi
+# Background grandchild so the test can assert the *whole* group is
+# terminated on cancellation, not just the direct child. It inherits stdout,
+# keeping the JSON backend's blocking read pending until the group is reaped.
+( sleep 300 ) &
+child=$!
+if [ -n "$ZCODE_PID_FILE" ]; then
+  printf '%s %s\n' "$$" "$child" > "$ZCODE_PID_FILE"
+fi
+while true; do
+  sleep 0.1
+done
+`
+}
+
+// TestZcodeJSONFallbackCancellationTerminatesProcessGroup verifies the process-
+// tree teardown is shared with the --json fallback (the path a standard
+// zcode-app-cli install takes): cancelling a run reaps zcode AND its grandchild,
+// returns without hanging, and leaves no orphan. The capability gate routes
+// this run to zcodeBackend via the streaming backend's delegation.
+func TestZcodeJSONFallbackCancellationTerminatesProcessGroup(t *testing.T) {
+	runZcodeCancellationTest(t, zcodeJSONCancelFakeScript(false))
+}
+
 func runZcodeCancellationTest(t *testing.T, script string) {
 	t.Helper()
 
