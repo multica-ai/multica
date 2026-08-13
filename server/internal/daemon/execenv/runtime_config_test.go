@@ -1976,18 +1976,18 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 }
 
 // Every brief that teaches `--output json` also says not to merge stderr into
-// it, because the two facts are only useful together.
+// it, because the two facts are only useful together. The CLI is right:
+// confirmations go to stderr, JSON goes to stdout, and `--output json | jq` has
+// always worked. It stays right only while the caller keeps the streams apart,
+// and `2>&1` is ordinary shell habit. The cost of merging them is not a cosmetic
+// parse error: a confirmation line inside the JSON makes the parse fail, so a
+// write that SUCCEEDED reads as one that failed, and the retry posts the comment
+// or sends the file a second time.
 //
-// The CLI is right: confirmations go to stderr, JSON goes to stdout, and
-// `--output json | jq` has always worked. It stays right only while the caller
-// keeps the streams apart, and `2>&1` is ordinary shell habit — six of six
-// throwaway agent sessions reached for it unprompted when asked to post a
-// comment and confirm it landed. What that costs is not a cosmetic parse error:
-// the confirmation line makes json.load fail, the command exits non-zero, and a
-// write that SUCCEEDED reads as one that failed. On 2026-08-12 an agent read a
-// posted comment that way and posted it again — the same text, twice, in front
-// of the person who asked for it. An attachment on that path is a file sent
-// into somebody's chat twice, and nothing takes a file back.
+// The assertions are on the rule's wording, not on loose substrings, because
+// `2>&1` and "look like it failed" both survive a brief that says to merge the
+// streams. Each builder must carry the prohibition verbatim, exactly once, with
+// the consequence attached.
 //
 // Both brief builders are checked, not one. The quick-create brief is a
 // separate function with its own copy of the `--output json` line, so guidance
@@ -1996,9 +1996,14 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing.T) {
 	t.Parallel()
 	const (
-		wantFlag  = "--output json"
-		wantMerge = "2>&1"
-		wantWhy   = "look like it failed"
+		wantFlag = "--output json"
+		// The prohibition itself, not just the operator it names: "Always merge
+		// them (`2>&1`)" contains `2>&1` and would pass a bare-operator check.
+		wantRule = "Do not merge them (`2>&1`)"
+		// The consequence, in the direction that makes the rule worth obeying;
+		// the inverse claim ("failed write looks like it succeeded") is a
+		// different bug and must not satisfy this.
+		wantWhy = "a write that SUCCEEDED look like it failed"
 	)
 	briefs := map[string]string{
 		"full":         buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}),
@@ -2008,11 +2013,16 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 		if !strings.Contains(brief, wantFlag) {
 			t.Fatalf("%s brief does not mention %s at all; this test's premise is gone", name, wantFlag)
 		}
-		if !strings.Contains(brief, wantMerge) {
-			t.Errorf("%s brief teaches %s without naming %s — the habit it has to displace is the one thing an agent will not infer", name, wantFlag, wantMerge)
+		switch got := strings.Count(brief, wantRule); got {
+		case 1:
+		case 0:
+			t.Errorf("%s brief teaches %s without saying %q — the habit it has to displace is the one thing an agent will not infer", name, wantFlag, wantRule)
+			continue // the reason check below would report a rule that is not there
+		default:
+			t.Errorf("%s brief repeats %q %d times; one rule, one place, or the next edit fixes only one of them", name, wantRule, got)
 		}
 		if !strings.Contains(brief, wantWhy) {
-			t.Errorf("%s brief warns about %s without saying what it costs; a rule with no reason is the first one dropped under pressure", name, wantMerge)
+			t.Errorf("%s brief states %q without %q; a rule with no reason is the first one dropped under pressure", name, wantRule, wantWhy)
 		}
 	}
 }
