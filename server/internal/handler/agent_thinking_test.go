@@ -644,11 +644,13 @@ func TestCreateAgent_NoReasoningControlRejectsThinkingLevel(t *testing.T) {
 		}
 	})
 
-	// The inverse, and the reason this test had to change: hermes covers jcode,
-	// which applies an advertised effort, so the provider-level gate no longer
-	// refuses it. With no discovered catalog the check fails open — a runtime we
-	// have never seen must not be blocked before its first discovery.
-	t.Run("hermes with no discovered catalog accepts an effort value", func(t *testing.T) {
+	// hermes with no discovered catalog must REFUSE, not accept. The catalog is
+	// written only when a client asks for a model list, so a CLI-only caller can
+	// sit in the undiscovered state forever — treating it as "supported" is the
+	// permanent hole that let a Hermes Agent user persist a level the daemon
+	// then drops. The message names the missing evidence rather than claiming a
+	// limitation that would be false for jcode.
+	t.Run("hermes with no discovered catalog is refused", func(t *testing.T) {
 		hermesRuntimeID := createProviderRuntime(t, "hermes")
 		body := map[string]any{
 			"name":                 "hermes-thinking-high",
@@ -659,18 +661,97 @@ func TestCreateAgent_NoReasoningControlRejectsThinkingLevel(t *testing.T) {
 		}
 		w := httptest.NewRecorder()
 		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("hermes thinking_level=high with no catalog: expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "has not reported a model catalog yet") {
+			t.Errorf("expected the not-yet-discovered explanation, got %s", w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "does not support") {
+			t.Errorf("must not claim a limitation we have not established, got %s", w.Body.String())
+		}
+	})
+
+	// Empty stays valid on the same runtime — "runtime default" needs no
+	// capability evidence.
+	t.Run("hermes with no catalog still accepts an empty value", func(t *testing.T) {
+		hermesRuntimeID := createProviderRuntime(t, "hermes")
+		body := map[string]any{
+			"name":                 "hermes-thinking-empty",
+			"runtime_id":           hermesRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"thinking_level":       "",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
 		if w.Code != http.StatusCreated {
-			t.Fatalf("hermes thinking_level=high: expected 201, got %d: %s", w.Code, w.Body.String())
+			t.Fatalf("hermes empty thinking_level: expected 201, got %d: %s", w.Code, w.Body.String())
 		}
 	})
 }
 
-// TestAcpRuntimeHasNoEffortControl is the fix for the regression the hermes
+// TestUpdateAgent_ThinkingLevelCarriesOverToUndiscoveredHermes covers the
+// branch where the caller never mentions thinking_level at all: an agent that
+// already carries one is switched onto a hermes runtime whose capability we
+// cannot confirm. Preserving the value there would smuggle a possibly-inert
+// setting onto the new runtime, so the switch is refused with the escape hatch
+// spelled out.
+func TestUpdateAgent_ThinkingLevelCarriesOverToUndiscoveredHermes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	claudeRuntimeID := createClaudeProviderRuntime(t)
+	hermesRuntimeID := createProviderRuntime(t, "hermes")
+
+	created := httptest.NewRecorder()
+	testHandler.CreateAgent(created, newRequest(http.MethodPost, "/api/agents", map[string]any{
+		"name":                 "carryover-thinking-agent",
+		"runtime_id":           claudeRuntimeID,
+		"visibility":           "private",
+		"max_concurrent_tasks": 1,
+		"thinking_level":       "high",
+	}))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("seed agent: expected 201, got %d: %s", created.Code, created.Body.String())
+	}
+	var seeded map[string]any
+	_ = json.NewDecoder(created.Body).Decode(&seeded)
+	agentID, _ := seeded["id"].(string)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
+
+	w := httptest.NewRecorder()
+	testHandler.UpdateAgent(w, withURLParam(
+		newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
+			"runtime_id": hermesRuntimeID,
+		}), "id", agentID))
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("carry-over onto undiscovered hermes: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	// Decode rather than substring-match the raw body: the escape hatch contains
+	// quotes, which JSON-escapes to `thinking_level=\"\"` on the wire.
+	var errBody struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&errBody); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if !strings.Contains(errBody.Error, "has not reported a model catalog yet") {
+		t.Errorf("expected the not-yet-discovered explanation, got %q", errBody.Error)
+	}
+	if !strings.Contains(errBody.Error, `thinking_level=""`) {
+		t.Errorf("expected the clear-it escape hatch, got %q", errBody.Error)
+	}
+}
+
+// TestAcpThinkingDecision is the fix for the regression the hermes
 // change introduced: `hermes` covers jcode (advertises an effort) and Hermes
 // Agent (advertises none), and the provider name cannot tell them apart. The
 // discovered catalog can, so the capability 400 survives for the binary that
 // genuinely has no reasoning dial.
-func TestAcpRuntimeHasNoEffortControl(t *testing.T) {
+func TestAcpThinkingDecision(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	runtimeID := parseUUID("11111111-1111-1111-1111-111111111111")
@@ -691,35 +772,46 @@ func TestAcpRuntimeHasNoEffortControl(t *testing.T) {
 	withoutEffort := []ModelEntry{{ID: "hermes-4"}}
 
 	t.Run("jcode-shaped catalog keeps the level accepted", func(t *testing.T) {
-		if withCatalog(t, withEffort).acpRuntimeHasNoEffortControl(ctx, "hermes", runtimeID) {
-			t.Error("a runtime advertising an effort must not be reported as having none")
+		if got := withCatalog(t, withEffort).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortPresent {
+			t.Errorf("decision = %v, want acpEffortPresent", got)
 		}
 	})
 
 	t.Run("Hermes-Agent-shaped catalog restores the capability answer", func(t *testing.T) {
-		if !withCatalog(t, withoutEffort).acpRuntimeHasNoEffortControl(ctx, "hermes", runtimeID) {
-			t.Error("a runtime whose catalog advertises no effort must be reported as having none")
+		if got := withCatalog(t, withoutEffort).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortAbsent {
+			t.Errorf("decision = %v, want acpEffortAbsent", got)
 		}
 	})
 
-	// Fail-open cases: never block an agent because we have not looked yet.
-	t.Run("no cache fails open", func(t *testing.T) {
-		if (&Handler{}).acpRuntimeHasNoEffortControl(ctx, "hermes", runtimeID) {
-			t.Error("a missing cache must not manufacture a capability rejection")
+	// Undiscovered is its own answer for an ambiguous provider — not "supported".
+	// The catalog is only written once a client asks for a model list, so this
+	// state persists indefinitely for CLI-only callers.
+	t.Run("no cache is unknown for hermes", func(t *testing.T) {
+		if got := (&Handler{}).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortUnknown {
+			t.Errorf("decision = %v, want acpEffortUnknown", got)
 		}
 	})
 
-	t.Run("empty catalog fails open", func(t *testing.T) {
-		if withCatalog(t, nil).acpRuntimeHasNoEffortControl(ctx, "hermes", runtimeID) {
-			t.Error("an empty catalog is 'not discovered yet', not 'no effort control'")
+	t.Run("empty catalog is unknown for hermes", func(t *testing.T) {
+		if got := withCatalog(t, nil).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortUnknown {
+			t.Errorf("decision = %v, want acpEffortUnknown", got)
+		}
+	})
+
+	// reasonix names exactly one binary, and that binary supports an effort, so
+	// an undiscovered reasonix runtime is allowed rather than blocked before its
+	// first discovery. Tightening hermes must not tighten this.
+	t.Run("no cache still allows reasonix", func(t *testing.T) {
+		if got := (&Handler{}).acpThinkingDecision(ctx, "reasonix", runtimeID); got != acpEffortPresent {
+			t.Errorf("decision = %v, want acpEffortPresent — reasonix is unambiguous", got)
 		}
 	})
 
 	// Providers outside the ACP-catalog set are answered by name alone; this
 	// check must not start second-guessing them from a catalog.
 	t.Run("non-ACP provider is not consulted", func(t *testing.T) {
-		if withCatalog(t, withoutEffort).acpRuntimeHasNoEffortControl(ctx, "claude", runtimeID) {
-			t.Error("claude's capability is decided by provider, not by catalog")
+		if got := withCatalog(t, withoutEffort).acpThinkingDecision(ctx, "claude", runtimeID); got != acpEffortPresent {
+			t.Errorf("decision = %v, want acpEffortPresent — claude is decided by provider", got)
 		}
 	})
 }

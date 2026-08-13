@@ -1142,11 +1142,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	// For ACP-catalog providers the provider name is not the capability answer
 	// — this runtime's own discovered catalog is. Keeps a Hermes Agent user's
-	// clear "no reasoning control" 400 instead of accepting a level the daemon
-	// would later drop.
-	if req.ThinkingLevel != "" && h.acpRuntimeHasNoEffortControl(r.Context(), runtime.Provider, runtime.ID) {
-		writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
-		return
+	// clear 400 instead of accepting a level the daemon would later drop.
+	if req.ThinkingLevel != "" {
+		switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID) {
+		case acpEffortAbsent:
+			writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
+			return
+		case acpEffortUnknown:
+			writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(runtime.Provider))
+			return
+		}
 	}
 	if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtime.Provider))
@@ -1738,8 +1743,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, thinkingLevelRejection(provider, value))
 				return
 			}
-			if h.acpRuntimeHasNoEffortControl(r.Context(), provider, targetRuntimeID) {
+			switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID) {
+			case acpEffortAbsent:
 				writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(provider))
+				return
+			case acpEffortUnknown:
+				writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(provider))
 				return
 			}
 			params.ThinkingLevel = pgtype.Text{String: value, Valid: true}
@@ -1765,8 +1774,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, existingThinkingLevelRejection(provider, existing.ThinkingLevel.String))
 			return
 		}
-		if h.acpRuntimeHasNoEffortControl(r.Context(), provider, targetRuntimeID) {
+		switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID) {
+		case acpEffortAbsent:
 			writeError(w, http.StatusBadRequest, existingThinkingCapabilityRejection(provider, existing.ThinkingLevel.String))
+			return
+		case acpEffortUnknown:
+			writeError(w, http.StatusBadRequest, existingThinkingCapabilityUnknownRejection(provider, existing.ThinkingLevel.String))
 			return
 		}
 	}
@@ -2013,6 +2026,30 @@ func existingThinkingCapabilityRejection(provider, value string) string {
 	)
 }
 
+// thinkingCapabilityUnknownRejection covers the ambiguous case: the provider
+// name does not say which binary is installed and no catalog has been reported
+// yet, so we can neither confirm nor deny the capability.
+//
+// It deliberately does NOT reuse the "does not support" sentence. That claim
+// would be actively wrong for a jcode runtime — sending its owner off to look
+// for a limitation that does not exist — whereas naming the missing evidence
+// points at the thing that resolves it.
+func thinkingCapabilityUnknownRejection(provider string) string {
+	return fmt.Sprintf(
+		"cannot confirm whether runtime %q supports a per-agent reasoning effort: it has not reported a model catalog yet. Open the agent's model picker to trigger discovery and retry, or leave thinking_level empty to use the runtime default",
+		provider,
+	)
+}
+
+// existingThinkingCapabilityUnknownRejection is the carry-over path's version of
+// the same answer: it names the value already on the agent and the escape hatch.
+func existingThinkingCapabilityUnknownRejection(provider, value string) string {
+	return fmt.Sprintf(
+		"cannot confirm whether runtime %q supports a per-agent reasoning effort: it has not reported a model catalog yet. Pass thinking_level=\"\" to clear the existing %q, or retry once the runtime has reported its models",
+		provider, value,
+	)
+}
+
 // thinkingCapabilityRejection is the "this runtime has no reasoning dial"
 // sentence. Split out because the same answer can now be reached two ways: from
 // the provider name alone, or — for ACP-catalog providers, where the provider
@@ -2024,35 +2061,64 @@ func thinkingCapabilityRejection(provider string) string {
 	)
 }
 
-// acpRuntimeHasNoEffortControl reports whether this specific runtime is known
-// to expose no reasoning-effort control, using the model catalog its daemon
-// already reported.
+// acpEffortEvidence is what the discovered model catalog says about a runtime's
+// reasoning-effort support.
+type acpEffortEvidence int
+
+const (
+	// acpEffortUnknown — no catalog has been discovered for this runtime.
+	//
+	// This is NOT a transient cold-start state. The catalog is written only by
+	// ReportModelListResult, i.e. only after a client explicitly asks for a
+	// model list, so a caller who never opens a model picker (pure CLI use) can
+	// sit here indefinitely. Treating unknown as "supported" is therefore not a
+	// brief window — it is a permanent hole for anyone who works this way.
+	acpEffortUnknown acpEffortEvidence = iota
+	// acpEffortAbsent — a catalog exists and no model in it advertises an effort.
+	acpEffortAbsent
+	// acpEffortPresent — a catalog exists and at least one model advertises one.
+	acpEffortPresent
+)
+
+// ambiguousACPEffortProviders are providers whose name does not determine which
+// binary is actually installed, so "not discovered yet" cannot be read as
+// "supported".
 //
-// The `hermes` provider is why this exists. It covers two unrelated binaries:
-// jcode advertises an effort option and applies it, Hermes Agent advertises
-// none. ThinkingControlSupported answers per provider and so must say "yes" for
-// both, which would leave a Hermes Agent user's `--thinking-level high` accepted
-// at the API and then silently dropped by the daemon. The discovered catalog is
-// the only thing at this layer that can tell the two apart.
+// `hermes` is the only one: it covers jcode (advertises an effort and applies
+// it) and Hermes Agent (advertises none). reasonix is deliberately absent — that
+// provider means one binary, which does support an effort, so an undiscovered
+// reasonix runtime is safely allowed rather than blocked before its first
+// discovery.
+var ambiguousACPEffortProviders = map[string]bool{
+	"hermes": true,
+}
+
+// acpThinkingDecision answers whether this runtime may carry a thinking level,
+// consulting the model catalog its daemon reported.
 //
-// Fails open: a cold cache, an offline daemon, or a runtime that has never been
-// discovered all return false, so a valid agent is never blocked by a missing
-// snapshot. The daemon's own pre-execution guard still drops a level the runtime
-// turns out not to take.
-func (h *Handler) acpRuntimeHasNoEffortControl(ctx context.Context, provider string, runtimeID pgtype.UUID) bool {
+// acpEffortPresent means "allow". Providers outside the ACP-catalog set, and
+// unambiguous ACP providers with no catalog yet, are reported as present — their
+// capability is already settled by the provider name. Only an ambiguous provider
+// turns an undiscovered catalog into a refusal, because for those the name
+// genuinely does not answer the question and guessing "yes" is what let a Hermes
+// Agent user persist a level the daemon would later drop.
+func (h *Handler) acpThinkingDecision(ctx context.Context, provider string, runtimeID pgtype.UUID) acpEffortEvidence {
 	if !agent.UsesACPCatalogThinking(provider) {
-		return false
+		return acpEffortPresent
 	}
 	snapshot := h.cachedModelCatalog(ctx, uuidToString(runtimeID))
 	if snapshot == nil || len(snapshot.Models) == 0 {
-		return false
+		if ambiguousACPEffortProviders[provider] {
+			return acpEffortUnknown
+		}
+		return acpEffortPresent
 	}
 	for _, m := range snapshot.Models {
 		if m.Thinking != nil && len(m.Thinking.SupportedLevels) > 0 {
-			return false
+			return acpEffortPresent
 		}
 	}
-	return true
+	return acpEffortAbsent
 }
 
 // existingThinkingLevelRejection is thinkingLevelRejection for the carry-over
