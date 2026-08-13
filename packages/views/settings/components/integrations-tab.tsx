@@ -103,7 +103,15 @@ export function IntegrationsTab() {
       >
         <TelegramTab />
       </SettingsSection>
-      <SettingsSection title={t(($) => $.sharecrm.section_title)}>
+      <SettingsSection
+        title={
+          <span className="flex items-center gap-2">
+            <IntegrationChannelIcon channel="sharecrm" />
+            {t(($) => $.sharecrm.section_title)}
+          </span>
+        }
+        description={t(($) => $.sharecrm.page_description)}
+      >
         <ShareCRMTab />
       </SettingsSection>
       {vcsAvailable && (

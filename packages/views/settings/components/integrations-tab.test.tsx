@@ -106,12 +106,12 @@ describe("Settings IntegrationsTab", () => {
 
   // Reaching for a generic lucide glyph is how Slack and WeCom ended up sharing
   // one speech bubble, with nothing on the row saying which platform it was
-  // (#6585). Requiring five distinct shapes is the cheap guard against a
+  // (#6585). Requiring six distinct shapes is the cheap guard against a
   // regression to that.
   it("gives every channel its own brand mark", () => {
     renderTab();
 
-    const shapes = ["lark", "slack", "dingtalk", "wecom", "telegram"].map(
+    const shapes = ["lark", "slack", "dingtalk", "wecom", "telegram", "sharecrm"].map(
       (channel) => screen.getByTestId(`integration-channel-icon-${channel}`).innerHTML,
     );
 
