@@ -27,6 +27,11 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useAppForeground } from "../../common/use-app-foreground";
 import {
+  RowActionsMenu,
+  handleRowActivationKey,
+  type RowActionItem,
+} from "../../common/row-actions-menu";
+import {
   PickerEmpty,
   PickerItem,
   PickerSection,
@@ -1114,6 +1119,11 @@ function AgentPickerItem({
   );
 }
 
+interface SessionRowAction extends RowActionItem {
+  /** Extra visible text in the hover strip (the stop button reads "Stop"). */
+  stripText?: string;
+}
+
 /**
  * Session dropdown: a flat "Chat history" list of all non-archived
  * sessions. Selecting a session from a different agent implicitly
@@ -1326,6 +1336,34 @@ function SessionDropdown({
           ? t(($) => $.session_history.row_subtitle.new_reply)
           : formatTimeAgo(session.updated_at);
 
+    // One list drives both action surfaces — the compact menu without hover
+    // and the hover strip with it — so they cannot drift.
+    const rowActions: SessionRowAction[] = isRunning
+      ? [
+          {
+            key: "stop",
+            icon: <Square className="size-2.5 fill-current" />,
+            label: t(($) => $.session_history.row_stop_aria),
+            stripText: t(($) => $.session_history.stop_action),
+            danger: true,
+            onSelect: () => setConfirmingStopId(session.id),
+          },
+        ]
+      : [
+          {
+            key: "rename",
+            icon: <Pencil className="size-3.5" />,
+            label: t(($) => $.session_history.row_rename_aria),
+            onSelect: () => setRenamingId(session.id),
+          },
+          {
+            key: "archive",
+            icon: <Archive className="size-3.5" />,
+            label: t(($) => $.list.archive),
+            onSelect: () => handleArchive(session),
+          },
+        ];
+
     return (
       <div
         key={session.id}
@@ -1337,9 +1375,7 @@ function SessionDropdown({
         }}
         onKeyDown={(e) => {
           if (isRenaming || isConfirmingAction) return;
-          if (e.key !== "Enter" && e.key !== " ") return;
-          e.preventDefault();
-          handleSelectSession(session);
+          handleRowActivationKey(e, () => handleSelectSession(session));
         }}
         className={cn(
           "group/history-row relative flex min-h-11 min-w-0 cursor-default items-center gap-2 overflow-hidden rounded-md py-1.5 pl-2 pr-2 outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring",
@@ -1422,7 +1458,7 @@ function SessionDropdown({
             </div>
           ) : (
             <div className="flex shrink-0 items-center">
-              <div className="flex h-7 items-center justify-end gap-1.5 text-caption text-muted-foreground group-hover/history-row:hidden">
+              <div className="flex h-7 items-center justify-end gap-1.5 text-caption text-muted-foreground [@media(hover:hover)]:group-hover/history-row:hidden [@media(hover:hover)]:group-focus-within/history-row:hidden">
                 {isRunning && <Loader2 className="size-3 animate-spin" />}
                 {showCompleted && !isRunning && <Check className="size-3 text-emerald-500" />}
                 {showUnread && !isRunning && !showCompleted && (
@@ -1434,9 +1470,16 @@ function SessionDropdown({
                 )}
                 <span className={cn("truncate", (showUnread || showCompleted || isRunning) && "font-medium text-foreground")}>{trailingStatus}</span>
               </div>
-              <div className="hidden h-7 items-center gap-0.5 group-hover/history-row:flex">
-                {isRunning && pendingTask && (
+              {/* Touch has no hover: without it the status above stays put and
+                  these same actions move into the row's compact menu. */}
+              <RowActionsMenu
+                label={t(($) => $.session_history.row_actions_aria)}
+                groups={[rowActions]}
+              />
+              <div className="hidden h-7 items-center gap-0.5 [@media(hover:hover)]:group-hover/history-row:flex [@media(hover:hover)]:group-focus-within/history-row:flex">
+                {rowActions.map((action) => (
                   <button
+                    key={action.key}
                     type="button"
                     onPointerDown={(e) => {
                       e.preventDefault();
@@ -1445,54 +1488,20 @@ function SessionDropdown({
                     onClick={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
-                      setConfirmingStopId(session.id);
+                      action.onSelect();
                     }}
-                    className="inline-flex h-7 items-center gap-1 rounded px-1.5 text-micro font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:outline-none"
-                    aria-label={t(($) => $.session_history.row_stop_aria)}
-                    title={t(($) => $.session_history.row_stop_aria)}
+                    className={
+                      action.danger
+                        ? "inline-flex h-7 items-center gap-1 rounded px-1.5 text-micro font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:outline-none"
+                        : "inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
+                    }
+                    aria-label={action.label}
+                    title={action.label}
                   >
-                    <Square className="size-2.5 fill-current" />
-                    {t(($) => $.session_history.stop_action)}
+                    {action.icon}
+                    {action.stripText}
                   </button>
-                )}
-                {!isRunning && (
-                  <>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        setRenamingId(session.id);
-                      }}
-                      className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
-                      aria-label={t(($) => $.session_history.row_rename_aria)}
-                      title={t(($) => $.session_history.row_rename_aria)}
-                    >
-                      <Pencil className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        handleArchive(session);
-                      }}
-                      className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none"
-                      aria-label={t(($) => $.list.archive)}
-                      title={t(($) => $.list.archive)}
-                    >
-                      <Archive className="size-3.5" />
-                    </button>
-                  </>
-                )}
+                ))}
               </div>
             </div>
           )

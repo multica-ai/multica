@@ -162,6 +162,7 @@ type Handler struct {
 	DaemonWorkspaceRefresh WorkspaceSetRefreshNotifier
 	Bus                    *events.Bus
 	TaskService            *service.TaskService
+	PluginService          *service.PluginService
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
 	EmailService           *service.EmailService
@@ -285,6 +286,29 @@ type Handler struct {
 	// production, which gets the real handshake probe; tests inject a fake so
 	// the install path runs without a socket.
 	WecomCredentialProbe wecom.CredentialProbe
+
+	// channelFileDelivery names the channel types that can, IN THIS
+	// DEPLOYMENT, carry a file the agent produced the last hop into the
+	// conversation. It answers the claim response's
+	// chat_channel_delivers_files, which the agent's PER-TURN prompt turns into
+	// either "run `multica attachment upload`" or "describe the file in words"
+	// (daemon/prompt.go). Not the brief: the brief is the prompt cache prefix and
+	// this is a per-turn verdict, so stating it there made one session render two
+	// briefs (MUL-5377).
+	//
+	// It is a deployment fact, not a property of the channel type, and that
+	// distinction is the whole reason it lives here. Whether the file arrives
+	// takes TWO things: an adapter that goes back for the bound attachment,
+	// and object storage for it to go back to. The first is a property of the
+	// code, the second of the configuration, and only the process that wired
+	// both knows the conjunction. A daemon that answers this from the channel
+	// type alone promises delivery a storage-less deployment cannot perform.
+	//
+	// Written once at boot by DeclareChannelFileDelivery (cmd/server/router.go,
+	// in the same branch that passes the storage to the adapter, so the two
+	// cannot drift), read-only from then on. Nil means no channel delivers
+	// files, which is what a deployment with no storage configured gets.
+	channelFileDelivery map[string]bool
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in
@@ -361,6 +385,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		DaemonWorkspaceRefresh:       daemonWorkspaceRefresh,
 		Bus:                          bus,
 		TaskService:                  taskSvc,
+		PluginService:                service.NewPluginService(queries, txStarter),
 		IssueService:                 service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		AutopilotService:             service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:                 emailService,
@@ -535,6 +560,45 @@ func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName s
 		uuids[i] = u
 	}
 	return uuids, true
+}
+
+// DeclareChannelFileDelivery records that this deployment can put a file the
+// agent produced into a channelType conversation. Call it at boot, from the
+// same branch that gives the adapter what it needs to perform the delivery —
+// the point is that one condition produces both the capability and the claim
+// it is announced under, so a deployment cannot end up promising a hop it does
+// not have.
+//
+// Not safe to call once the server is serving: the map it writes is read
+// without a lock by every task claim.
+func (h *Handler) DeclareChannelFileDelivery(channelType string) {
+	if channelType == "" {
+		return
+	}
+	if h.channelFileDelivery == nil {
+		h.channelFileDelivery = map[string]bool{}
+	}
+	h.channelFileDelivery[channelType] = true
+}
+
+// channelDeliversFiles answers chat_channel_delivers_files for one claim.
+//
+// The default is false in every direction that is not an explicit declaration:
+// a channel nobody declared, a deployment with no object storage, an adapter
+// that was never wired. False is the safe answer because of what the two
+// answers cost. False when the file could have travelled loses a delivery the
+// agent then describes in words. True when it cannot has the agent write "the
+// chart is attached" into a room where nothing is attached, and the reader is
+// left hunting for it.
+//
+// Web chat (empty channel type) is not answered here. It has no adapter and no
+// last hop to have — the browser renders the attachment card off the same bind
+// — and the prompt handles it in its own branch.
+func (h *Handler) channelDeliversFiles(channelType string) bool {
+	if channelType == "" {
+		return false
+	}
+	return h.channelFileDelivery[channelType]
 }
 
 // publish sends a domain event through the event bus.
@@ -924,18 +988,33 @@ func splitIdentifier(id string) *identifierParts {
 	return &identifierParts{prefix: id[:idx], number: int32(num)}
 }
 
-// getIssuePrefix fetches the issue_prefix for a workspace.
-// Falls back to generating a prefix from the workspace name if the stored
-// prefix is empty (e.g. workspaces created before the prefix was introduced).
+// issuePrefixForWorkspace resolves a workspace row's effective issue prefix:
+// the configured value, or one generated from the workspace name when the
+// stored prefix is empty (e.g. workspaces created before the prefix was
+// introduced). Split out from getIssuePrefix so callers that already hold the
+// row — such as the GitHub close-intent scan, which must not re-read it — can
+// reuse the rule.
+//
+// The empty-prefix fallback stays on the FROZEN name-based derivation, not the
+// slug-based one new workspaces get (MUL-6050): identifiers are computed at
+// read time, so switching this path would rewrite the identifier of every
+// issue in those legacy workspaces. New workspaces always persist a prefix at
+// creation, so they never reach this branch.
+func issuePrefixForWorkspace(ws db.Workspace) string {
+	if ws.IssuePrefix != "" {
+		return ws.IssuePrefix
+	}
+	return legacyIssuePrefixFromName(ws.Name)
+}
+
+// getIssuePrefix fetches the effective issue_prefix for a workspace, and
+// returns "" when the workspace row cannot be loaded.
 func (h *Handler) getIssuePrefix(ctx context.Context, workspaceID pgtype.UUID) string {
 	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		return ""
 	}
-	if ws.IssuePrefix != "" {
-		return ws.IssuePrefix
-	}
-	return generateIssuePrefix(ws.Name)
+	return issuePrefixForWorkspace(ws)
 }
 
 func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agentID string) (db.Agent, bool) {

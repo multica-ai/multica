@@ -116,6 +116,8 @@
       "findInIssue": { "label": "タスク内を検索", "description": "開いているタスクの詳細を検索します。" },
       "openThreadNav": { "label": "スレッドナビゲーターを開く", "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。" },
       "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログでタスクを作成します。" },
+      "goBack": { "label": "戻る", "description": "ブラウザーのように履歴を戻ります。" },
+      "goForward": { "label": "進む", "description": "ブラウザーのように履歴を進みます。" },
       "goInbox": { "label": "受信トレイへ移動", "description": "ワークスペースの受信トレイを開きます。" },
       "goChat": { "label": "チャットへ移動", "description": "ワークスペースのチャットを開きます。" },
       "goMyIssues": { "label": "自分のタスクへ移動", "description": "自分に割り当てられたタスクを開きます。" },

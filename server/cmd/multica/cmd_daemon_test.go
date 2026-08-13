@@ -868,6 +868,28 @@ func TestDaemonStatusHealthPortInTaskContext(t *testing.T) {
 		}
 	})
 
+	t.Run("port-only host context derives the port from the profile", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		clearDaemonTaskEnv(t)
+		t.Setenv("MULTICA_DAEMON_PORT", strconv.Itoa(injectedPort))
+
+		cmd := &cobra.Command{}
+		cmd.Flags().String("profile", "", "")
+		if err := cmd.Flags().Set("profile", "staging"); err != nil {
+			t.Fatalf("set profile flag: %v", err)
+		}
+		got, err := daemonStatusHealthPort(cmd)
+		if err != nil {
+			t.Fatalf("daemonStatusHealthPort: %v", err)
+		}
+		if want := healthPortForProfile("staging"); got != want {
+			t.Fatalf("health port = %d, want profile-derived %d", got, want)
+		}
+		if got == injectedPort {
+			t.Fatal("port-only host context used the stale injected port")
+		}
+	})
+
 	t.Run("inside a task uses the injected port", func(t *testing.T) {
 		t.Chdir(t.TempDir())
 		clearDaemonTaskEnv(t)

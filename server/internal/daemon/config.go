@@ -68,7 +68,7 @@ const (
 	DefaultGCInterval                     = 2 * time.Hour
 	DefaultGCTTL                          = 24 * time.Hour      // 1 day — AI-coding issues rarely stay open long
 	DefaultGCOrphanTTL                    = 72 * time.Hour      // 3 days — orphans with no meta (crashes, pre-GC leftovers)
-	DefaultGCArtifactTTL                  = 12 * time.Hour      // 12h — drop regenerable artifacts on completed but still-open issues
+	DefaultGCArtifactTTL                  = 12 * time.Hour      // 12h — drop regenerable artifacts once a task has been completed this long
 	DefaultGCCodexSessionTTL              = 14 * 24 * time.Hour // 14 days — reclaim per-issue Codex session stores untouched this long
 	DefaultGCHermesMemoryTTL              = 90 * 24 * time.Hour // 90 days — reclaim per-agent Hermes memory stores untouched this long (long: reclaiming these is visible amnesia, and they are a few markdown files)
 	DefaultGCRepoTTL                      = 30 * 24 * time.Hour // 30 days — evict a bare repo cache no task has checked out this long
@@ -102,9 +102,10 @@ type Config struct {
 	GCInterval                     time.Duration         // how often the GC loop runs (default: 2h)
 	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
 	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
-	GCArtifactTTL                  time.Duration         // when a task has been completed for at least this long but its issue is still open, drop regenerable artifacts (default: 12h, set 0 to disable)
+	GCArtifactTTL                  time.Duration         // once a task has been completed for at least this long, drop regenerable artifacts: pattern-matched build outputs when the parent record keeps the directory (an open issue), and the exact daemon-managed Codex cache for every task kind (default: 12h, set 0 to disable both)
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
 	GCRepoTTL                      time.Duration         // evict a cached bare repo under .repos once no task has created a worktree from it for this long, it has no worktrees left, and it is no longer attached to any watched workspace (default: 30d, set 0 to disable)
+	GCRepoMaintenanceEnabled       bool                  // run reflog expiry and git gc after stale agent refs are removed (default: true; disable independently as an operational kill switch)
 	GCCodexSessionTTL              time.Duration         // reclaim a per-issue Codex session store (~/.codex/multica-sessions/<agent>/<issue>) untouched for at least this long, so a done/abandoned issue's conversation history does not accumulate forever (default: 14d, set 0 to disable)
 	GCHermesMemoryTTL              time.Duration         // reclaim a per-agent Hermes memory store (<profile dir>/hermes-state/<agent>/<profile>) untouched for at least this long, so a deleted agent's memory does not sit on disk forever (default: 90d, set 0 to disable)
 	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
@@ -430,6 +431,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	gcRepoMaintenanceEnabled := boolFromEnv("MULTICA_GC_REPO_MAINTENANCE_ENABLED", true)
 	gcArtifactPatterns := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", DefaultGCArtifactPatterns)
 
 	// Auto-update config: default -> env override -> CLI override.
@@ -481,6 +483,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCArtifactTTL:                  gcArtifactTTL,
 		GCArtifactPatterns:             gcArtifactPatterns,
 		GCRepoTTL:                      gcRepoTTL,
+		GCRepoMaintenanceEnabled:       gcRepoMaintenanceEnabled,
 		GCCodexSessionTTL:              gcCodexSessionTTL,
 		GCHermesMemoryTTL:              gcHermesMemoryTTL,
 		AutoUpdateEnabled:              autoUpdateEnabled,

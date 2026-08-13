@@ -110,7 +110,8 @@
       "cancel": "取消",
       "confirm": "删除",
       "confirming": "删除中..."
-    }
+    },
+    "row_actions_aria": "聊天操作"
   },
   "window": {
     "new_chat_tooltip": "新对话",
@@ -215,7 +216,8 @@
     "pinned": "已置顶",
     "archive": "归档",
     "unarchive": "取消归档",
-    "archived_title": "已归档"
+    "archived_title": "已归档",
+    "row_actions_aria": "聊天操作"
   },
   "header": {
     "view_profile": "查看 Agent 资料",

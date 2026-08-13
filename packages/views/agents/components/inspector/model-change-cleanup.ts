@@ -1,4 +1,5 @@
 import type { RuntimeModel } from "@multica/core/types";
+import { findModelCapabilityEntry } from "./model-capability";
 
 /**
  * The exact per-model catalog for the agent's runtime, or `null` when it is not
@@ -37,6 +38,7 @@ export type ModelChangeUpdate = {
  * combination the UI never intended.
  */
 export function buildModelChangeUpdate(input: {
+  provider: string;
   model: string;
   thinkingLevel: string;
   serviceTier: string;
@@ -46,7 +48,11 @@ export function buildModelChangeUpdate(input: {
   if (!input.thinkingLevel && !input.serviceTier) return update;
   if (input.catalog === null || !input.model) return update;
 
-  const entry = input.catalog.find((model) => model.id === input.model);
+  const entry = findModelCapabilityEntry(
+    input.catalog,
+    input.model,
+    input.provider,
+  );
   if (!entry) return update;
 
   const supportsThinking = (entry.thinking?.supported_levels ?? []).some(

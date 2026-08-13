@@ -80,12 +80,18 @@ type PrepareParams struct {
 	// HermesMemoryStore is the agent's persistent Hermes memory store
 	// (HermesMemoryStorePath) the overlay links memories/ to, so memory outlives
 	// the task. Empty keeps memories/ task-local — no agent to key on, or the
-	// MULTICA_HERMES_TASK_MEMORY rollback switch is engaged.
+	// Multica profile dir could not be resolved.
 	HermesMemoryStore string
 	// HermesEnv is the sanitized effective env (agent custom_env minus the daemon
 	// blocklisted keys) used to expand ${VAR} in Hermes external_dirs so it
 	// matches what the Hermes child process actually sees. Only used for hermes.
 	HermesEnv map[string]string
+	// ReasonixEnv is the sanitized agent custom_env, layered over the daemon's
+	// own environment exactly as the child's env is built. The per-task
+	// reasonix.toml restates the permissions from the user config that env
+	// resolves to, so an agent that re-points (or clears) REASONIX_HOME moves the
+	// daemon's read with it. Only used for reasonix.
+	ReasonixEnv map[string]string
 	// CodexCustomArgs are the effective Codex CLI args this task launches with
 	// (daemon defaults + profile-fixed + per-agent custom_args). Only the
 	// Windows sandbox decision reads them, to honor a `-c windows.sandbox=...`
@@ -131,13 +137,31 @@ type TaskContextForEnv struct {
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID                 string                  // non-empty for chat tasks
 	// ChatChannelType is the IM platform behind a chat session ("slack",
-	// "feishu", "wecom"); empty for a web/mobile chat. Any non-empty value
-	// means the reply leaves Multica for an external channel, so `multica
-	// attachment upload` cannot deliver a file and the Output section says
-	// text-only instead (MUL-4899). The orthogonal audience and history policies
-	// live in the per-turn chat prompt (daemon/prompt.go) — the server has no
-	// history reader for any other channel.
-	ChatChannelType         string
+	// "feishu", "wecom"); empty for a web/mobile chat. It names the surface in
+	// the brief's copy; what that surface can DELIVER is the separate field
+	// below (MUL-4899). The orthogonal audience and history policies live in
+	// the per-turn chat prompt (daemon/prompt.go) — the server has no history
+	// reader for any other channel.
+	ChatChannelType string
+	// ChatChannelDeliversFiles is the server's verdict, for THIS turn, on
+	// whether a file the agent produces reaches the reader: the adapter goes
+	// back for the bound attachment and this deployment has the object storage
+	// it goes back to. It arrives on the claim and is used as given. False
+	// covers an old server that never sent it, a deployment with no storage,
+	// and every channel whose adapter does not perform the hop — all three of
+	// which want the same instruction, the one telling the agent to describe
+	// its file in words.
+	//
+	// Carried here but deliberately NOT rendered into the brief. It is a
+	// per-turn value: a server upgrade that starts sending it, or object
+	// storage being turned on or off, flips it under a chat session that
+	// resumes across the change, and the brief is the prompt-cache prefix
+	// (MUL-5377). The agent-facing verdict is emitted by the per-turn chat
+	// prompt (daemon.buildChatPrompt) instead, and
+	// TestBriefByteIdenticalAcrossRunsForEveryKind is what keeps this field out
+	// of the brief.
+	ChatChannelDeliversFiles bool
+
 	AutopilotRunID          string // non-empty for autopilot run_only tasks
 	AutopilotID             string
 	AutopilotTitle          string
@@ -404,6 +428,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.QwenpawWorkspace = qwenpawWorkspace
 	}
 
+	// For Reasonix, deny the `ask` tool for this task through a project-scoped
+	// reasonix.toml. Degraded, not fatal: without it the task still runs under
+	// the backend's fail-closed question handling.
+	if params.Provider == "reasonix" {
+		if err := writeReasonixProjectConfig(workDir, params.ReasonixEnv, manifest, logger); err != nil {
+			logger.Warn("execenv: write reasonix project config failed", "error", err)
+		}
+	}
+
 	// For Cursor, materialize managed MCP into project-local config and use
 	// an isolated CURSOR_DATA_DIR for the per-workdir approval sidecar. Cursor
 	// still reads ~/.cursor/mcp.json, but only servers with approval entries in
@@ -492,6 +525,9 @@ type ReuseParams struct {
 	HermesSourceMustExist bool
 	HermesEnv             map[string]string
 	HermesMemoryStore     string
+	// ReasonixEnv mirrors PrepareParams.ReasonixEnv on reuse so the rewritten
+	// reasonix.toml keeps restating the owner's current permissions.
+	ReasonixEnv map[string]string
 	// CodexCustomArgs mirrors PrepareParams.CodexCustomArgs on reuse so the
 	// Windows sandbox decision honors a `-c windows.sandbox=...` override here
 	// too (MUL-4957).
@@ -618,6 +654,15 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			logger.Warn("execenv: refresh claude skill settings failed", "error", err)
 		} else {
 			env.ClaudeSettingsPath = settingsPath
+		}
+	}
+
+	// Re-deny Reasonix's `ask` tool on reuse: CleanupSidecars above removed the
+	// prior run's reasonix.toml, so without this the next turn would run with
+	// the tool available again.
+	if params.Provider == "reasonix" {
+		if err := writeReasonixProjectConfig(params.WorkDir, params.ReasonixEnv, manifest, logger); err != nil {
+			logger.Warn("execenv: refresh reasonix project config failed", "error", err)
 		}
 	}
 

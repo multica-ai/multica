@@ -599,6 +599,18 @@ func TestCodexStaticModelsMatchVerifiedFallbackCatalog(t *testing.T) {
 	if got := ids["gpt-5.3-codex"].Thinking; got == nil || !hasThinkingLevel(got, "xhigh") || hasThinkingLevel(got, "max") || hasThinkingLevel(got, "ultra") {
 		t.Errorf("unexpected gpt-5.3-codex thinking catalog: %+v", got)
 	}
+	for id, label := range map[string]string{
+		"gpt-5.6-sol":   "GPT-5.6 Sol",
+		"gpt-5.6-terra": "GPT-5.6 Terra",
+		"gpt-5.6-luna":  "GPT-5.6 Luna",
+	} {
+		if got := ids[id].Label; got != label {
+			t.Errorf("Codex model %q label = %q, want %q", id, got, label)
+		}
+		if ModelKnownIncompatibleWithProvider("codex", id) {
+			t.Errorf("Codex model %q must be accepted by the provider compatibility gate", id)
+		}
+	}
 }
 
 func TestModelKnownIncompatibleWithProvider(t *testing.T) {
@@ -631,6 +643,30 @@ func TestModelKnownIncompatibleWithProvider(t *testing.T) {
 			provider: "claude",
 			model:    "claude-opus-4-7",
 			want:     false,
+		},
+		{
+			name:     "claude context variant is compatible with claude",
+			provider: "claude",
+			model:    "claude-opus-5[1m]",
+			want:     false,
+		},
+		{
+			name:     "future-shaped claude context variant is compatible with claude",
+			provider: "claude",
+			model:    "claude-opus-5[500k]",
+			want:     false,
+		},
+		{
+			name:     "malformed claude context variant is incompatible with claude",
+			provider: "claude",
+			model:    "claude-opus-5[weird]",
+			want:     true,
+		},
+		{
+			name:     "unknown claude base stays incompatible after context normalization",
+			provider: "claude",
+			model:    "claude-fake-9[1m]",
+			want:     true,
 		},
 		{
 			name:     "provider-prefixed openai model is incompatible with codex",

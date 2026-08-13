@@ -164,13 +164,84 @@ describe("InboxListItem issue activity", () => {
   });
 });
 
+describe("InboxListItem keyboard semantics", () => {
+  it("is a role=button host, so its own controls stay reachable", () => {
+    // Interactive descendants of a real <button> are invalid HTML and are not
+    // exposed to screen readers — the row carries an action button and a menu.
+    const { container } = renderRow({ item: item(), view: "inbox" });
+
+    const row = screen.getByTestId("actor-avatar").closest('[role="button"]')!;
+    expect(row.tagName).toBe("DIV");
+    expect(row.getAttribute("tabindex")).toBe("0");
+    expect(container.querySelector("button")).not.toBeNull();
+  });
+
+  it("gates the archive affordance on hover capability, not viewport width", () => {
+    // A width breakpoint hides this button on every wide surface, touch or
+    // not. On a pointer that cannot hover — a phone in landscape clears `md` —
+    // that left the row with no reachable archive at all, which is the whole
+    // problem the compact menu exists to solve.
+    const { container } = renderRow({ item: item(), view: "inbox" });
+
+    const actionButton = container.querySelector("button")!;
+
+    expect(actionButton.className).toContain(
+      "[@media(hover:hover)]:group-hover:inline-flex",
+    );
+    expect(actionButton.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):group-/);
+  });
+
+  it("activates on Enter like the button it replaces", () => {
+    const onClick = vi.fn();
+    renderRow({ item: item(), view: "inbox", onClick });
+
+    const row = screen.getByTestId("actor-avatar").closest('[role="button"]')!;
+    fireEvent.keyDown(row, { key: "Enter" });
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves keys pressed inside its own controls alone", () => {
+    // Enter on the archive button must archive, not select the row.
+    const onClick = vi.fn();
+    const { container } = renderRow({ item: item(), view: "inbox", onClick });
+
+    fireEvent.keyDown(container.querySelector("button")!, { key: "Enter" });
+
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("runs the row action without selecting the row", () => {
+    const onClick = vi.fn();
+    const onAction = vi.fn();
+    const { container } = render(
+      <WorkspaceSlugProvider slug="acme">
+        <NavigationProvider value={makeAdapter()}>
+          <InboxListItem
+            item={item()}
+            view="inbox"
+            isSelected={false}
+            onClick={onClick}
+            onAction={onAction}
+          />
+        </NavigationProvider>
+      </WorkspaceSlugProvider>,
+    );
+
+    fireEvent.click(container.querySelector("button")!);
+
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+});
+
 describe("InboxListItem link semantics", () => {
   it("plain click keeps the master-detail selection and does not navigate", () => {
     const onClick = vi.fn();
     const push = vi.fn();
     renderRow({ item: item(), view: "inbox", onClick, adapter: makeAdapter({ push }) });
 
-    fireEvent.click(screen.getByTestId("actor-avatar").closest("button")!);
+    fireEvent.click(screen.getByTestId("actor-avatar").closest('[role="button"]')!);
     expect(onClick).toHaveBeenCalledTimes(1);
     expect(push).not.toHaveBeenCalled();
   });
@@ -185,7 +256,7 @@ describe("InboxListItem link semantics", () => {
       adapter: makeAdapter({ openInNewTab }),
     });
 
-    fireEvent.click(screen.getByTestId("actor-avatar").closest("button")!, {
+    fireEvent.click(screen.getByTestId("actor-avatar").closest('[role="button"]')!, {
       metaKey: true,
     });
     expect(openInNewTab).toHaveBeenCalledWith("/acme/issues/issue-1", undefined);
@@ -196,7 +267,7 @@ describe("InboxListItem link semantics", () => {
     const openInNewTab = vi.fn();
     renderRow({ item: item(), view: "inbox", adapter: makeAdapter({ openInNewTab }) });
 
-    const row = screen.getByTestId("actor-avatar").closest("button")!;
+    const row = screen.getByTestId("actor-avatar").closest('[role="button"]')!;
     const event = new MouseEvent("auxclick", {
       bubbles: true,
       button: 1,
@@ -218,7 +289,7 @@ describe("InboxListItem link semantics", () => {
       adapter: makeAdapter({ openInNewTab }),
     });
 
-    fireEvent.click(screen.getByTestId("actor-avatar").closest("button")!, {
+    fireEvent.click(screen.getByTestId("actor-avatar").closest('[role="button"]')!, {
       metaKey: true,
     });
     expect(onClick).toHaveBeenCalledTimes(1);

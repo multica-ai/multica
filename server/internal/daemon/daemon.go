@@ -272,7 +272,7 @@ type workspaceState struct {
 	taskRepoRefs    map[string]map[string]string // taskID -> repo URL -> checkout ref
 	settings        json.RawMessage              // workspace settings (JSONB)
 	lastRepoSyncErr string
-	repoRefreshMu   sync.Mutex
+	repoRefreshMu   contextLock
 	// profileSetSig is a content hash of the workspace's custom runtime
 	// profile list (MUL-3332) as last seen from the server. An on-demand
 	// refresh compares the live signature with this cached value; any drift
@@ -295,6 +295,38 @@ type workspaceState struct {
 	// revisits it. A failed register records nothing, so the workspace stays
 	// behind and is retried. Guarded by Daemon.mu.
 	builtinVersions map[string]string
+}
+
+// contextLock is a zero-value-ready mutex whose wait can be cancelled. Repo
+// checkout requests use it for workspace refresh coalescing so disconnecting a
+// client never leaves the handler stuck behind another cold-cache refresh.
+type contextLock struct {
+	once  sync.Once
+	token chan struct{}
+}
+
+func (l *contextLock) Lock(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	l.once.Do(func() {
+		l.token = make(chan struct{}, 1)
+		l.token <- struct{}{}
+	})
+	select {
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	case <-l.token:
+		if err := ctx.Err(); err != nil {
+			l.token <- struct{}{}
+			return context.Cause(ctx)
+		}
+		return nil
+	}
+}
+
+func (l *contextLock) Unlock() {
+	l.token <- struct{}{}
 }
 
 type repoCacheBackend interface {
@@ -2776,10 +2808,22 @@ func (d *Daemon) waitBackgroundSyncs() {
 }
 
 func (d *Daemon) syncWorkspaceRepos(workspaceID string, repos []RepoData) {
+	d.syncWorkspaceReposContext(context.Background(), workspaceID, repos)
+}
+
+func (d *Daemon) syncWorkspaceReposContext(ctx context.Context, workspaceID string, repos []RepoData) {
 	if d.repoCache == nil {
 		return
 	}
-	if err := d.repoCache.Sync(workspaceID, repoDataToInfo(repos)); err != nil {
+	var err error
+	if cache, ok := d.repoCache.(interface {
+		SyncContext(context.Context, string, []repocache.RepoInfo) error
+	}); ok {
+		err = cache.SyncContext(ctx, workspaceID, repoDataToInfo(repos))
+	} else {
+		err = d.repoCache.Sync(workspaceID, repoDataToInfo(repos))
+	}
+	if err != nil {
 		d.setWorkspaceRepoSyncError(workspaceID, err.Error())
 		d.logger.Warn("repo cache sync failed", "workspace_id", workspaceID, "error", err)
 		return
@@ -3026,7 +3070,9 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	//     sibling's refresh is fresh enough for our gate read.
 	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
 
-	ws.repoRefreshMu.Lock()
+	if err := ws.repoRefreshMu.Lock(ctx); err != nil {
+		return err
+	}
 	defer ws.repoRefreshMu.Unlock()
 
 	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
@@ -3046,7 +3092,10 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return nil
 	}
 
-	d.syncWorkspaceRepos(workspaceID, resp.Repos)
+	d.syncWorkspaceReposContext(ctx, workspaceID, resp.Repos)
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
 
 	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
 		return nil
@@ -4424,6 +4473,13 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			d.logger.Info("task received", "task", shortID(t.ID), "target", taskTarget)
 			taskWG.Add(1)
 			d.activeTasks.Add(1)
+			if cache, ok := d.repoCache.(interface{ CancelMaintenance() }); ok {
+				// A task can reuse an existing worktree and never enter the
+				// checkout path that normally preempts repository maintenance.
+				// Cancel all low-priority maintenance before the agent starts so
+				// direct Git operations cannot overlap it.
+				cache.CancelMaintenance()
+			}
 			go func(t Task, slot int) {
 				defer taskWG.Done()
 				defer d.activeTasks.Add(-1)
@@ -5472,10 +5528,14 @@ func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRe
 		return SkillData{}, fmt.Errorf("resolve skill bundle returned wrong skill: requested source=%s id=%s, got source=%s id=%s", ref.Source, ref.ID, bundle.Source, bundle.ID)
 	}
 	bundleRef := skillRefFromBundle(bundle)
-	if !validateSkillBundle(bundleRef, bundle) {
+	validationRef := bundleRef
+	if ref.Source == skillbundle.SourcePlugin {
+		validationRef = ref
+	}
+	if !validateSkillBundle(validationRef, bundle) {
 		return SkillData{}, fmt.Errorf("resolve skill bundle returned invalid bundle: skill_id=%s source=%s hash=%s", bundle.ID, bundle.Source, bundle.Hash)
 	}
-	if err := d.skillCache.WithRefLock(task.WorkspaceID, bundleRef, func() error {
+	if err := d.skillCache.WithRefLock(task.WorkspaceID, validationRef, func() error {
 		return d.skillCache.Store(task.WorkspaceID, bundle)
 	}); err != nil {
 		return SkillData{}, fmt.Errorf("store skill bundle cache: %w", err)
@@ -5725,6 +5785,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
 		ChatChannelType:                  task.ChatChannelType,
+		ChatChannelDeliversFiles:         task.ChatChannelDeliversFiles,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
 		AutopilotTitle:                   task.AutopilotTitle,
@@ -5872,6 +5933,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			defer d.unmarkActiveStore(store)
 		}
 	}
+	// Reasonix locates its user config from the environment (REASONIX_HOME, and
+	// the platform config dirs behind it), which an agent's custom_env may
+	// re-point or clear. The per-task reasonix.toml has to restate the
+	// permissions from whichever config the child ends up loading, so the deny
+	// rules the runtime owner set there survive the task-scoped config that
+	// overrides them — hence the same sanitized env the child is launched with.
+	var reasonixEnv map[string]string
+	if provider == "reasonix" {
+		reasonixEnv = sanitizeAgentEnv(agentEnvOverrides)
+	}
 	// Guard this task's per-issue Codex session store from the GC for the whole
 	// task, starting before Prepare/Reuse mounts it — so a prune that samples the
 	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
@@ -5899,6 +5970,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
 			HermesMemoryStore:     hermesMemoryStore,
+			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		})
@@ -5924,6 +5996,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
 			HermesMemoryStore:     hermesMemoryStore,
+			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}
@@ -6698,6 +6771,35 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 	// gets its session retired, just by classifyPoisonedError at report time
 	// rather than by an in-turn retry.
 	if taskfailure.UnresumableHistory(result.Error) {
+		return true
+	}
+	// Third form of positive evidence, and the same shape of argument: the
+	// resume was not refused — the runtime happily rebuilt the session — but
+	// the provider identity it rebuilt can no longer resolve its own
+	// credentials, so the turn dies with "Could not resolve authentication
+	// method" (GH #6777). The credentials are fine; only the session's copy of
+	// the provider is broken, which is precisely what a fresh session
+	// re-resolves from current config.
+	//
+	// This is the exception the Result.ResumeRejected doc calls out: adapters
+	// must NOT flag auth errors, because a genuine credential failure keeps the
+	// session so the platform's own retry can continue the conversation. The
+	// distinction is resume-vs-fresh, not the error text — and priorSessionID
+	// above already establishes that this run WAS a resume. On a cold run the
+	// same error means the config really is wrong and this gate never sees it.
+	//
+	// Deciding here rather than in each ACP adapter is what makes it correct
+	// for every step of the ACP lifecycle: the failure surfaces at
+	// session/resume, at session/set_model (a resumed session whose persisted
+	// provider was normalised gets a redundant set_model that re-routes to the
+	// wrong provider — MUL-5029) or at session/prompt, and only two of those
+	// three carry any resume-failure signal today. The final error text carries
+	// the phrase on all three.
+	//
+	// Worst case, the config genuinely is broken: the fresh attempt fails the
+	// same way, the user sees the same error once, and the single-retry budget
+	// bounds the cost. That is the same trade the branch above already makes.
+	if taskfailure.AuthMethodUnresolved(result.Error) {
 		return true
 	}
 	// Everything below is a bounded compatibility path for the backends that
@@ -7524,14 +7626,43 @@ func ensureTaskTempDir(envRoot string, workspaceID string, taskID string) (strin
 	if taskID == "" {
 		return "", errors.New("task id is empty")
 	}
-	dir, err := os.MkdirTemp(socketSafeTempBaseDir(), "multica-task-")
+	base, overrideConfigured, err := taskTempBaseDir()
 	if err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp(base, "multica-task-")
+	if err != nil {
+		if overrideConfigured {
+			return "", fmt.Errorf("MULTICA_AGENT_TEMP_BASE: create task temp dir: %w", err)
+		}
 		return "", err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return "", err
 	}
 	return dir, nil
+}
+
+// taskTempBaseDir resolves the parent directory for private per-task temp
+// dirs on Linux and macOS. The daemon operator can relocate it with
+// MULTICA_AGENT_TEMP_BASE, which must be an absolute path to an existing,
+// writable directory; an invalid value fails task startup instead of silently
+// falling back. Windows ignores the variable. Unset keeps the platform default
+// exactly as before, down to the syscalls made.
+// Operators should pick a short path: child tools may bind AF_UNIX sockets
+// under $TMPDIR (sun_path is 108 bytes on Linux, 104 on macOS).
+func taskTempBaseDir() (string, bool, error) {
+	if runtime.GOOS == "windows" {
+		return socketSafeTempBaseDir(), false, nil
+	}
+	base := strings.TrimSpace(os.Getenv("MULTICA_AGENT_TEMP_BASE"))
+	if base == "" {
+		return socketSafeTempBaseDir(), false, nil
+	}
+	if !filepath.IsAbs(base) {
+		return "", true, fmt.Errorf("MULTICA_AGENT_TEMP_BASE must be an absolute path, got %q", base)
+	}
+	return base, true, nil
 }
 
 func socketSafeTempBaseDir() string {

@@ -448,10 +448,12 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			res.IssueIdentifier = service.IssueIdentifier(prefix, duplicate.Number)
 			res.IssueDuplicate = true
 			// A duplicate is a terminal product outcome, not an infrastructure
-			// failure and not a chat prompt. Media binding remains independent,
-			// exactly like the successful direct-create path below.
+			// failure and not a chat prompt. Finalize the durable chat message's
+			// media state without resolving it. There is no new issue to consume
+			// the media, so downloading and persisting attachments would only
+			// create unused resources.
 			if resolveMedia {
-				r.enqueueMedia(set, inst, identity, appendRes.MessageID, msg, sessionID, duplicate, pgtype.Text{}, "", pgtype.UUID{}, localMediaDeadline)
+				r.enqueueMediaFinalization(set, inst, identity, appendRes.MessageID, msg, sessionID, localMediaDeadline)
 			}
 			return res, postAppendFinalize, nil
 		}
@@ -506,6 +508,32 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 // task service defers a task to the persisted media deadline, then media
 // completion promotes it early.
 func (r *Router) enqueueMedia(set ResolverSet, inst ResolvedInstallation, identity ResolvedIdentity, chatMessageID pgtype.UUID, msg channel.InboundMessage, sessionID pgtype.UUID, issue db.Issue, issueDescriptionBase pgtype.Text, issueCommandText string, issueTaskID pgtype.UUID, deadline time.Time) {
+	r.enqueueMediaJob(set, inst, identity, chatMessageID, msg, sessionID, issue, issueDescriptionBase, issueCommandText, issueTaskID, true, deadline)
+}
+
+// enqueueMediaFinalization clears the durable media-pending marker without
+// invoking the platform resolver. Duplicate /issue commands use this because
+// neither the existing issue nor the hidden command message should gain a new
+// copy of media that no newly-created issue will consume.
+func (r *Router) enqueueMediaFinalization(set ResolverSet, inst ResolvedInstallation, identity ResolvedIdentity, chatMessageID pgtype.UUID, msg channel.InboundMessage, sessionID pgtype.UUID, deadline time.Time) {
+	r.mediaQueueMu.Lock()
+	if r.stopping {
+		r.mediaQueueMu.Unlock()
+		return
+	}
+	r.mediaWg.Add(1)
+	r.mediaQueueMu.Unlock()
+
+	go func() {
+		defer r.mediaWg.Done()
+		// A channel_command message cannot join or gate a chat task's input
+		// batch, so clearing its own pending marker need not wait behind the
+		// session's ordered remote-media queue.
+		r.resolveAndBindMedia(set, inst, identity, chatMessageID, msg, sessionID, db.Issue{}, pgtype.Text{}, "", pgtype.UUID{}, false, deadline)
+	}()
+}
+
+func (r *Router) enqueueMediaJob(set ResolverSet, inst ResolvedInstallation, identity ResolvedIdentity, chatMessageID pgtype.UUID, msg channel.InboundMessage, sessionID pgtype.UUID, issue db.Issue, issueDescriptionBase pgtype.Text, issueCommandText string, issueTaskID pgtype.UUID, resolveRemote bool, deadline time.Time) {
 	key := keyForSession(sessionID)
 	done := make(chan struct{})
 
@@ -546,7 +574,7 @@ func (r *Router) enqueueMedia(set ResolverSet, inst ResolvedInstallation, identi
 				expired = true
 			}
 		}
-		if !expired {
+		if !expired && resolveRemote {
 			select {
 			case r.mediaSem <- struct{}{}:
 				defer func() { <-r.mediaSem }()
@@ -560,18 +588,20 @@ func (r *Router) enqueueMedia(set ResolverSet, inst ResolvedInstallation, identi
 				// sees the dead deadline and runs only the empty finalize.
 			}
 		}
-		r.resolveAndBindMedia(set, inst, identity, chatMessageID, msg, sessionID, issue, issueDescriptionBase, issueCommandText, issueTaskID, deadline)
+		r.resolveAndBindMedia(set, inst, identity, chatMessageID, msg, sessionID, issue, issueDescriptionBase, issueCommandText, issueTaskID, resolveRemote, deadline)
 	}()
 }
 
 const mediaFinalizeTimeout = 5 * time.Second
 
-func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation, identity ResolvedIdentity, chatMessageID pgtype.UUID, msg channel.InboundMessage, sessionID pgtype.UUID, issue db.Issue, issueDescriptionBase pgtype.Text, issueCommandText string, issueTaskID pgtype.UUID, deadline time.Time) {
+func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation, identity ResolvedIdentity, chatMessageID pgtype.UUID, msg channel.InboundMessage, sessionID pgtype.UUID, issue db.Issue, issueDescriptionBase pgtype.Text, issueCommandText string, issueTaskID pgtype.UUID, resolveRemote bool, deadline time.Time) {
 	ctx, cancel := context.WithDeadline(r.mediaCtx, deadline)
 	defer cancel()
 
 	resolved := msg
-	if ctx.Err() == nil {
+	if !resolveRemote {
+		resolved.MediaRefs = nil
+	} else if ctx.Err() == nil {
 		// Skipped entirely when the budget expired while queued (or on
 		// shutdown): resolving on a dead context would only churn through
 		// intent writes that immediately fail.
@@ -579,7 +609,7 @@ func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation,
 	}
 	finalizeCtx, finalizeCancel := context.WithTimeout(context.Background(), mediaFinalizeTimeout)
 	defer finalizeCancel()
-	if err := ctx.Err(); err != nil {
+	if err := ctx.Err(); resolveRemote && err != nil {
 		// Refs resolved before the deadline already sit in object storage but
 		// will not gain an attachment row. Nothing is deleted here — their
 		// intent-ledger rows were written before the uploads, and the

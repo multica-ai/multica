@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -289,10 +290,28 @@ func ModelKnownIncompatibleWithProvider(providerType, model string) bool {
 	if !ok {
 		return false
 	}
-	if accepted[model] {
+	if accepted[modelIDForCapabilityLookup(providerType, model)] {
 		return false
 	}
 	return isRuntimeSpecificModelID(model)
+}
+
+// claudeContextWindowTagRe recognises Claude Code's trailing context-window
+// model modifier (for example, claude-opus-5[1m]). Keep this narrower than a
+// generic bracket suffix: capability lookup may inherit the base model's
+// effort catalog only when the modifier is syntactically a context size.
+var claudeContextWindowTagRe = regexp.MustCompile(`\[[1-9][0-9]*[km]\]$`)
+
+// modelIDForCapabilityLookup returns the catalog identity for a runtime-native
+// model string. It never changes the value persisted on the agent or passed to
+// the provider CLI. Claude context-window variants share their base model's
+// capabilities; every other provider and malformed/unknown modifier retains
+// exact-match behavior.
+func modelIDForCapabilityLookup(providerType, model string) string {
+	if providerType != "claude" {
+		return model
+	}
+	return claudeContextWindowTagRe.ReplaceAllString(model, "")
 }
 
 func acceptedModelIDsForProvider(providerType string) (map[string]bool, bool) {
@@ -450,9 +469,9 @@ func codexStaticModels() []Model {
 		}
 	}
 	return []Model{
-		{ID: "gpt-5.6-sol", Label: "GPT-5.6-Sol", Provider: "openai", Default: true, Thinking: standardThinking("low", true, true)},
-		{ID: "gpt-5.6-terra", Label: "GPT-5.6-Terra", Provider: "openai", Thinking: standardThinking("medium", true, true)},
-		{ID: "gpt-5.6-luna", Label: "GPT-5.6-Luna", Provider: "openai", Thinking: standardThinking("medium", true, false)},
+		{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol", Provider: "openai", Default: true, Thinking: standardThinking("low", true, true)},
+		{ID: "gpt-5.6-terra", Label: "GPT-5.6 Terra", Provider: "openai", Thinking: standardThinking("medium", true, true)},
+		{ID: "gpt-5.6-luna", Label: "GPT-5.6 Luna", Provider: "openai", Thinking: standardThinking("medium", true, false)},
 		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai", Thinking: standardThinking("medium", false, false)},
 		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai", Thinking: standardThinking("medium", false, false)},
 		{ID: "gpt-5.4-mini", Label: "GPT-5.4-Mini", Provider: "openai", Thinking: standardThinking("medium", false, false)},
@@ -1510,6 +1529,15 @@ func acpConfigOptionCurrentValue(raw json.RawMessage, configID string) (string, 
 // model configOptions advertised by session/new. Authentication and provider
 // configuration remain owned by `reasonix setup`; discovery failure therefore
 // falls back to manual model entry like the other ACP runtimes.
+//
+// The same handshake carries the effort selector, so annotate picks it up for
+// free — no second process and no reasonix-specific parser.
+//
+// Only the session's current model gets a catalog: reasonix derives the effort
+// vocabulary from the current model's provider entry, so the advertised list
+// describes that model alone. Every other model keeps a nil Thinking and shows
+// no picker until per-model probing exists. See
+// annotateACPThinkingForSessionModel.
 func discoverReasonixModels(ctx context.Context, executablePath string) ([]Model, error) {
 	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:       "reasonix",
@@ -1517,6 +1545,7 @@ func discoverReasonixModels(ctx context.Context, executablePath string) ([]Model
 		acpArgs:          reasonixACPLaunchArgs(),
 		tmpdirPrefix:     "multica-reasonix-discovery-",
 		isolatedStateEnv: "REASONIX_STATE_HOME",
+		annotate:         annotateACPThinkingForSessionModel,
 	})
 }
 

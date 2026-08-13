@@ -217,9 +217,10 @@ Daemon behavior is configured via flags or environment variables:
 | GC scan interval | — | `MULTICA_GC_INTERVAL` | `2h` |
 | GC TTL (done/cancelled issues) | — | `MULTICA_GC_TTL` | `24h` |
 | GC orphan TTL (no `.gc_meta.json`) | — | `MULTICA_GC_ORPHAN_TTL` | `72h` |
-| GC artifact TTL (open issues) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
+| GC artifact TTL (completed tasks) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
 | GC artifact patterns | — | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
 | GC repo cache TTL (`.repos`) | — | `MULTICA_GC_REPO_TTL` | `720h` (30d; set `0` to disable) |
+| GC repo maintenance | — | `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` (set `false`/`0` to disable heavy Git maintenance only) |
 | GC Hermes memory TTL (per-agent `memories/`) | — | `MULTICA_GC_HERMES_MEMORY_TTL` | `2160h` (90d; set `0` to disable) |
 
 #### Workspace garbage collection
@@ -229,8 +230,11 @@ The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and reclaims disk space 
 - **Full task cleanup** — when an issue's status is `done` or `cancelled` and has been idle for `MULTICA_GC_TTL`, the entire task directory is removed.
 - **Orphan cleanup** — task directories with no `.gc_meta.json` (e.g. left over from a daemon crash) are removed once they exceed `MULTICA_GC_ORPHAN_TTL`.
 - **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims the exact managed path `codex-home/.sandbox-bin`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it.
+- **Managed-cache reclamation** — the exact managed path above is reclaimed for *every* task kind once the task has been completed for `MULTICA_GC_ARTIFACT_TTL`, not just for issue tasks whose issue is still open. It applies even while the parent record says the directory itself must stay — an active chat session, a still-running autopilot run — and even when the parent record could not be reached this cycle, because the contents are regenerable and the next run re-provisions them on demand. A task currently running on the directory is never touched. Set `MULTICA_GC_ARTIFACT_TTL=0` to disable this along with the rest of artifact cleanup.
 
 - **Repo cache eviction** — the bare git clones under `.repos/` are shared object stores: each task workdir is a `git worktree` off one of them rather than its own clone, so a task's `.git` is only a pointer file. They are evicted only when all of the following hold: the repo is no longer attached to any workspace this daemon watches, it has no worktrees left, and no task has created a worktree from it for `MULTICA_GC_REPO_TTL`. A cache created before this stamp existed is not treated as ancient — its clock starts at the first GC cycle that sees it, so upgrading does not wipe every cache. Evicting is safe by construction: the next task that needs the repo re-clones it on demand, so a wrong eviction costs a clone, not a failure.
+
+  Short worktree cleanup and eligible cache eviction continue on every GC cycle, including while agents are active. Heavy repo maintenance (`reflog expire` and `git gc`) starts only while the daemon is otherwise idle. A checkout or newly claimed task cancels it and takes priority; interrupted work remains pending for a later idle GC cycle. Operators can disable only these heavy commands with `MULTICA_GC_REPO_MAINTENANCE_ENABLED=false` without disabling worktree cleanup or cache eviction.
 
 - **Hermes memory store reclamation** — a Hermes agent's long-term memory (`memories/`) lives at `<profile dir>/hermes-state/<agent-id>/<hermes-profile>/`, outside any task directory, so it survives across tasks and issues (see [Hermes agent memory](#hermes-agent-memory)). A store untouched for `MULTICA_GC_HERMES_MEMORY_TTL` is removed, giving a deleted agent's memory an eventual-reclamation guarantee. The default is deliberately long: these are a handful of markdown files, and reclaiming one is user-visible amnesia rather than a cache miss. A store a running task holds is never reclaimed.
 
@@ -263,7 +267,6 @@ Agent-specific overrides:
 | `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |
-| `MULTICA_HERMES_TASK_MEMORY` | Revert Hermes memory to a fresh task-local `memories/` per task (see [Hermes agent memory](#hermes-agent-memory)) |
 | `MULTICA_PI_PATH` | Custom path to the `pi` binary |
 | `MULTICA_PI_MODEL` | Override the Pi model used |
 | `MULTICA_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
@@ -326,7 +329,6 @@ Consequences worth knowing:
 - **Session history is not covered.** `state.db` and its WAL sidecars stay task-local: sharing a live SQLite database across one agent's concurrent tasks needs lock and consistency handling (plus Windows byte-range locks on `-shm`) that plain memory files do not. The agent remembers accumulated notes, not previous transcripts.
 - **Concurrent tasks of one agent are last-writer-wins.** Hermes rewrites its memory files whole, so two tasks writing memory at the same time can overwrite each other.
 - **Every Hermes agent gets the overlay in practice**, so every one of them gets a persistent memory store. The daemon builds the overlay only when a task carries skills, but the server appends Multica's built-in skills to every agent's skill set (`LoadAgentSkillBundles`), so that list is never empty — leaving an agent's own skill list empty does not opt out of the overlay, and is not a way to keep using the host's `~/.hermes/memories`.
-- `MULTICA_HERMES_TASK_MEMORY=1` on the daemon reverts to the previous behaviour, a fresh task-local `memories/` per task.
 
 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS` are parsed with POSIX shellword quoting, so values such as `--model "gpt-5.1 codex" --sandbox read-only` are split like a shell command line. Agent arguments are applied in this order: hardcoded Multica defaults, daemon-wide env defaults, then per-agent `custom_args` from the task.
 

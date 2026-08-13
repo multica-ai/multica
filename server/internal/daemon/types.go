@@ -57,11 +57,12 @@ type ConnectedAppData = runtimeapps.ConnectedApp
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
-	ID          string `json:"id"`
-	AgentID     string `json:"agent_id"`
-	RuntimeID   string `json:"runtime_id"`
-	IssueID     string `json:"issue_id"`
-	WorkspaceID string `json:"workspace_id"`
+	ID                      string                       `json:"id"`
+	AgentID                 string                       `json:"agent_id"`
+	RuntimeID               string                       `json:"runtime_id"`
+	IssueID                 string                       `json:"issue_id"`
+	WorkspaceID             string                       `json:"workspace_id"`
+	PluginExecutionManifest *PluginExecutionManifestData `json:"plugin_execution_manifest,omitempty"`
 	// WorkspaceContext mirrors workspace.context (the per-workspace system
 	// prompt set in Settings → General). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`
@@ -91,6 +92,7 @@ type Task struct {
 	NewCommentsSince              string                 `json:"new_comments_since,omitempty"`               // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	ChatSessionID                 string                 `json:"chat_session_id,omitempty"`                  // non-empty for chat tasks
 	ChatChannelType               string                 `json:"chat_channel_type,omitempty"`                // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Drives the channel-awareness block in the prompt
+	ChatChannelDeliversFiles      bool                   `json:"chat_channel_delivers_files,omitempty"`      // server capability: this deployment carries a file the agent produces the last hop into this conversation. Absent on a server predating it, which reads as false — the run is told to describe its file in words, and the worst case is a delivery that could have happened did not. Must never be re-derived from chat_channel_type: whether the hop exists depends on the SERVER's storage and adapter wiring, which no daemon can see (MUL-4899)
 	ChatType                      string                 `json:"chat_type,omitempty"`                        // "group" when the channel conversation is a shared room, "p2p" for a 1:1 with the bot. Empty for a web chat or an old server; the per-turn prompt then reports unknown rather than guessing 1:1
 	ChatInThread                  bool                   `json:"chat_in_thread,omitempty"`                   // true when the latest @mention was a thread reply; selects which read command the prompt tells the agent to start with
 	ChatMessage                   string                 `json:"chat_message,omitempty"`                     // user message content for chat tasks
@@ -142,6 +144,20 @@ type Task struct {
 	// Empty or non-task-scoped values are fatal for writable agent tasks; the
 	// daemon must not fall back to its own token. See MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+}
+
+// PluginExecutionManifestData mirrors the immutable enqueue-time plugin pin
+// returned by the server. The daemon materializes its skill refs through the
+// normal content-addressed cache; this record is retained on the task for run
+// attribution and diagnostics.
+type PluginExecutionManifestData struct {
+	ID                   string          `json:"id"`
+	SnapshotID           string          `json:"snapshot_id,omitempty"`
+	SnapshotRevision     int64           `json:"snapshot_revision"`
+	SnapshotDigest       string          `json:"snapshot_digest,omitempty"`
+	ComposerVersion      string          `json:"composer_version"`
+	SchemaVersion        int32           `json:"schema_version"`
+	OrderedContributions json.RawMessage `json:"ordered_contributions"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

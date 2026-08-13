@@ -369,8 +369,8 @@ func hermesProfileDir(root, name string) (home string, mustExist bool, err error
 // silently seed from an empty dir and drop the user's auth/config. env is the
 // sanitized effective env used to expand ${VAR} in external_dirs so it matches
 // what the Hermes child sees. memoryStore is the agent's persistent memory store
-// (execenv.HermesMemoryStorePath) that memories/ is linked to; empty keeps the
-// pre-MUL-5932 task-local dir, which is what the rollback switch produces.
+// (execenv.HermesMemoryStorePath) that memories/ is linked to; empty keeps
+// memories/ task-local for this task.
 func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, workspaceSkills []SkillContextForEnv, env map[string]string, memoryStore string, logger *slog.Logger) error {
 	sharedHome := strings.TrimSpace(sourceHome)
 	if sharedHome == "" {
@@ -395,7 +395,7 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	}
 	// Memory: link memories/ at the agent's persistent store so it survives the
 	// task, or fall back to a fresh task-local dir when there is no store (no
-	// agent to key on, or the rollback switch is engaged). See hermes_memory.go.
+	// agent to key on, or an unresolvable profile dir). See hermes_memory.go.
 	if memoryStore != "" {
 		if err := mountHermesMemories(hermesHome, memoryStore, logger); err != nil {
 			return fmt.Errorf("mount agent memories: %w", err)
