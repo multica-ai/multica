@@ -101,10 +101,6 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     defaultShortcut: createShortcutChord("O", { primary: true, shift: true }),
     allowInEditable: true,
   },
-  // Plain E is the archive key mail clients have trained users on, and the
-  // inbox is the only screen that binds it. Not `allowInEditable`: the open
-  // notification hosts a comment composer, and typing an "e" there must never
-  // file the notification away.
   {
     id: "archiveInboxItem",
     category: "general",

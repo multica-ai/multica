@@ -96,9 +96,6 @@ describe("keyboard shortcut definitions", () => {
   it("keeps the inbox archive key out of editable controls", () => {
     const action = SHORTCUT_ACTION_BY_ID.archiveInboxItem;
     expect(action.defaultShortcut).toEqual(createShortcutChord("E"));
-    // A bare letter is only safe because the inbox handler skips editable
-    // targets. Flipping this flag would archive the open notification while
-    // the user types an "e" into its comment composer.
     expect(action.allowInEditable).toBe(false);
   });
 

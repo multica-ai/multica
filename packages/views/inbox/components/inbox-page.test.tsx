@@ -34,8 +34,6 @@ vi.mock("@multica/core/paths", () => ({
   }),
 }));
 
-// Mutable so a test can put a dialog over the page: the archive shortcut has
-// to stand down while one owns the keyboard.
 const modalState: { modal: string | null; open: ReturnType<typeof vi.fn> } = {
   modal: null,
   open: vi.fn(),
@@ -419,8 +417,6 @@ describe("InboxPage", () => {
   });
 
   describe("archive shortcut", () => {
-    // Fires on `document`, so an editable target has to be a real focused
-    // element in the page rather than a made-up event target.
     function pressArchiveKey(target: Element | Document = document) {
       fireEvent.keyDown(target, { key: "e" });
     }
@@ -444,8 +440,6 @@ describe("InboxPage", () => {
     });
 
     it("restores the open notification while reading the archive", () => {
-      // The shortcut mirrors the row action of the view on screen, the same
-      // way the detail's own button does.
       reset();
       layout.width = DESKTOP;
       searchParams = new URLSearchParams("view=archived");
@@ -462,8 +456,6 @@ describe("InboxPage", () => {
     });
 
     it("leaves the selection on the next notification", () => {
-      // Same move the row action makes: the list is newest-first, so archiving
-      // hands the reader the next (older) item instead of an empty pane.
       reset();
       layout.width = DESKTOP;
       listData.active = [
@@ -480,8 +472,6 @@ describe("InboxPage", () => {
     });
 
     it("does not fire while typing in an editable control", () => {
-      // The open notification hosts a comment composer, and every "e" typed
-      // there would otherwise file the notification away mid-sentence.
       reset();
       layout.width = DESKTOP;
       listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
@@ -499,8 +489,6 @@ describe("InboxPage", () => {
     });
 
     it("stands down while a dialog is open", () => {
-      // A dialog over the page owns the keyboard; archiving underneath it
-      // would be an invisible edit to a list the user cannot see.
       reset();
       layout.width = DESKTOP;
       listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
@@ -514,7 +502,6 @@ describe("InboxPage", () => {
     });
 
     it("ignores an auto-repeated key", () => {
-      // Holding the key down archives one notification, not a run of them.
       reset();
       layout.width = DESKTOP;
       listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
