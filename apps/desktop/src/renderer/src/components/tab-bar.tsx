@@ -34,6 +34,7 @@ import {
   ContextMenuTrigger,
 } from "@multica/ui/components/ui/context-menu";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import { SIDEBAR_WRAPPER_FILL_CLASS } from "@multica/ui/components/ui/sidebar";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabStore, useActiveGroup, type Tab } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
@@ -46,16 +47,23 @@ import { parseIssueWindowPath } from "../../../shared/issue-window";
 const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
 
-// The active tab flares into the content surface through concave corners.
-// An opaque backing (the flare's background-color) prevents its translucent
-// arc from stacking with the content card's top ring. The backing must equal
-// the strip's backdrop, which is the sidebar wrapper's fill: bg-sidebar while
-// an inset sidebar is mounted, bg-app-shell otherwise (compact widths render
-// the sidebar as a sheet). TAB_FLARE_BACKDROP mirrors the wrapper's own
-// has-data-[variant=inset]:bg-sidebar condition so the two cannot drift.
+// Chrome-style merged tab: the active tab shares the content surface's fill and
+// flares into it through concave bottom corners. Each flare is a small square
+// whose radial gradient carves a quarter-circle notch (transparent, so the
+// flare's own background-color shows through and the notch reads as the strip),
+// strokes a 1px arc that continues the tab's side border into the content card's
+// top ring, and fills the rest with the surface colour. The 0.4px spread on
+// either side of the --surface-border pair anti-aliases that arc.
+//
+// That background-color is load-bearing, not decoration: the flare's bottom row
+// overlaps the content card's top ring, and in dark mode --surface-border is
+// translucent (oklch(1 0 0 / 10%)), so without an opaque layer beneath it the
+// arc would composite over the ring instead of replacing it and the two keylines
+// would stack into a markedly lighter line right where the straight ring meets
+// the curve. It therefore has to be the strip's real backdrop — the sidebar
+// wrapper's fill, which is conditional and not this file's to re-derive.
+// SIDEBAR_WRAPPER_FILL_CLASS reads it off the wrapper itself.
 const TAB_FLARE_RADIUS = 10;
-const TAB_FLARE_BACKDROP =
-  "bg-app-shell group-has-data-[variant=inset]/sidebar-wrapper:bg-sidebar";
 const tabFlareGradient = (side: "left" | "right") => {
   const r = TAB_FLARE_RADIUS;
   return `radial-gradient(circle at top ${side}, transparent ${r - 1.2}px, var(--surface-border) ${r - 0.8}px, var(--surface-border) ${r - 0.2}px, var(--page-canvas) ${r + 0.2}px)`;
@@ -346,11 +354,11 @@ function SortableTabItem({
             <span className="absolute inset-x-0 top-0 bottom-2.5 rounded-t-lg border border-b-0 border-surface-border bg-page-canvas bg-clip-padding" />
             <span className="absolute inset-x-0 bottom-0 h-2.5 bg-page-canvas" />
             <span
-              className={cn("absolute bottom-0 size-2.5", TAB_FLARE_BACKDROP)}
+              className={cn("absolute bottom-0 size-2.5", SIDEBAR_WRAPPER_FILL_CLASS)}
               style={{ left: -TAB_FLARE_RADIUS + 1, backgroundImage: tabFlareGradient("left") }}
             />
             <span
-              className={cn("absolute bottom-0 size-2.5", TAB_FLARE_BACKDROP)}
+              className={cn("absolute bottom-0 size-2.5", SIDEBAR_WRAPPER_FILL_CLASS)}
               style={{ right: -TAB_FLARE_RADIUS + 1, backgroundImage: tabFlareGradient("right") }}
             />
           </span>

@@ -238,7 +238,12 @@ export function DesktopShell() {
       <WorkspaceSlugProvider slug={slug}>
         <DesktopInboxBridge />
         <div className="flex h-screen bg-app-shell">
-          <SidebarProvider className="flex-1 bg-app-shell">
+          {/* bg-app-shell is the wrapper's non-inset fill, so it also owns the
+              non-inset half of --sidebar-wrapper-fill. sidebar.tsx supplies the
+              inset half of both. Anything that has to paint an opaque layer
+              over this wrapper (the tab flares) reads the variable rather than
+              re-deriving which of the two is in play. */}
+          <SidebarProvider className="flex-1 bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]">
             {slug && <GlobalShortcuts />}
             {slug && <WindowToolbar />}
             {slug && <AppSidebar topSlot={<SidebarTopSpacer />} searchSlot={<SearchTrigger />} />}

@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import { SIDEBAR_WRAPPER_FILL_CLASS } from "@multica/ui/components/ui/sidebar";
 
 type MockTab = {
   id: string;
@@ -261,11 +262,12 @@ describe("TabBar merged-tab chrome", () => {
     );
   });
 
-  // The opaque backing keeps the flare and card keylines from stacking, and
-  // must equal the strip's backdrop on both sides of the compact breakpoint:
-  // the wrapper paints bg-sidebar only while an inset sidebar is mounted, so
-  // the flare mirrors that condition instead of pinning one token.
-  it("paints each flare on an opaque layer matching the strip backdrop", () => {
+  // The opaque backing keeps the flare and card keylines from stacking, and has
+  // to equal the strip's backdrop at every width. It reads that colour off the
+  // sidebar wrapper's published fill rather than naming a token, so no token may
+  // appear here or in the gradient — a pinned one is exactly the regression this
+  // covers. The wrapper's end of the contract is covered in packages/views.
+  it("paints each flare on the sidebar wrapper's own fill", () => {
     const { getByLabelText } = render(<TabBar />);
     const flares = getByLabelText("Issues")
       .closest("[data-tab-frame]")
@@ -273,14 +275,12 @@ describe("TabBar merged-tab chrome", () => {
 
     expect(flares).toHaveLength(2);
     for (const flare of flares ?? []) {
-      expect(flare).toHaveClass(
-        "bg-app-shell",
-        "group-has-data-[variant=inset]/sidebar-wrapper:bg-sidebar",
-      );
-      // The gradient itself carries no backing layer; the classes above own it.
+      expect(flare).toHaveClass(SIDEBAR_WRAPPER_FILL_CLASS);
       expect(flare.getAttribute("style")).toContain("var(--page-canvas) 10.2px)");
       expect(flare.getAttribute("style")).not.toContain("var(--sidebar)");
       expect(flare.getAttribute("style")).not.toContain("var(--app-shell)");
+      expect(flare.className).not.toContain("bg-app-shell");
+      expect(flare.className).not.toContain("bg-sidebar");
     }
   });
 
