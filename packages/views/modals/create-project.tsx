@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, Maximize2, Minimize2, MoreHorizontal, Search, X as XIcon, UserMinus } from "lucide-react";
+import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, GitBranch, Maximize2, Minimize2, MoreHorizontal, Pencil, Search, X as XIcon, UserMinus } from "lucide-react";
 
 /**
  * GitHub mark — lucide-react v1 dropped brand icons, so we inline the
@@ -67,6 +67,42 @@ import {
   validateLocalDirectory,
 } from "../platform/local-directory";
 import { useLocalDaemonStatus } from "../platform/use-local-daemon-status";
+import {
+  MIN_LOCAL_WORKTREE_CLI_VERSION,
+  daemonSupportsLocalWorktree,
+  readRuntimeCliVersion,
+  runtimeListOptions,
+} from "@multica/core/runtimes";
+import type { LocalDirectoryExecutionMode } from "@multica/core/types";
+import { LocalDirectoryModeOptions } from "../projects/components/local-directory-mode-dialog";
+
+/**
+ * Builds the resource_ref for a local directory attached during project
+ * creation.
+ *
+ * Exported so the execution-mode contract can be asserted directly: this is the
+ * payload the server stores and the daemon later reads to decide whether tasks
+ * edit the user's folder or hand back a branch, and getting `execution_mode`
+ * wrong here is invisible until a task runs.
+ */
+export function buildLocalDirectoryResourceRef({
+  localPath,
+  daemonId,
+  label,
+  mode,
+}: {
+  localPath: string;
+  daemonId: string;
+  label: string | null;
+  mode: LocalDirectoryExecutionMode;
+}): Record<string, unknown> {
+  return {
+    local_path: localPath,
+    daemon_id: daemonId,
+    ...(label ? { label } : {}),
+    execution_mode: mode,
+  };
+}
 
 function RepoUrlText({
   url,
@@ -93,6 +129,9 @@ function RepoUrlText({
 
 export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const { t } = useT("modals");
+  // The execution-mode copy lives in the projects namespace alongside the
+  // resource panel's, so both entry points describe the choice identically.
+  const { t: tProjects } = useT("projects");
   const router = useNavigation();
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name;
@@ -150,6 +189,62 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [selectedLocalLabel, setSelectedLocalLabel] = useState<string | null>(null);
   const [localPickError, setLocalPickError] = useState<string | null>(null);
   const [localPicking, setLocalPicking] = useState(false);
+  // Execution mode is chosen here rather than after creation: it decides
+  // whether tasks edit this folder or hand back a branch, which is part of
+  // what the user is setting up, not a setting to discover later.
+  //
+  // null means "the user has not picked one" — distinct from an explicit
+  // in_place. Only then does the folder-derived preselection apply, so an
+  // explicit choice is never overridden by a later folder change.
+  const [localMode, setLocalMode] = useState<LocalDirectoryExecutionMode | null>(null);
+  // undefined = could not check (older desktop build); the daemon re-checks
+  // authoritatively, so unknown stays permissive.
+  const [localIsGitRepo, setLocalIsGitRepo] = useState<boolean | undefined>(undefined);
+  const [localModeOpen, setLocalModeOpen] = useState(false);
+
+  // Worktree mode needs a daemon new enough to implement it; the server refuses
+  // to save the resource otherwise. In this flow the resource is attached in the
+  // same call that creates the project, so an un-caught rejection would fail the
+  // whole creation — check up front and disable the option instead.
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  const localDaemonCliVersion = daemonStatus.daemonId
+    ? (runtimes
+        .filter((rt) => rt.daemon_id === daemonStatus.daemonId)
+        .map((rt) => readRuntimeCliVersion(rt.metadata))
+        .find((v) => v && v.length > 0) ?? "")
+    : "";
+  // Capability, not version: a dev-built daemon reports a git-describe string
+  // that the version floor exempts, so the version check passed for a binary
+  // with no worktree implementation (MUL-5707).
+  const localDaemonSupportsWorktree = daemonSupportsLocalWorktree(
+    runtimes,
+    daemonStatus.daemonId,
+  );
+  const worktreeUnavailableReason =
+    localIsGitRepo === false
+      ? ("not_git" as const)
+      : !localDaemonSupportsWorktree
+        ? ("daemon_outdated" as const)
+        : undefined;
+  // Preselection, not a default behavior change: when the folder is a git repo
+  // and the runtime can actually run worktree mode, parallel is the better fit,
+  // so it starts selected — visibly, in a control the user can flip in one
+  // click before creating anything. A plain folder starts on direct.
+  //
+  // `localIsGitRepo === undefined` (an older desktop build that doesn't report
+  // it) preselects direct. The asymmetry is deliberate: permissive about what
+  // the user MAY choose, conservative about what we choose FOR them.
+  const preselectedLocalMode: LocalDirectoryExecutionMode =
+    localIsGitRepo === true && worktreeUnavailableReason === undefined
+      ? "worktree"
+      : "in_place";
+  // Never submit a mode the picker would have blocked — the folder can change
+  // after a mode was chosen (pick a git repo, choose worktree, then pick a
+  // plain folder), and the stale choice would fail at task time.
+  const effectiveLocalMode: LocalDirectoryExecutionMode =
+    worktreeUnavailableReason !== undefined
+      ? "in_place"
+      : (localMode ?? preselectedLocalMode);
 
   const handleSourceModeChange = (mode: "repos" | "local") => {
     setSourceMode(mode);
@@ -179,6 +274,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       }
       setSelectedLocalPath(picked.path);
       setSelectedLocalLabel(picked.basename ?? null);
+      setLocalIsGitRepo(validation.is_git_repo);
     } finally {
       setLocalPicking(false);
     }
@@ -188,6 +284,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setSelectedLocalPath(null);
     setSelectedLocalLabel(null);
     setLocalPickError(null);
+    setLocalIsGitRepo(undefined);
+    setLocalMode(null);
   };
 
   // Sync field changes to draft store
@@ -237,11 +335,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       resources = [
         {
           resource_type: "local_directory" as const,
-          resource_ref: {
-            local_path: selectedLocalPath,
-            daemon_id: daemonStatus.daemonId,
-            ...(selectedLocalLabel ? { label: selectedLocalLabel } : {}),
-          },
+          resource_ref: buildLocalDirectoryResourceRef({
+            localPath: selectedLocalPath,
+            daemonId: daemonStatus.daemonId,
+            label: selectedLocalLabel,
+            mode: effectiveLocalMode,
+          }),
         },
       ];
     }
@@ -763,16 +862,61 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           <XIcon className="size-3" />
                         </button>
                       </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 w-full text-caption"
-                        onClick={handlePickLocalDirectory}
-                        disabled={localPicking || !daemonStatus.running}
-                      >
-                        {t(($) => $.create_project.local_change)}
-                      </Button>
+                      <div className="flex items-center gap-1.5">
+                        <Popover open={localModeOpen} onOpenChange={setLocalModeOpen}>
+                          <PopoverTrigger
+                            render={
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                // Sized to its (short) label so the wider
+                                // "Change directory…" beside it fits whole.
+                                className="h-6 shrink-0 text-caption"
+                              >
+                                {effectiveLocalMode === "worktree" ? (
+                                  <GitBranch className="size-3 shrink-0" />
+                                ) : (
+                                  <Pencil className="size-3 shrink-0" />
+                                )}
+                                {/* Short labels: the panel is ~380px wide and
+                                    two buttons share it, so the full option
+                                    titles truncate to uselessness. The picker
+                                    below carries the full wording. */}
+                                <span className="truncate">
+                                  {effectiveLocalMode === "worktree"
+                                    ? tProjects(($) => $.resources.mode_badge_worktree)
+                                    : tProjects(($) => $.resources.mode_badge_in_place)}
+                                </span>
+                              </Button>
+                            }
+                          />
+                          <PopoverContent align="start" className="w-80 p-2">
+                            <LocalDirectoryModeOptions
+                              value={effectiveLocalMode}
+                              onChange={(mode) => {
+                                setLocalMode(mode);
+                                setLocalModeOpen(false);
+                              }}
+                              unavailableReason={worktreeUnavailableReason}
+                              currentVersion={localDaemonCliVersion}
+                              minVersion={MIN_LOCAL_WORKTREE_CLI_VERSION}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 flex-1 min-w-0 text-caption"
+                          onClick={handlePickLocalDirectory}
+                          disabled={localPicking || !daemonStatus.running}
+                        >
+                          <span className="truncate">
+                            {t(($) => $.create_project.local_change)}
+                          </span>
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <Button

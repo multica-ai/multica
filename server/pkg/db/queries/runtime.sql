@@ -441,11 +441,13 @@ UPDATE agent_runtime
 SET legacy_daemon_id = COALESCE(legacy_daemon_id, $2)
 WHERE id = $1;
 
--- name: DeleteStaleOfflineRuntimes :many
--- Deletes runtimes that have been offline for longer than the TTL and have
--- no agents bound (active or archived). The FK constraint on agent.runtime_id
--- is ON DELETE RESTRICT, so we must exclude all agent references.
-DELETE FROM agent_runtime
+-- name: ListStaleOfflineRuntimeGCCandidates :many
+-- Bounded gather for runtime GC. Non-terminal task owners are deliberately
+-- excluded here so one permanently-deferred task cannot monopolise the front
+-- of every batch and starve otherwise-drainable runtimes. The per-runtime
+-- transaction re-checks every predicate after taking FOR UPDATE, so this is an
+-- efficiency filter rather than the correctness boundary.
+SELECT id FROM agent_runtime
 WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
   AND NOT EXISTS (
@@ -453,4 +455,57 @@ WHERE status = 'offline'
     FROM agent
     WHERE agent.runtime_id = agent_runtime.id
   )
-RETURNING id, workspace_id;
+  AND NOT EXISTS (
+    SELECT 1
+    FROM agent_task_queue
+    WHERE agent_task_queue.runtime_id = agent_runtime.id
+      AND agent_task_queue.completed_at IS NULL
+  )
+ORDER BY last_seen_at ASC, id ASC
+LIMIT @max_per_tick::int;
+
+-- name: IsAgentRuntimeEligibleForGC :one
+-- Re-checks the mutable GC predicates after the caller has locked the runtime
+-- row FOR UPDATE. Agent inserts/updates and task ownership writes take FOR KEY
+-- SHARE on that row, so no new dependency can commit between this check and
+-- DeleteAgentRuntime in the same transaction.
+SELECT EXISTS (
+  SELECT 1 FROM agent_runtime
+  WHERE agent_runtime.id = @id
+    AND status = 'offline'
+    AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM agent
+      WHERE agent.runtime_id = agent_runtime.id
+    )
+) AS eligible;
+
+-- name: CountTasksByRuntime :one
+-- Final fail-closed assertion after UnbindTasksFromRuntime. A non-zero result
+-- aborts the transaction instead of relying on the legacy ON DELETE CASCADE.
+SELECT count(*) FROM agent_task_queue WHERE runtime_id = $1;
+
+-- name: CountStaleOfflineRuntimesBlockedByTasks :one
+-- Bounded observability sample of runtimes that are otherwise GC-eligible but
+-- retain a non-terminal task. In particular, deferred tasks have no generic
+-- TTL, so silently filtering them from the candidate batch would hide a
+-- permanently-starved runtime. The count saturates at max_rows so this
+-- recurring safety signal cannot become an unbounded backlog scan.
+SELECT count(*) FROM (
+  SELECT 1 FROM agent_runtime
+  WHERE status = 'offline'
+    AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM agent
+      WHERE agent.runtime_id = agent_runtime.id
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM agent_task_queue
+      WHERE agent_task_queue.runtime_id = agent_runtime.id
+        AND agent_task_queue.completed_at IS NULL
+    )
+  LIMIT @max_rows::int
+) AS blocked_runtimes;

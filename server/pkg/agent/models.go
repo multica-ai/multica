@@ -1264,6 +1264,12 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 		clientName:   "multica-model-discovery",
 		extraEnv:     []string{"HERMES_YOLO_MODE=1"},
 		tmpdirPrefix: "multica-hermes-discovery-",
+		// The same handshake carries an effort selector on jcode and carries
+		// none on Hermes Agent, so annotate is what tells the two apart —
+		// Hermes Agent models come back with a nil Thinking and show no
+		// picker. Only the session's current model is annotated; see
+		// annotateACPThinkingForSessionModel.
+		annotate: annotateACPThinkingForSessionModel,
 	})
 }
 

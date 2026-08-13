@@ -47,6 +47,9 @@ import {
   SquadSchema,
   TimelineEntriesSchema,
   UserSchema,
+  EMPTY_PLUGIN_CATALOG,
+  PluginCatalogResponseSchema,
+  PluginInstallationSchema,
 } from "./schemas";
 import { IssueViewSchema, IssueViewListSchema } from "./schemas";
 import { parseWithFallback } from "./schema";
@@ -1361,5 +1364,32 @@ describe("WeCom installation schemas", () => {
       { endpoint: "POST /api/wecom/binding/redeem" },
     );
     expect(redeem).toEqual(EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE);
+  });
+});
+
+describe("Plugin catalog schemas", () => {
+  it("defaults optional release fields without granting trust or compatibility", () => {
+    const parsed = PluginCatalogResponseSchema.parse({
+      releases: [{ plugin_key: "ai.multica.software-delivery", version: "1.0.0" }],
+    });
+    expect(parsed.supported).toBe(true);
+    expect(parsed.releases[0]?.compatible).toBe(false);
+    expect(parsed.releases[0]?.signature_verified).toBe(false);
+    expect(parsed.releases[0]?.contributions).toEqual([]);
+  });
+
+  it("defaults missing lifecycle and binding fields to a disabled error state", () => {
+    const parsed = PluginInstallationSchema.parse({ id: "installation-1" });
+    expect(parsed.enabled).toBe(false);
+    expect(parsed.lifecycle_status).toBe("error");
+    expect(parsed.bindings).toEqual([]);
+  });
+
+  it("degrades a malformed catalog response to unsupported and empty", () => {
+    const parsed = parseWithFallback("not-json", PluginCatalogResponseSchema, EMPTY_PLUGIN_CATALOG, {
+      endpoint: "GET /api/workspaces/{id}/plugins/catalog",
+    });
+    expect(parsed).toEqual(EMPTY_PLUGIN_CATALOG);
+    expect(parsed.supported).toBe(false);
   });
 });

@@ -12,6 +12,12 @@ export type OriginInfo = {
   runtime_id?: string;
   source_path?: string;
   source_url?: string;
+  owner?: string;
+  repo?: string;
+  ref?: string;
+  path?: string;
+  skill?: string;
+  slug?: string;
 };
 
 export function readOrigin(skill: SkillSummary): OriginInfo {
@@ -23,6 +29,20 @@ export function readOrigin(skill: SkillSummary): OriginInfo {
   if (raw?.type === "skills_sh") return raw;
   if (raw?.type === "github") return raw;
   return { type: "manual" };
+}
+
+/**
+ * Whether the skill can be re-downloaded from where it was imported. Only
+ * hosted sources qualify: runtime-local copies re-import through the daemon,
+ * and manual / archive-uploaded skills have no upstream at all. The server
+ * enforces the same rule on `POST /api/skills/:id/refresh`.
+ */
+export function isRefreshableOrigin(origin: OriginInfo): boolean {
+  return (
+    (origin.type === "github" || origin.type === "skills_sh" || origin.type === "clawhub") &&
+    typeof origin.source_url === "string" &&
+    origin.source_url.length > 0
+  );
 }
 
 /**

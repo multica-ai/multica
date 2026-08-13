@@ -36,6 +36,11 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 		for _, want := range []string{
 			protocol.DaemonCapabilitySkillBundlesV1,
 			protocol.DaemonCapabilityCoalescedCommentsV1,
+			// The worktree gate is decided entirely from this header: if the
+			// daemon stops advertising it, every worktree task on this machine
+			// is cancelled with an upgrade prompt (MUL-5707). Pin it here so
+			// dropping it from the list can never be a silent change.
+			protocol.DaemonCapabilityLocalWorktreeV1,
 		} {
 			if !capabilities[want] {
 				t.Errorf("X-Client-Capabilities missing %q: %v", want, capabilities)
@@ -290,7 +295,7 @@ func TestFailTask_RetriesOnTransient5xxThenSucceeds(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
-	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "timeout", true, ""); err != nil {
+	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "", "timeout", true, ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 	if got := calls.Load(); got != 3 {
@@ -427,7 +432,7 @@ func TestTerminalReportsCarryRetiredSessionID(t *testing.T) {
 			name:     "fail",
 			endpoint: "/api/daemon/tasks/task-1/fail",
 			call: func(c *Client) error {
-				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "api_invalid_request", false, "POISONED-S")
+				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "api_invalid_request", false, "POISONED-S")
 			},
 		},
 	} {

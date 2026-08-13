@@ -120,7 +120,7 @@ func TestFailTaskPublishesDeliverableChannelFailure(t *testing.T) {
 	var got events.Event
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) { got = e })
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: bus}
-	if _, err := svc.FailTask(ctx, util.MustParseUUID(taskID), "provider failed", "", "", "agent_error", false, ""); err != nil {
+	if _, err := svc.FailTask(ctx, util.MustParseUUID(taskID), "provider failed", "", "", "", "agent_error", false, ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 

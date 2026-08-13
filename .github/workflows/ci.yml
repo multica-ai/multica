@@ -359,12 +359,15 @@ jobs:
         # in the log instead of passing as "ok".
         run: go test ./pkg/agent -v -run '^TestOpencodeExecuteOversizedPromptStartsOnWindows$' -count=1 -timeout=5m
 
-      - name: Test bounded Codex cleanup with inherited stdout descendant
+      - name: Test Windows agent process-tree ownership
         working-directory: server
-        # Windows cannot prove whole-tree termination without a Job Object,
-        # but a descendant holding inherited stdout must never keep Result
-        # blocked forever. -v makes RUN/PASS evidence explicit in CI logs.
-        run: go test ./pkg/agent -v -run '^TestCodexWindowsInheritedStdoutDescendantCleanupIsBounded$' -count=1 -timeout=5m
+        # A Job Object is the only way to prove whole-tree termination on
+        # Windows, and only a real Windows runner can exercise it: that a
+        # grandchild dies with the tree that owns it, that an unowned process
+        # still reports cleanup as unconfirmed, and that a descendant holding
+        # inherited stdout neither keeps Result blocked nor survives cleanup.
+        # -v makes RUN/PASS evidence explicit in CI logs.
+        run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree)$' -count=1 -timeout=5m
 
       - name: Test Windows OpenClaw npm shim interpreter resolution
         working-directory: server
@@ -426,6 +429,16 @@ jobs:
         run: |
           go test ./internal/daemon/execenv -v -run '^(TestSeedUserCodexSkills|TestHydrateCodexSkills)' -count=1 -timeout=5m
           go test ./internal/daemon -v -run '^(TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction|TestTaskSize_DoesNotCountDirectoryJunction)$' -count=1 -timeout=5m
+
+      - name: Test Windows agent executable junction resolution
+        working-directory: server
+        # The standalone Codex installer exposes bin as a directory junction.
+        # filepath.EvalSymlinks cannot traverse that reparse-point shape, so
+        # only a real Windows filesystem proves both PATH discovery and an
+        # explicitly configured path reach the release executable. The same job
+        # covers the npm shape, where the entry point is a `.cmd` shim that only
+        # the command interpreter can run.
+        run: go test ./internal/daemon -v -run '^(TestCanonicalExecutablePath|TestTrimExtendedLengthPrefix|TestResolveAgentExecutablePathKeeps|TestResolveAgentEntry(FollowsRetargetedInstallerJunction|CanonicalizesRediscoveredJunction|ForLaunchKeepsCmdShimLaunchable|ForLaunchRejectsUnverifiedInitialJunctionTarget|ForLaunchRejectsRediscoveredJunctionWhenFinalPathResolutionFails|DoesNotSharePreRetargetSingleflightResult|ForLaunchFailsWhenJunctionKeepsRetargeting)|TestHandleTaskReportsWindowsCodexProcessStartFailure)' -count=1 -timeout=5m
 
       - name: Build Windows CLI helper entrypoint
         working-directory: server

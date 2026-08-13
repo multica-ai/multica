@@ -315,6 +315,65 @@ describe("ApiClient schema fallback", () => {
       expect(res.installations).toHaveLength(1);
       expect(res.configured).toBe(true);
       expect(res.install_supported).toBeUndefined();
+      expect(res.group_routing_supported).toBeUndefined();
+    });
+
+    it("parses the new-server group-routing capability", async () => {
+      stubFetchJson({
+        installations: [{ id: "dt-1", status: "active" }],
+        configured: true,
+        install_supported: true,
+        group_routing_supported: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
+      expect(res.group_routing_supported).toBe(true);
+    });
+  });
+
+  describe("listDingTalkGroupRoutes", () => {
+    it("falls back to an empty list when the response is malformed", async () => {
+      stubFetchJson({ routes: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroupRoutes("ws-1")).resolves.toEqual({ routes: [] });
+    });
+
+    it("defaults fields missing from an older or partial route row", async () => {
+      stubFetchJson({ routes: [{ id: "route-1", agent_id: "agent-2" }] });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkGroupRoutes("ws-1");
+      expect(res.routes[0]).toMatchObject({
+        id: "route-1",
+        agent_id: "agent-2",
+        conversation_title: "",
+        installation_id: "",
+      });
+    });
+  });
+
+  describe("updateDingTalkGroupRoute", () => {
+    it("falls back safely on a malformed PATCH response and sends the scoped request", async () => {
+      stubFetchJson({ id: 42, agent_id: { wrong: "shape" } });
+      const client = new ApiClient("https://api.example.test");
+      await expect(
+        client.updateDingTalkGroupRoute("ws-1", "route-1", { agent_id: "agent-2" }),
+      ).resolves.toEqual({
+        id: "",
+        workspace_id: "",
+        installation_id: "",
+        conversation_id: "",
+        conversation_title: "",
+        agent_id: "",
+        discovered_at: "",
+        updated_at: "",
+      });
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/dingtalk/group-routes/route-1",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ agent_id: "agent-2" }),
+        }),
+      );
     });
   });
 

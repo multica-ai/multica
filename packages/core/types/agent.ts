@@ -297,7 +297,14 @@ export interface AgentTask {
   error: string | null;
   // Empty string when the task is not in a failed state (the backend uses
   // `omitempty`, so the field may also be missing on non-failed tasks).
-  failure_reason?: TaskFailureReason | "";
+  // Open string on the wire, not a closed enum: the backend's classifier
+  // taxonomy has grown far past TaskFailureReason (21+ refined
+  // `agent_error.*` reasons since MUL-1949, `local_directory_error`, …) and
+  // keeps growing — an installed client will meet reasons its build
+  // predates. TaskFailureReason stays in the union for autocomplete on the
+  // coarse values; `string & {}` admits the rest without collapsing the
+  // hints.
+  failure_reason?: TaskFailureReason | (string & {}) | "";
   created_at: string;
   /** Non-empty when the task was spawned from a chat session. */
   chat_session_id?: string;
@@ -366,6 +373,18 @@ export interface AgentTask {
    * shares and screenshots also stay safe).
    */
   relative_work_dir?: string;
+  /**
+   * Git branch this run delivered its work on. Set only by worktree-mode
+   * local_directory tasks, where the agent never touches the user's working
+   * copy — the branch is the only pointer to what it produced.
+   *
+   * Present on failed runs too: worktree mode commits whatever the agent left
+   * before tearing the worktree down, so a run that died partway still has
+   * something worth finding. Unlike `work_dir` this is safe to render
+   * verbatim; it is a ref inside the user's own repo, not a filesystem path.
+   * Older backends omit it — render conditionally.
+   */
+  branch_name?: string;
   /**
    * Resolved accountable-human provenance of this run (MUL-4302 §9): who it ran
    * "on behalf of", how that was resolved, and the evidence/lineage. Present on

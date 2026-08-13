@@ -515,7 +515,10 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"kimi", ".hidden", false},
 		{"kimi", "bad value", false},
 		{"hermes", "", true},
-		{"hermes", "low", false}, // hermes' ACP surface exposes no effort dial
+		// jcode runs under this provider and applies an advertised effort;
+		// Hermes Agent advertises none. The per-session catalog decides, so the
+		// literal gate opens for both.
+		{"hermes", "low", true},
 		{"grok", "", true},
 		{"grok", "low", true},
 		{"grok", "medium", true},
@@ -549,7 +552,7 @@ func TestThinkingControlSupported(t *testing.T) {
 		{"codex", true},    // dynamic catalog, validated per model by the daemon
 		{"opencode", true}, // dynamic variant names from opencode.json
 		{"pi", true},       // fixed tokens, per-model subset discovered over RPC
-		{"hermes", false},  // ACP adapter drops reasoning entirely (MUL-5770)
+		{"hermes", true},   // jcode applies it; Hermes Agent gets an empty catalog
 		{"kimi", true},     // dynamic catalog; ACP session/set_config_option applies it
 		{"qwenpaw", false},
 		{"", false},

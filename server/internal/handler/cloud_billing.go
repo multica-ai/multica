@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
+	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // Cloud billing endpoints proxy to the same multica-cloud HTTP service
@@ -14,9 +18,10 @@ import (
 // upstream README). All paths here forward verbatim to /api/v1/billing/*
 // on the cloud side, mirroring the cloud-runtime handler shape:
 //
-//   - User-facing endpoints sit under /api/cloud-billing/* in our router
-//     and require the regular Auth middleware. We inject the resolved
-//     user_id as `X-User-ID` so the cloud side can scope owner queries.
+//   - Owner-credit endpoints sit under /api/cloud-billing/* in our router.
+//     Workspace subscription endpoints sit under /api/cloud-subscriptions/*
+//     and add membership / role checks plus an authoritative workspace ID.
+//     Both require regular Auth and inject the resolved user_id as `X-User-ID`.
 //
 //   - The Stripe webhook is the one outlier: it lives at
 //     /api/webhooks/stripe (outside the Auth group), takes the raw
@@ -25,8 +30,9 @@ import (
 //     upstream contract is explicit about this:
 //     "webhook 使用原始请求体进行签名校验，不要在反向代理里改写 body."
 //
-// All proxy paths share `proxyCloudRuntime` for the standard JSON
-// shape and only the webhook needs a custom raw-body forwarder.
+// Owner-credit paths share `proxyCloudRuntime`. Workspace subscriptions use a
+// small stricter wrapper to inject workspace_id and allowlist Idempotency-Key;
+// the webhook remains the only raw-body forwarder.
 
 // maxStripeWebhookBodySize bounds the raw body we'll forward upstream.
 // Stripe's documented event payload upper bound is well under this;
@@ -39,6 +45,177 @@ const maxStripeWebhookBodySize = 1 << 20 // 1 MiB
 // client sent verbatim; the cloud side is the one that knows the
 // shared secret and rejects on mismatch.
 const stripeSignatureHeader = "Stripe-Signature"
+
+const idempotencyKeyHeader = "Idempotency-Key"
+const maxCloudSubscriptionIdempotencyKeyLength = 255
+
+type cloudSubscriptionCheckoutRequest struct {
+	Interval       string `json:"interval"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	CustomerEmail  string `json:"customer_email,omitempty"`
+}
+
+// This is an intentional allowlist: additive cloud fields are not forwarded
+// until the main repository explicitly reviews and adds them here.
+type cloudSubscriptionCheckoutUpstreamRequest struct {
+	WorkspaceID    string `json:"workspace_id"`
+	Interval       string `json:"interval"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	CustomerEmail  string `json:"customer_email,omitempty"`
+}
+
+// requireCloudSubscriptionWorkspace is the handler-level backstop behind the
+// router's RequireWorkspaceMember / RequireWorkspaceRole middleware. Keeping
+// the check here makes a future route refactor fail closed instead of exposing
+// a workspace billing write without its tenant/role guard.
+func (h *Handler) requireCloudSubscriptionWorkspace(w http.ResponseWriter, r *http.Request, roles ...string) (string, string, bool) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return "", "", false
+	}
+	if !featureflags.BillingWorkspaceSubscriptionsEnabled(r.Context(), h.FeatureFlags) {
+		writeError(w, http.StatusServiceUnavailable, "workspace subscriptions are not enabled")
+		return "", "", false
+	}
+
+	workspaceID := ctxWorkspaceID(r.Context())
+	workspaceUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "workspace_id or workspace_slug is required")
+		return "", "", false
+	}
+	member, ok := ctxMember(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "workspace membership required")
+		return "", "", false
+	}
+	if len(roles) > 0 && !roleAllowed(member.Role, roles...) {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return "", "", false
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return "", "", false
+	}
+	return util.UUIDToString(workspaceUUID), userID, true
+}
+
+func (h *Handler) proxyCloudSubscription(w http.ResponseWriter, r *http.Request, method, path, userID string, body []byte, headers http.Header) {
+	if h.CloudRuntime == nil || !h.CloudRuntime.Enabled() {
+		writeError(w, http.StatusServiceUnavailable, "cloud runtime is not configured")
+		return
+	}
+	resp, err := h.CloudRuntime.Do(r.Context(), cloudruntime.Request{
+		Method:    method,
+		Path:      path,
+		Body:      body,
+		UserID:    userID,
+		RequestID: cloudRuntimeRequestID(r),
+		Op:        "billing",
+		Headers:   headers,
+	})
+	if err != nil {
+		writeCloudRuntimeError(w, r, err)
+		return
+	}
+	writeCloudRuntimeResponse(w, resp)
+}
+
+func cloudSubscriptionIdempotencyHeaders(r *http.Request) http.Header {
+	key := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader))
+	if key == "" {
+		return nil
+	}
+	return http.Header{idempotencyKeyHeader: []string{key}}
+}
+
+func requireCloudSubscriptionIdempotencyKey(w http.ResponseWriter, r *http.Request, bodyKey string) (string, bool) {
+	key := strings.TrimSpace(bodyKey)
+	if key == "" {
+		key = strings.TrimSpace(r.Header.Get(idempotencyKeyHeader))
+	}
+	if key == "" {
+		writeError(w, http.StatusBadRequest, "Idempotency-Key or idempotency_key is required")
+		return "", false
+	}
+	if len(key) > maxCloudSubscriptionIdempotencyKeyLength {
+		writeError(w, http.StatusBadRequest, "idempotency key must be at most 255 bytes")
+		return "", false
+	}
+	return key, true
+}
+
+// GetCloudWorkspaceEntitlements forwards the active workspace to cloud's
+// resolved entitlement endpoint. Any workspace member may read this snapshot;
+// cloud independently verifies the stamped X-User-ID against its read-only
+// product database.
+func (h *Handler) GetCloudWorkspaceEntitlements(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requireCloudSubscriptionWorkspace(w, r)
+	if !ok {
+		return
+	}
+	h.proxyCloudSubscription(w, r, http.MethodGet, "/api/v1/entitlements/"+workspaceID, userID, nil, nil)
+}
+
+// CreateCloudWorkspaceSubscriptionCheckout injects the middleware-resolved
+// workspace into the upstream body. A caller cannot use a valid role in one
+// workspace to smuggle a different workspace_id through JSON.
+func (h *Handler) CreateCloudWorkspaceSubscriptionCheckout(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requireCloudSubscriptionWorkspace(w, r, "owner", "admin")
+	if !ok {
+		return
+	}
+	body, ok := readCloudRuntimeJSONBody(w, r)
+	if !ok {
+		return
+	}
+	var in cloudSubscriptionCheckoutRequest
+	if err := json.Unmarshal(body, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if in.Interval != "month" && in.Interval != "year" {
+		writeError(w, http.StatusBadRequest, "interval must be month or year")
+		return
+	}
+	idempotencyKey, ok := requireCloudSubscriptionIdempotencyKey(w, r, in.IdempotencyKey)
+	if !ok {
+		return
+	}
+	upstreamBody, err := json.Marshal(cloudSubscriptionCheckoutUpstreamRequest{
+		WorkspaceID:    workspaceID,
+		Interval:       in.Interval,
+		IdempotencyKey: idempotencyKey,
+		CustomerEmail:  in.CustomerEmail,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build subscription request")
+		return
+	}
+	h.proxyCloudSubscription(w, r, http.MethodPost, "/api/v1/subscriptions/checkout-sessions", userID, upstreamBody, cloudSubscriptionIdempotencyHeaders(r))
+}
+
+// ReconcileCloudWorkspaceSubscriptionSeats is a hint only: neither this
+// handler nor its caller supplies a seat quantity. Cloud re-counts human
+// members from its least-privilege product-database connection.
+func (h *Handler) ReconcileCloudWorkspaceSubscriptionSeats(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requireCloudSubscriptionWorkspace(w, r, "owner", "admin")
+	if !ok {
+		return
+	}
+	h.proxyCloudSubscription(w, r, http.MethodPost, "/api/v1/subscriptions/"+workspaceID+"/seats/reconcile", userID, nil, nil)
+}
+
+func (h *Handler) CreateCloudWorkspaceSubscriptionPortal(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requireCloudSubscriptionWorkspace(w, r, "owner", "admin")
+	if !ok {
+		return
+	}
+	if _, ok := requireCloudSubscriptionIdempotencyKey(w, r, ""); !ok {
+		return
+	}
+	h.proxyCloudSubscription(w, r, http.MethodPost, "/api/v1/subscriptions/"+workspaceID+"/portal-sessions", userID, nil, cloudSubscriptionIdempotencyHeaders(r))
+}
 
 // GetCloudBillingBalance forwards GET /api/v1/billing/balance.
 //
@@ -282,6 +459,7 @@ func (h *Handler) HandleCloudBillingStripeWebhook(w http.ResponseWriter, r *http
 		Body:      body,
 		Headers:   headers,
 		RequestID: cloudRuntimeRequestID(r),
+		Op:        "billing",
 		// Intentionally no UserID — webhook is unauthenticated by
 		// design; injecting an empty header would still be harmless,
 		// but staying explicit makes the contract obvious to readers.

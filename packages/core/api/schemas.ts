@@ -22,7 +22,9 @@ import type {
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   CronPreviewResponse,
+  DingTalkGroupRoute,
   DingTalkInstallation,
+  ListDingTalkGroupRoutesResponse,
   ListDingTalkInstallationsResponse,
   RedeemDingTalkBindingTokenResponse,
   WecomInstallation,
@@ -49,10 +51,14 @@ import type {
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
   NotificationPreferenceResponse,
+  PluginCatalogResponse,
+  PluginInstallation,
+  PluginInstallationListResponse,
   ResourceLabelsResponse,
   RuntimeModelListRequest,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  Skill,
   Squad,
   TimelineEntry,
   User,
@@ -60,6 +66,99 @@ import type {
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
+
+export const PluginBindingSchema = z.object({
+  scope_type: z.string().default("workspace"),
+  scope_id: z.string().default(""),
+  enabled: z.boolean().default(false),
+  revision: z.number().default(0),
+}).loose();
+
+export const PluginInstallationSchema = z.object({
+  id: z.string(),
+  plugin_key: z.string().default(""),
+  display_name: z.string().default(""),
+  desired_version: z.string().default(""),
+  active_version: z.string().optional(),
+  enabled: z.boolean().default(false),
+  desired_generation: z.number().default(0),
+  active_generation: z.number().default(0),
+  lifecycle_status: z.string().default("error"),
+  health_state: z.string().optional(),
+  health_reason: z.string().optional(),
+  contributions: z.array(z.string()).default([]),
+  bindings: z.array(PluginBindingSchema).default([]),
+}).loose();
+
+export const EMPTY_PLUGIN_INSTALLATION: PluginInstallation = {
+  id: "",
+  plugin_key: "",
+  display_name: "",
+  desired_version: "",
+  enabled: false,
+  desired_generation: 0,
+  active_generation: 0,
+  lifecycle_status: "error",
+  contributions: [],
+  bindings: [],
+};
+
+export const PluginInstallationListResponseSchema = z.object({
+  plugins: z.array(PluginInstallationSchema).default([]),
+}).loose();
+
+export const EMPTY_PLUGIN_INSTALLATION_LIST: PluginInstallationListResponse = {
+  plugins: [],
+};
+
+export const PluginCatalogContributionSchema = z.object({
+  key: z.string(),
+  type: z.string().default(""),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  entry_path: z.string().default(""),
+  entry_digest: z.string().default(""),
+}).loose();
+
+export const PluginCatalogReleaseSchema = z.object({
+  plugin_key: z.string(),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  version: z.string(),
+  publisher: z.string().default(""),
+  publisher_type: z.string().default(""),
+  trust_tier: z.string().default(""),
+  source_kind: z.string().default("bundled"),
+  source_ref: z.string().default(""),
+  requested_capabilities: z.array(z.string()).default([]),
+  host_api: z.string().default(""),
+  required_daemon_features: z.array(z.string()).default([]),
+  signature_key_id: z.string().default(""),
+  signature_verified: z.boolean().default(false),
+  manifest_digest: z.string().default(""),
+  archive_digest: z.string().default(""),
+  artifact_digest: z.string().default(""),
+  compatible: z.boolean().default(false),
+  compatibility_reason: z.string().optional(),
+  contributions: z.array(PluginCatalogContributionSchema).default([]),
+  installation: PluginInstallationSchema.optional(),
+}).loose();
+
+export const PluginCatalogResponseSchema = z.object({
+  releases: z.array(PluginCatalogReleaseSchema).default([]),
+  diagnostics: z.array(z.object({
+    source_ref: z.string().default(""),
+    code: z.string().default("unknown"),
+    message: z.string().default(""),
+  }).loose()).default([]),
+  supported: z.boolean().optional().default(true),
+}).loose();
+
+export const EMPTY_PLUGIN_CATALOG: PluginCatalogResponse = {
+  releases: [],
+  diagnostics: [],
+  supported: false,
+};
 
 export const GitHubInstallationSchema = z.object({
   id: z.string(),
@@ -2128,11 +2227,42 @@ export const ListDingTalkInstallationsResponseSchema = z.object({
   installations: z.array(DingTalkInstallationSchema).default([]),
   configured: z.boolean().default(false),
   install_supported: z.boolean().optional(),
+  group_routing_supported: z.boolean().optional(),
 }).loose();
 
 export const EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE: ListDingTalkInstallationsResponse = {
   installations: [],
   configured: false,
+};
+
+export const DingTalkGroupRouteSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  installation_id: z.string().default(""),
+  conversation_id: z.string().default(""),
+  conversation_title: z.string().default(""),
+  agent_id: z.string().default(""),
+  discovered_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_DINGTALK_GROUP_ROUTE: DingTalkGroupRoute = {
+  id: "",
+  workspace_id: "",
+  installation_id: "",
+  conversation_id: "",
+  conversation_title: "",
+  agent_id: "",
+  discovered_at: "",
+  updated_at: "",
+};
+
+export const ListDingTalkGroupRoutesResponseSchema = z.object({
+  routes: z.array(DingTalkGroupRouteSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_DINGTALK_GROUP_ROUTES_RESPONSE: ListDingTalkGroupRoutesResponse = {
+  routes: [],
 };
 
 export const RedeemDingTalkBindingTokenResponseSchema = z.object({
@@ -2193,4 +2323,42 @@ export const EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE: RedeemWecomBindingTokenR
   workspace_id: "",
   installation_id: "",
   wecom_user_id: "",
+};
+
+// Skills. Introduced for `POST /api/skills/:id/refresh` (update a skill from
+// its imported source). `config` stays a loose record: the server owns the
+// `origin` provenance shape and may extend it freely.
+export const SkillFileSchema = z.object({
+  id: z.string(),
+  skill_id: z.string(),
+  path: z.string(),
+  content: z.string().optional().default(""),
+  created_at: z.string().optional().default(""),
+  updated_at: z.string().optional().default(""),
+}).loose();
+
+export const SkillSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  description: z.string().optional().default(""),
+  content: z.string().optional().default(""),
+  config: z.record(z.string(), z.unknown()).optional().default({}),
+  created_by: z.string().nullable().optional().default(null),
+  created_at: z.string().optional().default(""),
+  updated_at: z.string().optional().default(""),
+  files: z.array(SkillFileSchema).optional().default([]),
+}).loose();
+
+export const EMPTY_SKILL: Skill = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  content: "",
+  config: {},
+  created_by: null,
+  created_at: "",
+  updated_at: "",
+  files: [],
 };

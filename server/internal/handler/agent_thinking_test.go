@@ -546,20 +546,25 @@ func TestUpdateAgent_RuntimeSwitch_ClearsKnownIncompatibleModel(t *testing.T) {
 // TestThinkingLevelRejectionCopy pins WHY a thinking_level was refused, not
 // just that it was. A runtime with no reasoning control must not be described
 // as receiving an unrecognised value: "high" is a fine effort token, and the
-// old shared sentence sent Hermes users looking for a spelling that cannot
-// exist (MUL-5770).
+// old shared sentence sent users looking for a spelling that cannot exist
+// (MUL-5770).
+//
+// Copilot is the standing example: it discovers over ACP but executes through
+// its own CLI, so no live ACP session exists to carry an effort. Hermes used
+// to play this role and no longer can — jcode runs under that provider and
+// applies an advertised effort, so the provider-level gate is open for it.
 func TestThinkingLevelRejectionCopy(t *testing.T) {
 	t.Parallel()
 
 	t.Run("runtime without reasoning control names the capability gap", func(t *testing.T) {
-		msg := thinkingLevelRejection("hermes", "high")
+		msg := thinkingLevelRejection("copilot", "high")
 		if !strings.Contains(msg, "does not support a per-agent reasoning effort") {
 			t.Errorf("expected a capability explanation, got %q", msg)
 		}
 		if strings.Contains(msg, "not a recognised value") {
 			t.Errorf("capability gap must not read as a bad token, got %q", msg)
 		}
-		if !strings.Contains(msg, `"hermes"`) {
+		if !strings.Contains(msg, `"copilot"`) {
 			t.Errorf("expected the runtime named in %q", msg)
 		}
 	})
@@ -575,35 +580,78 @@ func TestThinkingLevelRejectionCopy(t *testing.T) {
 	})
 
 	t.Run("carry-over path always offers the clear escape hatch", func(t *testing.T) {
-		for _, provider := range []string{"hermes", "claude"} {
+		for _, provider := range []string{"copilot", "claude"} {
 			msg := existingThinkingLevelRejection(provider, "xhigh")
 			if !strings.Contains(msg, `thinking_level=""`) {
 				t.Errorf("provider %q: expected the clear instruction, got %q", provider, msg)
 			}
 		}
-		if msg := existingThinkingLevelRejection("hermes", "xhigh"); !strings.Contains(msg, "does not support a per-agent reasoning effort") {
+		if msg := existingThinkingLevelRejection("copilot", "xhigh"); !strings.Contains(msg, "does not support a per-agent reasoning effort") {
 			t.Errorf("expected the capability explanation on the carry-over path, got %q", msg)
 		}
 	})
 }
 
-// TestCreateAgent_HermesRejectsThinkingLevel covers the reported flow
-// end-to-end: creating a Hermes agent with a reasoning effort 400s, and the
-// body explains that the runtime has no such control rather than blaming the
+// TestCreateAgent_NoReasoningControlRejectsThinkingLevel covers the reported
+// flow end-to-end: creating an agent on a runtime with no reasoning control
+// 400s, and the body explains the capability gap rather than blaming the
 // value. Empty stays valid — it means "runtime default".
-func TestCreateAgent_HermesRejectsThinkingLevel(t *testing.T) {
+//
+// It also pins the other side of the MUL-5991 change: hermes, which used to be
+// this test's subject, now accepts a level because jcode applies one.
+func TestCreateAgent_NoReasoningControlRejectsThinkingLevel(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	hermesRuntimeID := createHermesProviderRuntime(t)
+	gapRuntimeID := createProviderRuntime(t, "copilot")
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM agent WHERE workspace_id = $1 AND name LIKE 'hermes-thinking-%'`,
+			`DELETE FROM agent WHERE workspace_id = $1 AND name LIKE '%-thinking-%'`,
 			testWorkspaceID,
 		)
 	})
 
 	t.Run("effort value rejected with a capability message", func(t *testing.T) {
+		body := map[string]any{
+			"name":                 "copilot-thinking-high",
+			"runtime_id":           gapRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"thinking_level":       "high",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("copilot thinking_level=high: expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "does not support a per-agent reasoning effort") {
+			t.Errorf("expected a capability explanation in the 400 body, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("empty value still creates", func(t *testing.T) {
+		body := map[string]any{
+			"name":                 "copilot-thinking-empty",
+			"runtime_id":           gapRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"thinking_level":       "",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("copilot empty thinking_level: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	// hermes with no discovered catalog must REFUSE, not accept. The catalog is
+	// written only when a client asks for a model list, so a CLI-only caller can
+	// sit in the undiscovered state forever — treating it as "supported" is the
+	// permanent hole that let a Hermes Agent user persist a level the daemon
+	// then drops. The message names the missing evidence rather than claiming a
+	// limitation that would be false for jcode.
+	t.Run("hermes with no discovered catalog is refused", func(t *testing.T) {
+		hermesRuntimeID := createProviderRuntime(t, "hermes")
 		body := map[string]any{
 			"name":                 "hermes-thinking-high",
 			"runtime_id":           hermesRuntimeID,
@@ -614,14 +662,20 @@ func TestCreateAgent_HermesRejectsThinkingLevel(t *testing.T) {
 		w := httptest.NewRecorder()
 		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
 		if w.Code != http.StatusBadRequest {
-			t.Fatalf("hermes thinking_level=high: expected 400, got %d: %s", w.Code, w.Body.String())
+			t.Fatalf("hermes thinking_level=high with no catalog: expected 400, got %d: %s", w.Code, w.Body.String())
 		}
-		if !strings.Contains(w.Body.String(), "does not support a per-agent reasoning effort") {
-			t.Errorf("expected a capability explanation in the 400 body, got %s", w.Body.String())
+		if !strings.Contains(w.Body.String(), "has not reported a model catalog yet") {
+			t.Errorf("expected the not-yet-discovered explanation, got %s", w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "does not support") {
+			t.Errorf("must not claim a limitation we have not established, got %s", w.Body.String())
 		}
 	})
 
-	t.Run("empty value still creates", func(t *testing.T) {
+	// Empty stays valid on the same runtime — "runtime default" needs no
+	// capability evidence.
+	t.Run("hermes with no catalog still accepts an empty value", func(t *testing.T) {
+		hermesRuntimeID := createProviderRuntime(t, "hermes")
 		body := map[string]any{
 			"name":                 "hermes-thinking-empty",
 			"runtime_id":           hermesRuntimeID,
@@ -637,9 +691,134 @@ func TestCreateAgent_HermesRejectsThinkingLevel(t *testing.T) {
 	})
 }
 
-// createHermesProviderRuntime stands up a runtime row with provider "hermes",
-// the runtime whose ACP surface exposes no reasoning-effort control.
-func createHermesProviderRuntime(t *testing.T) string {
+// TestUpdateAgent_ThinkingLevelCarriesOverToUndiscoveredHermes covers the
+// branch where the caller never mentions thinking_level at all: an agent that
+// already carries one is switched onto a hermes runtime whose capability we
+// cannot confirm. Preserving the value there would smuggle a possibly-inert
+// setting onto the new runtime, so the switch is refused with the escape hatch
+// spelled out.
+func TestUpdateAgent_ThinkingLevelCarriesOverToUndiscoveredHermes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	claudeRuntimeID := createClaudeProviderRuntime(t)
+	hermesRuntimeID := createProviderRuntime(t, "hermes")
+
+	created := httptest.NewRecorder()
+	testHandler.CreateAgent(created, newRequest(http.MethodPost, "/api/agents", map[string]any{
+		"name":                 "carryover-thinking-agent",
+		"runtime_id":           claudeRuntimeID,
+		"visibility":           "private",
+		"max_concurrent_tasks": 1,
+		"thinking_level":       "high",
+	}))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("seed agent: expected 201, got %d: %s", created.Code, created.Body.String())
+	}
+	var seeded map[string]any
+	_ = json.NewDecoder(created.Body).Decode(&seeded)
+	agentID, _ := seeded["id"].(string)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
+
+	w := httptest.NewRecorder()
+	testHandler.UpdateAgent(w, withURLParam(
+		newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
+			"runtime_id": hermesRuntimeID,
+		}), "id", agentID))
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("carry-over onto undiscovered hermes: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	// Decode rather than substring-match the raw body: the escape hatch contains
+	// quotes, which JSON-escapes to `thinking_level=\"\"` on the wire.
+	var errBody struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&errBody); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if !strings.Contains(errBody.Error, "has not reported a model catalog yet") {
+		t.Errorf("expected the not-yet-discovered explanation, got %q", errBody.Error)
+	}
+	if !strings.Contains(errBody.Error, `thinking_level=""`) {
+		t.Errorf("expected the clear-it escape hatch, got %q", errBody.Error)
+	}
+}
+
+// TestAcpThinkingDecision is the fix for the regression the hermes
+// change introduced: `hermes` covers jcode (advertises an effort) and Hermes
+// Agent (advertises none), and the provider name cannot tell them apart. The
+// discovered catalog can, so the capability 400 survives for the binary that
+// genuinely has no reasoning dial.
+func TestAcpThinkingDecision(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runtimeID := parseUUID("11111111-1111-1111-1111-111111111111")
+
+	withCatalog := func(t *testing.T, models []ModelEntry) *Handler {
+		t.Helper()
+		cache := NewInMemoryModelCatalogCache()
+		if err := cache.Put(ctx, uuidToString(runtimeID), models, true); err != nil {
+			t.Fatalf("seed catalog: %v", err)
+		}
+		return &Handler{ModelCatalogCache: cache}
+	}
+
+	withEffort := []ModelEntry{{
+		ID:       "gpt-5.6-sol",
+		Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{{Value: "high", Label: "High"}}},
+	}}
+	withoutEffort := []ModelEntry{{ID: "hermes-4"}}
+
+	t.Run("jcode-shaped catalog keeps the level accepted", func(t *testing.T) {
+		if got := withCatalog(t, withEffort).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortPresent {
+			t.Errorf("decision = %v, want acpEffortPresent", got)
+		}
+	})
+
+	t.Run("Hermes-Agent-shaped catalog restores the capability answer", func(t *testing.T) {
+		if got := withCatalog(t, withoutEffort).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortAbsent {
+			t.Errorf("decision = %v, want acpEffortAbsent", got)
+		}
+	})
+
+	// Undiscovered is its own answer for an ambiguous provider — not "supported".
+	// The catalog is only written once a client asks for a model list, so this
+	// state persists indefinitely for CLI-only callers.
+	t.Run("no cache is unknown for hermes", func(t *testing.T) {
+		if got := (&Handler{}).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortUnknown {
+			t.Errorf("decision = %v, want acpEffortUnknown", got)
+		}
+	})
+
+	t.Run("empty catalog is unknown for hermes", func(t *testing.T) {
+		if got := withCatalog(t, nil).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortUnknown {
+			t.Errorf("decision = %v, want acpEffortUnknown", got)
+		}
+	})
+
+	// reasonix names exactly one binary, and that binary supports an effort, so
+	// an undiscovered reasonix runtime is allowed rather than blocked before its
+	// first discovery. Tightening hermes must not tighten this.
+	t.Run("no cache still allows reasonix", func(t *testing.T) {
+		if got := (&Handler{}).acpThinkingDecision(ctx, "reasonix", runtimeID); got != acpEffortPresent {
+			t.Errorf("decision = %v, want acpEffortPresent — reasonix is unambiguous", got)
+		}
+	})
+
+	// Providers outside the ACP-catalog set are answered by name alone; this
+	// check must not start second-guessing them from a catalog.
+	t.Run("non-ACP provider is not consulted", func(t *testing.T) {
+		if got := withCatalog(t, withoutEffort).acpThinkingDecision(ctx, "claude", runtimeID); got != acpEffortPresent {
+			t.Errorf("decision = %v, want acpEffortPresent — claude is decided by provider", got)
+		}
+	})
+}
+
+// createProviderRuntime stands up a runtime row for the given provider so a
+// test can exercise provider-level gates end-to-end.
+func createProviderRuntime(t *testing.T, provider string) string {
 	t.Helper()
 	var runtimeID string
 	err := testPool.QueryRow(context.Background(), `
@@ -647,11 +826,11 @@ func createHermesProviderRuntime(t *testing.T) string {
 			workspace_id, daemon_id, name, runtime_mode, provider, status,
 			device_info, metadata, last_seen_at, owner_id
 		)
-		VALUES ($1, NULL, $2, 'cloud', 'hermes', 'online', $3, '{}'::jsonb, now(), $4)
+		VALUES ($1, NULL, $2, 'cloud', $5, 'online', $3, '{}'::jsonb, now(), $4)
 		RETURNING id
-	`, testWorkspaceID, "Hermes Thinking Runtime", "Hermes thinking-level test runtime", testUserID).Scan(&runtimeID)
+	`, testWorkspaceID, provider+" Thinking Runtime", provider+" thinking-level test runtime", testUserID, provider).Scan(&runtimeID)
 	if err != nil {
-		t.Fatalf("create hermes runtime: %v", err)
+		t.Fatalf("create %s runtime: %v", provider, err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)

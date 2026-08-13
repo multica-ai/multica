@@ -98,6 +98,9 @@ interface DesktopAPI {
       | "not_writable"
       | "error";
     error?: string;
+    /** Whether the path sits inside a git working tree. Only set when ok=true.
+     *  Drives the worktree execution-mode option in the resource UI. */
+    is_git_repo?: boolean;
   }>;
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */

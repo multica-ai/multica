@@ -68,10 +68,11 @@ type gcStats struct {
 	// hermesMemoryStoresReclaimed is counted separately from storesReclaimed:
 	// the two stores hold different things on different TTLs, so folding them
 	// into one number would make either figure unreadable for an operator.
-	hermesMemoryStoresReclaimed int            // per-agent Hermes memory stores reclaimed past their TTL
-	repoCachesReclaimed         int            // bare repo caches under .repos evicted past their TTL
-	bytesReclaimed              int64          // total bytes freed in this cycle
-	byPattern                   map[string]int // configured basename or managed path label -> reclaim count
+	hermesMemoryStoresReclaimed  int            // per-agent Hermes memory stores reclaimed past their TTL
+	hermesSessionStoresReclaimed int            // per-conversation Hermes session stores reclaimed past their TTL
+	repoCachesReclaimed          int            // bare repo caches under .repos evicted past their TTL
+	bytesReclaimed               int64          // total bytes freed in this cycle
+	byPattern                    map[string]int // configured basename or managed path label -> reclaim count
 }
 
 // runGC performs a single GC scan across all workspace directories.
@@ -124,7 +125,15 @@ func (d *Daemon) runGC(ctx context.Context) {
 		stats.bytesReclaimed += storeBytes
 	}
 
-	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 {
+	// And per-conversation Hermes session stores, which outlive the task for the
+	// same reason (that is what fixes #6806) but hold transcripts rather than
+	// notes — so they get the shorter, Codex-like retention.
+	if storesRemoved, storeBytes := execenv.PruneHermesSessionStores(d.cfg.Profile, d.cfg.GCHermesSessionTTL, time.Now(), d.reserveStoreForDeletion, d.logger); storesRemoved > 0 {
+		stats.hermesSessionStoresReclaimed += storesRemoved
+		stats.bytesReclaimed += storeBytes
+	}
+
+	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.hermesSessionStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 {
 		d.logger.Info("gc: cycle complete",
 			"cleaned", stats.cleaned,
 			"orphaned", stats.orphaned,
@@ -133,6 +142,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 			"artifact_removed", stats.artifactRemoved,
 			"codex_session_stores_reclaimed", stats.storesReclaimed,
 			"hermes_memory_stores_reclaimed", stats.hermesMemoryStoresReclaimed,
+			"hermes_session_stores_reclaimed", stats.hermesSessionStoresReclaimed,
 			"repo_caches_reclaimed", stats.repoCachesReclaimed,
 			"bytes_reclaimed", stats.bytesReclaimed,
 			"by_pattern", stats.byPattern,

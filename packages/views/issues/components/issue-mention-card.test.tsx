@@ -66,6 +66,37 @@ describe("IssueMentionCard", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
+  // The real IssueHoverCard is deliberately not mocked: the point of these two
+  // is that mentions get the card for real, and that wrapping the link in a
+  // trigger did not cost the link anything. Neither opens the card — the card's
+  // own contents are covered in issue-hover-card.test.tsx, and hovering here
+  // would only duplicate that file's query and avatar mocks.
+  it("wraps the mention in a real hover-card trigger", () => {
+    renderCard(makeAdapter());
+
+    const trigger = screen
+      .getByTestId("issue-chip")
+      .closest('[data-slot="hover-card-trigger"]');
+    expect(trigger).toBeInTheDocument();
+    // A span, not the trigger's default anchor: the link is inside it, and
+    // nested anchors would break both the DOM and the assertions above.
+    expect(trigger?.tagName).toBe("SPAN");
+  });
+
+  it("keeps the chip a navigable link inside the trigger", () => {
+    const push = vi.fn();
+    renderCard(makeAdapter({ push }));
+
+    const anchor = screen.getByTestId("issue-chip").closest("a");
+    expect(anchor).toHaveAttribute("href", "/acme/issues/issue-1");
+    expect(
+      anchor?.closest('[data-slot="hover-card-trigger"]'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("issue-chip"));
+    expect(push).toHaveBeenCalledWith("/acme/issues/issue-1");
+  });
+
   it("cmd-click without an adapter (web) is left to the browser's native background-tab handling", () => {
     const push = vi.fn();
     renderCard(makeAdapter({ push }));

@@ -801,6 +801,26 @@ var acpCatalogThinkingProviders = map[string]bool{
 	// config surface. Its catalog is per model — see
 	// annotateACPThinkingForSessionModel.
 	"reasonix": true,
+	// hermes covers two unrelated binaries, and membership here is safe only
+	// because the catalog decides per session which one answered:
+	//
+	//   - jcode advertises option id `reasoning_effort` (category
+	//     `thought_level`) and genuinely applies it — set_config_option waits
+	//     for an `effort_changed` ack, and the provider request carries
+	//     `reasoning.effort` upstream. Confirmed against jcode v0.71.1 and
+	//     v0.73.0 (GitHub #6720). Its catalog is per model too: jcode
+	//     revalidates the effort against the new model's advertised list on a
+	//     model switch.
+	//   - Hermes Agent advertises no configOptions at all, so it gets an empty
+	//     catalog, no picker, and no set_config_option call. Re-verified
+	//     against v0.20.0 on 2026-08-11: session/new still returns only
+	//     `_meta`, `models`, `modes`, `sessionId` — unchanged from the v0.18.2
+	//     finding in MUL-5770.
+	//
+	// That split is why this feature is catalog-driven rather than gated on a
+	// version string: one provider, two binaries, and the session answers the
+	// capability question directly.
+	"hermes": true,
 }
 
 // usesDynamicThinkingCatalog reports whether a provider's effort vocabulary is
@@ -809,30 +829,35 @@ func usesDynamicThinkingCatalog(providerType string) bool {
 	return thinkingDynamicCatalogProviders[providerType] || acpCatalogThinkingProviders[providerType]
 }
 
+// UsesACPCatalogThinking reports whether a provider's effort support is decided
+// per session by what its ACP handshake advertises, rather than by the provider
+// name alone.
+//
+// Callers that can reach a discovered catalog should use it to answer the
+// capability question for a specific runtime: `hermes` covers both jcode (which
+// advertises and applies an effort) and Hermes Agent (which advertises none), so
+// the provider name is not a sufficient answer for either. See
+// acpCatalogThinkingProviders.
+func UsesACPCatalogThinking(providerType string) bool {
+	return acpCatalogThinkingProviders[providerType]
+}
+
 // ThinkingControlSupported reports whether Multica can deliver a per-agent
 // reasoning effort to this runtime at all. False means the answer to any
 // thinking_level is "no", regardless of the token: the runtime exposes no
 // effort dial on the surface the daemon speaks to it over, so there is nothing
 // to inject and nothing a different spelling would fix.
 //
-// Hermes is the instructive case (MUL-5770). The Hermes CLI does support
-// reasoning effort — `agent.reasoning_effort` in `<HERMES_HOME>/config.yaml`,
-// checked against its own `minimal|low|medium|high|xhigh|max|ultra` set — but
-// Multica drives Hermes over ACP (`hermes acp`), and its ACP adapter does not
-// carry that setting onto the session:
-//   - `session/new` advertises `models` and `modes` only, no `configOptions`,
-//     so there is no effort catalog to discover;
-//   - `session/set_config_option` records the value on the session and never
-//     applies it;
-//   - `acp_adapter/session.py::_make_agent` constructs the agent without
-//     `reasoning_config`, so every ACP session runs at the transport default.
+// Copilot is the instructive case. It speaks ACP for model discovery but
+// executes through its own CLI surface (`--acp` is blocked in copilot.go), so
+// there is no live ACP session to carry an effort onto — a picker there would
+// be inert no matter what discovery advertised.
 //
-// Verified against Hermes Agent v0.18.2. Because the config file is read by
-// the CLI/gateway paths but not the ACP one, writing an effort into a per-task
-// HERMES_HOME would be just as inert as accepting the value here — which is
-// why this is a capability gap to report, not a value to pass through. Revisit
-// when Hermes' ACP surface exposes reasoning; the picker then follows from the
-// discovered catalog like every other runtime's.
+// True at provider granularity only. The `hermes` provider covers two
+// unrelated binaries whose answers differ — jcode applies an advertised
+// effort, Hermes Agent has no effort surface on ACP at all — so it reports
+// true here and the per-session catalog decides whether a picker actually
+// appears. See acpCatalogThinkingProviders for the evidence on each.
 func ThinkingControlSupported(providerType string) bool {
 	if usesDynamicThinkingCatalog(providerType) {
 		return true

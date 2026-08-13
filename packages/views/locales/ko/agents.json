@@ -724,7 +724,10 @@
     "details_cache_read": "캐시 읽기",
     "details_cache_write": "캐시 쓰기",
     "details_cost": "비용",
-    "usage_chip_title": "이 실행의 토큰 및 예상 비용"
+    "usage_chip_title": "이 실행의 토큰 및 예상 비용",
+    "details_branch": "브랜치",
+    "details_reason": "사유",
+    "copy_branch": "브랜치 이름 복사"
   },
   "task_failure": {
     "agent_error": "에이전트 실행 오류",

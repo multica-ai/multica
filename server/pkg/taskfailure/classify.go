@@ -97,7 +97,7 @@ func Classify(rawError string) Reason {
 	case strings.Contains(lower, "missing environment variable"),
 		strings.Contains(lower, "missing") && strings.Contains(lower, "api_key"),
 		strings.Contains(lower, "api key") && strings.Contains(lower, "required"),
-		strings.Contains(lower, "no llm provider configured"),
+		strings.Contains(lower, providerUnconfiguredPhrase),
 		strings.Contains(lower, "no provider configured"):
 		return ReasonAgentMissingConfig
 
@@ -258,6 +258,7 @@ func Classify(rawError string) Reason {
 		"panic",
 		"sigsegv",
 		"process exited",
+		"start codex:",
 		"pipe has been ended",
 		"file already closed",
 		"initialize failed",
@@ -266,6 +267,36 @@ func Classify(rawError string) Reason {
 	}
 
 	return ReasonAgentUnknown
+}
+
+// providerUnconfiguredPhrase is the runtime's wording for "I resolved no LLM
+// provider at all" — structurally a configuration gap, not a rejected
+// credential. This const is the single source of truth for its two readers:
+// rule 2 of Classify above (which maps it to ReasonAgentMissingConfig) and
+// ProviderUnconfigured below. Keep them together; a second literal copy is how
+// the two drift apart.
+const providerUnconfiguredPhrase = "no llm provider configured"
+
+// ProviderUnconfigured reports whether an agent error is the runtime refusing
+// to start because it resolved no provider whatsoever. Callers use it to
+// attach context about WHERE the runtime looked — the failure text names a
+// remedy ("run `hermes model`") without naming the home it would apply to, so
+// a runtime reading a different config directory than the user edited sends
+// them to fix the wrong file (GH #6872).
+//
+// Substring, not equality: the phrase reaches us wrapped in the ACP transport's
+// own framing (`hermes session/new failed: session/new: Internal error
+// (code=-32603, data={"details":"No LLM provider configured. …`).
+//
+// This says nothing about which credential is missing or whether one would
+// help — it is strictly "the runtime resolved no provider". An expired key, a
+// 401, or a provider the user configured but mistyped are all different
+// failures and must not be widened into this.
+func ProviderUnconfigured(errText string) bool {
+	if errText == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(errText), providerUnconfiguredPhrase)
 }
 
 // contextWindowExceededWitnesses are the two wordings for an overflow reported

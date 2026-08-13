@@ -8,7 +8,7 @@ import (
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path string // path to CLI binary (pinned at startup; symlink-resolved to a concrete, possibly versioned, path)
+	Path string // stable startup-resolved CLI entry point; launch resolution may follow platform links to a concrete path
 	// Command is the bare command name or MULTICA_*_PATH value that Path was
 	// resolved from at startup. It is kept so the daemon can re-resolve Path
 	// if the pinned executable later vanishes — e.g. a version manager
@@ -57,11 +57,12 @@ type ConnectedAppData = runtimeapps.ConnectedApp
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
-	ID          string `json:"id"`
-	AgentID     string `json:"agent_id"`
-	RuntimeID   string `json:"runtime_id"`
-	IssueID     string `json:"issue_id"`
-	WorkspaceID string `json:"workspace_id"`
+	ID                      string                       `json:"id"`
+	AgentID                 string                       `json:"agent_id"`
+	RuntimeID               string                       `json:"runtime_id"`
+	IssueID                 string                       `json:"issue_id"`
+	WorkspaceID             string                       `json:"workspace_id"`
+	PluginExecutionManifest *PluginExecutionManifestData `json:"plugin_execution_manifest,omitempty"`
 	// WorkspaceContext mirrors workspace.context (the per-workspace system
 	// prompt set in Settings → General). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`
@@ -143,6 +144,20 @@ type Task struct {
 	// Empty or non-task-scoped values are fatal for writable agent tasks; the
 	// daemon must not fall back to its own token. See MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+}
+
+// PluginExecutionManifestData mirrors the immutable enqueue-time plugin pin
+// returned by the server. The daemon materializes its skill refs through the
+// normal content-addressed cache; this record is retained on the task for run
+// attribution and diagnostics.
+type PluginExecutionManifestData struct {
+	ID                   string          `json:"id"`
+	SnapshotID           string          `json:"snapshot_id,omitempty"`
+	SnapshotRevision     int64           `json:"snapshot_revision"`
+	SnapshotDigest       string          `json:"snapshot_digest,omitempty"`
+	ComposerVersion      string          `json:"composer_version"`
+	SchemaVersion        int32           `json:"schema_version"`
+	OrderedContributions json.RawMessage `json:"ordered_contributions"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

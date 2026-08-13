@@ -1495,6 +1495,36 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 
 // --- daemon logs ---
 
+// tailLog is the seam tests replace to observe `daemon logs` without spawning
+// the platform tail implementation.
+var tailLog = tailLogFile
+
+// profileLabel names a profile for humans; the default profile has no name.
+func profileLabel(profile string) string {
+	if profile == "" {
+		return "default"
+	}
+	return profile
+}
+
+// daemonLogSourcePath resolves the daemon.log path for a profile —
+// ~/.multica/daemon.log for the default profile,
+// ~/.multica/profiles/<name>/daemon.log for a named one — and guarantees it is
+// absolute, because this path is shown to the user to paste into an editor or
+// another shell.
+//
+// A relative result means daemonDirForProfile could not resolve the home
+// directory and swallowed the error, leaving a bare "daemon.log". That is
+// reported instead of returned: it would resolve against the caller's cwd and
+// name a file with nothing to do with the daemon.
+func daemonLogSourcePath(profile string) (string, error) {
+	logPath := daemonLogPathForProfile(profile)
+	if !filepath.IsAbs(logPath) {
+		return "", fmt.Errorf("cannot resolve the state directory for profile %q", profileLabel(profile))
+	}
+	return logPath, nil
+}
+
 func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	if err := requireHumanLocalCommand("daemon logs"); err != nil {
 		return err
@@ -1503,7 +1533,10 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	if err := requireKnownProfile(profile); err != nil {
 		return err
 	}
-	logPath := daemonLogPathForProfile(profile)
+	logPath, err := daemonLogSourcePath(profile)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {
 		return fmt.Errorf("no log file found at %s\nThe daemon may not have been started in background mode", logPath)
 	}
@@ -1511,7 +1544,14 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	follow, _ := cmd.Flags().GetBool("follow")
 	lines, _ := cmd.Flags().GetInt("lines")
 
-	return tailLogFile(logPath, lines, follow)
+	// Name the file before streaming it. Which daemon.log is live is otherwise
+	// unknowable — a stale default-profile log reads fine and looks current —
+	// and this command is the only thing that knows the answer. It goes to
+	// stderr and is written before the tail starts so `-f` output and any
+	// downstream pipe stay clean.
+	fmt.Fprintf(cmd.ErrOrStderr(), "Reading %s (profile: %s)\n", logPath, profileLabel(profile))
+
+	return tailLog(logPath, lines, follow)
 }
 
 // daemonAlive reports whether a health response indicates a live daemon

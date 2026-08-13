@@ -294,6 +294,35 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.25",
+        date: "2026-08-13",
+        title:
+          "Parallel local-folder mode, per-group DingTalk routing, and one-click skill updates",
+        changes: [],
+        features: [
+          "A local folder can now run tasks in parallel, each delivering its own branch.",
+          "One DingTalk bot can now serve each group with its own agent.",
+          "Imported skills can now be updated from their source in one click.",
+          "Hovering an Issue mention now shows its title, assignee and progress.",
+          "jcode agents can now be set to think harder or faster.",
+          "Self-hosted setups can now keep task temp files on a bigger disk.",
+        ],
+        improvements: [
+          "`multica daemon logs` now tells you where the log file is.",
+          "A Hermes task now says which HERMES_HOME it read.",
+        ],
+        fixes: [
+          "Clearing out offline runtimes no longer takes task history with it.",
+          "Hermes conversations no longer lose their history when a task ends.",
+          "Agents installed through npm now launch on Windows.",
+          "Codex no longer leaves stray processes behind on Windows.",
+          "Clicking the avatar on a Board card now changes the assignee.",
+          "Runtime activity and gantt dates now follow your interface language.",
+          "In dark mode the keyline between a tab and the page no longer shifts colour.",
+          "The built-in Bug triage Autopilot now runs.",
+        ],
+      },
+      {
         version: "0.4.24",
         date: "2026-08-12",
         title: "WeCom file delivery, chat history readback, and bulk env var editing",
