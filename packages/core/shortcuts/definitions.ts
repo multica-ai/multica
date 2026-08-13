@@ -274,14 +274,10 @@ const PORTAL_LAYER_SELECTOR =
   '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
 
 /**
- * Whether an open menu, dialog or listbox popup owns the keyboard.
- *
- * These popups are portaled to the document body, so a page-level keydown
- * listener still sees their keypresses: the target is outside the page, and
- * Base UI only calls `preventDefault()` for navigation keys, never for the
- * plain characters menus use for typeahead. Modal layers additionally mark
- * everything else `data-base-ui-inert`, which catches the case where focus
- * never left the page.
+ * Whether an open popup (menu, dialog, listbox) owns the keyboard. Popups are
+ * portaled to the body, so page-level listeners still see their keypresses;
+ * the `data-base-ui-inert` marker catches modal layers even when focus never
+ * left the page.
  */
 export function isPortalLayerShortcutTarget(target: EventTarget | null): boolean {
   if (typeof document === "undefined") return false;

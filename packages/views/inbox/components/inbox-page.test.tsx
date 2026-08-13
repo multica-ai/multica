@@ -423,6 +423,19 @@ describe("InboxPage", () => {
     expect(screen.queryByTestId("list")).not.toBeNull();
   });
 
+  function renderWithActiveItem() {
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+    return render(<InboxPage />);
+  }
+
+  function renderWithOpenItem() {
+    const view = renderWithActiveItem();
+    fireEvent.click(screen.getByTestId("row"));
+    return view;
+  }
+
   describe("archive shortcut", () => {
     function pressArchiveKey(target: Element | Document = document) {
       fireEvent.keyDown(target, { key: "e" });
@@ -435,12 +448,7 @@ describe("InboxPage", () => {
     }
 
     it("archives the open notification", () => {
-      reset();
-      layout.width = DESKTOP;
-      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
-
-      render(<InboxPage />);
-      fireEvent.click(screen.getByTestId("row"));
+      renderWithOpenItem();
       pressArchiveKey();
 
       expect(archiveMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
@@ -479,12 +487,7 @@ describe("InboxPage", () => {
     });
 
     it("does not fire while typing in an editable control", () => {
-      reset();
-      layout.width = DESKTOP;
-      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
-
-      render(<InboxPage />);
-      fireEvent.click(screen.getByTestId("row"));
+      renderWithOpenItem();
 
       typeArchiveKeyInto(document.createElement("input"));
       typeArchiveKeyInto(document.createElement("textarea"));
@@ -496,32 +499,21 @@ describe("InboxPage", () => {
     });
 
     it("stands down while a dialog is open", () => {
-      reset();
-      layout.width = DESKTOP;
-      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
-
-      render(<InboxPage />);
-      fireEvent.click(screen.getByTestId("row"));
+      renderWithOpenItem();
       modalState.modal = "create-issue";
       pressArchiveKey();
 
       expect(archiveMutate).not.toHaveBeenCalled();
     });
 
-    // Menus, dialogs and select popups are portaled to the body, so their
-    // keypresses reach the page listener with a non-editable target and no
-    // preventDefault — `e` is typeahead there, not archive.
+    // Keypresses in portaled popups still reach the page listener, where `e`
+    // is typeahead, not archive.
     it.each([
       ["menu", "menuitem"],
       ["dialog", "button"],
       ["listbox", "option"],
     ])("stands down while a portaled %s owns the keyboard", (layerRole, itemRole) => {
-      reset();
-      layout.width = DESKTOP;
-      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
-
-      render(<InboxPage />);
-      fireEvent.click(screen.getByTestId("row"));
+      renderWithOpenItem();
 
       const layer = document.createElement("div");
       layer.setAttribute("role", layerRole);
@@ -536,15 +528,9 @@ describe("InboxPage", () => {
     });
 
     it("stands down while a modal layer holds the page inert", () => {
-      // Base UI marks everything outside a modal popup `data-base-ui-inert`.
-      // Covers the case where focus never moved into the popup, so the target
-      // is still the page (or the body).
-      reset();
-      layout.width = DESKTOP;
-      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
-
-      const { container } = render(<InboxPage />);
-      fireEvent.click(screen.getByTestId("row"));
+      // Base UI marks everything outside a modal popup `data-base-ui-inert`,
+      // even when focus never left the page.
+      const { container } = renderWithOpenItem();
       container.firstElementChild?.setAttribute("data-base-ui-inert", "");
       pressArchiveKey();
 
@@ -552,24 +538,14 @@ describe("InboxPage", () => {
     });
 
     it("ignores an auto-repeated key", () => {
-      reset();
-      layout.width = DESKTOP;
-      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
-
-      render(<InboxPage />);
-      fireEvent.click(screen.getByTestId("row"));
+      renderWithOpenItem();
       fireEvent.keyDown(document, { key: "e", repeat: true });
 
       expect(archiveMutate).not.toHaveBeenCalled();
     });
 
     it("ignores a press a nearer handler already consumed", () => {
-      reset();
-      layout.width = DESKTOP;
-      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
-
-      render(<InboxPage />);
-      fireEvent.click(screen.getByTestId("row"));
+      renderWithOpenItem();
 
       const consumer = document.createElement("button");
       consumer.addEventListener("keydown", (event) => event.preventDefault());
@@ -581,20 +557,14 @@ describe("InboxPage", () => {
     });
 
     it("does nothing when no notification is open", () => {
-      reset();
-      layout.width = DESKTOP;
-      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
-
-      render(<InboxPage />);
+      renderWithActiveItem();
       pressArchiveKey();
 
       expect(archiveMutate).not.toHaveBeenCalled();
     });
   });
 
-  // A bare key that mutates state has to say so. The confirmation lives in the
-  // shared handlers, so every surface — row action, detail button, `onDone`,
-  // the shortcut — reports the same way.
+  // Toasts live in the shared handlers, so every archive surface reports alike.
   describe("archive feedback", () => {
     type MutateOptions = {
       onSuccess?: () => void;
@@ -614,11 +584,7 @@ describe("InboxPage", () => {
     }
 
     it("confirms an archive from the row action", () => {
-      reset();
-      layout.width = DESKTOP;
-      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
-
-      render(<InboxPage />);
+      renderWithActiveItem();
       act(() => rowActions?.onAction("inbox-a"));
       settle(archiveMutate, "success");
 
@@ -626,12 +592,7 @@ describe("InboxPage", () => {
     });
 
     it("confirms an archive driven by the shortcut", () => {
-      reset();
-      layout.width = DESKTOP;
-      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
-
-      render(<InboxPage />);
-      fireEvent.click(screen.getByTestId("row"));
+      renderWithOpenItem();
       fireEvent.keyDown(document, { key: "e" });
       settle(archiveMutate, "success");
 
@@ -654,11 +615,7 @@ describe("InboxPage", () => {
     });
 
     it("reports a failed archive as a failure only", () => {
-      reset();
-      layout.width = DESKTOP;
-      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
-
-      render(<InboxPage />);
+      renderWithActiveItem();
       act(() => rowActions?.onAction("inbox-a"));
       settle(archiveMutate, "error");
 

@@ -327,8 +327,7 @@ export function InboxPage() {
     setSelectedKey(next ? (next.issue_id ?? next.id) : "");
   };
 
-  // The confirmation lives here rather than in the keyboard handler so the row
-  // action, the detail button, `onDone` and the shortcut all confirm alike.
+  // Toasts live in these shared handlers so every archive surface confirms alike.
   const handleArchive = (id: string) => {
     advanceSelectionPast(id, items);
     archiveMutation.mutate(id, {
@@ -367,8 +366,6 @@ export function InboxPage() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
       if (isEditableShortcutTarget(event.target)) return;
-      // Menus, dialogs and select popups are portaled out of this page, so
-      // their keypresses reach this listener with nothing else to stop them.
       if (isPortalLayerShortcutTarget(event.target)) return;
       if (useModalStore.getState().modal) return;
       if (!shortcutMatchesEvent(getShortcut("archiveInboxItem"), event)) return;
