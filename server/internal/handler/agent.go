@@ -2036,7 +2036,7 @@ func existingThinkingCapabilityRejection(provider, value string) string {
 // points at the thing that resolves it.
 func thinkingCapabilityUnknownRejection(provider string) string {
 	return fmt.Sprintf(
-		"cannot confirm whether runtime %q supports a per-agent reasoning effort: it has not reported a model catalog yet. Open the agent's model picker to trigger discovery and retry, or leave thinking_level empty to use the runtime default",
+		"cannot confirm whether runtime %q supports a per-agent reasoning effort: it has not reported a model catalog yet. Open the model picker for this runtime to trigger discovery and retry, or leave thinking_level empty to use the runtime default",
 		provider,
 	)
 }
