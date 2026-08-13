@@ -1,7 +1,12 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import type { InboxItem } from "@multica/core/types";
 import { InboxPage } from "./inbox-page";
+
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
 
 vi.mock("react-resizable-panels", () => ({
   useDefaultLayout: () => ({ defaultLayout: undefined, onLayoutChanged: vi.fn() }),
@@ -195,6 +200,8 @@ function reset() {
   archiveMutate.mockClear();
   unarchiveMutate.mockClear();
   modalState.modal = null;
+  vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.error).mockClear();
   rowActions = null;
   issueDetailProps.length = 0;
   layout.width = PHONE;
@@ -501,6 +508,49 @@ describe("InboxPage", () => {
       expect(archiveMutate).not.toHaveBeenCalled();
     });
 
+    // Menus, dialogs and select popups are portaled to the body, so their
+    // keypresses reach the page listener with a non-editable target and no
+    // preventDefault — `e` is typeahead there, not archive.
+    it.each([
+      ["menu", "menuitem"],
+      ["dialog", "button"],
+      ["listbox", "option"],
+    ])("stands down while a portaled %s owns the keyboard", (layerRole, itemRole) => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+
+      const layer = document.createElement("div");
+      layer.setAttribute("role", layerRole);
+      const focused = document.createElement("div");
+      focused.setAttribute("role", itemRole);
+      layer.appendChild(focused);
+      document.body.appendChild(layer);
+      pressArchiveKey(focused);
+      layer.remove();
+
+      expect(archiveMutate).not.toHaveBeenCalled();
+    });
+
+    it("stands down while a modal layer holds the page inert", () => {
+      // Base UI marks everything outside a modal popup `data-base-ui-inert`.
+      // Covers the case where focus never moved into the popup, so the target
+      // is still the page (or the body).
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      const { container } = render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+      container.firstElementChild?.setAttribute("data-base-ui-inert", "");
+      pressArchiveKey();
+
+      expect(archiveMutate).not.toHaveBeenCalled();
+    });
+
     it("ignores an auto-repeated key", () => {
       reset();
       layout.width = DESKTOP;
@@ -539,6 +589,81 @@ describe("InboxPage", () => {
       pressArchiveKey();
 
       expect(archiveMutate).not.toHaveBeenCalled();
+    });
+  });
+
+  // A bare key that mutates state has to say so. The confirmation lives in the
+  // shared handlers, so every surface — row action, detail button, `onDone`,
+  // the shortcut — reports the same way.
+  describe("archive feedback", () => {
+    type MutateOptions = {
+      onSuccess?: () => void;
+      onError?: (err: unknown) => void;
+    };
+
+    function settle(
+      spy: typeof archiveMutate,
+      outcome: "success" | "error",
+      err: unknown = new Error("boom"),
+    ) {
+      const options = spy.mock.calls.at(-1)?.[1] as MutateOptions | undefined;
+      act(() => {
+        if (outcome === "success") options?.onSuccess?.();
+        else options?.onError?.(err);
+      });
+    }
+
+    it("confirms an archive from the row action", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      render(<InboxPage />);
+      act(() => rowActions?.onAction("inbox-a"));
+      settle(archiveMutate, "success");
+
+      expect(toast.success).toHaveBeenCalledTimes(1);
+    });
+
+    it("confirms an archive driven by the shortcut", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+      fireEvent.keyDown(document, { key: "e" });
+      settle(archiveMutate, "success");
+
+      expect(toast.success).toHaveBeenCalledTimes(1);
+    });
+
+    it("confirms a restore", () => {
+      reset();
+      layout.width = DESKTOP;
+      searchParams = new URLSearchParams("view=archived");
+      listData.archived = [
+        item({ id: "archived-1", issue_id: "issue-9", archived: true }),
+      ];
+
+      render(<InboxPage />);
+      act(() => rowActions?.onAction("archived-1"));
+      settle(unarchiveMutate, "success");
+
+      expect(toast.success).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports a failed archive as a failure only", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      render(<InboxPage />);
+      act(() => rowActions?.onAction("inbox-a"));
+      settle(archiveMutate, "error");
+
+      expect(toast.error).toHaveBeenCalledTimes(1);
+      expect(toast.success).not.toHaveBeenCalled();
     });
   });
 

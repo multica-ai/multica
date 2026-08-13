@@ -9,6 +9,7 @@ import { useModalStore } from "@multica/core/modals";
 import {
   getShortcut,
   isEditableShortcutTarget,
+  isPortalLayerShortcutTarget,
   shortcutMatchesEvent,
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
@@ -326,9 +327,12 @@ export function InboxPage() {
     setSelectedKey(next ? (next.issue_id ?? next.id) : "");
   };
 
+  // The confirmation lives here rather than in the keyboard handler so the row
+  // action, the detail button, `onDone` and the shortcut all confirm alike.
   const handleArchive = (id: string) => {
     advanceSelectionPast(id, items);
     archiveMutation.mutate(id, {
+      onSuccess: () => toast.success(t(($) => $.toasts.archived)),
       onError: (err) =>
         toast.error(
           err instanceof Error && err.message
@@ -341,6 +345,7 @@ export function InboxPage() {
   const handleUnarchive = (id: string) => {
     advanceSelectionPast(id, archivedItems);
     unarchiveMutation.mutate(id, {
+      onSuccess: () => toast.success(t(($) => $.toasts.unarchived)),
       onError: (err) =>
         toast.error(
           err instanceof Error && err.message
@@ -352,14 +357,19 @@ export function InboxPage() {
 
   // Keep the listener stable while using the latest selected-item action.
   const actionOnSelectedRef = useRef<(() => void) | null>(null);
-  actionOnSelectedRef.current = selected
-    ? () => (isArchivedView ? handleUnarchive(selected.id) : handleArchive(selected.id))
-    : null;
+  useEffect(() => {
+    actionOnSelectedRef.current = selected
+      ? () => (isArchivedView ? handleUnarchive(selected.id) : handleArchive(selected.id))
+      : null;
+  });
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
       if (isEditableShortcutTarget(event.target)) return;
+      // Menus, dialogs and select popups are portaled out of this page, so
+      // their keypresses reach this listener with nothing else to stop them.
+      if (isPortalLayerShortcutTarget(event.target)) return;
       if (useModalStore.getState().modal) return;
       if (!shortcutMatchesEvent(getShortcut("archiveInboxItem"), event)) return;
       const run = actionOnSelectedRef.current;
