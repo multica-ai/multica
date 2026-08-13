@@ -899,6 +899,14 @@ func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 			tellUser:     false,
 			wantMentions: "multica chat history",
 		},
+		{
+			// ShareCRM persists to chat_message through the same AppendUserMessage
+			// path as DingTalk/WeCom, so its transcript is readable the same way.
+			name:         "sharecrm rebuilds from the stored transcript",
+			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeSharecrm},
+			tellUser:     false,
+			wantMentions: "multica chat history",
+		},
 	}
 
 	for _, tc := range cases {
