@@ -896,10 +896,10 @@ layer.) The underlying detail is still available on demand (see `--debug`).
 ### What you see
 
 - **Friendly, single-line message.** Transport failures (timeout, DNS,
-  connection refused, TLS) and HTTP status failures (401/403/404/409/400·422/
-  429/5xx) are each rendered as one clear sentence with a next step — for
-  example a timeout suggests checking the network or raising
-  `MULTICA_HTTP_TIMEOUT`, and a 401 tells you to run `multica login`.
+  connection refused, TLS, interrupted connections) and HTTP status failures
+  (401/403/404/409/400·422/429/5xx) are each rendered as one clear sentence
+  with a next step — for example a timeout suggests checking the network or
+  raising `MULTICA_HTTP_TIMEOUT`, and a 401 tells you to run `multica login`.
 - **Server-provided validation messages are preserved.** For a 400/422 that
   carries a message from the server, that message is shown verbatim
   (`Invalid request: <server message>`); only when there is none do you get the
@@ -926,7 +926,7 @@ The process exit code is tiered so scripts can branch on the failure class:
 | --- | --- |
 | `0` | success |
 | `1` | generic / unclassified error |
-| `2` | network error (timeout, DNS, connection refused, TLS, offline) |
+| `2` | network error (timeout, DNS, connection refused, TLS, interrupted, offline) |
 | `3` | authentication / authorization (HTTP 401, 403) |
 | `4` | not found (HTTP 404) |
 | `5` | validation (HTTP 400, 422) |
@@ -957,4 +957,19 @@ always at least this value, so raising it takes effect across all commands.
 
 ```bash
 MULTICA_HTTP_TIMEOUT=60s multica issue list
+```
+
+### Automatic retries
+
+The CLI retries brief transport interruptions and HTTP 502/503/504 responses
+for idempotent requests. It waits 200 ms and 600 ms between the default two
+retries. A request that fails while dialing can be retried for any method
+because it never reached the server. Once a write may have reached the server,
+POST and PATCH requests are not replayed; check whether the change took effect
+before running such a command again.
+
+Set `MULTICA_HTTP_RETRIES` to the number of retries, or to `0` to disable them:
+
+```bash
+MULTICA_HTTP_RETRIES=0 multica issue list
 ```
