@@ -46,28 +46,9 @@ import { parseIssueWindowPath } from "../../../shared/issue-window";
 const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
 
-// Chrome-style merged tab: the active tab shares the content surface's fill
-// and flares into it through concave bottom corners. Each flare is a small
-// square whose radial gradient carves a quarter-circle notch (the backdrop
-// fill below), strokes a 1px arc that continues the tab's side border into
-// the content card's top ring, and fills the rest with the surface color.
-// The 0.4px stop spread anti-aliases the arc.
-//
-// The gradient sits on an opaque backdrop layer rather than letting the
-// strip show through, because the flare's bottom row overlaps the content
-// card's top ring. In dark mode --surface-border is translucent
-// (oklch(1 0 0 / 10%)), so the arc would composite over the ring instead of
-// replacing it and the two keylines would stack into a markedly lighter line
-// right where the straight ring meets the curve. The backdrop layer makes
-// the flare opaque over everything it covers, so the arc reads the same tone
-// whether it crosses the ring or the bare strip.
-//
-// That layer must be --sidebar, not --app-shell: the tab strip sits on the
-// sidebar wrapper, which paints bg-sidebar whenever the inset-variant app
-// sidebar is mounted (sidebar.tsx's has-data-[variant=inset]:bg-sidebar).
-// In dark mode --app-shell is markedly darker than --sidebar, so using it
-// here printed a visible dark square under each bottom corner of the active
-// tab. In light mode the two tokens share one value.
+// The active tab flares into the content surface through concave corners.
+// An opaque sidebar backing prevents its translucent arc from stacking with
+// the content card's top ring.
 const TAB_FLARE_RADIUS = 10;
 const tabFlareBackground = (side: "left" | "right") => {
   const r = TAB_FLARE_RADIUS;
@@ -354,13 +335,8 @@ function SortableTabItem({
               isDragging && "opacity-60",
             )}
           >
-            {/* bg-clip-padding keeps the page-canvas fill out from under the
-                1px border. In dark mode --surface-border is translucent
-                (oklch(1 0 0 / 10%)), so a fill behind it would tint this
-                keyline lighter than the flare arcs and the content card's
-                ring, which both composite over the sidebar wrapper's fill.
-                That leaves a visible step exactly where the tab merges into
-                the frame. */}
+            {/* Keep the fill inside the translucent keyline so it matches the
+                flare arcs and content card ring. */}
             <span className="absolute inset-x-0 top-0 bottom-2.5 rounded-t-lg border border-b-0 border-surface-border bg-page-canvas bg-clip-padding" />
             <span className="absolute inset-x-0 bottom-0 h-2.5 bg-page-canvas" />
             <span

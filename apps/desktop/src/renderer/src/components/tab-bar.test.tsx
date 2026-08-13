@@ -247,10 +247,7 @@ describe("TabBar active-tab title persistence", () => {
 });
 
 describe("TabBar merged-tab chrome", () => {
-  // Dark mode's --surface-border is translucent, so a fill painted under the
-  // cap's own border tints its keyline lighter than the flare arcs and the
-  // content card's ring, leaving a visible step where the tab meets the frame.
-  // bg-clip-padding keeps the fill inside the border box.
+  // Keep the fill inside the translucent keyline so the merged border is even.
   it("keeps the active tab's page-canvas fill out from under its keyline", () => {
     const { getByLabelText } = render(<TabBar />);
     const cap = getByLabelText("Issues")
@@ -264,17 +261,7 @@ describe("TabBar merged-tab chrome", () => {
     );
   });
 
-  // The flare's bottom row sits on top of the content card's top ring. Both
-  // draw --surface-border, so in dark mode the arc would composite over the
-  // ring rather than replace it and the two translucent keylines would stack
-  // into a markedly lighter line right at the straight-to-curve junction. An
-  // opaque layer under the gradient makes the flare replace whatever it
-  // covers.
-  //
-  // That layer must be --sidebar, the tab strip's real backdrop (the sidebar
-  // wrapper paints bg-sidebar while the inset-variant app sidebar is
-  // mounted). --app-shell is markedly darker in dark mode and printed a
-  // visible dark square under each bottom corner of the active tab.
+  // The opaque sidebar backing keeps the flare and card keylines from stacking.
   it("paints each flare on an opaque layer matching the strip backdrop", () => {
     const { getByLabelText } = render(<TabBar />);
     const flares = getByLabelText("Issues")
