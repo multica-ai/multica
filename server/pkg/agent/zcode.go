@@ -21,21 +21,21 @@ var zcodeBlockedArgs = map[string]blockedArgMode{
 	"--resume": blockedWithValue,
 }
 
-// zcodeBackend implements Backend by spawning the ZCode CLI
-// (https://github.com/kingsword09/zcode-cli) in non-interactive JSON summary
-// mode (`zcode --prompt <prompt> --json [--resume <sessionId>] [--cwd <dir>]`)
-// and parsing the single JSON object it prints on stdout when the turn ends.
+// zcodeBackend implements Backend by spawning the ZCode CLI in non-interactive
+// JSON summary mode (`zcode --prompt <prompt> --json [--resume <sessionId>]
+// [--cwd <dir>]`) and parsing the single JSON object it prints on stdout when
+// the turn ends.
 //
-// This is the LEGACY non-streaming backend, retained for reference. The
-// agent.New() factory now returns zcodeStreamBackend (zcode_stream.go), which
-// drives `--stream-json` and surfaces tool calls / thinking / incremental text
-// as live Messages. This file documents the original --json contract and keeps
-// the zcodeJSONResult shape available should a fallback to the summary mode
-// ever be needed (e.g. for an older zcode-cli that lacks --stream-json).
+// This is the CAPABILITY-GATED FALLBACK. The agent.New("zcode") factory
+// returns zcodeStreamBackend, which at Execute time probes whether the
+// installed zcode CLI advertises --stream-json. The published zcode-app-cli
+// only supports --json, so a standard install lands here; a streaming-enabled
+// build (zcode-cli-stream, or a future upstream release) takes the streaming
+// path instead. Both paths are covered by tests.
 //
 // ZCode is a terminal client for the official ZCode Desktop agent runtime
-// (a GLM-family runtime). The legacy `--prompt --json` mode runs a whole turn
-// and prints one summary object:
+// (a GLM-family runtime). The `--prompt --json` mode runs a whole turn and
+// prints one summary object:
 //
 //	{"sessionId":"sess_...","response":"<final text>","usage":{...}}
 //

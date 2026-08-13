@@ -7,21 +7,27 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
-// zcodeStreamBackend drives the ZCode CLI in streaming NDJSON mode
-// (`zcode --prompt <prompt> --stream-json [--resume <sessionId>] [--cwd <dir>]`).
+// zcodeStreamBackend is the entry point the agent.New("zcode") factory returns.
+// At Execute time it probes whether the installed zcode CLI advertises
+// --stream-json:
 //
-// This backend requires zcode-app-cli with the streaming patch (fork
-// tornado404/zcode-cli, branch feat/stream-json-output) or any upstream release
-// that ships equivalent --stream-json support. The event schema is intentionally
-// qwen-compatible: zcode-cli's patch maps its internal runtime events
-// (model_streaming, tool_call_*, turn_complete) into the same
-// {type, message:{content:[...]}} shape qwen emits, so this backend reuses the
-// qwen event/message/content-block types and the shared streaming finalize
-// machinery (finalizeStreamResult, streamTerminalState, newAgentStreamScanner,
-// trySend) unchanged.
+//   - If it does (the streaming-enabled zcode-cli-stream fork, or any future
+//     upstream release that ships --stream-json), Execute drives
+//     `zcode --prompt <prompt> --stream-json` and surfaces thinking, tool
+//     calls, tool results, and incremental text as live Messages.
+//   - If it does NOT (the published zcode-app-cli, which only supports --json),
+//     Execute delegates to zcodeBackend, the --json summary path. This keeps a
+//     standard install working instead of failing every turn on an unknown flag.
+//
+// The event schema on the streaming path is intentionally qwen-compatible:
+// zcode-cli's --stream-json emits the same {type, message:{content:[...]}}
+// shape qwen emits, so this backend reuses the qwen event/message/content-block
+// types and the shared streaming finalize machinery (finalizeStreamResult,
+// streamTerminalState, newAgentStreamScanner, trySend) unchanged.
 //
 // Unlike qwen, zcode has no CLI model override (the model is fixed by
 // ~/.zcode/cli/config.json), so the model bucket falls back to "zcode" when no
@@ -30,6 +36,48 @@ import (
 // the daemon to feed back as --resume on the next turn.
 type zcodeStreamBackend struct {
 	cfg Config
+}
+
+// zcodeStreamCapability caches the --stream-json capability probe result per
+// executable path for the life of the process. --help output is a static
+// property of a binary, so re-running it per turn would add startup latency
+// for no benefit; the cache keys on the resolved path so two different builds
+// of zcode (one streaming, one not) never share a result.
+var zcodeStreamCapability sync.Map // execName (string) -> supports (bool)
+
+// zcodeStreamCapabilityProbe is the function that actually probes a binary.
+// It is a package-level variable so tests can substitute a stub; production
+// code calls it through zcodeSupportsStreamJSON, which memoizes the result.
+var zcodeStreamCapabilityProbe = probeZcodeStreamCapability
+
+// zcodeSupportsStreamJSON reports whether the zcode binary at execName
+// advertises the --stream-json flag in its --help output. This is the
+// capability gate that selects the streaming path vs. the --json fallback.
+//
+// Failures (binary missing, --help non-zero, exec error) report false so the
+// backend degrades to the universally-supported --json mode rather than
+// failing every turn on an unknown flag. The result is cached: --help is a
+// static property of a binary, and re-running it per turn would only add
+// startup latency.
+func zcodeSupportsStreamJSON(execName string) bool {
+	if v, ok := zcodeStreamCapability.Load(execName); ok {
+		return v.(bool)
+	}
+	supported := zcodeStreamCapabilityProbe(execName)
+	zcodeStreamCapability.Store(execName, supported)
+	return supported
+}
+
+// probeZcodeStreamCapability runs `zcode --help` and reports whether the flag
+// is advertised. --help text is read from both stdout and stderr (CLIs differ
+// on which stream they use) and a non-zero exit is tolerated (some CLIs exit
+// non-zero on --help); the decision is purely whether the flag token appears.
+func probeZcodeStreamCapability(execName string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, execName, "--help")
+	out, _ := cmd.CombinedOutput()
+	return strings.Contains(string(out), "--stream-json")
 }
 
 // buildZcodeStreamArgs constructs the argv for a streaming zcode turn.
@@ -62,6 +110,17 @@ func (b *zcodeStreamBackend) Execute(ctx context.Context, prompt string, opts Ex
 	}
 	if _, err := exec.LookPath(execName); err != nil {
 		return nil, fmt.Errorf("zcode executable not found at %q: %w", execName, err)
+	}
+
+	// Capability gate: only zcode-cli builds that advertise --stream-json (the
+	// streaming-enabled fork, or a future upstream release that ships it) take
+	// the streaming path. The published zcode-app-cli only supports --json, so
+	// without this gate every task on a standard install would fail on an
+	// unknown flag. Fall back to the JSON summary backend, which is the
+	// universally-supported contract.
+	if !zcodeSupportsStreamJSON(execName) {
+		b.cfg.Logger.Info("zcode --stream-json not advertised; using --json fallback", "exec", execName)
+		return (&zcodeBackend{cfg: b.cfg}).Execute(ctx, prompt, opts)
 	}
 
 	timeout := opts.Timeout
