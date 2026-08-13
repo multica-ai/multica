@@ -205,11 +205,11 @@ func (d *Daemon) refreshAgentAvailability() []string {
 // NOT restart. What a user needs when codex or claude upgrades is that
 // subsequent tasks run the new CLI under the new version's rules — not that
 // Multica's availability tracks a third party's release cadence. An in-place
-// upgrade leaves the pinned path valid, so the new binary is already what
-// launches; the two things left stale are the cached version (which keys
-// version-sensitive policy such as the Codex sandbox, read back through
-// resolveAgentEntry) and the version the server displays. Both are refreshed
-// here with running tasks untouched.
+// POSIX upgrade changes the binary behind the pinned path; a Windows installer
+// upgrade retargets the stable junction resolved by resolveAgentEntry. The two
+// things left stale are the cached version (which keys version-sensitive policy
+// such as the Codex sandbox) and the version the server displays. Both are
+// refreshed here with running tasks untouched.
 //
 // detectBuiltinRuntimes does the probing, which buys three properties for free:
 // probes fan out, a fast failure is retried (runtimeVersionProbeAttempts), and

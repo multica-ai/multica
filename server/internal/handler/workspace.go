@@ -22,11 +22,47 @@ import (
 )
 
 var nonAlpha = regexp.MustCompile(`[^a-zA-Z]`)
+var nonAlphanumeric = regexp.MustCompile(`[^a-zA-Z0-9]`)
 var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+var issuePrefixPattern = regexp.MustCompile(`^[A-Z0-9]{1,10}$`)
 
-// generateIssuePrefix produces a 2-5 char uppercase prefix from a workspace name.
-// Examples: "Jiayuan's Workspace" → "JIA", "My Team" → "MYT", "AB" → "AB".
-func generateIssuePrefix(name string) string {
+// defaultIssuePrefixFromSlug derives a new workspace's default issue prefix
+// from its slug: alphanumerics only, first 4 chars, uppercased.
+// Examples: "acme" → "ACME", "front-end" → "FRON", "team-2" → "TEAM".
+//
+// The slug — not the name — is the derivation source on purpose (MUL-6050).
+// Name is the one field in the create flow that accepts non-ASCII, so deriving
+// an ASCII-only prefix from it forced every CJK/emoji-named workspace onto the
+// same "WS" fallback. Slug is validated as `^[a-z0-9]+(-[a-z0-9]+)*$` and
+// required, so it always yields a non-empty, workspace-specific prefix.
+//
+// Kept byte-for-byte in sync with the client-side preview in
+// packages/views/onboarding/steps/step-workspace.tsx — what the user sees on
+// the create screen has to be what the server would derive.
+func defaultIssuePrefixFromSlug(slug string) string {
+	head := nonAlphanumeric.ReplaceAllString(slug, "")
+	if head == "" {
+		// Unreachable for a validated slug; keeps the function total so a
+		// future caller can never persist an empty prefix.
+		return "WS"
+	}
+	if len(head) > 4 {
+		head = head[:4]
+	}
+	return strings.ToUpper(head)
+}
+
+// legacyIssuePrefixFromName is the pre-MUL-6050 derivation: first 3 ASCII
+// letters of the workspace name, uppercased, "WS" when the name has none.
+//
+// FROZEN — do not "fix" this to match defaultIssuePrefixFromSlug. Its only
+// caller is getIssuePrefix's fallback for workspaces whose stored prefix is
+// empty (rows predating the column). Issue identifiers are computed at read
+// time from the current prefix, so changing what this returns would silently
+// rewrite the identifier of every historical issue in those workspaces.
+// Deliberate product decision: no backfill, existing workspaces stay as they
+// are; only newly created ones follow the slug-derived rule.
+func legacyIssuePrefixFromName(name string) string {
 	letters := nonAlpha.ReplaceAllString(name, "")
 	if len(letters) == 0 {
 		return "WS"
@@ -37,6 +73,24 @@ func generateIssuePrefix(name string) string {
 	}
 	return letters
 }
+
+// normalizeIssuePrefix trims and uppercases a client-supplied issue prefix.
+// An all-whitespace value means "not provided" and reports ("", true) so the
+// caller can fall back to its default. Anything else must be 1-10 chars of
+// A-Z0-9, mirroring the client-side guardrail in
+// packages/views/settings/components/workspace-tab.tsx.
+func normalizeIssuePrefix(raw string) (string, bool) {
+	prefix := strings.ToUpper(strings.TrimSpace(raw))
+	if prefix == "" {
+		return "", true
+	}
+	if !issuePrefixPattern.MatchString(prefix) {
+		return "", false
+	}
+	return prefix, true
+}
+
+const issuePrefixFormatError = "issue prefix must be 1-10 uppercase letters or digits"
 
 type WorkspaceResponse struct {
 	ID          string  `json:"id"`
@@ -180,17 +234,27 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the prefix before opening the transaction: an invalid one is a
+	// 400 that should never cost a connection.
+	issuePrefix := ""
+	if req.IssuePrefix != nil {
+		prefix, ok := normalizeIssuePrefix(*req.IssuePrefix)
+		if !ok {
+			writeError(w, http.StatusBadRequest, issuePrefixFormatError)
+			return
+		}
+		issuePrefix = prefix
+	}
+	if issuePrefix == "" {
+		issuePrefix = defaultIssuePrefixFromSlug(req.Slug)
+	}
+
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create workspace")
 		return
 	}
 	defer tx.Rollback(r.Context())
-
-	issuePrefix := generateIssuePrefix(req.Name)
-	if req.IssuePrefix != nil && strings.TrimSpace(*req.IssuePrefix) != "" {
-		issuePrefix = strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
-	}
 
 	qtx := h.Queries.WithTx(tx)
 	ws, err := qtx.CreateWorkspace(r.Context(), db.CreateWorkspaceParams{
@@ -339,7 +403,11 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Repos = reposJSON
 	}
 	if req.IssuePrefix != nil {
-		prefix := strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
+		prefix, ok := normalizeIssuePrefix(*req.IssuePrefix)
+		if !ok {
+			writeError(w, http.StatusBadRequest, issuePrefixFormatError)
+			return
+		}
 		if prefix != "" {
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
 		}
@@ -1201,6 +1269,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete squads and skills",
 			run:  func() error { return qtx.DeleteWorkspaceSquadsAndSkills(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete plugin data",
+			run:  func() error { return qtx.DeleteWorkspacePluginData(ctx, requester.WorkspaceID) },
 		},
 		{
 			name: "delete agents",

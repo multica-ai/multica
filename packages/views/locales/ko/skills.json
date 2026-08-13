@@ -67,6 +67,7 @@
   "actions": {
     "row_menu": "작업",
     "add_to_agent": "에이전트에 추가",
+    "refresh": "소스에서 업데이트",
     "my_agents": "내 에이전트",
     "other_agents": "다른 에이전트",
     "no_agents": "사용 가능한 에이전트가 없습니다",
@@ -139,6 +140,23 @@
     "toast_save_failed": "스킬을 저장하지 못했습니다",
     "toast_deleted": "스킬을 삭제했습니다",
     "toast_delete_failed": "스킬을 삭제하지 못했습니다",
+    "refresh": {
+      "button": "업데이트",
+      "tooltip": "소스에서 스킬을 다시 다운로드합니다",
+      "source_github": "GitHub",
+      "source_skills_sh": "Skills.sh",
+      "source_clawhub": "ClawHub",
+      "toast_success": "{{source}}에서 스킬을 업데이트했습니다",
+      "toast_failed": "스킬 업데이트에 실패했습니다",
+      "dialog": {
+        "title": "소스에서 업데이트할까요?",
+        "description": "\"{{name}}\"을(를) {{source}}에서 다시 다운로드하여 이름, 설명, SKILL.md, 파일을 최신 버전으로 교체합니다.",
+        "warning": "이 스킬에 대한 로컬 편집 내용은 덮어쓰기됩니다. 에이전트 할당, 라벨, 작성자는 유지됩니다.",
+        "cancel": "취소",
+        "confirm": "업데이트",
+        "refreshing": "업데이트하는 중..."
+      }
+    },
     "delete_dialog": {
       "title": "스킬을 삭제할까요?",
       "description_with_agents_other": "\"{{name}}\"을(를) 영구 삭제하고 현재 사용 중인 에이전트 {{count}}개에서 제거합니다.",

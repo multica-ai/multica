@@ -463,6 +463,14 @@
       "intro_prefix": "Injected into the agent process at launch (e.g. ",
       "intro_separator": ", ",
       "intro_suffix": ").",
+      "bulk_edit_action": "Bulk edit",
+      "row_edit_action": "Edit as rows",
+      "bulk_placeholder": "API_KEY=value\nBASE_URL=https://example.com",
+      "bulk_plaintext_notice": "Values are shown in plain text while bulk editing.",
+      "bulk_unsupported_toast": "\"{{key}}\" can't be shown as text — edit it as a row",
+      "parse_error_malformed": "Line {{line}} isn't a KEY=value assignment",
+      "parse_error_duplicate": "Duplicate key \"{{key}}\" on line {{line}}",
+      "paste_invalid_toast": "Couldn't parse pasted environment variables",
       "key_placeholder": "KEY",
       "value_placeholder": "value",
       "show_value_aria": "Show value",
@@ -830,7 +838,10 @@
     "details_cache_read": "Cache read",
     "details_cache_write": "Cache write",
     "details_cost": "Cost",
-    "usage_chip_title": "Tokens and estimated cost for this run"
+    "usage_chip_title": "Tokens and estimated cost for this run",
+    "details_branch": "Branch",
+    "details_reason": "Reason",
+    "copy_branch": "Copy branch name"
   },
   "task_failure": {
     "agent_error": "Agent execution error",

@@ -23,7 +23,7 @@ import { StatusIcon } from "./status-icon";
 import { PriorityIcon } from "./priority-icon";
 import { IssueActionsContextMenu } from "../actions";
 import { sortIssues } from "../utils/sort";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
 // Date utilities — everything is UTC-day-aligned so a `due_date` ISO string
@@ -123,7 +123,7 @@ function GanttAxis({
   todayOffsetDays: number;
   width: number;
 }) {
-  const locale = typeof navigator !== "undefined" ? navigator.language : "en";
+  const locale = useLocale();
   const totalDays = daysBetween(range.start, range.end);
 
   const monthBlocks = useMemo(() => {
@@ -316,6 +316,7 @@ function ScheduledRow({
   totalDays: number;
 }) {
   const { t } = useT("issues");
+  const locale = useLocale();
   const p = useWorkspacePaths();
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery({
@@ -349,7 +350,6 @@ function ScheduledRow({
     }
   }
 
-  const locale = typeof navigator !== "undefined" ? navigator.language : "en";
   const fmt = (d: Date) =>
     d.toLocaleDateString(locale, {
       month: "short",

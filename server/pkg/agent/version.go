@@ -34,6 +34,19 @@ const MinQuickCreateCLIVersion = "0.2.21"
 // older floor above; only requests using these optional fields need this gate.
 const MinQuickCreateFieldsCLIVersion = "0.4.3"
 
+// MinLocalWorktreeCLIVersion is the first daemon release that implements
+// execution_mode=worktree for local_directory resources (MUL-5707). A daemon
+// older than this does not know the field exists: it json-skips it and runs
+// the task IN PLACE, editing the working copy the user explicitly asked to
+// isolate. (Daemons FROM this version refuse unknown future modes themselves —
+// see localDirectoryAssignment.ValidateExecutionMode — but a daemon that
+// predates the field cannot refuse what it cannot see, so the server has to.)
+// The handler rejects saving a worktree-mode resource while the owning
+// daemon's registered CLI version is missing or below this floor. Hard
+// requirement, fail closed. Keep in sync with the release that actually ships
+// worktree mode when tagging.
+const MinLocalWorktreeCLIVersion = "0.4.24"
+
 // MinHandoffCLIVersion is the lowest multica CLI version whose daemon renders
 // the assignment handoff note into the run's opening prompt + issue_context.md
 // (MUL-3375). Unlike quick-create this is a SOFT gate: assigning an issue with

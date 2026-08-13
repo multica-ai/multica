@@ -114,7 +114,8 @@
       "cancel": "Cancel",
       "confirm": "Delete",
       "confirming": "Deleting..."
-    }
+    },
+    "row_actions_aria": "Chat actions"
   },
   "window": {
     "new_chat_tooltip": "New chat",
@@ -219,7 +220,8 @@
     "pinned": "Pinned",
     "archive": "Archive",
     "unarchive": "Unarchive",
-    "archived_title": "Archived"
+    "archived_title": "Archived",
+    "row_actions_aria": "Chat actions"
   },
   "header": {
     "view_profile": "View agent profile",

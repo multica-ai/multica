@@ -346,6 +346,14 @@
       "intro_prefix": "エージェントプロセスの起動時に注入されます（例: ",
       "intro_separator": ", ",
       "intro_suffix": "）。",
+      "bulk_edit_action": "一括編集",
+      "row_edit_action": "個別編集",
+      "bulk_placeholder": "API_KEY=値\nBASE_URL=https://example.com",
+      "bulk_plaintext_notice": "一括編集中は値が平文で表示されます。",
+      "bulk_unsupported_toast": "\"{{key}}\" の値はテキストで表現できません。個別編集で変更してください",
+      "parse_error_malformed": "{{line}} 行目が KEY=value 形式ではありません",
+      "parse_error_duplicate": "{{line}} 行目のキー \"{{key}}\" が重複しています",
+      "paste_invalid_toast": "貼り付けた環境変数を解析できませんでした",
       "key_placeholder": "KEY",
       "value_placeholder": "value",
       "show_value_aria": "値を表示",
@@ -708,7 +716,10 @@
     "details_cache_read": "キャッシュ読み取り",
     "details_cache_write": "キャッシュ書き込み",
     "details_cost": "費用",
-    "usage_chip_title": "この実行のトークンと推定費用"
+    "usage_chip_title": "この実行のトークンと推定費用",
+    "details_branch": "ブランチ",
+    "details_reason": "理由",
+    "copy_branch": "ブランチ名をコピー"
   },
   "task_failure": {
     "agent_error": "エージェント実行エラー",

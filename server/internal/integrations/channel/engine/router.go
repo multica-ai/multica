@@ -114,6 +114,13 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 // delay dwarfs every pipeline budget.
 const DefaultMediaTimeout = 45 * time.Second
 
+// Dedup finalization is a short durability step after the claimed pipeline has
+// selected a terminal outcome. The request context may already be cancelled
+// (notably after repeated route conflicts), so preserve its values while giving
+// Mark/Release a bounded opportunity to commit instead of stranding a claim
+// until stale reclaim.
+const dedupFinalizeTimeout = time.Second
+
 type mediaQueueEntry struct {
 	tail chan struct{}
 }
@@ -273,8 +280,10 @@ func (r *Router) dispatch(ctx context.Context, set ResolverSet, msg channel.Inbo
 
 	res, finalize, err := r.processClaimed(ctx, set, msg, inst, claimToken, bareFresh)
 
-	if claimed {
-		r.applyFinalize(ctx, set, inst.ID, msg.MessageID, claimToken, finalize)
+	if claimed && finalize != finalizeNone {
+		finalizeCtx, finalizeCancel := context.WithTimeout(context.WithoutCancel(ctx), dedupFinalizeTimeout)
+		r.applyFinalize(finalizeCtx, set, inst.ID, msg.MessageID, claimToken, finalize)
+		finalizeCancel()
 	}
 
 	// ErrClaimLost: another worker holds the claim. Surface as duplicate.
@@ -322,37 +331,52 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}
 	}
 
-	// 5. Resolve the chat_session. Group sessions are created by the INSTALLER
-	//    (stable workspace identity that won't churn with group membership);
-	//    p2p sessions by the sole human sender.
+	// Platform discovery that exposes a conversation to workspace members must
+	// run only after both the @bot gate and sender membership validation. The
+	// resolver may also finalize a platform-specific target selected by that
+	// newly discovered route.
+	if set.Validated != nil {
+		inst, err = set.Validated.ResolveValidatedInbound(ctx, inst, identity, msg)
+		if err != nil {
+			if errors.Is(err, ErrTargetAgentArchived) {
+				return Result{
+					Outcome:        OutcomeAgentArchived,
+					InstallationID: inst.ID,
+					Sender:         msg.Source.SenderID,
+				}, finalizeMark, nil
+			}
+			return Result{}, finalizeRelease, fmt.Errorf("resolve validated inbound route: %w", err)
+		}
+	}
+
+	// 5-6. Resolve the chat_session, then append the message and dedup Mark as
+	// the durable transition point. A platform route fence may reject the append
+	// when a concurrent reassignment committed first. Resolve the latest route
+	// and retry this same claimed message in-process: DingTalk has already ACKed
+	// the callback and will not redeliver it.
 	sessionCreator := identity.UserID
 	if msg.Source.ChatType == channel.ChatTypeGroup {
 		sessionCreator = inst.InstallerUserID
 	}
-	sessionID, err := set.Session.EnsureSession(ctx, EnsureSessionParams{
-		Installation: inst,
-		Sender:       sessionCreator,
-		Message:      msg,
-	})
-	if err != nil {
-		// Single tx; an error rolled it back, nothing landed. Release.
-		return Result{}, finalizeRelease, fmt.Errorf("ensure chat session: %w", err)
-	}
-	if bareFresh {
-		// ForceFresh is a task-dispatch property. A bare command has no useful
-		// task to dispatch, so remember the intent and apply it to the next real
-		// message instead of writing or running an empty turn.
-		if err := set.Session.MarkPendingFresh(ctx, sessionID); err != nil {
-			return Result{}, finalizeRelease, fmt.Errorf("persist fresh command: %w", err)
+	refreshChangedRoute := func() (Result, bool, error) {
+		if set.Validated == nil {
+			return Result{}, false, ErrRouteChanged
 		}
-		return Result{
-			Outcome:        OutcomeFreshPending,
-			InstallationID: inst.ID,
-			ChatSessionID:  sessionID,
-			Sender:         msg.Source.SenderID,
-		}, finalizeMark, nil
+		var routeErr error
+		inst, routeErr = set.Validated.ResolveValidatedInbound(ctx, inst, identity, msg)
+		if errors.Is(routeErr, ErrTargetAgentArchived) {
+			return Result{
+				Outcome:        OutcomeAgentArchived,
+				InstallationID: inst.ID,
+				Sender:         msg.Source.SenderID,
+			}, true, nil
+		}
+		if routeErr != nil {
+			return Result{}, false, fmt.Errorf("refresh validated inbound route: %w", routeErr)
+		}
+		return Result{}, false, nil
 	}
-	// 6. Append message + in-tx dedup Mark — the durable transition point.
+
 	// The media budget is persisted only when the message actually carries
 	// media: a plain text message must never wait behind the media semaphore
 	// or fall back to the 45s deadline after a crash. It is a relative
@@ -377,19 +401,70 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	if resolveMedia {
 		mediaPendingSeconds = r.mediaTimeout.Seconds()
 	}
-	appendRes, err := set.Session.AppendMessage(ctx, AppendParams{
-		SessionID:           sessionID,
-		Sender:              identity.UserID,
-		InstallationID:      inst.ID,
-		Message:             msg,
-		ClaimToken:          claimToken,
-		MediaPendingSeconds: mediaPendingSeconds,
-	})
-	if err != nil {
-		if errors.Is(err, ErrClaimLost) {
-			return Result{}, finalizeNone, err
+
+	var sessionID pgtype.UUID
+	var appendRes AppendResult
+	for {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return Result{}, finalizeRelease, ctxErr
 		}
-		return Result{}, finalizeRelease, fmt.Errorf("append user message: %w", err)
+		sessionID, err = set.Session.EnsureSession(ctx, EnsureSessionParams{
+			Installation: inst,
+			Sender:       sessionCreator,
+			Message:      msg,
+		})
+		if errors.Is(err, ErrRouteChanged) {
+			if result, done, refreshErr := refreshChangedRoute(); refreshErr != nil {
+				return Result{}, finalizeRelease, refreshErr
+			} else if done {
+				return result, finalizeMark, nil
+			}
+			continue
+		}
+		if err != nil {
+			// Single tx; an error rolled it back, nothing landed. Release.
+			return Result{}, finalizeRelease, fmt.Errorf("ensure chat session: %w", err)
+		}
+		if bareFresh {
+			// ForceFresh is a task-dispatch property. A bare command has no useful
+			// task to dispatch, so remember the intent and apply it to the next real
+			// message instead of writing or running an empty turn.
+			if err := set.Session.MarkPendingFresh(ctx, sessionID); err != nil {
+				return Result{}, finalizeRelease, fmt.Errorf("persist fresh command: %w", err)
+			}
+			return Result{
+				Outcome:        OutcomeFreshPending,
+				InstallationID: inst.ID,
+				ChatSessionID:  sessionID,
+				Sender:         msg.Source.SenderID,
+			}, finalizeMark, nil
+		}
+
+		appendRes, err = set.Session.AppendMessage(ctx, AppendParams{
+			SessionID:           sessionID,
+			Sender:              identity.UserID,
+			InstallationID:      inst.ID,
+			AgentID:             inst.AgentID,
+			RouteRevision:       inst.RouteRevision,
+			Message:             msg,
+			ClaimToken:          claimToken,
+			MediaPendingSeconds: mediaPendingSeconds,
+		})
+		if errors.Is(err, ErrRouteChanged) {
+			if result, done, refreshErr := refreshChangedRoute(); refreshErr != nil {
+				return Result{}, finalizeRelease, refreshErr
+			} else if done {
+				return result, finalizeMark, nil
+			}
+			continue
+		}
+		if err != nil {
+			if errors.Is(err, ErrClaimLost) {
+				return Result{}, finalizeNone, err
+			}
+			return Result{}, finalizeRelease, fmt.Errorf("append user message: %w", err)
+		}
+		break
 	}
 
 	// Post-append paths must NOT Release (chat_message + Mark already

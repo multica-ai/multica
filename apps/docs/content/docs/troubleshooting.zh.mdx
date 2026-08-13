@@ -203,6 +203,8 @@ netstat -ano | findstr :8080       # Windows
 | Docker backend | `docker compose -f docker-compose.selfhost.yml logs -f backend` |
 | 浏览器 | 开发者工具中的 Console 和 Network |
 
+哪个文件是当前活跃的日志，取决于守护进程启动时使用的 profile；早前守护进程残留的旧日志同样能正常读出来，最容易让人调错文件。不要靠猜去开文件：`multica daemon logs` 会在输出日志内容前先打印它解析到的绝对路径。读命名 profile 的日志时加上 `--profile <name>`。
+
 需要直接观察守护进程启动过程时，可以改为前台运行：
 
 ```bash

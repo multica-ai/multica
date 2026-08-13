@@ -207,6 +207,7 @@ API key 与 base URL 都为空时，服务端 LLM 生成关闭，调用方会使
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 检查更新的间隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二进制被带外替换（`brew upgrade`、重新下载、本地构建）后重启到新二进制。与 `MULTICA_DAEMON_AUTO_UPDATE` 相互独立 |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 执行任务工作目录的根目录 |
+| `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | 仅适用于 Linux/macOS。私有 task 临时目录的父目录；必须是现有、可写的绝对路径，无效值会使 task 启动失败，不会回退到 `/tmp`。请选择较短的路径——子工具可能会在其中绑定 AF_UNIX socket；Linux 的 `sun_path` 上限为 108 字节，macOS 为 104 字节 |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 保留执行任务目录用于调试 |
 
 各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 和 `MULTICA_<PROVIDER>_MODEL` 覆盖命令路径与默认模型。QwenPaw 是例外：它没有 `MULTICA_QWENPAW_MODEL`，因为 Multica 不会向它传模型，详见 [AI 编程工具对比](/providers#模型来源)。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：

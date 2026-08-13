@@ -136,11 +136,10 @@ Other defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
 are typed `[]string`/`any` and marshaled as-is — the JSON-shape rejection
 happens in the CLI, not the create handler.
 
-The 1–50 concurrency range applies consistently to manual create, update, and
-the create-from-template HTTP path. On create paths, an omitted field defaults
-to 6 while an explicitly supplied 0 is rejected; on update, omission preserves
-the current value. The CLI performs the same range check before sending create
-or update requests.
+The 1–50 concurrency range applies consistently to create and update. On
+create, an omitted field defaults to 6 while an explicitly supplied 0 is
+rejected; on update, omission preserves the current value. The CLI performs the
+same range check before sending create or update requests.
 
 `thinking_level` is validated only at the provider level: fixed-vocabulary
 providers reject an unrecognized literal, while dynamic-vocabulary providers

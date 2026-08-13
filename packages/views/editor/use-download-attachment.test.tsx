@@ -295,6 +295,64 @@ describe("useDownloadAttachment (web)", () => {
     expect(clickSpy).not.toHaveBeenCalled();
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
   });
+
+  it("prefers the forced-attachment URL over the capability and slug endpoint", async () => {
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/pic.png",
+      // A proxy capability is present, but the forced-attachment URL wins.
+      download_url:
+        "/api/attachments/att-1/signed-download?exp=1800000060&sig=load",
+      attachment_download_url:
+        "/api/attachments/att-1/signed-download?exp=1800000060&sig=dl&dl=1",
+      filename: "pic.png",
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const appendSpy = vi.spyOn(document.body, "appendChild");
+
+    const { result } = renderHook(() => useDownloadAttachment());
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(clickSpy).toHaveBeenCalledOnce();
+    const anchor = appendSpy.mock.calls
+      .map(([node]) => node)
+      .find((node): node is HTMLAnchorElement =>
+        node instanceof HTMLAnchorElement,
+      );
+    expect(anchor).toBeDefined();
+    // The forced-attachment capability is used verbatim (same-origin base).
+    expect(anchor!.getAttribute("href")).toBe(
+      "/api/attachments/att-1/signed-download?exp=1800000060&sig=dl&dl=1",
+    );
+  });
+
+  it("uses the forced-attachment URL even when the workspace slug is missing", async () => {
+    useWorkspaceSlugMock.mockReturnValueOnce(null);
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/pic.png",
+      attachment_download_url:
+        "/api/attachments/att-1/signed-download?exp=1800000060&sig=dl&dl=1",
+      filename: "pic.png",
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    const { result } = renderHook(() => useDownloadAttachment());
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    // The capability carries its own credential, so a missing slug — which only
+    // gates the legacy fallback — must not block it.
+    expect(clickSpy).toHaveBeenCalledOnce();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
 });
 
 describe("useDownloadAttachment (desktop)", () => {
@@ -443,5 +501,29 @@ describe("useDownloadAttachment (desktop)", () => {
     });
 
     expect(downloadURL).toHaveBeenCalledWith(SIGNED_URL);
+  });
+
+  it("prefers the forced-attachment URL over download_url on desktop", async () => {
+    const downloadURL = vi.fn();
+    (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
+      downloadURL,
+    };
+    const forced =
+      "https://cdn.example.test/att-1.png?response-content-disposition=attachment&Policy=p&Signature=s&Key-Pair-Id=k";
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/pic.png",
+      download_url: SIGNED_URL,
+      attachment_download_url: forced,
+      filename: "pic.png",
+    });
+
+    const { result } = renderHook(() => useDownloadAttachment());
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    // The forced-attachment URL wins over the load-intent download_url.
+    expect(downloadURL).toHaveBeenCalledWith(forced);
   });
 });

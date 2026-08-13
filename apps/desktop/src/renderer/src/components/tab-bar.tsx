@@ -48,14 +48,23 @@ const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
 
 // Chrome-style merged tab: the active tab shares the content surface's fill
 // and flares into it through concave bottom corners. Each flare is a small
-// square whose radial gradient carves a quarter-circle notch (shell shows
-// through), strokes a 1px arc that continues the tab's side border into the
+// square whose radial gradient carves a quarter-circle notch (the shell fill
+// below), strokes a 1px arc that continues the tab's side border into the
 // content card's top ring, and fills the rest with the surface color. The
 // 0.4px stop spread anti-aliases the arc.
+//
+// The gradient sits on an opaque --app-shell layer rather than letting the
+// shell show through, because the flare's bottom row overlaps the content
+// card's top ring. In dark mode --surface-border is translucent
+// (oklch(1 0 0 / 10%)), so the arc would composite over the ring instead of
+// replacing it and the two keylines would stack into a markedly lighter line
+// right where the straight ring meets the curve. The shell layer makes the
+// flare opaque over everything it covers, so the arc reads the same tone
+// whether it crosses the ring or the bare shell.
 const TAB_FLARE_RADIUS = 10;
 const tabFlareBackground = (side: "left" | "right") => {
   const r = TAB_FLARE_RADIUS;
-  return `radial-gradient(circle at top ${side}, transparent ${r - 1.2}px, var(--surface-border) ${r - 0.8}px, var(--surface-border) ${r - 0.2}px, var(--page-canvas) ${r + 0.2}px)`;
+  return `radial-gradient(circle at top ${side}, transparent ${r - 1.2}px, var(--surface-border) ${r - 0.8}px, var(--surface-border) ${r - 0.2}px, var(--page-canvas) ${r + 0.2}px), var(--app-shell)`;
 };
 
 type TabSnapshot = {
@@ -338,7 +347,13 @@ function SortableTabItem({
               isDragging && "opacity-60",
             )}
           >
-            <span className="absolute inset-x-0 top-0 bottom-2.5 rounded-t-lg border border-b-0 border-surface-border bg-page-canvas" />
+            {/* bg-clip-padding keeps the page-canvas fill out from under the
+                1px border. In dark mode --surface-border is translucent
+                (oklch(1 0 0 / 10%)), so a fill behind it would tint this
+                keyline lighter than the flare arcs and the content card's
+                ring, which both composite over --app-shell. That leaves a
+                visible step exactly where the tab merges into the frame. */}
+            <span className="absolute inset-x-0 top-0 bottom-2.5 rounded-t-lg border border-b-0 border-surface-border bg-page-canvas bg-clip-padding" />
             <span className="absolute inset-x-0 bottom-0 h-2.5 bg-page-canvas" />
             <span
               className="absolute bottom-0 size-2.5"

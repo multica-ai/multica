@@ -144,3 +144,27 @@ function meetsMinCliVersion(detected: string | undefined | null, minimum: string
   if (!parsed) return false;
   return !lessThan(parsed, parseSemver(minimum)!);
 }
+
+/**
+ * Minimum daemon CLI version that implements worktree mode for
+ * `local_directory` resources (`execution_mode: "worktree"`).
+ *
+ * Server twin: `MinLocalWorktreeCLIVersion` in `server/pkg/agent/version.go`.
+ * Keep the two in lockstep — the server refuses to SAVE a worktree resource
+ * below this floor, and this constant only exists so the UI can say so before
+ * the user submits rather than surfacing a bare 422.
+ *
+ * HARD gate, unlike `handoffSupported`: a daemon below the floor does not know
+ * the field exists, so it would run the task in place — editing the working
+ * copy the user asked to isolate. Degrading to "just try it" is not an option.
+ */
+export const MIN_LOCAL_WORKTREE_CLI_VERSION = "0.4.24";
+
+/**
+ * Whether a daemon-reported CLI version can run worktree mode. Missing /
+ * unparsable / below-minimum are `false`; dev-built daemons (git-describe
+ * shape) pass, matching every other gate in this file.
+ */
+export function localWorktreeSupported(detected: string | undefined | null): boolean {
+  return meetsMinCliVersion(detected, MIN_LOCAL_WORKTREE_CLI_VERSION);
+}

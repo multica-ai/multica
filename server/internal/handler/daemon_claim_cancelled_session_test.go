@@ -770,14 +770,14 @@ func TestTerminalReports_TakeChatSessionLockBeforeTask(t *testing.T) {
 			callCtx, cancel := raceCtx()
 			defer cancel()
 			_, err := testHandler.TaskService.CompleteTask(callCtx, parseUUID(taskID),
-				[]byte(`"done"`), "turn2-session", "/tmp/turn2-workdir", false, "")
+				[]byte(`"done"`), "turn2-session", "/tmp/turn2-workdir", "", false, "")
 			return err
 		},
 		"fail": func(taskID string) error {
 			callCtx, cancel := raceCtx()
 			defer cancel()
 			_, err := testHandler.TaskService.FailTask(callCtx, parseUUID(taskID),
-				"boom", "turn2-session", "/tmp/turn2-workdir", "agent_error", false, "")
+				"boom", "turn2-session", "/tmp/turn2-workdir", "", "agent_error", false, "")
 			return err
 		},
 	}
@@ -874,7 +874,7 @@ func TestCancelAndPin_ConcurrentWithTerminalReport(t *testing.T) {
 				callCtx, cancel := raceCtx()
 				defer cancel()
 				_, err := testHandler.TaskService.CompleteTask(callCtx, parseUUID(taskID),
-					[]byte(`"done"`), "turn2-session", "/tmp/turn2-workdir", false, "")
+					[]byte(`"done"`), "turn2-session", "/tmp/turn2-workdir", "", false, "")
 				return err
 			},
 		},
@@ -904,7 +904,7 @@ func TestCancelAndPin_ConcurrentWithTerminalReport(t *testing.T) {
 				callCtx, cancel := raceCtx()
 				defer cancel()
 				_, err := testHandler.TaskService.FailTask(callCtx, parseUUID(taskID),
-					"boom", "turn3-session", "/tmp/turn3-workdir", "agent_error", false, "")
+					"boom", "turn3-session", "/tmp/turn3-workdir", "", "agent_error", false, "")
 				return err
 			},
 		},

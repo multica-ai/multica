@@ -198,7 +198,14 @@ export function createEditorExtensions(
 
   return [
     StarterKit.configure({
-      heading: { levels: [1, 2, 3] },
+      // Every level Markdown can express. The Markdown parser keeps the source
+      // depth of `#`…`######`, but Heading.renderHTML falls back to `levels[0]`
+      // for any level it was not configured with — so `levels: [1, 2, 3]` made
+      // the editor draw every H4–H6 as an H1 (MUL-6060). The same list drives
+      // parseHTML, so it also decides whether a pasted `<h4>` survives as a
+      // heading. This is about rendering headings the content already has; the
+      // bubble menu still offers only H1–H3 as authoring choices.
+      heading: { levels: [1, 2, 3, 4, 5, 6] },
       link: false,
       codeBlock: false,
       // Underline has no Markdown representation. Tiptap's extension serializes

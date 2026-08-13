@@ -203,6 +203,8 @@ If it is another Multica checkout, run `make stop` in that directory first. Othe
 | Docker backend | `docker compose -f docker-compose.selfhost.yml logs -f backend` |
 | Browser | Console and Network in the developer tools |
 
+Which of those files is the live one depends on the profile the daemon was started with, and a stale log from an earlier daemon still reads perfectly — the easiest way to debug the wrong file. Don't open one by guess: `multica daemon logs` prints the absolute path it resolved before streaming it. Add `--profile <name>` to read a named profile's log.
+
 To observe the daemon's startup directly, run it in the foreground instead:
 
 ```bash

@@ -29,8 +29,8 @@ import (
 // Two failure modes covered:
 //   - Embedded NUL (0x00) — PG rejects with SQLSTATE 22021. Removed.
 //   - Other invalid-UTF-8 byte sequences (e.g. 0x91 = Windows-1252 smart
-//     quote, which crashed agent-template import of skills containing
-//     Windows-encoded prose). `strings.ToValidUTF8` drops them.
+//     quote in imported Windows-encoded prose). `strings.ToValidUTF8` drops
+//     them.
 //
 // Name is kept for compatibility with the many call sites; the behaviour
 // is a strict superset of the original.
@@ -2252,12 +2252,9 @@ func importFetchErrorResponse(ctx context.Context, err error) (int, string) {
 	return http.StatusBadGateway, err.Error()
 }
 
-// finishSkillImport runs the shared tail of every skill import — whether the
-// bundle came from a hosted URL or an uploaded archive (.skill / .zip). It maps
-// the extracted files onto CreateSkillFileRequest, records provenance into
-// config.origin, and creates the skill, routing same-name collisions through
-// the on_conflict strategy.
-func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID, creatorUUID pgtype.UUID, creatorID, strategy string, structuredResult bool, imported *importedSkill) {
+// importedSkillFileRequests maps a fetched bundle's supporting files onto
+// CreateSkillFileRequest, dropping entries whose path fails validateFilePath.
+func importedSkillFileRequests(imported *importedSkill) []CreateSkillFileRequest {
 	files := make([]CreateSkillFileRequest, 0, len(imported.files))
 	for _, f := range imported.files {
 		if !validateFilePath(f.path) {
@@ -2268,6 +2265,16 @@ func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, work
 			Content: f.content,
 		})
 	}
+	return files
+}
+
+// finishSkillImport runs the shared tail of every skill import — whether the
+// bundle came from a hosted URL or an uploaded archive (.skill / .zip). It maps
+// the extracted files onto CreateSkillFileRequest, records provenance into
+// config.origin, and creates the skill, routing same-name collisions through
+// the on_conflict strategy.
+func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID, creatorUUID pgtype.UUID, creatorID, strategy string, structuredResult bool, imported *importedSkill) {
+	files := importedSkillFileRequests(imported)
 
 	// Persist provenance into skill.config.origin so list/detail UI can show
 	// "Imported from GitHub / ClawHub / Skills.sh" and link back to the source.

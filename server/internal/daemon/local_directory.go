@@ -19,13 +19,23 @@ import (
 // constant — keep in sync if the type string is ever renamed.
 const localDirectoryResourceType = "local_directory"
 
+// Execution modes for local_directory resources. Mirrors the server-side
+// constants in handler/project_resource.go — keep in sync. An absent or empty
+// value means in_place, so resources created before worktree mode existed keep
+// their original behavior.
+const (
+	localDirectoryModeInPlace  = "in_place"
+	localDirectoryModeWorktree = "worktree"
+)
+
 // localDirectoryRef mirrors the server-side ref shape for local_directory
 // project resources. Defined locally so the daemon does not have to import
 // the server handler package.
 type localDirectoryRef struct {
-	LocalPath string `json:"local_path"`
-	DaemonID  string `json:"daemon_id"`
-	Label     string `json:"label,omitempty"`
+	LocalPath     string `json:"local_path"`
+	DaemonID      string `json:"daemon_id"`
+	Label         string `json:"label,omitempty"`
+	ExecutionMode string `json:"execution_mode,omitempty"`
 }
 
 // localDirectoryAssignment is the resolved view of a task's local_directory
@@ -38,6 +48,40 @@ type localDirectoryAssignment struct {
 	Ref      localDirectoryRef
 	AbsPath  string // user-provided path, cleaned but not symlink-resolved
 	RealPath string // canonical key for the path mutex
+}
+
+// UsesWorktree reports whether this assignment runs each task in its own git
+// worktree instead of in the user's directory. Worktree tasks skip the per-path
+// mutex entirely — that is the whole point of the mode — so every caller that
+// serialises, cleans up sidecars, or exempts the env root from GC must branch
+// on this rather than on "is there a local_directory assignment at all".
+func (a *localDirectoryAssignment) UsesWorktree() bool {
+	return a != nil && strings.TrimSpace(a.Ref.ExecutionMode) == localDirectoryModeWorktree
+}
+
+// ValidateExecutionMode rejects a mode this daemon does not implement.
+//
+// Falling back to in_place would be the wrong direction, even though it is the
+// older and more conservative code path. execution_mode is how a user asks for
+// ISOLATION, not merely for concurrency: silently running in_place instead
+// would let the agent edit the working copy the user explicitly asked it to
+// stay out of. Losing concurrency is a nuisance; ignoring a request to not
+// touch someone's files is a broken promise. So an unrecognised mode fails the
+// task with a message naming the version skew.
+func (a *localDirectoryAssignment) ValidateExecutionMode() error {
+	if a == nil {
+		return nil
+	}
+	switch strings.TrimSpace(a.Ref.ExecutionMode) {
+	case "", localDirectoryModeInPlace, localDirectoryModeWorktree:
+		return nil
+	default:
+		return fmt.Errorf(
+			"local_directory: this daemon does not support execution_mode %q for %q "+
+				"(update the daemon, or set the resource's execution mode to %q or %q); "+
+				"refusing to run in place, since that would modify a directory the resource asked to isolate",
+			a.Ref.ExecutionMode, a.AbsPath, localDirectoryModeInPlace, localDirectoryModeWorktree)
+	}
 }
 
 // localDirectoryAssignmentForTask returns the local_directory assignment a task

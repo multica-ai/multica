@@ -31,12 +31,6 @@ export type {
   AgentBuilderSessionSummary,
   AgentPermissionScope,
   StoredAgentDraft,
-  AgentTemplate,
-  AgentTemplateSummary,
-  AgentTemplateSkillRef,
-  CreateAgentFromTemplateRequest,
-  CreateAgentFromTemplateResponse,
-  CreateAgentFromTemplateFailure,
   UpdateAgentRequest,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
@@ -152,6 +146,7 @@ export type {
   ProjectResourceRef,
   GithubRepoResourceRef,
   LocalDirectoryResourceRef,
+  LocalDirectoryExecutionMode,
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
@@ -198,9 +193,12 @@ export type {
 } from "./slack";
 export type {
   DingTalkInstallation,
+  DingTalkGroupRoute,
   ListDingTalkInstallationsResponse,
+  ListDingTalkGroupRoutesResponse,
   RegisterDingTalkBYORequest,
   RedeemDingTalkBindingTokenResponse,
+  UpdateDingTalkGroupRouteRequest,
 } from "./dingtalk";
 export type {
   WecomInstallation,

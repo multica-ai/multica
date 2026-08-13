@@ -187,6 +187,7 @@ const (
 	// as Slack's BYO channel installation.
 	EventDingTalkInstallationCreated = "dingtalk_installation:created"
 	EventDingTalkInstallationRevoked = "dingtalk_installation:revoked"
+	EventDingTalkGroupRouteUpdated   = "dingtalk_group_route:updated"
 
 	// WeCom smart-bot installation lifecycle. Same semantics as Lark /
 	// Slack: `created` covers both first install and re-install via

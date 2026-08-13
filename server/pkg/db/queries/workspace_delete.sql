@@ -436,6 +436,9 @@ deleted_channel_chat_bindings AS (
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)
        OR chat_session_id IN (SELECT id FROM ws_sessions)
 ),
+deleted_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE workspace_id = $1
+),
 deleted_channel_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)
@@ -563,6 +566,42 @@ WITH deleted_squads AS (
     DELETE FROM squad WHERE squad.workspace_id = $1
 )
 DELETE FROM skill WHERE skill.workspace_id = $1;
+
+-- name: DeleteWorkspacePluginData :exec
+-- Plugin relationships have no foreign keys or cascades. Delete the append-only
+-- grant/binding history first, then installation rows. Global identity, release,
+-- contribution, and artifact rows survive for other workspaces and historical
+-- execution-manifest attribution.
+WITH installations AS MATERIALIZED (
+    SELECT plugin_installation.id
+    FROM plugin_installation
+    WHERE plugin_installation.workspace_id = $1
+),
+deleted_health AS (
+    DELETE FROM plugin_health
+    WHERE workspace_id = $1
+),
+deleted_execution_manifests AS (
+    DELETE FROM plugin_execution_manifest
+    WHERE workspace_id = $1
+),
+deleted_snapshots AS (
+    DELETE FROM plugin_capability_snapshot
+    WHERE workspace_id = $1
+),
+deleted_workspace_state AS (
+    DELETE FROM plugin_workspace_capability_state
+    WHERE workspace_id = $1
+),
+deleted_bindings AS (
+    DELETE FROM plugin_binding
+    WHERE installation_id IN (SELECT id FROM installations)
+),
+deleted_grants AS (
+    DELETE FROM plugin_grant
+    WHERE installation_id IN (SELECT id FROM installations)
+)
+DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations);
 
 -- name: DeleteWorkspaceAgents :exec
 DELETE FROM agent WHERE agent.workspace_id = $1;

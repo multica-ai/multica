@@ -162,6 +162,7 @@ type Handler struct {
 	DaemonWorkspaceRefresh WorkspaceSetRefreshNotifier
 	Bus                    *events.Bus
 	TaskService            *service.TaskService
+	PluginService          *service.PluginService
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
 	EmailService           *service.EmailService
@@ -384,6 +385,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		DaemonWorkspaceRefresh:       daemonWorkspaceRefresh,
 		Bus:                          bus,
 		TaskService:                  taskSvc,
+		PluginService:                service.NewPluginService(queries, txStarter),
 		IssueService:                 service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		AutopilotService:             service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:                 emailService,
@@ -986,18 +988,33 @@ func splitIdentifier(id string) *identifierParts {
 	return &identifierParts{prefix: id[:idx], number: int32(num)}
 }
 
-// getIssuePrefix fetches the issue_prefix for a workspace.
-// Falls back to generating a prefix from the workspace name if the stored
-// prefix is empty (e.g. workspaces created before the prefix was introduced).
+// issuePrefixForWorkspace resolves a workspace row's effective issue prefix:
+// the configured value, or one generated from the workspace name when the
+// stored prefix is empty (e.g. workspaces created before the prefix was
+// introduced). Split out from getIssuePrefix so callers that already hold the
+// row — such as the GitHub close-intent scan, which must not re-read it — can
+// reuse the rule.
+//
+// The empty-prefix fallback stays on the FROZEN name-based derivation, not the
+// slug-based one new workspaces get (MUL-6050): identifiers are computed at
+// read time, so switching this path would rewrite the identifier of every
+// issue in those legacy workspaces. New workspaces always persist a prefix at
+// creation, so they never reach this branch.
+func issuePrefixForWorkspace(ws db.Workspace) string {
+	if ws.IssuePrefix != "" {
+		return ws.IssuePrefix
+	}
+	return legacyIssuePrefixFromName(ws.Name)
+}
+
+// getIssuePrefix fetches the effective issue_prefix for a workspace, and
+// returns "" when the workspace row cannot be loaded.
 func (h *Handler) getIssuePrefix(ctx context.Context, workspaceID pgtype.UUID) string {
 	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		return ""
 	}
-	if ws.IssuePrefix != "" {
-		return ws.IssuePrefix
-	}
-	return generateIssuePrefix(ws.Name)
+	return issuePrefixForWorkspace(ws)
 }
 
 func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agentID string) (db.Agent, bool) {

@@ -246,6 +246,54 @@ describe("TabBar active-tab title persistence", () => {
   });
 });
 
+describe("TabBar merged-tab chrome", () => {
+  // Dark mode's --surface-border is translucent, so a fill painted under the
+  // cap's own border tints its keyline lighter than the flare arcs and the
+  // content card's ring, leaving a visible step where the tab meets the frame.
+  // bg-clip-padding keeps the fill inside the border box.
+  it("keeps the active tab's page-canvas fill out from under its keyline", () => {
+    const { getByLabelText } = render(<TabBar />);
+    const cap = getByLabelText("Issues")
+      .closest("[data-tab-frame]")
+      ?.querySelector(".rounded-t-lg");
+
+    expect(cap).toHaveClass(
+      "border-surface-border",
+      "bg-page-canvas",
+      "bg-clip-padding",
+    );
+  });
+
+  // The flare's bottom row sits on top of the content card's top ring. Both
+  // draw --surface-border, so in dark mode the arc would composite over the
+  // ring rather than replace it and the two translucent keylines would stack
+  // into a markedly lighter line right at the straight-to-curve junction. The
+  // opaque --app-shell layer under the gradient makes the flare replace
+  // whatever it covers.
+  it("paints each flare on an opaque shell layer", () => {
+    const { getByLabelText } = render(<TabBar />);
+    const flares = getByLabelText("Issues")
+      .closest("[data-tab-frame]")
+      ?.querySelectorAll('[style*="radial-gradient"]');
+
+    expect(flares).toHaveLength(2);
+    for (const flare of flares ?? []) {
+      expect(flare.getAttribute("style")).toContain(
+        "var(--page-canvas) 10.2px), var(--app-shell)",
+      );
+    }
+  });
+
+  it("draws the merged cap only on the active tab", () => {
+    const { getByLabelText } = render(<TabBar />);
+    expect(
+      getByLabelText("Projects")
+        .closest("[data-tab-frame]")
+        ?.querySelector(".rounded-t-lg"),
+    ).toBeNull();
+  });
+});
+
 describe("TabBar overflow", () => {
   it("keeps tabs readable in a bounded horizontal scroller", () => {
     state.byWorkspace.acme.tabs = Array.from({ length: 8 }, (_, index) => ({

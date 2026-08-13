@@ -29,7 +29,8 @@ A project's `description` is also durable context: when an issue (or a quick-cre
 Common resource types:
 
 - `github_repo` — durable GitHub repo context, with `resource_ref.url`, optional checkout `ref`, and optional prompt-only `default_branch_hint`;
-- `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, and optional label.
+- `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, optional label, and
+  optional `execution_mode` (`in_place`, the default, or `worktree`).
 
 ## CLI
 
@@ -46,10 +47,21 @@ multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json
 multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --output json
+multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --execution-mode worktree --output json
+multica project resource update <project-id> <resource-id> --execution-mode in_place --output json
 multica project resource update <project-id> <resource-id> --url <new-github-url> --output json
 multica project resource update <project-id> <resource-id> --ref <branch-or-sha> --output json
 multica project resource remove <project-id> <resource-id> --output json
 ```
+
+`--execution-mode` decides how tasks share a `local_directory`. `in_place` (default) runs the agent in the user's
+directory, one task at a time; a second task waits in `waiting_local_directory`. `worktree` gives each task its own
+git worktree of that repo, so tasks run concurrently and each delivers its work as an `agent/<agent>/<task>` branch
+in the user's repo instead of editing the working copy. `worktree` requires the path to be a git repository with at
+least one commit; tasks fail with an explicit error otherwise. The daemon version is gated twice — at save time and again
+against the daemon that claims each task — so a downgraded machine gets its tasks cancelled rather than run in place. Saving `worktree` is also refused (HTTP 422, code
+`daemon_version_unsupported`) while the daemon on that machine is older than the release that ships the mode — the
+fix is upgrading that daemon, then retrying. Pass an empty value to clear it back to the default.
 
 For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default checkout branch/tag/SHA for future tasks in that project. JSON `--ref '<json>'` remains the escape hatch for full payloads or resource types not covered by shortcuts.
 

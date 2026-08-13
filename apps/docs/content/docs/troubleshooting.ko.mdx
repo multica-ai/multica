@@ -203,6 +203,8 @@ netstat -ano | findstr :8080       # Windows
 | Docker backend | `docker compose -f docker-compose.selfhost.yml logs -f backend` |
 | 브라우저 | 개발자 도구의 Console과 Network |
 
+어떤 파일이 현재 사용 중인 로그인지는 데몬을 시작한 profile에 따라 달라집니다. 이전 데몬이 남긴 오래된 로그도 문제없이 읽히기 때문에 엉뚱한 파일을 보게 되기 쉽습니다. 추측으로 파일을 열지 말고 `multica daemon logs`를 사용하세요. 내용을 출력하기 전에 해석한 절대 경로를 먼저 표시합니다. 이름 있는 profile의 로그는 `--profile <name>`을 붙여서 확인합니다.
+
 데몬 시작 과정을 직접 확인해야 한다면 foreground에서 실행합니다.
 
 ```bash

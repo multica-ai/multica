@@ -67,6 +67,7 @@
   "actions": {
     "row_menu": "Actions",
     "add_to_agent": "Add to agent",
+    "refresh": "Update from source",
     "my_agents": "My agents",
     "other_agents": "Other agents",
     "no_agents": "No agents available",
@@ -145,6 +146,23 @@
     "toast_save_failed": "Failed to save skill",
     "toast_deleted": "Skill deleted",
     "toast_delete_failed": "Failed to delete skill",
+    "refresh": {
+      "button": "Update",
+      "tooltip": "Re-download this skill from its source",
+      "source_github": "GitHub",
+      "source_skills_sh": "Skills.sh",
+      "source_clawhub": "ClawHub",
+      "toast_success": "Skill updated from {{source}}",
+      "toast_failed": "Failed to update skill",
+      "dialog": {
+        "title": "Update from source?",
+        "description": "This will re-download \"{{name}}\" from {{source}} and replace its name, description, SKILL.md, and files with the latest version.",
+        "warning": "Local edits to this skill will be overwritten. Agent assignments, labels, and creator are preserved.",
+        "cancel": "Cancel",
+        "confirm": "Update",
+        "refreshing": "Updating…"
+      }
+    },
     "delete_dialog": {
       "title": "Delete skill?",
       "description_with_agents_one": "This will permanently delete \"{{name}}\" and remove it from {{count}} agent currently using it.",

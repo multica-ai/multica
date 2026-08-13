@@ -710,18 +710,6 @@ func TestAgentUpdateDoesNotExposeCustomEnvFlags(t *testing.T) {
 	}
 }
 
-// TestAgentCreateDoesNotExposeFromTemplate guards against re-adding the
-// `--from-template` flag. It was an untaught, immature CLI surface that
-// short-circuited before body assembly — silently dropping sibling create
-// flags like --mcp-config / --custom-env — and was removed. The agent-template
-// backend API still exists but has no CLI surface; manual `agent create` is the
-// only supported CLI creation path.
-func TestAgentCreateDoesNotExposeFromTemplate(t *testing.T) {
-	if agentCreateCmd.Flag("from-template") != nil {
-		t.Error("agent create must NOT expose --from-template; it was removed as an untaught CLI surface that silently dropped sibling flags")
-	}
-}
-
 func TestAgentMaxConcurrentTasksFlagValidation(t *testing.T) {
 	previousDir, err := os.Getwd()
 	if err != nil {
