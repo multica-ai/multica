@@ -198,6 +198,7 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	// drive a group-wide SIGKILL from the deferred cleanup below. Returning
 	// nil keeps os/exec from racing us with its own kill.
 	cmd.Cancel = func() error { return nil }
+	cmd.WaitDelay = 10 * time.Second
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", dimArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -390,6 +391,7 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			// a fresh session and losing the conversation (review #1).
 			var result json.RawMessage
 			var loadErr error
+		loadRetry:
 			for attempt := 0; attempt <= dimSessionLoadRetryAttempts; attempt++ {
 				result, loadErr = c.request(runCtx, "session/load", map[string]any{
 					"cwd":        cwd,
@@ -414,10 +416,8 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 					select {
 					case <-time.After(dimSessionLoadRetryDelay):
 					case <-runCtx.Done():
-						// Context cancelled during the retry delay; stop
-						// retrying and let the error path below handle it.
 						loadErr = fmt.Errorf("dim session/load cancelled: %w", runCtx.Err())
-						break
+						break loadRetry
 					}
 				}
 			}
