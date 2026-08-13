@@ -33,6 +33,15 @@ interface PageHeaderProps {
   className?: string;
 }
 
+/**
+ * Push actions right with `flex-1` on the content group, never with
+ * `justify-between` on the header.
+ *
+ * The leading slot below is a flex item too, so a header that reads as two
+ * zones in source is three at runtime, and `justify-between` splits the free
+ * space on BOTH sides of the title — parking it mid-header. Desktop windows
+ * sit below `xl`, where the trigger renders, so that is where it surfaces.
+ */
 export function PageHeader({ children, leading, className }: PageHeaderProps) {
   return (
     <header className={cn("flex h-12 shrink-0 items-center border-b px-4", className)}>

@@ -460,8 +460,8 @@ export function DashboardPage() {
       onValueChange={handleTabChange}
       className="flex h-full min-h-0 flex-col gap-0"
     >
-      <PageHeader className="justify-between gap-2 px-5">
-        <div className="flex min-w-0 items-center gap-2">
+      <PageHeader className="gap-2 px-5">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" />
           <h1 className="text-body font-medium">{t(($) => $.title)}</h1>
         </div>
