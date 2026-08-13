@@ -2,12 +2,13 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
 	"sync"
-
+	"syscall"
 	"time"
 )
 
@@ -72,7 +73,68 @@ var (
 	// cannot delay Result delivery; the next run's session/load is still safe
 	// because dim releases the lock on its own after ~5s.
 	dimSessionCloseTimeout = 2 * time.Second
+	// dimSessionLoadRetryAttempts bounds the number of retries when
+	// session/load reports "held by another process" — the prior process's
+	// lock has not been released yet. With graceful session/close this is
+	// rare (the lock releases immediately), but a force-killed process can
+	// take up to ~5s. The retry loop covers that window instead of silently
+	// starting a fresh session and losing the conversation.
+	dimSessionLoadRetryAttempts = 3
+	dimSessionLoadRetryDelay    = 2 * time.Second
 )
+
+// dimMinVersion is the minimum dim version that supports cross-run session
+// resume via session/load. Earlier builds bind sessions to the creating
+// process permanently.
+const dimMinVersion = "0.3.10"
+
+// extractACPAgentVersion pulls agentInfo.version out of an initialize
+// response. Returns "" if the field is absent (e.g. an older runtime that
+// does not report it).
+func extractACPAgentVersion(result json.RawMessage) string {
+	var resp struct {
+		AgentInfo struct {
+			Version string `json:"version"`
+		} `json:"agentInfo"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return ""
+	}
+	return resp.AgentInfo.Version
+}
+
+// dimVersionSupported reports whether the dim version meets the minimum
+// required for cross-run session resume. Uses semver-ish comparison
+// (major.minor.patch); a non-parseable version is treated as supported so
+// development builds are not blocked.
+func dimVersionSupported(version string) bool {
+	version = strings.TrimPrefix(version, "v")
+	parts := strings.Split(version, ".")
+	if len(parts) < 3 {
+		return true // unparseable — don't block dev/unknown builds
+	}
+	var maj, min, pat int
+	if _, err := fmt.Sscanf(parts[0], "%d", &maj); err != nil {
+		return true
+	}
+	if _, err := fmt.Sscanf(parts[1], "%d", &min); err != nil {
+		return true
+	}
+	// patch may have a suffix (e.g. "10-beta"); Sscanf stops at the first
+	// non-digit, which is what we want.
+	if _, err := fmt.Sscanf(parts[2], "%d", &pat); err != nil {
+		return true
+	}
+	var reqMaj, reqMin, reqPat int
+	fmt.Sscanf(dimMinVersion, "%d.%d.%d", &reqMaj, &reqMin, &reqPat)
+	if maj != reqMaj {
+		return maj > reqMaj
+	}
+	if min != reqMin {
+		return min > reqMin
+	}
+	return pat >= reqPat
+}
 
 // dimMessageStream serializes sends and the final close so a late stdout
 // reader cannot send on a closed channel. Mirrors grok/traecli/qoder.
@@ -130,6 +192,12 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 
 	cmd := exec.CommandContext(runCtx, execPath, dimArgs...)
 	hideAgentWindow(cmd)
+	configureProcessGroup(cmd)
+	// Take over context cancellation: the default would SIGKILL only the
+	// leader the instant runCtx is done, orphaning descendants. We instead
+	// drive a group-wide SIGKILL from the deferred cleanup below. Returning
+	// nil keeps os/exec from racing us with its own kill.
+	cmd.Cancel = func() error { return nil }
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", dimArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -180,12 +248,19 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	var deliverable acpDeliverableTracker
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
 		cfg:          b.cfg,
 		stdin:        stdin,
 		pending:      make(map[int]*pendingRPC),
 		pendingTools: make(map[string]*pendingToolCall),
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
+		},
 		onMessage: func(msg Message) {
 			if msg.Type == MessageToolUse {
 				// Re-normalise tool titles the same way kimi/traecli do so the
@@ -229,6 +304,13 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		// resCh. cmd.Wait is bounded so a still-stuck child cannot block the
 		// final Result either.
 		defer func() {
+			// Signal the entire process group (the agent CLI plus any tool
+			// subprocesses it spawned) BEFORE closing stdin. exec.
+			// CommandContext's cancel is disabled (cmd.Cancel returns nil)
+			// so we own all signalling. If we close stdin first, the shell
+			// exits on EOF and its process group dissolves before we can
+			// SIGKILL the descendants, orphaning them to PPID=1.
+			signalProcessGroup(cmd.Process, syscall.SIGKILL)
 			cancel()
 			stdin.Close()
 			waitDone := make(chan struct{})
@@ -236,12 +318,8 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			select {
 			case <-waitDone:
 			case <-time.After(dimProcessWaitTimeout):
-				// The child did not exit on cancellation+EOF within the
-				// grace window; force-kill it so the goroutine and its
-				// pipes can be reaped rather than leaking indefinitely.
-				_ = cmd.Process.Kill()
-				<-waitDone
 			}
+			waitProcessGroupGone(cmd.Process, dimProcessWaitTimeout)
 		}()
 
 		startTime := time.Now()
@@ -269,6 +347,18 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			return
 		}
 
+		// Require dim >= 0.3.10: earlier builds bind sessions to the creating
+		// process permanently, so cross-run session/load fails with "held by
+		// another process" and follow-up runs lose context. 0.3.10 releases
+		// the lock on graceful exit (session/close) or after ~5s.
+		dimVersion := extractACPAgentVersion(initResult)
+		if dimVersion != "" && !dimVersionSupported(dimVersion) {
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("dim %s is too old: cross-run session resume requires dim >= 0.3.10 (0.3.10+ releases the per-process session lock on exit); please upgrade dimcode", dimVersion)
+			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			return
+		}
+
 		// Drop MCP entries whose remote transport the runtime didn't advertise.
 		// See hermes.go for why sending an unsupported transport tanks session/new.
 		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "dim", b.cfg)
@@ -292,11 +382,42 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		// sessions.
 		var freshSession bool
 		if opts.ResumeSessionID != "" {
-			result, err := c.request(runCtx, "session/load", map[string]any{
-				"cwd":        cwd,
-				"sessionId":  opts.ResumeSessionID,
-				"mcpServers": mcpServers,
-			})
+			// Retry session/load when the prior process's lock has not been
+			// released yet ("held by another process"). With graceful
+			// session/close the lock releases immediately, but a force-killed
+			// process can take up to ~5s. Retry instead of silently starting
+			// a fresh session and losing the conversation (review #1).
+			var result json.RawMessage
+			var loadErr error
+			for attempt := 0; attempt <= dimSessionLoadRetryAttempts; attempt++ {
+				result, loadErr = c.request(runCtx, "session/load", map[string]any{
+					"cwd":        cwd,
+					"sessionId":  opts.ResumeSessionID,
+					"mcpServers": mcpServers,
+				})
+				if loadErr == nil {
+					break
+				}
+				if isACPSessionNotFound(loadErr) {
+					break // session is gone — no point retrying
+				}
+				if !isACPHeldByProcess(loadErr) {
+					break // different error — let the normal failure path handle it
+				}
+				if attempt < dimSessionLoadRetryAttempts {
+					b.cfg.Logger.Warn("dim session/load: lock not yet released, retrying",
+						"backend", "dim",
+						"attempt", attempt+1,
+						"delay", dimSessionLoadRetryDelay.String(),
+					)
+					select {
+					case <-time.After(dimSessionLoadRetryDelay):
+					case <-runCtx.Done():
+						break
+					}
+				}
+			}
+			err := loadErr
 			if err != nil {
 				if isACPSessionNotFound(err) {
 					b.cfg.Logger.Warn("dim resumed session not found; the daemon will retry fresh",
@@ -371,32 +492,38 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 
 		// Dim's ACP server hardcodes a read-only permission preset when a
 		// session is created, which would silently deny file writes and
-		// process spawns. Raise it to full-access for this session and pin
-		// the agent mode so the headless task can do real work. A resumed
-		// session already carries these settings (verified: full-access
-		// survives session/load), so the block is skipped on resume. Both
-		// calls are hard-required: if either fails we abort rather than run
-		// a turn that is guaranteed to fail.
-		if freshSession {
-			for _, cfgOpt := range []struct {
-				id    string
-				value string
-			}{
-				{"permission", "full-access"},
-				{"mode", "agent"},
-			} {
-				if _, err := c.request(runCtx, "session/set_config_option", map[string]any{
-					"sessionId": sessionID,
-					"configId":  cfgOpt.id,
-					"value":     cfgOpt.value,
-				}); err != nil {
-					finalStatus = "failed"
-					finalError = fmt.Sprintf("dim could not set session config %s=%s: %v", cfgOpt.id, cfgOpt.value, err)
-					resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), SessionID: sessionID, ResumeRejected: resumeRejected}
-					return
-				}
-				b.cfg.Logger.Info("dim session config set", "config", cfgOpt.id, "value", cfgOpt.value, "session_id", sessionID)
+		// process spawns. Raise it to full-access and pin agent mode so the
+		// headless task can do real work. This runs on BOTH fresh and resumed
+		// sessions: a resumed session whose first run failed partway through
+		// config (permission set, but mode not yet) would otherwise carry a
+		// half-configured state into the resume, silently denying writes.
+		// set_config_option is idempotent, so re-applying on a fully
+		// configured session is harmless. If either call fails we close the
+		// session (so a partially configured one is not left for the next
+		// resume) and abort rather than run a turn that is guaranteed to fail.
+		for _, cfgOpt := range []struct {
+			id    string
+			value string
+		}{
+			{"permission", "full-access"},
+			{"mode", "agent"},
+		} {
+			if _, err := c.request(runCtx, "session/set_config_option", map[string]any{
+				"sessionId": sessionID,
+				"configId":  cfgOpt.id,
+				"value":     cfgOpt.value,
+			}); err != nil {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("dim could not set session config %s=%s: %v", cfgOpt.id, cfgOpt.value, err)
+				// Best-effort close so a partially configured session is not
+				// left behind for the next resume to inherit.
+				closeCtx, closeCancel := context.WithTimeout(context.Background(), dimSessionCloseTimeout)
+				_, _ = c.request(closeCtx, "session/close", map[string]any{"sessionId": sessionID})
+				closeCancel()
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), SessionID: sessionID, ResumeRejected: resumeRejected}
+				return
 			}
+			b.cfg.Logger.Info("dim session config set", "config", cfgOpt.id, "value", cfgOpt.value, "session_id", sessionID)
 		}
 
 		if opts.Model != "" {
@@ -442,11 +569,9 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 				finalError = fmt.Sprintf("dim session/prompt failed: %v", err)
 			}
 		} else {
-			// session/prompt may return before the final prompt notification
-			// arrives over the stdout stream. A non-blocking read here would
-			// race the stdin.Close()+cancel() below and lose the last
-			// assistant message / usage. Wait for the notification with a
-			// bounded grace window instead, then drain the pipes.
+			// Check if we got a promptDone result from the response parsing
+			// (non-blocking — the response is parsed synchronously during
+			// c.request, so promptDone is usually already ready).
 			select {
 			case pr := <-promptDone:
 				if pr.stopReason == "cancelled" {
@@ -457,11 +582,14 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 					effectiveModel = pr.modelID
 				}
 				c.mergeUsage(pr.usage)
-			case <-time.After(dimNotificationQuietTime):
-				// The runtime did not emit a terminal notification within
-				// the quiet window; proceed with whatever the deliverable
-				// captured so far rather than blocking indefinitely.
+			default:
 			}
+			// Give the stdout reader a bounded chance to consume notifications
+			// dim may emit just after session/prompt returns (agent_message_chunk,
+			// usage updates). Closing stdin at the response boundary otherwise
+			// races the reader and truncates the final text — the same race
+			// fixed for hermes (TestHermesBackendDrainsLateFinalNotification).
+			waitForACPNotificationQuiescence(runCtx, activity, readerDone, dimNotificationQuietTime, dimReaderDrainGrace)
 		}
 
 		duration := time.Since(startTime)

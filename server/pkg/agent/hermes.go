@@ -1254,6 +1254,19 @@ func isACPSessionNotFound(err error) bool {
 		strings.Contains(text, "unknown session")
 }
 
+// isACPHeldByProcess reports whether a session/load error means the session
+// is still locked by a prior process that has not released it yet. Dim < 0.3.10
+// reports this permanently; 0.3.10+ releases on graceful exit or after ~5s.
+// The caller retries a bounded number of times before giving up.
+func isACPHeldByProcess(err error) bool {
+	var rpcErr *acpRPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
+	return strings.Contains(text, "held by another process")
+}
+
 // hermesResumeLostError is the fallback reason for a resumed session Hermes
 // could not rebuild, used only when nothing more specific was captured.
 const hermesResumeLostError = "hermes could not restore the resumed session; it refused the turn without running the agent"

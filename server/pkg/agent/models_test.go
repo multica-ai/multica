@@ -1868,3 +1868,45 @@ func TestCachedDiscovery(t *testing.T) {
 		t.Errorf("expected 1 underlying call due to cache, got %d", calls)
 	}
 }
+
+// TestDiscoveryCacheKeyIsolatesByExecutable verifies that two different
+// executable paths for the same provider type produce different cache keys,
+// so a built-in and a custom Dim-compatible executable do not serve each
+// other's model catalog during the TTL (review #4/#6).
+func TestDiscoveryCacheKeyIsolatesByExecutable(t *testing.T) {
+	key1 := discoveryCacheKey("dim", "/usr/bin/dim")
+	key2 := discoveryCacheKey("dim", "/opt/custom/dim")
+	if key1 == key2 {
+		t.Fatalf("different executables must produce different cache keys: both %q", key1)
+	}
+	// Empty executable falls back to the provider type only.
+	keyEmpty := discoveryCacheKey("dim", "")
+	if keyEmpty != "dim" {
+		t.Fatalf("empty executable should fall back to provider type, got %q", keyEmpty)
+	}
+	if keyEmpty == key1 {
+		t.Fatal("empty executable key must differ from a non-empty executable key")
+	}
+
+	// Verify the isolation holds at the cachedDiscovery level: two different
+	// keys must call the underlying function twice, not share a cache entry.
+	calls := 0
+	fn := func() (Catalog, error) {
+		calls++
+		return Catalog{Models: []Model{{ID: "m"}}}, nil
+	}
+	modelCacheMu.Lock()
+	delete(modelCache, key1)
+	delete(modelCache, key2)
+	modelCacheMu.Unlock()
+
+	if _, err := cachedDiscovery(key1, fn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cachedDiscovery(key2, fn); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Errorf("expected 2 underlying calls (one per executable), got %d", calls)
+	}
+}

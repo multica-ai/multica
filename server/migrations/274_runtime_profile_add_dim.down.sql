@@ -1,5 +1,6 @@
--- Restore the pre-255 whitelist. Existing Dim rows remain valid because
--- the replacement constraint is NOT VALID, but new Dim profiles are blocked.
+-- Restore the pre-274 whitelist (the set after migration 254 added reasonix).
+-- Existing Dim rows remain valid because the replacement constraint is NOT
+-- VALID, but new Dim profiles are blocked.
 ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_family_check;
 
 ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check

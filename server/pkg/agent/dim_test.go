@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -46,11 +48,17 @@ while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*)
       if [ -n "$DIM_INIT_FAIL_HANG" ]; then
-        # Return an error, then ignore TERM and hang so the process does not
-        # exit on stdin EOF — exercises the force-kill cleanup path.
-        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"initialize failed"}}\n' "$id"
+        # Spawn a descendant BEFORE sending the error response, so the PID
+        # file is written before the backend's cleanup race begins. Then
+        # ignore TERM and hang so the process does not exit on stdin EOF —
+        # exercises the force-kill process-group cleanup path.
         trap '' TERM
         sleep 60 &
+        child_pid=$!
+        if [ -n "$DIM_CHILD_PID_FILE" ]; then
+          printf '%s' "$child_pid" > "$DIM_CHILD_PID_FILE"
+        fi
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"initialize failed"}}\n' "$id"
         wait
       else
         printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentInfo":{"name":"dimcode","version":"0.3.10"},"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":false}}}}\n' "$id"
@@ -71,7 +79,11 @@ while IFS= read -r line; do
       fi
       ;;
     *'"method":"session/set_config_option"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      if [ -n "$DIM_CONFIG_FAIL" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"config set failed"}}\n' "$id"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      fi
       ;;
     *'"method":"session/set_model"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
@@ -82,6 +94,13 @@ while IFS= read -r line; do
       # wait (the backend must still complete, not hang on a missing notify).
       if [ -n "$DIM_PROMPT_NO_STOP" ]; then
         printf '{"jsonrpc":"2.0","id":%s,"result":{"usage":{"inputTokens":10,"outputTokens":20}}}\n' "$id"
+      elif [ -n "$DIM_LATE_NOTIFICATION" ]; then
+        # Return the prompt response, then emit a late agent_message_chunk
+        # notification after a short delay — exercises the notification
+        # quiescence drain (the late text must survive into Result.Output).
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":20}}}\n' "$id"
+        sleep 0.1
+        printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"late-answer"}}}}\n' "$DIM_SESSION_ID"
       else
         printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":20}}}\n' "$id"
       fi
@@ -168,7 +187,7 @@ func TestDimSessionNew(t *testing.T) {
 
 	reqs := readDimRequests(t, requestsFile)
 	if strings.Contains(reqs, "session/load") {
-		t.Fatal("backend must never send session/load (dim sessions are process-bound)")
+		t.Fatal("backend must not send session/load on a fresh-session run")
 	}
 	// The ACP server hardcodes read-only permission; the backend must raise
 	// it to full-access and pin agent mode before the prompt.
@@ -180,6 +199,12 @@ func TestDimSessionNew(t *testing.T) {
 	}
 	if !strings.Contains(reqs, "session/prompt") {
 		t.Fatal("expected session/prompt")
+	}
+	// The backend must send session/close during teardown so dim releases the
+	// per-process session lock immediately (graceful exit), enabling the next
+	// run to resume without delay.
+	if !strings.Contains(reqs, "session/close") {
+		t.Fatal("expected session/close during teardown")
 	}
 }
 
@@ -223,10 +248,11 @@ func TestDimResumeLoadsSession(t *testing.T) {
 	if strings.Contains(reqs, "session/new") {
 		t.Fatal("backend must not send session/new when the resume succeeded")
 	}
-	// A resumed session already carries permission/mode, so the config block
-	// must be skipped — no set_config_option after a successful load.
-	if strings.Contains(reqs, "set_config_option") {
-		t.Fatal("set_config_option must not be sent on a resumed session")
+	// A resumed session is re-issued set_config_option (permission/mode) to
+	// guard against a partially configured session being resumed — see
+	// review #4. So set_config_option MUST appear after a successful load.
+	if !strings.Contains(reqs, "set_config_option") {
+		t.Fatal("set_config_option must be re-applied on a resumed session (fail-closed)")
 	}
 }
 
@@ -268,14 +294,21 @@ func TestDimResumeNotFound(t *testing.T) {
 	}
 }
 
-// TestDimCleanupKillsHangingChild verifies the deferred cleanup force-kills a
-// child that ignores stdin EOF and SIGTERM after an early RPC failure, so
-// Result still closes (review #3 failure-path race). Without the bounded
-// force-kill, cmd.Wait() would hang forever and resCh would never close.
+// TestDimCleanupKillsHangingChild verifies the deferred cleanup force-kills the
+// entire process group — not just the direct child — when a child ignores stdin
+// EOF and SIGTERM after an early RPC failure, so Result still closes AND no
+// descendant is orphaned (review #2/#3). Without the group force-kill,
+// cmd.Wait() would hang forever and the sleep descendant would survive as a
+// PPID=1 orphan.
 func TestDimCleanupKillsHangingChild(t *testing.T) {
 	t.Parallel()
-	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
-	b := newDimTestBackendWithEnv(t, requestsFile, map[string]string{"DIM_INIT_FAIL_HANG": "1"})
+	dir := t.TempDir()
+	requestsFile := filepath.Join(dir, "requests.jsonl")
+	childPidFile := filepath.Join(dir, "child_pid")
+	b := newDimTestBackendWithEnv(t, requestsFile, map[string]string{
+		"DIM_INIT_FAIL_HANG": "1",
+		"DIM_CHILD_PID_FILE": childPidFile,
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -291,16 +324,53 @@ func TestDimCleanupKillsHangingChild(t *testing.T) {
 		}
 	}()
 
-	// Result must close within a bounded window — the force-kill (bounded by
-	// dimProcessWaitTimeout) guarantees the hung child cannot block it.
+	// Result must close within a bounded window — the group force-kill
+	// (bounded by dimProcessWaitTimeout) guarantees the hung child cannot
+	// block it.
 	select {
 	case result := <-session.Result:
 		if result.Status != "failed" {
 			t.Fatalf("expected status=failed from the initialize error, got %q", result.Status)
 		}
-	case <-time.After(dimProcessWaitTimeout + 10*time.Second):
+	case <-time.After(dimProcessWaitTimeout + 15*time.Second):
 		t.Fatal("Result never closed: the hanging child was not force-killed within the cleanup timeout")
 	}
+
+	// The descendant (sleep 60) must be gone too — not orphaned to PPID=1.
+	// Give the PID file a moment to appear (the child is spawned after the
+	// error response is written).
+	deadline := time.Now().Add(5 * time.Second)
+	var pidStr string
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(childPidFile)
+		if err == nil && len(data) > 0 {
+			pidStr = string(data)
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if pidStr == "" {
+		t.Fatal("child PID file was never written; the fake did not spawn a descendant")
+	}
+	childPid, err := strconv.Atoi(strings.TrimSpace(pidStr))
+	if err != nil {
+		t.Fatalf("invalid child PID %q: %v", pidStr, err)
+	}
+	// Verify the descendant is no longer alive. Poll briefly because the
+	// group SIGKILL and the kernel's process-table reaping are asynchronous
+	// with respect to Result delivery.
+	proc, err := os.FindProcess(childPid)
+	if err != nil {
+		return // already reaped
+	}
+	goneDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(goneDeadline) {
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			return // process is gone
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("descendant PID %d is still alive after cleanup: process group was not reaped", childPid)
 }
 
 // TestDimPromptMissingNotificationStillCompletes verifies the success path
@@ -336,5 +406,85 @@ func TestDimPromptMissingNotificationStillCompletes(t *testing.T) {
 		}
 	case <-time.After(dimNotificationQuietTime + 15*time.Second):
 		t.Fatal("Result never closed: the missing prompt notification was not bounded by the quiet-time wait")
+	}
+}
+
+// TestDimDrainsLateFinalNotificationAfterPromptResponse verifies that a
+// notification arriving just after the session/prompt response is not lost —
+// the activity-based quiescence drain gives the stdout reader time to consume
+// it before stdin is closed (review #3, the Dim equivalent of
+// TestHermesBackendDrainsLateFinalNotificationAfterPromptResponse).
+func TestDimDrainsLateFinalNotificationAfterPromptResponse(t *testing.T) {
+	t.Parallel()
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	b := newDimTestBackendWithEnv(t, requestsFile, map[string]string{
+		"DIM_LATE_NOTIFICATION": "1",
+		"DIM_SESSION_ID":        "ses_dim_new",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 15 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Output, "late-answer") {
+			t.Fatalf("late notification was lost: expected output to contain %q, got %q", "late-answer", result.Output)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// TestDimConfigFailClosesSession verifies that when set_config_option fails,
+// the backend sends session/close before returning the error, so a partially
+// configured session is not left for the next resume to inherit without
+// full-access (review #4).
+func TestDimConfigFailClosesSession(t *testing.T) {
+	t.Parallel()
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	b := newDimTestBackendWithEnv(t, requestsFile, map[string]string{"DIM_CONFIG_FAIL": "1"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 15 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q", result.Status)
+	}
+
+	reqs := readDimRequests(t, requestsFile)
+	// set_config_option must have been attempted.
+	if !strings.Contains(reqs, "set_config_option") {
+		t.Fatal("expected a set_config_option attempt")
+	}
+	// session/close must have been sent to clean up the partially configured
+	// session so it is not resumed later without full-access.
+	if !strings.Contains(reqs, "session/close") {
+		t.Fatal("expected session/close after config failure to prevent a partially configured resume")
 	}
 }

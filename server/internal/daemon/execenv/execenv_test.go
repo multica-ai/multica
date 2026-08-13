@@ -1801,6 +1801,39 @@ func TestInjectRuntimeConfigAntigravity(t *testing.T) {
 	}
 }
 
+// TestInjectRuntimeConfigDim verifies that the runtime brief is delivered to
+// Dim via AGENTS.md (review #1/#6). Dim reads AGENTS.md from the session cwd,
+// so InjectRuntimeConfig must write the brief there.
+func TestInjectRuntimeConfigDim(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "dim", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Dim should advertise native skill discovery")
+	}
+}
+
 // TestWriteContextFilesAntigravityNativeSkills pins that skills for the
 // antigravity provider land in {workDir}/.agents/skills/<slug>/, matching the
 // CLI's native workspace discovery path (Gemini CLI lineage).

@@ -214,6 +214,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | OpenClaw | `openclaw` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |
 | [Pi](https://pi.dev/) | `pi` | Pi coding agent |
+| Oh-My-Pi | `omp` | Oh-My-Pi coding agent (Pi fork) |
 | [Cursor Agent](https://cursor.com/) | `cursor-agent` | Cursor's headless coding agent |
 | Kimi | `kimi` | Moonshot coding agent |
 | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) | `reasonix` | DeepSeek-focused ACP coding agent (run `reasonix setup` first) |
@@ -344,7 +345,7 @@ The daemon launches Qwen Code as `qwen -p <prompt> --output-format stream-json`.
 
 #### `mcp_config` on ACP runtimes
 
-ACP-family runtimes — Hermes, Kimi, Kiro, Grok, Qoder, Reasonix, Trae, Qwenpaw, and any custom runtime profile whose `protocol_family` is one of them — receive MCP servers **over the ACP session protocol**, not through a config file. The daemon translates the agent's `mcp_config` into ACP's `McpServer` array and sends it with `session/new`, and again with that runtime's resume request (`session/resume` on Hermes, Kimi, Qoder and Reasonix; `session/load` on Kiro, Grok, Trae and Qwenpaw) so a resumed task keeps the same tools.
+ACP-family runtimes — Hermes, Kimi, Kiro, Grok, Qoder, Reasonix, Trae, Qwenpaw, Dim, and any custom runtime profile whose `protocol_family` is one of them — receive MCP servers **over the ACP session protocol**, not through a config file. The daemon translates the agent's `mcp_config` into ACP's `McpServer` array and sends it with `session/new`, and again with that runtime's resume request (`session/resume` on Hermes, Kimi, Qoder and Reasonix; `session/load` on Kiro, Grok, Trae, Qwenpaw and Dim) so a resumed task keeps the same tools.
 
 Nothing is written to the runtime's own config file, and the runtime's own file is not read or merged. `~/.hermes/…`, `~/.jcode/mcp.json` and the like stay untouched; an agent's servers travel with its tasks instead of being installed per machine.
 

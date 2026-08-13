@@ -60,10 +60,11 @@ func TestDimRealACPSmoke(t *testing.T) {
 	defer cancel()
 
 	// Prompt the agent to write a sentinel file under full-access. This is
-	// the real permission proof: the read-only default would deny the write,
-	// so a successful write confirms set_config_option landed.
+	// the real permission proof: the read-only default would deny both the
+	// command execution and the file write, so success confirms
+	// set_config_option landed for permission=full-access AND mode=agent.
 	session, err := backend.Execute(ctx,
-		"Write the text 'dim-was-here' to the file sentinel.txt in the current directory using your file write tool, then reply with exactly: done",
+		"Use your shell/exec tool to run: echo dim-exec-ok > sentinel.txt — then reply with exactly: done",
 		ExecOptions{
 			Cwd:     cwd,
 			Timeout: 100 * time.Second,
@@ -93,7 +94,7 @@ func TestDimRealACPSmoke(t *testing.T) {
 		if readErr != nil {
 			t.Fatalf("sentinel file was not written (permission=full-access not effective): %v", readErr)
 		}
-		if !strings.Contains(string(data), "dim-was-here") {
+		if !strings.Contains(string(data), "dim-exec-ok") {
 			t.Fatalf("sentinel file content unexpected: %q", string(data))
 		}
 		t.Logf("real dim smoke OK: session=%s output=%q sentinel=%q", result.SessionID, result.Output, strings.TrimSpace(string(data)))
@@ -167,10 +168,11 @@ func TestDimRealCrossRunResume(t *testing.T) {
 		t.Fatal("timeout waiting for run A result")
 	}
 
-	// Give dim time to release the per-process session lock after run A's
-	// process exits (~5s on dim 0.3.10+).
-	t.Logf("waiting for dim to release the session lock before run B...")
-	time.Sleep(8 * time.Second)
+	// Run B starts immediately: dim 0.3.10+ releases the per-process session
+	// lock instantly when the prior run sent session/close (graceful exit), so
+	// no sleep is needed. The bounded retry in the backend covers the rare
+	// case where the lock has not been released yet.
+	t.Logf("run B starting immediately after run A...")
 
 	// Run B: resume run A's session and ask for the secret. The token was
 	// only ever mentioned in run A, so a correct resume recalls it.
