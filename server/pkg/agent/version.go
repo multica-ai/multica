@@ -10,6 +10,14 @@ import (
 
 // MinVersions defines the minimum required CLI version for each agent type.
 // Versions below these will be rejected during daemon registration.
+//
+// zcode is deliberately absent: zcode-app-cli ships a non-standard, drifting
+// version string (e.g. 3.7.5-11, 3.7.6-12, CLI 0.16.x) while its flag surface
+// is stable, so a parsed semver floor is an unreliable compatibility signal.
+// Instead zcode is capability-gated on its --help output: a build advertising
+// --stream-json takes the streaming path; otherwise one advertising --json
+// takes the summary path; a build advertising neither is rejected at Execute
+// time. See zcodeSupportsStreamJSON / zcodeSupportsJSONSummary.
 var MinVersions = map[string]string{
 	"claude":  "2.0.0",
 	"codex":   "0.100.0", // app-server --listen stdio:// added in 0.100.0

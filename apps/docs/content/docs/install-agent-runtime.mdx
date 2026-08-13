@@ -43,7 +43,7 @@ Multica currently detects these commands:
 <Callout type="info">
 ZCode is an **unofficial community client integration**. Multica detects any `zcode` command on PATH; it is not published or maintained by Multica. Install and sign in with the upstream `zcode` CLI (`zcode login`), and configure the model in `~/.zcode/cli/config.json` — Multica cannot override the model at run time.
 
-The published `zcode` CLI runs one turn and returns a JSON summary, so progress appears when the turn completes. Live streaming (thinking, tool calls, incremental text) requires a build that advertises `--stream-json`; Multica auto-detects this and uses streaming when available, otherwise it falls back to the summary mode. Skills bound to a ZCode agent are written to `.zcode/skills/` in the task workdir.
+The published `zcode` CLI runs one turn and returns a JSON summary, so progress appears when the turn completes. Live streaming (thinking, tool calls, incremental text) requires a build that advertises `--stream-json`. Multica checks the installed `zcode --help` each run and picks the best mode automatically: streaming when `--stream-json` is advertised, the JSON summary when only `--json` is, and rejects the runtime otherwise (no hard CLI version is enforced, because the zcode version string is non-standard and drifts across releases). Skills bound to a ZCode agent are written to `.zcode/skills/` in the task workdir.
 </Callout>
 
 ## 2. Sign in on your machine
