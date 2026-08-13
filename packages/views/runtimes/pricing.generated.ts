@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-08-07
+// Snapshot: 2026-08-13
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -42,8 +42,6 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "deepseek-reasoner": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
   "deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
   "deepseek-v4-pro": { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0.435 },
-  "gemini-2.0-flash": { input: 0.1, output: 0.4, cacheRead: 0.025, cacheWrite: 0.1 },
-  "gemini-2.0-flash-lite": { input: 0.075, output: 0.3, cacheRead: 0.075, cacheWrite: 0.075 },
   "gemini-2.5-computer-use-preview-10-2025": { input: 1.25, output: 10, cacheRead: 1.25, cacheWrite: 1.25 },
   "gemini-2.5-flash": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
   "gemini-2.5-flash-image": { input: 0.3, output: 30, cacheRead: 0.075, cacheWrite: 0.3 },
@@ -56,7 +54,6 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "gemini-3-pro": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
   "gemini-3-pro-image": { input: 2, output: 120, cacheRead: 2, cacheWrite: 2 },
   "gemini-3-pro-image-preview": { input: 2, output: 120, cacheRead: 2, cacheWrite: 2 },
-  "gemini-3-pro-preview": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
   "gemini-3.1-flash-image": { input: 0.5, output: 60, cacheRead: 0.5, cacheWrite: 0.5 },
   "gemini-3.1-flash-image-preview": { input: 0.5, output: 60, cacheRead: 0.5, cacheWrite: 0.5 },
   "gemini-3.1-flash-lite": { input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite: 0.25 },
@@ -80,7 +77,6 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "github-copilot/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.2 },
   "github-copilot/gpt-5.6-terra": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
   "github-copilot/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
-  "github-copilot/kimi-k3": { input: 0.95, output: 4, cacheRead: 0.19, cacheWrite: 0.95 },
   "glm-4.5": { input: 0.6, output: 2.2, cacheRead: 0.11, cacheWrite: 0 },
   "glm-4.5-air": { input: 0.2, output: 1.1, cacheRead: 0.03, cacheWrite: 0 },
   "glm-4.5-flash": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -139,6 +135,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "grok-4.20-multi-agent-0309": { input: 1.25, output: 2.5, cacheRead: 0.2, cacheWrite: 1.25 },
   "grok-4.3": { input: 1.25, output: 2.5, cacheRead: 0.2, cacheWrite: 1.25 },
   "grok-4.5": { input: 2, output: 6, cacheRead: 0.3, cacheWrite: 2 },
+  "grok-4.6": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
   "grok-build-0.1": { input: 1, output: 2, cacheRead: 0.2, cacheWrite: 1 },
   "hy3": { input: 0.14, output: 0.58, cacheRead: 0.035, cacheWrite: 0.14 },
   "kimi-k2": { input: 0.4, output: 2.5, cacheRead: 0.4, cacheWrite: 0.4 },
@@ -153,6 +150,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "kimi-k2.7-code-highspeed": { input: 1.9, output: 8, cacheRead: 0.38, cacheWrite: 1.9 },
   "kimi-k3": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3 },
   "mai-code-1-flash-picker": { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0.75 },
+  "mai-code-1.1-flash": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.2 },
   "mimo-v2-omni": { input: 0.4, output: 2, cacheRead: 0.08, cacheWrite: 0.4 },
   "mimo-v2-pro": { input: 1, output: 3, cacheRead: 0.2, cacheWrite: 1 },
   "mimo-v2.5": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
