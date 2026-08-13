@@ -642,6 +642,9 @@ func shellArgsFromEnv(name string) ([]string, error) {
 // resolveAgentExecutablePath returns the executable entry point the daemon
 // should keep for an agent command. Bare command names are pinned to the path
 // resolved during startup so later PATH changes cannot redirect task launches.
+// Ordinary executables are pinned to their concrete target; entrypoints owned
+// by a name-dispatching shim keep the command name the manager needs to select
+// the right package (see discoveredExecutablePath).
 // On Windows this deliberately keeps the stable discovered junction path;
 // resolveAgentEntryWithHeal follows it for each launch so installer upgrades
 // that retarget a still-live junction take effect without a daemon restart.
@@ -843,8 +846,8 @@ var supportedLoginShells = map[string]struct{}{
 	"ksh":  {},
 }
 
-// resolveAgentsViaLoginShell asks the user's login shell to print the canonical
-// (symlink-resolved) absolute path to each name in `names`. It returns a map
+// resolveAgentsViaLoginShell asks the user's login shell to print an absolute,
+// invocation-safe path to each name in `names`. It returns a map
 // of name → path for whatever the shell could find, and an empty map if the
 // shell is unavailable / unsupported / times out / produces no usable output.
 //
@@ -945,7 +948,8 @@ var resolveAgentsViaLoginShell = func(names []string) map[string]string {
 //     still print the alias/function definition, and we'd rather drop it
 //     than hand back garbage),
 //  5. canonicalises the directory via `cd ... && pwd -P` so symlinked prefix
-//     dirs (fnm/nvm/volta) collapse to stable paths,
+//     dirs (fnm/nvm/volta) collapse to stable paths while the invoked command
+//     name is kept,
 //  6. if the resolved path lives in ~/.multica/hooks, searches the same
 //     shell-expanded PATH for the first executable outside that hooks dir,
 //  7. prints `<name>\t<canonical_path>` one entry per line for the caller.
