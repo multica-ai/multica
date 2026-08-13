@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	skillpkg "github.com/multica-ai/multica/server/internal/skill"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -527,6 +528,28 @@ type reportedRuntimeLocalSkill struct {
 	Files       []CreateSkillFileRequest `json:"files,omitempty"`
 }
 
+func runtimeLocalSkillImportFiles(reported []CreateSkillFileRequest) ([]CreateSkillFileRequest, error) {
+	reportedPaths := make([]string, len(reported))
+	for i, file := range reported {
+		reportedPaths[i] = file.Path
+	}
+	canonicalPaths, err := skillpkg.CanonicalRuntimeLocalFilePaths(reportedPaths)
+	if err != nil {
+		return nil, err
+	}
+
+	files := make([]CreateSkillFileRequest, 0, len(reported))
+	for i, canonicalPath := range canonicalPaths {
+		if canonicalPath == "" {
+			continue
+		}
+		file := reported[i]
+		file.Path = canonicalPath
+		files = append(files, file)
+	}
+	return files, nil
+}
+
 func cleanOptionalString(value *string) *string {
 	if value == nil {
 		return nil
@@ -851,12 +874,10 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 		description = *req.Description
 	}
 
-	files := make([]CreateSkillFileRequest, 0, len(body.Skill.Files))
-	for _, f := range body.Skill.Files {
-		if !validateFilePath(f.Path) {
-			continue
-		}
-		files = append(files, f)
+	files, err := runtimeLocalSkillImportFiles(body.Skill.Files)
+	if err != nil {
+		h.failLocalSkillImport(w, r, requestID, err.Error())
+		return
 	}
 
 	config := map[string]any{
