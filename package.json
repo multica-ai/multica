@@ -25,7 +25,8 @@
     "lint": "turbo lint --filter=!@multica/mobile",
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",
-    "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
+    "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs",
+    "generate:text-preview-types": "node scripts/generate-text-preview-types.mjs"
   },
   "packageManager": "pnpm@10.28.2",
   "pnpm": {

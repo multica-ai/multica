@@ -1601,7 +1601,6 @@ func TestGetAttachmentContent_NotFound(t *testing.T) {
 // client-side dispatcher. Regress against the most common content types so
 // drifting one of the lists alone fails loud.
 func TestIsTextPreviewable(t *testing.T) {
-	t.Helper()
 	cases := []struct {
 		name        string
 		contentType string
@@ -1633,6 +1632,28 @@ func TestIsTextPreviewable(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isTextPreviewable(tc.contentType, tc.filename); got != tc.want {
 				t.Errorf("isTextPreviewable(%q, %q) = %v, want %v", tc.contentType, tc.filename, got, tc.want)
+			}
+		})
+	}
+
+	for contentType := range textPreviewContentTypes {
+		t.Run("generated content type "+contentType, func(t *testing.T) {
+			if !isTextPreviewable(contentType, "attachment") {
+				t.Errorf("generated content type %q is not previewable", contentType)
+			}
+		})
+	}
+	for extension := range textPreviewExtensions {
+		t.Run("generated extension "+extension, func(t *testing.T) {
+			if !isTextPreviewable("application/octet-stream", "attachment."+extension) {
+				t.Errorf("generated extension %q is not previewable", extension)
+			}
+		})
+	}
+	for basename := range textPreviewBasenames {
+		t.Run("generated basename "+basename, func(t *testing.T) {
+			if !isTextPreviewable("application/octet-stream", basename) {
+				t.Errorf("generated basename %q is not previewable", basename)
 			}
 		})
 	}

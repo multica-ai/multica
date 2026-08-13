@@ -5,6 +5,13 @@ import {
   isPreviewable,
   type PreviewKind,
 } from "./preview";
+import {
+  TEXT_BASENAME_LANGUAGE_MAP,
+  TEXT_BASENAMES,
+  TEXT_CONTENT_TYPES,
+  TEXT_EXTENSION_LANGUAGE_MAP,
+  TEXT_EXTENSIONS,
+} from "./text-preview-types.generated";
 
 describe("getPreviewKind", () => {
   const cases: Array<[string, string, PreviewKind | null]> = [
@@ -67,6 +74,33 @@ describe("isPreviewable", () => {
   it("is false for unsupported types", () => {
     expect(isPreviewable("application/zip", "x.zip")).toBe(false);
     expect(isPreviewable("application/octet-stream", "x.bin")).toBe(false);
+  });
+});
+
+describe("generated text preview types", () => {
+  it("dispatches every generated content type as text-like", () => {
+    for (const contentType of TEXT_CONTENT_TYPES) {
+      expect(getPreviewKind(contentType, "attachment")).toBe("text");
+    }
+  });
+
+  it("dispatches and highlights every generated extension", () => {
+    for (const extension of TEXT_EXTENSIONS) {
+      const filename = `attachment.${extension}`;
+      expect(getPreviewKind("application/octet-stream", filename)).not.toBeNull();
+      expect(extensionToLanguage(filename)).toBe(
+        TEXT_EXTENSION_LANGUAGE_MAP[extension],
+      );
+    }
+  });
+
+  it("dispatches and highlights every generated basename", () => {
+    for (const basename of TEXT_BASENAMES) {
+      expect(getPreviewKind("application/octet-stream", basename)).toBe("text");
+      expect(extensionToLanguage(basename)).toBe(
+        TEXT_BASENAME_LANGUAGE_MAP[basename],
+      );
+    }
   });
 });
 
