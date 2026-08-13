@@ -267,10 +267,15 @@ describe("TabBar merged-tab chrome", () => {
   // The flare's bottom row sits on top of the content card's top ring. Both
   // draw --surface-border, so in dark mode the arc would composite over the
   // ring rather than replace it and the two translucent keylines would stack
-  // into a markedly lighter line right at the straight-to-curve junction. The
-  // opaque --app-shell layer under the gradient makes the flare replace
-  // whatever it covers.
-  it("paints each flare on an opaque shell layer", () => {
+  // into a markedly lighter line right at the straight-to-curve junction. An
+  // opaque layer under the gradient makes the flare replace whatever it
+  // covers.
+  //
+  // That layer must be --sidebar, the tab strip's real backdrop (the sidebar
+  // wrapper paints bg-sidebar while the inset-variant app sidebar is
+  // mounted). --app-shell is markedly darker in dark mode and printed a
+  // visible dark square under each bottom corner of the active tab.
+  it("paints each flare on an opaque layer matching the strip backdrop", () => {
     const { getByLabelText } = render(<TabBar />);
     const flares = getByLabelText("Issues")
       .closest("[data-tab-frame]")
@@ -279,7 +284,7 @@ describe("TabBar merged-tab chrome", () => {
     expect(flares).toHaveLength(2);
     for (const flare of flares ?? []) {
       expect(flare.getAttribute("style")).toContain(
-        "var(--page-canvas) 10.2px), var(--app-shell)",
+        "var(--page-canvas) 10.2px), var(--sidebar)",
       );
     }
   });
