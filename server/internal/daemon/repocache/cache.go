@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/processtree"
@@ -71,13 +72,23 @@ var agentGitExcludePatterns = []string{
 // worktree add, reset, etc.).
 const DefaultGitTimeout = 10 * time.Minute
 
-// repoCacheGitTimeout backs every runGit*Context wrapper below. It is a
-// package var (not a Cache field) because those wrappers are free functions
-// shared across every Cache instance and have no *Cache receiver. New sets
-// it once, before the returned Cache serves any request — there is no
-// concurrent-write hazard in practice because exactly one Cache is
-// constructed per daemon process.
-var repoCacheGitTimeout = DefaultGitTimeout
+// repoCacheGitTimeoutNS backs every runGit*Context wrapper below, in
+// nanoseconds. It is a package var (not a Cache field) because those
+// wrappers are free functions shared across every Cache instance and have no
+// *Cache receiver. It is an atomic.Int64 rather than a plain time.Duration
+// because Go's test suite constructs many Cache instances concurrently
+// (each call to New writes this var) while other tests' git operations read
+// it at the same time — a plain var trips the race detector even though
+// every caller in this codebase passes the same default timeout.
+var repoCacheGitTimeoutNS atomic.Int64
+
+func init() {
+	repoCacheGitTimeoutNS.Store(int64(DefaultGitTimeout))
+}
+
+func repoCacheGitTimeout() time.Duration {
+	return time.Duration(repoCacheGitTimeoutNS.Load())
+}
 
 func newGitCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
@@ -90,7 +101,7 @@ func runGitCombinedOutput(args ...string) ([]byte, error) {
 }
 
 func runGitCombinedOutputContext(ctx context.Context, args ...string) ([]byte, error) {
-	return runGitCombinedOutputWithTimeoutContext(ctx, repoCacheGitTimeout, args...)
+	return runGitCombinedOutputWithTimeoutContext(ctx, repoCacheGitTimeout(), args...)
 }
 
 func runGitCombinedOutputWithTimeout(timeout time.Duration, args ...string) ([]byte, error) {
@@ -114,7 +125,7 @@ func runGitOutput(args ...string) ([]byte, error) {
 }
 
 func runGitOutputContext(ctx context.Context, args ...string) ([]byte, error) {
-	return runGitOutputWithTimeoutContext(ctx, repoCacheGitTimeout, args...)
+	return runGitOutputWithTimeoutContext(ctx, repoCacheGitTimeout(), args...)
 }
 
 func runGitOutputWithTimeout(timeout time.Duration, args ...string) ([]byte, error) {
@@ -138,7 +149,7 @@ func runGit(args ...string) error {
 }
 
 func runGitContext(ctx context.Context, args ...string) error {
-	return runGitWithTimeoutContext(ctx, repoCacheGitTimeout, args...)
+	return runGitWithTimeoutContext(ctx, repoCacheGitTimeout(), args...)
 }
 
 func runGitWithTimeout(timeout time.Duration, args ...string) error {
@@ -310,7 +321,7 @@ func New(root string, logger *slog.Logger, gitTimeout time.Duration) *Cache {
 	if gitTimeout <= 0 {
 		gitTimeout = DefaultGitTimeout
 	}
-	repoCacheGitTimeout = gitTimeout
+	repoCacheGitTimeoutNS.Store(int64(gitTimeout))
 	return &Cache{root: root, logger: logger}
 }
 
