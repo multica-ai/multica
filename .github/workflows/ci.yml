@@ -432,8 +432,10 @@ jobs:
         # The standalone Codex installer exposes bin as a directory junction.
         # filepath.EvalSymlinks cannot traverse that reparse-point shape, so
         # only a real Windows filesystem proves both PATH discovery and an
-        # explicitly configured path reach the release executable.
-        run: go test ./internal/daemon -v -run '^(TestCanonicalExecutablePath|TestResolveAgentExecutablePathKeeps|TestResolveAgentEntry(FollowsRetargetedInstallerJunction|CanonicalizesRediscoveredJunction|ForLaunchRejectsUnverifiedInitialJunctionTarget|ForLaunchRejectsRediscoveredJunctionWhenFinalPathResolutionFails|DoesNotSharePreRetargetSingleflightResult|ForLaunchFailsWhenJunctionKeepsRetargeting)|TestHandleTaskReportsWindowsCodexProcessStartFailure)' -count=1 -timeout=5m
+        # explicitly configured path reach the release executable. The same job
+        # covers the npm shape, where the entry point is a `.cmd` shim that only
+        # the command interpreter can run.
+        run: go test ./internal/daemon -v -run '^(TestCanonicalExecutablePath|TestTrimExtendedLengthPrefix|TestResolveAgentExecutablePathKeeps|TestResolveAgentEntry(FollowsRetargetedInstallerJunction|CanonicalizesRediscoveredJunction|ForLaunchKeepsCmdShimLaunchable|ForLaunchRejectsUnverifiedInitialJunctionTarget|ForLaunchRejectsRediscoveredJunctionWhenFinalPathResolutionFails|DoesNotSharePreRetargetSingleflightResult|ForLaunchFailsWhenJunctionKeepsRetargeting)|TestHandleTaskReportsWindowsCodexProcessStartFailure)' -count=1 -timeout=5m
 
       - name: Build Windows CLI helper entrypoint
         working-directory: server
