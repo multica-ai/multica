@@ -5,6 +5,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -86,21 +88,24 @@ func TestCodexInitializeRetrySupportedWithOwnedProcessTree(t *testing.T) {
 	}
 }
 
-// TestAttachProcessGroupTerminatesDescendants is the property in isolation: a
-// child that spawns its own long-lived grandchild must take that grandchild
-// with it. Killing only the direct child is what left Codex command runners
-// from earlier task dates alive in #6883.
-func TestAttachProcessGroupTerminatesDescendants(t *testing.T) {
+// TestStartOwnedProcessTreeCapturesImmediateDescendants is the pre-attach
+// window: Windows grants job membership only to processes created after the
+// assignment and never retroactively, so a child that spawns its real work
+// immediately could escape a job it joined after Start. The helper here spawns
+// its grandchild as the very first thing it does, and the assertion is direct —
+// the job's own accounting must have seen both processes, not just the wrapper.
+//
+// That distinction matters more than it looks: a job holding only a wrapper that
+// exits reports the tree empty while the escaped process is still running, which
+// would make cleanup look confirmed when it is not.
+func TestStartOwnedProcessTreeCapturesImmediateDescendants(t *testing.T) {
 	exePath, pidPath := buildDescendantSpawner(t)
 
 	cmd := exec.Command(exePath, "spawn")
 	cmd.Env = append(os.Environ(), "DESCENDANT_PID_FILE="+pidPath)
 	hideAgentWindow(cmd)
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	if err := attachProcessGroup(cmd); err != nil {
-		t.Fatalf("attachProcessGroup: %v", err)
+	if err := startOwnedProcessTree(cmd, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("startOwnedProcessTree: %v", err)
 	}
 	t.Cleanup(func() { releaseProcessGroup(cmd) })
 
@@ -108,9 +113,12 @@ func TestAttachProcessGroupTerminatesDescendants(t *testing.T) {
 	if !processStillRunning(descendantPid) {
 		t.Fatalf("descendant %d was not running; the test cannot prove anything", descendantPid)
 	}
+	if total := jobTotalProcesses(t, cmd); total < 2 {
+		t.Fatalf("job accounted for %d processes, want the child and its descendant; the descendant escaped the job", total)
+	}
 
-	signalProcessGroup(cmd.Process, syscall.SIGKILL)
-	if !waitProcessGroupGone(cmd.Process, 10*time.Second) {
+	signalProcessGroup(cmd, syscall.SIGKILL)
+	if !waitProcessGroupGone(cmd, 10*time.Second) {
 		t.Fatal("waitProcessGroupGone reported the tree still active after terminating the job")
 	}
 	_ = cmd.Wait()
@@ -120,20 +128,68 @@ func TestAttachProcessGroupTerminatesDescendants(t *testing.T) {
 }
 
 // TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed covers the
-// degraded path: when the Job Object assignment never happened there is nothing
-// to observe, and callers must read that as "cleanup unconfirmed" rather than
-// as success.
+// degraded path: a command started with a plain Start owns no job, so there is
+// nothing to observe, and callers must read that as "cleanup unconfirmed"
+// rather than as success.
 func TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed(t *testing.T) {
 	cmd := exec.Command("cmd.exe", "/c", "exit", "0")
 	hideAgentWindow(cmd)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	pid := cmd.Process.Pid
 	_ = cmd.Wait()
-	if waitProcessGroupGone(&os.Process{Pid: pid}, 50*time.Millisecond) {
+	if waitProcessGroupGone(cmd, 50*time.Millisecond) {
 		t.Fatal("waitProcessGroupGone must not confirm cleanup for an unowned process")
 	}
+}
+
+// TestStartOwnedProcessTreeLeavesNoSuspendedChild guards the CREATE_SUSPENDED
+// path: a child that is never resumed would hang the launch forever, so a
+// successful return has to mean the process is actually running.
+func TestStartOwnedProcessTreeLeavesNoSuspendedChild(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "ran.txt")
+	cmd := exec.Command("cmd.exe", "/c", "echo ran > "+marker)
+	hideAgentWindow(cmd)
+	if err := startOwnedProcessTree(cmd, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("startOwnedProcessTree: %v", err)
+	}
+	t.Cleanup(func() { releaseProcessGroup(cmd) })
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("child exited with error: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("child never exited; it was most likely left suspended")
+	}
+	if _, err := os.ReadFile(marker); err != nil {
+		t.Fatalf("child produced no output, so it never ran: %v", err)
+	}
+}
+
+// jobTotalProcesses reports how many processes the command's job has ever
+// accounted for, which is what proves membership regardless of whether a
+// descendant has already exited.
+func jobTotalProcesses(t *testing.T, cmd *exec.Cmd) uint32 {
+	t.Helper()
+	tree, ok := lookupProcessTree(cmd)
+	if !ok {
+		t.Fatal("command owns no process tree")
+	}
+	var info jobObjectBasicAccountingInformation
+	if err := windows.QueryInformationJobObject(
+		tree.job,
+		windows.JobObjectBasicAccountingInformation,
+		uintptr(unsafe.Pointer(&info)),
+		uint32(unsafe.Sizeof(info)),
+		nil,
+	); err != nil {
+		t.Fatalf("query job accounting: %v", err)
+	}
+	return info.TotalProcesses
 }
 
 // buildDescendantSpawner compiles a helper that starts a long-lived grandchild

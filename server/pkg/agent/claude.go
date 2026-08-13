@@ -200,7 +200,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			}
 			closeStdin()
 			if cmd.Process != nil {
-				signalProcessGroup(cmd.Process, syscall.SIGTERM)
+				signalProcessGroup(cmd, syscall.SIGTERM)
 				// Escalate to a group SIGKILL unless the WHOLE process group has
 				// exited within the grace window. This must key off the process
 				// group, not procDone: procDone only means cmd.Wait() returned
@@ -209,8 +209,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				// and skip the SIGKILL — leaking exactly the orphan this fix
 				// targets. waitProcessGroupGone returns as soon as the group is
 				// empty, so the graceful case adds no latency.
-				if !waitProcessGroupGone(cmd.Process, claudeTerminateGrace()) {
-					signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				if !waitProcessGroupGone(cmd, claudeTerminateGrace()) {
+					signalProcessGroup(cmd, syscall.SIGKILL)
 				}
 			}
 			_ = stdout.Close()

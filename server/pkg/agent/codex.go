@@ -994,7 +994,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// still backstops cmd.Wait() if the kill leaves an open pipe.
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
-			signalProcessGroup(cmd.Process, syscall.SIGKILL)
+			signalProcessGroup(cmd, syscall.SIGKILL)
 		}
 		return nil
 	}
@@ -1023,18 +1023,16 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	stderrBuf := newStderrTail(io.Discard, codexStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	// Start and take ownership of the process tree in one step. On Windows the
+	// child is created suspended and placed in a Job Object before it runs, so
+	// the cleanup below reaches the Node wrapper, the native app-server, and the
+	// sandbox helpers underneath them rather than just the direct child. On Unix
+	// the process group configured above already covers that and this is a plain
+	// Start. Ownership that cannot be taken is logged, not fatal; a child that
+	// cannot be resumed is killed and reported here.
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start codex: %w", err)
-	}
-	// Claim the process tree now that there is a process to claim. On Windows
-	// this is what lets the cleanup below reach the Node wrapper, the native
-	// app-server, and the sandbox helpers underneath them; on Unix the process
-	// group set before Start already covers that and this is a no-op. A failure
-	// is not fatal — cleanup degrades to terminating the direct child.
-	if err := attachProcessGroup(cmd); err != nil {
-		b.cfg.Logger.Warn("codex: could not take ownership of the process tree; descendant cleanup will be best-effort",
-			"error", err, "pid", cmd.Process.Pid, "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID)
 	}
 	activeLaunches := activeCodexLaunches.Add(1)
 	for {
@@ -1265,7 +1263,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			// Wait returning with a ProcessState is the os/exec reap boundary.
 			// On Unix, ProcessState.Exited reports false for a process terminated
 			// by SIGKILL even though Wait successfully reaped it.
-			cleanupConfirmed = waitReturned && cmd.ProcessState != nil && waitProcessGroupGone(cmd.Process, grace)
+			cleanupConfirmed = waitReturned && cmd.ProcessState != nil && waitProcessGroupGone(cmd, grace)
 			if codexCleanupConfirmationOverride.Load() < 0 {
 				cleanupConfirmed = false
 			}
@@ -1328,7 +1326,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				// A timed-out initialize may still complete after the host gives up.
 				// Kill the whole process group before waiting so a leader that exits
 				// on stdin EOF cannot leave detached-stdio descendants behind.
-				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				signalProcessGroup(cmd, syscall.SIGKILL)
 			}
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
@@ -1367,7 +1365,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				// A timed-out thread/start has an uncertain provider outcome. Kill
 				// the whole process group before waiting so a leader that exits on
 				// EOF cannot leave detached-stdio descendants behind.
-				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				signalProcessGroup(cmd, syscall.SIGKILL)
 			}
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"

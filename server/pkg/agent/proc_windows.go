@@ -4,7 +4,7 @@ package agent
 
 import (
 	"fmt"
-	"os"
+	"log/slog"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -26,6 +26,10 @@ import (
 // pass CREATE_NO_WINDOW — the exact popup storm reported in #1521.
 const createNewConsole = 0x00000010
 
+// createSuspended starts the child with its initial thread suspended, so it can
+// be placed in a Job Object before it executes a single instruction.
+const createSuspended = 0x00000004
+
 // hideAgentWindow configures cmd to suppress the console window on Windows
 // while still giving descendant processes a hidden console to inherit.
 // Stdio pipes set via cmd.StdoutPipe/StdinPipe keep working because
@@ -38,27 +42,26 @@ func hideAgentWindow(cmd *exec.Cmd) {
 	cmd.SysProcAttr.CreationFlags |= createNewConsole
 }
 
-// configureProcessGroup is a no-op on Windows: a process cannot join a Job
-// Object before it exists, so ownership is taken in attachProcessGroup once
-// Start has returned.
+// configureProcessGroup is a no-op on Windows: there is no Setpgid equivalent,
+// and job membership cannot be requested before the process exists. Ownership
+// is taken by startOwnedProcessTree instead, which a backend opts into by
+// calling it in place of cmd.Start.
 func configureProcessGroup(cmd *exec.Cmd) {}
 
 // ownedProcessTree is the Windows equivalent of a Unix process group: a Job
-// Object the agent was assigned to, which every process it goes on to create
+// Object the agent belongs to, which every process it goes on to create
 // inherits membership of.
-//
-// The process handle is held open for as long as the entry lives. That is not
-// bookkeeping — an open handle is what stops Windows recycling the pid, so the
-// pid stays a safe key and a later terminate can never reach an unrelated
-// process that inherited the number.
 type ownedProcessTree struct {
-	job     windows.Handle
-	process windows.Handle
+	job windows.Handle
 }
 
+// ownedProcessTrees is keyed by the *exec.Cmd of one launch, never by pid. A pid
+// is only unique while its process is alive, so a launch that outlived its
+// process could otherwise look up — and terminate — an unrelated task that
+// happened to inherit the number.
 var (
 	ownedProcessTreesMu sync.Mutex
-	ownedProcessTrees   = map[int]ownedProcessTree{}
+	ownedProcessTrees   = map[*exec.Cmd]ownedProcessTree{}
 )
 
 // jobObjectBasicAccountingInformation mirrors JOBOBJECT_BASIC_ACCOUNTING_INFORMATION.
@@ -74,25 +77,56 @@ type jobObjectBasicAccountingInformation struct {
 	TotalTerminatedProcesses  uint32
 }
 
-// attachProcessGroup takes ownership of a started agent's process tree so that
-// a later signalProcessGroup reaches the descendants it spawned, not just the
-// direct child. On Windows the direct child is frequently a `cmd.exe` wrapping
-// a `.cmd` shim, so killing only the child left the whole real tree — the Node
-// wrapper, the native app-server, and any tool subprocess below them — running
-// as orphans. See #6883, where Codex command runners from earlier task dates
-// were still alive.
+// startOwnedProcessTree starts cmd and takes ownership of every process it goes
+// on to create. Backends that need whole-tree cleanup call this instead of
+// cmd.Start.
 //
-// This runs after Start because a process can only join a job once it exists.
-// The window between the two is the same one processtree accepts, and it is
-// small relative to when agents spawn subprocesses of their own.
+// The child is created suspended and assigned to a Job Object before it runs.
+// That ordering is the whole point: Windows grants membership only to processes
+// created *after* the assignment, and never retroactively. Assigning after a
+// plain Start leaves a window in which the direct child — usually a cmd.exe
+// wrapping a .cmd shim — has already spawned the real agent outside the job.
+// That is worse than owning nothing, because the job would then hold only a
+// wrapper that exits immediately: accounting would report the tree empty while
+// the escaped app-server is still running, and cleanup would be reported as
+// confirmed when it is not.
 //
-// A failure here is not fatal: cleanup falls back to terminating the direct
-// child, which is exactly the previous behaviour. Callers log the error rather
-// than failing the launch.
-func attachProcessGroup(cmd *exec.Cmd) error {
-	if cmd == nil || cmd.Process == nil {
-		return nil
+// The child is never left suspended. If ownership cannot be taken it is resumed
+// anyway and runs unowned, exactly as it did before Job Objects, with the reason
+// logged. Only a failure to resume is unrecoverable: that child is killed and
+// the error returned, so the caller fails the launch instead of waiting forever
+// on a process that will never run.
+func startOwnedProcessTree(cmd *exec.Cmd, logger *slog.Logger) error {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
+	cmd.SysProcAttr.CreationFlags |= createSuspended
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	if err := ownProcessTree(cmd); err != nil && logger != nil {
+		logger.Warn("could not take ownership of the agent process tree; descendant cleanup will be best-effort",
+			"error", err, "pid", cmd.Process.Pid)
+	}
+
+	if err := resumeProcess(cmd.Process.Pid); err != nil {
+		// The child cannot run, so nothing downstream can succeed. Drop
+		// ownership first: closing the job terminates the suspended child, and
+		// Kill covers the case where ownership was never taken.
+		releaseProcessGroup(cmd)
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("resume suspended child: %w", err)
+	}
+	return nil
+}
+
+// ownProcessTree creates the Job Object and assigns the (still suspended) child
+// to it. The process handle is only needed for the assignment and is closed
+// straight after: termination and accounting both go through the job.
+func ownProcessTree(cmd *exec.Cmd) error {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return fmt.Errorf("create job object: %w", err)
@@ -112,7 +146,7 @@ func attachProcessGroup(cmd *exec.Cmd) error {
 		return fmt.Errorf("set KILL_ON_JOB_CLOSE: %w", err)
 	}
 	process, err := windows.OpenProcess(
-		windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.SYNCHRONIZE,
+		windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE,
 		false,
 		uint32(cmd.Process.Pid),
 	)
@@ -120,53 +154,71 @@ func attachProcessGroup(cmd *exec.Cmd) error {
 		_ = windows.CloseHandle(job)
 		return fmt.Errorf("open process: %w", err)
 	}
+	defer windows.CloseHandle(process)
 	if err := windows.AssignProcessToJobObject(job, process); err != nil {
-		_ = windows.CloseHandle(process)
 		_ = windows.CloseHandle(job)
 		return fmt.Errorf("assign process to job object: %w", err)
 	}
 
 	ownedProcessTreesMu.Lock()
 	defer ownedProcessTreesMu.Unlock()
-	// A live entry for this pid cannot exist: its own open process handle would
-	// have prevented the pid being reused. Close any stale one defensively so a
-	// missed release cannot leak a handle forever.
-	if stale, ok := ownedProcessTrees[cmd.Process.Pid]; ok {
-		stale.close()
-	}
-	ownedProcessTrees[cmd.Process.Pid] = ownedProcessTree{job: job, process: process}
+	ownedProcessTrees[cmd] = ownedProcessTree{job: job}
 	return nil
 }
 
-// releaseProcessGroup drops ownership of a finished tree. Closing the job
-// handle is what kills anything still inside it, so this must run only after
-// the caller has reaped the process — never on a path that could still be
-// serving a live agent.
-func releaseProcessGroup(cmd *exec.Cmd) {
-	if cmd == nil || cmd.Process == nil {
-		return
+// resumeProcess releases the initial thread of a CREATE_SUSPENDED child. A
+// freshly created process has exactly one thread; the snapshot is filtered by
+// owning pid so a concurrent enumeration cannot resume somebody else's.
+func resumeProcess(pid int) error {
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
+	if err != nil {
+		return fmt.Errorf("snapshot threads: %w", err)
 	}
+	defer windows.CloseHandle(snapshot)
+
+	var entry windows.ThreadEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+	resumed := 0
+	for err = windows.Thread32First(snapshot, &entry); err == nil; err = windows.Thread32Next(snapshot, &entry) {
+		if entry.OwnerProcessID != uint32(pid) {
+			continue
+		}
+		thread, openErr := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, entry.ThreadID)
+		if openErr != nil {
+			return fmt.Errorf("open thread %d: %w", entry.ThreadID, openErr)
+		}
+		_, resumeErr := windows.ResumeThread(thread)
+		_ = windows.CloseHandle(thread)
+		if resumeErr != nil {
+			return fmt.Errorf("resume thread %d: %w", entry.ThreadID, resumeErr)
+		}
+		resumed++
+	}
+	if resumed == 0 {
+		return fmt.Errorf("no threads found for pid %d", pid)
+	}
+	return nil
+}
+
+// releaseProcessGroup drops ownership of a finished tree. Closing the job handle
+// is what kills anything still inside it, so this must run only after the caller
+// has reaped the process — never on a path that could still be serving a live
+// agent.
+func releaseProcessGroup(cmd *exec.Cmd) {
 	ownedProcessTreesMu.Lock()
-	tree, ok := ownedProcessTrees[cmd.Process.Pid]
-	delete(ownedProcessTrees, cmd.Process.Pid)
+	tree, ok := ownedProcessTrees[cmd]
+	delete(ownedProcessTrees, cmd)
 	ownedProcessTreesMu.Unlock()
 	if ok {
-		tree.close()
+		_ = windows.CloseHandle(tree.job)
 	}
 }
 
-func lookupProcessTree(pid int) (ownedProcessTree, bool) {
+func lookupProcessTree(cmd *exec.Cmd) (ownedProcessTree, bool) {
 	ownedProcessTreesMu.Lock()
 	defer ownedProcessTreesMu.Unlock()
-	tree, ok := ownedProcessTrees[pid]
+	tree, ok := ownedProcessTrees[cmd]
 	return tree, ok
-}
-
-func (t ownedProcessTree) close() {
-	// Job first: closing it terminates whatever is left inside. The process
-	// handle is released afterwards so the pid stays reserved until then.
-	_ = windows.CloseHandle(t.job)
-	_ = windows.CloseHandle(t.process)
 }
 
 func (t ownedProcessTree) activeProcesses() (uint32, error) {
@@ -185,8 +237,8 @@ func (t ownedProcessTree) activeProcesses() (uint32, error) {
 
 // codexInitializeRetrySupported reports whether descendant termination can be
 // positively confirmed. Owning the tree in a Job Object is what makes that
-// possible; when attachProcessGroup failed, waitProcessGroupGone returns false
-// and the caller's cleanup_confirmed gate suppresses the retry anyway.
+// possible; when ownership was not taken, waitProcessGroupGone returns false and
+// the caller's cleanup_confirmed gate suppresses the retry anyway.
 func codexInitializeRetrySupported() bool { return true }
 
 // signalProcessGroup terminates the whole owned process tree. Windows has no
@@ -194,27 +246,27 @@ func codexInitializeRetrySupported() bool { return true }
 // ignored and the Job Object is terminated; the caller's grace window still
 // applies before this is invoked with SIGKILL. Without an owned tree this falls
 // back to killing the direct child alone.
-func signalProcessGroup(p *os.Process, _ syscall.Signal) {
-	if p == nil {
+func signalProcessGroup(cmd *exec.Cmd, _ syscall.Signal) {
+	if cmd == nil || cmd.Process == nil {
 		return
 	}
-	if tree, ok := lookupProcessTree(p.Pid); ok {
+	if tree, ok := lookupProcessTree(cmd); ok {
 		if err := windows.TerminateJobObject(tree.job, 1); err == nil {
 			return
 		}
 	}
-	_ = p.Kill()
+	_ = cmd.Process.Kill()
 }
 
 // waitProcessGroupGone reports whether every process in the owned tree is gone,
 // polling the job's accounting information until the timeout. Without an owned
 // tree there is nothing to observe, so it reports false — callers treat that as
-// "cleanup could not be confirmed" rather than as a failure.
-func waitProcessGroupGone(p *os.Process, timeout time.Duration) bool {
-	if p == nil {
+// "cleanup could not be confirmed" rather than as success.
+func waitProcessGroupGone(cmd *exec.Cmd, timeout time.Duration) bool {
+	if cmd == nil || cmd.Process == nil {
 		return false
 	}
-	tree, ok := lookupProcessTree(p.Pid)
+	tree, ok := lookupProcessTree(cmd)
 	if !ok {
 		return false
 	}
