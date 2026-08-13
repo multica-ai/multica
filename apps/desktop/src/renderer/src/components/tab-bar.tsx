@@ -338,7 +338,13 @@ function SortableTabItem({
               isDragging && "opacity-60",
             )}
           >
-            <span className="absolute inset-x-0 top-0 bottom-2.5 rounded-t-lg border border-b-0 border-surface-border bg-page-canvas" />
+            {/* bg-clip-padding keeps the page-canvas fill out from under the
+                1px border. In dark mode --surface-border is translucent
+                (oklch(1 0 0 / 10%)), so a fill behind it would tint this
+                keyline lighter than the flare arcs and the content card's
+                ring, which both composite over --app-shell. That leaves a
+                visible step exactly where the tab merges into the frame. */}
+            <span className="absolute inset-x-0 top-0 bottom-2.5 rounded-t-lg border border-b-0 border-surface-border bg-page-canvas bg-clip-padding" />
             <span className="absolute inset-x-0 bottom-0 h-2.5 bg-page-canvas" />
             <span
               className="absolute bottom-0 size-2.5"

@@ -246,6 +246,34 @@ describe("TabBar active-tab title persistence", () => {
   });
 });
 
+describe("TabBar merged-tab chrome", () => {
+  // Dark mode's --surface-border is translucent, so a fill painted under the
+  // cap's own border tints its keyline lighter than the flare arcs and the
+  // content card's ring, leaving a visible step where the tab meets the frame.
+  // bg-clip-padding keeps the fill inside the border box.
+  it("keeps the active tab's page-canvas fill out from under its keyline", () => {
+    const { getByLabelText } = render(<TabBar />);
+    const cap = getByLabelText("Issues")
+      .closest("[data-tab-frame]")
+      ?.querySelector(".rounded-t-lg");
+
+    expect(cap).toHaveClass(
+      "border-surface-border",
+      "bg-page-canvas",
+      "bg-clip-padding",
+    );
+  });
+
+  it("draws the merged cap only on the active tab", () => {
+    const { getByLabelText } = render(<TabBar />);
+    expect(
+      getByLabelText("Projects")
+        .closest("[data-tab-frame]")
+        ?.querySelector(".rounded-t-lg"),
+    ).toBeNull();
+  });
+});
+
 describe("TabBar overflow", () => {
   it("keeps tabs readable in a bounded horizontal scroller", () => {
     state.byWorkspace.acme.tabs = Array.from({ length: 8 }, (_, index) => ({
