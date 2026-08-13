@@ -57,7 +57,7 @@ import {
   CollectionPageState,
 } from "../../layout/collection-page";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
-import { readOrigin, type OriginInfo } from "../lib/origin";
+import { isRefreshableOrigin, readOrigin, type OriginInfo } from "../lib/origin";
 import { CreateSkillDialog } from "./create-skill-dialog";
 import {
   useSkillsViewStore,
@@ -348,10 +348,36 @@ function SourceCell({
     label = t(($) => $.table.source_github);
   }
 
+  // Imported skills link to their upstream page; the anchor must not bubble
+  // its click into the row's whole-row navigation.
+  const sourceUrl =
+    isRefreshableOrigin(origin) && typeof origin.source_url === "string"
+      ? origin.source_url
+      : null;
+
   return (
     <ListGridCell className="hidden gap-1.5 text-caption text-muted-foreground @2xl:flex">
       {icon}
-      <span className="min-w-0 truncate">{label}</span>
+      {sourceUrl ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <a
+                href={sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="min-w-0 truncate hover:underline"
+              >
+                {label}
+              </a>
+            }
+          />
+          <TooltipContent side="top">{sourceUrl}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <span className="min-w-0 truncate">{label}</span>
+      )}
     </ListGridCell>
   );
 }

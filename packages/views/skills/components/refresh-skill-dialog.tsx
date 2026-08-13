@@ -19,6 +19,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
+import { midTruncate } from "../../common/github-url";
 import { useT } from "../../i18n";
 import type { OriginInfo } from "../lib/origin";
 
@@ -103,6 +109,23 @@ export function RefreshSkillDialog({
             })}
           </DialogDescription>
         </DialogHeader>
+        {typeof origin?.source_url === "string" && origin.source_url.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <a
+                  href={origin.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-fit max-w-full truncate text-caption text-muted-foreground hover:underline"
+                >
+                  {midTruncate(origin.source_url, 60)}
+                </a>
+              }
+            />
+            <TooltipContent side="top">{origin.source_url}</TooltipContent>
+          </Tooltip>
+        )}
         <div className="rounded-md bg-warning/10 px-3 py-2 text-caption text-muted-foreground">
           {t(($) => $.detail.refresh.dialog.warning)}
         </div>
