@@ -10,6 +10,11 @@
     "task_list": "チェックリスト",
     "quote": "引用",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "リンクを適用",
+      "remove": "リンクを削除",
+      "close": "リンク編集を閉じる"
+    },
     "heading_dropdown": {
       "text": "テキスト",
       "normal_text": "標準テキスト",
