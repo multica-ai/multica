@@ -71,5 +71,14 @@
     "refresh": "새로고침",
     "paging": "{{page}} / {{totalPages}} 페이지 · 총 {{total}}개",
     "date_dash": "—"
+  },
+  "return_page": {
+    "redirecting": "워크스페이스 결제 페이지로 돌아갑니다…",
+    "load_failed_title": "워크스페이스 결제 페이지를 열 수 없습니다",
+    "load_failed_description": "Stripe에서 돌아왔지만 워크스페이스 목록을 불러오지 못해 해당 결제 페이지를 열 수 없었습니다. 워크스페이스 설정 → 결제에서 현재 상태를 확인해 주세요.",
+    "workspace_missing_title": "워크스페이스를 찾을 수 없습니다",
+    "workspace_missing_description": "Stripe에서 돌아왔지만 이 워크스페이스를 사용할 수 없습니다. 삭제되었거나 접근 권한이 변경되었을 수 있습니다. 원하는 워크스페이스의 결제 페이지에서 현재 상태를 확인해 주세요.",
+    "retry": "다시 시도",
+    "go_to_app": "Multica로 이동"
   }
 }

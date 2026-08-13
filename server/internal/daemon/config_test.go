@@ -15,6 +15,80 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
+func TestResolveAgentExecutablePath_PreservesDispatchShimName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires elevated privileges on Windows")
+	}
+
+	for _, shimName := range []string{"volta-shim", "vp"} {
+		t.Run(shimName, func(t *testing.T) {
+			managerDir := t.TempDir()
+			manager := filepath.Join(managerDir, shimName)
+			if err := os.WriteFile(manager, []byte("#!/bin/sh\nprintf '%s\\n' \"${0##*/}\"\n"), 0o755); err != nil {
+				t.Fatalf("write dispatcher: %v", err)
+			}
+
+			binDir := t.TempDir()
+			entrypoint := filepath.Join(binDir, "claude")
+			if err := os.Symlink(manager, entrypoint); err != nil {
+				t.Fatalf("symlink dispatcher: %v", err)
+			}
+			t.Setenv("PATH", binDir)
+
+			got, err := resolveAgentExecutablePath("claude")
+			if err != nil {
+				t.Fatalf("resolveAgentExecutablePath: %v", err)
+			}
+			realBinDir, err := filepath.EvalSymlinks(binDir)
+			if err != nil {
+				t.Fatalf("resolve bin directory: %v", err)
+			}
+			want := filepath.Join(realBinDir, "claude")
+			if got != want {
+				t.Fatalf("resolved path = %q, want command-preserving entrypoint %q", got, want)
+			}
+			output, err := exec.Command(got, "--version").CombinedOutput()
+			if err != nil {
+				t.Fatalf("run resolved entrypoint: %v: %s", err, output)
+			}
+			if got := strings.TrimSpace(string(output)); got != "claude" {
+				t.Fatalf("dispatcher observed command name %q, want claude", got)
+			}
+		})
+	}
+}
+
+func TestResolveAgentExecutablePath_CanonicalizesOrdinaryVersionTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires elevated privileges on Windows")
+	}
+
+	versionDir := t.TempDir()
+	target := filepath.Join(versionDir, "claude-2.1.216")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write versioned executable: %v", err)
+	}
+
+	binDir := t.TempDir()
+	entrypoint := filepath.Join(binDir, "claude")
+	if err := os.Symlink(target, entrypoint); err != nil {
+		t.Fatalf("symlink versioned executable: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	got, err := resolveAgentExecutablePath("claude")
+	if err != nil {
+		t.Fatalf("resolveAgentExecutablePath: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(entrypoint)
+	if err != nil {
+		t.Fatalf("resolve versioned executable: %v", err)
+	}
+	if got != want {
+		t.Fatalf("resolved path = %q, want pinned version target %q", got, want)
+	}
+}
+
 func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	t.Setenv("MULTICA_GC_ARTIFACT_PATTERNS", "")
 	defaults := []string{"node_modules", ".next", ".turbo"}

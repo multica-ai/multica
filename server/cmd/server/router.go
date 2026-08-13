@@ -1351,14 +1351,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		// Workspace subscriptions use the same cloud transport and Stripe
 		// webhook as the existing owner-credit billing surface, but every request
-		// is workspace-scoped. Entitlements are member-readable; Checkout, seat
-		// reconcile, and Portal mutations require owner/admin. The handlers also
-		// enforce billing_workspace_subscriptions so a route refactor cannot
+		// is workspace-scoped. Entitlements, summary and prices are
+		// member-readable; Checkout, seat reconcile, and Portal mutations require
+		// owner/admin. The handlers also enforce
+		// billing_workspace_subscriptions so a route refactor cannot
 		// accidentally bypass the rollout flag.
 		r.Route("/api/cloud-subscriptions", func(r chi.Router) {
 			r.Use(handler.RequireHumanActor)
 
-			r.With(middleware.RequireWorkspaceMember(queries)).Get("/entitlements", h.GetCloudWorkspaceEntitlements)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireWorkspaceMember(queries))
+				r.Get("/entitlements", h.GetCloudWorkspaceEntitlements)
+				r.Get("/summary", h.GetCloudWorkspaceSubscriptionSummary)
+				r.Get("/prices", h.GetCloudWorkspaceSubscriptionPrices)
+			})
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
 				r.Post("/checkout-sessions", h.CreateCloudWorkspaceSubscriptionCheckout)
