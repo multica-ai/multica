@@ -36,8 +36,15 @@ Multica は現在、次のコマンドを検出します。
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 公式サイト](https://www.trae.cn/) |
+| ZCode | `zcode` | [ZCode CLI (zcode-cli)](https://github.com/kingsword09/zcode-cli) |
 
 ここでの「対応」とは、Multica が該当する CLI を呼び出せるという意味です。そのツールのアカウント、サブスクリプション、モデルの利用枠を Multica が提供するわけではありません。
+
+<Callout type="info">
+ZCode は**非公式のコミュニティクライアント連携**です。Multica は PATH 上の任意の `zcode` コマンドを検出しますが、Multica が公開・保守しているわけではありません。上流の `zcode` CLI でインストールとログイン（`zcode login`）を行い、モデルは `~/.zcode/cli/config.json` で設定してください。Multica が実行時にモデルを上書きすることはできません。
+
+公開版の `zcode` CLI は 1 ターンごとに JSON サマリーを返すため、進行状況はターン完了時に表示されます。ライブストリーミング（思考、ツール呼び出し、差分テキスト）には `--stream-json` をサポートするビルドが必要です。Multica はこれを自動検出し、対応していればストリーミング、そうでなければサマリーモードにフォールバックします。ZCode エージェントにバインドしたスキルは、タスク作業ディレクトリの `.zcode/skills/` に書き込まれます。
+</Callout>
 
 ## 2. ローカル環境でログインする
 

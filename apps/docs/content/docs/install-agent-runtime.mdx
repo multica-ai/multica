@@ -36,8 +36,15 @@ Multica currently detects these commands:
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE official site](https://www.trae.cn/) |
+| ZCode | `zcode` | [ZCode CLI (zcode-cli)](https://github.com/kingsword09/zcode-cli) |
 
 "Supported" means Multica can invoke that CLI. It does not mean Multica provides the tool's account, subscription, or model quota for you.
+
+<Callout type="info">
+ZCode is an **unofficial community client integration**. Multica detects any `zcode` command on PATH; it is not published or maintained by Multica. Install and sign in with the upstream `zcode` CLI (`zcode login`), and configure the model in `~/.zcode/cli/config.json` — Multica cannot override the model at run time.
+
+The published `zcode` CLI runs one turn and returns a JSON summary, so progress appears when the turn completes. Live streaming (thinking, tool calls, incremental text) requires a build that advertises `--stream-json`; Multica auto-detects this and uses streaming when available, otherwise it falls back to the summary mode. Skills bound to a ZCode agent are written to `.zcode/skills/` in the task workdir.
+</Callout>
 
 ## 2. Sign in on your machine
 

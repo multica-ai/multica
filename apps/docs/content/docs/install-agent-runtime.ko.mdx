@@ -36,8 +36,15 @@ Multica는 현재 다음 명령을 감지합니다.
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 공식 사이트](https://www.trae.cn/) |
+| ZCode | `zcode` | [ZCode CLI (zcode-cli)](https://github.com/kingsword09/zcode-cli) |
 
 "지원됨"은 Multica가 해당 CLI를 호출할 수 있다는 뜻이며 Multica가 도구의 계정, 구독, 모델 사용량을 제공한다는 뜻은 아닙니다.
+
+<Callout type="info">
+ZCode는 **비공식 커뮤니티 클라이언트 연동**입니다. Multica는 PATH의 모든 `zcode` 명령을 감지하지만, Multica가 게시하거나 유지 관리하지는 않습니다. 상위 `zcode` CLI로 설치 및 로그인(`zcode login`)하고, 모델은 `~/.zcode/cli/config.json`에서 설정하세요. Multica가 런타임에 모델을 재정의할 수는 없습니다.
+
+공개된 `zcode` CLI는 턴마다 JSON 요약을 반환하므로 진행 상황은 턴이 완료될 때 나타납니다. 라이브 스트리밍(사고, 도구 호출, 점진적 텍스트)은 `--stream-json`을 지원하는 빌드가 필요합니다. Multica는 이를 자동 감지하여 지원하면 스트리밍을, 그렇지 않으면 요약 모드로 대체합니다. ZCode 에이전트에 바인딩된 스킬은 작업 디렉터리의 `.zcode/skills/`에 기록됩니다.
+</Callout>
 
 ## 2. 로컬에서 로그인 완료
 

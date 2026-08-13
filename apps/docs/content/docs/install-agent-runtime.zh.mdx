@@ -36,8 +36,15 @@ Multica 当前会检测以下命令：
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 官方站](https://www.trae.cn/) |
+| ZCode | `zcode` | [ZCode CLI (zcode-cli)](https://github.com/kingsword09/zcode-cli) |
 
 "受支持"表示 Multica 能够调用对应 CLI，不代表 Multica 会替你提供该工具的账号、订阅或模型额度。
+
+<Callout type="info">
+ZCode 是**非官方社区客户端集成**。Multica 会探测 PATH 上的任意 `zcode` 命令；它不由 Multica 发布或维护。请用上游 `zcode` CLI 安装并登录（`zcode login`），并在 `~/.zcode/cli/config.json` 中配置模型——Multica 无法在运行时覆盖模型。
+
+公开发布的 `zcode` CLI 每轮返回一个 JSON 摘要，进度在该轮结束时才出现。实时流式（思考、工具调用、增量文本）需要支持 `--stream-json` 的构建版本；Multica 会自动探测，支持时使用流式，否则降级为摘要模式。绑定到 ZCode 智能体的技能会写入任务工作目录的 `.zcode/skills/`。
+</Callout>
 
 ## 2. 在本机完成登录
 
