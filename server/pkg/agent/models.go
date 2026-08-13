@@ -191,6 +191,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverReasonixModels(ctx, executablePath))
 		})
+	case "dsh":
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
+			return discovered(discoverDshModels(ctx, executablePath))
+		})
 	case "kiro":
 		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverKiroModels(ctx, executablePath))

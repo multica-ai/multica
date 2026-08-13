@@ -769,6 +769,7 @@ var providerThinkingEnums = map[string]map[string]bool{
 // per-model check decide before execution.
 var thinkingDynamicCatalogProviders = map[string]bool{
 	"codex":    true,
+	"dsh":      true,
 	"opencode": true,
 	"kimi":     true,
 }
