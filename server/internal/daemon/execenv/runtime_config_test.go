@@ -1997,6 +1997,11 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 	t.Parallel()
 	const (
 		wantFlag = "--output json"
+		// The premise the rule rests on. "Do not merge them" says nothing about
+		// WHICH stream carries what, so a brief that swapped the two would pass
+		// every other assertion here while telling an agent the opposite of the
+		// truth — the same defect one clause to the left.
+		wantPremise = "writes JSON to stdout; confirmations and warnings go to stderr"
 		// The prohibition itself, not just the operator it names: "Always merge
 		// them (`2>&1`)" contains `2>&1` and would pass a bare-operator check.
 		wantRule = "Do not merge them (`2>&1`)"
@@ -2012,6 +2017,9 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 	for name, brief := range briefs {
 		if !strings.Contains(brief, wantFlag) {
 			t.Fatalf("%s brief does not mention %s at all; this test's premise is gone", name, wantFlag)
+		}
+		if !strings.Contains(brief, wantPremise) {
+			t.Errorf("%s brief teaches %s without saying %q — the rule below it is only correct while the streams carry what this says they carry", name, wantFlag, wantPremise)
 		}
 		switch got := strings.Count(brief, wantRule); got {
 		case 1:
