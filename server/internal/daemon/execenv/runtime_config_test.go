@@ -1974,3 +1974,45 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 		})
 	}
 }
+
+// Every brief that teaches `--output json` also says not to merge stderr into
+// it, because the two facts are only useful together.
+//
+// The CLI is right: confirmations go to stderr, JSON goes to stdout, and
+// `--output json | jq` has always worked. It stays right only while the caller
+// keeps the streams apart, and `2>&1` is ordinary shell habit — six of six
+// throwaway agent sessions reached for it unprompted when asked to post a
+// comment and confirm it landed. What that costs is not a cosmetic parse error:
+// the confirmation line makes json.load fail, the command exits non-zero, and a
+// write that SUCCEEDED reads as one that failed. On 2026-08-12 an agent read a
+// posted comment that way and posted it again — the same text, twice, in front
+// of the person who asked for it. An attachment on that path is a file sent
+// into somebody's chat twice, and nothing takes a file back.
+//
+// Both brief builders are checked, not one. The quick-create brief is a
+// separate function with its own copy of the `--output json` line, so guidance
+// added to the full brief alone would be missing from exactly the runs that are
+// given the least context to work it out for themselves.
+func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing.T) {
+	t.Parallel()
+	const (
+		wantFlag  = "--output json"
+		wantMerge = "2>&1"
+		wantWhy   = "look like it failed"
+	)
+	briefs := map[string]string{
+		"full":         buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}),
+		"quick-create": buildMetaSkillContent("claude", TaskContextForEnv{QuickCreatePrompt: "make an issue"}),
+	}
+	for name, brief := range briefs {
+		if !strings.Contains(brief, wantFlag) {
+			t.Fatalf("%s brief does not mention %s at all; this test's premise is gone", name, wantFlag)
+		}
+		if !strings.Contains(brief, wantMerge) {
+			t.Errorf("%s brief teaches %s without naming %s — the habit it has to displace is the one thing an agent will not infer", name, wantFlag, wantMerge)
+		}
+		if !strings.Contains(brief, wantWhy) {
+			t.Errorf("%s brief warns about %s without saying what it costs; a rule with no reason is the first one dropped under pressure", name, wantMerge)
+		}
+	}
+}
