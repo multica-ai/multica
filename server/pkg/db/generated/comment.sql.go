@@ -440,6 +440,32 @@ func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepli
 	return has_replied, err
 }
 
+const hasSystemCommentForIssueAndSourceTask = `-- name: HasSystemCommentForIssueAndSourceTask :one
+SELECT EXISTS (
+    SELECT 1 FROM comment
+    WHERE issue_id = $1
+      AND workspace_id = $2
+      AND author_type = 'system'
+      AND source_task_id = $3
+) AS commented
+`
+
+type HasSystemCommentForIssueAndSourceTaskParams struct {
+	IssueID      pgtype.UUID `json:"issue_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
+}
+
+// Recovery notifications are keyed to the terminal task that discovered the
+// stalled child. Persisting that key on the comment makes reconciliation safe
+// to replay after duplicate terminal callbacks or a server restart.
+func (q *Queries) HasSystemCommentForIssueAndSourceTask(ctx context.Context, arg HasSystemCommentForIssueAndSourceTaskParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasSystemCommentForIssueAndSourceTask, arg.IssueID, arg.WorkspaceID, arg.SourceTaskID)
+	var commented bool
+	err := row.Scan(&commented)
+	return commented, err
+}
+
 const listChildCommentsForParents = `-- name: ListChildCommentsForParents :many
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id FROM comment
 WHERE parent_id = ANY($1::uuid[])

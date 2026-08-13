@@ -1332,6 +1332,48 @@ FOR UPDATE;
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
 
+-- name: ListStalledStageChildTasks :many
+-- Latest terminal run for non-terminal child issues that have no active run.
+-- The service performs the exact stage-frontier check before notifying; this
+-- query only supplies a bounded recovery scan after missed terminal events.
+SELECT atq.*
+FROM issue i
+JOIN agent_task_queue atq ON atq.issue_id = i.id
+WHERE i.parent_issue_id IS NOT NULL
+  AND i.status NOT IN ('done', 'cancelled', 'backlog')
+  AND atq.status IN ('completed', 'failed', 'cancelled')
+  AND atq.id = (
+      SELECT latest.id
+      FROM agent_task_queue latest
+      WHERE latest.issue_id = i.id
+        AND latest.status IN ('completed', 'failed', 'cancelled')
+      ORDER BY COALESCE(latest.completed_at, latest.started_at, latest.dispatched_at, latest.created_at) DESC,
+               latest.id DESC
+      LIMIT 1
+  )
+  AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at)
+      < now() - make_interval(secs => @stale_secs::double precision)
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue active
+      WHERE active.issue_id = i.id
+        AND active.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM comment recovery
+      WHERE recovery.issue_id = i.parent_issue_id
+        AND recovery.author_type = 'system'
+        AND recovery.source_task_id = atq.id
+  )
+ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at), atq.id
+LIMIT @max_rows::int;
+
+-- name: GetLatestTerminalTaskForIssue :one
+SELECT * FROM agent_task_queue
+WHERE issue_id = @issue_id
+  AND status IN ('completed', 'failed', 'cancelled')
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
+LIMIT 1;
+
 -- name: HasPendingTaskForIssue :one
 -- Returns true if there is a queued or dispatched (but not yet running) task for the issue.
 -- Used by the coalescing queue: allow enqueue when a task is running (so

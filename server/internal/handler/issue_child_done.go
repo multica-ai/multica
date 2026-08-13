@@ -135,6 +135,106 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	h.postChildDoneComment(ctx, parent, issue, children, staged, closedStage, false)
 }
 
+// reconcileParentAfterChildTaskTerminal gives a parent coordinator an
+// actionable recovery turn when a child run ended but the child still holds
+// the stage barrier open. The source task is persisted on the system comment,
+// so replaying a terminal callback after a process restart is idempotent.
+func (h *Handler) reconcileParentAfterChildTaskTerminal(ctx context.Context, task db.AgentTaskQueue, child db.Issue) {
+	if !child.ParentIssueID.Valid || isTerminalChildStatus(child.Status) {
+		return
+	}
+	parent, err := h.Queries.GetIssue(ctx, child.ParentIssueID)
+	if err != nil || parent.Status == "done" || parent.Status == "cancelled" || parent.Status == "backlog" {
+		return
+	}
+	if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
+		return
+	}
+	children, err := h.Queries.ListChildIssues(ctx, parent.ID)
+	if err != nil || !childHoldsCurrentStageBarrier(children, child) {
+		return
+	}
+	alreadyPosted, err := h.Queries.HasSystemCommentForIssueAndSourceTask(ctx, db.HasSystemCommentForIssueAndSourceTaskParams{
+		IssueID:      parent.ID,
+		WorkspaceID:  parent.WorkspaceID,
+		SourceTaskID: task.ID,
+	})
+	if err != nil || alreadyPosted {
+		return
+	}
+
+	prefix := h.getIssuePrefix(ctx, child.WorkspaceID)
+	identifier := prefix + "-" + strconv.Itoa(int(child.Number))
+	childID := uuidToString(child.ID)
+	title := sanitizeChildTitleForSystemComment(child.Title)
+	action := childRecoveryInstruction(child.Status, childID)
+	content := fmt.Sprintf(
+		"%sSub-issue [%s](mention://issue/%s) — \"%s\" — has no active run and remains `%s`, so it is still holding its stage barrier open. %s",
+		h.buildParentAssigneeMention(ctx, parent), identifier, childID, title, child.Status, action,
+	)
+	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:      parent.ID,
+		WorkspaceID:  parent.WorkspaceID,
+		AuthorType:   "system",
+		AuthorID:     pgtype.UUID{Valid: true},
+		Content:      content,
+		Type:         "system",
+		SourceTaskID: task.ID,
+	})
+	if err != nil {
+		slog.Warn("child recovery: create system comment failed",
+			"error", err,
+			"task_id", uuidToString(task.ID),
+			"child_id", childID,
+			"parent_id", uuidToString(parent.ID))
+		return
+	}
+	h.publish(protocol.EventCommentCreated, uuidToString(parent.WorkspaceID), "system", "", map[string]any{
+		"comment":             commentToResponse(comment, nil, nil),
+		"issue_title":         parent.Title,
+		"issue_assignee_type": textToPtr(parent.AssigneeType),
+		"issue_assignee_id":   uuidToPtr(parent.AssigneeID),
+		"issue_status":        parent.Status,
+	})
+	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
+}
+
+// childHoldsCurrentStageBarrier reports whether child belongs to the current
+// frontier. In a staged layout only the lowest stage with any non-terminal
+// child is actionable; later stages are deliberately parked and must not
+// generate recovery noise. Unstaged children form one implicit frontier.
+func childHoldsCurrentStageBarrier(children []db.Issue, child db.Issue) bool {
+	if !siblingsAreStaged(children) {
+		return true
+	}
+	if !child.Stage.Valid {
+		return false
+	}
+	var current int32
+	for _, sibling := range children {
+		if !sibling.Stage.Valid || isTerminalChildStatus(sibling.Status) {
+			continue
+		}
+		if current == 0 || sibling.Stage.Int32 < current {
+			current = sibling.Stage.Int32
+		}
+	}
+	return current != 0 && child.Stage.Int32 == current
+}
+
+func childRecoveryInstruction(status, childID string) string {
+	switch status {
+	case "in_review":
+		return "Review its result now; if accepted, move the child to `done`, otherwise reopen it and rerun the assigned agent."
+	case "blocked":
+		return "The child stays blocked by default. Resolve or record the dependency, then rerun it; only cancel it with explicit confirmation."
+	case "todo":
+		return fmt.Sprintf("Inspect its latest run, fix the failure, then run `multica issue rerun %s`; only cancel it with explicit confirmation.", childID)
+	default:
+		return fmt.Sprintf("Inspect why the run ended, choose the correct child status, and run `multica issue rerun %s` when it is ready; do not mark it done or cancelled automatically.", childID)
+	}
+}
+
 // notifyParentsOfBatchChildDone emits child-done parent notifications for a
 // whole batch AFTER every status write has committed. `completed` is the set of
 // children that transitioned non-terminal -> terminal during the batch.

@@ -73,6 +73,8 @@ Larger work can be split into sub-issues: the parent issue keeps the overall goa
 
 Sub-issues can be given a **stage** to advance in batches — 1, 2, 3. When every sub-issue in the earliest unfinished stage reaches `done` or `cancelled`, the parent issue receives a "sub-issues completed" notification; when the parent's assignee is an agent, it wakes up and decides whether to start the next stage. Sub-issues without a stage count as one batch and notify once when they all finish.
 
+If a run ends while a child in the current stage is still non-terminal, Multica keeps that child in the barrier and wakes the parent coordinator with an explicit recovery action after no active run remains. `in_review` asks for acceptance, `blocked` continues to block, and the platform never marks the child `done` or `cancelled` automatically. The periodic recovery scan replays the same reconciliation for missed events, with duplicate notifications suppressed across restarts.
+
 ## Switch views
 
 The Issues page offers five views — list, board, table, Gantt, and swimlane — filterable and sortable by status, assignee, project, and other properties. They all show the same issues.

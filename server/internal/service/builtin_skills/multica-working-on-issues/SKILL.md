@@ -200,7 +200,13 @@ on it. These are the contracts, not advice:
   cancel the task itself.
 - **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
   `todo` when no active task / retry remains — that is the main server-owned
-  status write on the agent-run path.
+  status write on the agent-run path. When the issue is a non-terminal child in
+  the current stage, the same terminal reconciliation wakes the parent
+  coordinator with an explicit recovery action. `in_review` asks for
+  acceptance, `blocked` keeps blocking, and the platform never auto-completes
+  or auto-cancels the child. A configurable stale-child scan replays missed
+  reconciliation events; persisted source-task dedup keeps the wake single
+  across retries and server restarts.
 
 ## Sub-issues: `todo` starts work now, `backlog` parks it
 
@@ -256,6 +262,11 @@ multica issue status <stage-2-child-id> todo   # promote when its deps are met
 Read each sub-issue's description before promoting and only promote items whose
 stated dependencies are met; if a description conflicts with the parent's
 breakdown, leave it `backlog` and comment to confirm first.
+
+If the parent wake says a current-stage child has no active run, inspect that
+child's latest execution and use the action in the recovery comment. Do not
+promote the next stage while the child remains non-terminal: `in_review` still
+needs acceptance, and `blocked` still holds the barrier.
 
 ## Incorrect → correct
 

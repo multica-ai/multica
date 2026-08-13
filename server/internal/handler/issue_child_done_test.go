@@ -154,6 +154,107 @@ func TestChildDoneNotifiesParent(t *testing.T) {
 	}
 }
 
+func TestChildTaskFailureWakesParentWithRecoveryAndDedupes(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("locate test agent: %v", err)
+	}
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
+	setIssueAssigneeDirect(t, fx.child.ID, "agent", agentID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`, fx.parent.ID, fx.child.ID)
+	})
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at, max_attempts)
+		VALUES ($1, $2, $3, 'running', 0, now(), now(), 1)
+		RETURNING id
+	`, agentID, runtimeID, fx.child.ID).Scan(&taskID); err != nil {
+		t.Fatalf("create child task: %v", err)
+	}
+
+	task, err := testHandler.TaskService.FailTask(context.Background(), parseUUID(taskID), "agent stopped", "", "", "", "agent_error.unknown", false, "")
+	if err != nil {
+		t.Fatalf("FailTask: %v", err)
+	}
+
+	var childStatus string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id = $1`, fx.child.ID).Scan(&childStatus); err != nil {
+		t.Fatalf("load child: %v", err)
+	}
+	if childStatus != "todo" {
+		t.Fatalf("child status = %q, want todo after terminal failure", childStatus)
+	}
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("recovery comments = %d, want 1", got)
+	}
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, fx.child.Identifier) || !strings.Contains(content, "multica issue rerun "+fx.child.ID) {
+		t.Fatalf("recovery comment is not actionable: %s", content)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
+		t.Fatalf("parent wake tasks = %d, want 1", got)
+	}
+
+	// Replay the same terminal event as a post-restart sweeper would. The
+	// persisted source_task_id and unique index keep both comment and wake single.
+	testHandler.TaskService.ReconcileIssueAfterTaskTerminal(context.Background(), *task, true)
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("replayed recovery comments = %d, want 1", got)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
+		t.Fatalf("replayed parent wake tasks = %d, want 1", got)
+	}
+}
+
+func TestChildInReviewTerminalRunWakesParentWithoutChangingStatus(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+	updateChildStatus(t, fx.child.ID, "in_review")
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("locate test agent: %v", err)
+	}
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`, fx.parent.ID, fx.child.ID)
+	})
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at, completed_at)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), now())
+		RETURNING id
+	`, agentID, runtimeID, fx.child.ID).Scan(&taskID); err != nil {
+		t.Fatalf("create completed child task: %v", err)
+	}
+	task, err := testHandler.Queries.GetAgentTask(context.Background(), parseUUID(taskID))
+	if err != nil {
+		t.Fatalf("load completed child task: %v", err)
+	}
+	testHandler.TaskService.ReconcileIssueAfterTaskTerminal(context.Background(), task, false)
+
+	var status string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id = $1`, fx.child.ID).Scan(&status); err != nil {
+		t.Fatalf("load child status: %v", err)
+	}
+	if status != "in_review" {
+		t.Fatalf("child status = %q, want in_review", status)
+	}
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "Review its result now") {
+		t.Fatalf("in_review recovery comment is not an acceptance prompt: %s", content)
+	}
+}
+
 // TestChildDoneNotificationIsIdempotent — re-saving an already-done child
 // must NOT fire a second notification. UpdateIssue is called with the same
 // status='done' twice; only the first call is a transition and should
