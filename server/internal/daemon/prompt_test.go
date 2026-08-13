@@ -13,16 +13,24 @@ import (
 // description body. Each substring corresponds to a concrete failure mode
 // observed in production output:
 //   - meta-instructions ("create an issue", "cc @X") leaking into the body
+//   - uploaded file-card or image Markdown being summarized out of the body
 //   - the Context section being misused as an apology log when no external
 //     references were actually fetched
 //   - hard-line rules being silently dropped on prompt rewrites
 func TestBuildQuickCreatePromptRules(t *testing.T) {
-	out := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
+	fileReference := "!file[requirements.docx](https://public.example/api/attachments/att-doc/download)"
+	imageReference := "![login mockup.png](https://public.example/api/attachments/att-image/download)"
+	out := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color\n" + fileReference + "\n" + imageReference})
 
 	mustContain := []string{
 		// high-fidelity invariant
 		"Faithfully restate what the user wants",
 		"Preserve specific names, identifiers, file paths",
+		"uploaded image or file Markdown reference",
+		"copy each reference verbatim",
+		"durable issue context",
+		"never summarize it away",
+		"routing or conversational material",
 		// strip non-spec material: verbal routing wrappers + conversational fillers
 		"verbal routing wrappers about creating the issue",
 		"pure conversational fillers",
@@ -56,6 +64,11 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
 			t.Errorf("buildQuickCreatePrompt output missing required rule: %q", s)
+		}
+	}
+	for _, reference := range []string{fileReference, imageReference} {
+		if !strings.Contains(out, reference) {
+			t.Errorf("buildQuickCreatePrompt output dropped attachment reference from user input: %q", reference)
 		}
 	}
 
