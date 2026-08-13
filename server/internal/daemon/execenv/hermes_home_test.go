@@ -382,6 +382,128 @@ mcp_servers:
 	}
 }
 
+func TestPrepareHermesScheduledRunOnlyMaterializesAliasesAcrossDocument(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	hostConfig := `mcp_servers:
+  figma:
+    enabled: true
+    auth: &figmaauth oauth
+other:
+  copy: *figmaauth
+`
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), hostConfig)
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot:   t.TempDir(),
+		WorkspaceID:      "ws-hermes-cross-document-alias",
+		TaskID:           "aaaa1111-2222-3333-4444-555566667777",
+		Provider:         "hermes",
+		HermesSourceHome: sharedHome,
+		Task: TaskContextForEnv{
+			AutopilotRunID:  "scheduled-run",
+			AutopilotSource: "schedule",
+			AgentSkills:     []SkillContextForEnv{{Name: "Review Helper", Content: "x"}},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	data, err := os.ReadFile(filepath.Join(env.HermesHome, "config.yaml"))
+	if err != nil {
+		t.Fatalf("read derived config: %v", err)
+	}
+	var parsed struct {
+		MCPServers map[string]struct {
+			Enabled bool   `yaml:"enabled"`
+			Auth    string `yaml:"auth"`
+		} `yaml:"mcp_servers"`
+		Other struct {
+			Copy string `yaml:"copy"`
+		} `yaml:"other"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("derived config must remain valid YAML: %v\n%s", err, data)
+	}
+	if got := parsed.MCPServers["figma"]; got.Enabled || got.Auth != "oauth" {
+		t.Errorf("Figma = %+v, want enabled false with auth preserved", got)
+	}
+	if parsed.Other.Copy != "oauth" {
+		t.Errorf("other.copy = %q, want materialized alias value", parsed.Other.Copy)
+	}
+	if source, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+		t.Fatalf("read source config: %v", err)
+	} else if string(source) != hostConfig {
+		t.Error("source config was modified")
+	}
+}
+
+func TestPrepareHermesScheduledRunOnlyMaterializesTopLevelMerge(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	hostConfig := `base: &base
+  mcp_servers:
+    figma:
+      enabled: true
+      marker: merged
+    unrelated:
+      enabled: true
+<<: *base
+model: hermes-4
+`
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), hostConfig)
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot:   t.TempDir(),
+		WorkspaceID:      "ws-hermes-top-level-merge",
+		TaskID:           "aaaa1111-2222-3333-4444-555566667777",
+		Provider:         "hermes",
+		HermesSourceHome: sharedHome,
+		Task: TaskContextForEnv{
+			AutopilotRunID:  "scheduled-run",
+			AutopilotSource: "schedule",
+			AgentSkills:     []SkillContextForEnv{{Name: "Review Helper", Content: "x"}},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	data, err := os.ReadFile(filepath.Join(env.HermesHome, "config.yaml"))
+	if err != nil {
+		t.Fatalf("read derived config: %v", err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse derived config node: %v\n%s", err, data)
+	}
+	if yamlMapValue(yamlDocumentRoot(&doc), "<<") != nil {
+		t.Fatal("derived top-level config must be materialized without merge key")
+	}
+	var parsed struct {
+		Model      string `yaml:"model"`
+		MCPServers map[string]struct {
+			Enabled bool   `yaml:"enabled"`
+			Marker  string `yaml:"marker"`
+		} `yaml:"mcp_servers"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse derived config: %v", err)
+	}
+	if got := parsed.MCPServers["figma"]; got.Enabled || got.Marker != "merged" {
+		t.Errorf("Figma = %+v, want merged config with enabled false", got)
+	}
+	if !parsed.MCPServers["unrelated"].Enabled || parsed.Model != "hermes-4" {
+		t.Errorf("unrelated config changed: parsed=%+v", parsed)
+	}
+	if source, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+		t.Fatalf("read source config: %v", err)
+	} else if string(source) != hostConfig {
+		t.Error("source config was modified")
+	}
+}
+
 func TestPrepareHermesScheduledRunOnlyFailsClosedOnNonMappingFigmaAlias(t *testing.T) {
 	t.Parallel()
 	sharedHome := t.TempDir()

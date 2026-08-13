@@ -714,11 +714,23 @@ func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]stri
 // server and every other field on the Figma entry remain unchanged.
 func disableHermesFigmaMCP(doc *yaml.Node) error {
 	top := yamlDocumentRoot(doc)
+	if top == nil {
+		return fmt.Errorf("scheduled Hermes config must be a mapping")
+	}
+	materializedTop, err := materializeHermesYAMLMapping(top)
+	if err != nil {
+		return fmt.Errorf("materialize scheduled Hermes config: %w", err)
+	}
+	if doc.Kind == yaml.DocumentNode {
+		doc.Content[0] = materializedTop
+	} else {
+		*doc = *materializedTop
+	}
+	top = materializedTop
 	servers := yamlMapValue(top, "mcp_servers")
 	if servers == nil {
 		return nil
 	}
-	var err error
 	servers, err = materializeHermesYAMLMapping(servers)
 	if err != nil {
 		return fmt.Errorf("materialize scheduled mcp_servers config: %w", err)
