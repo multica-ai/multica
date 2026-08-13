@@ -644,6 +644,16 @@ func TestTrimExtendedLengthPrefix(t *testing.T) {
 			want: `\\server\share\bin\codex.cmd`,
 		},
 		{
+			// 100 CJK characters: 300 UTF-8 bytes but only 100 UTF-16 code
+			// units, so the whole path is ~123 units — comfortably inside
+			// MAX_PATH. Measuring bytes would call this too long and keep a
+			// prefix that breaks .cmd launches for anyone whose user directory
+			// is not ASCII.
+			name: "non-ascii path is measured in utf-16 code units",
+			in:   `\\?\C:\Users\` + strings.Repeat("目录", 50) + `\npm\codex.cmd`,
+			want: `C:\Users\` + strings.Repeat("目录", 50) + `\npm\codex.cmd`,
+		},
+		{
 			name: "volume guid keeps the prefix",
 			in:   `\\?\Volume{b75e2c83-0000-0000-0000-602f00000000}\bin\codex.exe`,
 			want: `\\?\Volume{b75e2c83-0000-0000-0000-602f00000000}\bin\codex.exe`,

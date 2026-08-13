@@ -45,12 +45,30 @@ func trimExtendedLengthPrefix(path string) string {
 	default:
 		return path
 	}
-	// syscall.MAX_PATH counts the terminating NUL, so the usable length is one
-	// less. At or past that limit the prefix is what makes the path nameable.
-	if len(trimmed) >= syscall.MAX_PATH-1 {
+	if !fitsWithoutExtendedLengthPrefix(trimmed) {
 		return path
 	}
 	return trimmed
+}
+
+// fitsWithoutExtendedLengthPrefix reports whether path is short enough to be
+// used as a plain Win32 path.
+//
+// MAX_PATH counts UTF-16 code units and includes the terminating NUL, which is
+// why this cannot use len(path): Go measures UTF-8 bytes, and every non-ASCII
+// character costs more bytes than it does code units. A path under a user
+// directory with a CJK name would be over-counted, judged too long, and keep a
+// prefix it does not need — reintroducing the .cmd launch failure for exactly
+// the users least likely to be tested against.
+func fitsWithoutExtendedLengthPrefix(path string) bool {
+	// UTF16FromString returns the string plus its terminating NUL, which is the
+	// unit MAX_PATH is expressed in. It fails only on an embedded NUL, which no
+	// real path has — treat that as "keep the prefix" rather than guessing.
+	encoded, err := windows.UTF16FromString(path)
+	if err != nil {
+		return false
+	}
+	return len(encoded) <= syscall.MAX_PATH
 }
 
 func canonicalPath(path string) (string, error) {
