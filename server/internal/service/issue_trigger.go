@@ -15,24 +15,59 @@ const (
 	// RunSourceAssign covers issue creation and assignee changes — the issue
 	// is being handed to an agent/squad. Parks silently on backlog.
 	RunSourceAssign RunEnqueueSource = "assign"
-	// RunSourceStatus covers promoting an already-assigned issue out of
-	// backlog into an active status.
+	// RunSourceStatus covers a status-only move that hands an already-assigned
+	// issue back to its agent: promoting out of backlog, or reopening a
+	// reviewed/closed issue into todo.
 	RunSourceStatus RunEnqueueSource = "status"
 )
+
+// isRunEnqueueingStatusMove reports whether a status-only change on an
+// already-assigned issue hands the work back to the agent. Two distinct moves
+// qualify, and they are deliberately asymmetric:
+//
+//   - backlog → anything active: promotion out of the parking lot. The issue
+//     was never dispatched, so any landing status other than the terminal ones
+//     means "start now".
+//   - in_review / done / cancelled → todo: a reopen. The reviewer rejecting a
+//     delivery, or anyone pulling a closed issue back into the ready queue, is
+//     re-dispatching it to the same assignee. Only `todo` counts here: it is
+//     the one status that means "this is ready to be worked", whereas moving a
+//     reviewed issue to in_progress/blocked/backlog is bookkeeping, not a
+//     hand-off.
+//
+// Before the reopen arm existed, a rework request with an unchanged assignee
+// produced no task at all and the returned issue sat silently in the queue
+// until someone re-@mentioned the agent.
+//
+// Every other move (in_progress → todo churn, → backlog parking, → in_review
+// hand-off to a reviewer) stays inert, so parking and reviewing keep their
+// no-wake semantics.
+func isRunEnqueueingStatusMove(prev, next string) bool {
+	switch prev {
+	case "backlog":
+		return next != "done" && next != "cancelled"
+	case "in_review", "done", "cancelled":
+		return next == "todo"
+	}
+	return false
+}
 
 // IssueTriggerProbe carries the request-scoped checks WillEnqueueRun cannot
 // resolve from issue state alone.
 //
-// CanAccessAgent is the private-agent gate. The write paths enforce it at the
-// HTTP boundary (validateAssigneePair on assign, canEnqueueSquadLeader inside
-// the squad enqueue helper) and therefore pass an allow-all probe so the gate
-// is never duplicated or sunk into the service layer. Preview passes the real
-// gate so it never leaks a private agent's readiness to a member who cannot
-// see it. A nil func is treated as allow-all.
+// CanAccessAgent is the private-agent gate. The write paths enforce it on the
+// enqueue side instead (canDispatchIssueAgent for a direct agent,
+// canEnqueueSquadLeader inside the squad enqueue helper, plus the 403 that
+// validateAssigneePair raises on an unauthorised assign) and therefore pass an
+// allow-all probe so the gate is never duplicated or sunk into the service
+// layer. Preview passes the real gate so it never leaks a private agent's
+// readiness to a member who cannot see it, and so preview and the write path
+// reach the same verdict. A nil func is treated as allow-all.
 //
-// IsSelfLoop reports whether promoting this issue out of backlog would be the
-// calling agent re-triggering its own running task. Only the status source
-// consults it; create and assign never do. A nil func means "not a self-loop".
+// IsSelfLoop reports whether the status move (promoting out of backlog, or
+// reopening into todo) would be the calling agent re-triggering its own running
+// task. Only the status source consults it; create and assign never do. A nil
+// func means "not a self-loop".
 type IssueTriggerProbe struct {
 	CanAccessAgent func(agent db.Agent) bool
 	IsSelfLoop     func() bool
@@ -77,10 +112,11 @@ func allowAllAgents(db.Agent) bool { return true }
 // CreateAgentTask, guarded by the (issue_id, agent_id) partial unique index
 // over pending (queued/dispatched) tasks; the pending check below mirrors that
 // guard, and only the status source needs it:
-//   - status source (backlog → active) can re-fire against an assignee that
-//     already holds a pending task (e.g. one a @mention raised while the issue
-//     sat in backlog); the check keeps preview from promising a run the unique
-//     index would coalesce away.
+//   - status source (backlog → active, or reopen → todo) can re-fire against an
+//     assignee that already holds a pending task (e.g. one a @mention raised
+//     while the issue sat in backlog, or a rework request flipped twice); the
+//     check keeps preview from promising a run the unique index would coalesce
+//     away.
 //   - assign source (create / assignee change) skips the check: a create
 //     targets a fresh issue with no prior task, and a reassignment no longer
 //     cancels existing tasks (#4963 / MUL-4113) — in the rare case the new
@@ -104,8 +140,7 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 			return IssueRunTrigger{}, false
 		}
 		source = RunSourceAssign
-	case in.StatusChanged && in.PrevStatus == "backlog" &&
-		issue.Status != "done" && issue.Status != "cancelled":
+	case in.StatusChanged && isRunEnqueueingStatusMove(in.PrevStatus, issue.Status):
 		if probe.IsSelfLoop != nil && probe.IsSelfLoop() {
 			return IssueRunTrigger{}, false
 		}

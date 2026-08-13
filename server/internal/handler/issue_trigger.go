@@ -17,13 +17,16 @@ import (
 const maxPreviewTriggerIssues = 500
 
 // issueTriggerWriteProbe builds the probe the write paths feed to
-// WillEnqueueRun. The private-agent gate is already enforced at the HTTP
-// boundary (validateAssigneePair on assign) and inside enqueueSquadLeaderTask
-// (canEnqueueSquadLeader), so a write must NOT re-run or sink it — it passes
-// allow-all. The self-loop check needs the request's X-Task-ID header.
+// WillEnqueueRun. It passes allow-all for the access gate: the gate is not
+// skipped, it simply lives on the enqueue side instead — validateAssigneePair
+// rejects an unauthorised assign with 403 at the HTTP boundary, and every
+// dispatch then re-checks it (canDispatchIssueAgent for a direct agent,
+// canEnqueueSquadLeader inside enqueueSquadLeaderTask for a squad leader), so
+// sinking a second copy here would only add drift. The self-loop check needs
+// the request's X-Task-ID header.
 func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType string, issue db.Issue) service.IssueTriggerProbe {
 	return service.IssueTriggerProbe{
-		CanAccessAgent: nil, // allow-all; gate lives at the write boundary
+		CanAccessAgent: nil, // allow-all; the gate runs on dispatch
 		IsSelfLoop: func() bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue)
 		},
@@ -48,11 +51,17 @@ func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, 
 
 // dispatchIssueRun executes the enqueue side effect for a decision produced by
 // WillEnqueueRun, carrying an optional handoff note into the run's opening
-// context. The squad path still flows through enqueueSquadLeaderTask so the
-// leader access gate and pending dedup stay in one place.
-func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) {
+// context. Both branches gate on the invoke permission before enqueueing: the
+// squad path through enqueueSquadLeaderTask (canEnqueueSquadLeader), the direct
+// agent path through canDispatchIssueAgent. originatorUserID must be the value
+// the caller already resolved with invokeOriginatorFromRequest, so the gate
+// judges the exact same principal the preview endpoint did.
+func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, originatorUserID, handoffNote string) {
 	switch trigger.AssigneeType {
 	case "agent":
+		if !h.canDispatchIssueAgent(ctx, trigger.AgentID, actorType, actorID, originatorUserID, uuidToString(issue.WorkspaceID)) {
+			return
+		}
 		// The member who performed this assign/promote is the accountable human
 		// for the run (MUL-4302 §4). An agent actor is not a human, so only a
 		// member actor is threaded; otherwise attribution falls back to the chain.
@@ -60,6 +69,28 @@ func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger 
 	case "squad":
 		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
 	}
+}
+
+// canDispatchIssueAgent is the direct-agent counterpart of
+// enqueueSquadLeaderTask's canEnqueueSquadLeader: the last gate before an issue
+// write spends a private agent's runtime.
+//
+// It closes a hole the assign-time boundary check cannot see. UpdateIssue and
+// BatchUpdateIssues only call validateAssigneePair when the write TOUCHES an
+// assignee field, so a status-only write — promoting out of backlog, or
+// reopening a reviewed/closed issue into todo — reached the enqueue with no
+// permission check at all. Preview did evaluate canInvokeAgent, so an
+// unauthorised member saw "0 runs will start" and then started one anyway.
+// Gating here restores preview/write parity and stops that member from
+// spending the agent's runtime; the status change itself still applies.
+//
+// Errors fail closed: an agent we cannot load is an agent we cannot authorise.
+func (h *Handler) canDispatchIssueAgent(ctx context.Context, agentID pgtype.UUID, actorType, actorID, originatorUserID, workspaceID string) bool {
+	agent, err := h.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return false
+	}
+	return h.canInvokeAgent(ctx, agent, actorType, actorID, originatorUserID, workspaceID)
 }
 
 // memberActorUserID returns the acting member's user id as a pgtype.UUID when the
