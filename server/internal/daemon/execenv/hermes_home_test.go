@@ -145,6 +145,789 @@ func TestHermesDisablesExternalMemoryProvider(t *testing.T) {
 	}
 }
 
+func TestPrepareHermesScheduledRunOnlyDisablesOnlyFigmaMCP(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	hostConfig := `model: hermes-4
+mcp_servers:
+  FiGmA:
+    transport: http
+    url: https://mcp.figma.example
+    auth: oauth
+    enabled: true
+    custom_setting: keep-me
+  github:
+    command: github-mcp
+    args: ["serve"]
+    enabled: true
+`
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), hostConfig)
+
+	type mcpServer struct {
+		Enabled       *bool    `yaml:"enabled"`
+		Transport     string   `yaml:"transport"`
+		URL           string   `yaml:"url"`
+		Auth          string   `yaml:"auth"`
+		CustomSetting string   `yaml:"custom_setting"`
+		Command       string   `yaml:"command"`
+		Args          []string `yaml:"args"`
+	}
+	readServers := func(configPath string) map[string]mcpServer {
+		t.Helper()
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read derived config: %v", err)
+		}
+		var parsed struct {
+			MCPServers map[string]mcpServer `yaml:"mcp_servers"`
+		}
+		if err := yaml.Unmarshal(data, &parsed); err != nil {
+			t.Fatalf("parse derived config: %v", err)
+		}
+		return parsed.MCPServers
+	}
+
+	tests := []struct {
+		name             string
+		taskID           string
+		task             TaskContextForEnv
+		wantFigmaEnabled bool
+	}{
+		{
+			name:             "scheduled run-only",
+			taskID:           "aaaa1111-2222-3333-4444-555566667777",
+			task:             TaskContextForEnv{AutopilotRunID: "run-scheduled", AutopilotSource: "schedule"},
+			wantFigmaEnabled: false,
+		},
+		{
+			name:             "manual run-only",
+			taskID:           "bbbb1111-2222-3333-4444-555566667777",
+			task:             TaskContextForEnv{AutopilotRunID: "run-manual", AutopilotSource: "manual"},
+			wantFigmaEnabled: true,
+		},
+		{
+			name:             "webhook run-only",
+			taskID:           "cccc1111-2222-3333-4444-555566667777",
+			task:             TaskContextForEnv{AutopilotRunID: "run-webhook", AutopilotSource: "webhook"},
+			wantFigmaEnabled: true,
+		},
+		{
+			name:             "regular issue",
+			taskID:           "dddd1111-2222-3333-4444-555566667777",
+			task:             TaskContextForEnv{IssueID: "issue-1"},
+			wantFigmaEnabled: true,
+		},
+		{
+			name:             "regular chat",
+			taskID:           "eeee1111-2222-3333-4444-555566667777",
+			task:             TaskContextForEnv{ChatSessionID: "chat-1"},
+			wantFigmaEnabled: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.task.AgentSkills = []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+			env, err := Prepare(PrepareParams{
+				WorkspacesRoot:   t.TempDir(),
+				WorkspaceID:      "ws-hermes-figma",
+				TaskID:           tt.taskID,
+				Provider:         "hermes",
+				HermesSourceHome: sharedHome,
+				Task:             tt.task,
+			}, testLogger())
+			if err != nil {
+				t.Fatalf("Prepare failed: %v", err)
+			}
+			defer env.Cleanup(true)
+
+			servers := readServers(filepath.Join(env.HermesHome, "config.yaml"))
+			figma := servers["FiGmA"]
+			if figma.Enabled == nil || *figma.Enabled != tt.wantFigmaEnabled {
+				t.Errorf("Figma enabled = %v, want %t", figma.Enabled, tt.wantFigmaEnabled)
+			}
+			if figma.Transport != "http" || figma.URL != "https://mcp.figma.example" || figma.Auth != "oauth" || figma.CustomSetting != "keep-me" {
+				t.Errorf("Figma fields changed: %+v", figma)
+			}
+			github := servers["github"]
+			if github.Enabled == nil || !*github.Enabled || github.Command != "github-mcp" || strings.Join(github.Args, " ") != "serve" {
+				t.Errorf("unrelated MCP changed: %+v", github)
+			}
+		})
+	}
+
+	if data, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+		t.Fatalf("read host config after prepare: %v", err)
+	} else if string(data) != hostConfig {
+		t.Error("host config was modified")
+	}
+}
+
+func TestPrepareHermesScheduledRunOnlyFailsClosedOnInvalidConfig(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		config string
+	}{
+		{name: "malformed YAML", config: "mcp_servers:\n  figma: [\n"},
+		{name: "non-mapping root", config: "- mcp_servers\n- figma\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sharedHome := t.TempDir()
+			mustWrite(t, filepath.Join(sharedHome, "config.yaml"), tt.config)
+			task := TaskContextForEnv{
+				AutopilotRunID:  "scheduled-run",
+				AutopilotSource: "schedule",
+				AgentSkills:     []SkillContextForEnv{{Name: "Review Helper", Content: "x"}},
+			}
+			if env, err := Prepare(PrepareParams{
+				WorkspacesRoot:   t.TempDir(),
+				WorkspaceID:      "ws-hermes-invalid",
+				TaskID:           "aaaa1111-2222-3333-4444-555566667777",
+				Provider:         "hermes",
+				HermesSourceHome: sharedHome,
+				Task:             task,
+			}, testLogger()); err == nil {
+				env.Cleanup(true)
+				t.Fatal("scheduled task must fail closed when Figma isolation cannot be applied")
+			}
+
+			// Preserve the legacy non-scheduled fallback: malformed/non-mapping
+			// source config is copied verbatim rather than blocking the task.
+			task.AutopilotRunID = ""
+			task.AutopilotSource = ""
+			task.IssueID = "issue-1"
+			env, err := Prepare(PrepareParams{
+				WorkspacesRoot:   t.TempDir(),
+				WorkspaceID:      "ws-hermes-invalid",
+				TaskID:           "bbbb1111-2222-3333-4444-555566667777",
+				Provider:         "hermes",
+				HermesSourceHome: sharedHome,
+				Task:             task,
+			}, testLogger())
+			if err != nil {
+				t.Fatalf("regular task should retain legacy verbatim fallback: %v", err)
+			}
+			defer env.Cleanup(true)
+			if data, err := os.ReadFile(filepath.Join(env.HermesHome, "config.yaml")); err != nil {
+				t.Fatalf("read regular derived config: %v", err)
+			} else if string(data) != tt.config {
+				t.Errorf("regular derived config = %q, want verbatim source %q", data, tt.config)
+			}
+			if data, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+				t.Fatalf("read source config: %v", err)
+			} else if string(data) != tt.config {
+				t.Error("source config was modified")
+			}
+		})
+	}
+}
+
+func TestPrepareHermesScheduledRunOnlyMaterializesFigmaAlias(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	hostConfig := `shared_mcp: &shared_mcp
+  transport: http
+  auth: oauth
+  enabled: true
+  custom_setting: keep-me
+mcp_servers:
+  figma: *shared_mcp
+  unrelated: *shared_mcp
+`
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), hostConfig)
+	task := TaskContextForEnv{
+		AutopilotRunID:  "scheduled-run",
+		AutopilotSource: "schedule",
+		AgentSkills:     []SkillContextForEnv{{Name: "Review Helper", Content: "x"}},
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot:   t.TempDir(),
+		WorkspaceID:      "ws-hermes-alias",
+		TaskID:           "aaaa1111-2222-3333-4444-555566667777",
+		Provider:         "hermes",
+		HermesSourceHome: sharedHome,
+		Task:             task,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	data, err := os.ReadFile(filepath.Join(env.HermesHome, "config.yaml"))
+	if err != nil {
+		t.Fatalf("read derived config: %v", err)
+	}
+	var parsed struct {
+		MCPServers map[string]struct {
+			Enabled       bool   `yaml:"enabled"`
+			Transport     string `yaml:"transport"`
+			Auth          string `yaml:"auth"`
+			CustomSetting string `yaml:"custom_setting"`
+		} `yaml:"mcp_servers"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse derived config: %v", err)
+	}
+	if got := parsed.MCPServers["figma"]; got.Enabled || got.Transport != "http" || got.Auth != "oauth" || got.CustomSetting != "keep-me" {
+		t.Errorf("materialized Figma = %+v, want preserved fields with enabled false", got)
+	}
+	if got := parsed.MCPServers["unrelated"]; !got.Enabled || got.Transport != "http" || got.Auth != "oauth" || got.CustomSetting != "keep-me" {
+		t.Errorf("unrelated anchored MCP changed: %+v", got)
+	}
+	if data, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+		t.Fatalf("read source config: %v", err)
+	} else if string(data) != hostConfig {
+		t.Error("source config was modified")
+	}
+}
+
+func TestPrepareHermesScheduledRunOnlyFailsClosedOnNonMappingFigmaAlias(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	hostConfig := `shared_command: &shared_command figma-mcp
+mcp_servers:
+  figma: *shared_command
+`
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), hostConfig)
+	task := TaskContextForEnv{
+		AutopilotRunID:  "scheduled-run",
+		AutopilotSource: "schedule",
+		AgentSkills:     []SkillContextForEnv{{Name: "Review Helper", Content: "x"}},
+	}
+	if env, err := Prepare(PrepareParams{
+		WorkspacesRoot:   t.TempDir(),
+		WorkspaceID:      "ws-hermes-invalid-alias",
+		TaskID:           "aaaa1111-2222-3333-4444-555566667777",
+		Provider:         "hermes",
+		HermesSourceHome: sharedHome,
+		Task:             task,
+	}, testLogger()); err == nil {
+		env.Cleanup(true)
+		t.Fatal("scheduled task must fail closed on non-mapping Figma alias")
+	}
+	if data, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+		t.Fatalf("read source config: %v", err)
+	} else if string(data) != hostConfig {
+		t.Error("source config was modified")
+	}
+}
+
+func TestPrepareHermesScheduledRunOnlyHandlesMCPServersShape(t *testing.T) {
+	t.Parallel()
+	scheduledTask := TaskContextForEnv{
+		AutopilotRunID:  "scheduled-run",
+		AutopilotSource: "schedule",
+		AgentSkills:     []SkillContextForEnv{{Name: "Review Helper", Content: "x"}},
+	}
+	prepare := func(t *testing.T, hostConfig string) (*Environment, string) {
+		t.Helper()
+		sharedHome := t.TempDir()
+		mustWrite(t, filepath.Join(sharedHome, "config.yaml"), hostConfig)
+		env, err := Prepare(PrepareParams{
+			WorkspacesRoot:   t.TempDir(),
+			WorkspaceID:      "ws-hermes-servers-shape",
+			TaskID:           "aaaa1111-2222-3333-4444-555566667777",
+			Provider:         "hermes",
+			HermesSourceHome: sharedHome,
+			Task:             scheduledTask,
+		}, testLogger())
+		if err != nil {
+			t.Fatalf("Prepare failed: %v", err)
+		}
+		t.Cleanup(func() { env.Cleanup(true) })
+		return env, sharedHome
+	}
+
+	t.Run("mapping alias is materialized", func(t *testing.T) {
+		hostConfig := `shared_servers: &shared_servers
+  figma:
+    enabled: true
+    custom_setting: keep-me
+  unrelated:
+    enabled: true
+mcp_servers: *shared_servers
+`
+		env, sharedHome := prepare(t, hostConfig)
+		data, err := os.ReadFile(filepath.Join(env.HermesHome, "config.yaml"))
+		if err != nil {
+			t.Fatalf("read derived config: %v", err)
+		}
+		var parsed struct {
+			SharedServers map[string]struct {
+				Enabled bool `yaml:"enabled"`
+			} `yaml:"shared_servers"`
+			MCPServers map[string]struct {
+				Enabled       bool   `yaml:"enabled"`
+				CustomSetting string `yaml:"custom_setting"`
+			} `yaml:"mcp_servers"`
+		}
+		if err := yaml.Unmarshal(data, &parsed); err != nil {
+			t.Fatalf("parse derived config: %v", err)
+		}
+		if got := parsed.MCPServers["figma"]; got.Enabled || got.CustomSetting != "keep-me" {
+			t.Errorf("materialized Figma = %+v, want enabled false with fields preserved", got)
+		}
+		if !parsed.MCPServers["unrelated"].Enabled {
+			t.Error("unrelated MCP was disabled")
+		}
+		if !parsed.SharedServers["figma"].Enabled || !parsed.SharedServers["unrelated"].Enabled {
+			t.Error("shared anchor was mutated")
+		}
+		if source, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+			t.Fatalf("read source config: %v", err)
+		} else if string(source) != hostConfig {
+			t.Error("source config was modified")
+		}
+	})
+
+	for _, tt := range []struct {
+		name   string
+		config string
+	}{
+		{name: "scalar", config: "mcp_servers: disabled\n"},
+		{name: "sequence", config: "mcp_servers: [figma]\n"},
+		{name: "non-mapping alias", config: "shared: &shared disabled\nmcp_servers: *shared\n"},
+	} {
+		t.Run(tt.name+" fails closed", func(t *testing.T) {
+			sharedHome := t.TempDir()
+			mustWrite(t, filepath.Join(sharedHome, "config.yaml"), tt.config)
+			if env, err := Prepare(PrepareParams{
+				WorkspacesRoot:   t.TempDir(),
+				WorkspaceID:      "ws-hermes-servers-shape-invalid",
+				TaskID:           "bbbb1111-2222-3333-4444-555566667777",
+				Provider:         "hermes",
+				HermesSourceHome: sharedHome,
+				Task:             scheduledTask,
+			}, testLogger()); err == nil {
+				env.Cleanup(true)
+				t.Fatal("scheduled task must fail closed on present non-mapping mcp_servers")
+			}
+			if source, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+				t.Fatalf("read source config: %v", err)
+			} else if string(source) != tt.config {
+				t.Error("source config was modified")
+			}
+		})
+	}
+
+	t.Run("missing key is safe no-op", func(t *testing.T) {
+		hostConfig := "model: hermes-4\n"
+		env, sharedHome := prepare(t, hostConfig)
+		if _, err := os.Stat(filepath.Join(env.HermesHome, "config.yaml")); err != nil {
+			t.Fatalf("derived config missing: %v", err)
+		}
+		if source, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+			t.Fatalf("read source config: %v", err)
+		} else if string(source) != hostConfig {
+			t.Error("source config was modified")
+		}
+	})
+}
+
+func TestPrepareHermesScheduledRunOnlyMaterializesNestedAliases(t *testing.T) {
+	t.Parallel()
+	scheduledTask := TaskContextForEnv{
+		AutopilotRunID:  "scheduled-run",
+		AutopilotSource: "schedule",
+		AgentSkills:     []SkillContextForEnv{{Name: "Review Helper", Content: "x"}},
+	}
+	tests := []struct {
+		name       string
+		hostConfig string
+	}{
+		{
+			name: "servers alias contains Figma entry alias",
+			hostConfig: `shared_entry: &shared_entry
+  enabled: true
+  transport: http
+  custom_setting: keep-me
+shared_servers: &shared_servers
+  figma: *shared_entry
+  unrelated: *shared_entry
+mcp_servers: *shared_servers
+`,
+		},
+		{
+			name: "Figma entry alias contains nested headers alias",
+			hostConfig: `shared_headers: &shared_headers
+  Authorization: Bearer-placeholder
+  X-Custom: keep-me
+shared_entry: &shared_entry
+  enabled: true
+  transport: http
+  headers: *shared_headers
+mcp_servers:
+  figma: *shared_entry
+  unrelated:
+    enabled: true
+    headers: *shared_headers
+`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sharedHome := t.TempDir()
+			mustWrite(t, filepath.Join(sharedHome, "config.yaml"), tt.hostConfig)
+			env, err := Prepare(PrepareParams{
+				WorkspacesRoot:   t.TempDir(),
+				WorkspaceID:      "ws-hermes-nested-alias",
+				TaskID:           "aaaa1111-2222-3333-4444-555566667777",
+				Provider:         "hermes",
+				HermesSourceHome: sharedHome,
+				Task:             scheduledTask,
+			}, testLogger())
+			if err != nil {
+				t.Fatalf("Prepare failed: %v", err)
+			}
+			defer env.Cleanup(true)
+
+			data, err := os.ReadFile(filepath.Join(env.HermesHome, "config.yaml"))
+			if err != nil {
+				t.Fatalf("read derived config: %v", err)
+			}
+			var parsed struct {
+				SharedEntry struct {
+					Enabled bool `yaml:"enabled"`
+				} `yaml:"shared_entry"`
+				SharedHeaders map[string]string `yaml:"shared_headers"`
+				MCPServers    map[string]struct {
+					Enabled       bool              `yaml:"enabled"`
+					Transport     string            `yaml:"transport"`
+					CustomSetting string            `yaml:"custom_setting"`
+					Headers       map[string]string `yaml:"headers"`
+				} `yaml:"mcp_servers"`
+			}
+			if err := yaml.Unmarshal(data, &parsed); err != nil {
+				t.Fatalf("parse derived config: %v\n%s", err, data)
+			}
+			figma := parsed.MCPServers["figma"]
+			if figma.Enabled || figma.Transport != "http" {
+				t.Errorf("materialized Figma = %+v, want enabled false with fields preserved", figma)
+			}
+			if strings.Contains(tt.name, "servers alias") {
+				if figma.CustomSetting != "keep-me" || !parsed.MCPServers["unrelated"].Enabled || parsed.MCPServers["unrelated"].CustomSetting != "keep-me" {
+					t.Errorf("shared entry fields changed: figma=%+v unrelated=%+v", figma, parsed.MCPServers["unrelated"])
+				}
+			} else {
+				wantHeaders := map[string]string{"Authorization": "Bearer-placeholder", "X-Custom": "keep-me"}
+				if figma.Headers["Authorization"] != wantHeaders["Authorization"] || figma.Headers["X-Custom"] != wantHeaders["X-Custom"] {
+					t.Errorf("nested Figma headers = %v, want %v", figma.Headers, wantHeaders)
+				}
+				if unrelated := parsed.MCPServers["unrelated"]; !unrelated.Enabled || unrelated.Headers["X-Custom"] != "keep-me" {
+					t.Errorf("unrelated shared headers changed: %+v", unrelated)
+				}
+				if parsed.SharedHeaders["Authorization"] != "Bearer-placeholder" || parsed.SharedHeaders["X-Custom"] != "keep-me" {
+					t.Errorf("shared headers anchor changed: %v", parsed.SharedHeaders)
+				}
+			}
+			if !parsed.SharedEntry.Enabled {
+				t.Error("shared entry anchor was mutated")
+			}
+			if source, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+				t.Fatalf("read source config: %v", err)
+			} else if string(source) != tt.hostConfig {
+				t.Error("source config was modified")
+			}
+		})
+	}
+}
+
+func TestPrepareHermesScheduledRunOnlyFailsClosedOnCyclicAlias(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	hostConfig := `mcp_servers: &servers
+  figma: *servers
+`
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), hostConfig)
+	task := TaskContextForEnv{
+		AutopilotRunID:  "scheduled-run",
+		AutopilotSource: "schedule",
+		AgentSkills:     []SkillContextForEnv{{Name: "Review Helper", Content: "x"}},
+	}
+	if env, err := Prepare(PrepareParams{
+		WorkspacesRoot:   t.TempDir(),
+		WorkspaceID:      "ws-hermes-cyclic-alias",
+		TaskID:           "aaaa1111-2222-3333-4444-555566667777",
+		Provider:         "hermes",
+		HermesSourceHome: sharedHome,
+		Task:             task,
+	}, testLogger()); err == nil {
+		env.Cleanup(true)
+		t.Fatal("scheduled task must fail closed on cyclic alias")
+	}
+	if source, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+		t.Fatalf("read source config: %v", err)
+	} else if string(source) != hostConfig {
+		t.Error("source config was modified")
+	}
+}
+
+func TestPrepareHermesScheduledRunOnlyMaterializesMCPServerMerges(t *testing.T) {
+	t.Parallel()
+	scheduledTask := TaskContextForEnv{
+		AutopilotRunID:  "scheduled-run",
+		AutopilotSource: "schedule",
+		AgentSkills:     []SkillContextForEnv{{Name: "Review Helper", Content: "x"}},
+	}
+	tests := []struct {
+		name       string
+		hostConfig string
+		wantMarker string
+		wantLocal  string
+	}{
+		{
+			name: "single mapping merge",
+			hostConfig: `shared_servers: &shared_servers
+  figma:
+    enabled: true
+    marker: shared
+  unrelated:
+    enabled: true
+    marker: shared-unrelated
+mcp_servers:
+  <<: *shared_servers
+  local:
+    enabled: true
+    marker: explicit-local
+`,
+			wantMarker: "shared",
+			wantLocal:  "explicit-local",
+		},
+		{
+			name: "merge sequence earlier wins and explicit overrides",
+			hostConfig: `earlier: &earlier
+  figma:
+    enabled: true
+    marker: earlier
+  unrelated:
+    enabled: true
+    marker: earlier-unrelated
+later: &later
+  figma:
+    enabled: true
+    marker: later
+  unrelated:
+    enabled: false
+    marker: later-unrelated
+  later_only:
+    enabled: true
+    marker: from-later
+mcp_servers:
+  <<: [*earlier, *later]
+  local:
+    enabled: true
+    marker: explicit-local
+  unrelated:
+    enabled: true
+    marker: explicit-unrelated
+`,
+			wantMarker: "earlier",
+			wantLocal:  "explicit-local",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sharedHome := t.TempDir()
+			mustWrite(t, filepath.Join(sharedHome, "config.yaml"), tt.hostConfig)
+			env, err := Prepare(PrepareParams{
+				WorkspacesRoot:   t.TempDir(),
+				WorkspaceID:      "ws-hermes-merge",
+				TaskID:           "aaaa1111-2222-3333-4444-555566667777",
+				Provider:         "hermes",
+				HermesSourceHome: sharedHome,
+				Task:             scheduledTask,
+			}, testLogger())
+			if err != nil {
+				t.Fatalf("Prepare failed: %v", err)
+			}
+			defer env.Cleanup(true)
+
+			data, err := os.ReadFile(filepath.Join(env.HermesHome, "config.yaml"))
+			if err != nil {
+				t.Fatalf("read derived config: %v", err)
+			}
+			var doc yaml.Node
+			if err := yaml.Unmarshal(data, &doc); err != nil {
+				t.Fatalf("parse derived config node: %v", err)
+			}
+			serversNode := yamlMapValue(yamlDocumentRoot(&doc), "mcp_servers")
+			if yamlMapValue(serversNode, "<<") != nil {
+				t.Fatal("derived mcp_servers must be materialized without merge key")
+			}
+			var parsed struct {
+				MCPServers map[string]struct {
+					Enabled bool   `yaml:"enabled"`
+					Marker  string `yaml:"marker"`
+				} `yaml:"mcp_servers"`
+			}
+			if err := yaml.Unmarshal(data, &parsed); err != nil {
+				t.Fatalf("parse derived config: %v", err)
+			}
+			if got := parsed.MCPServers["figma"]; got.Enabled || got.Marker != tt.wantMarker {
+				t.Errorf("Figma = %+v, want enabled false marker %q", got, tt.wantMarker)
+			}
+			if got := parsed.MCPServers["local"]; !got.Enabled || got.Marker != tt.wantLocal {
+				t.Errorf("explicit local MCP changed: %+v", got)
+			}
+			if tt.name == "single mapping merge" {
+				if got := parsed.MCPServers["unrelated"]; !got.Enabled || got.Marker != "shared-unrelated" {
+					t.Errorf("merged unrelated MCP changed: %+v", got)
+				}
+			} else {
+				if got := parsed.MCPServers["unrelated"]; !got.Enabled || got.Marker != "explicit-unrelated" {
+					t.Errorf("explicit key did not override merged value: %+v", got)
+				}
+				if got := parsed.MCPServers["later_only"]; !got.Enabled || got.Marker != "from-later" {
+					t.Errorf("later-only merged key missing: %+v", got)
+				}
+			}
+			if source, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+				t.Fatalf("read source config: %v", err)
+			} else if string(source) != tt.hostConfig {
+				t.Error("source config was modified")
+			}
+		})
+	}
+}
+
+func TestPrepareHermesScheduledRunOnlyFailsClosedOnInvalidMCPServerMerge(t *testing.T) {
+	t.Parallel()
+	scheduledTask := TaskContextForEnv{
+		AutopilotRunID:  "scheduled-run",
+		AutopilotSource: "schedule",
+		AgentSkills:     []SkillContextForEnv{{Name: "Review Helper", Content: "x"}},
+	}
+	tests := []struct {
+		name       string
+		hostConfig string
+	}{
+		{name: "scalar merge", hostConfig: "mcp_servers:\n  <<: invalid\n"},
+		{name: "wrong-kind alias merge", hostConfig: "shared: &shared invalid\nmcp_servers:\n  <<: *shared\n"},
+		{name: "wrong-kind merge sequence item", hostConfig: "valid: &valid {figma: {enabled: true}}\ninvalid: &invalid nope\nmcp_servers:\n  <<: [*valid, *invalid]\n"},
+		{name: "cyclic merge", hostConfig: "mcp_servers: &servers\n  <<: *servers\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sharedHome := t.TempDir()
+			mustWrite(t, filepath.Join(sharedHome, "config.yaml"), tt.hostConfig)
+			if env, err := Prepare(PrepareParams{
+				WorkspacesRoot:   t.TempDir(),
+				WorkspaceID:      "ws-hermes-invalid-merge",
+				TaskID:           "aaaa1111-2222-3333-4444-555566667777",
+				Provider:         "hermes",
+				HermesSourceHome: sharedHome,
+				Task:             scheduledTask,
+			}, testLogger()); err == nil {
+				env.Cleanup(true)
+				t.Fatal("scheduled task must fail closed on invalid mcp_servers merge")
+			}
+			if source, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+				t.Fatalf("read source config: %v", err)
+			} else if string(source) != tt.hostConfig {
+				t.Error("source config was modified")
+			}
+		})
+	}
+}
+
+func TestHermesHomeOptionsForTaskAndReuseTransitions(t *testing.T) {
+	t.Parallel()
+	if opts := hermesHomeOptionsForTask(TaskContextForEnv{AutopilotRunID: "run-1", AutopilotSource: "schedule"}); !opts.disableFigmaMCP {
+		t.Fatal("scheduled run-only task should disable Figma")
+	}
+	for _, task := range []TaskContextForEnv{
+		{AutopilotSource: "schedule"},
+		{AutopilotRunID: "run-1", AutopilotSource: "manual"},
+		{AutopilotRunID: "run-1", AutopilotSource: "Schedule"},
+		{IssueID: "issue-1"},
+	} {
+		if opts := hermesHomeOptionsForTask(task); opts.disableFigmaMCP {
+			t.Errorf("task %+v should preserve Figma", task)
+		}
+	}
+
+	sharedHome := t.TempDir()
+	hostConfig := `mcp_servers:
+  figma:
+    enabled: true
+    custom_setting: keep-me
+  unrelated:
+    enabled: true
+`
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), hostConfig)
+	manualTask := TaskContextForEnv{
+		AutopilotRunID:  "manual-run",
+		AutopilotSource: "manual",
+		AgentSkills:     []SkillContextForEnv{{Name: "Review Helper", Content: "x"}},
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot:   t.TempDir(),
+		WorkspaceID:      "ws-hermes-reuse-policy",
+		TaskID:           "aaaa1111-2222-3333-4444-555566667777",
+		Provider:         "hermes",
+		HermesSourceHome: sharedHome,
+		Task:             manualTask,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare manual task failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	assertEnabled := func(wantFigma bool) {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(env.HermesHome, "config.yaml"))
+		if err != nil {
+			t.Fatalf("read derived config: %v", err)
+		}
+		var parsed struct {
+			MCPServers map[string]struct {
+				Enabled       bool   `yaml:"enabled"`
+				CustomSetting string `yaml:"custom_setting"`
+			} `yaml:"mcp_servers"`
+		}
+		if err := yaml.Unmarshal(data, &parsed); err != nil {
+			t.Fatalf("parse derived config: %v", err)
+		}
+		if got := parsed.MCPServers["figma"]; got.Enabled != wantFigma || got.CustomSetting != "keep-me" {
+			t.Errorf("Figma after reuse enabled=%t setting=%q, want enabled=%t setting=keep-me", got.Enabled, got.CustomSetting, wantFigma)
+		}
+		if !parsed.MCPServers["unrelated"].Enabled {
+			t.Error("unrelated MCP disabled during reuse transition")
+		}
+	}
+	assertEnabled(true)
+
+	scheduledTask := manualTask
+	scheduledTask.AutopilotRunID = "scheduled-run"
+	scheduledTask.AutopilotSource = "schedule"
+	if reused := Reuse(ReuseParams{
+		WorkDir:          env.WorkDir,
+		Provider:         "hermes",
+		HermesSourceHome: sharedHome,
+		Task:             scheduledTask,
+	}, testLogger()); reused == nil {
+		t.Fatal("Reuse manual to scheduled returned nil")
+	}
+	assertEnabled(false)
+
+	if reused := Reuse(ReuseParams{
+		WorkDir:          env.WorkDir,
+		Provider:         "hermes",
+		HermesSourceHome: sharedHome,
+		Task:             manualTask,
+	}, testLogger()); reused == nil {
+		t.Fatal("Reuse scheduled to manual returned nil")
+	}
+	assertEnabled(true)
+
+	if data, err := os.ReadFile(filepath.Join(sharedHome, "config.yaml")); err != nil {
+		t.Fatalf("read source config: %v", err)
+	} else if string(data) != hostConfig {
+		t.Error("source config was modified")
+	}
+}
+
 // TestHermesDerivedConfigRebasesRelativeExternalDirs is the regression for the
 // silent-repoint bug: relative external_dirs must be rewritten to absolute paths
 // anchored at the shared home, absolute entries left intact, and the real skills
