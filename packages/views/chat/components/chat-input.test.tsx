@@ -1433,6 +1433,13 @@ describe("ChatInput send keeps composer focus", () => {
     expect(fireEvent.pointerDown(sendButton)).toBe(false);
   });
 
+  it("cancels the send button's compatibility mouse-down on Android", async () => {
+    renderInput();
+    const sendButton = await readySendButton();
+
+    expect(fireEvent.mouseDown(sendButton)).toBe(false);
+  });
+
   it("still submits on tap — cancelling pointer-down suppresses focus, not activation", async () => {
     const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
       commitInput();
@@ -1452,6 +1459,12 @@ describe("ChatInput send keeps composer focus", () => {
     renderInput({ isRunning: true, onStop: vi.fn() });
 
     expect(fireEvent.pointerDown(screen.getByRole("button", { name: "Stop" }))).toBe(false);
+  });
+
+  it("cancels the stop button's compatibility mouse-down on Android", () => {
+    renderInput({ isRunning: true, onStop: vi.fn() });
+
+    expect(fireEvent.mouseDown(screen.getByRole("button", { name: "Stop" }))).toBe(false);
   });
 
   it("still stops on tap", () => {

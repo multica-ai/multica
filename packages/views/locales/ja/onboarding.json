@@ -172,6 +172,7 @@
     "issue_prefix_label": "タスクプレフィックス",
     "issue_prefix_prefix": "タスクは ",
     "issue_prefix_suffix": " のように表示されます。あとで設定から変更できます。",
+    "issue_prefix_pending": "上の URL を入力すると、タスク番号はそれに合わせて決まります。ここに直接入力することもできます。",
     "create_new_title": "新しいワークスペースを作成",
     "create_new_subtitle": "新しく始めましょう — 別の業務領域のための独立した場所です。",
     "hint_opening": "{{name}} を開いています。",

@@ -70,36 +70,17 @@ const hermesMemoryStoreRoot = "hermes-state"
 // and the overlay home — Hermes resolves it relative to HERMES_HOME.
 const hermesMemoriesEntry = "memories"
 
-// MulticaHermesTaskMemoryEnv is the rollback switch. Anything truthy (1, true,
-// yes, on; case-insensitive) restores the pre-MUL-5932 behaviour of a fresh
-// task-local memories/ dir per task, for an operator who needs to revert without
-// waiting for a release. Everything else (including unset) keeps memory
-// agent-scoped and persistent.
-const MulticaHermesTaskMemoryEnv = "MULTICA_HERMES_TASK_MEMORY"
-
-// hermesTaskLocalMemoryForced reports whether the rollback switch is engaged.
-func hermesTaskLocalMemoryForced() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(MulticaHermesTaskMemoryEnv))) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
-}
-
 // HermesMemoryStorePath returns the persistent memory store for (daemonProfile,
-// agentID, sourceHome), or "" when memory must stay task-local — the rollback
-// switch is engaged, there is no agent to key on, or the Multica profile dir
-// cannot be resolved. The daemon marks the returned path in-use for the task's
-// duration so PruneHermesMemoryStores never reclaims it mid-mount.
+// agentID, sourceHome), or "" when memory must stay task-local — there is no
+// agent to key on, or the Multica profile dir cannot be resolved. The daemon
+// marks the returned path in-use for the task's duration so
+// PruneHermesMemoryStores never reclaims it mid-mount.
 //
 // daemonProfile namespaces by Multica profile for free: profile dirs are already
 // disjoint, so a staging daemon's GC can never see a production daemon's stores
 // and no hashed namespace segment is needed (unlike the Codex store, which lives
 // in the shared ~/.codex).
 func HermesMemoryStorePath(daemonProfile, agentID, sourceHome string) string {
-	if hermesTaskLocalMemoryForced() {
-		return ""
-	}
 	agent := sanitizePathSegment(agentID)
 	if agent == "" {
 		return ""
@@ -158,11 +139,11 @@ func hashHermesHomePath(path string) string {
 // memory outlives the task. Idempotent across Reuse: a link already pointing at
 // the store is left alone.
 //
-// A real memories/ directory left by an older daemon (or by a task that ran with
-// the rollback switch on) is migrated into the store rather than discarded — but
-// only into an empty store, so an upgrade never overwrites memory the agent has
-// already accumulated. A migration that cannot complete fails the overlay rather
-// than dropping the directory it could not carry over.
+// A real memories/ directory left by an older daemon (or by a task that ran
+// without a store to key on) is migrated into the store rather than discarded —
+// but only into an empty store, so an upgrade never overwrites memory the agent
+// has already accumulated. A migration that cannot complete fails the overlay
+// rather than dropping the directory it could not carry over.
 func mountHermesMemories(hermesHome, storeDir string, logger *slog.Logger) error {
 	dst := filepath.Join(hermesHome, hermesMemoriesEntry)
 
@@ -364,11 +345,12 @@ func copyHermesMemoryTree(src, dst string) error {
 }
 
 // detachHermesMemories gives the overlay a real, task-local memories dir. It is
-// the rollback path (MULTICA_HERMES_TASK_MEMORY), so it must actively replace a
-// link left by a previous run against the persistent store: a reused overlay
-// still carries that link, and MkdirAll would follow it and silently succeed,
-// leaving the task writing to a store the daemon no longer guards from the GC.
-// An existing real directory is kept — that is this task's own memory.
+// the path taken when there is no store to key on (no agent, or an unresolvable
+// Multica profile dir), so it must actively replace a link left by a previous
+// run against the persistent store: a reused overlay still carries that link,
+// and MkdirAll would follow it and silently succeed, leaving the task writing to
+// a store the daemon no longer guards from the GC. An existing real directory is
+// kept — that is this task's own memory.
 func detachHermesMemories(hermesHome string) error {
 	dst := filepath.Join(hermesHome, hermesMemoriesEntry)
 	if fi, err := os.Lstat(dst); err == nil {

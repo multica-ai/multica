@@ -209,6 +209,14 @@ type Result struct {
 	// network drops, rate limits, quota, provider 5xx, or auth errors. Those
 	// keep the session pointer so the platform's own retry can resume the
 	// truncated conversation (see retryableReasons in internal/service/task.go).
+	//
+	// The auth exclusion above stands even for the one auth error a fresh
+	// session DOES cure — a resumed session whose persisted provider identity
+	// can no longer resolve its credentials (GH #6777). An adapter cannot tell
+	// that apart from a genuinely bad credential by looking at the error, so
+	// the judgement is made once, provider-agnostically, in
+	// shouldRetryWithFreshSession, where "was this run a resume?" is already
+	// known. Do not encode it here.
 	ResumeRejected bool
 	// codexInitializeRetrySafe is provider-internal evidence that an
 	// initialize timeout happened before semantic activity and after the

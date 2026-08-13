@@ -308,25 +308,46 @@ describe("ReadonlyContent issue mention Markdown", () => {
     expect(resolveIssueIdentifierMock).not.toHaveBeenCalled();
     expect(queryByTestId("issue-mention-card")).toBeNull();
   });
+});
 
-  it("documents the CommonMark quoted-emphasis edge case before Korean particles", () => {
-    const unsafe = render(
-      <ReadonlyContent content={'**"무엇을 먼저 정해두고 시작할지"**가'} />,
-    );
-
-    expect(unsafe.container.querySelector("strong")).toBeNull();
-    expect(unsafe.container.textContent).toContain(
+describe("ReadonlyContent CJK emphasis", () => {
+  it.each([
+    ["Chinese punctuation", "**水温适度。**水的温度", "水温适度。"],
+    ["Japanese punctuation", "**テスト。**テスト", "テスト。"],
+    [
+      "Korean punctuation before a particle",
       '**"무엇을 먼저 정해두고 시작할지"**가',
+      '"무엇을 먼저 정해두고 시작할지"',
+    ],
+  ])("renders CJK-friendly strong emphasis: %s", (_name, content, strongText) => {
+    const { container } = render(<ReadonlyContent content={content} />);
+
+    expect(container.querySelector("strong")?.textContent).toBe(strongText);
+    expect(container.textContent).not.toContain("**");
+  });
+
+  it("repairs a trailing space before a CJK strong closing delimiter", () => {
+    const { container } = render(
+      <ReadonlyContent content="**为什么做，收益是什么。 **Multica 的能力边界" />,
     );
 
-    const safe = render(
-      <ReadonlyContent content={'"**무엇을 먼저 정해두고 시작할지**"가'} />,
+    expect(container.querySelector("strong")?.textContent).toBe(
+      "为什么做，收益是什么。",
     );
+    expect(container.textContent).toBe("为什么做，收益是什么。 Multica 的能力边界");
+  });
 
-    expect(safe.container.querySelector("strong")?.textContent).toBe(
-      "무엇을 먼저 정해두고 시작할지",
-    );
-    expect(safe.container.textContent).toContain('"무엇을 먼저 정해두고 시작할지"가');
+  it.each([
+    ["inline code", "`**中文。 **后文`"],
+    ["fenced code", "```md\n**中文。 **后文\n```"],
+    ["indented code", "    **中文。 **后文"],
+    ["escaped Markdown", "\\**中文。 **后文"],
+    ["non-CJK prose", "**English sentence. **next"],
+  ])("does not repair trailing-space emphasis in %s", (_name, content) => {
+    const { container } = render(<ReadonlyContent content={content} />);
+
+    expect(container.querySelector("strong")).toBeNull();
+    expect(container.textContent).toContain("**");
   });
 });
 

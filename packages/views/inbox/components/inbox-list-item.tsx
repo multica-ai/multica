@@ -11,6 +11,8 @@ import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useInboxContextMenu } from "./inbox-context-menu";
+import { InboxRowMenu } from "./inbox-row-menu";
+import { handleRowActivationKey } from "../../common/row-actions-menu";
 import { useT } from "../../i18n";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { resolveClickIntent, useIntentNavigate } from "../../navigation";
@@ -72,8 +74,13 @@ export function InboxListItem({
   const actorType = item.actor_type ?? item.recipient_type;
 
   return (
-    <button
-      type="button"
+    // A div, not a <button>: the row carries its own controls (the action
+    // button, the compact menu), and interactive descendants of a <button>
+    // are invalid HTML that screen readers cannot reach. `role="button"` plus
+    // the Enter/Space handler keeps the row's own keyboard behavior.
+    <div
+      role="button"
+      tabIndex={0}
       onClick={(e) => {
         // Plain click keeps the master-detail selection; a modifier click on
         // a row that references an issue opens that issue as its own tab.
@@ -86,6 +93,7 @@ export function InboxListItem({
         }
         onClick();
       }}
+      onKeyDown={(e) => handleRowActivationKey(e, onClick)}
       onAuxClick={(e) => {
         if (e.defaultPrevented || e.button !== 1 || !issueHref) return;
         e.preventDefault();
@@ -97,7 +105,7 @@ export function InboxListItem({
       onContextMenu={
         openContextMenu ? (e) => openContextMenu(item, e) : undefined
       }
-      className={`group flex w-full select-none items-center gap-3 rounded-md px-2 py-2.5 text-left transition-colors ${
+      className={`group flex w-full cursor-default select-none items-center gap-3 rounded-md px-2 py-2.5 text-left outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring ${
         isSelected
           ? "bg-accent"
           : "hover:bg-accent/50 data-[popup-open]:bg-accent/50"
@@ -122,25 +130,23 @@ export function InboxListItem({
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <span
-              role="button"
-              tabIndex={-1}
+            {/* Pointer-only affordance: revealed on hover, and on keyboard
+                focus anywhere in the row so it is reachable by Tab. Touch has
+                neither, so it stays hidden on a pointer that cannot hover and
+                the compact menu below carries the same action. */}
+            <button
+              type="button"
               title={actionLabel}
               aria-label={actionLabel}
               onClick={(e) => {
                 e.stopPropagation();
                 onAction();
               }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.stopPropagation();
-                  onAction();
-                }
-              }}
-              className="hidden rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground group-hover:inline-flex"
+              className="hidden rounded p-0.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [@media(hover:hover)]:group-hover:inline-flex [@media(hover:hover)]:group-focus-within:inline-flex"
             >
               <ActionIcon className="h-3.5 w-3.5" />
-            </span>
+            </button>
+            <InboxRowMenu item={item} view={view} />
             {item.issue_status && (
               <StatusIcon status={item.issue_status} className="h-3.5 w-3.5 shrink-0" />
             )}
@@ -168,6 +174,6 @@ export function InboxListItem({
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 }

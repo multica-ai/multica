@@ -99,15 +99,6 @@ first, then removes those agent IDs as a post-filter. A missing or empty field
 preserves the old behavior. A valid UUID that is not in the computed trigger set
 is a no-op; a malformed UUID is rejected at the request boundary.
 
-For plain member-authored replies, implicit routing respects the direct
-conversation target. Replying directly to an agent can trigger that agent, and
-a member-authored thread that already has an agent owner can continue that
-conversation. But a reply directly under another member does NOT fall back to
-the issue's agent or squad assignee when the thread has no agent owner. Use an
-explicit `@agent` or `@squad` mention when that human-to-human reply should also
-start agent work. Top-level member comments can still use the issue assignee
-fallback.
-
 ## @all is the broadcast type
 
 `@all` uses the literal `all`, never a UUID:

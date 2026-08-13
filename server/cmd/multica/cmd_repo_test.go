@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -190,7 +191,7 @@ func TestRunRepoRemoveRejectsMissingRepoWithoutPatch(t *testing.T) {
 }
 
 func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
-	var body map[string]string
+	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/repo/checkout" {
 			http.NotFound(w, r)
@@ -224,5 +225,69 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 	}
 	if got := body["ref"]; got != "release/v2" {
 		t.Fatalf("ref = %q, want release/v2", got)
+	}
+	if got := body["retry_busy"]; got != true {
+		t.Fatalf("retry_busy = %v, want true", got)
+	}
+}
+
+func TestRunRepoCheckoutRetriesServiceUnavailable(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("X-Multica-Retryable", "repo-busy")
+			w.Header().Set("Retry-After", "0")
+			http.Error(w, "repository busy", http.StatusServiceUnavailable)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{
+			"path":        "/work/repo",
+			"branch_name": "agent/test/task",
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_DAEMON_PORT", strings.TrimPrefix(srv.URL, "http://127.0.0.1:"))
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_NAME", "Test Agent")
+	t.Setenv("MULTICA_TASK_ID", "task-1")
+
+	if err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"}); err != nil {
+		t.Fatalf("runRepoCheckout: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("checkout attempts = %d, want 2", attempts)
+	}
+}
+
+func TestRunRepoCheckoutDoesNotRetryUnmarkedServiceUnavailable(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		http.Error(w, "daemon unavailable", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_DAEMON_PORT", strings.TrimPrefix(srv.URL, "http://127.0.0.1:"))
+	if err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"}); err == nil {
+		t.Fatal("runRepoCheckout unexpectedly succeeded")
+	}
+	if attempts != 1 {
+		t.Fatalf("checkout attempts = %d, want 1", attempts)
+	}
+}
+
+func TestRepoCheckoutRetryDelay(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC)
+	if got := repoCheckoutRetryDelay("7", now); got != 7*time.Second {
+		t.Fatalf("seconds delay = %s, want 7s", got)
+	}
+	if got := repoCheckoutRetryDelay(now.Add(time.Minute).Format(http.TimeFormat), now); got != 30*time.Second {
+		t.Fatalf("capped date delay = %s, want 30s", got)
+	}
+	if got := repoCheckoutRetryDelay("invalid", now); got != time.Second {
+		t.Fatalf("default delay = %s, want 1s", got)
 	}
 }

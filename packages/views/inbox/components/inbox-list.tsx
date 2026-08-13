@@ -91,8 +91,8 @@ export function InboxList({
 
   const selectItem = useCallback(
     (item: InboxItem) => {
-      // Safari does not focus a <button> on click, so the container has to be
-      // focused explicitly or the arrow keys would stay dead after a click.
+      // Safari does not focus a clicked row control, so the container has to
+      // be focused explicitly or the arrow keys would stay dead after a click.
       focusList();
       onSelect(item);
     },
@@ -207,9 +207,8 @@ export function InboxList({
     <div
       ref={attachScrollEl}
       data-tab-scroll-root="list"
-      // Programmatically focusable only: the rows are buttons and already
-      // carry their own tab stops, so a tabbable container would just add a
-      // redundant one.
+      // Programmatically focusable only: the rows already carry their own tab
+      // stops, so a tabbable container would just add a redundant one.
       tabIndex={-1}
       onKeyDown={handleKeyDown}
       className="flex-1 min-h-0 overflow-y-auto outline-none"

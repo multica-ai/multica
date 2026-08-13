@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
@@ -1361,5 +1363,280 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin') RETURN
 	}
 	if memberExists {
 		t.Fatal("member row was not deleted")
+	}
+}
+
+// TestDefaultIssuePrefixFromSlug pins the derivation new workspaces get
+// (MUL-6050): alphanumerics of the slug, first 4, uppercased. The Chinese
+// cases are the point of the change — under the old name-based derivation
+// every one of them collapsed to "WS".
+//
+// Keep this table in sync with the client-side preview
+// (packages/views/onboarding/steps/step-workspace.tsx). If the two ever
+// disagree, the create screen lies about the identifier the user will get.
+func TestDefaultIssuePrefixFromSlug(t *testing.T) {
+	cases := []struct {
+		slug string
+		want string
+	}{
+		{"acme", "ACME"},
+		{"front-end", "FRON"},
+		{"growth", "GROW"},
+		{"team-2", "TEAM"},
+		{"a1b2c3", "A1B2"},
+		{"ab", "AB"},
+		{"x", "X"},
+		// Slugs the create handler would have rejected anyway; the function
+		// stays total so no caller can persist an empty prefix.
+		{"", "WS"},
+		{"--", "WS"},
+	}
+
+	for _, tc := range cases {
+		if got := defaultIssuePrefixFromSlug(tc.slug); got != tc.want {
+			t.Errorf("defaultIssuePrefixFromSlug(%q) = %q, want %q", tc.slug, got, tc.want)
+		}
+	}
+}
+
+// TestLegacyIssuePrefixFromName_Frozen guards the read-time fallback for
+// workspaces whose stored prefix is empty. Issue identifiers are computed
+// from the current prefix on every read, so changing what this returns would
+// silently rewrite the identifier of every historical issue in those
+// workspaces. The product decision on MUL-6050 was explicit: no backfill,
+// existing workspaces are left exactly as they are — which means this
+// function must keep returning what it always did, including "WS" for
+// non-ASCII names.
+func TestLegacyIssuePrefixFromName_Frozen(t *testing.T) {
+	cases := []struct {
+		name string
+		want string
+	}{
+		{"Jiayuan's Workspace", "JIA"},
+		{"My Team", "MYT"},
+		{"AB", "AB"},
+		{"Team 2", "TEA"},
+		{"前端团队", "WS"},
+		{"", "WS"},
+	}
+
+	for _, tc := range cases {
+		if got := legacyIssuePrefixFromName(tc.name); got != tc.want {
+			t.Errorf("legacyIssuePrefixFromName(%q) = %q, want %q — this function is frozen; changing it rewrites existing issue identifiers", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestIssuePrefixForWorkspace_LegacyFallbackFrozen guards the resolution rule
+// itself, at the seam every read-time caller goes through (getIssuePrefix and
+// the GitHub close-intent scan, which holds the row already).
+//
+// A stored prefix always wins; only an empty one falls back, and that fallback
+// must stay on the old name-based derivation. Pointing it at
+// defaultIssuePrefixFromSlug would rewrite the identifier of every issue in
+// those legacy workspaces on the next read — the exact outcome the "no
+// backfill, leave existing workspaces alone" decision on MUL-6050 rules out.
+func TestIssuePrefixForWorkspace_LegacyFallbackFrozen(t *testing.T) {
+	cases := []struct {
+		label string
+		ws    db.Workspace
+		want  string
+	}{
+		{"stored prefix wins", db.Workspace{Name: "前端团队", Slug: "frontend", IssuePrefix: "FE"}, "FE"},
+		{"empty prefix, CJK name", db.Workspace{Name: "前端团队", Slug: "frontend"}, "WS"},
+		{"empty prefix, ASCII name", db.Workspace{Name: "My Team", Slug: "my-team"}, "MYT"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			if got := issuePrefixForWorkspace(tc.ws); got != tc.want {
+				t.Fatalf("issuePrefixForWorkspace(%+v) = %q, want %q — legacy workspaces must keep the identifiers they already have", tc.ws, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeIssuePrefix(t *testing.T) {
+	cases := []struct {
+		raw   string
+		want  string
+		valid bool
+	}{
+		{"acme", "ACME", true},
+		{"  acme  ", "ACME", true},
+		{"AB12", "AB12", true},
+		{"ABCDEFGHIJ", "ABCDEFGHIJ", true},
+		// Absent / blank means "use the default", not "invalid".
+		{"", "", true},
+		{"   ", "", true},
+		// Rejections the API accepted before MUL-6050.
+		{"ABCDEFGHIJK", "", false},
+		{"前端", "", false},
+		{"AB-CD", "", false},
+		{"AB CD", "", false},
+		{"AB_CD", "", false},
+	}
+
+	for _, tc := range cases {
+		got, ok := normalizeIssuePrefix(tc.raw)
+		if ok != tc.valid {
+			t.Errorf("normalizeIssuePrefix(%q) valid = %v, want %v", tc.raw, ok, tc.valid)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("normalizeIssuePrefix(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}
+
+// TestCreateWorkspace_ChineseNameDerivesPrefixFromSlug is the end-to-end
+// regression for MUL-6050: a workspace whose name has no ASCII letters used
+// to be created with prefix "WS" — deterministically, for every Chinese team
+// on the instance. It must now take its prefix from the slug, which the same
+// form already forced the user to choose in ASCII.
+func TestCreateWorkspace_ChineseNameDerivesPrefixFromSlug(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const slug = "handler-tests-frontend-team"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces", map[string]any{
+		"name": "前端团队",
+		"slug": slug,
+	})
+	testHandler.CreateWorkspace(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateWorkspace: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp WorkspaceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.IssuePrefix != "HAND" {
+		t.Fatalf("issue_prefix = %q, want %q (derived from the slug, not the name)", resp.IssuePrefix, "HAND")
+	}
+	if resp.IssuePrefix == "WS" {
+		t.Fatal("issue_prefix fell back to WS — the MUL-6050 regression is back")
+	}
+}
+
+// TestCreateWorkspace_HonorsExplicitIssuePrefix covers the create screen's new
+// editable prefix field: whatever the user typed is what gets persisted.
+func TestCreateWorkspace_HonorsExplicitIssuePrefix(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const slug = "handler-tests-explicit-prefix"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces", map[string]any{
+		"name":         "前端团队",
+		"slug":         slug,
+		"issue_prefix": "fe",
+	})
+	testHandler.CreateWorkspace(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateWorkspace: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp WorkspaceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.IssuePrefix != "FE" {
+		t.Fatalf("issue_prefix = %q, want %q", resp.IssuePrefix, "FE")
+	}
+}
+
+// TestCreateWorkspace_RejectsInvalidIssuePrefix closes the API-side hole the
+// settings UI already guarded: before MUL-6050 the create and update handlers
+// only trimmed and uppercased the caller-supplied prefix, so a direct API call
+// could persist CJK text or a 100-character string as an issue prefix.
+func TestCreateWorkspace_RejectsInvalidIssuePrefix(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	invalid := map[string]string{
+		"non-ascii":  "前端",
+		"too-long":   "ABCDEFGHIJK",
+		"hyphenated": "AB-CD",
+		"spaced":     "AB CD",
+	}
+
+	for label, prefix := range invalid {
+		t.Run(label, func(t *testing.T) {
+			slug := "handler-tests-bad-prefix-" + label
+			ctx := context.Background()
+			_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+			t.Cleanup(func() {
+				_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
+			})
+
+			w := httptest.NewRecorder()
+			req := newRequest("POST", "/api/workspaces", map[string]any{
+				"name":         "Prefix Validation Probe",
+				"slug":         slug,
+				"issue_prefix": prefix,
+			})
+			testHandler.CreateWorkspace(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("issue_prefix %q: expected 400, got %d: %s", prefix, w.Code, w.Body.String())
+			}
+
+			var count int
+			if err := testPool.QueryRow(ctx, `SELECT count(*) FROM workspace WHERE slug = $1`, slug).Scan(&count); err != nil {
+				t.Fatalf("count workspaces: %v", err)
+			}
+			if count != 0 {
+				t.Fatalf("expected no workspace row for a rejected prefix, found %d", count)
+			}
+		})
+	}
+}
+
+// TestUpdateWorkspace_RejectsInvalidIssuePrefix is the PATCH half of the same
+// hole: settings normalizes client-side, but the endpoint took anything.
+func TestUpdateWorkspace_RejectsInvalidIssuePrefix(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var before string
+	if err := testPool.QueryRow(ctx, `SELECT issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&before); err != nil {
+		t.Fatalf("read current prefix: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(
+		newRequest("PATCH", "/api/workspaces/"+testWorkspaceID, map[string]any{"issue_prefix": "前端团队前端团队前端"}),
+		"id", testWorkspaceID,
+	)
+	testHandler.UpdateWorkspace(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a non-ASCII issue_prefix, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var after string
+	if err := testPool.QueryRow(ctx, `SELECT issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&after); err != nil {
+		t.Fatalf("re-read prefix: %v", err)
+	}
+	if after != before {
+		t.Fatalf("issue_prefix changed on a rejected update: %q → %q", before, after)
 	}
 }

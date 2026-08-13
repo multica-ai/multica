@@ -64,8 +64,8 @@ func TestHermesMemoryStorePathLayout(t *testing.T) {
 	}
 }
 
-// TestHermesMemoryStorePathDisabled covers the two ways memory stays
-// task-local: no agent to key on, and the operator rollback switch.
+// TestHermesMemoryStorePathDisabled covers the task without an agent to key the
+// store on: memory has to stay task-local rather than land in a shared segment.
 func TestHermesMemoryStorePathDisabled(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -73,11 +73,6 @@ func TestHermesMemoryStorePathDisabled(t *testing.T) {
 
 	if got := HermesMemoryStorePath("", "", ""); got != "" {
 		t.Fatalf("store path without an agent = %q, want empty", got)
-	}
-
-	t.Setenv(MulticaHermesTaskMemoryEnv, "1")
-	if got := HermesMemoryStorePath("", "agent-1", ""); got != "" {
-		t.Fatalf("store path with the rollback switch on = %q, want empty", got)
 	}
 }
 
@@ -144,10 +139,10 @@ func TestPrepareHermesHomeMemoryStoreIsolatesAgents(t *testing.T) {
 	}
 }
 
-// TestPrepareHermesHomeMemoryStoreRollback verifies the operator switch: with no
-// store the overlay keeps a plain task-local memories dir, i.e. the old
-// behaviour, and never leaves a dangling link behind.
-func TestPrepareHermesHomeMemoryStoreRollback(t *testing.T) {
+// TestPrepareHermesHomeWithoutStore verifies the no-store path: with nothing to
+// key a store on, the overlay keeps a plain task-local memories dir and never
+// leaves a dangling link behind.
+func TestPrepareHermesHomeWithoutStore(t *testing.T) {
 	t.Parallel()
 	sharedHome := t.TempDir()
 	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
@@ -168,27 +163,28 @@ func TestPrepareHermesHomeMemoryStoreRollback(t *testing.T) {
 	}
 }
 
-// TestPrepareHermesHomeRollbackDetachesExistingStoreLink is the regression test
-// for the rollback switch on a reused workdir. The overlay still carries the
-// link to the persistent store from the previous run, and MkdirAll would follow
-// it and silently succeed — leaving the task writing to a store the daemon no
-// longer marks active, and the GC free to reclaim it mid-task.
-func TestPrepareHermesHomeRollbackDetachesExistingStoreLink(t *testing.T) {
+// TestPrepareHermesHomeWithoutStoreDetachesExistingStoreLink is the regression
+// test for a reused workdir whose next task has no store (no agent to key on, or
+// an unresolvable profile dir). The overlay still carries the link to the
+// persistent store from the previous run, and MkdirAll would follow it and
+// silently succeed — leaving the task writing to a store the daemon no longer
+// marks active, and the GC free to reclaim it mid-task.
+func TestPrepareHermesHomeWithoutStoreDetachesExistingStoreLink(t *testing.T) {
 	t.Parallel()
 	sharedHome := t.TempDir()
 	store := filepath.Join(t.TempDir(), "hermes-state", "agent-1", "default")
 	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
 	skills := []SkillContextForEnv{{Name: "deploy", Content: "# Deploy"}}
 
-	// Run once with the store mounted, as a pre-rollback task would.
+	// Run once with the store mounted.
 	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, store, testLogger()); err != nil {
 		t.Fatalf("prepare with store: %v", err)
 	}
 	mustWrite(t, filepath.Join(hermesHome, "memories", "MEMORY.md"), "persistent memory")
 
-	// Operator flips MULTICA_HERMES_TASK_MEMORY=1; the same overlay is reused.
+	// The same overlay is reused by a task that resolves no store.
 	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", testLogger()); err != nil {
-		t.Fatalf("prepare after rollback: %v", err)
+		t.Fatalf("prepare without store: %v", err)
 	}
 
 	fi, err := os.Lstat(filepath.Join(hermesHome, "memories"))
@@ -196,21 +192,22 @@ func TestPrepareHermesHomeRollbackDetachesExistingStoreLink(t *testing.T) {
 		t.Fatalf("lstat memories: %v", err)
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		t.Fatalf("rollback left the store link in place; the task still writes to the persistent store")
+		t.Fatalf("the store link is still in place; the task still writes to the persistent store")
 	}
 	if _, err := os.Stat(filepath.Join(hermesHome, "memories", "MEMORY.md")); !os.IsNotExist(err) {
-		t.Fatalf("rollback should give the task an empty memories dir (err = %v)", err)
+		t.Fatalf("a task without a store should get an empty memories dir (err = %v)", err)
 	}
-	// The store itself must survive, so flipping the switch back restores memory.
+	// The store itself must survive, so the agent's next task with a store
+	// resolved still finds its memory.
 	if _, err := os.Stat(filepath.Join(store, "MEMORY.md")); err != nil {
-		t.Fatalf("rollback destroyed the persistent store: %v", err)
+		t.Fatalf("detaching destroyed the persistent store: %v", err)
 	}
 }
 
-// TestPrepareHermesHomeRollbackKeepsTaskLocalMemories checks the other reuse
+// TestPrepareHermesHomeWithoutStoreKeepsTaskLocalMemories checks the other reuse
 // case: with no store, an existing real memories dir is this task's own memory
 // and must be preserved across reuse.
-func TestPrepareHermesHomeRollbackKeepsTaskLocalMemories(t *testing.T) {
+func TestPrepareHermesHomeWithoutStoreKeepsTaskLocalMemories(t *testing.T) {
 	t.Parallel()
 	sharedHome := t.TempDir()
 	hermesHome := filepath.Join(t.TempDir(), "hermes-home")

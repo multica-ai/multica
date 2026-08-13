@@ -265,7 +265,7 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 				return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token; detected a daemon task marker at %s — if you are not running inside an agent task this is likely a leftover, remove it and retry", markerPath)
 			}
 		}
-		return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
+		return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", daemonPortOnlyContextHint())
 	}
 
 	serverURL := resolveServerURL(cmd)
@@ -291,13 +291,35 @@ const (
 )
 
 func tryResolveServerURL(cmd *cobra.Command) string {
-	val := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
-	if val != "" {
-		return normalizeAPIBaseURL(val)
+	if val := tryResolveExplicitServerURL(cmd); val != "" {
+		return val
 	}
 	if inDaemonManagedExecutionContext() && strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) == "" {
 		return ""
 	}
+	return tryResolveProfileServerURL(cmd)
+}
+
+// tryResolveHumanServerURL is reserved for a human/local command after it has
+// passed requireHumanLocalCommand. Unlike the general resolver, a stale
+// MULTICA_DAEMON_PORT in a host/container environment must not hide the human
+// profile that login is explicitly meant to update.
+func tryResolveHumanServerURL(cmd *cobra.Command) string {
+	if val := tryResolveExplicitServerURL(cmd); val != "" {
+		return val
+	}
+	return tryResolveProfileServerURL(cmd)
+}
+
+func tryResolveExplicitServerURL(cmd *cobra.Command) string {
+	val := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
+	if val == "" {
+		return ""
+	}
+	return normalizeAPIBaseURL(val)
+}
+
+func tryResolveProfileServerURL(cmd *cobra.Command) string {
 	profile := resolveProfile(cmd)
 	cfg, err := cli.LoadCLIConfigForProfile(profile)
 	if err == nil && cfg.ServerURL != "" {
@@ -310,13 +332,26 @@ func resolveServerURL(cmd *cobra.Command) string {
 	if val := tryResolveServerURL(cmd); val != "" {
 		return val
 	}
+	fmt.Fprintln(os.Stderr, missingServerConfigMessage())
+	os.Exit(1)
+	return "" // unreachable
+}
+
+func missingServerConfigMessage() string {
+	return fmt.Sprintf("No server configured. Run 'multica setup' first%s.", daemonPortOnlyContextHint())
+}
+
+func resolveHumanServerURL(cmd *cobra.Command) string {
+	if val := tryResolveHumanServerURL(cmd); val != "" {
+		return val
+	}
 	fmt.Fprintln(os.Stderr, "No server configured. Run 'multica setup' first.")
 	os.Exit(1)
 	return "" // unreachable
 }
 
 func resolveLoginTokenServerURL(cmd *cobra.Command) string {
-	if val := tryResolveServerURL(cmd); val != "" {
+	if val := tryResolveHumanServerURL(cmd); val != "" {
 		return val
 	}
 	return defaultCloudServerURL
@@ -346,6 +381,23 @@ func inDaemonManagedExecutionContext() bool {
 	return inAgentExecutionContext() || os.Getenv("MULTICA_DAEMON_PORT") != "" || hasDaemonTaskContextMarker()
 }
 
+// inDaemonTaskIdentityContext reports strong evidence that the current process
+// belongs to a daemon-managed task. MULTICA_DAEMON_PORT is deliberately not
+// sufficient: older host/container setups may export that otherwise inert
+// task hint before login or daemon startup.
+func inDaemonTaskIdentityContext() bool {
+	return inAgentExecutionContext() ||
+		strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) != "" ||
+		hasDaemonTaskContextMarker()
+}
+
+func daemonPortOnlyContextHint() string {
+	if strings.TrimSpace(os.Getenv("MULTICA_DAEMON_PORT")) == "" || inDaemonTaskIdentityContext() {
+		return ""
+	}
+	return "; MULTICA_DAEMON_PORT is set without task identity — if this is a host or container startup shell, remove that variable and retry"
+}
+
 // requireTaskLocalConfigRoot prevents daemon-managed subprocesses that lost
 // part of their injected environment from silently resolving Multica state
 // below the daemon owner's HOME. Commands that intentionally support task-local
@@ -355,7 +407,7 @@ func requireTaskLocalConfigRoot() error {
 		return nil
 	}
 	if strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) == "" {
-		return fmt.Errorf("daemon-managed task requires a task-local Multica config root in %s", cli.TaskConfigRootEnv)
+		return fmt.Errorf("daemon-managed task requires a task-local Multica config root in %s%s", cli.TaskConfigRootEnv, daemonPortOnlyContextHint())
 	}
 	return nil
 }
@@ -364,7 +416,7 @@ func requireTaskLocalConfigRoot() error {
 // set up, or operate the human-owned local daemon/profile. Task API commands
 // remain available with the injected mat_ token; these local commands do not.
 func requireHumanLocalCommand(command string) error {
-	if inDaemonManagedExecutionContext() {
+	if inDaemonTaskIdentityContext() {
 		return fmt.Errorf("%s is not available inside a daemon-managed task", command)
 	}
 	return nil
