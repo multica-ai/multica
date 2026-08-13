@@ -907,6 +907,9 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	// Track affected workspaces for WS notifications.
 	affectedWorkspaces := make(map[string]bool)
 
+	// Tasks still in flight on the runtimes going away, recovered below.
+	var orphaned []db.AgentTaskQueue
+
 	for i, rid := range req.RuntimeIDs {
 		// Look up the runtime and verify ownership.
 		rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUIDs[i])
@@ -925,6 +928,35 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
 			continue
 		}
+
+		// Recover whatever this runtime was still executing. Deregistration is
+		// the one moment the server knows for certain that a runtime is going
+		// away, and until now it dropped that knowledge on the floor: the
+		// runtime went offline and its dispatched/running tasks were left
+		// behind, with nothing marking them failed and nothing retrying them.
+		//
+		// The startup path already does this — the daemon calls
+		// POST /runtimes/{id}/recover-orphans and RecoverOrphanedTasks funnels
+		// the rows through HandleFailedTasks for the retry. But that only
+		// rescues a task if the SAME runtime id comes back to ask for it, and
+		// a daemon that is replaced rather than restarted re-registers under
+		// fresh ids: a new host, a new container, a wiped state directory. The
+		// orphans stay pinned to ids nobody will ever query again, and the only
+		// thing that eventually notices is the stale-task sweeper, up to a
+		// 2.5h in-process timeout later.
+		//
+		// Doing it here closes the asymmetry with the same query and the same
+		// post-failure pipeline, so a graceful shutdown — which is what a
+		// rolling deploy or a scale-down is — costs a retry instead of a lost
+		// task.
+		rows, err := h.Queries.RecoverOrphanedTasksForRuntime(r.Context(), rt.ID)
+		if err != nil {
+			// Not fatal: the runtime is already offline, and the stale-task
+			// sweeper remains as the backstop it has always been.
+			slog.Warn("deregister: recover orphans failed", "runtime_id", rid, "error", err)
+		} else {
+			orphaned = append(orphaned, rows...)
+		}
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeOffline(
 			uuidToString(rt.OwnerID),
 			wsID,
@@ -936,6 +968,14 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 		affectedWorkspaces[wsID] = true
 	}
 
+	// Same shared pipeline RecoverOrphanedTasks uses: task:failed events, agent
+	// status reconcile, issue rollback, and auto-retry for the reasons
+	// retryableReasons allows — runtime_recovery among them.
+	retried := 0
+	if len(orphaned) > 0 {
+		retried = h.TaskService.HandleFailedTasks(r.Context(), orphaned)
+	}
+
 	// Notify frontend clients so they re-fetch runtime list.
 	for wsID := range affectedWorkspaces {
 		h.publish(protocol.EventDaemonRegister, wsID, "system", "", map[string]any{
@@ -943,8 +983,16 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	slog.Info("daemon deregistered", "runtime_ids", req.RuntimeIDs)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	slog.Info("daemon deregistered",
+		"runtime_ids", req.RuntimeIDs,
+		"orphaned", len(orphaned),
+		"retried", retried,
+	)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "ok",
+		"orphaned": len(orphaned),
+		"retried":  retried,
+	})
 }
 
 type DaemonHeartbeatRequest struct {
