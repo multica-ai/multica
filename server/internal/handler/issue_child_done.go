@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -135,6 +136,29 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	h.postChildDoneComment(ctx, parent, issue, children, staged, closedStage, false)
 }
 
+// notifyParentOfChildAttention posts a parent-level handoff when a child moves
+// into a state that needs intervention but is not terminal. Child completion is
+// handled separately by notifyParentOfChildDone because it has stage-barrier
+// semantics; review/block states must surface immediately or the parent can
+// stall with no coordinator wake.
+func (h *Handler) notifyParentOfChildAttention(ctx context.Context, prev, issue db.Issue, actorType, actorID string) {
+	if !issue.ParentIssueID.Valid || !childNeedsParentAttention(prev.Status, issue.Status) {
+		return
+	}
+	parent, err := h.Queries.GetIssue(ctx, issue.ParentIssueID)
+	if err != nil {
+		slog.Warn("child attention: failed to load parent",
+			"error", err,
+			"child_id", uuidToString(issue.ID),
+			"parent_id", uuidToString(issue.ParentIssueID))
+		return
+	}
+	if parent.Status == "done" || parent.Status == "cancelled" || parent.Status == "backlog" {
+		return
+	}
+	h.postChildAttentionComment(ctx, parent, issue, false, actorType, actorID)
+}
+
 // notifyParentsOfBatchChildDone emits child-done parent notifications for a
 // whole batch AFTER every status write has committed. `completed` is the set of
 // children that transitioned non-terminal -> terminal during the batch.
@@ -245,6 +269,51 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 	}
 }
 
+// notifyParentsOfBatchChildAttention emits at most one review/block handoff per
+// parent after a batch update has committed. If several children need attention,
+// blocked wins over in_review because it is the stronger escalation signal.
+func (h *Handler) notifyParentsOfBatchChildAttention(ctx context.Context, children []db.Issue, actorType, actorID string) {
+	if len(children) == 0 {
+		return
+	}
+
+	type parentGroup struct {
+		parentID pgtype.UUID
+		child    db.Issue
+	}
+	var groups []*parentGroup
+	index := map[string]*parentGroup{}
+	for _, c := range children {
+		if !c.ParentIssueID.Valid {
+			continue
+		}
+		key := uuidToString(c.ParentIssueID)
+		g, ok := index[key]
+		if !ok {
+			g = &parentGroup{parentID: c.ParentIssueID, child: c}
+			index[key] = g
+			groups = append(groups, g)
+			continue
+		}
+		if g.child.Status != "blocked" && c.Status == "blocked" {
+			g.child = c
+		}
+	}
+
+	for _, g := range groups {
+		parent, err := h.Queries.GetIssue(ctx, g.parentID)
+		if err != nil {
+			slog.Warn("batch child attention: failed to load parent",
+				"error", err, "parent_id", uuidToString(g.parentID))
+			continue
+		}
+		if parent.Status == "done" || parent.Status == "cancelled" || parent.Status == "backlog" {
+			continue
+		}
+		h.postChildAttentionComment(ctx, parent, g.child, true, actorType, actorID)
+	}
+}
+
 // postChildDoneComment builds and posts the parent's child-done system comment
 // for a closed stage barrier, then dispatches the parent-assignee trigger. It
 // assumes every guard in notifyParentOfChildDone / notifyParentsOfBatchChildDone
@@ -334,11 +403,87 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
 }
 
+// postChildAttentionComment records a parent-level handoff for blocked or
+// review-needed child work, then routes the handoff to the parent owner.
+func (h *Handler) postChildAttentionComment(ctx context.Context, parent, child db.Issue, batch bool, actorType, actorID string) {
+	prefix := h.getIssuePrefix(ctx, child.WorkspaceID)
+	identifier := prefix + "-" + strconv.Itoa(int(child.Number))
+	childID := uuidToString(child.ID)
+	title := sanitizeChildTitleForSystemComment(child.Title)
+	mentionPrefix := h.buildParentAssigneeMention(ctx, parent)
+
+	stateLabel := statusLabelForChildAttention(child.Status)
+	action := "Review the child and decide whether to accept it, request follow-up, or continue the parent."
+	if child.Status == "blocked" {
+		action = "Review the child, unblock it, or decide who should continue the parent."
+	}
+
+	var content string
+	if batch {
+		content = fmt.Sprintf(
+			"%sA sub-issue needs attention after a batch update — [%s](mention://issue/%s) — \"%s\" is %s. %s",
+			mentionPrefix, identifier, childID, title, stateLabel, action,
+		)
+	} else {
+		content = fmt.Sprintf(
+			"%sA sub-issue needs attention — [%s](mention://issue/%s) — \"%s\" is %s. %s",
+			mentionPrefix, identifier, childID, title, stateLabel, action,
+		)
+	}
+
+	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     parent.ID,
+		WorkspaceID: parent.WorkspaceID,
+		AuthorType:  "system",
+		AuthorID:    pgtype.UUID{Valid: true},
+		Content:     content,
+		Type:        "system",
+		ParentID:    pgtype.UUID{Valid: false},
+	})
+	if err != nil {
+		slog.Warn("child attention: create system comment failed",
+			"error", err,
+			"child_id", childID,
+			"parent_id", uuidToString(parent.ID))
+		return
+	}
+
+	h.publish(protocol.EventCommentCreated, uuidToString(parent.WorkspaceID), "system", "", map[string]any{
+		"comment":             commentToResponse(comment, nil, nil),
+		"issue_title":         parent.Title,
+		"issue_assignee_type": textToPtr(parent.AssigneeType),
+		"issue_assignee_id":   uuidToPtr(parent.AssigneeID),
+		"issue_status":        parent.Status,
+	})
+
+	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
+	h.notifyParentMemberOfChildAttention(ctx, parent, child, comment, actorType, actorID)
+}
+
 // isTerminalChildStatus reports whether a child issue status counts as
 // "finished" for stage-barrier purposes. Cancelled counts as terminal: a
 // cancelled sibling will never complete, so it must not hold a stage open.
 func isTerminalChildStatus(status string) bool {
 	return status == "done" || status == "cancelled"
+}
+
+func isChildAttentionStatus(status string) bool {
+	return status == "in_review" || status == "blocked"
+}
+
+func childNeedsParentAttention(prevStatus, nextStatus string) bool {
+	return prevStatus != nextStatus && isChildAttentionStatus(nextStatus)
+}
+
+func statusLabelForChildAttention(status string) string {
+	switch status {
+	case "in_review":
+		return "in review"
+	case "blocked":
+		return "blocked"
+	default:
+		return status
+	}
 }
 
 // siblingsAreStaged reports whether any child in the set carries an explicit
@@ -594,6 +739,57 @@ func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.I
 	case "squad":
 		h.triggerChildDoneSquad(ctx, parent, systemComment.ID)
 	}
+}
+
+func (h *Handler) notifyParentMemberOfChildAttention(ctx context.Context, parent, child db.Issue, systemComment db.Comment, actorType, actorID string) {
+	if !parent.AssigneeType.Valid || parent.AssigneeType.String != "member" || !parent.AssigneeID.Valid {
+		return
+	}
+	parentMemberID := uuidToString(parent.AssigneeID)
+	if actorType == "member" && actorID == parentMemberID {
+		return
+	}
+
+	details, _ := json.Marshal(map[string]string{
+		"parent_issue_id":   uuidToString(parent.ID),
+		"child_issue_id":    uuidToString(child.ID),
+		"child_status":      child.Status,
+		"system_comment_id": uuidToString(systemComment.ID),
+	})
+	item, err := h.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		WorkspaceID:   parent.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   parent.AssigneeID,
+		Type:          "status_changed",
+		Severity:      "action_required",
+		IssueID:       child.ID,
+		Title:         child.Title,
+		Body:          strToText("A sub-issue under an issue you own needs attention."),
+		ActorType:     strToText(actorType),
+		ActorID:       optionalActorUUID(actorID),
+		Details:       details,
+	})
+	if err != nil {
+		slog.Warn("child attention: create parent member inbox failed",
+			"error", err,
+			"child_id", uuidToString(child.ID),
+			"parent_id", uuidToString(parent.ID),
+			"member_id", parentMemberID)
+		return
+	}
+
+	resp := inboxToResponse(item)
+	resp.IssueStatus = &child.Status
+	h.publish(protocol.EventInboxNew, uuidToString(parent.WorkspaceID), actorType, actorID, map[string]any{
+		"item": resp,
+	})
+}
+
+func optionalActorUUID(actorID string) pgtype.UUID {
+	if actorID == "" {
+		return pgtype.UUID{Valid: false}
+	}
+	return parseUUID(actorID)
 }
 
 // triggerChildDoneAgent enqueues a mention-style task for the parent's
