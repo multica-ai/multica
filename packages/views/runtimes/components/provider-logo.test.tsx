@@ -40,8 +40,14 @@ describe("ProviderLogo", () => {
       <ProviderLogo provider="dsh" className="runtime-logo" />,
     );
 
-    const logo = container.querySelector('img[alt="DeepSeek Harness"]');
-    expect(logo?.getAttribute("src")).toBeTruthy();
+    const logo = container.querySelector("svg");
+
+    // Inlined rather than loaded through <img>: currentColor only resolves
+    // against the host document, so an <img> would pin the mark to black and
+    // lose it against the dark theme.
+    expect(logo?.getAttribute("viewBox")).toBe("0 0 50 50");
+    expect(logo?.getAttribute("fill")).toBe("currentColor");
+    expect(logo?.querySelector("path")).not.toBeNull();
     expect(logo?.classList.contains("runtime-logo")).toBe(true);
   });
 
