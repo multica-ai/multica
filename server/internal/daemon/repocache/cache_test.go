@@ -785,6 +785,69 @@ func TestCreateWorktreeRecoversFromCorruptedAdminMetadata(t *testing.T) {
 	}
 }
 
+// TestCreateWorktreeRecoversFromStaleIndexLock reproduces the failure
+// reported on multica-ai/multica#6879: a checkout killed mid `git
+// reset`/`git checkout` can leave a stale index.lock behind while
+// HEAD/commondir/gitdir stay intact, so gitWorktreeAdminIntact alone can't
+// detect it. Every retry against the same workdir hit
+// updateExistingWorktreeContext's `git reset --hard`, which failed hard on
+// the pre-existing lock file. The fix falls through to the same
+// remove-and-recreate recovery used for corrupted admin metadata whenever
+// the reuse attempt itself fails.
+func TestCreateWorktreeRecoversFromStaleIndexLock(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger(), 0)
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	params := WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Code Reviewer",
+		TaskID:      "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+	}
+
+	first, err := cache.CreateWorktree(params)
+	if err != nil {
+		t.Fatalf("first CreateWorktree failed: %v", err)
+	}
+
+	// Simulate a checkout killed mid `git reset`/`git checkout`: admin
+	// metadata is fine, but a stale index.lock is left behind.
+	adminDir := readWorktreeAdminDir(t, first.Path)
+	lockPath := filepath.Join(adminDir, "index.lock")
+	if err := os.WriteFile(lockPath, nil, 0o644); err != nil {
+		t.Fatalf("failed to create stale index.lock: %v", err)
+	}
+	if !gitWorktreeAdminIntact(first.Path) {
+		t.Fatalf("expected worktree with only a stale index.lock to still report admin metadata as intact")
+	}
+
+	// Retrying against the same workdir/task must self-heal instead of
+	// failing forever with the opaque "Unable to create index.lock" error.
+	second, err := cache.CreateWorktree(params)
+	if err != nil {
+		t.Fatalf("second CreateWorktree (after stale index.lock) failed: %v", err)
+	}
+	if second.Path != first.Path {
+		t.Fatalf("expected recovered worktree at same path %q, got %q", first.Path, second.Path)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale index.lock to be gone after recovery, stat err: %v", err)
+	}
+
+	cmd := exec.Command("git", "-C", second.Path, "status", "--short")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git status on recovered worktree failed: %s: %v", out, err)
+	}
+}
+
 // readWorktreeAdminDir reads a linked worktree's .git file and resolves the
 // admin directory it points at, mirroring gitWorktreeAdminIntact's parsing.
 func readWorktreeAdminDir(t *testing.T, worktreePath string) string {

@@ -909,12 +909,14 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// If worktree already exists (reused environment from a prior task),
 	// update it to the latest remote code instead of creating a new one.
 	if isGitWorktree(worktreePath) {
-		if gitWorktreeAdminIntact(worktreePath) {
-			actualBranch, err := updateExistingWorktreeContext(ctx, worktreePath, branchName, baseRef)
-			if err != nil {
-				return nil, fmt.Errorf("update existing worktree: %w", err)
-			}
+		adminIntact := gitWorktreeAdminIntact(worktreePath)
+		var reuseErr error
+		var actualBranch string
+		if adminIntact {
+			actualBranch, reuseErr = updateExistingWorktreeContext(ctx, worktreePath, branchName, baseRef)
+		}
 
+		if adminIntact && reuseErr == nil {
 			for _, pattern := range agentGitExcludePatterns {
 				_ = excludeFromGitContext(ctx, worktreePath, pattern)
 			}
@@ -950,15 +952,22 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			}, nil
 		}
 
-		// Corrupted admin metadata from a canceled checkout (see
-		// multica-ai/multica#6879) — recover instead of failing every retry
-		// with an opaque git error. Remove the broken checkout and the bare
-		// repo's dangling worktree registration, then fall through to the
-		// normal fresh-create path below.
-		c.logger.Warn("repo checkout: existing worktree has corrupted admin metadata, recreating",
-			"url", params.RepoURL,
-			"path", worktreePath,
-		)
+		// Corrupted admin metadata, or a reuse attempt that failed outright
+		// (e.g. a stale index.lock left behind by a canceled checkout mid
+		// `git reset`/`git checkout` — see multica-ai/multica#6879). Recover
+		// instead of failing every retry with an opaque git error. Remove the
+		// broken checkout and the bare repo's dangling worktree registration,
+		// then fall through to the normal fresh-create path below.
+		if reuseErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, context.Cause(ctx)
+			}
+			c.logger.Warn("repo checkout: existing worktree failed to update cleanly, recreating",
+				"url", params.RepoURL, "path", worktreePath, "error", reuseErr)
+		} else {
+			c.logger.Warn("repo checkout: existing worktree has corrupted admin metadata, recreating",
+				"url", params.RepoURL, "path", worktreePath)
+		}
 		if err := os.RemoveAll(worktreePath); err != nil {
 			return nil, fmt.Errorf("remove corrupted worktree: %w", err)
 		}
@@ -1048,16 +1057,27 @@ func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, bareP
 			return "", err
 		}
 		actualBranch, err := updateExistingWorktreeContext(ctx, checkoutPath, branchName, baseCommit)
-		if err != nil {
-			return "", err
+		if err == nil {
+			// Drop earlier tasks' agent/* heads so a reused workdir doesn't grow
+			// a new local branch on every checkout. Non-fatal: leftover
+			// branches are harmless clutter and must never fail the checkout.
+			if err := deleteStaleAgentBranchesContext(ctx, checkoutPath, actualBranch); err != nil {
+				c.logger.Warn("repo checkout: prune stale branches failed (non-fatal)", "error", err)
+			}
+			return actualBranch, nil
 		}
-		// Drop earlier tasks' agent/* heads so a reused workdir doesn't grow a
-		// new local branch on every checkout. Non-fatal: leftover branches are
-		// harmless clutter and must never fail the checkout.
-		if err := deleteStaleAgentBranchesContext(ctx, checkoutPath, actualBranch); err != nil {
-			c.logger.Warn("repo checkout: prune stale branches failed (non-fatal)", "error", err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", context.Cause(ctx)
 		}
-		return actualBranch, nil
+		// The reuse attempt itself failed (e.g. a stale index.lock left behind
+		// by a canceled checkout — see multica-ai/multica#6879). Recover
+		// instead of failing every retry: remove the broken checkout and fall
+		// through to the normal fresh-create path below.
+		c.logger.Warn("repo checkout: existing isolated checkout failed to update cleanly, recreating",
+			"url", repoURL, "path", checkoutPath, "error", err)
+		if err := os.RemoveAll(checkoutPath); err != nil {
+			return "", fmt.Errorf("remove corrupted isolated checkout: %w", err)
+		}
 	}
 	// A daemon upgrade can resume a pre-fix Codex workdir that still has a
 	// linked worktree. Remove it through Git (so the shared admin record is
