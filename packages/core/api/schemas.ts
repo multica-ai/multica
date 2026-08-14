@@ -2522,60 +2522,103 @@ export const EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE: ListWecomInstallationsResp
   configured: false,
 };
 
-export const QianwenInstallationSchema = z.object({
-  id: z.string(),
-  agent_id: z.string().default(""),
-  connection_id: z.string().default(""),
-  mode: z.string().default(""),
-  status: z.string().default("revoked"),
-  current_user_bound: z.boolean().optional(),
-}).loose();
+const QianwenInstallationWireSchema = z
+  .object({
+    id: z.string(),
+    agent_id: z.string().default(""),
+    connection_id: z.string().default(""),
+    mode: z.string().default(""),
+    status: z.string().default("revoked"),
+    current_user_bound: z.boolean().optional(),
+  });
+
+export const QianwenInstallationSchema = QianwenInstallationWireSchema.transform(
+  (value): QianwenInstallation => ({
+    id: value.id,
+    agentId: value.agent_id,
+    connectionId: value.connection_id,
+    mode: value.mode,
+    status: value.status,
+    currentUserBound: value.current_user_bound,
+  }),
+);
 
 export const EMPTY_QIANWEN_INSTALLATION: QianwenInstallation = {
   id: "",
-  agent_id: "",
-  connection_id: "",
+  agentId: "",
+  connectionId: "",
   mode: "",
   status: "revoked",
 };
 
-export const ListQianwenInstallationsResponseSchema = z.object({
-  installations: z.array(QianwenInstallationSchema).default([]),
-  configured: z.boolean().default(false),
-  mode: z.string().optional(),
-  pairing_supported: z.boolean().optional(),
-}).loose();
+export const ListQianwenInstallationsResponseSchema = z
+  .object({
+    installations: z.array(QianwenInstallationSchema).default([]),
+    configured: z.boolean().default(false),
+    mode: z.string().optional(),
+    pairing_supported: z.boolean().optional(),
+  })
+  .transform(
+    (value): ListQianwenInstallationsResponse => ({
+      installations: value.installations,
+      configured: value.configured,
+      mode: value.mode,
+      pairingSupported: value.pairing_supported,
+    }),
+  );
 
 export const EMPTY_LIST_QIANWEN_INSTALLATIONS_RESPONSE: ListQianwenInstallationsResponse = {
   installations: [],
   configured: false,
 };
 
-export const QianwenInstallResponseSchema = QianwenInstallationSchema.extend({
+export const QianwenInstallResponseSchema = QianwenInstallationWireSchema.extend({
   access_token: z.string().startsWith("qws_").min(5),
   token_visible_once: z.literal(true),
   submit_path: z.string().min(1),
   status_path_pattern: z.string().min(1),
-}).loose();
+})
+  .transform(
+    (value): QianwenInstallResponse => ({
+      id: value.id,
+      agentId: value.agent_id,
+      connectionId: value.connection_id,
+      mode: value.mode,
+      status: value.status,
+      currentUserBound: value.current_user_bound,
+      accessToken: value.access_token,
+      tokenVisibleOnce: value.token_visible_once,
+      submitPath: value.submit_path,
+      statusPathPattern: value.status_path_pattern,
+    }),
+  );
 
 export const EMPTY_QIANWEN_INSTALL_RESPONSE: QianwenInstallResponse = {
   ...EMPTY_QIANWEN_INSTALLATION,
-  access_token: "",
-  token_visible_once: true,
-  submit_path: "",
-  status_path_pattern: "",
+  accessToken: "",
+  tokenVisibleOnce: true,
+  submitPath: "",
+  statusPathPattern: "",
 };
 
-export const QianwenPairingCodeResponseSchema = z.object({
-  pairing_code: z.string().regex(/^\d{8}$/),
-  expires_at: z.string().min(1),
-  code_visible_once: z.literal(true),
-}).loose();
+export const QianwenPairingCodeResponseSchema = z
+  .object({
+    pairing_code: z.string().regex(/^\d{8}$/),
+    expires_at: z.string().min(1),
+    code_visible_once: z.literal(true),
+  })
+  .transform(
+    (value): QianwenPairingCodeResponse => ({
+      pairingCode: value.pairing_code,
+      expiresAt: value.expires_at,
+      codeVisibleOnce: value.code_visible_once,
+    }),
+  );
 
 export const EMPTY_QIANWEN_PAIRING_CODE_RESPONSE: QianwenPairingCodeResponse = {
-  pairing_code: "",
-  expires_at: "",
-  code_visible_once: true,
+  pairingCode: "",
+  expiresAt: "",
+  codeVisibleOnce: true,
 };
 
 export const RedeemWecomBindingTokenResponseSchema = z.object({

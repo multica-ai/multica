@@ -20,7 +20,7 @@ const queriesRef = vi.hoisted(() => ({
   installations: {
     installations: [] as Array<Record<string, unknown>>,
     configured: true,
-    pairing_supported: true as boolean | undefined,
+    pairingSupported: true as boolean | undefined,
   },
   agents: [
     {
@@ -141,7 +141,7 @@ describe("QianwenTab", () => {
     queriesRef.installations = {
       installations: [],
       configured: true,
-      pairing_supported: true,
+      pairingSupported: true,
     };
     queriesRef.agents = [
       {
@@ -166,21 +166,21 @@ describe("QianwenTab", () => {
     queriesRef.members = [{ user_id: "user-1", role: "member" }];
     install.mockResolvedValue({
       id: "installation-1",
-      agent_id: "agent-owned",
-      connection_id: "qwc_connection",
+      agentId: "agent-owned",
+      connectionId: "qwc_connection",
       mode: "personal_polling",
       status: "active",
-      current_user_bound: false,
-      access_token: "qws_secret_once",
-      token_visible_once: true,
-      submit_path: "/api/channels/qianwen/qwc_connection/requests",
-      status_path_pattern:
+      currentUserBound: false,
+      accessToken: "qws_secret_once",
+      tokenVisibleOnce: true,
+      submitPath: "/api/channels/qianwen/qwc_connection/requests",
+      statusPathPattern:
         "/api/channels/qianwen/qwc_connection/requests/{request_id}",
     });
     mintPairingCode.mockResolvedValue({
-      pairing_code: "01234567",
-      expires_at: "2026-08-15T03:10:00Z",
-      code_visible_once: true,
+      pairingCode: "01234567",
+      expiresAt: "2026-08-15T03:10:00Z",
+      codeVisibleOnce: true,
     });
   });
 
@@ -218,28 +218,28 @@ describe("QianwenTab", () => {
   it("shows connection lifecycle separately from caller-relative identity state", () => {
     queriesRef.installations = {
       configured: true,
-      pairing_supported: true,
+      pairingSupported: true,
       installations: [
         {
           id: "installation-linked",
-          agent_id: "agent-owned",
-          connection_id: "qwc_linked",
+          agentId: "agent-owned",
+          connectionId: "qwc_linked",
           mode: "personal_polling",
           status: "active",
-          current_user_bound: true,
+          currentUserBound: true,
         },
         {
           id: "installation-unlinked",
-          agent_id: "agent-other",
-          connection_id: "qwc_unlinked",
+          agentId: "agent-other",
+          connectionId: "qwc_unlinked",
           mode: "personal_polling",
           status: "active",
-          current_user_bound: false,
+          currentUserBound: false,
         },
         {
           id: "installation-unknown",
-          agent_id: "agent-owned",
-          connection_id: "qwc_unknown",
+          agentId: "agent-owned",
+          connectionId: "qwc_unknown",
           mode: "personal_polling",
           status: "revoked",
         },
@@ -266,12 +266,12 @@ describe("QianwenTab", () => {
   it("does not treat an unknown caller-relative identity state as unlinked", () => {
     queriesRef.installations = {
       configured: true,
-      pairing_supported: true,
+      pairingSupported: true,
       installations: [
         {
           id: "installation-unknown-active",
-          agent_id: "agent-owned",
-          connection_id: "qwc_unknown_active",
+          agentId: "agent-owned",
+          connectionId: "qwc_unknown_active",
           mode: "personal_polling",
           status: "active",
         },
@@ -290,15 +290,15 @@ describe("QianwenTab", () => {
   it("disables installation and pairing unless the backend explicitly supports pairing", () => {
     queriesRef.installations = {
       configured: true,
-      pairing_supported: undefined,
+      pairingSupported: undefined,
       installations: [
         {
           id: "installation-unlinked",
-          agent_id: "agent-owned",
-          connection_id: "qwc_unlinked",
+          agentId: "agent-owned",
+          connectionId: "qwc_unlinked",
           mode: "personal_polling",
           status: "active",
-          current_user_bound: false,
+          currentUserBound: false,
         },
       ],
     };
@@ -321,15 +321,15 @@ describe("QianwenTab", () => {
     const user = userEvent.setup();
     queriesRef.installations = {
       configured: true,
-      pairing_supported: true,
+      pairingSupported: true,
       installations: [
         {
           id: "installation-unlinked",
-          agent_id: "agent-owned",
-          connection_id: "qwc_unlinked",
+          agentId: "agent-owned",
+          connectionId: "qwc_unlinked",
           mode: "personal_polling",
           status: "active",
-          current_user_bound: false,
+          currentUserBound: false,
         },
       ],
     };
@@ -349,15 +349,15 @@ describe("QianwenTab", () => {
     const user = userEvent.setup();
     queriesRef.installations = {
       configured: true,
-      pairing_supported: true,
+      pairingSupported: true,
       installations: [
         {
           id: "installation-linked",
-          agent_id: "agent-owned",
-          connection_id: "qwc_linked",
+          agentId: "agent-owned",
+          connectionId: "qwc_linked",
           mode: "personal_polling",
           status: "active",
-          current_user_bound: true,
+          currentUserBound: true,
         },
       ],
     };
@@ -391,15 +391,15 @@ describe("QianwenTab", () => {
     const user = userEvent.setup();
     queriesRef.installations = {
       configured: true,
-      pairing_supported: true,
+      pairingSupported: true,
       installations: [
         {
           id: "installation-unlinked",
-          agent_id: "agent-owned",
-          connection_id: "qwc_unlinked",
+          agentId: "agent-owned",
+          connectionId: "qwc_unlinked",
           mode: "personal_polling",
           status: "active",
-          current_user_bound: false,
+          currentUserBound: false,
         },
       ],
     };
@@ -433,23 +433,23 @@ describe("QianwenTab", () => {
     ];
     queriesRef.installations = {
       configured: true,
-      pairing_supported: true,
+      pairingSupported: true,
       installations: [
         {
           id: "installation-private",
-          agent_id: "agent-private-other",
-          connection_id: "qwc_private",
+          agentId: "agent-private-other",
+          connectionId: "qwc_private",
           mode: "personal_polling",
           status: "active",
-          current_user_bound: false,
+          currentUserBound: false,
         },
         {
           id: "installation-missing-agent",
-          agent_id: "agent-missing",
-          connection_id: "qwc_missing",
+          agentId: "agent-missing",
+          connectionId: "qwc_missing",
           mode: "personal_polling",
           status: "active",
-          current_user_bound: false,
+          currentUserBound: false,
         },
       ],
     };
@@ -470,15 +470,15 @@ describe("QianwenTab", () => {
     const user = userEvent.setup();
     queriesRef.installations = {
       configured: true,
-      pairing_supported: true,
+      pairingSupported: true,
       installations: [
         {
           id: "installation-unlinked",
-          agent_id: "agent-owned",
-          connection_id: "qwc_unlinked",
+          agentId: "agent-owned",
+          connectionId: "qwc_unlinked",
           mode: "personal_polling",
           status: "active",
-          current_user_bound: false,
+          currentUserBound: false,
         },
       ],
     };
@@ -495,23 +495,23 @@ describe("QianwenTab", () => {
     queriesRef.members = [{ user_id: "user-1", role: "admin" }];
     queriesRef.installations = {
       configured: true,
-      pairing_supported: true,
+      pairingSupported: true,
       installations: [
         {
           id: "installation-active",
-          agent_id: "agent-owned",
-          connection_id: "qwc_active",
+          agentId: "agent-owned",
+          connectionId: "qwc_active",
           mode: "personal_polling",
           status: "active",
-          current_user_bound: false,
+          currentUserBound: false,
         },
         {
           id: "installation-revoked",
-          agent_id: "agent-other",
-          connection_id: "qwc_revoked",
+          agentId: "agent-other",
+          connectionId: "qwc_revoked",
           mode: "personal_polling",
           status: "revoked",
-          current_user_bound: false,
+          currentUserBound: false,
         },
       ],
     };

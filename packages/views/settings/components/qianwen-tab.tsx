@@ -82,7 +82,7 @@ export function QianwenTab() {
       new Set(
         installations
           .filter((installation) => installation.status === "active")
-          .map((installation) => installation.agent_id),
+          .map((installation) => installation.agentId),
       ),
     [installations],
   );
@@ -114,7 +114,7 @@ export function QianwenTab() {
       : manageableAgents.length === 1
         ? manageableAgents[0]?.id ?? null
         : null;
-  const pairingSupported = installationsQuery.data?.pairing_supported === true;
+  const pairingSupported = installationsQuery.data?.pairingSupported === true;
   const agentNames = new Map(
     (agentsQuery.data ?? []).map((agent) => [agent.id, agent.name]),
   );
@@ -134,8 +134,8 @@ export function QianwenTab() {
       });
       setCredentialSaved(false);
       setOneTimeCredential({
-        connectionId: result.connection_id,
-        accessToken: result.access_token,
+        connectionId: result.connectionId,
+        accessToken: result.accessToken,
       });
     } catch {
       reportActionFailure();
@@ -149,8 +149,8 @@ export function QianwenTab() {
     try {
       const result = await pairingMutation.mutateAsync({ installationId });
       setPairingCode({
-        code: result.pairing_code,
-        expiresAt: result.expires_at,
+        code: result.pairingCode,
+        expiresAt: result.expiresAt,
       });
     } catch {
       reportActionFailure();
@@ -248,7 +248,7 @@ export function QianwenTab() {
         <Card>
           <CardContent className="divide-y divide-surface-border">
             {installations.map((installation) => {
-              const agent = agentsById.get(installation.agent_id);
+              const agent = agentsById.get(installation.agentId);
               const canRevoke =
                 agent !== undefined &&
                 canEditAgent(agent, {
@@ -275,9 +275,9 @@ export function QianwenTab() {
               }
 
               const identityStatus =
-                installation.current_user_bound === true
+                installation.currentUserBound === true
                   ? t(($) => $.qianwen.identity_linked)
-                  : installation.current_user_bound === false
+                  : installation.currentUserBound === false
                     ? t(($) => $.qianwen.identity_unlinked)
                     : t(($) => $.qianwen.identity_unknown);
 
@@ -285,17 +285,17 @@ export function QianwenTab() {
                 <div
                   key={installation.id}
                   role="group"
-                  aria-label={installation.connection_id}
+                  aria-label={installation.connectionId}
                   className="space-y-2 py-4 first:pt-0 last:pb-0"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="truncate text-body font-medium">
-                        {agentNames.get(installation.agent_id) ??
+                        {agentNames.get(installation.agentId) ??
                           t(($) => $.qianwen.unknown_agent)}
                       </p>
                       <p className="break-all text-micro text-muted-foreground">
-                        {installation.connection_id}
+                        {installation.connectionId}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2 text-caption">
@@ -320,7 +320,7 @@ export function QianwenTab() {
                           ? t(($) => $.qianwen.refreshing_status)
                           : t(($) => $.qianwen.refresh_status)}
                       </Button>
-                      {installation.current_user_bound === true ? (
+                      {installation.currentUserBound === true ? (
                         <Button
                           type="button"
                           variant="outline"
@@ -330,7 +330,7 @@ export function QianwenTab() {
                         >
                           {t(($) => $.qianwen.unbind_me)}
                         </Button>
-                      ) : installation.current_user_bound === false && canPair ? (
+                      ) : installation.currentUserBound === false && canPair ? (
                         <Button
                           type="button"
                           variant="outline"

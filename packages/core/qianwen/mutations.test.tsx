@@ -51,14 +51,14 @@ describe("Qianwen management mutations", () => {
   it("keeps a one-time install credential out of Query cache and evicts its mutation immediately when unused", async () => {
     const response: QianwenInstallResponse = {
       id: "installation-1",
-      agent_id: "agent-1",
-      connection_id: "qwc_connection-1",
+      agentId: "agent-1",
+      connectionId: "qwc_connection-1",
       mode: "personal_polling",
       status: "active",
-      access_token: "qws_one-time-secret",
-      token_visible_once: true,
-      submit_path: "/qianwen/requests",
-      status_path_pattern: "/qianwen/requests/{request_id}",
+      accessToken: "qws_one-time-secret",
+      tokenVisibleOnce: true,
+      submitPath: "/qianwen/requests",
+      statusPathPattern: "/qianwen/requests/{request_id}",
     };
     const installQianwenPersonal = vi.fn(async () => response);
     setApiInstance({ installQianwenPersonal } as unknown as ApiClient);
@@ -85,7 +85,7 @@ describe("Qianwen management mutations", () => {
     });
     expect(
       JSON.stringify(queryClient.getQueryCache().getAll().map((query) => query.state.data)),
-    ).not.toContain(response.access_token);
+    ).not.toContain(response.accessToken);
     expect(queryClient.getMutationCache().getAll()[0]?.options.gcTime).toBe(0);
 
     unmount();
@@ -96,9 +96,9 @@ describe("Qianwen management mutations", () => {
 
   it("keeps a one-time pairing code out of Query cache and gives the mutation zero retention", async () => {
     const response: QianwenPairingCodeResponse = {
-      pairing_code: "00001234",
-      expires_at: "2026-08-15T03:00:00Z",
-      code_visible_once: true,
+      pairingCode: "00001234",
+      expiresAt: "2026-08-15T03:00:00Z",
+      codeVisibleOnce: true,
     };
     const mintQianwenPairingCode = vi.fn(async () => response);
     setApiInstance({ mintQianwenPairingCode } as unknown as ApiClient);
@@ -123,7 +123,7 @@ describe("Qianwen management mutations", () => {
       queryKey: qianwenKeys.installationsRoot("workspace-1"),
     });
     expect(JSON.stringify(queryClient.getQueryCache().getAll())).not.toContain(
-      response.pairing_code,
+      response.pairingCode,
     );
     expect(queryClient.getMutationCache().getAll()[0]?.options.gcTime).toBe(0);
 

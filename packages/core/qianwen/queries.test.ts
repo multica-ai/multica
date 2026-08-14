@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiClient, setApiInstance } from "../api";
 import { qianwenInstallationsOptions, qianwenKeys } from "./queries";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("Qianwen installation queries", () => {
   it("isolates caller-relative binding state by workspace and current user", () => {
@@ -16,5 +22,68 @@ describe("Qianwen installation queries", () => {
 
     expect(qianwenInstallationsOptions("workspace-1", "user-1").enabled).toBe(true);
     expect(qianwenInstallationsOptions("workspace-1", "").enabled).toBe(false);
+  });
+
+  it("never stores unknown config or access-token fields in the Query cache", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            installations: [
+              {
+                id: "installation-1",
+                agent_id: "agent-1",
+                connection_id: "qwc_connection-1",
+                mode: "personal_polling",
+                status: "active",
+                current_user_bound: false,
+                config: { access_token: "qws_nested-cache-secret" },
+                access_token: "qws_row-cache-secret",
+              },
+            ],
+            configured: true,
+            pairing_supported: true,
+            config: { access_token: "qws_top-level-config-cache-secret" },
+            access_token: "qws_top-level-cache-secret",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    setApiInstance(new ApiClient("https://api.example.test"));
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    try {
+      const options = qianwenInstallationsOptions("workspace-1", "user-1");
+      const parsed = await queryClient.fetchQuery(options);
+      const cached = queryClient.getQueryData(
+        qianwenKeys.installations("workspace-1", "user-1"),
+      );
+
+      expect(parsed).toEqual({
+        installations: [
+          {
+            id: "installation-1",
+            agentId: "agent-1",
+            connectionId: "qwc_connection-1",
+            mode: "personal_polling",
+            status: "active",
+            currentUserBound: false,
+          },
+        ],
+        configured: true,
+        pairingSupported: true,
+      });
+      expect(cached).toEqual(parsed);
+      const serializedCache = JSON.stringify(cached);
+      expect(serializedCache).not.toContain('"config":');
+      expect(serializedCache).not.toContain("access_token");
+      expect(serializedCache).not.toContain("qws_");
+    } finally {
+      queryClient.clear();
+    }
   });
 });

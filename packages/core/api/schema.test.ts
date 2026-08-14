@@ -375,12 +375,59 @@ describe("ApiClient schema fallback", () => {
       const result = await client.listQianwenInstallations("ws-1");
 
       expect(result.configured).toBe(true);
-      expect(result.pairing_supported).toBeUndefined();
+      expect(result.pairingSupported).toBeUndefined();
       expect(result.installations[0]).toMatchObject({
         id: "installation-1",
         status: "future-status",
       });
-      expect(result.installations[0]?.current_user_bound).toBeUndefined();
+      expect(result.installations[0]?.currentUserBound).toBeUndefined();
+      expect(result.installations[0]).toMatchObject({
+        agentId: "",
+        connectionId: "",
+      });
+    });
+
+    it("strips unknown config and access-token fields from installation lists", async () => {
+      stubFetchJson({
+        installations: [
+          {
+            id: "installation-1",
+            agent_id: "agent-1",
+            connection_id: "qwc_connection-1",
+            mode: "personal_polling",
+            status: "active",
+            current_user_bound: true,
+            config: { access_token: "qws_nested-secret" },
+            access_token: "qws_row-secret",
+          },
+        ],
+        configured: true,
+        pairing_supported: true,
+        config: { access_token: "qws_top-level-config-secret" },
+        access_token: "qws_top-level-secret",
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      const result = await client.listQianwenInstallations("ws-1");
+
+      expect(result).toEqual({
+        installations: [
+          {
+            id: "installation-1",
+            agentId: "agent-1",
+            connectionId: "qwc_connection-1",
+            mode: "personal_polling",
+            status: "active",
+            currentUserBound: true,
+          },
+        ],
+        configured: true,
+        pairingSupported: true,
+      });
+      const serialized = JSON.stringify(result);
+      expect(serialized).not.toContain('"config":');
+      expect(serialized).not.toContain("access_token");
+      expect(serialized).not.toContain("qws_");
     });
 
     it("installs an agent-scoped personal channel and returns the one-time credential", async () => {
@@ -397,13 +444,18 @@ describe("ApiClient schema fallback", () => {
       });
       const client = new ApiClient("https://api.example.test");
 
-      await expect(
-        client.installQianwenPersonal("ws-1", "agent-1"),
-      ).resolves.toMatchObject({
+      const result = await client.installQianwenPersonal("ws-1", "agent-1");
+
+      expect(result).toMatchObject({
         id: "installation-1",
-        access_token: "qws_one-time-secret",
-        token_visible_once: true,
+        agentId: "agent-1",
+        connectionId: "qwc_connection-1",
+        accessToken: "qws_one-time-secret",
+        tokenVisibleOnce: true,
+        submitPath: "/qianwen/requests",
+        statusPathPattern: "/qianwen/requests/{request_id}",
       });
+      expect(result).not.toHaveProperty("access_token");
       expect(vi.mocked(fetch)).toHaveBeenCalledWith(
         "https://api.example.test/api/workspaces/ws-1/qianwen/installations?agent_id=agent-1",
         expect.objectContaining({ method: "POST" }),
@@ -421,9 +473,9 @@ describe("ApiClient schema fallback", () => {
       await expect(
         client.mintQianwenPairingCode("ws-1", "installation-1"),
       ).resolves.toEqual({
-        pairing_code: "00001234",
-        expires_at: "2026-08-15T03:00:00Z",
-        code_visible_once: true,
+        pairingCode: "00001234",
+        expiresAt: "2026-08-15T03:00:00Z",
+        codeVisibleOnce: true,
       });
       expect(vi.mocked(fetch)).toHaveBeenCalledWith(
         "https://api.example.test/api/workspaces/ws-1/qianwen/installations/installation-1/pairing-codes",

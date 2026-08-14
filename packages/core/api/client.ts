@@ -4059,7 +4059,7 @@ export class ApiClient {
         redactFailureDetails: true,
       },
     );
-    if (!parsed.access_token) {
+    if (!parsed.accessToken) {
       throw new Error("Invalid Qianwen installation response");
     }
     return parsed;
@@ -4082,7 +4082,7 @@ export class ApiClient {
         redactFailureDetails: true,
       },
     );
-    if (!parsed.pairing_code) {
+    if (!parsed.pairingCode) {
       throw new Error("Invalid Qianwen pairing-code response");
     }
     return parsed;
