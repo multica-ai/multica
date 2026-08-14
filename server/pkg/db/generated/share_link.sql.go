@@ -51,15 +51,18 @@ func (q *Queries) CreateShareLink(ctx context.Context, arg CreateShareLinkParams
 	return i, err
 }
 
-const getShareLinkByCode = `-- name: GetShareLinkByCode :one
-SELECT id, workspace_id, code, created_by, role, expires_at, max_uses, use_count, is_active, created_at FROM workspace_share_link
-WHERE code = $1 AND is_active = true
+const claimShareLinkByCode = `-- name: ClaimShareLinkByCode :one
+UPDATE workspace_share_link
+SET use_count = use_count + 1
+WHERE code = $1
+  AND is_active = true
   AND (expires_at IS NULL OR expires_at > now())
   AND (max_uses IS NULL OR use_count < max_uses)
+RETURNING id, workspace_id, code, created_by, role, expires_at, max_uses, use_count, is_active, created_at
 `
 
-func (q *Queries) GetShareLinkByCode(ctx context.Context, code string) (WorkspaceShareLink, error) {
-	row := q.db.QueryRow(ctx, getShareLinkByCode, code)
+func (q *Queries) ClaimShareLinkByCode(ctx context.Context, code string) (WorkspaceShareLink, error) {
+	row := q.db.QueryRow(ctx, claimShareLinkByCode, code)
 	var i WorkspaceShareLink
 	err := row.Scan(
 		&i.ID,
@@ -74,17 +77,6 @@ func (q *Queries) GetShareLinkByCode(ctx context.Context, code string) (Workspac
 		&i.CreatedAt,
 	)
 	return i, err
-}
-
-const incrementShareLinkUseCount = `-- name: IncrementShareLinkUseCount :exec
-UPDATE workspace_share_link
-SET use_count = use_count + 1
-WHERE id = $1
-`
-
-func (q *Queries) IncrementShareLinkUseCount(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, incrementShareLinkUseCount, id)
-	return err
 }
 
 const listShareLinksByWorkspace = `-- name: ListShareLinksByWorkspace :many
@@ -173,11 +165,10 @@ func (q *Queries) RevokeShareLink(ctx context.Context, arg RevokeShareLinkParams
 }
 
 const getShareLinkInfoByCode = `-- name: GetShareLinkInfoByCode :one
-SELECT wsl.id, wsl.workspace_id, wsl.code, wsl.created_by, wsl.role, wsl.expires_at, wsl.max_uses, wsl.use_count, wsl.is_active, wsl.created_at,
+SELECT wsl.role,
        w.name  AS workspace_name,
        w.slug  AS workspace_slug,
-       u.name  AS creator_name,
-       u.email AS creator_email
+       u.name  AS creator_name
 FROM workspace_share_link wsl
 JOIN workspace w ON w.id = wsl.workspace_id
 JOIN "user" u ON u.id = wsl.created_by
@@ -187,40 +178,20 @@ WHERE wsl.code = $1 AND wsl.is_active = true
 `
 
 type GetShareLinkInfoByCodeRow struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Code          string             `json:"code"`
-	CreatedBy     pgtype.UUID        `json:"created_by"`
-	Role          string             `json:"role"`
-	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
-	MaxUses       pgtype.Int4        `json:"max_uses"`
-	UseCount      int32              `json:"use_count"`
-	IsActive      bool               `json:"is_active"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	WorkspaceName string             `json:"workspace_name"`
-	WorkspaceSlug string             `json:"workspace_slug"`
-	CreatorName   string             `json:"creator_name"`
-	CreatorEmail  string             `json:"creator_email"`
+	Role          string `json:"role"`
+	WorkspaceName string `json:"workspace_name"`
+	WorkspaceSlug string `json:"workspace_slug"`
+	CreatorName   string `json:"creator_name"`
 }
 
 func (q *Queries) GetShareLinkInfoByCode(ctx context.Context, code string) (GetShareLinkInfoByCodeRow, error) {
 	row := q.db.QueryRow(ctx, getShareLinkInfoByCode, code)
 	var i GetShareLinkInfoByCodeRow
 	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Code,
-		&i.CreatedBy,
 		&i.Role,
-		&i.ExpiresAt,
-		&i.MaxUses,
-		&i.UseCount,
-		&i.IsActive,
-		&i.CreatedAt,
 		&i.WorkspaceName,
 		&i.WorkspaceSlug,
 		&i.CreatorName,
-		&i.CreatorEmail,
 	)
 	return i, err
 }

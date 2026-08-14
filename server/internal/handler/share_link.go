@@ -77,8 +77,44 @@ func (h *Handler) CreateShareLink(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.Queries.DeactivateWorkspaceShareLinks(r.Context(), requester.WorkspaceID); err != nil {
+	// Validate expiry and usage bounds instead of silently treating bad input
+	// as "no limit": negative/overflowing values are rejected outright.
+	var expiresAt pgtype.Timestamptz
+	if req.ExpiresIn != nil {
+		if *req.ExpiresIn <= 0 {
+			writeError(w, http.StatusBadRequest, "expires_in must be a positive number of hours")
+			return
+		}
+		expiresAt = pgtype.Timestamptz{Time: time.Now().Add(time.Duration(*req.ExpiresIn) * time.Hour), Valid: true}
+	}
+
+	var maxUses pgtype.Int4
+	if req.MaxUses != nil {
+		if *req.MaxUses <= 0 {
+			writeError(w, http.StatusBadRequest, "max_uses must be a positive integer")
+			return
+		}
+		maxUses = pgtype.Int4{Int32: int32(*req.MaxUses), Valid: true}
+	}
+
+	// Rotating to a new link and deactivating the previous one must be atomic:
+	// deactivating outside the transaction (as before) could destroy the old
+	// working link if the insert fails, and ignoring deactivation errors could
+	// leave multiple active links. The partial unique index on
+	// (workspace_id) WHERE is_active also fails closed on concurrent creates.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create share link")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	qtx := h.Queries.WithTx(tx)
+
+	if err := qtx.DeactivateWorkspaceShareLinks(r.Context(), requester.WorkspaceID); err != nil {
 		slog.Warn("deactivate share links failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to create share link")
+		return
 	}
 
 	code, err := generateShareCode()
@@ -88,17 +124,7 @@ func (h *Handler) CreateShareLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var expiresAt pgtype.Timestamptz
-	if req.ExpiresIn != nil && *req.ExpiresIn > 0 {
-		expiresAt = pgtype.Timestamptz{Time: time.Now().Add(time.Duration(*req.ExpiresIn) * time.Hour), Valid: true}
-	}
-
-	var maxUses pgtype.Int4
-	if req.MaxUses != nil && *req.MaxUses > 0 {
-		maxUses = pgtype.Int4{Int32: int32(*req.MaxUses), Valid: true}
-	}
-
-	link, err := h.Queries.CreateShareLink(r.Context(), db.CreateShareLinkParams{
+	link, err := qtx.CreateShareLink(r.Context(), db.CreateShareLinkParams{
 		WorkspaceID: requester.WorkspaceID,
 		Code:        code,
 		CreatedBy:   requester.UserID,
@@ -107,7 +133,17 @@ func (h *Handler) CreateShareLink(w http.ResponseWriter, r *http.Request) {
 		MaxUses:     maxUses,
 	})
 	if err != nil {
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "a share link is already active for this workspace")
+			return
+		}
 		slog.Warn("create share link failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to create share link")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("commit share link failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to create share link")
 		return
 	}
@@ -171,14 +207,14 @@ func (h *Handler) RevokeShareLink(w http.ResponseWriter, r *http.Request) {
 }
 
 // ShareLinkInfoResponse is the public, pre-join preview of a share link:
-// the workspace name/slug and the inviting user. It deliberately excludes
-// the link code itself and any usage/expiry internals.
+// only what a visitor needs to decide whether to join — the workspace name,
+// its slug, the inviting user's display name, and the role the link grants.
+// It deliberately excludes internal IDs (workspace_id), the invite code, and
+// the inviter's email address.
 type ShareLinkInfoResponse struct {
-	WorkspaceID   string `json:"workspace_id"`
 	WorkspaceName string `json:"workspace_name"`
 	WorkspaceSlug string `json:"workspace_slug"`
 	CreatorName   string `json:"creator_name,omitempty"`
-	CreatorEmail  string `json:"creator_email,omitempty"`
 	Role          string `json:"role"`
 }
 
@@ -201,11 +237,9 @@ func (h *Handler) GetShareLinkInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, ShareLinkInfoResponse{
-		WorkspaceID:   uuidToString(row.WorkspaceID),
 		WorkspaceName: row.WorkspaceName,
 		WorkspaceSlug: row.WorkspaceSlug,
 		CreatorName:   row.CreatorName,
-		CreatorEmail:  row.CreatorEmail,
 		Role:          row.Role,
 	})
 }
@@ -230,29 +264,16 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	link, err := h.Queries.GetShareLinkByCode(r.Context(), code)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "share link not found or expired")
-		return
-	}
-
 	user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load user")
 		return
 	}
 
-	// Check if already a member.
-	_, memberErr := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
-		UserID:      user.ID,
-		WorkspaceID: link.WorkspaceID,
-	})
-	if memberErr == nil {
-		writeError(w, http.StatusConflict, "you are already a member of this workspace")
-		return
-	}
-
-	// Use a transaction: increment use count + create member.
+	// Open the transaction first, then atomically claim the link. The claim is
+	// a conditional UPDATE that revalidates active/not-expired/below-max_uses
+	// and increments use_count in one statement, so concurrent joins cannot
+	// exceed max_uses and a join cannot race past a revocation/expiry.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to join workspace")
@@ -262,8 +283,19 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 
 	qtx := h.Queries.WithTx(tx)
 
-	if err := qtx.IncrementShareLinkUseCount(r.Context(), link.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to join workspace")
+	link, err := qtx.ClaimShareLinkByCode(r.Context(), code)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "share link not found or expired")
+		return
+	}
+
+	// Check if already a member — if so, roll back the claimed use count.
+	_, memberErr := qtx.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+		UserID:      user.ID,
+		WorkspaceID: link.WorkspaceID,
+	})
+	if memberErr == nil {
+		writeError(w, http.StatusConflict, "you are already a member of this workspace")
 		return
 	}
 
@@ -281,8 +313,12 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mark onboarded.
-	qtx.MarkUserOnboarded(r.Context(), user.ID)
+	// Mark onboarded. A failure here must roll the whole join back, otherwise a
+	// first-time user could become a member while still blocked by onboarding.
+	if _, err := qtx.MarkUserOnboarded(r.Context(), user.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to finalize onboarding")
+		return
+	}
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to join workspace")
