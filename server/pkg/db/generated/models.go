@@ -1291,6 +1291,15 @@ type UserComposioConnection struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
+type UserOidcIdentity struct {
+	Issuer    string             `json:"issuer"`
+	Subject   string             `json:"subject"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Email     string             `json:"email"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type VcsCommitStatus struct {
 	ConnectionID pgtype.UUID        `json:"connection_id"`
 	Sha          string             `json:"sha"`

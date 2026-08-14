@@ -1,11 +1,11 @@
 ---
 title: Sign-in and signup
-description: Configure email verification codes, Google sign-in, and who can sign up.
+description: Configure email verification codes, Google sign-in, generic OpenID Connect, and who can sign up.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica signs users in with email verification codes by default; Google OAuth can be added on top. Existing users can always sign in again — signup restrictions only decide whether new accounts can be created.
+Multica signs users in with email verification codes by default; Google OAuth and one generic OpenID Connect provider can be added on top. Existing users can always sign in again — signup restrictions only decide whether new accounts can be created.
 
 ## Email verification codes
 
@@ -96,6 +96,37 @@ Do not enable a fixed code on a publicly reachable instance. The production comb
 4. Restart the API service.
 
 The URLs in the Google Console and in `GOOGLE_REDIRECT_URI` must match exactly, including protocol, port, and trailing slash. Once configured, the sign-in page shows a Google sign-in button; the frontend image needs no rebuild.
+
+## Generic OpenID Connect
+
+Multica can use one discovery-capable OIDC provider alongside email codes and Google. This covers Authentik, GitLab, and other providers that expose a standard OpenID Configuration document.
+
+1. Register a confidential web application in the provider with this callback URL:
+
+    ```text
+    https://multica.yourdomain.com/auth/callback
+    ```
+
+2. Configure Multica:
+
+    ```bash
+    OIDC_ISSUER_URL=https://auth.yourdomain.com/application/o/multica
+    OIDC_CLIENT_ID=multica
+    OIDC_CLIENT_SECRET=replace-me
+    OIDC_REDIRECT_URI=https://multica.yourdomain.com/auth/callback
+    OIDC_PROVIDER_NAME=Company SSO
+    # Optional group restriction:
+    OIDC_ALLOWED_GROUPS=multica-users,multica-admins
+    OIDC_GROUPS_CLAIM=groups
+    ```
+
+   For GitLab.com the issuer is `https://gitlab.com`. For self-managed GitLab it is the instance root. For Authentik it is the provider-specific issuer shown in its OpenID Configuration.
+
+3. Grant the `openid`, `profile`, and `email` scopes, then restart the server.
+
+By default Multica requires `email_verified=true` before it creates an account. On first login, the account is linked to the provider's stable `(issuer, subject)` identity, so later email changes do not create a second account. Set `OIDC_REQUIRE_VERIFIED_EMAIL=false` only when the provider cannot emit this claim and its email ownership policy is trusted. `OIDC_ALLOWED_GROUPS` optionally requires an exact match in `OIDC_GROUPS_CLAIM`. OIDC configuration is read at runtime, so the frontend does not need to be rebuilt.
+
+The iOS app opens this same web login in the system authentication browser and returns through the registered `multica://auth/callback` scheme. Its `EXPO_PUBLIC_WEB_URL` must point to the frontend paired with the configured API.
 
 ## Signup restrictions
 

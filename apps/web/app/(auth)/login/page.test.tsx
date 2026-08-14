@@ -217,6 +217,37 @@ describe("LoginPage", () => {
     }
   });
 
+  it("mints a token and deep-links to mobile when already logged in with platform=mobile", async () => {
+    searchParamsState.params = new URLSearchParams({ platform: "mobile" });
+    authStateRef.state.user = { id: "u1", email: "test@multica.ai" };
+    mockIssueCliToken.mockResolvedValue({ token: "mobile-handoff-jwt" });
+
+    const hrefSetter = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, set href(value: string) { hrefSetter(value); } },
+    });
+
+    try {
+      render(<LoginPage />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(hrefSetter).toHaveBeenCalledWith(
+          "multica://auth/callback?token=mobile-handoff-jwt",
+        );
+      });
+      expect(
+        await screen.findByRole("button", { name: "Open Multica" }),
+      ).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
+  });
+
   // Regression: #5009 — the "already authenticated on arrival" effect used to
   // fire for fresh form logins too. verifyCode writes `user` while handleVerify
   // is still fetching the workspace list, so the effect read an empty cache and
