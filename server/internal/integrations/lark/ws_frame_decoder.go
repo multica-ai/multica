@@ -65,16 +65,18 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 	}
 
 	msg := InboundMessage{
-		EventType:    env.Header.EventType,
-		EventID:      env.Header.EventID,
-		AppID:        env.Header.AppID,
-		ChatID:       ChatID(evt.Message.ChatID),
-		ChatType:     normalizeChatType(evt.Message.ChatType),
-		MessageID:    evt.Message.MessageID,
-		SenderOpenID: OpenID(evt.Sender.SenderID.OpenID),
-		MessageType:  evt.Message.MessageType,
-		Content:      evt.Message.Content,
-		CreateTime:   evt.Message.CreateTime,
+		EventType:       env.Header.EventType,
+		EventID:         env.Header.EventID,
+		AppID:           env.Header.AppID,
+		TenantKey:       env.Header.TenantKey,
+		ChatID:          ChatID(evt.Message.ChatID),
+		ChatType:        normalizeChatType(evt.Message.ChatType),
+		MessageID:       evt.Message.MessageID,
+		SenderOpenID:    OpenID(evt.Sender.SenderID.OpenID),
+		SenderTenantKey: evt.Sender.TenantKey,
+		MessageType:     evt.Message.MessageType,
+		Content:         evt.Message.Content,
+		CreateTime:      evt.Message.CreateTime,
 		// parent_id / root_id are populated by Lark only in reply
 		// scenarios. The enricher keys quoted-reply expansion off
 		// ParentID (the directly quoted message); RootID is carried for

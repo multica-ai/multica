@@ -15,6 +15,7 @@ package lark
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -183,6 +184,26 @@ func (s *ChannelStore) SetLarkInstallationStatus(ctx context.Context, arg SetIns
 		ID:     arg.ID,
 		Status: arg.Status,
 	})
+}
+
+func (s *ChannelStore) SetLarkInstallationInboundAccessMode(ctx context.Context, arg SetInstallationInboundAccessModeParams) error {
+	value, err := json.Marshal(normalizeInboundAccessMode(arg.Mode))
+	if err != nil {
+		return err
+	}
+	rows, err := s.Queries.SetChannelInstallationConfigValue(ctx, db.SetChannelInstallationConfigValueParams{
+		ConfigKey:   "inbound_access_mode",
+		ConfigValue: value,
+		ID:          arg.ID,
+		ChannelType: channelTypeFeishu,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 // SetLarkInstallationBotUnionID folds bot_union_id into the JSONB config via a

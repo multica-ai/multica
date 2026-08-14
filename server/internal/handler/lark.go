@@ -31,25 +31,27 @@ type LarkInstallationResponse struct {
 	// Region is the Lark cloud this installation lives on: "feishu"
 	// (mainland) or "lark" (international). The UI uses it to render a
 	// badge and to build the correct "Manage in Lark" dev-console host.
-	Region      string `json:"region"`
-	InstalledAt string `json:"installed_at"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	Region            string                 `json:"region"`
+	InboundAccessMode lark.InboundAccessMode `json:"inbound_access_mode"`
+	InstalledAt       string                 `json:"installed_at"`
+	CreatedAt         string                 `json:"created_at"`
+	UpdatedAt         string                 `json:"updated_at"`
 }
 
 func larkInstallationToResponse(row lark.Installation) LarkInstallationResponse {
 	resp := LarkInstallationResponse{
-		ID:              uuidToString(row.ID),
-		WorkspaceID:     uuidToString(row.WorkspaceID),
-		AgentID:         uuidToString(row.AgentID),
-		AppID:           row.AppID,
-		BotOpenID:       row.BotOpenID,
-		InstallerUserID: uuidToString(row.InstallerUserID),
-		Status:          row.Status,
-		Region:          row.Region,
-		InstalledAt:     row.InstalledAt.Time.UTC().Format(time.RFC3339),
-		CreatedAt:       row.CreatedAt.Time.UTC().Format(time.RFC3339),
-		UpdatedAt:       row.UpdatedAt.Time.UTC().Format(time.RFC3339),
+		ID:                uuidToString(row.ID),
+		WorkspaceID:       uuidToString(row.WorkspaceID),
+		AgentID:           uuidToString(row.AgentID),
+		AppID:             row.AppID,
+		BotOpenID:         row.BotOpenID,
+		InstallerUserID:   uuidToString(row.InstallerUserID),
+		Status:            row.Status,
+		Region:            row.Region,
+		InboundAccessMode: row.InboundAccessMode,
+		InstalledAt:       row.InstalledAt.Time.UTC().Format(time.RFC3339),
+		CreatedAt:         row.CreatedAt.Time.UTC().Format(time.RFC3339),
+		UpdatedAt:         row.UpdatedAt.Time.UTC().Format(time.RFC3339),
 	}
 	if row.TenantKey.Valid {
 		tk := row.TenantKey.String
@@ -121,59 +123,95 @@ func (h *Handler) ListLarkInstallations(w http.ResponseWriter, r *http.Request) 
 // entry point keeps working without handing a plain member orphan-row
 // rights.
 func (h *Handler) RevokeLarkInstallation(w http.ResponseWriter, r *http.Request) {
+	inst, userID, ok := h.requireManageableLarkInstallation(w, r)
+	if !ok {
+		return
+	}
+	if err := h.LarkInstallations.Revoke(r.Context(), inst.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke installation")
+		return
+	}
+	h.publish(protocol.EventLarkInstallationRevoked, uuidToString(inst.WorkspaceID), "user", userID, map[string]any{
+		"id": uuidToString(inst.ID),
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type UpdateLarkInstallationRequest struct {
+	InboundAccessMode lark.InboundAccessMode `json:"inbound_access_mode"`
+}
+
+// UpdateLarkInstallation (PATCH /api/workspaces/{id}/lark/installations/{installationId})
+// updates management-only per-installation behavior. Access policy belongs to
+// the installation (one Bot ↔ one Agent), so every Agent can choose its own
+// strict or guest-enabled mode without changing workspace membership.
+func (h *Handler) UpdateLarkInstallation(w http.ResponseWriter, r *http.Request) {
+	inst, userID, ok := h.requireManageableLarkInstallation(w, r)
+	if !ok {
+		return
+	}
+	var req UpdateLarkInstallationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.LarkInstallations.UpdateInboundAccessMode(r.Context(), inst.ID, req.InboundAccessMode); err != nil {
+		if errors.Is(err, lark.ErrInvalidInboundAccessMode) {
+			writeError(w, http.StatusBadRequest, "inbound_access_mode must be 'workspace_members' or 'feishu_users'")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update lark installation")
+		return
+	}
+	inst.InboundAccessMode = req.InboundAccessMode
+	h.publish(protocol.EventLarkInstallationUpdated, uuidToString(inst.WorkspaceID), "user", userID, map[string]any{
+		"installation": larkInstallationToResponse(inst),
+	})
+	writeJSON(w, http.StatusOK, larkInstallationToResponse(inst))
+}
+
+// requireManageableLarkInstallation centralizes the workspace scoping and
+// per-Agent authorization shared by PATCH and DELETE. Orphan installations are
+// manageable only by workspace owner/admin so the cleanup behavior stays
+// identical to the pre-PATCH revoke path.
+func (h *Handler) requireManageableLarkInstallation(w http.ResponseWriter, r *http.Request) (lark.Installation, string, bool) {
 	if h.LarkInstallations == nil {
 		writeError(w, http.StatusServiceUnavailable, "lark integration not configured")
-		return
+		return lark.Installation{}, "", false
 	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
-		return
+		return lark.Installation{}, "", false
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
 	if !ok {
-		return
+		return lark.Installation{}, "", false
 	}
 	instUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "installationId"), "installation id")
 	if !ok {
-		return
+		return lark.Installation{}, "", false
 	}
-	// Workspace-scoped lookup ensures one workspace cannot revoke
-	// another's installation by guessing the UUID.
 	inst, err := h.LarkInstallations.GetInWorkspace(r.Context(), instUUID, wsUUID)
 	if err != nil {
 		if errors.Is(err, lark.ErrInstallationNotFound) {
 			writeError(w, http.StatusNotFound, "lark installation not found")
-			return
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to load installation")
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load installation")
-		return
+		return lark.Installation{}, "", false
 	}
-	// Authorize against the bound agent. Normally its owner or a workspace
-	// owner/admin may revoke (canManageAgent writes the 403/404 itself).
-	// If the agent has been hard-deleted the installation is an orphan, so
-	// fall back to workspace owner/admin-only cleanup instead of 404-ing
-	// the disconnect entry point (see ListByWorkspace vs the orphan-
-	// filtered active list). No FK/cascade: the missing agent is handled
-	// in the application layer.
 	agent, agentErr := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
 		ID:          inst.AgentID,
 		WorkspaceID: wsUUID,
 	})
 	if agentErr != nil {
 		if _, ok := h.requireWorkspaceRole(w, r, uuidToString(wsUUID), "lark installation not found", "owner", "admin"); !ok {
-			return
+			return lark.Installation{}, "", false
 		}
 	} else if !h.canManageAgent(w, r, agent) {
-		return
+		return lark.Installation{}, "", false
 	}
-	if err := h.LarkInstallations.Revoke(r.Context(), instUUID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to revoke installation")
-		return
-	}
-	h.publish(protocol.EventLarkInstallationRevoked, uuidToString(wsUUID), "user", userID, map[string]any{
-		"id": uuidToString(instUUID),
-	})
-	w.WriteHeader(http.StatusNoContent)
+	return inst, userID, true
 }
 
 // RedeemLarkBindingTokenRequest carries the raw token the user

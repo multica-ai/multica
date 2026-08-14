@@ -357,6 +357,21 @@ UPDATE channel_installation
 SET config = $2, updated_at = now()
 WHERE id = $1;
 
+-- name: SetChannelInstallationConfigValue :execrows
+-- Atomically updates one top-level config key without rewriting credentials or
+-- racing another platform-specific config writer. The channel discriminator
+-- keeps the generic installation id from crossing adapter boundaries.
+UPDATE channel_installation
+SET config = jsonb_set(
+        COALESCE(config, '{}'::jsonb),
+        ARRAY[sqlc.arg('config_key')::text],
+        sqlc.arg('config_value')::jsonb,
+        true
+    ),
+    updated_at = now()
+WHERE id = sqlc.arg('id')
+  AND channel_type = sqlc.arg('channel_type');
+
 -- name: BackfillChannelInstallationRegionToFeishuLark :execrows
 -- Operator repair, feishu-only: flip every feishu installation still
 -- carrying region='feishu' to 'lark'. Called only on deployments whose

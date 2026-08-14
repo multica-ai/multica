@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 )
@@ -28,6 +30,29 @@ func TestRevokeLarkInstallation_NotConfigured(t *testing.T) {
 	h.RevokeLarkInstallation(w, req)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d", w.Code)
+	}
+}
+
+func TestUpdateLarkInstallation_NotConfigured(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/x/lark/installations/y", strings.NewReader(`{"inbound_access_mode":"feishu_users"}`))
+	w := httptest.NewRecorder()
+	h.UpdateLarkInstallation(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", w.Code)
+	}
+}
+
+func TestLarkInstallationResponseIncludesInboundAccessMode(t *testing.T) {
+	now := pgtype.Timestamptz{Time: time.Unix(1, 0), Valid: true}
+	resp := larkInstallationToResponse(lark.Installation{
+		InboundAccessMode: lark.InboundAccessFeishuUsers,
+		InstalledAt:       now,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	})
+	if resp.InboundAccessMode != lark.InboundAccessFeishuUsers {
+		t.Fatalf("inbound access mode = %q", resp.InboundAccessMode)
 	}
 }
 

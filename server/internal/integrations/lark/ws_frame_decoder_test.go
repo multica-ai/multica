@@ -14,12 +14,14 @@ func TestLarkJSONFrameDecoderTextMessageInP2P(t *testing.T) {
 		"header":{
 			"event_id":"evt-1",
 			"event_type":"im.message.receive_v1",
-			"app_id":"cli_app_x"
+			"app_id":"cli_app_x",
+			"tenant_key":"tenant-header"
 		},
 		"event":{
 			"sender":{
 				"sender_id":{"open_id":"ou_user"},
-				"sender_type":"user"
+				"sender_type":"user",
+				"tenant_key":"tenant-sender"
 			},
 			"message":{
 				"message_id":"om_1",
@@ -50,6 +52,12 @@ func TestLarkJSONFrameDecoderTextMessageInP2P(t *testing.T) {
 	}
 	if msg.SenderOpenID != "ou_user" {
 		t.Errorf("SenderOpenID = %q", msg.SenderOpenID)
+	}
+	if msg.SenderTenantKey != "tenant-sender" {
+		t.Errorf("SenderTenantKey = %q, want sender tenant", msg.SenderTenantKey)
+	}
+	if msg.TenantKey != "tenant-header" {
+		t.Errorf("TenantKey = %q, want event tenant", msg.TenantKey)
 	}
 	if msg.Body != "hello" {
 		t.Errorf("Body = %q", msg.Body)

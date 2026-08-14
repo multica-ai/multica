@@ -334,7 +334,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    (stable workspace identity that won't churn with group membership);
 	//    p2p sessions by the sole human sender.
 	sessionCreator := identity.UserID
-	if msg.Source.ChatType == channel.ChatTypeGroup {
+	if identity.External || msg.Source.ChatType == channel.ChatTypeGroup {
 		sessionCreator = inst.InstallerUserID
 	}
 	sessionID, err := set.Session.EnsureSession(ctx, EnsureSessionParams{
@@ -447,7 +447,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			// cannot race an issue agent reading the newly-created issue.
 			assignedRunFireAt = localMediaDeadline.Add(mediaFinalizeTimeout)
 		}
-		issueRes, err := r.createIssue(ctx, inst, set.OriginType, identity.UserID, sessionID, *appendRes.IssueCommand, prefix, assignedRunFireAt)
+		issueRes, err := r.createIssue(ctx, inst, identity, set.OriginType, sessionID, *appendRes.IssueCommand, prefix, assignedRunFireAt)
 		if errors.Is(err, service.ErrActiveDuplicate) && issueRes.DuplicateIssue != nil {
 			duplicate := *issueRes.DuplicateIssue
 			res.IssueID = duplicate.ID
@@ -502,7 +502,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    and the OutboundReplier still fires — only the debounced run trigger
 	//    (and therefore the typing indicator) is suppressed.
 	if !msg.SkipAgentRun {
-		r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
+		r.scheduleRun(set, inst, msg, sessionID, identity.TaskInitiatorUserID(), identity.External)
 		res.runScheduled = true
 	}
 	if resolveMedia {
@@ -685,10 +685,10 @@ func (r *Router) finishMediaQueue(key string, done chan struct{}) {
 
 // scheduleRun hands the per-session run trigger to the debouncer (or fires it
 // inline when batching is disabled).
-func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID) {
+func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, disableOwnerConnectedApps bool) {
 	fresh := msg.ForceFresh
 	if r.batcher == nil {
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh)
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh, disableOwnerConnectedApps)
 		return
 	}
 	key := keyForSession(sessionID)
@@ -697,7 +697,7 @@ func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg cha
 		// AppendMessage persists ForceFresh on the channel binding, and
 		// EnqueueChatTask consumes it transactionally, so correctness does not
 		// depend on which message's in-memory closure wins.
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh)
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh, disableOwnerConnectedApps)
 	}
 	r.batcher.Schedule(key, flush)
 }
@@ -709,7 +709,7 @@ const chatRunFlushTimeout = 10 * time.Second
 // flushChatRun is the debounced run-trigger: reload session, enqueue exactly
 // one chat task for the window, and emit the offline/archived notice (only
 // known here now) via the replier. Errors are logged, not returned.
-func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, forceFresh bool) {
+func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, forceFresh, disableOwnerConnectedApps bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), chatRunFlushTimeout)
 	defer cancel()
 
@@ -720,7 +720,9 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 		r.clearTyping(ctx, set, sessionID)
 		return
 	}
-	if _, err := r.tasks.EnqueueChatTask(ctx, session, initiatorUserID, forceFresh); err != nil {
+	if _, err := r.tasks.EnqueueChatTask(ctx, session, initiatorUserID, forceFresh, service.ChatTaskEnqueueOptions{
+		DisableOwnerConnectedApps: disableOwnerConnectedApps,
+	}); err != nil {
 		// No task was enqueued, so no task lifecycle event will ever publish and
 		// the platform's bus-driven typing clear can never fire. Clear the
 		// indicator here (before any notice) so the "processing" reaction does
@@ -804,9 +806,19 @@ func (r *Router) drop(ctx context.Context, set ResolverSet, msg channel.InboundM
 	return Result{Outcome: OutcomeDropped, DropReason: reason, InstallationID: instID}
 }
 
-func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, originType string, creatorUserID, sessionID pgtype.UUID, cmd IssueCommand, issuePrefix string, assignedRunFireAt time.Time) (service.IssueCreateResult, error) {
+func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, identity ResolvedIdentity, originType string, sessionID pgtype.UUID, cmd IssueCommand, issuePrefix string, assignedRunFireAt time.Time) (service.IssueCreateResult, error) {
 	if cmd.Title == "" {
 		return service.IssueCreateResult{}, ErrEmptyIssueTitle
+	}
+	creatorType := "member"
+	creatorID := identity.UserID
+	if identity.External {
+		// An external channel sender has no Multica member identity. Attribute the
+		// issue to the receiving Agent instead of impersonating the installer;
+		// issue-task attribution then follows the existing owner-fallback path and
+		// cannot hydrate the installer's personal connected-app overlay.
+		creatorType = "agent"
+		creatorID = inst.AgentID
 	}
 	params := service.IssueCreateParams{
 		WorkspaceID:  inst.WorkspaceID,
@@ -816,8 +828,8 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 		Priority:     "none",
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 		AssigneeID:   inst.AgentID,
-		CreatorType:  "member",
-		CreatorID:    creatorUserID,
+		CreatorType:  creatorType,
+		CreatorID:    creatorID,
 		OriginType:   pgtype.Text{String: originType, Valid: originType != ""},
 		OriginID:     sessionID,
 	}
@@ -830,7 +842,8 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 	// IssueResponse that handler path broadcasts, so clients see one issue
 	// shape regardless of which entry point created the issue.
 	opts := service.IssueCreateOpts{
-		AssignedAgentRunFireAt: assignedRunFireAt,
+		AssignedAgentRunFireAt:    assignedRunFireAt,
+		DisableOwnerConnectedApps: identity.External,
 		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
 			// Plain IssueToMap is authoritative here: this path always creates
 			// with the built-in "todo" above, and a built-in status IS its own
