@@ -51,9 +51,10 @@ type pendingBatcher struct {
 }
 
 type pendingEntry struct {
-	timer stoppableTimer
-	flush func()
-	gen   uint64
+	timer                     stoppableTimer
+	flush                     func(bool)
+	disableOwnerConnectedApps bool
+	gen                       uint64
 }
 
 // newPendingBatcher returns a batcher with the given silence window. A
@@ -78,8 +79,8 @@ func realAfterFunc(d time.Duration, fn func()) stoppableTimer {
 // closure (which captures the latest installation/message context) suffices.
 // Calling Schedule after FlushAll runs the flush inline rather than dropping it
 // (the shutdown race where a message arrives after the drain has begun).
-func (b *pendingBatcher) Schedule(key string, flush func()) {
-	b.schedule(key, flush, true)
+func (b *pendingBatcher) Schedule(key string, disableOwnerConnectedApps bool, flush func(bool)) {
+	b.schedule(key, disableOwnerConnectedApps, flush, true)
 }
 
 // ScheduleIfAbsent arms key only when this process has no live window for it.
@@ -87,15 +88,15 @@ func (b *pendingBatcher) Schedule(key string, flush func()) {
 // timer must be restored, but a message on a newer generation must not reset an
 // older generation's already-running silence window or replace its sender
 // metadata.
-func (b *pendingBatcher) ScheduleIfAbsent(key string, flush func()) {
-	b.schedule(key, flush, false)
+func (b *pendingBatcher) ScheduleIfAbsent(key string, disableOwnerConnectedApps bool, flush func(bool)) {
+	b.schedule(key, disableOwnerConnectedApps, flush, false)
 }
 
-func (b *pendingBatcher) schedule(key string, flush func(), replace bool) {
+func (b *pendingBatcher) schedule(key string, disableOwnerConnectedApps bool, flush func(bool), replace bool) {
 	b.mu.Lock()
 	if b.stopped {
 		b.mu.Unlock()
-		flush()
+		flush(disableOwnerConnectedApps)
 		return
 	}
 	b.seq++
@@ -103,20 +104,27 @@ func (b *pendingBatcher) schedule(key string, flush func(), replace bool) {
 	fire := func() { b.onFire(key, gen) }
 	if e, ok := b.pending[key]; ok {
 		if !replace {
+			e.disableOwnerConnectedApps = e.disableOwnerConnectedApps || disableOwnerConnectedApps
 			b.mu.Unlock()
 			return
 		}
 		e.timer.Stop()
 		e.flush = flush
+		// A batch may contain messages from both workspace members and external
+		// channel users. The strictest policy must win regardless of arrival order;
+		// otherwise the latest closure could re-enable a member's personal apps for
+		// a run that also processes a guest's message.
+		e.disableOwnerConnectedApps = e.disableOwnerConnectedApps || disableOwnerConnectedApps
 		e.gen = gen
 		e.timer = b.afterFunc(b.window, fire)
 		b.mu.Unlock()
 		return
 	}
 	b.pending[key] = &pendingEntry{
-		flush: flush,
-		gen:   gen,
-		timer: b.afterFunc(b.window, fire),
+		flush:                     flush,
+		disableOwnerConnectedApps: disableOwnerConnectedApps,
+		gen:                       gen,
+		timer:                     b.afterFunc(b.window, fire),
 	}
 	b.mu.Unlock()
 }
@@ -133,11 +141,12 @@ func (b *pendingBatcher) onFire(key string, gen uint64) {
 	}
 	delete(b.pending, key)
 	flush := e.flush
+	disableOwnerConnectedApps := e.disableOwnerConnectedApps
 	b.inflight.Add(1)
 	b.mu.Unlock()
 
 	defer b.inflight.Done()
-	flush()
+	flush(disableOwnerConnectedApps)
 }
 
 // FlushAll stops the batcher and runs every still-pending flush exactly once,
@@ -156,7 +165,7 @@ func (b *pendingBatcher) FlushAll() {
 	b.mu.Unlock()
 
 	for _, e := range entries {
-		e.flush()
+		e.flush(e.disableOwnerConnectedApps)
 	}
 	b.inflight.Wait()
 }

@@ -724,16 +724,20 @@ func (r *Router) scheduleRunMode(set ResolverSet, inst ResolvedInstallation, msg
 		return
 	}
 	key := keyForSessionContext(sessionID, contextRevision)
-	flush := func() {
+	flush := func(batchDisablesOwnerConnectedApps bool) {
 		// A later message in this same durable context generation may replace
 		// the closure. /new advances the generation and therefore uses a distinct
-		// batch key; the pre-boundary flush remains armed independently.
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh, contextRevision, disableOwnerConnectedApps)
+		// batch key; the pre-boundary flush remains armed independently. The
+		// strictest connected-app policy wins across every sender in a generation.
+		if batchDisablesOwnerConnectedApps {
+			initiatorUserID = pgtype.UUID{}
+		}
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh, contextRevision, batchDisablesOwnerConnectedApps)
 	}
 	if replace {
-		r.batcher.Schedule(key, flush)
+		r.batcher.Schedule(key, disableOwnerConnectedApps, flush)
 	} else {
-		r.batcher.ScheduleIfAbsent(key, flush)
+		r.batcher.ScheduleIfAbsent(key, disableOwnerConnectedApps, flush)
 	}
 }
 
