@@ -133,8 +133,14 @@ func taskScopedAuthToken(task Task) (string, error) {
 	return token, nil
 }
 
+// taskMulticaEnvironment builds the Multica-owned environment variables for
+// the spawned agent process. Values here are available to every agent CLI
+// (Hermes, Claude Code, Codex, …) and any MCP tool it runs, complementing
+// the `## Task Initiator` block the prompt already carries. Only non-empty
+// initiator fields are emitted, so task kinds with no attributable human
+// initiator (on-assign, autopilot, quick-create) do not receive empty vars.
 func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesRoot, serverURL string, healthPort, slot int, tempDir string) map[string]string {
-	return map[string]string{
+	env := map[string]string{
 		"MULTICA_TOKEN":        token,
 		cli.TaskConfigRootEnv:  configRoot,
 		TaskWorkspacesRootEnv:  workspacesRoot,
@@ -149,6 +155,19 @@ func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesR
 		"TMP":                  tempDir,
 		"TEMP":                 tempDir,
 	}
+	if v := strings.TrimSpace(task.InitiatorType); v != "" {
+		env["MULTICA_INITIATOR_TYPE"] = v
+	}
+	if v := strings.TrimSpace(task.InitiatorID); v != "" {
+		env["MULTICA_INITIATOR_ID"] = v
+	}
+	if v := strings.TrimSpace(task.InitiatorName); v != "" {
+		env["MULTICA_INITIATOR_NAME"] = v
+	}
+	if v := strings.TrimSpace(task.InitiatorEmail); v != "" {
+		env["MULTICA_INITIATOR_EMAIL"] = v
+	}
+	return env
 }
 
 // taskRunner executes a single agent task and returns the result.
