@@ -15,7 +15,7 @@ import { SidebarTrigger, useSidebarSafe } from "@multica/ui/components/ui/sideba
 export function CollapsedNavTrigger() {
   const sidebar = useSidebarSafe();
   if (!sidebar) return null;
-  return <SidebarTrigger className="mr-2 xl:hidden" />;
+  return <SidebarTrigger className="xl:hidden" />;
 }
 
 interface PageHeaderProps {
@@ -41,10 +41,21 @@ interface PageHeaderProps {
  * zones in source is three at runtime, and `justify-between` splits the free
  * space on BOTH sides of the title — parking it mid-header. Desktop windows
  * sit below `xl`, where the trigger renders, so that is where it surfaces.
+ *
+ * `gap-2` is the base for the same reason: it makes the header's own gap the
+ * single source of the leading-slot spacing. When the trigger carried its own
+ * margin as well, every header that declared a gap paid both and its title
+ * started further right than the ones that declared none. Override the gap
+ * per header if the zones need more air; do not add margin to the trigger.
+ *
+ * `px-4` is only the default gutter — a page whose content sits at `px-5`
+ * should pass that through so the title lines up with the toolbar under it.
  */
 export function PageHeader({ children, leading, className }: PageHeaderProps) {
   return (
-    <header className={cn("flex h-12 shrink-0 items-center border-b px-4", className)}>
+    <header
+      className={cn("flex h-12 shrink-0 items-center gap-2 border-b px-4", className)}
+    >
       {leading ?? <CollapsedNavTrigger />}
       {children}
     </header>

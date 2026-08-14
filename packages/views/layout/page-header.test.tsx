@@ -79,3 +79,61 @@ describe("PageHeader title alignment", () => {
     expect(trigger).toHaveClass("xl:hidden");
   });
 });
+
+/**
+ * The trigger is a flex item, so the header's own `gap` already separates it
+ * from the title. When the trigger carried a margin as well, every header that
+ * declared a gap paid both and its title started further right than the ones
+ * that declared none — at 390px the Autopilot title sat 8px right of Issues.
+ * One declared gap, one source.
+ */
+describe("PageHeader leading spacing", () => {
+  it("gives the nav trigger no margin of its own", () => {
+    const { container } = renderWithI18n(
+      <SidebarProvider>
+        <PageHeader>
+          <h1>Inbox</h1>
+        </PageHeader>
+      </SidebarProvider>,
+    );
+
+    const trigger = container.querySelector("[data-slot='sidebar-trigger']")!;
+    expect(trigger.className).not.toMatch(/(^|\s)-?m[rsxe]?-/);
+  });
+
+  it("spaces a header that declares no gap by the base gap", () => {
+    const { container } = renderWithI18n(
+      <SidebarProvider>
+        <PageHeader>
+          <h1>Inbox</h1>
+        </PageHeader>
+      </SidebarProvider>,
+    );
+
+    expect(container.querySelector("header")).toHaveClass("gap-2");
+  });
+
+  it("leads the collection header on the same gap as the issues header", () => {
+    const collection = renderWithI18n(
+      <SidebarProvider>
+        <CollectionPageHeader icon={Zap} title="Autopilot" count={2} />
+      </SidebarProvider>,
+    );
+    const issues = renderWithI18n(
+      <SidebarProvider>
+        <PageHeader className="gap-2">
+          <ListTodo className="h-4 w-4" />
+          <h1>Issues</h1>
+        </PageHeader>
+      </SidebarProvider>,
+    );
+
+    const gapOf = (r: { container: HTMLElement }) =>
+      Array.from(r.container.querySelector("header")!.classList).find((c) =>
+        c.startsWith("gap-"),
+      );
+
+    expect(gapOf(collection)).toBe("gap-2");
+    expect(gapOf(collection)).toBe(gapOf(issues));
+  });
+});
