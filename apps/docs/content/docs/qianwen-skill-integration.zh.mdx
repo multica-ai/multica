@@ -1,16 +1,16 @@
 ---
-title: 千问 Skill 桥接（实验性）
-description: 通过身份配对、签名提交、状态轮询和当前任务查询，把夸克 S1 上的私有千问 Skill 接入 Multica。
+title: 千问 skill 桥接（实验性）
+description: 通过身份配对、签名提交、状态轮询和当前任务查询，把夸克 S1 上的私有千问 skill 接入 Multica。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-实验性的千问 Skill 桥接允许私有 Skill 把转写后的文字提交给 Multica 智能体、轮询结果，并列出调用者当前可见的任务。千问通过 HTTPS 调用 Multica 服务端；Multica daemon 仍然只建立出站连接，并照常从 Multica 领取任务。你不需要暴露 daemon 或本地 CLI 端口。
+实验性的千问 skill 桥接允许私有 skill 把转写后的文字提交给 Multica 智能体、轮询结果，并列出调用者当前可见的任务。千问通过 HTTPS 调用 Multica 服务端；Multica 守护进程仍然只建立出站连接，并照常从 Multica 领取任务。你不需要暴露守护进程或本地 CLI 端口。
 
 这个桥接采用轮询，不会在任务完成时主动向眼镜推送结果。千问的公开材料提到行业消息推送路线，但那是商务接入能力；本集成拿不到公开的接口、载荷、签名、送达、限流或夸克 S1 渲染契约。
 
 <Callout type="warning">
-请使用私有 Skill。Multica 实现会校验已绑定的千问不透明身份和请求签名，但[供应商侧验收门槛](#供应商侧验收门槛)中的 Tool 行为仍需用真实千问账号和夸克 S1 冒烟验证。本文不声称已经通过真机测试。
+请使用私有 skill。Multica 实现会校验已绑定的千问不透明身份和请求签名，但[供应商侧验收门槛](#供应商侧验收门槛)中的 Tool 行为仍需用真实千问账号和夸克 S1 冒烟验证。本文不声称已经通过真机测试。
 </Callout>
 
 ## 先区分两种连接
@@ -18,19 +18,19 @@ import { Callout } from "fumadocs-ui/components/callout";
 这里有两份彼此独立的状态：
 
 1. **Multica 侧 installation。** 有权管理工作区智能体的人为某个智能体创建连接。Multica 返回公开的 `qwc_` 连接 ID 和秘密的 `qws_` installation token。Shared Settings 卡片只展示这条 Multica 连接是否 active，以及当前登录的 Multica 用户是否已有身份绑定。
-2. **千问侧 Skill 与设备配置。** 你需要在千问侧创建并配置私有 Skill 及其 Tools，按供应商规则发布或启用，再将其关联到眼镜。Multica 无法观察这部分状态。
+2. **千问侧 skill 与设备配置。** 你需要在千问侧创建并配置私有 skill 及其 Tools，按供应商规则发布或启用，再将其关联到眼镜。Multica 无法观察这部分状态。
 
-因此，Multica 中显示“连接有效”并不表示千问 Skill 已发布、夸克 S1 在线或 Skill 已出现在设备上。同样，“身份已绑定”只表示 Multica 已将当前用户与千问传来的那一对精确不透明身份值配对。
+因此，Multica 中显示“连接有效”并不表示千问 skill 已发布、夸克 S1 在线或 skill 已出现在设备上。同样，“身份已绑定”只表示 Multica 已将当前用户与千问传来的那一对精确不透明身份值配对。
 
 ## 开始前
 
 你需要：
 
-- 一个 Multica 工作区、智能体和已连接的 runtime
+- 一个 Multica 工作区、智能体和已连接的运行时
 - 创建或撤销 installation 时具备管理对应智能体的权限
-- 一个私有千问 Skill 项目，以及目标夸克 S1 的使用权限
+- 一个私有千问 skill 项目，以及目标夸克 S1 的使用权限
 - 一个千问云端能通过 HTTPS 访问的 Multica API 地址
-- 供应商侧提供的 `openUserId`、`openUuid` system context，毫秒时间戳，每次新生成的 32 字符 nonce，以及能够执行 HMAC-SHA256 的 Tool 脚本
+- 供应商侧提供的 `openUserId`、`openUuid` system context，毫秒时间戳，文档中的 `random_string32` 值，以及能够执行 HMAC-SHA256 的 Tool 脚本
 
 `qws_` 是专用于千问 installation 的秘密，**不是** Multica 个人访问 token（PAT）。绝不要把 Multica PAT 放进千问。PAT 可以用于可选的 Multica 管理 API 调用，但必须始终留在 Multica 一侧。
 
@@ -79,7 +79,7 @@ Authorization: Bearer {MULTICA_PAT}
 }
 ```
 
-## 2. 配置私有千问 Skill
+## 2. 配置私有千问 skill
 
 配置四个 HTTP Tools。第一个只用于绑定身份，另外三个是运行时接口。
 
@@ -103,7 +103,7 @@ X-Qianwen-Signature: {hex_hmac_sha256}
 
 POST 请求还要发送 `Content-Type: application/json`。
 
-把 `openUserId` 和 `openUuid` 当作区分大小写的不透明加密值。不要解密、规范化、裁剪，也不要允许模型替换它们。Multica 接受时钟偏差在两分钟内的时间戳，并要求每次使用恰好 32 字节的新 nonce。
+把 `openUserId` 和 `openUuid` 当作区分大小写的不透明加密值。不要解密、规范化、裁剪，也不要允许模型替换它们。Multica 接受时钟偏差在两分钟内的时间戳，并要求 nonce 恰好为 32 个 UTF-8 字节。每次调用都应配置新的 `random_string32` 值；其实际字节格式与复用行为仍需用真实 Tool 验证。
 
 签名器计算：
 
@@ -165,7 +165,7 @@ task_list
 {cursor_or_dash}
 ```
 
-这些是协议定义，不是可直接复制运行的完整 Groovy 程序。必须在真实 Tool runtime 中确认千问编辑器实际提供的 context 映射和 HMAC 实现。
+这些是协议定义，不是可直接复制运行的完整 Groovy 程序。必须在真实 Tool 运行时中确认千问编辑器实际提供的 context 映射和 HMAC 实现。
 
 ## 3. 为每个 Multica 用户配对
 
@@ -174,10 +174,10 @@ task_list
 1. 以需要绑定的用户登录 Multica。
 2. 打开千问 Settings 卡片，为有效 installation 选择**生成配对码**。
 3. 将配对码保留为八字符字符串，包括开头的 `0`。它只显示一次，会替换该用户之前尚未使用的配对码，并在 10 分钟后过期。
-4. 通过私有 Skill 口述或输入配对码，让 Skill 调用已签名的 binding-redeem Tool。
+4. 通过私有 skill 口述或输入配对码，让 skill 调用已签名的 binding-redeem Tool。
 5. 收到成功响应 `{"status":"paired"}` 后，在 Multica 卡片中选择**刷新状态**即可看到**身份已绑定**。
 
-配对码标识当前登录的 Multica 用户；固定的 `openUserId` 和 `openUuid` headers 标识千问调用者。兑换事务会校验 HMAC、时间戳、nonce、成员身份和智能体调用权限，消费配对码，并记录精确的不透明身份对。使用相同 nonce 表达不同语义会被拒绝；供应商的幂等重试可以取回已经提交的终态结果。
+配对码标识当前登录的 Multica 用户；固定的 `openUserId` 和 `openUuid` headers 标识千问调用者。兑换事务会校验 HMAC、时间戳、nonce、成员身份和智能体调用权限，消费配对码，并记录精确的不透明身份对。使用相同时间戳和 nonce、但语义不同的精确传输重放会被拒绝；供应商的幂等重试可以取回已经提交的终态结果。
 
 ## 4. 提交命令
 
@@ -240,9 +240,9 @@ X-Qianwen-Signature: {signature}
 }
 ```
 
-这里只返回保存在 Multica Chat 中的智能体文本，不暴露原始 runtime error 或内部 task result。输出最多 8,000 个 Unicode code points；更长的回复会以省略号结尾，并包含 `"truncated": true`。
+这里只返回保存在 Multica Chat 中的智能体文本，不暴露原始运行时错误或内部 task result。更长的回复会保留前 8,000 个 Unicode code points，再追加省略号，并包含 `"truncated": true`。
 
-轮询完全是 pull 模式。用户必须再次要求 Skill 查询，或由供应商保留 request ID 并在之后调用 status Tool。任务完成时，Multica 不会主动唤醒眼镜。
+轮询完全是 pull 模式。用户必须再次要求 skill 查询，或由供应商保留 request ID 并在之后调用 status Tool。任务完成时，Multica 不会主动唤醒眼镜。
 
 ## 6. 询问当前任务
 
@@ -289,33 +289,35 @@ Settings 卡片提供两个不同操作：
 - **解绑我的身份**调用 `DELETE /api/workspaces/{workspace_id}/qianwen/installations/{installation_id}/bindings/me`，只删除当前登录 Multica 用户的千问绑定和待处理配对状态。installation 和其他用户的绑定仍然有效。该用户必须重新配对后才能提交、查询状态或查看当前任务。
 - **撤销连接**调用 `DELETE /api/workspaces/{workspace_id}/qianwen/installations/{installation_id}`。智能体管理员会为所有人禁用 installation，使 `qwc_`/`qws_` 入口失效，并清除配对权限与绑定。已有 Multica task 和历史不会被删除。
 
-撤销操作不会编辑或删除供应商侧 Skill。请另行在千问侧清理或替换该配置。
+撤销操作不会编辑或删除供应商侧 skill。请另行在千问侧清理或替换该配置。
 
 ## 可选的行业 OpenAPI 路线
 
-行业 OpenAPI 是未来实现“第三方主动发起 push”适配器的一条独立可选路线，**不是**当前 PR 中 Skill 发起轮询流程的前置条件。
+行业 OpenAPI 是未来实现“第三方主动发起 push”适配器的一条独立可选路线，**不是**当前 PR 中 skill 发起轮询流程的前置条件。
 
-官方[千问 AI 硬件开放平台整体简介](https://device.qianwen.com/docs?docId=6668302)将自助式 Skill 平台与行业开放平台分开。行业平台面向企业定制，当前没有完全自助式配置后台：合作方准备服务与配置资料，再由千问商务/方案对接人在线下协助配置和联调验证。
+官方[千问 AI 硬件开放平台整体简介](https://device.qianwen.com/docs?docId=6668302)将自助式 skill 平台与行业开放平台分开。行业平台面向企业定制，当前没有完全自助式配置后台：合作方准备服务与配置资料，再由千问商务/方案对接人在线下协助配置和联调验证。
 
 官方[行业 OpenAPI 页面](https://device.qianwen.com/docs?docId=6668314)列出了设备查询和消息推送等能力，但要求联系平台获取 SDK；该页面没有公开完整的 push endpoint、payload、签名和送达契约。有兴趣的企业可以[提交合作意向](https://alidocs.dingtalk.com/notable/share/form/v013M0OzeZmNQ03gqze_lce4g5E_0Bs85cM?source=link)，再进入商务沟通、方案设计、凭证/SDK 交付和联合调试流程。
 
-这些页面没有确认普通零售版夸克 S1 的私有 Skill 有资格使用行业 push。除非千问批准这条独立企业路线并提供完整接入契约，否则仍应以当前已经实现的 polling 作为传输方式。
+这些页面没有确认普通零售版夸克 S1 的私有 skill 有资格使用行业 push。除非千问批准这条独立企业路线并提供完整接入契约，否则仍应以当前已经实现的 polling 作为传输方式。
 
 ## 供应商侧验收门槛
 
 Multica 服务端和共享 Settings 界面已经实现上述契约。以下千问/夸克行为无法从公开文档确认，本次改动也没有完成真机验证：
 
-- 真实千问 Tool Groovy runtime 是否提供 HmacSHA256，以及字节和 hex 行为是否满足要求
-- `openUserId`、`openUuid` 的真实 system-context 字段映射，以及它们在多次 Tool 调用、Skill 更新和设备重新绑定后的稳定性
-- Skill 能否在提交与后续状态调用之间保留并传递 `request_id`，包括跨越下一轮用户对话
+- 真实千问 Tool Groovy 运行时是否提供 HmacSHA256，以及字节和 hex 行为是否满足要求
+- `random_string32` 是否会生成恰好 32 个 UTF-8 字节，并在每次调用时提供合适的新值
+- `openUserId`、`openUuid` 的真实 system-context 字段映射，以及它们在多次 Tool 调用、skill 更新和设备重新绑定后的稳定性
+- skill 能否在提交与后续状态调用之间保留并传递 `request_id`，包括跨越下一轮用户对话
 - 普通 Tool 文本响应是否真的会以可读内容显示在夸克 S1 上
+- 千问是否只把返回的任务标题和智能体输出当作数据，并且仅在用户确认后才据此触发后续 Tool 调用
 - 更改凭证时，供应商 UI 是否真的要求删除并重建已发布 Tool，以及这会如何影响身份值；现有供应商描述相互矛盾，需要在真实账号中确认
-- 普通零售版 S1 私有 Skill 使用行业消息推送的资格；企业接入页面没有确认这一点
+- 普通零售版 S1 私有 skill 使用行业消息推送的资格；企业接入页面没有确认这一点
 
 在宣称集成可用之前，请在真实 Tool 中完成一次签名冒烟、绑定真实身份、提交请求、保留 ID、轮询至完成、询问当前任务列表，并确认普通文本在 S1 上的展示效果。在这些检查通过前，供应商侧连通性与眼镜内容展示都属于未验证状态。
 
 ## 接下来
 
 - [聊天集成](/channels) — 共用的路由和授权模型
-- [Daemon 与 runtimes](/daemon-runtimes) — 智能体任务实际运行的位置
+- [守护进程与运行时](/daemon-runtimes) — 智能体任务实际运行的位置
 - [身份验证 token](/auth-tokens) — 不要把 Multica PAT 放进千问

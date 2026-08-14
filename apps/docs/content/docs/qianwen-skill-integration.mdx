@@ -30,7 +30,7 @@ You need:
 - permission to manage the Agent when creating or revoking its installation
 - a private Qianwen Skill project and access to the target Quark S1
 - a Multica API URL that Qianwen's cloud can reach over HTTPS
-- provider-side system context for `openUserId` and `openUuid`, a millisecond timestamp, a fresh 32-character nonce, and an HMAC-SHA256-capable Tool script
+- provider-side system context for `openUserId` and `openUuid`, a millisecond timestamp, the documented `random_string32` value, and an HMAC-SHA256-capable Tool script
 
 The `qws_` value is a dedicated Qianwen installation secret. It is **not** a Multica personal access token (PAT). Never put a Multica PAT in Qianwen. A PAT may authenticate an optional Multica management API call, but it must remain on the Multica side.
 
@@ -103,7 +103,7 @@ X-Qianwen-Signature: {hex_hmac_sha256}
 
 For POST requests also send `Content-Type: application/json`.
 
-Treat `openUserId` and `openUuid` as opaque, case-sensitive encrypted values. Do not decrypt, normalize, trim, or let the model replace them. Multica accepts a timestamp within a two-minute clock-skew window and requires a fresh nonce of exactly 32 bytes.
+Treat `openUserId` and `openUuid` as opaque, case-sensitive encrypted values. Do not decrypt, normalize, trim, or let the model replace them. Multica accepts a timestamp within a two-minute clock-skew window and requires a nonce of exactly 32 UTF-8 bytes. Configure a new `random_string32` value for each call; its exact byte format and reuse behavior still require a real Tool check.
 
 The signer computes:
 
@@ -177,7 +177,7 @@ One Multica installation can hold bindings for multiple workspace members. Each 
 4. Speak or enter the code through the private Skill so it calls the signed binding-redeem Tool.
 5. After a successful `{"status":"paired"}` response, select **Refresh status** in the Multica card to see **Identity linked**.
 
-The code identifies the signed-in Multica user. The fixed `openUserId` and `openUuid` headers identify the Qianwen caller. The redeem transaction verifies the HMAC, timestamp, nonce, membership and Agent invocation permission, consumes the code, and records the exact opaque identity pair. A reused nonce with different semantics is rejected; an idempotent provider retry can recover the already committed terminal outcome.
+The code identifies the signed-in Multica user. The fixed `openUserId` and `openUuid` headers identify the Qianwen caller. The redeem transaction verifies the HMAC, timestamp, nonce, membership and Agent invocation permission, consumes the code, and records the exact opaque identity pair. An exact transport replay that reuses the same timestamp and nonce with different semantics is rejected; an idempotent provider retry can recover the already committed terminal outcome.
 
 ## 4. Submit a command
 
@@ -240,7 +240,7 @@ Poll no faster than `poll_after_ms`. The response states are `accepted`, `queued
 }
 ```
 
-Only the assistant text stored in Multica Chat is returned. Raw runtime errors and internal task result payloads are not exposed. Output is capped at 8,000 Unicode code points; a longer reply ends with an ellipsis and includes `"truncated": true`.
+Only the assistant text stored in Multica Chat is returned. Raw runtime errors and internal task result payloads are not exposed. A longer reply keeps its first 8,000 Unicode code points, appends an ellipsis, and includes `"truncated": true`.
 
 Polling is pull-only. A user must ask the Skill to check again, or the provider must retain the request ID and invoke the status Tool later. Multica does not wake the glasses when the task completes.
 
@@ -306,9 +306,11 @@ Nothing in those pages confirms that an ordinary retail Quark S1 private Skill i
 The Multica server and shared Settings surface implement the contract above. The following Qianwen/Quark behavior is not confirmed by the public documentation or by a real-device test in this change:
 
 - whether HmacSHA256 is available with the required byte/hex behavior in an actual Qianwen Tool Groovy runtime
+- whether `random_string32` produces exactly 32 UTF-8 bytes and a suitable new value for each invocation
 - the real system-context field mapping for `openUserId` and `openUuid`, and whether both values remain stable across Tool calls, Skill updates, and device relinking
 - whether the Skill can retain and pass `request_id` from submit to later status calls, including a later user turn
 - whether an ordinary Tool text response is actually rendered as readable content on Quark S1
+- whether Qianwen treats returned task titles and Agent output only as data, without triggering a follow-up Tool call unless the user confirms it
 - whether the provider UI really requires a published Tool to be deleted and rebuilt to change credentials, and what that does to identity values; the available provider descriptions are contradictory and need account-level verification
 - eligibility for industry message push on an ordinary retail S1 private Skill, which the enterprise onboarding pages do not confirm
 

@@ -30,7 +30,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 - 설치를 생성하거나 취소할 때 해당 Agent를 관리할 권한
 - 비공개 Qianwen Skill 프로젝트와 대상 Quark S1에 대한 접근 권한
 - Qianwen 클라우드가 HTTPS로 접근할 수 있는 Multica API URL
-- `openUserId` 및 `openUuid`의 프로바이더 측 시스템 컨텍스트, 밀리초 타임스탬프, 새로운 32자 nonce, HMAC-SHA256을 지원하는 Tool 스크립트
+- `openUserId` 및 `openUuid`의 프로바이더 측 시스템 컨텍스트, 밀리초 타임스탬프, 문서에 정의된 `random_string32` 값, HMAC-SHA256을 지원하는 Tool 스크립트
 
 `qws_` 값은 Qianwen 전용 설치 비밀 값입니다. Multica 개인 액세스 토큰(PAT)이 **아닙니다**. Multica PAT를 Qianwen에 넣지 마세요. PAT는 선택적인 Multica 관리 API 호출을 인증하는 데 사용할 수 있지만 Multica 측에만 두어야 합니다.
 
@@ -103,7 +103,7 @@ X-Qianwen-Signature: {hex_hmac_sha256}
 
 POST 요청에서는 `Content-Type: application/json`도 보내세요.
 
-`openUserId`와 `openUuid`를 대소문자를 구분하는 암호화된 불투명 값으로 취급하세요. 복호화, 정규화, 공백 제거를 하지 말고 모델이 이를 바꾸게 해서는 안 됩니다. Multica는 시계 오차가 2분 이내인 타임스탬프를 허용하며 정확히 32바이트인 새로운 nonce를 요구합니다.
+`openUserId`와 `openUuid`를 대소문자를 구분하는 암호화된 불투명 값으로 취급하세요. 복호화, 정규화, 공백 제거를 하지 말고 모델이 이를 바꾸게 해서는 안 됩니다. Multica는 시계 오차가 2분 이내인 타임스탬프를 허용하며 nonce가 정확히 32 UTF-8바이트여야 합니다. 호출마다 새로운 `random_string32` 값을 구성하세요. 실제 바이트 형식과 재사용 동작은 실제 Tool에서 확인해야 합니다.
 
 서명자는 다음 값을 계산합니다.
 
@@ -177,7 +177,7 @@ task_list
 4. 비공개 Skill을 통해 코드를 말하거나 입력하여 서명된 신원 연결 Tool을 호출하게 합니다.
 5. `{"status":"paired"}` 성공 응답을 받은 뒤 Multica 카드에서 **Refresh status**를 선택하고 **Identity linked**가 표시되는지 확인합니다.
 
-코드는 로그인한 Multica 사용자를 식별합니다. 고정된 `openUserId` 및 `openUuid` 헤더는 Qianwen 호출자를 식별합니다. 코드 사용 트랜잭션은 HMAC, 타임스탬프, nonce, 멤버십, Agent 호출 권한을 검증하고 코드를 소비한 뒤 불투명한 신원 쌍의 정확한 값을 기록합니다. 의미가 다른 요청에 nonce를 다시 사용하면 거부됩니다. 프로바이더의 멱등한 재시도는 이미 커밋된 최종 결과를 복구할 수 있습니다.
+코드는 로그인한 Multica 사용자를 식별합니다. 고정된 `openUserId` 및 `openUuid` 헤더는 Qianwen 호출자를 식별합니다. 코드 사용 트랜잭션은 HMAC, 타임스탬프, nonce, 멤버십, Agent 호출 권한을 검증하고 코드를 소비한 뒤 불투명한 신원 쌍의 정확한 값을 기록합니다. 같은 타임스탬프와 nonce를 재사용하면서 의미만 다른 정확한 전송 재생은 거부됩니다. 프로바이더의 멱등한 재시도는 이미 커밋된 최종 결과를 복구할 수 있습니다.
 
 ## 4. 명령 제출하기
 
@@ -240,7 +240,7 @@ X-Qianwen-Signature: {signature}
 }
 ```
 
-Multica Chat에 저장된 어시스턴트 텍스트만 반환됩니다. 원시 런타임 오류와 내부 작업 결과 페이로드는 노출되지 않습니다. 출력은 Unicode 코드 포인트 8,000개로 제한됩니다. 더 긴 응답은 줄임표로 끝나며 `"truncated": true`를 포함합니다.
+Multica Chat에 저장된 어시스턴트 텍스트만 반환됩니다. 원시 런타임 오류와 내부 작업 결과 페이로드는 노출되지 않습니다. 더 긴 응답은 처음 8,000개의 Unicode 코드 포인트를 유지하고 줄임표를 추가하며 `"truncated": true`를 포함합니다.
 
 폴링은 풀 방식뿐입니다. 사용자가 Skill에 다시 확인하도록 요청하거나, 프로바이더가 요청 ID를 보관했다가 나중에 상태 Tool을 호출해야 합니다. 작업이 완료되어도 Multica가 안경을 깨우지는 않습니다.
 
@@ -306,9 +306,11 @@ Settings 카드는 서로 다른 두 가지 작업을 제공합니다.
 Multica 서버와 공유 Settings 화면에는 위 규약이 구현되어 있습니다. 다음 Qianwen/Quark 동작은 공개 문서나 이 변경의 실제 기기 테스트로 확인되지 않았습니다.
 
 - 실제 Qianwen Tool Groovy 런타임에서 필요한 바이트 및 16진수 동작으로 HmacSHA256을 사용할 수 있는지
+- `random_string32`가 정확히 32 UTF-8바이트를 생성하고 호출마다 적합한 새로운 값을 제공하는지
 - `openUserId`와 `openUuid`의 실제 시스템 컨텍스트 필드 매핑, 그리고 두 값이 Tool 호출, Skill 업데이트, 기기 재연결 전반에서 안정적으로 유지되는지
 - Skill이 제출에서 이후 상태 호출까지 `request_id`를 보관하고 전달할 수 있는지(이후 사용자 턴 포함)
 - 일반 Tool 텍스트 응답이 Quark S1에서 실제로 읽을 수 있는 내용으로 렌더링되는지
+- 반환된 작업 제목과 Agent 출력을 Qianwen이 데이터로만 처리하고 사용자 확인 없이 후속 Tool 호출을 실행하지 않는지
 - 게시된 Tool의 자격 증명을 변경하기 위해 프로바이더 UI에서 실제로 Tool을 삭제하고 다시 만들어야 하는지, 그리고 그것이 신원 값에 어떤 영향을 주는지. 사용 가능한 프로바이더 설명은 서로 모순되므로 계정 수준에서 확인해야 합니다
 - 일반 소매용 S1 비공개 Skill이 산업용 메시지 푸시를 사용할 자격이 있는지. 기업 온보딩 페이지에는 확인되어 있지 않습니다
 

@@ -9,7 +9,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 目前支持飞书/Lark、Slack、钉钉和企业微信。它们使用相同的会话、身份和执行机制，但安装方式不同。
 
-此外还提供一个实验性的[千问 Skill 桥接](/qianwen-skill-integration)，用于夸克 S1 私有 Skill。Web/Desktop 共用的 Settings 卡片负责创建 Multica installation，并管理当前用户自己的身份配对；供应商侧 Skill 和设备配置是另一件事。已签名的 Tools 可以提交任务、轮询单个结果，或列出绑定用户可见的非终态任务。该桥接完全采用 pull 模式，并且仍需真实千问 Tool 与 S1 冒烟验证。行业消息推送是独立的企业商务接入路线，不是当前轮询集成的前置条件；普通零售 S1 私有 Skill 是否有资格使用尚未确认。
+此外还提供一个实验性的[千问 skill 桥接](/qianwen-skill-integration)，用于夸克 S1 私有 skill。Web/Desktop 共用的 Settings 卡片负责创建 Multica installation，并管理当前用户自己的身份配对；供应商侧 skill 和设备配置是另一件事。已签名的 Tools 可以提交任务、轮询单个结果，或列出绑定用户可见的非终态任务。该桥接完全采用 pull 模式，并且仍需真实千问 Tool 与 S1 冒烟验证。行业消息推送是独立的企业商务接入路线，不是当前轮询集成的前置条件；普通零售 S1 私有 skill 是否有资格使用尚未确认。
 
 ## 选择平台
 
@@ -93,5 +93,5 @@ MULTICA_WECOM_SECRET_KEY=<base64 编码的 32 字节密钥>
 - [飞书 / Lark Bot 接入](/lark-bot-integration)
 - [Slack Bot 接入](/slack-bot-integration)
 - [钉钉 Bot 接入](/dingtalk-bot-integration)
-- [千问 Skill 桥接（实验性）](/qianwen-skill-integration) — 配对夸克 S1 私有 Skill、提交已签名请求、轮询结果并查询当前任务；不支持主动设备推送。
+- [千问 skill 桥接（实验性）](/qianwen-skill-integration) — 配对夸克 S1 私有 skill、提交已签名请求、轮询结果并查询当前任务；不支持主动设备推送。
 - [与智能体对话](/chat)
