@@ -278,7 +278,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "codearts", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -286,10 +286,9 @@ type Config struct {
 // migration 134 to add qoder, migration 136 to add traecli, migration 175 to
 // add deveco, migration 179 to add grok, migration 202 to add qwen,
 // migration 242 to add qoderclicn, migration 253 to add qwenpaw,
-// migration 254 to add reasonix, migration 313 to add dsh, migration 327 to
-// add mcode): a
-// custom runtime profile may only
-// be based on a backend Multica officially supports.
+// migration 254 to add reasonix, migration 313 to add dsh, migration 315 to
+// add codearts, and migration 327 to add mcode): a custom runtime profile may
+// only be based on a backend Multica officially supports.
 // qoder and qoderclicn share the same ACP backend; keeping both provider keys
 // lets the daemon auto-detect and register the international and China-region
 // binaries independently. traecli (Trae) has a New backend, launch
@@ -303,6 +302,7 @@ var SupportedTypes = []string{
 	"codex",
 	"copilot",
 	"opencode",
+	"codearts",
 	"deveco",
 	"openclaw",
 	"hermes",
@@ -352,6 +352,7 @@ var resumeRejectionUndetectable = map[string]bool{
 	"cursor":      true,
 	"deveco":      true,
 	"opencode":    true,
+	"codearts":    true,
 }
 
 // ResumeRejectionUndetectable reports whether agentType is a backend that
@@ -387,6 +388,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &copilotBackend{cfg: cfg}, nil
 	case "opencode":
 		return &opencodeBackend{cfg: cfg}, nil
+	case "codearts":
+		return newCodeArtsBackend(cfg)
 	case "deveco":
 		return &devecoBackend{cfg: cfg}, nil
 	case "openclaw":
@@ -449,6 +452,7 @@ var launchHeaders = map[string]string{
 	"codex":       "codex app-server",
 	"copilot":     "copilot (json)",
 	"cursor":      "cursor-agent (stream-json)",
+	"codearts":    "codearts run (json)",
 	"deveco":      "deveco run (json)",
 	"hermes":      "hermes acp",
 	"kimi":        "kimi acp",

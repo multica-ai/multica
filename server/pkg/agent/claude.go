@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1109,6 +1110,11 @@ var detectVersionTimeout = 10 * time.Second
 func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
+	if runtime.GOOS == "windows" {
+		if native := resolveCodeArtsNativeFromShim(execPath, os.Stat); native != "" {
+			execPath = native
+		}
+	}
 
 	cmd := runtimeCmd.exec(ctx, "--version")
 	hideAgentWindow(cmd)

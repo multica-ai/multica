@@ -6,6 +6,7 @@ describe("providerSupportsMcpConfig", () => {
   it("matches providers whose runtime consumes mcp_config", () => {
     expect(providerSupportsMcpConfig("claude")).toBe(true);
     expect(providerSupportsMcpConfig("codebuddy")).toBe(true);
+    expect(providerSupportsMcpConfig("codearts")).toBe(true);
     expect(providerSupportsMcpConfig("codex")).toBe(true);
     expect(providerSupportsMcpConfig("cursor")).toBe(true);
     expect(providerSupportsMcpConfig("hermes")).toBe(true);
