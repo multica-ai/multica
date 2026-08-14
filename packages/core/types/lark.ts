@@ -19,10 +19,15 @@ export interface LarkInstallation {
    * server that predates the field — defaults to Feishu in the UI
    * (see CLAUDE.md → API Response Compatibility). */
   region?: "feishu" | "lark" | string;
+  /** Who may invoke this Bot. Missing means the secure legacy default:
+   * only Feishu identities bound to Multica workspace members. */
+  inbound_access_mode?: "workspace_members" | "feishu_users" | string;
   installed_at: string;
   created_at: string;
   updated_at: string;
 }
+
+export type LarkInboundAccessMode = "workspace_members" | "feishu_users";
 
 export interface ListLarkInstallationsResponse {
   installations: LarkInstallation[];

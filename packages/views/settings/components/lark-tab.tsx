@@ -14,6 +14,7 @@ import { ChevronRight, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
 import { QRCode } from "react-qr-code";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import {
   AlertDialog,
@@ -520,6 +521,39 @@ function LarkAgentBotConnectedBadge({
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [guestAccessEnabled, setGuestAccessEnabled] = useState(
+    installation.inbound_access_mode === "feishu_users",
+  );
+  const [updatingAccess, setUpdatingAccess] = useState(false);
+
+  useEffect(() => {
+    setGuestAccessEnabled(installation.inbound_access_mode === "feishu_users");
+  }, [installation.inbound_access_mode]);
+
+  async function handleGuestAccessChange(enabled: boolean) {
+    if (updatingAccess) return;
+    const previous = guestAccessEnabled;
+    setGuestAccessEnabled(enabled);
+    setUpdatingAccess(true);
+    try {
+      await api.updateLarkInstallation(wsId, installation.id, {
+        inbound_access_mode: enabled ? "feishu_users" : "workspace_members",
+      });
+      await qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
+      toast.success(
+        enabled
+          ? t(($) => $.lark.toast_guest_access_enabled)
+          : t(($) => $.lark.toast_guest_access_disabled),
+      );
+    } catch (e) {
+      setGuestAccessEnabled(previous);
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.lark.toast_guest_access_failed),
+      );
+    } finally {
+      setUpdatingAccess(false);
+    }
+  }
 
   async function handleDisconnect() {
     if (disconnecting) return;
@@ -580,6 +614,35 @@ function LarkAgentBotConnectedBadge({
             ? t(($) => $.lark.disconnecting)
             : t(($) => $.lark.disconnect)}
         </Button>
+      </div>
+
+      <div className="rounded-md border border-border/70 bg-muted/30 px-3 py-2.5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 space-y-1">
+            <label
+              htmlFor={`lark-guest-access-${installation.id}`}
+              className="block text-caption font-medium text-foreground"
+            >
+              {t(($) => $.lark.guest_access_label)}
+            </label>
+            <p className="text-micro leading-relaxed text-muted-foreground">
+              {t(($) => $.lark.guest_access_description)}
+            </p>
+          </div>
+          <Switch
+            id={`lark-guest-access-${installation.id}`}
+            checked={guestAccessEnabled}
+            onCheckedChange={handleGuestAccessChange}
+            disabled={updatingAccess || disconnecting}
+            aria-label={t(($) => $.lark.guest_access_label)}
+            data-testid="lark-agent-bot-guest-access"
+          />
+        </div>
+        {guestAccessEnabled && (
+          <p className="mt-2 text-micro leading-relaxed text-amber-700 dark:text-amber-400">
+            {t(($) => $.lark.guest_access_warning)}
+          </p>
+        )}
       </div>
 
       {/* Row 2: secondary "Manage in Lark" link to the Bot's dev-console
