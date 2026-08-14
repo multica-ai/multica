@@ -7,7 +7,7 @@ import {
   CollectionPageHeader,
   CollectionPageHeaderAction,
 } from "./collection-page";
-import { PageHeader } from "./page-header";
+import { PAGE_GUTTER, PageHeader } from "./page-header";
 
 /**
  * Below `xl` the collapsed-nav trigger renders, so a header that reads as two
@@ -113,54 +113,53 @@ describe("PageHeader leading spacing", () => {
     expect(container.querySelector("header")).toHaveClass("gap-2");
   });
 
-  it("leads the collection header on the same gutter as the issues header", () => {
-    const collection = renderWithI18n(
-      <SidebarProvider>
-        <CollectionPageHeader icon={Zap} title="Autopilot" count={2} />
-      </SidebarProvider>,
+  // The collection header and the issues header have to resolve to the same
+  // leading edge and the same gap. Each `it` below is one axis of that, read
+  // off both renders at once rather than asserted per page — a per-page
+  // assertion is what let the Agents toolbar drift while its header moved.
+  it.each([
+    ["gutter", /^px-/, PAGE_GUTTER],
+    ["gap", /^gap-/, "gap-2"],
+  ])("resolves the same %s for collection and issues headers", (_axis, pattern, expected) => {
+    const headerClass = (ui: React.ReactElement) =>
+      Array.from(
+        renderWithI18n(<SidebarProvider>{ui}</SidebarProvider>)
+          .container.querySelector("header")!
+          .classList,
+      ).find((c) => pattern.test(c));
+
+    const collection = headerClass(
+      <CollectionPageHeader icon={Zap} title="Autopilot" count={2} />,
     );
-    const issues = renderWithI18n(
-      <SidebarProvider>
-        <PageHeader className="gap-2">
-          <ListTodo className="h-4 w-4" />
-          <h1>Issues</h1>
-        </PageHeader>
-      </SidebarProvider>,
+    const issues = headerClass(
+      <PageHeader className="gap-2">
+        <ListTodo className="h-4 w-4" />
+        <h1>Issues</h1>
+      </PageHeader>,
     );
 
-    // Whatever the base gutter is, a collection page must not override it —
-    // that 4px is what made the Autopilot title sit right of Issues at every
-    // width, including >= xl where the nav trigger is not even rendered.
-    const gutterOf = (r: { container: HTMLElement }) =>
-      Array.from(r.container.querySelector("header")!.classList).find((c) =>
-        /^px-/.test(c),
-      );
-
-    expect(gutterOf(collection)).toBe("px-4");
-    expect(gutterOf(collection)).toBe(gutterOf(issues));
+    expect(collection).toBe(expected);
+    expect(collection).toBe(issues);
   });
+});
 
-  it("leads the collection header on the same gap as the issues header", () => {
-    const collection = renderWithI18n(
+/**
+ * The gutter is a constant so a page cannot spell its own and drift; the
+ * toolbar under a header reads the same one. Asserting the header renders the
+ * constant is what makes importing it elsewhere meaningful — the earlier
+ * version of this test hardcoded `px-4` in both the component and the
+ * expectation, so it could only ever agree with itself.
+ */
+describe("PAGE_GUTTER", () => {
+  it("is what PageHeader renders", () => {
+    const { container } = renderWithI18n(
       <SidebarProvider>
-        <CollectionPageHeader icon={Zap} title="Autopilot" count={2} />
-      </SidebarProvider>,
-    );
-    const issues = renderWithI18n(
-      <SidebarProvider>
-        <PageHeader className="gap-2">
-          <ListTodo className="h-4 w-4" />
-          <h1>Issues</h1>
+        <PageHeader>
+          <h1>Inbox</h1>
         </PageHeader>
       </SidebarProvider>,
     );
 
-    const gapOf = (r: { container: HTMLElement }) =>
-      Array.from(r.container.querySelector("header")!.classList).find((c) =>
-        c.startsWith("gap-"),
-      );
-
-    expect(gapOf(collection)).toBe("gap-2");
-    expect(gapOf(collection)).toBe(gapOf(issues));
+    expect(container.querySelector("header")).toHaveClass(PAGE_GUTTER);
   });
 });

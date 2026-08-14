@@ -69,6 +69,7 @@ import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
+import { PAGE_GUTTER } from "../../layout/page-header";
 
 // A run that already happened is an instant in the reader's day, so it reads in
 // the reader's zone (no timeZone passed). A run that is still to come belongs to
@@ -664,7 +665,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   if (isLoading) {
     return (
       <div className="flex h-full flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
+        <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
           <Skeleton className="h-4 w-4" />
           <span className="text-muted-foreground">/</span>
           <Skeleton className="h-4 w-32" />

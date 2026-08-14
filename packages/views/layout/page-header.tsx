@@ -4,6 +4,18 @@ import { cn } from "@multica/ui/lib/utils";
 import { SidebarTrigger, useSidebarSafe } from "@multica/ui/components/ui/sidebar";
 
 /**
+ * The left edge every page shares: the header, the toolbar under it, and any
+ * body row that has to line up with them.
+ *
+ * It is a constant rather than a per-page class because the pages drifted
+ * apart exactly when it was one — collection pages sat at `px-5` and the
+ * issues family at `px-4`, so switching tabs moved the title 4px. Import this
+ * anywhere that edge matters instead of writing the class again; a page that
+ * spells its own gutter is the bug coming back.
+ */
+export const PAGE_GUTTER = "px-4";
+
+/**
  * The way back to the nav wherever it is not a permanent column: a sheet below
  * the compact breakpoint, auto-collapsed from there up to `xl`.
  *
@@ -48,13 +60,17 @@ interface PageHeaderProps {
  * started further right than the ones that declared none. Override the gap
  * per header if the zones need more air; do not add margin to the trigger.
  *
- * `px-4` is only the default gutter — a page whose content sits at `px-5`
- * should pass that through so the title lines up with the toolbar under it.
+ * Do not pass a `px-*` through `className`. The gutter is `PAGE_GUTTER` for
+ * every page, and the toolbar beneath the header reads the same constant.
  */
 export function PageHeader({ children, leading, className }: PageHeaderProps) {
   return (
     <header
-      className={cn("flex h-12 shrink-0 items-center gap-2 border-b px-4", className)}
+      className={cn(
+        "flex h-12 shrink-0 items-center gap-2 border-b",
+        PAGE_GUTTER,
+        className,
+      )}
     >
       {leading ?? <CollapsedNavTrigger />}
       {children}

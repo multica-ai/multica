@@ -742,7 +742,7 @@ function SquadDetailInspector({
   return (
     <aside className="flex w-full flex-col rounded-lg border bg-background md:h-full md:min-h-0 md:overflow-y-auto">
       {/* Identity */}
-      <div className="flex flex-col gap-3 border-b px-4 pb-5 pt-5">
+      <div className="flex flex-col gap-3 border-b px-5 pb-5 pt-5">
         {canManage ? (
           <>
             <AvatarUploadControl
@@ -780,7 +780,7 @@ function SquadDetailInspector({
       </div>
 
       {/* Details — read-only */}
-      <div className="border-b px-4 py-4">
+      <div className="border-b px-5 py-4">
         <div className="mb-1 -mx-2 px-2 text-micro font-medium uppercase tracking-wider text-muted-foreground">
           {t(($) => $.inspector.details_section)}
         </div>
