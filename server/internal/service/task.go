@@ -4165,15 +4165,15 @@ const (
 )
 
 // retryAttemptCeiling reports how many attempts the auto-retry path allows for
-// a failure reason. It only ever WIDENS the task's generic max_attempts, and
-// only for reasons with a bespoke schedule; everything else keeps the column's
-// value (default 2 = first run + one retry).
+// a failure reason. Generic failures honor the task's max_attempts value
+// (default 2 = first run + one retry), including max_attempts <= 1 disabling
+// retries. The dedicated Codex capacity policy is an explicit exception: when
+// enabled, its configured ceiling overrides the inherited max_attempts value.
+// Other bespoke schedules may only widen an enabled generic retry budget.
 //
-// max_attempts <= 1 explicitly disables auto-retry (055_task_lease_and_retry.up
-// .sql: "1 disables retry"), so it is never overridden — a disabled task must
-// not be revived by a raised ceiling. Callers persist this value into the retry
-// child (CreateRetryTask's max_attempts) so the row stays self-consistent:
-// provider_network's chain records attempt=3, max_attempts=3, not a
+// Callers persist this reason-aware value into the retry child
+// (CreateRetryTask's max_attempts) so the row stays self-consistent: for
+// example, provider_network's chain records attempt=3, max_attempts=3, not a
 // contradictory attempt=3, max_attempts=2 (MUL-4910).
 func retryAttemptCeiling(reason, rawError string, taskMaxAttempts, capacityRetryCount int32) int32 {
 	if taskfailure.IsCodexSelectedModelCapacityError(rawError) && capacityRetryCount > 0 {

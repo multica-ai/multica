@@ -2351,8 +2351,9 @@ type CreateRetryTaskParams struct {
 // p.max_attempts unchanged). Callers persist the reason-aware effective ceiling
 // here so the row stays self-consistent — e.g. provider_network's chain records
 // attempt=3, max_attempts=3 rather than leaking attempt=3, max_attempts=2 to the
-// task API (MUL-4910). The Go retryAttemptCeiling already refuses to raise a
-// disabled (max_attempts<=1) task, so this only ever widens, never revives.
+// task API (MUL-4910). Generic failures keep max_attempts<=1 disabled, while an
+// enabled dedicated Codex capacity policy intentionally overrides that inherited
+// limit; this query persists whichever effective ceiling the caller computed.
 func (q *Queries) CreateRetryTask(ctx context.Context, arg CreateRetryTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createRetryTask,
 		arg.ID,
