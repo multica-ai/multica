@@ -71,9 +71,12 @@ func TestMulticaOperatorPublicSkillContract(t *testing.T) {
 		"Do not read a saved profile token",
 		"call the Multica API directly",
 		"community CLI",
-		"For an open-ended business goal, workflow design, resource selection, or dependent mutations, read `references/orchestration.md`",
+		"For an open-ended business goal, business orchestration, resource selection, or dependent mutations, read `references/orchestration.md`",
 		"Keep a concrete action on a known target in the direct-operation flow",
-		"Route by the need for design, not by resource count",
+		"Route by the need for orchestration, not by resource count",
+		"operational design, not software design",
+		"Present two or more mutually exclusive choices as a numbered list",
+		"Accept a number-only reply",
 	} {
 		if !strings.Contains(normalizedBody, contract) {
 			t.Errorf("SKILL.md is missing native-host contract anchor %q", contract)
@@ -100,6 +103,9 @@ func TestMulticaOperatorPublicSkillContract(t *testing.T) {
 		"Required tools and permissions",
 		"Autopilots assign Agents, not Squads",
 		"complete plan",
+		"The in-chat orchestration design is the execution plan",
+		"After the user confirms it, execute the plan directly",
+		"Create a repository design document, specification, or implementation plan only when the user explicitly requests that artifact",
 		"material deviation",
 		"trigger last",
 		"returned resource ID",
@@ -115,7 +121,12 @@ func TestMulticaOperatorPublicSkillContract(t *testing.T) {
 	setup := readPublicSkillFile(t, skillDir, filepath.FromSlash("references/setup-and-connection.md"))
 	normalizedSetup := strings.Join(strings.Fields(setup), " ")
 	for _, contract := range []string{
-		"Do not execute a downloaded installer without user approval.",
+		"authorizes installing the missing community CLI",
+		"without a separate confirmation",
+		"ask whether to use Multica Cloud or a self-hosted deployment",
+		"Do not run `setup` or `login` before the user chooses",
+		"Do not narrate",
+		"stay silent",
 		"does not install or update this Skill",
 		"Do not run `multica update` automatically",
 		"community CLI",
@@ -150,6 +161,14 @@ func TestMulticaOperatorPublicSkillContract(t *testing.T) {
 	} {
 		if !strings.Contains(normalizedSetup, contract) {
 			t.Errorf("setup reference is missing contract anchor %q", contract)
+		}
+	}
+	for _, forbidden := range []string{
+		"ask before installing software",
+		"Do not execute a downloaded installer without user approval.",
+	} {
+		if strings.Contains(normalizedSetup, forbidden) {
+			t.Errorf("setup reference retains superseded cold-start behavior %q", forbidden)
 		}
 	}
 	for _, forbidden := range []string{
@@ -229,6 +248,9 @@ func TestMulticaOperatorPublicSkillContract(t *testing.T) {
 		if !strings.Contains(install, contract) {
 			t.Errorf("public skill installation guide is missing %q", contract)
 		}
+	}
+	if strings.Contains(install, "asks for approval before installing it") {
+		t.Error("public skill installation guide retains superseded installer approval behavior")
 	}
 }
 

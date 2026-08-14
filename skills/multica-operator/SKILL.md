@@ -5,8 +5,9 @@ description: Use when a user wants to connect, sign in, configure, inspect, or o
 
 # Multica Operator
 
-Use the community `multica` CLI already installed by the user. Inspect before changing state, and report only
-results verified by the CLI.
+Use the official community `multica` CLI. Keep internal routing and setup checks
+quiet, inspect before changing state, and report only results verified by the
+CLI.
 
 ## First connection
 
@@ -37,13 +38,20 @@ the user selected either; never inspect one target and operate on another.
 After connection, do not preload or list workspace resources. Query issues,
 autopilots, projects, labels, agents, skills, or squads only when the user asks.
 
+When a user choice is required, use explicit selection controls. Present two or
+more mutually exclusive choices as a numbered list (`1.`, `2.`, `3.`). Accept a
+number-only reply by mapping it to the displayed option; ask again only when the
+number is absent, invalid, or the answer would materially change the requested
+scope.
+
 ## Request routing
 
 Keep a concrete action on a known target in the direct-operation flow below.
-For an open-ended business goal, workflow design, resource selection, or
+For an open-ended business goal, business orchestration, resource selection, or
 dependent mutations, read `references/orchestration.md` before querying
-workspace resources or proposing a solution. Route by the need for design, not
-by resource count.
+workspace resources or proposing a solution. Route by the need for
+orchestration, not by resource count. This is operational design, not software
+design; use the in-chat plan and confirmation flow defined there.
 
 ## Operating rule
 

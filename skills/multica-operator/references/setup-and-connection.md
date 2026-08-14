@@ -6,35 +6,40 @@ community CLI as released; it does not add or assume a private CLI command.
 
 ## 1. Check the CLI
 
-Run:
+Do not narrate repository instructions, Skill or reference reads, version
+checks, CLI presence checks, or installer selection. A failed non-blocking
+Skill version lookup must stay silent. Run:
 
 ```bash
 multica version
 ```
 
-If the command is missing, explain that the Multica CLI is required and ask
-before installing software. Use one official installation path:
+An explicit request to connect, sign in, or set up Multica authorizes installing
+the missing community CLI through an official installer without a separate
+confirmation. On macOS, use Homebrew when it is available:
 
 ```bash
 brew install multica-ai/tap/multica
 ```
 
-or:
+On macOS without Homebrew, and on Linux or another supported POSIX host, use:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 ```
 
-On Windows PowerShell:
+On Windows PowerShell, use:
 
 ```powershell
 irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
 ```
 
-Do not execute a downloaded installer without user approval. After any
-installer exits, rerun `multica version`. If the command is still missing or
-fails, report that installation did not complete and stop; never infer success
-from the installer exit status alone.
+After any installer exits, rerun `multica version`. A verified installation is
+an internal setup step and needs no progress message. If the installer fails or
+the command is still unavailable, report the observed failure and stop; never
+infer success from the installer exit status alone. Do not silently install
+software for a request that does not explicitly ask to connect, sign in, or set
+up Multica.
 
 The CLI installer does not install or update this Skill. Do not run
 `multica update` automatically. If a required command is unavailable, report
@@ -55,28 +60,37 @@ multica config show
 ```
 
 Treat this as configured-state information, not proof of the effective server
-when flags or environment variables may override it. For an explicitly supplied
+when flags or environment variables may override it. Do not run `config show`
+before `multica version` proves the CLI is available. For an explicitly supplied
 server, use that exact target for the workspace check:
 
 ```bash
 multica --server-url <server-url> workspace list --output json
 ```
 
-For a new Cloud setup, offer:
+If the user did not supply a target and no usable target is configured, ask
+whether to use Multica Cloud or a self-hosted deployment. Do not run `setup` or
+`login` before the user chooses. This deployment choice is material even when
+the preceding CLI installation was automatic.
+
+For Multica Cloud, use:
 
 - Server: `https://api.multica.ai`
 - Apps: `https://multica.ai`
 
-For a private target, ask for the exact Apps URL instead of deriving it from an
-API URL. Ask for Server and Apps URLs only when the user explicitly wants a new
-deployment or the CLI reports that setup is incomplete.
+For a self-hosted target, require the exact Server and Apps URLs instead of
+deriving either one. Ask for them only after the user chooses self-hosted, when
+the user explicitly wants a new deployment, or when the CLI reports that setup
+is incomplete. Preserve an existing configured target or an explicit
+user-supplied target without asking the same deployment question again.
 
 ## 3. Login and setup
 
 Run login or setup only when the user explicitly asks to connect, set up, or
-sign in. Before opening a browser, tell the user that the community CLI may
-open one and that
-credentials, verification codes, and consent stay in that browser.
+sign in and the deployment target is resolved. Before opening a browser, give
+one concise notice: authentication may complete automatically when the browser
+already has a valid Web session; credentials, verification codes, and consent
+stay in that browser.
 
 For an existing configured target:
 
@@ -105,10 +119,11 @@ multica --profile <name> setup self-host \
   --app-url https://app.internal.example
 ```
 
-The community CLI may wait for workspace creation when login finds no
-workspace, and it may choose a default during login. Explain this before the
-command; do not treat an opened browser as success and do not fill a browser
-form for the user.
+The community CLI may wait for workspace creation when login finds no workspace,
+and it may choose a default during login. Do not narrate those internal branches
+in advance, treat an opened browser as success, or fill a browser form for the
+user. Surface only a required user interaction, a material choice, an observed
+failure, or the final verified workspace result.
 
 Never request passwords, verification codes, or tokens in chat, and never print
 them or their prefixes. For token login, use the community CLI's prompt form rather

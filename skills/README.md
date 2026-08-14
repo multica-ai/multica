@@ -71,7 +71,8 @@ GitHub Release into the host's Skill location:
 After installation or upgrade, restart the host or begin a new session if it
 does not refresh Skills automatically. The Skill never updates its own files.
 
-The skill uses the Multica CLI. It checks for the CLI before connecting and asks
-for approval before installing it. CLI installers are documented in
-[`apps/docs/content/docs/cli.mdx`](../apps/docs/content/docs/cli.mdx), including
-macOS, Linux, Homebrew, and Windows PowerShell.
+The skill uses the Multica CLI. An explicit connection or sign-in request lets
+it install a missing official CLI automatically; first-time setup still asks
+the user to choose Multica Cloud or a self-hosted deployment. CLI installers
+are documented in [`apps/docs/content/docs/cli.mdx`](../apps/docs/content/docs/cli.mdx),
+including macOS, Linux, Homebrew, and Windows PowerShell.

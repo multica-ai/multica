@@ -3,7 +3,8 @@
 Use this workflow for an open-ended business outcome, workflow or automation
 design, resource selection, task decomposition, or multiple dependent
 mutations. Route by intent, not resource count. Keep a concrete action on a
-known target in the direct-operation flow.
+known target in the direct-operation flow. This is business execution
+orchestration, not a software development project.
 
 ## Clarify and decompose
 
@@ -97,6 +98,17 @@ that description is the task prompt used for created Issues. Do not depend on a
 separate example Issue being copied later.
 
 ## Present and confirm the plan
+
+The in-chat orchestration design is the execution plan. Present it, get one
+user confirmation, and then move directly to execution. After the user confirms
+it, execute the plan directly in dependency order. Do not insert a repository
+documentation, specification review, or software implementation-planning stage
+between confirmation and execution.
+
+Create a repository design document, specification, or implementation plan only
+when the user explicitly requests that artifact. Such a document records the
+approved orchestration; it is not a second approval gate unless the user asks
+for another review.
 
 Before any write, present one complete plan containing:
 

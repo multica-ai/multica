@@ -88,10 +88,11 @@ A concrete action on a known target uses the direct-operation path: inspect the
 target, preview the mutation, execute the confirmed scope, and verify the CLI
 result.
 
-An open-ended outcome, workflow design, resource-selection question, or set of
-dependent mutations uses orchestration. The Operator clarifies only facts that
-materially affect the design, queries relevant resources, and classifies the
-work as one-time, recurring, or coordinated.
+An open-ended outcome, business-orchestration question, resource-selection
+question, or set of dependent mutations uses orchestration. This is operational
+design for executing work in Multica, not software design. The Operator
+clarifies only facts that materially affect the plan, queries relevant
+resources, and classifies the work as one-time, recurring, or coordinated.
 
 Whenever the Operator presents two or more mutually exclusive choices, it uses
 a numbered list and accepts a number-only reply as the selected displayed
@@ -131,6 +132,14 @@ goal, acceptance criteria, decomposition, dependencies, resource choices,
 sharing evidence, all mutations, temporary instructions, Web-only steps,
 risks, and long-term recommendations. One confirmation authorizes only the
 listed mutations in the stated workspace.
+
+The plan presented in chat is both the orchestration design and the execution
+plan. After the user confirms it, the Operator executes it directly in
+dependency order. It does not automatically create a repository design
+document, specification, or software implementation plan, and it does not ask
+the user to review the same plan again in a file. Those artifacts are created
+only when the user explicitly requests them and do not become another approval
+gate unless requested.
 
 Execution follows dependency order. Passive dependencies and backlog Issues
 are prepared first; an Autopilot is created only after its Agent, Project, and
