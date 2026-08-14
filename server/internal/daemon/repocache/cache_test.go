@@ -1100,6 +1100,9 @@ func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
 	if !strings.Contains(exclude, ".opencode\n") {
 		t.Fatalf("expected .git/info/exclude to contain .opencode, got:\n%s", exclude)
 	}
+	if !strings.Contains(exclude, ".codeartsdoer\n") {
+		t.Fatalf("expected .git/info/exclude to contain .codeartsdoer, got:\n%s", exclude)
+	}
 	if strings.Contains(exclude, ".config/opencode") {
 		t.Fatalf("expected .git/info/exclude to not contain stale .config/opencode, got:\n%s", exclude)
 	}

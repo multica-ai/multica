@@ -2644,7 +2644,8 @@ func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, wo
 	// this host (MUL-3284). This is best-effort: a fetch error (e.g. an older
 	// server returning 404) must never fail registration — the daemon simply
 	// continues with the built-in runtimes it already collected. A profile
-	// whose command_name is not on PATH is skipped (the host doesn't have it).
+	// whose command_name is neither on PATH nor already discovered for the same
+	// protocol family is skipped (the host doesn't have it).
 	//
 	// profileSig is a content hash of the workspace's profile list captured
 	// here so an on-demand server notification can skip re-registration when
@@ -2733,14 +2734,14 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 
 // appendProfileRuntimes fetches the workspace's enabled custom runtime
 // profiles (MUL-3284) and appends a runtime registration entry for each one
-// whose command_name resolves on this host's PATH. For each resolved profile
+// whose command_name resolves on this host. For each resolved profile
 // it records the absolute command path and fixed args keyed by profile_id (via
 // recordProfileLaunch) so runTask can later launch the custom executable for a
 // claimed task.
 //
 // Best-effort by contract: any error fetching profiles (older server, network
 // blip) is logged and swallowed — registration proceeds with the built-in
-// runtimes already collected. A profile whose command is not on PATH is
+// runtimes already collected. A profile whose command cannot be resolved is
 // skipped with an Info log (this host simply doesn't have that command).
 //
 // The registration entry mirrors the built-in shape: name = display_name
@@ -2795,9 +2796,11 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		// that isn't on the daemon's PATH, or selects between multiple
 		// installs on the same host. A configured-but-unusable override
 		// (deleted/moved/non-executable) is logged and falls back to PATH
-		// rather than registering a runtime that can't launch. When neither
-		// the override nor PATH resolves, the profile is skipped (existing
-		// behavior).
+		// and then to the matching provider command already discovered at
+		// daemon startup. The latter matters for GUI-launched daemons whose
+		// environment cannot resolve a CLI directly even though built-in
+		// discovery found it through a login shell or provider install path.
+		// When none of those sources resolves, the profile is skipped.
 		var resolved string
 		var failureReason string
 		if override := strings.TrimSpace(d.cfg.ProfileCommandOverrides[profile.ID]); override != "" {
@@ -2815,23 +2818,31 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		if resolved == "" {
 			r, err := lookPath(profile.CommandName)
 			if err != nil {
-				// Host doesn't have this command — expected on hosts that aren't
-				// provisioned for this profile. Skip without failing.
-				d.logger.Info("skip custom runtime profile: command not found on PATH",
-					"workspace_id", workspaceID, "profile_id", profile.ID,
-					"command_name", profile.CommandName, "error", err)
-				if failureReason != "" {
-					failureReason += "; "
+				if discovered, ok := d.agents()[profile.ProtocolFamily]; ok && discovered.Command == profile.CommandName && discovered.Path != "" {
+					resolved = discovered.Path
+					d.logger.Info("custom runtime profile: using discovered provider command path",
+						"workspace_id", workspaceID, "profile_id", profile.ID,
+						"protocol_family", profile.ProtocolFamily, "command_path", resolved)
+				} else {
+					// Host doesn't have this command — expected on hosts that aren't
+					// provisioned for this profile. Skip without failing.
+					d.logger.Info("skip custom runtime profile: command not found on PATH or provider discovery",
+						"workspace_id", workspaceID, "profile_id", profile.ID,
+						"command_name", profile.CommandName, "error", err)
+					if failureReason != "" {
+						failureReason += "; "
+					}
+					failureReason += "command not found on PATH or provider discovery: " + profile.CommandName
+					*failedProfiles = append(*failedProfiles, map[string]string{
+						"profile_id":   profile.ID,
+						"command_name": profile.CommandName,
+						"reason":       failureReason,
+					})
+					continue
 				}
-				failureReason += "command not found on PATH: " + profile.CommandName
-				*failedProfiles = append(*failedProfiles, map[string]string{
-					"profile_id":   profile.ID,
-					"command_name": profile.CommandName,
-					"reason":       failureReason,
-				})
-				continue
+			} else {
+				resolved = r
 			}
-			resolved = r
 		}
 		// Best-effort version detection; an empty version is acceptable. The
 		// probe carries the profile's fixed_args so a wrapper reports the
@@ -4131,6 +4142,19 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	if catalog.Fallback {
 		d.logger.Warn("model discovery fell back to a static catalog; reporting it as non-authoritative",
 			"runtime_id", rt.ID, "provider", rt.Provider, "path", execPath, "count", len(models))
+	}
+	if rt.Provider == "codearts" && len(models) == 0 {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			configuredModels, configErr := loadCodeArtsConfiguredModels(home)
+			if configErr != nil {
+				d.logger.Warn("CodeArts custom model discovery failed",
+					"runtime_id", rt.ID, "path", codeArtsUserConfigPath(home), "error", configErr)
+			} else if len(configuredModels) > 0 {
+				models = configuredModels
+				d.logger.Info("CodeArts model discovery used user-configured providers",
+					"runtime_id", rt.ID, "path", codeArtsUserConfigPath(home), "count", len(models))
+			}
+		}
 	}
 
 	// Wire format matches handler.ModelEntry. Use a struct (not
@@ -5664,6 +5688,7 @@ func taskRootDirParams(workspacesRoot string, task Task) execenv.RootDirParams {
 // this map at init so their display names stay in lockstep with the
 // descriptor.
 var runtimeDisplayNameOverrides = map[string]string{
+	"codearts":   "CodeArts",
 	"dsh":        "DeepSeek Harness",
 	"traecli":    "Trae",
 	"grok":       "Grok",
@@ -7559,7 +7584,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
 
 	var idleWatchdogTimeout time.Duration
-	if provider == "opencode" {
+	if provider == "opencode" || provider == "codearts" {
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
 	execOpts := agent.ExecOptions{
@@ -7999,7 +8024,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 //     Not every backend can answer, though, and a false ResumeRejected means
 //     different things depending on who produced it: "checked, not a
 //     rejection" from a capable backend, "could not tell" from one of the
-//     five in agent.ResumeRejectionUndetectable. That is why provider is a
+//     backends in agent.ResumeRejectionUndetectable. That is why provider is a
 //     parameter — without it the compatibility branch below would silently
 //     apply to every backend, second-guessing capable ones by exclusion.
 //
@@ -8078,14 +8103,14 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 	if !agent.ResumeRejectionUndetectable(provider) {
 		return false
 	}
-	// antigravity, copilot, cursor, deveco and opencode scrape SessionID out
+	// antigravity, codearts, copilot, cursor, deveco and opencode scrape SessionID out
 	// of stream output and have no rejection string captured anywhere, so an
 	// empty SessionID is the only thing they can offer. It proves no session
 	// was established this run, which is exactly what the gate relied on for
 	// every backend before ResumeRejected existed; keeping it preserves their
 	// recovery instead of silently removing it.
 	//
-	// Inventing rejection phrases for these five would be the alternative,
+	// Inventing rejection phrases for these backends would be the alternative,
 	// and it is worse: no real output has been captured for any of them, and
 	// a false positive discards a recoverable session pointer.
 	return result.SessionID == "" && freshSessionMayHelp(result.Error)

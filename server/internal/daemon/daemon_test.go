@@ -2993,7 +2993,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 	// the compat path exists to catch.
 	result := agent.Result{Status: "failed", Error: "exit status 1"}
 
-	undetectable := []string{"antigravity", "copilot", "cursor", "deveco", "opencode"}
+	undetectable := []string{"antigravity", "codearts", "copilot", "cursor", "deveco", "opencode"}
 	for _, provider := range undetectable {
 		t.Run(provider+" retries", func(t *testing.T) {
 			t.Parallel()
@@ -5506,8 +5506,8 @@ func TestExecuteAndDrain_RedactsNestedToolInputBeforeSending(t *testing.T) {
 // session-shaped (a fresh session resolves it), yet it must NOT count as one
 // of the "fresh session is not the answer" buckets — in particular not
 // missing-config — or the in-turn fresh-session retry on the five
-// ResumeRejectionUndetectable backends (antigravity, copilot, cursor, deveco,
-// opencode) would silently stop firing and the dead session would be resumed
+// ResumeRejectionUndetectable backends (antigravity, codearts, copilot, cursor,
+// deveco, opencode) would silently stop firing and the dead session would be resumed
 // into the same provider error forever.
 func TestFreshSessionMayHelp(t *testing.T) {
 	t.Parallel()

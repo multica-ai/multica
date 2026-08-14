@@ -7,11 +7,12 @@ import (
 
 // BuiltinRuntime describes a built-in runtime identity that the daemon probes
 // and registers automatically — independent of the custom runtime profile
-// protocol_family whitelist. Multiple runtime identities can share one
-// protocol family (e.g. both "pi" and "omp" use the "pi" protocol backend).
+// protocol_family whitelist. A runtime identity shares an existing protocol
+// family while retaining its own executable, branding, skills, and models
+// (for example, "omp" uses the "pi" backend).
 //
-// The descriptor is the single declaration site for a runtime identity:
-// agents_probe.go, config.go, daemon.go display-name overrides, execenv
+// The descriptor is the single declaration site for a compatible runtime
+// identity: agents_probe.go, config.go, daemon.go display-name overrides, execenv
 // skill/config paths, local_skills.go, ListModels, and the frontend display
 // maps all derive from this. Adding a new compatible fork of an existing
 // runtime is a descriptor entry, not a cross-stack change.
@@ -21,10 +22,9 @@ type BuiltinRuntime struct {
 	// the runtime_profile.protocol_family CHECK constraint.
 	ID string
 
-	// ProtocolFamily is the execution backend this runtime dispatches to.
-	// It MUST be in SupportedTypes. NewRuntime builds that family's backend
-	// via New(), then applies this descriptor's ID-specific defaults
-	// (executable, label) to it.
+	// ProtocolFamily is the execution backend this runtime dispatches to. It MUST
+	// be in SupportedTypes. NewRuntime builds that family's backend via New(), then
+	// applies this descriptor's ID-specific defaults (executable, label) to it.
 	ProtocolFamily string
 
 	// DefaultCommand is the bare CLI name the probe looks up on PATH
@@ -77,13 +77,11 @@ type BuiltinRuntime struct {
 type ModelDiscoveryFunc func(ctx context.Context, runtimeCmd Command) ([]Model, error)
 
 // BuiltinRuntimes is the registry of built-in runtime identities that are
-// NOT in SupportedTypes (they are protocol-family derivatives, not families
-// themselves). The daemon probes each one independently and dispatches it
-// to its protocol family's backend.
+// NOT in SupportedTypes. The daemon probes each one independently and
+// dispatches it to a shared protocol-family backend.
 //
 // A runtime identity appears here when it needs its own probe/display/skills
-// but reuses an existing backend's protocol. The first entry is omp (oh-my-pi):
-// a separate CLI that speaks the pi JSON event protocol.
+// without becoming a custom runtime protocol family. Omp shares pi's backend.
 var BuiltinRuntimes = []BuiltinRuntime{
 	{
 		ID:                "omp",
@@ -159,10 +157,9 @@ func ResolveBackend(provider string, cfg Config) (Backend, error) {
 }
 
 // NewRuntime creates a Backend for a built-in runtime identity (e.g. "omp").
-// It builds the descriptor's protocol family backend via New(), then applies
-// the per-runtime overrides through the backendOverrideApplicator interface.
-// This is the production entry point for runtime identities; New() is
-// family-only and rejects runtime ids.
+// It builds the protocol backend via New() and applies descriptor overrides.
+// This is the production entry point for runtime identities; New() remains
+// family-only.
 //
 // Fails closed: if the protocol family backend does not implement
 // backendOverrideApplicator, the descriptor's overrides cannot be applied and
@@ -172,6 +169,9 @@ func NewRuntime(runtimeID string, cfg Config) (Backend, error) {
 	desc, ok := BuiltinRuntimeByID(runtimeID)
 	if !ok {
 		return nil, fmt.Errorf("unknown runtime identity: %q", runtimeID)
+	}
+	if desc.ProtocolFamily == "" {
+		return nil, fmt.Errorf("runtime %q: protocol family is not configured", runtimeID)
 	}
 	cfg.provider = runtimeID
 	backend, err := New(desc.ProtocolFamily, cfg)

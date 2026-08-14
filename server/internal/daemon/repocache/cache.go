@@ -61,6 +61,7 @@ var agentGitExcludePatterns = []string{
 	"AGENTS.md",
 	".claude",
 	".opencode",
+	".codeartsdoer",
 	".deveco",
 	"CODEBUDDY.md",
 	".codebuddy",
