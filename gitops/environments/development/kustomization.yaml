@@ -43,4 +43,4 @@ images:
     newTag: "ce88c110"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "f432ff3e"
+    newTag: "ce88c110"
