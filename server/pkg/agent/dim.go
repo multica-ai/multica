@@ -105,25 +105,26 @@ func extractACPAgentVersion(result json.RawMessage) string {
 
 // dimVersionSupported reports whether the dim version meets the minimum
 // required for cross-run session resume. Uses semver-ish comparison
-// (major.minor.patch); a non-parseable version is treated as supported so
-// development builds are not blocked.
+// (major.minor.patch). Fail-closed: an empty or non-parseable version is
+// rejected (returns false) rather than assumed supported, so a runtime that
+// cannot prove it is >= 0.3.10 is blocked from session resume (review #3).
 func dimVersionSupported(version string) bool {
 	version = strings.TrimPrefix(version, "v")
 	parts := strings.Split(version, ".")
 	if len(parts) < 3 {
-		return true // unparseable — don't block dev/unknown builds
+		return false // unparseable — fail-closed, do not assume supported
 	}
 	var maj, min, pat int
 	if _, err := fmt.Sscanf(parts[0], "%d", &maj); err != nil {
-		return true
+		return false
 	}
 	if _, err := fmt.Sscanf(parts[1], "%d", &min); err != nil {
-		return true
+		return false
 	}
 	// patch may have a suffix (e.g. "10-beta"); Sscanf stops at the first
 	// non-digit, which is what we want.
 	if _, err := fmt.Sscanf(parts[2], "%d", &pat); err != nil {
-		return true
+		return false
 	}
 	var reqMaj, reqMin, reqPat int
 	fmt.Sscanf(dimMinVersion, "%d.%d.%d", &reqMaj, &reqMin, &reqPat)
@@ -348,14 +349,21 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			return
 		}
 
-		// Require dim >= 0.3.10: earlier builds bind sessions to the creating
-		// process permanently, so cross-run session/load fails with "held by
-		// another process" and follow-up runs lose context. 0.3.10 releases
-		// the lock on graceful exit (session/close) or after ~5s.
+		// Require dim >= 0.3.10 (fail-closed): earlier builds bind sessions to
+		// the creating process permanently, so cross-run session/load fails with
+		// "held by another process" and follow-up runs lose context. 0.3.10
+		// releases the lock on graceful exit (session/close) or after ~5s. A
+		// version that is empty or cannot be parsed is rejected rather than
+		// assumed supported, so a runtime that cannot prove it is >= 0.3.10 is
+		// blocked from session resume (review #3).
 		dimVersion := extractACPAgentVersion(initResult)
-		if dimVersion != "" && !dimVersionSupported(dimVersion) {
+		if !dimVersionSupported(dimVersion) {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("dim %s is too old: cross-run session resume requires dim >= 0.3.10 (0.3.10+ releases the per-process session lock on exit); please upgrade dimcode", dimVersion)
+			if dimVersion == "" {
+				finalError = "dim did not report an agent version: cross-run session resume requires dim >= 0.3.10 (0.3.10+ releases the per-process session lock on exit); please upgrade dimcode"
+			} else {
+				finalError = fmt.Sprintf("dim %s is too old: cross-run session resume requires dim >= 0.3.10 (0.3.10+ releases the per-process session lock on exit); please upgrade dimcode", dimVersion)
+			}
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -383,6 +391,7 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		// to guard against a partially configured session being resumed
 		// (review #4).
 		var freshSession bool
+		var sessionResult json.RawMessage
 		if opts.ResumeSessionID != "" {
 			// Retry session/load when the prior process's lock has not been
 			// released yet ("held by another process"). With graceful
@@ -447,6 +456,7 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			}
 			var changed bool
 			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
+			sessionResult = result
 			if changed {
 				b.cfg.Logger.Warn("dim returned a different session id on resume — original was likely lost; continuing with the new id",
 					"backend", "dim",
@@ -478,6 +488,7 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 				return
 			}
 			sessionID = extractACPSessionID(result)
+			sessionResult = result
 			if sessionID == "" {
 				finalStatus = "failed"
 				finalError = "dim session/new returned no session ID"
@@ -549,6 +560,13 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			}
 			b.cfg.Logger.Info("dim session model set", "model", opts.Model)
 		}
+
+		// Apply the thinking level (if any) via the ACP session config. Dim
+		// advertises a `thought_level` configOption in session/new (auto/high/
+		// max), so it joins the acpCatalogThinkingProviders list. The effort
+		// option may depend on the current model, so apply it after set_model.
+		applyACPEffortOption(runCtx, c.request, "dim", b.cfg.Logger,
+			sessionID, sessionResult, opts.ThinkingLevel, opts.Model == "")
 
 		userText := prompt
 		if opts.SystemPrompt != "" {

@@ -156,6 +156,7 @@ var allFileBasedProviders = []string{
 	"kimi",
 	"reasonix",
 	"dsh",
+	"dim",
 	"kiro",
 	"antigravity",
 	"qwen",

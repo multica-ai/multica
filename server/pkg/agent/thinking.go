@@ -825,6 +825,11 @@ var acpCatalogThinkingProviders = map[string]bool{
 	// version string: one provider, two binaries, and the session answers the
 	// capability question directly.
 	"hermes": true,
+	// dim (dimcode 0.3.10+): session/new advertises option id `thought_level`
+	// (category `thought_level`) with options auto/high/max. Execute calls
+	// applyACPEffortOption to set it via session/set_config_option. Verified
+	// against dimcode 0.3.10.
+	"dim": true,
 }
 
 // usesDynamicThinkingCatalog reports whether a provider's effort vocabulary is

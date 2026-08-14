@@ -89,7 +89,11 @@ while IFS= read -r line; do
       fi
       ;;
     *'"method":"session/set_model"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      if [ -n "$DIM_MODEL_FAIL" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"set_model failed"}}\n' "$id"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      fi
       ;;
     *'"method":"session/prompt"'*)
       # When DIM_PROMPT_NO_STOP is set, omit stopReason so extractPromptResult
@@ -560,5 +564,79 @@ func TestDimConfigFailThenResumeReestablishes(t *testing.T) {
 	count := strings.Count(reqs, "set_config_option")
 	if count < 3 {
 		t.Fatalf("expected at least 3 set_config_option calls (1 fail + 2 re-apply on resume), got %d", count)
+	}
+}
+
+// TestDimVersionSupported pins the fail-closed version gate (review #3): only
+// a parseable semver >= 0.3.10 is accepted. Empty, non-parseable, and
+// too-short versions are rejected so a runtime that cannot prove it meets the
+// minimum is blocked from session resume.
+func TestDimVersionSupported(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		version string
+		want    bool
+	}{
+		{"0.3.10", true},
+		{"0.3.9", false},
+		{"0.4.0", true},
+		{"1.0.0", true},
+		{"", false},
+		{"abc", false},
+		{"0.3", false},
+	}
+	for _, tc := range cases {
+		if got := dimVersionSupported(tc.version); got != tc.want {
+			t.Errorf("dimVersionSupported(%q) = %v, want %v", tc.version, got, tc.want)
+		}
+	}
+}
+
+// TestDimSetModelFailClosesSession verifies that when session/set_model fails,
+// the backend sends session/close before returning the error, so a partially
+// configured session (permission/mode set, model not) is not left for the next
+// resume to inherit (review #5).
+func TestDimSetModelFailClosesSession(t *testing.T) {
+	t.Parallel()
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	b := newDimTestBackendWithEnv(t, requestsFile, map[string]string{"DIM_MODEL_FAIL": "1"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:     t.TempDir(),
+		Model:   "some-model",
+		Timeout: 15 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+	}
+
+	reqs := readDimRequests(t, requestsFile)
+	// session/set_model must have been attempted with the requested model.
+	if !strings.Contains(reqs, "session/set_model") {
+		t.Fatal("expected a session/set_model attempt")
+	}
+	if !strings.Contains(reqs, `"modelId":"some-model"`) {
+		t.Fatal("expected session/set_model to carry the requested model id")
+	}
+	// session/close must have been sent to clean up the partially configured
+	// session (permission/mode set, model not) so it is not resumed later.
+	if !strings.Contains(reqs, "session/close") {
+		t.Fatal("expected session/close after set_model failure to prevent a partially configured resume")
+	}
+	// The prompt must NOT have been sent — the model switch failed, so the
+	// turn aborts before session/prompt.
+	if strings.Contains(reqs, "session/prompt") {
+		t.Fatal("backend must not send session/prompt after set_model failure")
 	}
 }
