@@ -224,7 +224,7 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"authMethods":[{"id":"cached_token","name":"Cached login"},{"id":"xai.api_key","name":"API key"}],"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"authMethods":[{"id":"cached_token","name":"Cached login"},{"id":"xai.api_key","name":"API key"}],"agentInfo":{"name":"fake","version":"0.3.10"},"agentCapabilities":{"loadSession":true}}}\n' "$id"
       ;;
     *'"method":"authenticate"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
