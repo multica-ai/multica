@@ -44,7 +44,7 @@ type QianwenService interface {
 	GetInWorkspace(context.Context, pgtype.UUID, pgtype.UUID) (db.ChannelInstallation, error)
 	MintPairingCode(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) (qianwen.PairingCodeResult, error)
 	RedeemPairingCode(context.Context, string, string, qianwen.PairingRedeemRequest) (qianwen.PairingBindingResult, error)
-	Revoke(context.Context, pgtype.UUID) error
+	Revoke(context.Context, pgtype.UUID, pgtype.UUID) error
 	UnbindCurrentUser(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) error
 	Submit(context.Context, string, string, qianwen.SubmitInvocation) (qianwen.SubmitResult, error)
 	Status(context.Context, string, string, qianwen.StatusInvocation) (qianwen.RequestStatus, error)
@@ -476,7 +476,7 @@ func (h *Handler) RevokeQianwenInstallation(w http.ResponseWriter, r *http.Reque
 	if !h.canManageAgent(w, r, agent) {
 		return
 	}
-	if err := h.Qianwen.Revoke(r.Context(), installationID); err != nil {
+	if err := h.Qianwen.Revoke(r.Context(), workspaceID, installationID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to revoke qianwen installation")
 		return
 	}
@@ -724,7 +724,11 @@ func (h *Handler) writeQianwenServiceError(w http.ResponseWriter, r *http.Reques
 }
 
 func qianwenBearerToken(r *http.Request) (string, bool) {
-	scheme, token, found := strings.Cut(r.Header.Get("Authorization"), " ")
+	values := r.Header.Values("Authorization")
+	if len(values) != 1 {
+		return "", false
+	}
+	scheme, token, found := strings.Cut(values[0], " ")
 	if !found || !strings.EqualFold(scheme, "Bearer") || token == "" || strings.ContainsAny(token, " \t\r\n") {
 		return "", false
 	}

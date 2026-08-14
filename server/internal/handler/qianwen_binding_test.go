@@ -78,7 +78,7 @@ func installQianwenBindingHandlerFixture(
 		t.Fatalf("install Qianwen binding-management fixture: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = service.Revoke(context.Background(), installed.Installation.ID)
+		_ = service.Revoke(context.Background(), util.MustParseUUID(testWorkspaceID), installed.Installation.ID)
 		_, _ = testPool.Exec(
 			context.Background(),
 			`DELETE FROM channel_installation WHERE id = $1`,

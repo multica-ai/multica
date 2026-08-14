@@ -131,7 +131,7 @@ type serviceQueries interface {
 	ListChannelInstallationsByWorkspace(context.Context, db.ListChannelInstallationsByWorkspaceParams) ([]db.ChannelInstallation, error)
 	GetChannelInstallationInWorkspace(context.Context, db.GetChannelInstallationInWorkspaceParams) (db.ChannelInstallation, error)
 	GetChannelInstallationByAppID(context.Context, db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error)
-	RevokeQianwenInstallation(context.Context, pgtype.UUID) (int64, error)
+	RevokeQianwenInstallation(context.Context, db.RevokeQianwenInstallationParams) (int64, error)
 	GetMemberByUserAndWorkspace(context.Context, db.GetMemberByUserAndWorkspaceParams) (db.Member, error)
 	GetActiveQianwenInvocationUser(context.Context, db.GetActiveQianwenInvocationUserParams) (pgtype.UUID, error)
 	ClaimQianwenRequest(context.Context, db.ClaimQianwenRequestParams) (db.QianwenSkillRequest, error)
@@ -218,7 +218,9 @@ func (s *Service) PairingSupported() bool {
 
 // InstallPersonal creates a private Skill connection for an agent or
 // reactivates one that was explicitly revoked. An active installation is never
-// mutated here because published Qianwen Tool credentials cannot be edited.
+// mutated here because silently replacing its credential would break an
+// already configured Tool. Provider-side credential replacement remains an
+// account-level acceptance gate.
 func (s *Service) InstallPersonal(ctx context.Context, workspaceID, agentID, installerID pgtype.UUID) (InstallationResult, error) {
 	if !s.PairingSupported() {
 		return InstallationResult{}, ErrPairingUnavailable
@@ -281,8 +283,11 @@ func (s *Service) GetInWorkspace(ctx context.Context, id, workspaceID pgtype.UUI
 	return row, err
 }
 
-func (s *Service) Revoke(ctx context.Context, id pgtype.UUID) error {
-	rows, err := s.q.RevokeQianwenInstallation(ctx, id)
+func (s *Service) Revoke(ctx context.Context, workspaceID, id pgtype.UUID) error {
+	rows, err := s.q.RevokeQianwenInstallation(ctx, db.RevokeQianwenInstallationParams{
+		InstallationID: id,
+		WorkspaceID:    workspaceID,
+	})
 	if err != nil {
 		return fmt.Errorf("revoke qianwen installation: %w", err)
 	}

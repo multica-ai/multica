@@ -8,10 +8,12 @@
 -- exist and be active.
 
 -- name: InstallQianwenPersonal :one
--- A live private Skill credential is immutable from the install surface. The
--- provider does not allow a published Tool to be edited, so an active conflict
--- returns no row rather than silently replacing qwc_/qws_. A revoked row may be
--- reactivated after RevokeQianwenInstallation has cleared its pairing authority.
+-- A live private Skill credential is immutable from the install surface so a
+-- caller cannot silently invalidate an already configured Tool. An active
+-- conflict returns no row rather than replacing qwc_/qws_; provider-side
+-- credential replacement remains an account-level acceptance gate. A revoked
+-- row may be reactivated after RevokeQianwenInstallation has cleared its pairing
+-- authority.
 -- Installation shares the member-removal advisory lock, then locks workspace,
 -- agent, and active membership in the repository-wide lifecycle order. This
 -- fences every no-FK parent sweep: either install commits first and teardown
@@ -164,6 +166,7 @@ WITH revoked AS MATERIALIZED (
     UPDATE channel_installation
     SET status = 'revoked', updated_at = now()
     WHERE channel_installation.id = sqlc.arg('installation_id')
+      AND channel_installation.workspace_id = sqlc.arg('workspace_id')
       AND channel_installation.channel_type = 'qianwen'
     RETURNING channel_installation.id
 ), cleared_codes AS (

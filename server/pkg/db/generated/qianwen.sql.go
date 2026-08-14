@@ -959,10 +959,12 @@ type InstallQianwenPersonalParams struct {
 // rows were retired. Installation lifecycle cleanup explicitly removes
 // orphaned ledger rows; public status reads require the exact installation to
 // exist and be active.
-// A live private Skill credential is immutable from the install surface. The
-// provider does not allow a published Tool to be edited, so an active conflict
-// returns no row rather than silently replacing qwc_/qws_. A revoked row may be
-// reactivated after RevokeQianwenInstallation has cleared its pairing authority.
+// A live private Skill credential is immutable from the install surface so a
+// caller cannot silently invalidate an already configured Tool. An active
+// conflict returns no row rather than replacing qwc_/qws_; provider-side
+// credential replacement remains an account-level acceptance gate. A revoked
+// row may be reactivated after RevokeQianwenInstallation has cleared its pairing
+// authority.
 // Installation shares the member-removal advisory lock, then locks workspace,
 // agent, and active membership in the repository-wide lifecycle order. This
 // fences every no-FK parent sweep: either install commits first and teardown
@@ -1254,6 +1256,7 @@ WITH revoked AS MATERIALIZED (
     UPDATE channel_installation
     SET status = 'revoked', updated_at = now()
     WHERE channel_installation.id = $1
+      AND channel_installation.workspace_id = $2
       AND channel_installation.channel_type = 'qianwen'
     RETURNING channel_installation.id
 ), cleared_codes AS (
@@ -1272,14 +1275,19 @@ WITH revoked AS MATERIALIZED (
 SELECT count(*)::bigint FROM revoked
 `
 
+type RevokeQianwenInstallationParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+}
+
 // Revocation is the authority boundary for the private Skill credential. The
 // installation row is updated first (the same parent-before-child lock order
 // used by redeem), then every short-lived pairing capability and established
 // Qianwen identity binding is removed in the same transaction. Durable task
 // request rows intentionally survive revocation so an external retry can never
 // turn an already accepted request id into a second run.
-func (q *Queries) RevokeQianwenInstallation(ctx context.Context, installationID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, revokeQianwenInstallation, installationID)
+func (q *Queries) RevokeQianwenInstallation(ctx context.Context, arg RevokeQianwenInstallationParams) (int64, error) {
+	row := q.db.QueryRow(ctx, revokeQianwenInstallation, arg.InstallationID, arg.WorkspaceID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err

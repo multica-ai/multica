@@ -1126,7 +1126,7 @@ func TestQianwenServiceDBRevokeBeforeFinalizeRollsBackSubmit(t *testing.T) {
 
 	done := startQianwenSubmit(ctx, service, fixture.installation.ConnectionID, fixture.installation.AccessToken, requestID, query)
 	barrier.wait(t)
-	if err := fixture.service.Revoke(ctx, fixture.installation.Installation.ID); err != nil {
+	if err := fixture.service.Revoke(ctx, fixture.workspaceID, fixture.installation.Installation.ID); err != nil {
 		t.Fatalf("revoke installation before finalize: %v", err)
 	}
 	barrier.open()
@@ -1194,7 +1194,7 @@ func TestQianwenServiceDBConcurrentReconnectHasOneCredentialWinner(t *testing.T)
 	fixture := newQianwenServiceDBFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := fixture.service.Revoke(ctx, fixture.installation.Installation.ID); err != nil {
+	if err := fixture.service.Revoke(ctx, fixture.workspaceID, fixture.installation.Installation.ID); err != nil {
 		t.Fatalf("revoke before concurrent reconnect: %v", err)
 	}
 
@@ -1254,7 +1254,7 @@ func TestQianwenServiceDBWorkspaceDeleteFencesReinstall(t *testing.T) {
 	fixture := newQianwenServiceDBFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := fixture.service.Revoke(ctx, fixture.installation.Installation.ID); err != nil {
+	if err := fixture.service.Revoke(ctx, fixture.workspaceID, fixture.installation.Installation.ID); err != nil {
 		t.Fatalf("revoke before reconnect race: %v", err)
 	}
 
@@ -1351,7 +1351,7 @@ func TestQianwenServiceDBAgentArchiveFencesReinstall(t *testing.T) {
 	fixture := newQianwenServiceDBFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := fixture.service.Revoke(ctx, fixture.installation.Installation.ID); err != nil {
+	if err := fixture.service.Revoke(ctx, fixture.workspaceID, fixture.installation.Installation.ID); err != nil {
 		t.Fatalf("revoke before agent archive race: %v", err)
 	}
 

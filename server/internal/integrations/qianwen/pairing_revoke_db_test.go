@@ -50,7 +50,7 @@ func TestRevokeQianwenInstallationAtomicallyRemovesPairingAuthority(t *testing.T
 		t.Fatalf("pending MintPairingCode() error = %v", err)
 	}
 
-	if err := fixture.service.Revoke(ctx, fixture.installation.Installation.ID); err != nil {
+	if err := fixture.service.Revoke(ctx, fixture.workspaceID, fixture.installation.Installation.ID); err != nil {
 		t.Fatalf("Revoke() error = %v", err)
 	}
 
@@ -73,5 +73,25 @@ func TestRevokeQianwenInstallationAtomicallyRemovesPairingAuthority(t *testing.T
 	}
 	if status != "revoked" || codes != 0 || attempts != 0 || nonces != 0 || bindings != 0 {
 		t.Fatalf("revoked state status=%q codes=%d attempts=%d nonces=%d bindings=%d, want revoked and all pairing authority removed", status, codes, attempts, nonces, bindings)
+	}
+}
+
+func TestRevokeQianwenInstallationRejectsWrongWorkspace(t *testing.T) {
+	fixture := newQianwenServiceDBFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	wrongWorkspaceID := fixture.workspaceID
+	wrongWorkspaceID.Bytes[0] ^= 0xff
+	if err := fixture.service.Revoke(ctx, wrongWorkspaceID, fixture.installation.Installation.ID); !errors.Is(err, ErrInstallationNotFound) {
+		t.Fatalf("Revoke() error = %v, want ErrInstallationNotFound", err)
+	}
+
+	installation, err := fixture.service.GetInWorkspace(ctx, fixture.installation.Installation.ID, fixture.workspaceID)
+	if err != nil {
+		t.Fatalf("GetInWorkspace() after rejected revoke error = %v", err)
+	}
+	if installation.Status != "active" {
+		t.Fatalf("installation status = %q, want active", installation.Status)
 	}
 }

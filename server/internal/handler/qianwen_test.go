@@ -36,7 +36,7 @@ type fakeQianwenService struct {
 	getFn              func(context.Context, pgtype.UUID, pgtype.UUID) (db.ChannelInstallation, error)
 	pairFn             func(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) (qianwen.PairingCodeResult, error)
 	redeemFn           func(context.Context, string, string, qianwen.PairingRedeemRequest) (qianwen.PairingBindingResult, error)
-	revokeFn           func(context.Context, pgtype.UUID) error
+	revokeFn           func(context.Context, pgtype.UUID, pgtype.UUID) error
 	submitFn           func(context.Context, string, string, qianwen.SubmitInvocation) (qianwen.SubmitResult, error)
 	statusFn           func(context.Context, string, string, qianwen.StatusInvocation) (qianwen.RequestStatus, error)
 }
@@ -93,11 +93,11 @@ func (f *fakeQianwenService) RedeemPairingCode(ctx context.Context, connectionID
 	return f.redeemFn(ctx, connectionID, token, req)
 }
 
-func (f *fakeQianwenService) Revoke(ctx context.Context, id pgtype.UUID) error {
+func (f *fakeQianwenService) Revoke(ctx context.Context, workspaceID, id pgtype.UUID) error {
 	if f.revokeFn == nil {
 		return nil
 	}
-	return f.revokeFn(ctx, id)
+	return f.revokeFn(ctx, workspaceID, id)
 }
 
 func (f *fakeQianwenService) Submit(ctx context.Context, connectionID, token string, req qianwen.SubmitInvocation) (qianwen.SubmitResult, error) {
@@ -178,6 +178,47 @@ func TestSubmitQianwenRequestRequiresBearer(t *testing.T) {
 	}
 	if len(badCredentialDebt.keys) != 4 {
 		t.Fatalf("bad-credential debt charges = %d, want 4", len(badCredentialDebt.keys))
+	}
+}
+
+func TestSubmitQianwenRequestRejectsDuplicateAuthorizationHeaders(t *testing.T) {
+	called := 0
+	credentialLimiter := &recordingQianwenRateLimiter{allow: true}
+	badCredentialDebt := &recordingQianwenRateLimiter{allow: true}
+	h := &Handler{
+		Qianwen: &fakeQianwenService{
+			submitFn: func(context.Context, string, string, qianwen.SubmitInvocation) (qianwen.SubmitResult, error) {
+				called++
+				return qianwen.SubmitResult{Status: "accepted"}, nil
+			},
+		},
+		WebhookRateLimiter:   credentialLimiter,
+		WebhookIPRateLimiter: badCredentialDebt,
+	}
+	req := qianwenRequest(
+		http.MethodPost,
+		"/api/channels/qianwen/"+qianwenHandlerTestConnectionID+"/requests",
+		`{"request_id":"56a41a0c-cb13-476a-a75b-230792a277e1","query":"run tests"}`,
+		"connectionId",
+		qianwenHandlerTestConnectionID,
+	)
+	req.Header.Add("Authorization", "Bearer "+qianwenHandlerTestAccessToken)
+	req.Header.Add("Authorization", "Bearer "+qianwenHandlerTestOtherToken)
+	w := httptest.NewRecorder()
+
+	h.SubmitQianwenRequest(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+	if called != 0 {
+		t.Fatalf("Submit called %d times for duplicate Authorization headers, want 0", called)
+	}
+	if len(credentialLimiter.keys) != 0 {
+		t.Fatalf("credential limiter received duplicate Authorization header key(s): %q", credentialLimiter.keys)
+	}
+	if len(badCredentialDebt.keys) != 1 {
+		t.Fatalf("bad-credential debt charges = %d, want 1", len(badCredentialDebt.keys))
 	}
 }
 
@@ -877,7 +918,7 @@ func TestQianwenManagementRejectsMachineCredentialActors(t *testing.T) {
 					calls++
 					return qianwen.PairingCodeResult{}, nil
 				},
-				revokeFn: func(context.Context, pgtype.UUID) error {
+				revokeFn: func(context.Context, pgtype.UUID, pgtype.UUID) error {
 					calls++
 					return nil
 				},

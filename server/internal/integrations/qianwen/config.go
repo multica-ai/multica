@@ -44,7 +44,9 @@ type PublicConfig struct {
 // DecodePublicConfig returns only the non-secret connection metadata.
 func DecodePublicConfig(raw json.RawMessage) PublicConfig {
 	var cfg installConfig
-	_ = json.Unmarshal(raw, &cfg)
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return PublicConfig{}
+	}
 	return PublicConfig{ConnectionID: cfg.AppID, Mode: cfg.Mode}
 }
 

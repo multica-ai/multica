@@ -136,7 +136,7 @@ func (f *fakeServiceQueries) GetChannelInstallationByAppID(_ context.Context, ar
 	return f.installation, f.installationErr
 }
 
-func (f *fakeServiceQueries) RevokeQianwenInstallation(context.Context, pgtype.UUID) (int64, error) {
+func (f *fakeServiceQueries) RevokeQianwenInstallation(context.Context, db.RevokeQianwenInstallationParams) (int64, error) {
 	return 1, nil
 }
 
