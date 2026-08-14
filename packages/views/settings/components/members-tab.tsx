@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Clock, X, Mail, Link, Copy, Trash2 } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useOptionalNavigation } from "../../navigation";
 import type { MemberWithUser, MemberRole, Invitation, ShareLink } from "@multica/core/types";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
@@ -50,6 +51,20 @@ const ROLE_ICONS: Record<MemberRole, typeof Crown> = {
   admin: Shield,
   member: User,
 };
+
+// Builds the shareable URL for a share-link invite. Prefers the navigation
+// adapter's getShareableUrl (works on desktop where window.location.origin is
+// not the public web origin), falling back to the browser origin on web.
+function buildShareLinkUrl(
+  navigation: ReturnType<typeof useOptionalNavigation>,
+  code: string,
+): string {
+  const joinPath = `/join?code=${code}`;
+  if (navigation?.getShareableUrl) {
+    return navigation.getShareableUrl(joinPath);
+  }
+  return `${typeof window !== "undefined" ? window.location.origin : ""}${joinPath}`;
+}
 
 function useRoleLabels() {
   const { t } = useT("settings");
@@ -241,7 +256,8 @@ function ShareLinkRow({
   const { t } = useT("settings");
   const roleConfig = useRoleLabels();
   const rc = roleConfig[link.role];
-  const joinUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/join?code=${link.code}`;
+  const navigation = useOptionalNavigation();
+  const joinUrl = buildShareLinkUrl(navigation, link.code);
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
@@ -286,6 +302,7 @@ export function MembersTab() {
   const workspace = useCurrentWorkspace();
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  const navigation = useOptionalNavigation();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
   const { data: shareLinks = [] } = useQuery(shareLinkListOptions(wsId));
@@ -415,7 +432,7 @@ export function MembersTab() {
   };
 
   const handleCopyShareLink = (link: ShareLink) => {
-    const joinUrl = `${window.location.origin}/join?code=${link.code}`;
+    const joinUrl = buildShareLinkUrl(navigation, link.code);
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(joinUrl).then(
         () => toast.success(t(($) => $.members.toast_share_link_copied)),

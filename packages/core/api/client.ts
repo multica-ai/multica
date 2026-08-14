@@ -388,6 +388,13 @@ import {
   EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE,
   WorkspaceMcpServerListSchema,
   WorkspaceMcpServerSchema,
+  ShareLinkSchema,
+  ShareLinkListResponseSchema,
+  ShareLinkInfoSchema,
+  JoinShareLinkResponseSchema,
+  EMPTY_SHARE_LINK,
+  EMPTY_SHARE_LINK_INFO,
+  EMPTY_JOIN_SHARE_LINK_RESPONSE,
   type IssueView,
   type IssueViewPreference,
   type CreateIssueViewRequest,
@@ -2559,14 +2566,20 @@ export class ApiClient {
   }
 
   async createShareLink(workspaceId: string, data: { role?: string; expires_in?: number; max_uses?: number }): Promise<ShareLink> {
-    return this.fetch(`/api/workspaces/${workspaceId}/share-links`, {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/share-links`, {
       method: "POST",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ShareLinkSchema, EMPTY_SHARE_LINK, {
+      endpoint: "POST /api/workspaces/{id}/share-links",
     });
   }
 
   async listShareLinks(workspaceId: string): Promise<ShareLink[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/share-links`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/share-links`);
+    return parseWithFallback(raw, ShareLinkListResponseSchema, [], {
+      endpoint: "GET /api/workspaces/{id}/share-links",
+    });
   }
 
   async revokeShareLink(workspaceId: string, linkId: string): Promise<void> {
@@ -2576,14 +2589,20 @@ export class ApiClient {
   }
 
   async joinByShareLink(code: string): Promise<{ member: MemberWithUser; workspace_id: string; workspace_slug: string }> {
-    return this.fetch("/api/share-links/join", {
+    const raw = await this.fetch<unknown>("/api/share-links/join", {
       method: "POST",
       body: JSON.stringify({ code }),
+    });
+    return parseWithFallback(raw, JoinShareLinkResponseSchema, EMPTY_JOIN_SHARE_LINK_RESPONSE, {
+      endpoint: "POST /api/share-links/join",
     });
   }
 
   async getShareLinkInfo(code: string): Promise<ShareLinkInfo> {
-    return this.fetch(`/api/share-links/${encodeURIComponent(code)}`);
+    const raw = await this.fetch<unknown>(`/api/share-links/${encodeURIComponent(code)}`);
+    return parseWithFallback(raw, ShareLinkInfoSchema, EMPTY_SHARE_LINK_INFO, {
+      endpoint: "GET /api/share-links/{code}",
+    });
   }
 
   async deleteWorkspace(workspaceId: string): Promise<void> {

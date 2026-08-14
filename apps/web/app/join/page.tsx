@@ -66,7 +66,12 @@ function JoinInner() {
       .catch(async (e) => {
         const msg = e instanceof Error ? e.message : "";
         if (msg.includes("already a member")) {
-          // Already joined: bounce to the first workspace.
+          // Already joined: go straight to the workspace this invite points at
+          // rather than the account's first workspace.
+          if (info?.workspace_slug) {
+            router.push(`/${info.workspace_slug}/issues`);
+            return;
+          }
           try {
             const workspaces = await api.listWorkspaces();
             queryClient.setQueryData(workspaceKeys.list(), workspaces as any);
@@ -115,6 +120,11 @@ function JoinInner() {
               {info.creator_name && (
                 <p className="text-center text-muted-foreground">
                   Invited by {info.creator_name}
+                </p>
+              )}
+              {info.role === "admin" && (
+                <p className="text-center text-body text-destructive">
+                  This link grants you administrator access to this workspace.
                 </p>
               )}
               {!user && (

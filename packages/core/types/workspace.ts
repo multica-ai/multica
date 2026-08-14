@@ -127,10 +127,8 @@ export interface ShareLink {
 }
 
 export interface ShareLinkInfo {
-  workspace_id: string;
   workspace_name: string;
   workspace_slug: string;
   creator_name?: string;
-  creator_email?: string;
   role: MemberRole;
 }
