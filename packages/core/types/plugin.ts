@@ -17,7 +17,21 @@ export interface PluginInstallation {
   lifecycle_status: string;
   health_state?: string;
   health_reason?: string;
+  description?: string;
+  publisher: string;
+  publisher_type: string;
+  trust_tier: string;
+  source_kind: string;
+  source_ref: string;
+  uploader_id?: string;
+  manifest_digest: string;
+  archive_digest: string;
+  artifact_digest: string;
+  signature_verified: boolean;
+  requested_capabilities: string[];
+  available_versions: string[];
   contributions: string[];
+  contribution_details: PluginCatalogContribution[];
   bindings: PluginBinding[];
 }
 

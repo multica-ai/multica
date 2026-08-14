@@ -36,7 +36,7 @@ variable "GO_VERSION"          { default = "1.26.1" }
 // doesn't parse as semver ≥ 0.2.21 — "dev" surfaces to users as "daemon doesn't
 // report a CLI version". 0.4.12 matches the latest agentfarm fork tag. CI does
 // not override this, so the default is what ships.
-variable "MULTICA_VERSION"     { default = "0.4.25" }
+variable "MULTICA_VERSION"     { default = "0.4.26" }
 variable "MULTICA_COMMIT"      { default = "unknown" }
 variable "CLAUDE_CODE_VERSION" { default = "latest" }
 variable "CODEX_VERSION"       { default = "latest" }

@@ -44,6 +44,8 @@ The daemon runs in the background by default. Common commands:
 | `multica daemon stop` | Stop the daemon |
 | `multica daemon start --foreground` | Run in the current terminal, for debugging |
 
+To place task workspaces on another disk, persist a root for the current profile with `multica config set workspaces_root <path>`, or pass `--workspaces-root <path>` to `daemon start` or `daemon restart`. The flag overrides `MULTICA_WORKSPACES_ROOT`, which overrides the profile config. Existing task directories are not moved when the root changes.
+
 On startup, the daemon detects supported AI coding tools on `PATH` and registers runtimes for the workspaces you are allowed to connect. If a tool was just installed or signed in, restart the daemon to detect it again.
 
 The daemon needs at least one built-in supported AI coding tool detected before it will start. Install methods and executable names are in [Install AI coding tools](/install-agent-runtime).
@@ -73,9 +75,9 @@ Once a limit is reached, new tasks keep queueing. You can adjust a single agent'
 
 ## Private and public runtimes
 
-A local runtime is **private** by default: the runtime owner and the workspace's owners and admins can create agents on it.
+A local runtime is **private** by default: only the runtime owner can create agents on it. Workspace owners and admins are no exception — the runtime is someone else's computer, and running an agent there spends their machine and their tool credentials.
 
-The runtime owner or an admin can make it **public**. Other workspace members can then select this runtime as well; that does not share the underlying AI coding tool's login credentials — it only lets members route their agents' tasks to this computer.
+Only the runtime owner can make it **public** — workspace admins can rename or delete a runtime, but sharing one is the owner's decision. Other workspace members can then select this runtime as well; that does not share the underlying AI coding tool's login credentials — it only lets members route their agents' tasks to this computer.
 
 ## Custom runtime profiles
 

@@ -13,9 +13,15 @@ import (
 // returns, with the few fields these tests assert on.
 type batchClaimResponse struct {
 	Tasks []struct {
-		ID        string `json:"id"`
-		RuntimeID string `json:"runtime_id"`
-		AuthToken string `json:"auth_token"`
+		ID                string `json:"id"`
+		RuntimeID         string `json:"runtime_id"`
+		AuthToken         string `json:"auth_token"`
+		ActiveSiblingRuns []struct {
+			TaskID          string `json:"task_id"`
+			IssueID         string `json:"issue_id"`
+			IssueIdentifier string `json:"issue_identifier"`
+			Status          string `json:"status"`
+		} `json:"active_sibling_runs"`
 	} `json:"tasks"`
 }
 
@@ -84,6 +90,64 @@ func TestClaimTasksByRuntime_RoutesAcrossRuntimesAndMintsTokens(t *testing.T) {
 	}
 	if seen[rt1] != 1 || seen[rt2] != 1 {
 		t.Fatalf("runtime distribution = %v, want one task each for rt1/rt2", seen)
+	}
+}
+
+func TestClaimTasksByRuntime_IncludesActiveSiblingRun(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Sibling claim runtime")
+	agentID, sourceIssueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Sibling claim agent")
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET max_concurrent_tasks = 2 WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("raise concurrency: %v", err)
+	}
+	insertRunningIssueTask(t, agentID, sourceIssueID)
+
+	var targetIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'sibling target', 'todo', 'none', $2, 'member',
+			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1), 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&targetIssueID); err != nil {
+		t.Fatalf("create target issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, targetIssueID) })
+	queuedID := seedQueuedIssueTask(t, ctx, agentID, runtimeID, targetIssueID)
+
+	// A queued task cannot coordinate yet and must not dilute the warning. Seed
+	// it after the target so the deterministic claim order still picks queuedID.
+	var queuedSiblingIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'queued sibling', 'todo', 'none', $2, 'member',
+			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1), 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&queuedSiblingIssueID); err != nil {
+		t.Fatalf("create queued sibling issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, queuedSiblingIssueID) })
+	seedQueuedIssueTask(t, ctx, agentID, runtimeID, queuedSiblingIssueID)
+
+	w := postBatchClaim(t, testWorkspaceID, []string{runtimeID}, 1)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp batchClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Tasks) != 1 || resp.Tasks[0].ID != queuedID {
+		t.Fatalf("claimed task = %+v, want %s", resp.Tasks, queuedID)
+	}
+	if len(resp.Tasks[0].ActiveSiblingRuns) != 1 {
+		t.Fatalf("active_sibling_runs = %+v, want one running sibling", resp.Tasks[0].ActiveSiblingRuns)
+	}
+	sibling := resp.Tasks[0].ActiveSiblingRuns[0]
+	if sibling.IssueID != sourceIssueID || sibling.Status != "running" || sibling.IssueIdentifier == "" {
+		t.Fatalf("wrong sibling payload: %+v", sibling)
 	}
 }
 

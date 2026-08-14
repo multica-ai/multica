@@ -47,6 +47,14 @@ type CLIConfig struct {
 	// DefaultRuntimeName.
 	RuntimeName string `json:"runtime_name,omitempty"`
 
+	// WorkspacesRoot is the base directory where the daemon creates task
+	// workspaces. Persisting it per profile avoids relying on a process-wide
+	// environment variable and preserves profile isolation. Empty means "not
+	// set — use env / built-in default". Resolution precedence (highest wins):
+	// --workspaces-root flag, MULTICA_WORKSPACES_ROOT env, this field, the
+	// profile-aware built-in default.
+	WorkspacesRoot string `json:"workspaces_root,omitempty"`
+
 	// MaxConcurrentTasks caps the number of task executions the daemon
 	// processes in parallel. Persist here to avoid re-passing
 	// --max-concurrent-tasks on every daemon start / auto-restart. 0 means

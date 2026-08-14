@@ -45,3 +45,11 @@ export function useRollbackPlugin(wsId: string) {
     onSettled: invalidate,
   });
 }
+
+export function useUninstallPlugin(wsId: string) {
+  const invalidate = useInvalidatePlugins(wsId);
+  return useMutation({
+    mutationFn: (installationId: string) => api.uninstallPlugin(wsId, installationId),
+    onSettled: invalidate,
+  });
+}

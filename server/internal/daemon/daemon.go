@@ -5374,6 +5374,7 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 // this map at init so their display names stay in lockstep with the
 // descriptor.
 var runtimeDisplayNameOverrides = map[string]string{
+	"dsh":        "DeepSeek Harness",
 	"traecli":    "Trae",
 	"grok":       "Grok",
 	"qoderclicn": "Qoder CN",
@@ -6597,6 +6598,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		agentEnv["REASONIX_STATE_HOME"] = reasonixStateHome
 	}
+	if provider == "dsh" {
+		dshSessionRoot, err := prepareDshTaskSessionRoot(d.cfg.Profile, task.RuntimeID, task.AgentID)
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("prepare dsh session root: %w", err)
+		}
+		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
+		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
+	}
 	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
 	}
@@ -6724,14 +6733,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
 	execOpts := agent.ExecOptions{
-		Cwd:                       env.WorkDir,
-		Model:                     model,
-		ThreadName:                deriveTaskThreadName(task),
-		Timeout:                   d.cfg.AgentTimeout,
-		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
-		IdleWatchdogTimeout:       idleWatchdogTimeout,
-		HandshakeTimeout:          d.cfg.CodexHandshakeTimeout,
-		ResumeSessionID:           task.PriorSessionID,
+		Cwd:                        env.WorkDir,
+		Model:                      model,
+		ThreadName:                 deriveTaskThreadName(task),
+		Timeout:                    d.cfg.AgentTimeout,
+		SemanticInactivityTimeout:  d.cfg.CodexSemanticInactivityTimeout,
+		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
+		IdleWatchdogTimeout:        idleWatchdogTimeout,
+		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
+		ResumeSessionID:            task.PriorSessionID,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
 		// resume gates (a dropped resume is surfaced via the prompt instead). If it
 		// survived to here, the backend must disclose the loss when the live
@@ -7325,6 +7335,11 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	session, err := backend.Execute(agentCtx, prompt, opts)
 	if err != nil {
+		// One provider-agnostic boundary for launches: every backend's
+		// cmd.Start() failure arrives here, so diagnosing ENOEXEC at this point
+		// covers claude, opencode and any CLI added later without a wrap in
+		// each backend (MUL-6164).
+		err = agent.ExplainExecError(err)
 		taskLog.Debug("backend execute returned error", "error", err)
 		return agent.Result{}, 0, err
 	}
@@ -8222,6 +8237,32 @@ func prepareReasonixTaskStateHome(profile, runtimeID, agentID string) (string, e
 		return "", err
 	}
 	path := filepath.Join(profileDir, "reasonix-state", runtimeSegment, agentSegment)
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// prepareDshTaskSessionRoot keeps DSH transcripts private to one Multica
+// runtime/agent pair. Credentials and the user's DSH profile remain in the
+// ordinary DSH_HOME; only session persistence is redirected.
+func prepareDshTaskSessionRoot(profile, runtimeID, agentID string) (string, error) {
+	profileDir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return "", err
+	}
+	runtimeSegment, err := validateReasonixStateSegment("runtime", runtimeID)
+	if err != nil {
+		return "", err
+	}
+	agentSegment, err := validateReasonixStateSegment("agent", agentID)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(profileDir, "dsh-sessions", runtimeSegment, agentSegment)
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return "", err
 	}

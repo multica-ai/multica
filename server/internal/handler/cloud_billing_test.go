@@ -254,22 +254,29 @@ func withCloudSubscriptionWorkspace(req *http.Request, role string) *http.Reques
 }
 
 func TestCloudWorkspaceSubscriptionsDisabledByDefault(t *testing.T) {
-	proxy := &fakeCloudRuntimeProxy{enabled: true}
-	useCloudRuntimeProxy(t, proxy)
 	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, false)
 
-	req := withCloudSubscriptionWorkspace(
-		newRequest(http.MethodGet, "/api/cloud-subscriptions/entitlements", nil),
-		"member",
-	)
-	w := httptest.NewRecorder()
-	testHandler.GetCloudWorkspaceEntitlements(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	reads := map[string]func(http.ResponseWriter, *http.Request){
+		"/api/cloud-subscriptions/entitlements": testHandler.GetCloudWorkspaceEntitlements,
+		"/api/cloud-subscriptions/summary":      testHandler.GetCloudWorkspaceSubscriptionSummary,
+		"/api/cloud-subscriptions/prices":       testHandler.GetCloudWorkspaceSubscriptionPrices,
 	}
-	if proxy.called {
-		t.Fatal("upstream must not be called while the feature flag is off")
+	for path, invoke := range reads {
+		t.Run(path, func(t *testing.T) {
+			proxy := &fakeCloudRuntimeProxy{enabled: true}
+			useCloudRuntimeProxy(t, proxy)
+
+			req := withCloudSubscriptionWorkspace(newRequest(http.MethodGet, path, nil), "member")
+			w := httptest.NewRecorder()
+			invoke(w, req)
+
+			if w.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+			}
+			if proxy.called {
+				t.Fatal("upstream must not be called while the feature flag is off")
+			}
+		})
 	}
 }
 
@@ -293,6 +300,24 @@ func TestCloudWorkspaceSubscriptionReadAndWritesUseScopedPaths(t *testing.T) {
 			wantStatus: http.StatusOK,
 			wantPath:   "/api/v1/entitlements/" + testWorkspaceID,
 			invoke:     testHandler.GetCloudWorkspaceEntitlements,
+		},
+		{
+			name:       "member reads billing summary",
+			method:     http.MethodGet,
+			path:       "/api/cloud-subscriptions/summary",
+			role:       "member",
+			wantStatus: http.StatusOK,
+			wantPath:   "/api/v1/subscriptions/" + testWorkspaceID + "/summary",
+			invoke:     testHandler.GetCloudWorkspaceSubscriptionSummary,
+		},
+		{
+			name:       "member reads seat prices",
+			method:     http.MethodGet,
+			path:       "/api/cloud-subscriptions/prices",
+			role:       "member",
+			wantStatus: http.StatusOK,
+			wantPath:   "/api/v1/subscriptions/" + testWorkspaceID + "/prices",
+			invoke:     testHandler.GetCloudWorkspaceSubscriptionPrices,
 		},
 		{
 			name:       "admin reconciles seats",

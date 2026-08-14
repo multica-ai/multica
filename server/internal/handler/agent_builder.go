@@ -355,7 +355,7 @@ func (h *Handler) resolveBuilderRuntime(w http.ResponseWriter, r *http.Request, 
 		return db.AgentRuntime{}, false
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can use it")
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can use it")
 		return db.AgentRuntime{}, false
 	}
 	if runtime.Status != "online" {

@@ -676,6 +676,132 @@ describe("ApiClient schema fallback", () => {
         url: "",
       });
     });
+
+    it("parses workspace entitlements into camelCase without fabricating Free", async () => {
+      stubFetchJson({
+        workspace_id: "workspace-1",
+        plan: "pro",
+        status: "active",
+        seats: 4,
+        issue_window: null,
+        autopilot_runs: null,
+        current_period_end: "2026-09-13T00:00:00Z",
+        snapshot_expires_at: null,
+        version: 7,
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.getWorkspaceSubscriptionEntitlements(),
+      ).resolves.toEqual({
+        workspaceId: "workspace-1",
+        plan: "pro",
+        status: "active",
+        seats: 4,
+        issueWindow: null,
+        autopilotRuns: null,
+        currentPeriodEnd: "2026-09-13T00:00:00Z",
+        snapshotExpiresAt: null,
+        version: 7,
+      });
+
+      stubFetchJson({ plan: "free", seats: "unknown" });
+      await expect(client.getWorkspaceSubscriptionEntitlements()).resolves.toBeNull();
+    });
+
+    it("accepts an empty workspace entitlement snapshot", async () => {
+      stubFetchJson({
+        workspace_id: "workspace-1",
+        plan: "free",
+        status: "inactive",
+        seats: 0,
+        issue_window: 1000,
+        autopilot_runs: 100,
+        snapshot_expires_at: null,
+        version: 0,
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.getWorkspaceSubscriptionEntitlements(),
+      ).resolves.toMatchObject({ seats: 0, plan: "free" });
+    });
+
+    it("sends the Checkout idempotency key in the header and body", async () => {
+      stubFetchJson(
+        {
+          request_id: "request-1",
+          session_id: "cs_test_1",
+          url: "https://checkout.stripe.com/test-session",
+        },
+        201,
+      );
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.createWorkspaceSubscriptionCheckout({
+          interval: "year",
+          idempotencyKey: "checkout-intent-1",
+        }),
+      ).resolves.toEqual({
+        requestId: "request-1",
+        sessionId: "cs_test_1",
+        url: "https://checkout.stripe.com/test-session",
+      });
+
+      const fetchMock = vi.mocked(fetch);
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit & {
+        headers: Record<string, string>;
+      };
+      expect(init.headers["Idempotency-Key"]).toBe("checkout-intent-1");
+      expect(JSON.parse(String(init.body))).toEqual({
+        interval: "year",
+        idempotency_key: "checkout-intent-1",
+      });
+    });
+
+    it("rejects unreadable or non-HTTPS Stripe URLs at the schema boundary", async () => {
+      stubFetchJson(
+        {
+          request_id: "request-1",
+          session_id: "cs_test_1",
+          url: "javascript:alert(1)",
+        },
+        201,
+      );
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.createWorkspaceSubscriptionCheckout({
+          interval: "month",
+          idempotencyKey: "checkout-intent-1",
+        }),
+      ).resolves.toBeNull();
+
+      stubFetchJson({ url: 123 });
+      await expect(
+        client.createWorkspaceSubscriptionPortal("portal-intent-1"),
+      ).resolves.toBeNull();
+    });
+
+    it("parses seat reconciliation into camelCase", async () => {
+      stubFetchJson({
+        workspace_id: "workspace-1",
+        billed_seats: 5,
+        actual_seats: 4,
+        action: "scheduled_decrease",
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.reconcileWorkspaceSubscriptionSeats(),
+      ).resolves.toEqual({
+        workspaceId: "workspace-1",
+        billedSeats: 5,
+        actualSeats: 4,
+        action: "scheduled_decrease",
+      });
+    });
   });
 });
 
@@ -702,5 +828,163 @@ describe("parseWithFallback", () => {
     const fallback = { id: "fallback" };
     const out = parseWithFallback(null, schema, fallback, opts);
     expect(out).toBe(fallback);
+  });
+});
+
+// Workspace subscription reads carry a specific hazard the wallet schemas do
+// not: the fallback for a paid workspace must never be a shape that reads as
+// Free. An older cloud, a 503, or a renamed field has to surface as "unknown"
+// so the UI shows "unavailable" instead of quietly downgrading a paying team.
+describe("workspace subscription contract", () => {
+  const entitlement = {
+    workspace_id: "11111111-1111-1111-1111-111111111111",
+    plan: "pro",
+    status: "active",
+    seats: 3,
+    issue_window: null,
+    autopilot_runs: null,
+    current_period_end: "2026-09-01T00:00:00Z",
+    snapshot_expires_at: null,
+    version: 7,
+  };
+
+  it("maps a full summary to camelCase without inventing values", async () => {
+    stubFetchJson({
+      entitlement,
+      billing_interval: "year",
+      actual_seats: 3,
+      billed_seats: 5,
+      pending_seat_quantity: 3,
+      cancel_at_period_end: true,
+      grace_until: "2026-09-08T00:00:00Z",
+      has_stripe_customer: true,
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary).not.toBeNull();
+    expect(summary?.entitlement.plan).toBe("pro");
+    expect(summary?.entitlement.version).toBe(7);
+    expect(summary?.billingInterval).toBe("year");
+    expect(summary?.billedSeats).toBe(5);
+    expect(summary?.pendingSeatQuantity).toBe(3);
+    expect(summary?.cancelAtPeriodEnd).toBe(true);
+    expect(summary?.graceUntil).toBe("2026-09-08T00:00:00Z");
+    expect(summary?.hasStripeCustomer).toBe(true);
+  });
+
+  it("keeps a paid summary readable when optional fields are absent", async () => {
+    // A cloud that predates the optional seat/cancellation fields still has to
+    // produce a usable Pro summary rather than failing the whole read.
+    stubFetchJson({ entitlement, actual_seats: 3 });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary?.entitlement.plan).toBe("pro");
+    expect(summary?.billingInterval).toBeNull();
+    expect(summary?.billedSeats).toBeNull();
+    expect(summary?.pendingSeatQuantity).toBeNull();
+    expect(summary?.cancelAtPeriodEnd).toBe(false);
+    expect(summary?.graceUntil).toBeNull();
+    // Absent means "no Stripe customer known", which is the safe reading: the
+    // caller hides Portal rather than offering a control that would 404.
+    expect(summary?.hasStripeCustomer).toBe(false);
+  });
+
+  it("preserves unknown plans and statuses instead of coercing them", async () => {
+    stubFetchJson({
+      entitlement: { ...entitlement, plan: "business", status: "paused" },
+      actual_seats: 9,
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary?.entitlement.plan).toBe("business");
+    expect(summary?.entitlement.status).toBe("paused");
+  });
+
+  it("returns null — never a Free-looking shape — for a malformed summary", async () => {
+    stubFetchJson({ entitlement: { plan: "pro" }, actual_seats: "many" });
+    const client = new ApiClient("https://api.example.test");
+    expect(await client.getWorkspaceSubscriptionSummary()).toBeNull();
+  });
+
+  it("throws ApiError for a non-2xx summary so the caller reports unavailable", async () => {
+    // An older cloud without the route, a 403, or a 503 never reaches schema
+    // parsing: fetch rejects first and a React Query caller sees isError. What
+    // matters for both paths is the same — no snapshot is produced, so nothing
+    // can be mistaken for a Free workspace.
+    for (const status of [404, 503]) {
+      stubFetchJson({ error: "unavailable" }, status);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getWorkspaceSubscriptionSummary()).rejects.toThrow();
+    }
+  });
+
+  it("returns null for a 2xx body that does not match the contract", async () => {
+    // The other half of the contract: a response that arrives successfully but
+    // does not conform degrades to null rather than throwing into React.
+    stubFetchJson({ unexpected: "shape" });
+    const client = new ApiClient("https://api.example.test");
+    expect(await client.getWorkspaceSubscriptionSummary()).toBeNull();
+  });
+
+  it("accepts additive cloud fields on summary and prices", async () => {
+    stubFetchJson({
+      entitlement: { ...entitlement, trial_ends_at: "2026-10-01T00:00:00Z" },
+      actual_seats: 3,
+      future_field: { nested: true },
+    });
+    const client = new ApiClient("https://api.example.test");
+    expect(
+      (await client.getWorkspaceSubscriptionSummary())?.entitlement.plan,
+    ).toBe("pro");
+  });
+
+  it("maps validated prices and rejects a non-positive amount", async () => {
+    stubFetchJson({
+      month: { currency: "usd", unit_amount: 2000, interval: "month", interval_count: 1 },
+      year: { currency: "usd", unit_amount: 20000, interval: "year", interval_count: 1 },
+    });
+    const client = new ApiClient("https://api.example.test");
+    const prices = await client.getWorkspaceSubscriptionPrices();
+    expect(prices?.month.unitAmount).toBe(2000);
+    expect(prices?.year.interval).toBe("year");
+
+    // A zero or missing amount must not be rendered next to a purchase button.
+    stubFetchJson({
+      month: { currency: "usd", unit_amount: 0, interval: "month", interval_count: 1 },
+      year: { currency: "usd", unit_amount: 20000, interval: "year", interval_count: 1 },
+    });
+    expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+  });
+
+  it("rejects a prices response whose interval does not match its slot", async () => {
+    const client = new ApiClient("https://api.example.test");
+
+    // An interval outside the contract.
+    stubFetchJson({
+      month: { currency: "usd", unit_amount: 2000, interval: "month", interval_count: 1 },
+      year: { currency: "usd", unit_amount: 20000, interval: "week", interval_count: 1 },
+    });
+    expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+
+    // Valid intervals in the wrong slots. Accepting this would let the UI quote
+    // a yearly amount as the monthly price.
+    stubFetchJson({
+      month: { currency: "usd", unit_amount: 20000, interval: "year", interval_count: 1 },
+      year: { currency: "usd", unit_amount: 2000, interval: "month", interval_count: 1 },
+    });
+    expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+  });
+
+  it("rejects a prices response whose interval count is not one", async () => {
+    stubFetchJson({
+      month: { currency: "usd", unit_amount: 2000, interval: "month", interval_count: 3 },
+      year: { currency: "usd", unit_amount: 20000, interval: "year", interval_count: 1 },
+    });
+    const client = new ApiClient("https://api.example.test");
+
+    expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
   });
 });

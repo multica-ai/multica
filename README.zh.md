@@ -154,6 +154,7 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 | Qoder CLI | `qodercli` | Qoder CN | `qoderclicn` |
 | Qwen Code | `qwen` | QwenPaw | `qwenpaw` |
 | Reasonix | `reasonix` | Trae CLI | `traecli` |
+| DeepSeek Harness | `dsh` | Oh-My-Pi | `omp` |
 
 怎么装、怎么登录：[安装智能体运行时](https://multica.ai/docs/install-agent-runtime) ·
 [AI 编程工具对照](https://multica.ai/docs/providers)

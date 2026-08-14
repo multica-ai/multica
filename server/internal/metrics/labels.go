@@ -128,6 +128,7 @@ var (
 		"codex":         "codex",
 		"copilot":       "copilot",
 		"cursor":        "cursor",
+		"dsh":           "dsh",
 		"gemini":        "gemini",
 		"grok":          "grok",
 		"hermes":        "hermes",

@@ -1383,6 +1383,9 @@ describe("Plugin catalog schemas", () => {
     expect(parsed.enabled).toBe(false);
     expect(parsed.lifecycle_status).toBe("error");
     expect(parsed.bindings).toEqual([]);
+    expect(parsed.trust_tier).toBe("");
+    expect(parsed.signature_verified).toBe(false);
+    expect(parsed.contribution_details).toEqual([]);
   });
 
   it("degrades a malformed catalog response to unsupported and empty", () => {

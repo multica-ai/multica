@@ -3,9 +3,11 @@ SELECT pg_advisory_xact_lock(hashtextextended(@plugin_key, 0));
 
 -- name: CreatePluginIdentity :one
 INSERT INTO plugin_identity (
-    plugin_key, display_name, publisher_id, publisher_type, trust_tier
+    plugin_key, display_name, publisher_id, publisher_type, trust_tier,
+    owner_workspace_id
 ) VALUES (
-    @plugin_key, @display_name, @publisher_id, @publisher_type, @trust_tier
+    @plugin_key, @display_name, @publisher_id, @publisher_type, @trust_tier,
+    sqlc.narg('owner_workspace_id')
 )
 RETURNING *;
 
@@ -13,9 +15,13 @@ RETURNING *;
 SELECT * FROM plugin_identity
 WHERE id = $1;
 
--- name: GetPluginIdentityByKey :one
+-- name: GetOfficialPluginIdentityByKey :one
 SELECT * FROM plugin_identity
-WHERE plugin_key = $1;
+WHERE plugin_key = $1 AND owner_workspace_id IS NULL;
+
+-- name: GetWorkspacePrivatePluginIdentityByKey :one
+SELECT * FROM plugin_identity
+WHERE owner_workspace_id = @workspace_id AND plugin_key = @plugin_key;
 
 -- name: RetirePluginIdentity :one
 UPDATE plugin_identity
@@ -50,6 +56,10 @@ WHERE id = $1;
 
 -- name: GetPluginReleaseByVersion :one
 SELECT * FROM plugin_release
+WHERE plugin_id = $1 AND version = $2 AND revocation_status = 'active';
+
+-- name: GetRegisteredPluginReleaseByVersion :one
+SELECT * FROM plugin_release
 WHERE plugin_id = $1 AND version = $2;
 
 -- name: RevokePluginRelease :one
@@ -83,6 +93,11 @@ RETURNING *;
 SELECT * FROM plugin_contribution
 WHERE release_id = $1
 ORDER BY ordinal, id;
+
+-- name: ListPluginReleasesByPlugin :many
+SELECT * FROM plugin_release
+WHERE plugin_id = $1 AND revocation_status = 'active'
+ORDER BY published_at DESC, id DESC;
 
 -- name: CreatePluginInstallation :one
 WITH parents AS MATERIALIZED (
@@ -121,6 +136,45 @@ SELECT * FROM plugin_installation
 WHERE workspace_id = $1 AND uninstalled_at IS NULL
 ORDER BY installed_at, id;
 
+-- name: ListWorkspacePluginReleases :many
+SELECT release.*
+FROM plugin_release release
+JOIN plugin_installation installation ON installation.plugin_id = release.plugin_id
+WHERE installation.workspace_id = @workspace_id
+  AND installation.uninstalled_at IS NULL
+  AND release.revocation_status = 'active'
+ORDER BY release.plugin_id, release.published_at DESC, release.id DESC;
+
+-- name: ListWorkspacePrivatePluginInstallations :many
+SELECT installation.*
+FROM plugin_installation installation
+JOIN plugin_identity identity ON identity.id = installation.plugin_id
+WHERE installation.workspace_id = @workspace_id
+  AND identity.owner_workspace_id = @workspace_id
+  AND installation.source_kind = 'private_dev'
+  AND installation.uninstalled_at IS NULL
+ORDER BY installation.installed_at, installation.id;
+
+-- name: GetWorkspacePrivatePluginInstallationByRef :one
+SELECT installation.*
+FROM plugin_installation installation
+JOIN plugin_identity identity ON identity.id = installation.plugin_id
+WHERE installation.workspace_id = @workspace_id
+  AND identity.owner_workspace_id = @workspace_id
+  AND installation.source_kind = 'private_dev'
+  AND installation.uninstalled_at IS NULL
+  AND (installation.id::text = @plugin_ref::text OR identity.plugin_key = @plugin_ref::text)
+LIMIT 1;
+
+-- name: GetWorkspacePrivatePluginUsage :one
+SELECT
+    COUNT(release.id)::bigint AS release_count,
+    COALESCE(SUM(release.artifact_size), 0)::bigint AS total_bytes
+FROM plugin_release release
+JOIN plugin_identity identity ON identity.id = release.plugin_id
+WHERE identity.owner_workspace_id = @workspace_id
+  AND release.source_kind = 'private_dev';
+
 -- name: SetPluginInstallationDesiredState :one
 WITH workspace_guard AS MATERIALIZED (
     SELECT workspace.id
@@ -151,6 +205,29 @@ SET desired_release_id = target.release_id,
 FROM target
 WHERE i.id = target.id
 RETURNING i.*;
+
+-- name: UninstallPluginInstallation :one
+WITH target AS MATERIALIZED (
+    SELECT installation.id
+    FROM plugin_installation installation
+    JOIN workspace ON workspace.id = installation.workspace_id
+    WHERE installation.id = @id
+      AND installation.workspace_id = @workspace_id
+      AND installation.uninstalled_at IS NULL
+    FOR UPDATE OF installation
+    FOR KEY SHARE OF workspace
+)
+UPDATE plugin_installation installation
+SET enabled = FALSE,
+    desired_generation = installation.desired_generation + 1,
+    lifecycle_status = 'uninstalled',
+    updated_by = sqlc.narg('updated_by'),
+    updated_at = now(),
+    disabled_at = COALESCE(installation.disabled_at, now()),
+    uninstalled_at = now()
+FROM target
+WHERE installation.id = target.id
+RETURNING installation.*;
 
 -- name: CreatePluginGrantRevision :one
 WITH target AS MATERIALIZED (
@@ -275,6 +352,7 @@ SELECT release.*
 FROM plugin_release release
 JOIN plugin_identity identity ON identity.id = release.plugin_id
 WHERE identity.plugin_key = @plugin_key
+  AND identity.owner_workspace_id IS NULL
   AND identity.retired_at IS NULL
   AND release.version = @version
   AND release.revocation_status = 'active';
@@ -425,3 +503,9 @@ WHERE task.id = @task_id
 SELECT * FROM plugin_health
 WHERE workspace_id = $1
 ORDER BY observed_at DESC, id DESC;
+
+-- name: GetWorkspacePluginHealthByInstallation :one
+SELECT * FROM plugin_health
+WHERE workspace_id = @workspace_id AND installation_id = @installation_id
+ORDER BY observed_at DESC, id DESC
+LIMIT 1;

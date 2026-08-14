@@ -992,6 +992,55 @@ func TestBuildPromptDefaultScansRootsFirst(t *testing.T) {
 	}
 }
 
+func TestBuildPromptWarnsAboutActiveSiblingRuns(t *testing.T) {
+	task := Task{
+		IssueID: "issue-target",
+		ActiveSiblingRuns: []ActiveSiblingRunData{{
+			TaskID:          "task-existing",
+			IssueID:         "issue-source",
+			IssueIdentifier: "MUL-6000",
+			IssueTitle:      "Existing work",
+			Status:          "running",
+			StartedAt:       "2026-08-14T03:00:00Z",
+		}},
+	}
+	out := BuildPrompt(task, "claude")
+	for _, want := range []string{
+		"Active sibling runs",
+		"MUL-6000",
+		"task-existing",
+		"multica issue comment list issue-target --roots-only --summary --compact --output json",
+		"multica issue run-messages task-existing",
+		"--no-start",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "multica issue runs") {
+		t.Errorf("prompt must not direct overlap checks to the target issue's run list\n--- output ---\n%s", out)
+	}
+	if strings.Contains(out, "run-messages task-existing --issue") {
+		t.Errorf("prompt must not resolve the issue when the task id is already complete\n--- output ---\n%s", out)
+	}
+}
+
+func TestBuildPromptOmitsActiveSiblingRunsForChatTask(t *testing.T) {
+	task := Task{
+		ChatSessionID: "chat-1",
+		ActiveSiblingRuns: []ActiveSiblingRunData{{
+			TaskID:          "task-existing",
+			IssueID:         "issue-source",
+			IssueIdentifier: "MUL-6000",
+			Status:          "running",
+		}},
+	}
+	out := BuildPrompt(task, "claude")
+	if strings.Contains(out, "Active sibling runs") || strings.Contains(out, "task-existing") {
+		t.Errorf("chat prompt must not include issue sibling guidance\n--- output ---\n%s", out)
+	}
+}
+
 // TestBuildPromptNonSquadLeaderNoRule verifies that non-squad-leader agents
 // do NOT get the squad leader no_action rule injected.
 func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {

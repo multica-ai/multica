@@ -1211,9 +1211,8 @@ func TestSwitchAgentBuilderRuntimeEnforcesRuntimeAndSessionOwnership(t *testing.
 	}
 	ctx := context.Background()
 
-	// A plain member, so canUseRuntimeForAgent's owner/admin bypass does not
-	// apply — the fixture user is the workspace owner and may legitimately use
-	// anyone's private runtime.
+	// A plain member who owns none of the runtimes below — the fixture user
+	// owns them, and a private runtime is usable only by its owner.
 	var plainMemberID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email) VALUES ('Builder Switch Plain Member', 'builder-switch-plain@multica.ai')

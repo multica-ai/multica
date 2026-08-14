@@ -550,6 +550,7 @@ func TestThinkingControlSupported(t *testing.T) {
 		{"codebuddy", true},
 		{"grok", true},
 		{"codex", true},    // dynamic catalog, validated per model by the daemon
+		{"dsh", true},      // dynamic catalog from the installed DSH profile
 		{"opencode", true}, // dynamic variant names from opencode.json
 		{"pi", true},       // fixed tokens, per-model subset discovered over RPC
 		{"hermes", true},   // jcode applies it; Hermes Agent gets an empty catalog

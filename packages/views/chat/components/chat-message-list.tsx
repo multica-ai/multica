@@ -151,15 +151,15 @@ function ChatListHeader({ context }: { context?: ChatListContext }) {
 // constant bottom inset: without it the last row's own py-2 was the only gap
 // between the final reply (and its follow-up pills) and the composer.
 function ChatListFooter({ context }: { context?: ChatListContext }) {
-  if (!context) return null;
-  if (!context.showStatusPill || !context.pendingTask) return null;
   return (
     <div className={cn(CHAT_COLUMN, "pb-4 space-y-4")}>
-      <TaskStatusPill
-        pendingTask={context.pendingTask}
-        taskMessages={context.liveTaskMessages ?? []}
-        availability={context.availability}
-      />
+      {context?.showStatusPill && context.pendingTask ? (
+        <TaskStatusPill
+          pendingTask={context.pendingTask}
+          taskMessages={context.liveTaskMessages ?? []}
+          availability={context.availability}
+        />
+      ) : null}
     </div>
   );
 }

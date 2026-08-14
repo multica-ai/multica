@@ -118,7 +118,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 21개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 22개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -193,7 +193,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 21개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 22개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -268,6 +268,32 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.4.26",
+          date: "2026-08-14",
+          title: "DeepSeek Harness 런타임, 보드 드래그 이동, Inbox 보관 단축키",
+          changes: [],
+          features: [
+            "이제 DeepSeek Harness에서 에이전트를 실행할 수 있어요.",
+            "보드의 빈 공간을 드래그하면 좌우로 이동합니다.",
+            "Inbox에서 E를 누르면 열려 있는 알림을 보관합니다.",
+            "셀프호스팅에서 태스크 작업 디렉터리를 원하는 디스크에 둘 수 있어요.",
+          ],
+          improvements: [
+            "모든 페이지의 제목과 툴바가 같은 왼쪽 선에 맞춰집니다.",
+            "Codex의 첫 응답이 느릴 때 기다리는 시간을 늘릴 수 있어요.",
+            "Issue 담당이나 상태를 바꿔도 새 태스크를 시작하지 않게 할 수 있어요.",
+          ],
+          fixes: [
+            "실행되지 않는 에이전트 CLI가 고치는 방법을 알려줍니다.",
+            "다른 사람의 비공개 런타임을 API나 CLI에서 쓸 수 없습니다.",
+            "남은 태스크 파일 때문에 그 폴더의 multica 명령이 멈추지 않습니다.",
+            "Volta나 Vite Plus로 설치한 에이전트가 인식됩니다.",
+            "마지막 답변과 입력창 사이 여백이 돌아왔습니다.",
+            "다크 모드에서 활성 탭에 어두운 사각형이 생기지 않고, 호버 모서리도 둥글게 유지됩니다.",
+            "같은 Issue에 에이전트가 두 번째 태스크를 시작하지 않습니다.",
+          ],
+        },
         {
           version: "0.4.25",
           date: "2026-08-13",

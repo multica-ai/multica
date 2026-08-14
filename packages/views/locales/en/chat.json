@@ -64,7 +64,7 @@
       "provider_quota_limit": "The agent's model account has run out of credit. Top it up or switch accounts, then retry.",
       "provider_capacity_or_rate_limit": "The model provider is busy or rate-limiting this account. Please try again in a moment.",
       "context_overflow": "This conversation got too long for the model. Start a new session, or break your request into smaller steps.",
-      "runtime_missing_executable": "The agent's CLI couldn't be found on this machine. Check that it's installed and on PATH, then retry.",
+      "runtime_missing_executable": "The agent's CLI couldn't be run on this machine. Check that it's installed correctly and on PATH, then retry.",
       "runtime_version_unsupported": "The agent's CLI is too old for this runtime. Upgrade it, then retry.",
       "fallback": "Something went wrong and the agent couldn't finish replying. Please try again."
     },

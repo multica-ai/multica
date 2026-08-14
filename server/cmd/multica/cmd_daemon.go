@@ -97,6 +97,7 @@ func init() {
 	f.String("daemon-id", "", "Unique daemon identifier (env: MULTICA_DAEMON_ID)")
 	f.String("device-name", "", "Human-readable device name (env: MULTICA_DAEMON_DEVICE_NAME)")
 	f.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
+	f.String("workspaces-root", "", "Base directory for task workspaces (env: MULTICA_WORKSPACES_ROOT)")
 	f.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	f.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	f.Duration("agent-timeout", 0, "Absolute per-task wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
@@ -118,6 +119,7 @@ func init() {
 	rf.String("daemon-id", "", "Unique daemon identifier (env: MULTICA_DAEMON_ID)")
 	rf.String("device-name", "", "Human-readable device name (env: MULTICA_DAEMON_DEVICE_NAME)")
 	rf.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
+	rf.String("workspaces-root", "", "Base directory for task workspaces (env: MULTICA_WORKSPACES_ROOT)")
 	rf.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	rf.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	rf.Duration("agent-timeout", 0, "Absolute per-task wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
@@ -861,6 +863,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if v := flagString(cmd, "runtime-name"); v != "" {
 		args = append(args, "--runtime-name", v)
 	}
+	if v := flagString(cmd, "workspaces-root"); v != "" {
+		args = append(args, "--workspaces-root", v)
+	}
 	if d, _ := cmd.Flags().GetDuration("poll-interval"); d > 0 {
 		args = append(args, "--poll-interval", d.String())
 	}
@@ -962,14 +967,19 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		"MULTICA_AGENT_RUNTIME_NAME",
 		fileCfg.RuntimeName,
 	)
+	workspacesRoot, err := resolveWorkspacesRootForProfile(profile, flagString(cmd, "workspaces-root"))
+	if err != nil {
+		return err
+	}
 
 	overrides := daemon.Overrides{
-		ServerURL:   serverURL,
-		DaemonID:    flagString(cmd, "daemon-id"),
-		DeviceName:  deviceNameFlag,
-		RuntimeName: runtimeNameFlag,
-		Profile:     profile,
-		HealthPort:  healthPortForProfile(profile),
+		ServerURL:      serverURL,
+		DaemonID:       flagString(cmd, "daemon-id"),
+		DeviceName:     deviceNameFlag,
+		RuntimeName:    runtimeNameFlag,
+		WorkspacesRoot: workspacesRoot,
+		Profile:        profile,
+		HealthPort:     healthPortForProfile(profile),
 	}
 	pollFlag, _ := cmd.Flags().GetDuration("poll-interval")
 	pollOverride, err := resolveDaemonDurationOverride(pollFlag, "MULTICA_DAEMON_POLL_INTERVAL", fileCfg.PollInterval)
@@ -1607,7 +1617,8 @@ func envUnset(name string) bool {
 }
 
 // resolveDaemonStringOverride picks the value that goes into
-// daemon.Overrides for a string knob (device_name, runtime_name).
+// daemon.Overrides for a string knob (device_name, runtime_name,
+// workspaces_root).
 // Precedence, highest first:
 //
 //  1. flag (already resolved to string; empty means "not passed")
@@ -1629,6 +1640,20 @@ func resolveDaemonStringOverride(flagValue, envName, cfgValue string) string {
 		return ""
 	}
 	return cfgValue
+}
+
+// resolveWorkspacesRootForProfile is the single human-CLI resolver for the
+// daemon's task workspace root. Keeping daemon start, disk-usage, aggregate
+// scans, and cross-profile hints on this path prevents diagnostics from
+// drifting away from the directory the daemon actually uses.
+func resolveWorkspacesRootForProfile(profile, flagValue string) (string, error) {
+	fileCfg, _ := cli.LoadCLIConfigForProfile(profile)
+	override := resolveDaemonStringOverride(
+		flagValue,
+		"MULTICA_WORKSPACES_ROOT",
+		fileCfg.WorkspacesRoot,
+	)
+	return daemon.ResolveWorkspacesRoot(profile, override)
 }
 
 // resolveDaemonDurationOverride is the numeric counterpart for
@@ -1828,7 +1853,7 @@ func checkTaskDiskUsageScope(profile, rootOverride string, allProfiles bool) err
 // with. Failing closed on a missing value keeps that guess out of the output.
 func resolveDiskUsageRoot(taskContext bool, profile, rootOverride string) (string, error) {
 	if !taskContext {
-		return daemon.ResolveWorkspacesRoot(profile, rootOverride)
+		return resolveWorkspacesRootForProfile(profile, rootOverride)
 	}
 	root := strings.TrimSpace(os.Getenv(daemon.TaskWorkspacesRootEnv))
 	if root == "" {
@@ -1960,12 +1985,10 @@ func runDaemonDiskUsageAggregate(cmd *cobra.Command, byWorkspace bool, top int, 
 // (e.g. when MULTICA_WORKSPACES_ROOT pins every profile to one directory) are
 // collapsed to a single entry.
 func enumerateDiskUsageRoots() ([]daemon.DiskUsageRoot, error) {
-	seen := map[string]bool{}
 	out := make([]daemon.DiskUsageRoot, 0)
 
-	if root, err := daemon.ResolveWorkspacesRoot("", ""); err == nil {
+	if root, err := resolveWorkspacesRootForProfile("", ""); err == nil {
 		out = append(out, daemon.DiskUsageRoot{Profile: "", Root: root})
-		seen[root] = true
 	}
 
 	profilesRoot, err := profilesRootDir()
@@ -1984,8 +2007,8 @@ func enumerateDiskUsageRoots() ([]daemon.DiskUsageRoot, error) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		root, err := daemon.ResolveWorkspacesRoot(name, "")
-		if err != nil || seen[root] {
+		root, err := resolveWorkspacesRootForProfile(name, "")
+		if err != nil || containsDiskUsageRoot(out, root) {
 			continue
 		}
 		// Skip profile roots that were never created on disk — a configured
@@ -1993,10 +2016,18 @@ func enumerateDiskUsageRoots() ([]daemon.DiskUsageRoot, error) {
 		if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
 			continue
 		}
-		seen[root] = true
 		out = append(out, daemon.DiskUsageRoot{Profile: name, Root: root})
 	}
 	return out, nil
+}
+
+func containsDiskUsageRoot(roots []daemon.DiskUsageRoot, candidate string) bool {
+	for _, root := range roots {
+		if samePath(root.Root, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func printAggregateDiskUsage(w io.Writer, agg daemon.AggregateDiskUsageReport, byWorkspace bool) {
@@ -2152,7 +2183,7 @@ type diskUsageProfileSuggestion struct {
 func diskUsageProfileSuggestions(currentProfile, currentRoot string) []diskUsageProfileSuggestion {
 	out := make([]diskUsageProfileSuggestion, 0)
 	if currentProfile != "" {
-		if root, err := daemon.ResolveWorkspacesRoot("", ""); err == nil && !samePath(root, currentRoot) {
+		if root, err := resolveWorkspacesRootForProfile("", ""); err == nil && !samePath(root, currentRoot) {
 			if taskCount := countDiskUsageTaskDirs(root); taskCount > 0 {
 				out = append(out, diskUsageProfileSuggestion{
 					Profile:   "",
@@ -2180,7 +2211,7 @@ func diskUsageProfileSuggestions(currentProfile, currentRoot string) []diskUsage
 		if profile == currentProfile {
 			continue
 		}
-		root, err := daemon.ResolveWorkspacesRoot(profile, "")
+		root, err := resolveWorkspacesRootForProfile(profile, "")
 		if err != nil || samePath(root, currentRoot) {
 			continue
 		}

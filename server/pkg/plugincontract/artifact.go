@@ -65,6 +65,9 @@ func ValidateArtifact(archive []byte) (Artifact, error) {
 		if isDirectory {
 			continue
 		}
+		if isInstallHookPath(name) {
+			return Artifact{}, fmt.Errorf("plugin archive path %q is an installation or build hook", name)
+		}
 		if len(files) >= MaxArtifactFiles {
 			return Artifact{}, fmt.Errorf("plugin artifact exceeds %d files", MaxArtifactFiles)
 		}
@@ -160,6 +163,21 @@ func ValidateArtifact(archive []byte) (Artifact, error) {
 		SizeBytes:         totalSize,
 		Files:             ordered,
 	}, nil
+}
+
+func isInstallHookPath(name string) bool {
+	base := strings.ToLower(path.Base(name))
+	switch base {
+	case "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+		"install", "install.sh", "install.ps1", "install.cmd", "install.bat",
+		"preinstall", "preinstall.sh", "preinstall.ps1", "preinstall.cmd", "preinstall.bat",
+		"postinstall", "postinstall.sh", "postinstall.ps1", "postinstall.cmd", "postinstall.bat",
+		"prepare", "prepare.sh", "prepare.ps1", "prepare.cmd", "prepare.bat",
+		"build", "build.sh", "build.ps1", "build.cmd", "build.bat":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateArchivePath(name string) (string, bool, error) {
