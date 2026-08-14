@@ -174,6 +174,9 @@ import type {
   ListWecomInstallationsResponse,
   RegisterWecomBYORequest,
   RedeemWecomBindingTokenResponse,
+  ListQianwenInstallationsResponse,
+  QianwenInstallResponse,
+  QianwenPairingCodeResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -317,6 +320,12 @@ import {
   EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
+  ListQianwenInstallationsResponseSchema,
+  EMPTY_LIST_QIANWEN_INSTALLATIONS_RESPONSE,
+  QianwenInstallResponseSchema,
+  EMPTY_QIANWEN_INSTALL_RESPONSE,
+  QianwenPairingCodeResponseSchema,
+  EMPTY_QIANWEN_PAIRING_CODE_RESPONSE,
   EMPTY_BILLING_BALANCE,
   EMPTY_BILLING_TRANSACTIONS_PAGE,
   EMPTY_BILLING_BATCHES_PAGE,
@@ -4014,6 +4023,88 @@ export class ApiClient {
       RedeemWecomBindingTokenResponseSchema,
       EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/wecom/binding/redeem" },
+    );
+  }
+
+  // Qianwen personal-polling Skill integration.
+  async listQianwenInstallations(
+    workspaceId: string,
+  ): Promise<ListQianwenInstallationsResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/qianwen/installations`,
+    );
+    return parseWithFallback(
+      raw,
+      ListQianwenInstallationsResponseSchema,
+      EMPTY_LIST_QIANWEN_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/qianwen/installations" },
+    );
+  }
+
+  async installQianwenPersonal(
+    workspaceId: string,
+    agentId: string,
+  ): Promise<QianwenInstallResponse> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/qianwen/installations?${search.toString()}`,
+      { method: "POST" },
+    );
+    const parsed = parseWithFallback(
+      raw,
+      QianwenInstallResponseSchema,
+      EMPTY_QIANWEN_INSTALL_RESPONSE,
+      {
+        endpoint: "POST /api/workspaces/:id/qianwen/installations",
+        redactFailureDetails: true,
+      },
+    );
+    if (!parsed.access_token) {
+      throw new Error("Invalid Qianwen installation response");
+    }
+    return parsed;
+  }
+
+  async mintQianwenPairingCode(
+    workspaceId: string,
+    installationId: string,
+  ): Promise<QianwenPairingCodeResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/qianwen/installations/${installationId}/pairing-codes`,
+      { method: "POST" },
+    );
+    const parsed = parseWithFallback(
+      raw,
+      QianwenPairingCodeResponseSchema,
+      EMPTY_QIANWEN_PAIRING_CODE_RESPONSE,
+      {
+        endpoint: "POST /api/workspaces/:id/qianwen/installations/:installationId/pairing-codes",
+        redactFailureDetails: true,
+      },
+    );
+    if (!parsed.pairing_code) {
+      throw new Error("Invalid Qianwen pairing-code response");
+    }
+    return parsed;
+  }
+
+  async unbindQianwenCurrentUser(
+    workspaceId: string,
+    installationId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/workspaces/${workspaceId}/qianwen/installations/${installationId}/bindings/me`,
+      { method: "DELETE" },
+    );
+  }
+
+  async revokeQianwenInstallation(
+    workspaceId: string,
+    installationId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/workspaces/${workspaceId}/qianwen/installations/${installationId}`,
+      { method: "DELETE" },
     );
   }
 }

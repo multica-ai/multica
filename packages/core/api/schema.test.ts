@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { noopLogger } from "../logger";
 import { ApiClient } from "./client";
-import { parseWithFallback } from "./schema";
+import { parseWithFallback, setSchemaLogger } from "./schema";
 
 // Helper: stub fetch with a single JSON response. Status defaults to 200.
 function stubFetchJson(body: unknown, status = 200) {
@@ -18,6 +19,7 @@ function stubFetchJson(body: unknown, status = 200) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  setSchemaLogger(noopLogger);
 });
 
 // These tests cover the five failure modes that white-screened the desktop
@@ -348,6 +350,210 @@ describe("ApiClient schema fallback", () => {
         conversation_title: "",
         installation_id: "",
       });
+    });
+  });
+
+  describe("Qianwen management contract", () => {
+    it("falls back to a safe empty installation list when the response is malformed", async () => {
+      stubFetchJson({ installations: "not-an-array", configured: true });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listQianwenInstallations("ws-1")).resolves.toEqual({
+        installations: [],
+        configured: false,
+      });
+    });
+
+    it("keeps caller-relative binding and pairing capability unknown when an old backend omits them", async () => {
+      stubFetchJson({
+        installations: [{ id: "installation-1", status: "future-status" }],
+        configured: true,
+        future_field: "ignored",
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      const result = await client.listQianwenInstallations("ws-1");
+
+      expect(result.configured).toBe(true);
+      expect(result.pairing_supported).toBeUndefined();
+      expect(result.installations[0]).toMatchObject({
+        id: "installation-1",
+        status: "future-status",
+      });
+      expect(result.installations[0]?.current_user_bound).toBeUndefined();
+    });
+
+    it("installs an agent-scoped personal channel and returns the one-time credential", async () => {
+      stubFetchJson({
+        id: "installation-1",
+        agent_id: "agent-1",
+        connection_id: "qwc_connection-1",
+        mode: "personal_polling",
+        access_token: "qws_one-time-secret",
+        token_visible_once: true,
+        submit_path: "/qianwen/requests",
+        status_path_pattern: "/qianwen/requests/{request_id}",
+        status: "active",
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.installQianwenPersonal("ws-1", "agent-1"),
+      ).resolves.toMatchObject({
+        id: "installation-1",
+        access_token: "qws_one-time-secret",
+        token_visible_once: true,
+      });
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/qianwen/installations?agent_id=agent-1",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it("mints an eight-digit pairing code without losing leading zeroes", async () => {
+      stubFetchJson({
+        pairing_code: "00001234",
+        expires_at: "2026-08-15T03:00:00Z",
+        code_visible_once: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.mintQianwenPairingCode("ws-1", "installation-1"),
+      ).resolves.toEqual({
+        pairing_code: "00001234",
+        expires_at: "2026-08-15T03:00:00Z",
+        code_visible_once: true,
+      });
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/qianwen/installations/installation-1/pairing-codes",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it("unbinds only the current caller from one installation", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
+      );
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.unbindQianwenCurrentUser("ws-1", "installation-1"),
+      ).resolves.toBeUndefined();
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/qianwen/installations/installation-1/bindings/me",
+        expect.objectContaining({ method: "DELETE" }),
+      );
+    });
+
+    it("revokes the whole installation through its distinct endpoint", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
+      );
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.revokeQianwenInstallation("ws-1", "installation-1"),
+      ).resolves.toBeUndefined();
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/qianwen/installations/installation-1",
+        expect.objectContaining({ method: "DELETE" }),
+      );
+    });
+
+    it("fails closed and redacts a malformed one-time install response", async () => {
+      const accessToken = "qws_malformed-response-must-not-leak";
+      const logger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      };
+      setSchemaLogger(logger);
+      stubFetchJson({
+        id: "installation-1",
+        agent_id: "agent-1",
+        connection_id: "qwc_connection-1",
+        mode: "personal_polling",
+        status: "active",
+        access_token: accessToken,
+        token_visible_once: false,
+        submit_path: "/qianwen/requests",
+        status_path_pattern: "/qianwen/requests/{request_id}",
+      });
+      const client = new ApiClient("https://api.example.test", { logger });
+
+      await expect(
+        client.installQianwenPersonal("ws-1", "agent-1"),
+      ).rejects.toThrow("Invalid Qianwen installation response");
+      const logArguments = JSON.stringify(
+        Object.values(logger).flatMap((method) => method.mock.calls),
+      );
+      expect(logArguments).not.toContain(accessToken);
+      expect(JSON.stringify(logger.warn.mock.calls)).toContain("[REDACTED]");
+    });
+
+    it("fails closed and redacts a malformed one-time pairing-code response", async () => {
+      const pairingCode = "87654321";
+      const logger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      };
+      setSchemaLogger(logger);
+      stubFetchJson({
+        pairing_code: pairingCode,
+        expires_at: 123,
+        code_visible_once: true,
+      });
+      const client = new ApiClient("https://api.example.test", { logger });
+
+      await expect(
+        client.mintQianwenPairingCode("ws-1", "installation-1"),
+      ).rejects.toThrow("Invalid Qianwen pairing-code response");
+      const logArguments = JSON.stringify(
+        Object.values(logger).flatMap((method) => method.mock.calls),
+      );
+      expect(logArguments).not.toContain(pairingCode);
+      expect(JSON.stringify(logger.warn.mock.calls)).toContain("[REDACTED]");
+    });
+
+    it("rejects empty installation credentials and non-eight-digit pairing codes", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn()
+          .mockResolvedValueOnce(
+            new Response(JSON.stringify({
+              id: "installation-1",
+              agent_id: "agent-1",
+              connection_id: "qwc_connection-1",
+              mode: "personal_polling",
+              status: "active",
+              access_token: "",
+              token_visible_once: true,
+              submit_path: "/qianwen/requests",
+              status_path_pattern: "/qianwen/requests/{request_id}",
+            }), { status: 200, headers: { "Content-Type": "application/json" } }),
+          )
+          .mockResolvedValueOnce(
+            new Response(JSON.stringify({
+              pairing_code: "1234567",
+              expires_at: "2026-08-15T03:00:00Z",
+              code_visible_once: true,
+            }), { status: 200, headers: { "Content-Type": "application/json" } }),
+          ),
+      );
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.installQianwenPersonal("ws-1", "agent-1"),
+      ).rejects.toThrow("Invalid Qianwen installation response");
+      await expect(
+        client.mintQianwenPairingCode("ws-1", "installation-1"),
+      ).rejects.toThrow("Invalid Qianwen pairing-code response");
     });
   });
 
@@ -828,6 +1034,62 @@ describe("parseWithFallback", () => {
     const fallback = { id: "fallback" };
     const out = parseWithFallback(null, schema, fallback, opts);
     expect(out).toBe(fallback);
+  });
+
+  it("redacts a Qianwen installation token from every validation warning argument", () => {
+    const accessToken = "qws_schema-warning-must-not-leak";
+    const warn = vi.fn();
+    setSchemaLogger({
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn,
+      error: vi.fn(),
+    });
+    const schema = z
+      .object({ access_token: z.string() })
+      .refine(() => false, { message: `invalid token ${accessToken}` });
+    const fallback = { access_token: "" };
+
+    const out = parseWithFallback(
+      { access_token: accessToken },
+      schema,
+      fallback,
+      { endpoint: "POST /qianwen/installations", redactFailureDetails: true },
+    );
+
+    expect(out).toBe(fallback);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const warning = JSON.stringify(warn.mock.calls);
+    expect(warning).not.toContain(accessToken);
+    expect(warning).toContain("[REDACTED]");
+  });
+
+  it("redacts an eight-digit Qianwen pairing code from every validation warning argument", () => {
+    const pairingCode = "87654321";
+    const warn = vi.fn();
+    setSchemaLogger({
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn,
+      error: vi.fn(),
+    });
+    const schema = z
+      .object({ pairing_code: z.string() })
+      .refine(() => false, { message: `invalid code ${pairingCode}` });
+    const fallback = { pairing_code: "" };
+
+    const out = parseWithFallback(
+      { pairing_code: pairingCode },
+      schema,
+      fallback,
+      { endpoint: "POST /qianwen/pairing-codes", redactFailureDetails: true },
+    );
+
+    expect(out).toBe(fallback);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const warning = JSON.stringify(warn.mock.calls);
+    expect(warning).not.toContain(pairingCode);
+    expect(warning).toContain("[REDACTED]");
   });
 });
 

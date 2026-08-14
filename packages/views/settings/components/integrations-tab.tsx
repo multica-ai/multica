@@ -7,6 +7,7 @@ import { SlackTab } from "./slack-tab";
 import { DingTalkTab } from "./dingtalk-tab";
 import { VCSTab } from "./vcs-tab";
 import { WecomTab } from "./wecom-tab";
+import { QianwenTab } from "./qianwen-tab";
 import { ApiError } from "@multica/core/api";
 import { composioToolkitsOptions } from "@multica/core/composio";
 import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
@@ -93,6 +94,17 @@ export function IntegrationsTab() {
         description={t(($) => $.wecom.page_description)}
       >
         <WecomTab />
+      </SettingsSection>
+      <SettingsSection
+        title={
+          <span className="flex items-center gap-2">
+            <IntegrationChannelIcon channel="qianwen" />
+            {t(($) => $.qianwen.section_title)}
+          </span>
+        }
+        description={t(($) => $.qianwen.page_description)}
+      >
+        <QianwenTab />
       </SettingsSection>
     </SettingsTab>
   );
