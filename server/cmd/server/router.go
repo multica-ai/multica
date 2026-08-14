@@ -59,6 +59,7 @@ var corsAllowedHeaders = []string{
 	"Accept",
 	"Authorization",
 	"Content-Type",
+	"Idempotency-Key",
 	"X-Workspace-ID",
 	"X-Workspace-Slug",
 	"X-Request-ID",
@@ -1161,6 +1162,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// are admin-gated below).
 					r.Get("/runtime-profiles", h.ListRuntimeProfiles)
 					r.Get("/runtime-profiles/{profileId}", h.GetRuntimeProfile)
+					// Shared MCP configuration — member-visible so the agent
+					// settings UI can show what an agent inherits; the handler
+					// redacts the document itself for everyone who cannot
+					// write it (and for agent actors unconditionally).
+					r.Get("/mcp-config", h.GetWorkspaceMcpConfig)
 					r.Get("/plugins", h.ListPlugins)
 					r.Get("/plugins/private", h.ListPrivatePlugins)
 					r.Get("/plugins/private/{pluginRef}", h.GetPrivatePluginStatus)
@@ -1178,6 +1184,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					// Writing shared MCP servers is an admin action: the
+					// document reaches every agent in the workspace. The
+					// whole-document PUT is the declarative path (CLI); the
+					// per-server routes are what the settings UI uses, since
+					// the document is never echoed back for it to edit.
+					r.Put("/mcp-config", h.UpdateWorkspaceMcpConfig)
+					r.Put("/mcp-config/servers/{serverName}", h.UpsertWorkspaceMcpServer)
+					r.Delete("/mcp-config/servers/{serverName}", h.DeleteWorkspaceMcpServer)
 					// Custom runtime profile mutations (admin-only).
 					r.Post("/runtime-profiles", h.CreateRuntimeProfile)
 					r.Patch("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)

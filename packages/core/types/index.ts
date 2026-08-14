@@ -76,7 +76,7 @@ export type {
   MikaBootstrapResponse,
 } from "./agent";
 export { RUNTIME_PROFILE_PROTOCOL_FAMILIES } from "./agent";
-export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
+export type { Workspace, WorkspaceRepo, WorkspaceMcpServer, WorkspaceMcpConfig, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
 export type {
   PluginBinding,
   PluginInstallation,
@@ -285,4 +285,8 @@ export type {
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPrices,
+  CreateWorkspaceSubscriptionCheckoutRequest,
+  CreateWorkspaceSubscriptionCheckoutResponse,
+  WorkspaceSubscriptionSeatReconcileResult,
+  CreateWorkspaceSubscriptionPortalResponse,
 } from "./billing";

@@ -503,9 +503,11 @@ func init() {
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
+	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
+	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
@@ -515,6 +517,7 @@ func init() {
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
+	issueAssignCmd.Flags().Bool("no-start", false, "Assign ownership without starting an agent run")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment list
@@ -1239,6 +1242,7 @@ func activeDuplicateIssueCreateMessage(err error) (string, bool) {
 }
 
 func runIssueUpdate(cmd *cobra.Command, args []string) error {
+	noStart, _ := cmd.Flags().GetBool("no-start")
 	statusChanged := cmd.Flags().Changed("status")
 	statusFlag, _ := cmd.Flags().GetString("status")
 	if statusChanged {
@@ -1349,6 +1353,9 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	if len(body) == 0 {
 		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, etc.")
 	}
+	if noStart {
+		body["suppress_run"] = true
+	}
 
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
@@ -1374,6 +1381,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 func runIssueAssign(cmd *cobra.Command, args []string) error {
 	toName, _ := cmd.Flags().GetString("to")
 	unassign, _ := cmd.Flags().GetBool("unassign")
+	noStart, _ := cmd.Flags().GetBool("no-start")
 	toNameSet := cmd.Flags().Changed("to")
 	toIDSet := cmd.Flags().Changed("to-id")
 
@@ -1382,6 +1390,9 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	}
 	if (toNameSet || toIDSet) && unassign {
 		return fmt.Errorf("--to/--to-id and --unassign are mutually exclusive")
+	}
+	if noStart && unassign {
+		return fmt.Errorf("--no-start cannot be used with --unassign")
 	}
 
 	client, err := newAPIClient(cmd)
@@ -1412,6 +1423,9 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 		if displayTarget == "" {
 			displayTarget = loadActorDisplayLookup(ctx, client).actor(aType, aID)
 		}
+		if noStart {
+			body["suppress_run"] = true
+		}
 	}
 
 	var result map[string]any
@@ -1435,6 +1449,7 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 func runIssueStatus(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	status := args[1]
+	noStart, _ := cmd.Flags().GetBool("no-start")
 
 	if err := validateIssueStatus(status); err != nil {
 		return err
@@ -1454,6 +1469,9 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"status": status}
+	if noStart {
+		body["suppress_run"] = true
+	}
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update status: %w", err)

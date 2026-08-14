@@ -3398,6 +3398,171 @@ func TestBacklogToTodoByAgentSameAgentDifferentIssue(t *testing.T) {
 	}
 }
 
+// TestAssignIssueToSelfWithActiveTargetRunDoesNotDuplicate covers the direct
+// assignment form of #6947: an agent already working on an issue may claim its
+// ownership, but that ownership write must not enqueue a second run for the
+// same (issue, agent) pair.
+func TestAssignIssueToSelfWithActiveTargetRunDoesNotDuplicate(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID := createHandlerTestAgent(t, "Self Assign Active Target", nil)
+
+	issue := createIssueForTest(t, map[string]any{"title": "self-assign active target", "status": "todo"})
+	runningTask := createHandlerTestTaskForAgentOnIssue(t, agentID, issue.ID)
+
+	previewRecorder := httptest.NewRecorder()
+	previewReq := newRequest("POST", "/api/issues/preview-trigger?workspace_id="+testWorkspaceID, map[string]any{
+		"issue_ids":     []string{issue.ID},
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	previewReq.Header.Set("X-Agent-ID", agentID)
+	previewReq.Header.Set("X-Task-ID", runningTask)
+	testHandler.PreviewIssueTrigger(previewRecorder, previewReq)
+	if previewRecorder.Code != http.StatusOK {
+		t.Fatalf("PreviewIssueTrigger: expected 200, got %d: %s", previewRecorder.Code, previewRecorder.Body.String())
+	}
+	var preview IssueTriggerPreviewResponse
+	if err := json.NewDecoder(previewRecorder.Body).Decode(&preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if preview.TotalCount != 0 {
+		t.Fatalf("preview promised a duplicate self-assignment run: %+v", preview)
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	}), "id", issue.ID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", runningTask)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := queuedTaskCountFor(t, issue.ID, agentID); got != 0 {
+		t.Fatalf("self-assignment duplicated an active target run: got %d queued task(s)", got)
+	}
+	if got := taskStatus(t, runningTask); got != "running" {
+		t.Fatalf("existing target run must survive ownership claim, got status %q", got)
+	}
+}
+
+func TestShouldSuppressActiveSelfAssignmentFailsClosedOnLookupError(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	const agentID = "1c331d0b-94fd-412a-a7cc-6a209add00a1"
+	const issueID = "34c44eb2-bd85-455f-b47c-f39cc7b0b913"
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if !testHandler.shouldSuppressActiveSelfAssignment(
+		ctx,
+		"agent",
+		agentID,
+		parseUUID(issueID),
+		parseUUID(agentID),
+	) {
+		t.Fatal("lookup failure must fail closed and suppress duplicate enqueue")
+	}
+}
+
+// TestAssignDifferentIssueToSelfStillEnqueues locks in the intentional
+// cross-issue handoff behavior: an agent working on I1 may assign fresh I2 to
+// itself, and I2 still gets a queued run.
+func TestAssignDifferentIssueToSelfStillEnqueues(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID := createHandlerTestAgent(t, "Cross Issue Self Assign", nil)
+	source := createIssueForTest(t, map[string]any{"title": "cross-issue source", "status": "todo"})
+	target := createIssueForTest(t, map[string]any{"title": "cross-issue target", "status": "todo"})
+	sourceTask := createHandlerTestTaskForAgentOnIssue(t, agentID, source.ID)
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("PUT", "/api/issues/"+target.ID, map[string]any{
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	}), "id", target.ID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", sourceTask)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := queuedTaskCountFor(t, target.ID, agentID); got != 1 {
+		t.Fatalf("cross-issue self-assignment should enqueue one run, got %d", got)
+	}
+}
+
+// TestBatchAssignFreshIssuesToSelfEnqueuesEach protects triage/autopilot
+// batches: being busy on a source issue is not a global self-assignment ban.
+// Every fresh target keeps the existing enqueue behavior.
+func TestBatchAssignFreshIssuesToSelfEnqueuesEach(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID := createHandlerTestAgent(t, "Batch Fresh Self Assign", nil)
+	source := createIssueForTest(t, map[string]any{"title": "batch source", "status": "todo"})
+	target1 := createIssueForTest(t, map[string]any{"title": "batch target one", "status": "todo"})
+	target2 := createIssueForTest(t, map[string]any{"title": "batch target two", "status": "todo"})
+	sourceTask := createHandlerTestTaskForAgentOnIssue(t, agentID, source.ID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/issues/batch?workspace_id="+testWorkspaceID, map[string]any{
+		"issue_ids": []string{target1.ID, target2.ID},
+		"updates": map[string]any{
+			"assignee_type": "agent",
+			"assignee_id":   agentID,
+		},
+	})
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", sourceTask)
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BatchUpdateIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	for _, target := range []IssueResponse{target1, target2} {
+		if got := queuedTaskCountFor(t, target.ID, agentID); got != 1 {
+			t.Fatalf("fresh target %s should enqueue one run, got %d", target.ID, got)
+		}
+	}
+}
+
+// TestAssignActiveIssueToDifferentAgentStillEnqueues verifies the duplicate
+// guard never turns a real agent-to-agent transfer into an ownership-only
+// update. The old task survives per #4963 and the new assignee gets a run.
+func TestAssignActiveIssueToDifferentAgentStillEnqueues(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	actorAgent := createHandlerTestAgent(t, "Active Transfer Actor", nil)
+	targetAgent := createHandlerTestAgent(t, "Active Transfer Target", nil)
+	issue := createIssueForTest(t, map[string]any{"title": "active transfer", "status": "todo"})
+	actorTask := createHandlerTestTaskForAgentOnIssue(t, actorAgent, issue.ID)
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
+		"assignee_type": "agent",
+		"assignee_id":   targetAgent,
+	}), "id", issue.ID)
+	req.Header.Set("X-Agent-ID", actorAgent)
+	req.Header.Set("X-Task-ID", actorTask)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := queuedTaskCountFor(t, issue.ID, targetAgent); got != 1 {
+		t.Fatalf("new assignee should get one queued run, got %d", got)
+	}
+	if got := taskStatus(t, actorTask); got != "running" {
+		t.Fatalf("old active task must survive transfer, got status %q", got)
+	}
+}
+
 // TestBatchBacklogToTodoByAgentTriggersAssignee mirrors the single-update
 // serial-chain test on the BatchUpdateIssues path. Earlier the
 // member-only gate would silently drop agent-driven batch promotions; the

@@ -1120,7 +1120,11 @@ func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 	cmd.WaitDelay = 2 * time.Second
 	data, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("detect version for %s: %w", execPath, err)
+		// One provider-agnostic boundary for probes: DetectVersion routes every
+		// provider through here, so an ENOEXEC diagnosis added at this point
+		// reaches the reason the daemon reports for a skipped runtime
+		// (MUL-6164).
+		return "", fmt.Errorf("detect version for %s: %w", execPath, ExplainExecError(err))
 	}
 	return extractVersionLine(string(data)), nil
 }

@@ -227,9 +227,9 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | `issue` | `list` | イシューを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（繰り返し可）、`--limit`、`--offset`、`--sort`、`--full-id` |
 | | `get <id>` | 単一のイシューを表示 | |
 | | `create` | イシューを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可） |
-| | `update <id>` | イシューのフィールドを更新 | `create` と同系のフィールドに加え `--position` |
-| | `assign <id>` | 割り当てまたは割り当て解除 | `--to`（メンバー、エージェント、スクワッドを名前であいまいマッチ）、`--to-id`、`--unassign` |
-| | `status <id> <status>` | ステータスを変更 | |
+| | `update <id>` | イシューのフィールドを更新 | `create` と同系のフィールドに加え `--position`、`--no-start` |
+| | `assign <id>` | 割り当てまたは割り当て解除 | `--to`（メンバー、エージェント、スクワッドを名前であいまいマッチ）、`--to-id`、`--unassign`、`--no-start` |
+| | `status <id> <status>` | ステータスを変更 | `--no-start` |
 | | `reorder <id>` | カラム内で移動 | |
 | | `search <query>` | イシューを検索 | `--limit`、`--include-closed` |
 | | `children <id>` | サブイシューをステージごとに一覧 | |
@@ -260,6 +260,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `runs <id>` | 実行履歴を表示 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | スケジュールと webhook のトリガーを管理 | |
 | `workspace` | `list/get/create/update/switch` | ワークスペースを管理。`switch` は現在のプロファイルのデフォルトワークスペースを設定 | |
+| | `mcp get/set/add/remove` | ワークスペース内の全エージェントで共有する MCP サーバーを管理 | 書き込みは owner/admin のみ。`get` は名前と transport のみを表示し、保存された設定は書き込み専用でどのロールにも返らない。`set` はドキュメント全体を置換（`--mcp-config-file` / `--mcp-config-stdin` はトークンをシェル履歴から守る。`--mcp-config null` で削除）。`add <name>` / `remove <name>` はドキュメント全体を持たずに 1 つのサーバーだけを変更 |
 | | `member list/invite <email>` | メンバーの表示と招待 | `invite`: `--role`（member または admin。デフォルトは member） |
 | `repo` | `list/add/remove/checkout` | ワークスペースのリポジトリを管理し、ローカルにチェックアウト | `--url`（繰り返し可）；`checkout`: `--ref` |
 | `skill` | `list/get/create/update/delete` | スキルを管理 | |

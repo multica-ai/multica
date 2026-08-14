@@ -115,6 +115,7 @@
       "toggleChat": { "label": "チャットウィンドウを切り替え", "description": "フローティングチャットを開閉します。開いたときは入力欄にフォーカスします。" },
       "findInIssue": { "label": "タスク内を検索", "description": "開いているタスクの詳細を検索します。" },
       "openThreadNav": { "label": "スレッドナビゲーターを開く", "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。" },
+      "archiveInboxItem": { "label": "通知をアーカイブ", "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。" },
       "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログでタスクを作成します。" },
       "goBack": { "label": "戻る", "description": "ブラウザーのように履歴を戻ります。" },
       "goForward": { "label": "進む", "description": "ブラウザーのように履歴を進みます。" },
@@ -162,6 +163,28 @@
       "start_date": "開始日"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "このワークスペースの全エージェントで共有する MCP サーバー。同じ設定をエージェントごとに入力し直す必要がなくなります。",
+    "servers_title": "共有サーバー",
+    "write_only_note": "独自の MCP 設定を持たないエージェントはこれらのサーバーを継承します。独自の設定を持つエージェントはその上にマージされ、名前が衝突した場合はエージェント側が優先されます。保存された設定は書き込み専用です — url、コマンド、ヘッダー、環境変数は二度と表示されないため、サーバーの編集は設定の置き換えになります。",
+    "add_server": "サーバーを追加",
+    "edit_server": "サーバーを編集",
+    "remove_server": "サーバーを削除",
+    "empty_title": "共有 MCP サーバーはありません",
+    "empty_description": "ここにサーバーを追加すると、オプトアウトしていない限り、ワークスペース内の全エージェントが次のタスクから継承します。",
+    "disabled_badge": "無効",
+    "admin_only_note": "共有 MCP サーバーを変更できるのはワークスペースの owner と admin のみです。",
+    "delete_title": "共有サーバーを削除しますか？",
+    "delete_description": "{{name}} は次のタスクからこのワークスペースのエージェントに共有されなくなります。同名のサーバーを自分で定義しているエージェントには影響しません。",
+    "delete_confirm": "削除",
+    "cancel": "キャンセル",
+    "added_toast": "共有 MCP サーバーを追加しました",
+    "updated_toast": "共有 MCP サーバーを更新しました",
+    "removed_toast": "共有 MCP サーバーを削除しました",
+    "save_failed_toast": "共有 MCP サーバーを保存できませんでした",
+    "remove_failed_toast": "共有 MCP サーバーを削除できませんでした"
+  },
   "page": {
     "title": "設定",
     "my_account": "マイアカウント",
@@ -183,7 +206,9 @@
       "labels": "ラベル",
       "properties": "プロパティ",
       "quick_actions": "クイックアクション",
-      "plugins": "Plugins"
+    "plugins": "Plugins",
+    "mcp": "MCP",
+    "billing": "請求とプラン"
     }
   },
   "plugins": {

@@ -24,6 +24,8 @@ import {
   IssueDisplayControls,
   ViewRefreshIndicator,
 } from "../../issues/components/issues-header";
+import { cn } from "@multica/ui/lib/utils";
+import { PAGE_GUTTER } from "../../layout/page-header";
 import { FilterChipsBar } from "../../issues/components/filter-chips-bar";
 import { toast } from "sonner";
 import { SaveViewDialog, type SaveViewScope } from "../../issues/components/save-view-dialog";
@@ -98,7 +100,7 @@ export function MyIssuesHeader({
 
   return (
     <>
-    <div className="min-h-12 shrink-0 px-4 py-2 [-webkit-overflow-scrolling:touch]">
+    <div className={cn("min-h-12 shrink-0 py-2 [-webkit-overflow-scrolling:touch]", PAGE_GUTTER)}>
       <div className="flex w-full min-w-0 items-start justify-between gap-2">
         <div className="hidden min-w-0 flex-1 md:block">
           <ViewBar

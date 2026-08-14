@@ -168,10 +168,33 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]WorkspaceResponse, len(workspaces))
 	for i, ws := range workspaces {
-		resp[i] = h.workspaceToResponse(ws)
+		resp[i] = h.listWorkspacesRowToResponse(ws)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// listWorkspacesRowToResponse renders the deliberately narrow ListWorkspaces
+// projection. That query names its columns instead of selecting the whole row
+// so the workspace switcher never loads mcp_config — a secret-bearing document
+// no list consumer needs (MUL-5421) — which is also why this cannot simply
+// reuse workspaceToResponse's db.Workspace parameter.
+func (h *Handler) listWorkspacesRowToResponse(row db.ListWorkspacesRow) WorkspaceResponse {
+	return h.workspaceToResponse(db.Workspace{
+		ID:                    row.ID,
+		Name:                  row.Name,
+		Slug:                  row.Slug,
+		Description:           row.Description,
+		Settings:              row.Settings,
+		CreatedAt:             row.CreatedAt,
+		UpdatedAt:             row.UpdatedAt,
+		Context:               row.Context,
+		Repos:                 row.Repos,
+		IssuePrefix:           row.IssuePrefix,
+		IssueCounter:          row.IssueCounter,
+		AvatarUrl:             row.AvatarUrl,
+		AttributionFailClosed: row.AttributionFailClosed,
+	})
 }
 
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {

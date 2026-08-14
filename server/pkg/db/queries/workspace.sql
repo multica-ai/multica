@@ -39,6 +39,39 @@ WHERE slug = $1;
 SELECT attribution_fail_closed FROM workspace
 WHERE id = $1;
 
+-- name: GetWorkspaceMcpConfig :one
+-- Lean read of the workspace's shared MCP document for the daemon claim path,
+-- which resolves it under every agent's own mcp_config on each claim. Kept
+-- narrow (like GetWorkspaceAttributionFailClosed) so the hot path never drags
+-- settings/repos/context along. NULL = nothing shared at this layer.
+SELECT mcp_config FROM workspace
+WHERE id = $1;
+
+-- name: LockWorkspaceMcpConfig :one
+-- Read-for-update half of the per-server edit path. The shared document is
+-- never echoed back to clients, so a UI cannot do the read-modify-write
+-- itself; the server does it instead, and this lock is what keeps two admins
+-- editing different servers from losing one another's write. Takes only the
+-- workspace row, so it cannot deadlock against the workspace -> chat_session
+-- -> agent_task_queue lock order used elsewhere.
+SELECT mcp_config FROM workspace
+WHERE id = $1
+FOR UPDATE;
+
+-- name: SetWorkspaceMcpConfig :one
+-- Writes the shared MCP document. Mirrors the agent column's two-query
+-- pattern: COALESCE cannot restore NULL, so clearing has its own query below.
+UPDATE workspace SET mcp_config = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearWorkspaceMcpConfig :one
+-- Restores the "nothing shared at this layer" state. Every agent that was
+-- inheriting falls back to its own mcp_config on its next claim.
+UPDATE workspace SET mcp_config = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: CreateWorkspace :one
 INSERT INTO workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)

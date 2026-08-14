@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -560,6 +562,99 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	}
 	if cfg.CodexHandshakeTimeout != 12*time.Second {
 		t.Fatalf("CodexHandshakeTimeout = %s, want 12s from override", cfg.CodexHandshakeTimeout)
+	}
+}
+
+// TestLoadConfig_CodexFirstTurnNoProgressTimeout pins the env-only
+// MULTICA_CODEX_FIRST_TURN_TIMEOUT resolution (GH #3262 / #5959): unset and an
+// explicit "0" both mean "keep the backend default" (0 = unset), while a positive
+// value is honored verbatim. There is deliberately no Overrides/CLI parity — this
+// knob is environment-only.
+func TestLoadConfig_CodexFirstTurnNoProgressTimeout(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with unset: %v", err)
+	}
+	if cfg.CodexFirstTurnNoProgressTimeout != 0 {
+		t.Fatalf("CodexFirstTurnNoProgressTimeout = %s, want 0 when unset", cfg.CodexFirstTurnNoProgressTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", "30m")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with env: %v", err)
+	}
+	if cfg.CodexFirstTurnNoProgressTimeout != 30*time.Minute {
+		t.Fatalf("CodexFirstTurnNoProgressTimeout = %s, want 30m from env", cfg.CodexFirstTurnNoProgressTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", "0")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with zero env: %v", err)
+	}
+	if cfg.CodexFirstTurnNoProgressTimeout != 0 {
+		t.Fatalf("CodexFirstTurnNoProgressTimeout = %s, want 0 for explicit zero", cfg.CodexFirstTurnNoProgressTimeout)
+	}
+}
+
+// TestLoadConfig_CodexFirstTurnTimeoutEqualToSemanticWarns pins the equality
+// edge (multica-eve review on #6753): because the semantic-inactivity timer is
+// armed before the first-turn timer, equal durations still let the semantic
+// deadline win and drop the #3291 startup retry. LoadConfig must warn when the
+// first-turn timeout is >= the semantic timeout, and stay quiet only when the
+// semantic timeout is strictly greater.
+func TestLoadConfig_CodexFirstTurnTimeoutEqualToSemanticWarns(t *testing.T) {
+	stageFakeAgent(t)
+
+	const warnNeedle = "MULTICA_CODEX_FIRST_TURN_TIMEOUT is greater than or equal to the semantic-inactivity timeout"
+
+	loadWithLoggedWarnings := func(t *testing.T, semantic, firstTurn string) string {
+		t.Helper()
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+		t.Cleanup(func() { slog.SetDefault(prev) })
+
+		t.Setenv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", semantic)
+		t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", firstTurn)
+		if _, err := LoadConfig(Overrides{
+			ServerURL:      "http://localhost:8080",
+			WorkspacesRoot: t.TempDir(),
+		}); err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		return buf.String()
+	}
+
+	// Equal durations: the semantic timer is armed first, so the retry can still
+	// be lost. The warning MUST fire — this is the edge the earlier `>`-only
+	// check missed.
+	if logs := loadWithLoggedWarnings(t, "15m", "15m"); !strings.Contains(logs, warnNeedle) {
+		t.Fatalf("equal durations must warn; logs = %q", logs)
+	}
+
+	// First-turn strictly above semantic: also warns (the original truncation case).
+	if logs := loadWithLoggedWarnings(t, "10m", "30m"); !strings.Contains(logs, warnNeedle) {
+		t.Fatalf("first-turn above semantic must warn; logs = %q", logs)
+	}
+
+	// Semantic strictly above first-turn: the recommended safe configuration —
+	// no warning.
+	if logs := loadWithLoggedWarnings(t, "30m", "10m"); strings.Contains(logs, warnNeedle) {
+		t.Fatalf("semantic strictly above first-turn must not warn; logs = %q", logs)
 	}
 }
 

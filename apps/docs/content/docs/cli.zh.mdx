@@ -227,9 +227,9 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | `issue` | `list` | 列出 issue | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（可重复）、`--limit`、`--offset`、`--sort`、`--full-id` |
 | | `get <id>` | 查看单个 issue | |
 | | `create` | 创建 issue | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重复） |
-| | `update <id>` | 更新 issue 字段 | 与 `create` 同类字段，另有 `--position` |
-| | `assign <id>` | 指派或取消指派 | `--to`（名称模糊匹配成员、智能体或小队）、`--to-id`、`--unassign` |
-| | `status <id> <status>` | 修改状态 | |
+| | `update <id>` | 更新 issue 字段 | 与 `create` 同类字段，另有 `--position`、`--no-start` |
+| | `assign <id>` | 指派或取消指派 | `--to`（名称模糊匹配成员、智能体或小队）、`--to-id`、`--unassign`、`--no-start` |
+| | `status <id> <status>` | 修改状态 | `--no-start` |
 | | `reorder <id>` | 在列内移动 | |
 | | `search <query>` | 搜索 issue | `--limit`、`--include-closed` |
 | | `children <id>` | 按阶段分组列出子 issue | |
@@ -260,6 +260,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `runs <id>` | 查看运行历史 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 管理定时和 webhook 触发器 | |
 | `workspace` | `list/get/create/update/switch` | 管理工作区；`switch` 设置当前 profile 的默认工作区 | |
+| | `mcp get/set/add/remove` | 管理工作区内所有 agent 共享的 MCP 服务 | 写操作需要 owner/admin。`get` 只列出名称与 transport——存储的配置是只写的，任何角色都读不回。`set` 整份替换（`--mcp-config-file` / `--mcp-config-stdin` 避免 token 进入 shell 历史；`--mcp-config null` 清空）；`add <name>` / `remove <name>` 无需持有整份文档即可改动单个服务 |
 | | `member list/invite <email>` | 查看成员、发出邀请 | `invite`：`--role`（member 或 admin，默认 member） |
 | `repo` | `list/add/remove/checkout` | 管理工作区仓库并检出到本机 | `--url`（可重复）；`checkout`：`--ref` |
 | `skill` | `list/get/create/update/delete` | 管理 skill | |

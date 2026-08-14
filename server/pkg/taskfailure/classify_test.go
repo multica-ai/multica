@@ -139,6 +139,7 @@ func TestClassifyRules(t *testing.T) {
 
 		// 11. Runtime missing executable.
 		{"executable not found", "executable not found in $PATH", ReasonAgentRuntimeMissingExecutable},
+		{"exec format error", "start claude: fork/exec /usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe: exec format error", ReasonAgentRuntimeMissingExecutable},
 
 		// 12. Runtime version unsupported.
 		{"below the minimum supported version", "claude CLI 0.1.0 is below the minimum supported version 0.5.0", ReasonAgentRuntimeVersionUnsupported},

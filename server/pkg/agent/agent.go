@@ -38,6 +38,16 @@ type ExecOptions struct {
 	MaxTurns                  int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
+	// FirstTurnNoProgressTimeout optionally overrides the Codex first-turn
+	// no-progress ceiling — the window a turn may stay completely silent after
+	// the app-server reports turn/started before the watchdog fails it. Zero
+	// keeps the provider default and the existing behaviour where
+	// SemanticInactivityTimeout can only shrink that ceiling; a positive value
+	// sets it explicitly, upward included. This answers a different question than
+	// SemanticInactivityTimeout ("did the process ever start producing?" vs "has
+	// a running turn gone quiet?"), so the two move independently. Currently
+	// honoured by the codex backend (GH #3262).
+	FirstTurnNoProgressTimeout time.Duration
 	// IdleWatchdogTimeout optionally narrows the daemon's generic no-message
 	// watchdog for this execution. Zero keeps the daemon-wide window, and a
 	// value above that window cannot extend the global safety bound. The

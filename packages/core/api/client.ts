@@ -50,6 +50,7 @@ import type {
   IssueReaction,
   Workspace,
   WorkspaceRepo,
+  WorkspaceMcpConfig,
   MemberWithUser,
   User,
   Skill,
@@ -188,6 +189,10 @@ import type {
   WorkspaceSubscriptionEntitlements,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrices,
+  CreateWorkspaceSubscriptionCheckoutRequest,
+  CreateWorkspaceSubscriptionCheckoutResponse,
+  WorkspaceSubscriptionSeatReconcileResult,
+  CreateWorkspaceSubscriptionPortalResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -295,6 +300,9 @@ import {
   WorkspaceSubscriptionEntitlementsSchema,
   WorkspaceSubscriptionSummarySchema,
   WorkspaceSubscriptionPricesSchema,
+  CreateWorkspaceSubscriptionCheckoutResponseSchema,
+  WorkspaceSubscriptionSeatReconcileResultSchema,
+  CreateWorkspaceSubscriptionPortalResponseSchema,
   DingTalkInstallationSchema,
   DingTalkGroupRouteSchema,
   ListDingTalkGroupRoutesResponseSchema,
@@ -366,10 +374,12 @@ import {
   EMPTY_ISSUE_VIEW_PREFERENCE,
   EMPTY_PLUGIN_CATALOG,
   EMPTY_PLUGIN_INSTALLATION,
+  EMPTY_WORKSPACE_MCP_CONFIG,
   EMPTY_PLUGIN_INSTALLATION_LIST,
   PluginCatalogResponseSchema,
   PluginInstallationListResponseSchema,
   PluginInstallationSchema,
+  WorkspaceMcpConfigSchema,
   type IssueView,
   type IssueViewPreference,
   type CreateIssueViewRequest,
@@ -1646,6 +1656,66 @@ export class ApiClient {
     );
   }
 
+  async createWorkspaceSubscriptionCheckout(
+    data: CreateWorkspaceSubscriptionCheckoutRequest,
+  ): Promise<CreateWorkspaceSubscriptionCheckoutResponse | null> {
+    const res = await this.fetchRaw(
+      "/api/cloud-subscriptions/checkout-sessions",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          interval: data.interval,
+          idempotency_key: data.idempotencyKey,
+          ...(data.customerEmail
+            ? { customer_email: data.customerEmail }
+            : {}),
+        }),
+        extraHeaders: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": data.idempotencyKey,
+        },
+      },
+    );
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback<CreateWorkspaceSubscriptionCheckoutResponse | null>(
+      raw,
+      CreateWorkspaceSubscriptionCheckoutResponseSchema,
+      null,
+      { endpoint: "POST /api/cloud-subscriptions/checkout-sessions" },
+    );
+  }
+
+  async reconcileWorkspaceSubscriptionSeats(): Promise<
+    WorkspaceSubscriptionSeatReconcileResult | null
+  > {
+    const res = await this.fetchRaw("/api/cloud-subscriptions/seats/reconcile", {
+      method: "POST",
+    });
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback<WorkspaceSubscriptionSeatReconcileResult | null>(
+      raw,
+      WorkspaceSubscriptionSeatReconcileResultSchema,
+      null,
+      { endpoint: "POST /api/cloud-subscriptions/seats/reconcile" },
+    );
+  }
+
+  async createWorkspaceSubscriptionPortal(
+    idempotencyKey: string,
+  ): Promise<CreateWorkspaceSubscriptionPortalResponse | null> {
+    const res = await this.fetchRaw("/api/cloud-subscriptions/portal-sessions", {
+      method: "POST",
+      extraHeaders: { "Idempotency-Key": idempotencyKey },
+    });
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback<CreateWorkspaceSubscriptionPortalResponse | null>(
+      raw,
+      CreateWorkspaceSubscriptionPortalResponseSchema,
+      null,
+      { endpoint: "POST /api/cloud-subscriptions/portal-sessions" },
+    );
+  }
+
   async deleteRuntime(runtimeId: string): Promise<void> {
     await this.fetch(`/api/runtimes/${runtimeId}`, { method: "DELETE" });
   }
@@ -2256,6 +2326,48 @@ export class ApiClient {
     }
     return parseWithFallback(raw, PluginInstallationListResponseSchema, EMPTY_PLUGIN_INSTALLATION_LIST, {
       endpoint: "GET /api/workspaces/{id}/plugins",
+    });
+  }
+
+  /**
+   * Lists the MCP servers the workspace shares with every agent. The response
+   * carries names and transports only — the stored configuration is
+   * write-only server-side, so there is nothing here to redact.
+   */
+  async getWorkspaceMcpConfig(workspaceId: string): Promise<WorkspaceMcpConfig> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/mcp-config`);
+    return parseWithFallback(raw, WorkspaceMcpConfigSchema, EMPTY_WORKSPACE_MCP_CONFIG, {
+      endpoint: "GET /api/workspaces/{id}/mcp-config",
+    });
+  }
+
+  /**
+   * Adds or replaces ONE shared MCP server. Per-server rather than a whole
+   * document write because the client can never read the document back, so a
+   * read-modify-write is impossible; the server merges under a row lock.
+   */
+  async upsertWorkspaceMcpServer(
+    workspaceId: string,
+    name: string,
+    entry: Record<string, unknown>,
+  ): Promise<WorkspaceMcpConfig> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/mcp-config/servers/${encodeURIComponent(name)}`,
+      { method: "PUT", body: JSON.stringify(entry) },
+    );
+    return parseWithFallback(raw, WorkspaceMcpConfigSchema, EMPTY_WORKSPACE_MCP_CONFIG, {
+      endpoint: "PUT /api/workspaces/{id}/mcp-config/servers/{name}",
+    });
+  }
+
+  /** Removes one shared MCP server; removing the last one clears the layer. */
+  async deleteWorkspaceMcpServer(workspaceId: string, name: string): Promise<WorkspaceMcpConfig> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/mcp-config/servers/${encodeURIComponent(name)}`,
+      { method: "DELETE" },
+    );
+    return parseWithFallback(raw, WorkspaceMcpConfigSchema, EMPTY_WORKSPACE_MCP_CONFIG, {
+      endpoint: "DELETE /api/workspaces/{id}/mcp-config/servers/{name}",
     });
   }
 

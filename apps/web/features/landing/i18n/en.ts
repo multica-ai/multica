@@ -294,6 +294,33 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.26",
+        date: "2026-08-14",
+        title:
+          "DeepSeek Harness runtime, board drag-to-pan, and an Inbox archive shortcut",
+        changes: [],
+        features: [
+          "You can now run your agents on DeepSeek Harness.",
+          "Dragging blank space on the board now pans it sideways.",
+          "Pressing E in the Inbox now archives the open notification.",
+          "Self-hosted setups can now keep task workspaces on any disk you pick.",
+        ],
+        improvements: [
+          "Page titles and toolbars now line up on the same left edge everywhere.",
+          "You can now give Codex longer to get going when its first turn is slow.",
+          "Assigning an Issue or changing its status can now skip starting a run.",
+        ],
+        fixes: [
+          "An agent CLI that cannot run now tells you how to repair it.",
+          "Someone else's private runtime can no longer be used from the API or CLI.",
+          "Leftover task files no longer break every multica command in a folder.",
+          "Agents installed through Volta or Vite Plus are now recognised.",
+          "The gap between the last reply and the composer is back.",
+          "In dark mode the active tab no longer prints dark squares, and hover corners stay round.",
+          "An agent no longer starts a second run for an Issue it is already on.",
+        ],
+      },
+      {
         version: "0.4.25",
         date: "2026-08-13",
         title:

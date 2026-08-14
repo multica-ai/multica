@@ -87,3 +87,27 @@ export function useDeleteWorkspace() {
     },
   });
 }
+
+/**
+ * Adds or replaces one shared MCP server. There is no client-side merge: the
+ * document is never returned, so the server does the read-modify-write and
+ * hands back the refreshed inventory.
+ */
+export function useUpsertWorkspaceMcpServer(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, entry }: { name: string; entry: Record<string, unknown> }) =>
+      api.upsertWorkspaceMcpServer(wsId, name, entry),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.mcpConfig(wsId) }),
+  });
+}
+
+export function useDeleteWorkspaceMcpServer(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.deleteWorkspaceMcpServer(wsId, name),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.mcpConfig(wsId) }),
+  });
+}

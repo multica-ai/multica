@@ -1976,3 +1976,63 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 		})
 	}
 }
+
+// Every brief that teaches `--output json` also says not to merge stderr into
+// it, because the two facts are only useful together. The CLI is right:
+// confirmations go to stderr, JSON goes to stdout, and `--output json | jq` has
+// always worked. It stays right only while the caller keeps the streams apart,
+// and `2>&1` is ordinary shell habit. The cost of merging them is not a cosmetic
+// parse error: a confirmation line inside the JSON makes the parse fail, so a
+// write that SUCCEEDED reads as one that failed, and the retry posts the comment
+// or sends the file a second time.
+//
+// The assertions are on the rule's wording, not on loose substrings, because
+// `2>&1` and "look like it failed" both survive a brief that says to merge the
+// streams. Each builder must carry the prohibition verbatim, exactly once, with
+// the consequence attached.
+//
+// Both brief builders are checked, not one. The quick-create brief is a
+// separate function with its own copy of the `--output json` line, so guidance
+// added to the full brief alone would be missing from exactly the runs that are
+// given the least context to work it out for themselves.
+func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing.T) {
+	t.Parallel()
+	const (
+		wantFlag = "--output json"
+		// The premise the rule rests on. "Do not merge them" says nothing about
+		// WHICH stream carries what, so a brief that swapped the two would pass
+		// every other assertion here while telling an agent the opposite of the
+		// truth — the same defect one clause to the left.
+		wantPremise = "writes JSON to stdout; confirmations and warnings go to stderr"
+		// The prohibition itself, not just the operator it names: "Always merge
+		// them (`2>&1`)" contains `2>&1` and would pass a bare-operator check.
+		wantRule = "Do not merge them (`2>&1`)"
+		// The consequence, in the direction that makes the rule worth obeying;
+		// the inverse claim ("failed write looks like it succeeded") is a
+		// different bug and must not satisfy this.
+		wantWhy = "a write that SUCCEEDED look like it failed"
+	)
+	briefs := map[string]string{
+		"full":         buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}),
+		"quick-create": buildMetaSkillContent("claude", TaskContextForEnv{QuickCreatePrompt: "make an issue"}),
+	}
+	for name, brief := range briefs {
+		if !strings.Contains(brief, wantFlag) {
+			t.Fatalf("%s brief does not mention %s at all; this test's premise is gone", name, wantFlag)
+		}
+		if !strings.Contains(brief, wantPremise) {
+			t.Errorf("%s brief teaches %s without saying %q — the rule below it is only correct while the streams carry what this says they carry", name, wantFlag, wantPremise)
+		}
+		switch got := strings.Count(brief, wantRule); got {
+		case 1:
+		case 0:
+			t.Errorf("%s brief teaches %s without saying %q — the habit it has to displace is the one thing an agent will not infer", name, wantFlag, wantRule)
+			continue // the reason check below would report a rule that is not there
+		default:
+			t.Errorf("%s brief repeats %q %d times; one rule, one place, or the next edit fixes only one of them", name, wantRule, got)
+		}
+		if !strings.Contains(brief, wantWhy) {
+			t.Errorf("%s brief states %q without %q; a rule with no reason is the first one dropped under pressure", name, wantRule, wantWhy)
+		}
+	}
+}

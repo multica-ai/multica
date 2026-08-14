@@ -202,6 +202,7 @@ API key と base URL の両方が空の場合、サーバーサイド LLM 生成
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 単一のツール呼び出しが静穏なままでいられる上限 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 専用の静穏しきい値 |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex のセマンティック静穏しきい値 |
+| `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Codex 初回ターンの無進捗上限を明示的に上書き；`0` はデフォルトを維持。実効の初回ターン待機は依然として `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` と全体の実行タイムアウトに制限される——`MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` をこの値より厳密に大きく（余裕を持たせて）設定すること。さもないと待機はその値で打ち切られ、モデルカタログの起動リトライがスキップされる。同値では不十分：セマンティックタイマーが先に起動するため、同値の場合でもリトライが失われることがある |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server 起動ハンドシェイクの上限 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud は `true`、セルフホストは `false` | CLI の更新を自動でチェックして適用するか |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 更新チェックの間隔 |

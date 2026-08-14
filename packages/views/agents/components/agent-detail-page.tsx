@@ -570,16 +570,14 @@ function DetailHeader({
 
 function BackHeader({ paths, title }: { paths: string; title: string }) {
   return (
-    <PageHeader className="justify-between px-5">
-      <div className="flex items-center gap-2">
-        <AppLink
-          href={paths}
-          className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          {title}
-        </AppLink>
-      </div>
+    <PageHeader>
+      <AppLink
+        href={paths}
+        className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" />
+        {title}
+      </AppLink>
     </PageHeader>
   );
 }

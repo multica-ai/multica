@@ -54,6 +54,19 @@ type ProjectResourceData struct {
 // sharing the canonical JSON shape with the runtime app metadata package.
 type ConnectedAppData = runtimeapps.ConnectedApp
 
+// ActiveSiblingRunData mirrors the claim-time warning context returned by the
+// server for another in-flight issue task owned by this agent. Queued tasks are
+// intentionally excluded from this context.
+type ActiveSiblingRunData struct {
+	TaskID          string `json:"task_id"`
+	IssueID         string `json:"issue_id"`
+	IssueIdentifier string `json:"issue_identifier"`
+	IssueTitle      string `json:"issue_title"`
+	Status          string `json:"status"`
+	CreatedAt       string `json:"created_at"`
+	StartedAt       string `json:"started_at,omitempty"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -68,6 +81,7 @@ type Task struct {
 	// regardless of task kind so the daemon can inject `## Workspace Context`
 	// into the brief. Empty when the owner hasn't set one.
 	WorkspaceContext              string                 `json:"workspace_context,omitempty"`
+	ActiveSiblingRuns             []ActiveSiblingRunData `json:"active_sibling_runs,omitempty"`
 	ThreadName                    string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Agent                         *AgentData             `json:"agent,omitempty"`
 	ConnectedApps                 []ConnectedAppData     `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays

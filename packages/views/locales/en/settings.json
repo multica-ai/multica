@@ -115,6 +115,7 @@
       "toggleChat": { "label": "Toggle chat window", "description": "Open or close the floating chat window. Opening it focuses the message input." },
       "findInIssue": { "label": "Find in issue", "description": "Search within the open issue detail." },
       "openThreadNav": { "label": "Open thread navigator", "description": "List, search, and jump between the comment threads of the open issue." },
+      "archiveInboxItem": { "label": "Archive notification", "description": "Archive the open inbox notification, or restore it while reading the archive." },
       "send": { "label": "Send", "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog." },
       "goBack": { "label": "Go back", "description": "Navigate back through history, like a browser." },
       "goForward": { "label": "Go forward", "description": "Navigate forward through history, like a browser." },
@@ -162,6 +163,28 @@
       "start_date": "Start date"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "MCP servers shared with every agent in this workspace, so the same server does not have to be re-entered on each agent.",
+    "servers_title": "Shared servers",
+    "write_only_note": "An agent with no MCP configuration of its own inherits these servers; an agent with its own merges on top and wins on a name collision. Saved configurations are write-only — urls, commands, headers, and environment values are never shown again, so editing a server replaces its configuration.",
+    "add_server": "Add server",
+    "edit_server": "Edit server",
+    "remove_server": "Remove server",
+    "empty_title": "No shared MCP servers",
+    "empty_description": "Add a server here and every agent in the workspace inherits it on its next task, unless the agent has opted out.",
+    "disabled_badge": "Disabled",
+    "admin_only_note": "Only workspace owners and admins can change the shared MCP servers.",
+    "delete_title": "Remove shared server?",
+    "delete_description": "{{name}} will stop being shared with this workspace's agents on their next task. Agents that define a server with the same name themselves are unaffected.",
+    "delete_confirm": "Remove",
+    "cancel": "Cancel",
+    "added_toast": "Shared MCP server added",
+    "updated_toast": "Shared MCP server updated",
+    "removed_toast": "Shared MCP server removed",
+    "save_failed_toast": "Could not save the shared MCP server",
+    "remove_failed_toast": "Could not remove the shared MCP server"
+  },
   "page": {
     "title": "Settings",
     "my_account": "My Account",
@@ -183,7 +206,9 @@
       "labels": "Labels",
       "properties": "Properties",
       "quick_actions": "Quick Actions",
-      "plugins": "Plugins"
+    "plugins": "Plugins",
+    "mcp": "MCP",
+    "billing": "Billing"
     }
   },
   "plugins": {

@@ -145,6 +145,21 @@ never cancels tasks now. `CancelTasksForIssue` fires only from the issue-deletio
 paths (`DeleteIssue` / `BatchDeleteIssues`), where the owning issue row is going
 away, so no task is left orphaned.
 
+## Ownership-only assignment and duplicate-run awareness
+
+| Behavior | Source |
+|---|---|
+| `issue assign --no-start`, `issue update --no-start`, and `issue status --no-start` send `suppress_run=true` | `server/cmd/multica/cmd_issue.go` (`runIssueAssign`, `runIssueUpdate`, `runIssueStatus`) |
+| Update and batch-update apply ownership while skipping dispatch when `suppress_run` is true | `server/internal/handler/issue.go` (`UpdateIssue`, `BatchUpdateIssues`) |
+| Trusted direct self-assignment suppresses enqueue only when the target `(issue, agent)` already has a non-terminal task | `server/internal/service/issue_trigger.go` (`WillEnqueueRun`), `server/internal/handler/issue_trigger.go` (`shouldSuppressActiveSelfAssignment`) |
+| Claim responses expose a bounded, workspace-scoped snapshot of the same agent's other dispatched/running/waiting issue tasks; queued tasks are excluded | `server/pkg/db/queries/agent.sql` (`ListActiveSiblingIssueTasks`), `server/internal/handler/daemon.go` (`buildClaimedTaskResponse`) |
+| Daemon prompts point to the target's comment history and concrete sibling `run-messages` commands | `server/internal/daemon/prompt.go` (`buildActiveSiblingRunsBlock`) |
+
+The self-assignment guard is intentionally pair-scoped. It does not treat
+"this agent is busy on some other issue" as a reason to suppress a fresh
+cross-issue handoff, because serial sub-issue promotion and triage batches rely
+on those assignments creating their normal queued runs.
+
 ## Sub-issue stages (barrier wake)
 
 | Behavior | File:line |

@@ -73,6 +73,10 @@
     "created_with_agent": "에이전트가 생성: {{identifier}}",
     "failed_with_detail": "실패: {{detail}}"
   },
+  "toasts": {
+    "archived": "알림을 보관했습니다",
+    "unarchived": "알림을 복원했습니다"
+  },
   "errors": {
     "mark_read_failed": "읽음 표시를 하지 못했습니다",
     "mark_unread_failed": "읽지 않음 표시를 하지 못했습니다",

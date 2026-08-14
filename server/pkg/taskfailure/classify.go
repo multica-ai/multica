@@ -235,8 +235,15 @@ func Classify(rawError string) Reason {
 	case strings.Contains(lower, "timed out after"):
 		return ReasonAgentTimeout
 
-	// 11. Runner CLI binary missing.
-	case strings.Contains(lower, "executable not found"):
+	// 11. Runner CLI binary missing, or present but not runnable on this
+	//     machine — the npm placeholder stub left behind when a package's
+	//     postinstall was blocked passes every "is it installed" check and
+	//     only fails at execve (MUL-6164). Operationally the two are the same
+	//     verdict: this host has no usable CLI, and re-running cannot fix it.
+	case containsAny(lower,
+		"executable not found",
+		"exec format error",
+	):
 		return ReasonAgentRuntimeMissingExecutable
 
 	// 12. Runner CLI version too old / incompatible protocol.

@@ -19,6 +19,27 @@ export interface Workspace {
   updated_at: string;
 }
 
+/**
+ * One MCP server shared by the workspace, as returned by
+ * `GET /api/workspaces/{id}/mcp-config`.
+ *
+ * This is the WHOLE read shape: the stored configuration is write-only, so
+ * urls, commands, headers, and env never leave the server for any role. UI
+ * that needs to change an entry sends a replacement rather than editing what
+ * it read back.
+ */
+export interface WorkspaceMcpServer {
+  name: string;
+  transport: string;
+  enabled: boolean;
+}
+
+export interface WorkspaceMcpConfig {
+  workspace_id: string;
+  servers: WorkspaceMcpServer[];
+  server_count: number;
+}
+
 export interface Member {
   id: string;
   workspace_id: string;

@@ -1481,7 +1481,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		semanticTimer := time.NewTimer(semanticInactivityTimeout)
 		defer semanticTimer.Stop()
 
-		firstTurnNoProgressTimeout := codexFirstTurnNoProgressTimeout(semanticInactivityTimeout)
+		firstTurnNoProgressTimeout := codexFirstTurnNoProgressTimeout(semanticInactivityTimeout, opts.FirstTurnNoProgressTimeout)
 		var firstTurnNoProgressTimer *time.Timer
 		var firstTurnNoProgressTimerC <-chan time.Time
 		firstTurnStarted := false
@@ -1930,7 +1930,30 @@ func stopTimer(timer *time.Timer) {
 	}
 }
 
-func codexFirstTurnNoProgressTimeout(semanticInactivityTimeout time.Duration) time.Duration {
+// codexFirstTurnNoProgressTimeout resolves the first-turn watchdog ceiling:
+// how long the first turn may stay silent after turn/started before that one
+// watchdog fails it. This is only the first-turn timer's own duration — NOT
+// the effective first-item wait. The semantic-inactivity timer is armed
+// concurrently (the same first status:running resets it and starts this one),
+// so the real wait is min(this, semanticInactivityTimeout, execution timeout).
+// Raising the override above the semantic timeout therefore does not extend the
+// wait unless the semantic timeout is raised too; LoadConfig warns when it does
+// not. See the run loop's competing-timer select for the interaction.
+//
+// An explicit configured override (MULTICA_CODEX_FIRST_TURN_TIMEOUT) is honored
+// as-is, upward included: an operator whose app-server is legitimately slow to
+// its first event (a heavy MCP boot, a cold model catalog) can lift this ceiling
+// past the default that the semantic-inactivity timeout alone can never raise
+// (GH #3262 / #5959).
+//
+// With no override the behaviour is byte-identical to before: the default
+// ceiling, which the configured semantic-inactivity timeout can only ever
+// shrink, never raise. The `* 4 / 5` cannot overflow here because that branch
+// only runs when 0 < semanticInactivityTimeout <= defaultCodexFirstTurnNoProgressTimeout.
+func codexFirstTurnNoProgressTimeout(semanticInactivityTimeout, configured time.Duration) time.Duration {
+	if configured > 0 {
+		return configured
+	}
 	if semanticInactivityTimeout <= 0 || semanticInactivityTimeout > defaultCodexFirstTurnNoProgressTimeout {
 		return defaultCodexFirstTurnNoProgressTimeout
 	}

@@ -224,6 +224,7 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | Silence ceiling for a single tool call |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode-specific silence threshold |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex semantic-silence threshold |
+| `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Explicit override for the Codex first-turn no-progress ceiling; `0` keeps the default. The effective first-turn wait stays bounded by `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` and the overall execution timeout — set `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` strictly above this value (with some margin), or the wait is truncated to it and the model-catalog startup retry is skipped. Equal values are not enough: the semantic timer is armed first, so at equal durations the retry can still be lost |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server startup handshake ceiling |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |

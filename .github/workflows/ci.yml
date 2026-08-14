@@ -51,6 +51,9 @@ jobs:
               - 'scripts/generate-reserved-slugs.mjs'
               - 'server/internal/handler/reserved_slugs.json'
               - 'scripts/selfhost-config.test.sh'
+              - 'scripts/drop-database.sh'
+              - 'scripts/remove-worktree.sh'
+              - 'scripts/worktree-db.test.sh'
               - 'scripts/selfhost-wait.sh'
               # selfhost-config.test.sh asserts on the installers' side of
               # the port contract, so a change to either must run it.
@@ -148,6 +151,10 @@ jobs:
       - name: Test self-host env derivation
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/selfhost-config.test.sh
+
+      - name: Test worktree database cleanup
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: bash scripts/worktree-db.test.sh
 
       - name: Verify reserved-slugs.ts is up to date
         if: ${{ needs.changes.outputs.frontend == 'true' }}

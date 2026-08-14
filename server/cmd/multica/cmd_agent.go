@@ -1300,50 +1300,77 @@ func resolveCustomEnv(cmd *cobra.Command) (map[string]string, bool, error) {
 
 // parseMcpConfig validates the --mcp-config value and returns the raw JSON to
 // send. It accepts a JSON object (the MCP config, e.g. {"mcpServers": {…}}) or
-// the literal `null` to clear the agent's config. A top-level array or
-// primitive is rejected because it can never be a valid MCP config — this
-// mirrors the agent-settings UI (mcp-config-tab.tsx). Empty/whitespace input
-// is rejected rather than treated as a clear: for the stdin/file channels it
-// almost always signals an upstream failure (missing file, unset pipe) rather
-// than a deliberate clear, and silently wiping a secret-bearing field is the
-// wrong default — pass an explicit `null` to clear.
+// the literal `null` to clear the agent's config.
+func parseMcpConfig(raw string) (json.RawMessage, error) {
+	return parseMcpJSONObject("--mcp-config", raw, true)
+}
+
+// parseMcpJSONObject validates a JSON-object payload supplied through one of
+// the secret-safe flag channels. A top-level array or primitive is rejected
+// because it can never be a valid MCP payload — this mirrors the agent-settings
+// UI (mcp-config-tab.tsx). Empty/whitespace input is rejected rather than
+// treated as a clear: for the stdin/file channels it almost always signals an
+// upstream failure (missing file, unset pipe) rather than a deliberate clear,
+// and silently wiping a secret-bearing field is the wrong default.
+//
+// allowNull controls whether the literal `null` is accepted as the clear
+// sentinel. It is not for a single server entry, where removing something has
+// its own command and `null` is far more likely to be a mistake.
 //
 // The payload is treated as secret material (MCP entries routinely carry API
 // tokens), so parse errors never wrap the underlying json error, which can
 // echo short fragments of malformed input.
-func parseMcpConfig(raw string) (json.RawMessage, error) {
+func parseMcpJSONObject(flag, raw string, allowNull bool) (json.RawMessage, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return nil, fmt.Errorf("--mcp-config: empty input; pass 'null' to clear or a JSON object to set")
+		if allowNull {
+			return nil, fmt.Errorf("%s: empty input; pass 'null' to clear or a JSON object to set", flag)
+		}
+		return nil, fmt.Errorf("%s: empty input; pass a JSON object", flag)
 	}
 	var probe any
 	if err := json.Unmarshal([]byte(trimmed), &probe); err != nil {
-		return nil, fmt.Errorf("--mcp-config must be a valid JSON object, or 'null' to clear")
+		if allowNull {
+			return nil, fmt.Errorf("%s must be a valid JSON object, or 'null' to clear", flag)
+		}
+		return nil, fmt.Errorf("%s must be a valid JSON object", flag)
 	}
-	// null → clear (NULL column server-side; on create it is a no-op).
 	if probe == nil {
-		return json.RawMessage("null"), nil
+		if allowNull {
+			// null → clear (NULL column server-side; on create it is a no-op).
+			return json.RawMessage("null"), nil
+		}
+		return nil, fmt.Errorf("%s must be a JSON object, not null", flag)
 	}
 	if _, ok := probe.(map[string]any); !ok {
-		return nil, fmt.Errorf("--mcp-config must be a JSON object, or 'null' to clear")
+		if allowNull {
+			return nil, fmt.Errorf("%s must be a JSON object, or 'null' to clear", flag)
+		}
+		return nil, fmt.Errorf("%s must be a JSON object", flag)
 	}
 	return json.RawMessage(trimmed), nil
 }
 
 // resolveMcpConfig collects the --mcp-config, --mcp-config-stdin, and
 // --mcp-config-file flags and returns the raw JSON value to send, a bool
-// indicating whether the caller supplied any of them, and any error. The
-// three input channels are mutually exclusive so callers can't accidentally
-// provide a secret twice. Stdin and file inputs exist to keep mcp_config —
-// which routinely embeds API tokens — out of shell history and 'ps'. Mirrors
+// indicating whether the caller supplied any of them, and any error. Mirrors
 // resolveCustomEnv; the only behavioural difference is the clear sentinel
 // (`null` here vs `{}` for custom_env), because mcp_config distinguishes an
 // explicit empty object from an absent config server-side.
 func resolveMcpConfig(cmd *cobra.Command) (json.RawMessage, bool, error) {
-	inline := cmd.Flags().Changed("mcp-config")
-	fromStdin, _ := cmd.Flags().GetBool("mcp-config-stdin")
-	filePath, _ := cmd.Flags().GetString("mcp-config-file")
-	fromFile := cmd.Flags().Changed("mcp-config-file")
+	return resolveMcpJSONObject(cmd, "mcp-config", true)
+}
+
+// resolveMcpJSONObject collects the `<prefix>`, `<prefix>-stdin`, and
+// `<prefix>-file` flags. The three input channels are mutually exclusive so
+// callers can't accidentally provide a secret twice. Stdin and file inputs
+// exist to keep payloads — which routinely embed API tokens — out of shell
+// history and 'ps'.
+func resolveMcpJSONObject(cmd *cobra.Command, prefix string, allowNull bool) (json.RawMessage, bool, error) {
+	inline := cmd.Flags().Changed(prefix)
+	fromStdin, _ := cmd.Flags().GetBool(prefix + "-stdin")
+	filePath, _ := cmd.Flags().GetString(prefix + "-file")
+	fromFile := cmd.Flags().Changed(prefix + "-file")
 
 	count := 0
 	if inline {
@@ -1359,39 +1386,43 @@ func resolveMcpConfig(cmd *cobra.Command) (json.RawMessage, bool, error) {
 	case count == 0:
 		return nil, false, nil
 	case count > 1:
-		return nil, false, fmt.Errorf("--mcp-config, --mcp-config-stdin, and --mcp-config-file are mutually exclusive; pick one")
+		return nil, false, fmt.Errorf("--%s, --%s-stdin, and --%s-file are mutually exclusive; pick one", prefix, prefix, prefix)
 	}
 
+	clearHint := ""
+	if allowNull {
+		clearHint = "; pass 'null' to clear"
+	}
 	var raw string
 	switch {
 	case inline:
-		raw, _ = cmd.Flags().GetString("mcp-config")
+		raw, _ = cmd.Flags().GetString(prefix)
 	case fromStdin:
 		buf, err := io.ReadAll(cmd.InOrStdin())
 		if err != nil {
-			return nil, false, fmt.Errorf("read --mcp-config-stdin: %w", err)
+			return nil, false, fmt.Errorf("read --%s-stdin: %w", prefix, err)
 		}
 		raw = string(buf)
 		if strings.TrimSpace(raw) == "" {
-			return nil, false, fmt.Errorf("--mcp-config-stdin: empty input; pass 'null' to clear")
+			return nil, false, fmt.Errorf("--%s-stdin: empty input%s", prefix, clearHint)
 		}
 	case fromFile:
 		if filePath == "" {
-			return nil, false, fmt.Errorf("--mcp-config-file: path must not be empty")
+			return nil, false, fmt.Errorf("--%s-file: path must not be empty", prefix)
 		}
 		buf, err := os.ReadFile(filePath)
 		if err != nil {
 			// Filesystem errors may include the path but not the contents —
 			// safe to surface via %w.
-			return nil, false, fmt.Errorf("read --mcp-config-file: %w", err)
+			return nil, false, fmt.Errorf("read --%s-file: %w", prefix, err)
 		}
 		raw = string(buf)
 		if strings.TrimSpace(raw) == "" {
-			return nil, false, fmt.Errorf("--mcp-config-file %q: empty contents; pass 'null' to clear", filePath)
+			return nil, false, fmt.Errorf("--%s-file %q: empty contents%s", prefix, filePath, clearHint)
 		}
 	}
 
-	mc, err := parseMcpConfig(raw)
+	mc, err := parseMcpJSONObject("--"+prefix, raw, allowNull)
 	if err != nil {
 		return nil, false, err
 	}
