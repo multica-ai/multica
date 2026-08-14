@@ -692,14 +692,18 @@ func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg cha
 		return
 	}
 	key := keyForSession(sessionID)
-	flush := func() {
+	flush := func(batchDisablesOwnerConnectedApps bool) {
 		// A later message may replace this closure inside the debounce window.
 		// AppendMessage persists ForceFresh on the channel binding, and
-		// EnqueueChatTask consumes it transactionally, so correctness does not
-		// depend on which message's in-memory closure wins.
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh, disableOwnerConnectedApps)
+		// EnqueueChatTask consumes it transactionally. The batcher separately
+		// retains the strictest connected-app policy across every sender in the
+		// window, so the latest closure cannot weaken a guest-containing batch.
+		if batchDisablesOwnerConnectedApps {
+			initiatorUserID = pgtype.UUID{}
+		}
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh, batchDisablesOwnerConnectedApps)
 	}
-	r.batcher.Schedule(key, flush)
+	r.batcher.Schedule(key, disableOwnerConnectedApps, flush)
 }
 
 // chatRunFlushTimeout bounds the detached flush (session reload + enqueue +

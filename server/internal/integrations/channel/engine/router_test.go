@@ -1313,6 +1313,59 @@ func TestRouter_ExternalChannelUserDoesNotInheritInstallerIdentity(t *testing.T)
 	}
 }
 
+func TestRouter_GuestContainingBatchKeepsConnectedAppsDisabled(t *testing.T) {
+	tests := []struct {
+		name          string
+		firstExternal bool
+	}{
+		{name: "guest then member", firstExternal: true},
+		{name: "member then guest", firstExternal: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			timers := &fakeTimerFactory{}
+			h.router.batcher = newTestBatcher(timers)
+			member := ResolvedIdentity{UserID: uuidFromString(t, "44444444-4444-4444-4444-444444444444")}
+			guest := ResolvedIdentity{
+				UserID:        h.inst.inst.InstallerUserID,
+				External:      true,
+				ChannelUserID: "ou_external",
+			}
+			first, second := member, guest
+			if tt.firstExternal {
+				first, second = guest, member
+			}
+
+			h.ident.id = first
+			firstMessage := p2pMessage(t)
+			firstMessage.MessageID = "m1"
+			if err := h.router.Handle(context.Background(), firstMessage); err != nil {
+				t.Fatalf("first Handle: %v", err)
+			}
+
+			h.ident.id = second
+			secondMessage := p2pMessage(t)
+			secondMessage.MessageID = "m2"
+			if err := h.router.Handle(context.Background(), secondMessage); err != nil {
+				t.Fatalf("second Handle: %v", err)
+			}
+
+			timers.fireArmed()
+			if !waitFor(time.Second, h.tasks.wasCalled) {
+				t.Fatal("batched messages did not schedule an agent run")
+			}
+			if h.tasks.initiatorArg().Valid {
+				t.Fatalf("guest-containing batch must not retain a member initiator: %+v", h.tasks.initiatorArg())
+			}
+			if !h.tasks.optionsArg().DisableOwnerConnectedApps {
+				t.Fatal("guest-containing batch must disable owner connected apps")
+			}
+		})
+	}
+}
+
 func TestRouter_ExternalIssueIsAttributedToAgentNotInstaller(t *testing.T) {
 	h := newHarness(t)
 	h.ident.id = ResolvedIdentity{
