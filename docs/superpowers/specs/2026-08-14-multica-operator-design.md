@@ -16,7 +16,8 @@ Release archive from that source.
 
 The Skill supports:
 
-- CLI presence checks, browser-based login/setup, and workspace discovery;
+- silent CLI presence checks, automatic official CLI installation,
+  browser-based login/setup, and workspace discovery;
 - direct operations on known Multica resources;
 - decomposition of business goals into Issues, Projects, Agents, Squads,
   Skills, and Autopilots;
@@ -56,6 +57,31 @@ commands. Login may open a browser, wait for workspace creation, or select a
 default according to community CLI behavior. Credentials and verification
 codes remain in the browser or CLI prompt.
 
+An explicit request to connect, sign in, or set up Multica authorizes installing
+the missing community CLI through the official installer for the detected host.
+The Operator runs the installation without a separate confirmation, verifies it
+with `multica version`, and stops on installer failure or when the command remains
+unavailable. It does not silently upgrade or replace an existing CLI. Host-level
+approval prompts, such as administrator authorization, remain visible to the
+user.
+
+CLI installation does not authorize choosing a Multica deployment. When no
+usable local target exists and the user did not provide one, the Operator asks
+the user to choose Multica Cloud or a self-hosted deployment before running
+`setup` or `login`. Cloud uses the documented official URLs. Self-hosted setup
+requires the exact Server and Apps URLs from the user; the Operator never derives
+one from the other. An existing configured target or an explicit user-supplied
+target is preserved without asking the same question again.
+
+Connection setup is quiet by default. The Operator does not narrate Skill file
+reads, repository instructions, version checks, CLI presence checks, installer
+selection, or other internal routing. A failed non-blocking Skill version lookup
+is silent. It surfaces only user interaction that cannot be completed on the
+user's behalf, a material choice such as selecting a deployment or workspace,
+an observed failure, or the final verified workspace result. Before browser
+authentication, it gives one concise notice that credentials and verification
+remain in the browser.
+
 ## Request Routing
 
 A concrete action on a known target uses the direct-operation path: inspect the
@@ -66,6 +92,10 @@ An open-ended outcome, workflow design, resource-selection question, or set of
 dependent mutations uses orchestration. The Operator clarifies only facts that
 materially affect the design, queries relevant resources, and classifies the
 work as one-time, recurring, or coordinated.
+
+Whenever the Operator presents two or more mutually exclusive choices, it uses
+a numbered list and accepts a number-only reply as the selected displayed
+option. It asks again only for an invalid or ambiguous selection.
 
 Resource choice follows observed sharing risk:
 
@@ -161,10 +191,11 @@ generated Marketplace tree in one commit.
 ## Verification
 
 The public Skill contract test validates required files, routing anchors, CLI
-boundaries, and portable frontmatter. The unified distribution test runs the
-builder against valid and invalid inputs, compares Marketplace and archive
-Skill content, validates manifests, and checks the checksum. Release workflow
-syntax and repository diff checks run before commit.
+boundaries, portable frontmatter, automatic official installation, explicit
+deployment selection, and quiet connection behavior. The unified distribution
+test runs the builder against valid and invalid inputs, compares Marketplace and
+archive Skill content, validates manifests, and checks the checksum. Release
+workflow syntax and repository diff checks run before commit.
 
 The final pull request must contain no net changes to community CLI source,
 CLI tests, or CLI documentation. It contains no handoff, execution plan,
