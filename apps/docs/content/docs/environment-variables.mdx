@@ -242,6 +242,8 @@ The variables below are read on the computer that runs your agents, not in the A
 
 Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw and MiniMax Code have no model variable because Multica never sends them a model; MiniMax Code's path variable is `MULTICA_MCODE_PATH` — see [AI coding tools comparison](/providers#model-sources). DeepSeek Harness supports `MULTICA_DSH_PATH` and `MULTICA_DSH_MODEL` (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`). Dim supports `MULTICA_DIM_PATH` and `MULTICA_DIM_MODEL` (a model id from the dim catalog). ZeroClaw supports `MULTICA_ZEROCLAW_PATH` but has no model variable; its agent profile owns the model selection. Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
 
+ZCode supports `MULTICA_ZCODE_PATH` (the `zcode-acp-server` bridge executable) and `MULTICA_ZCODE_MODEL` (a model id from the bridge's advertised catalog, e.g. `glm-5.3`).
+
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40

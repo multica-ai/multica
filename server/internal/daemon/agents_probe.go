@@ -268,6 +268,12 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// Model selection is owned by the MCode runtime, so there is no model env.
 	if e, ok := probe("MULTICA_MCODE_PATH", "mcode", ""); ok {
 		agents["mcode"] = e
+	// ZCode (Z.ai) is driven through the zcode-acp-server ACP bridge, so the
+	// probed binary is the bridge, not a zcode CLI. MULTICA_ZCODE_MODEL seeds
+	// the daemon-wide default with a model id from the bridge's advertised
+	// configOptions catalog (see discoverZcodeModels).
+	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode-acp-server", "MULTICA_ZCODE_MODEL"); ok {
+		agents["zcode"] = e
 	}
 	// ZeroClaw (`zeroclaw`) is a Rust-based generic agent CLI, driven over
 	// ACP via `zeroclaw acp`. It takes no model env var: its ACP server has no

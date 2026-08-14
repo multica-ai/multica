@@ -249,6 +249,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// MCode's ACP server does not expose session-scoped model selection or
 		// a model catalog. The configured MCode runtime owns the model choice.
 		return Catalog{Models: []Model{}}, nil
+	case "zcode":
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
+			return discovered(discoverZcodeModels(ctx, executablePath))
+		})
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
@@ -1490,6 +1494,75 @@ func annotateHermesDiscoveryUnconfigured(err error) error {
 // Failure modes (kimi missing, not logged in, config error) return an empty
 // list so the UI falls back to manual entry.
 func discoverKimiModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
+// discoverZcodeModels enumerates the model catalog advertised by the
+// zcode-acp-server bridge over ACP. The bridge exposes the runtime's model
+// list through session/new configOptions (option id `model`, one choice per
+// GLM model), which the shared discoverACPModels parser already understands,
+// so this stays a thin provider description. Any failure returns an empty
+// catalog (Fallback) so the model picker keeps manual entry available; the
+// bridge's own stderr is discarded rather than leaked into daemon logs.
+//
+// Note on argv: the shared helper passes `acp` when acpArgs is empty; the
+// bridge ignores extra argv (verified against zcode-acp-server built from
+// main @a5cb8a1), so the stray positional is harmless here and at task time.
+func discoverZcodeModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "zcode-acp-server",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-zcode-discovery-",
+		// The bridge advertises a reasoning toggle (option id `thought`,
+		// category `thought_level`) alongside the model catalog in the same
+		// session/new response, so the effort picker comes for free from
+		// the discovery handshake. The vocabulary is per model (GLM-5.3:
+		// low/high/max; GLM-5-Turbo: enabled/off) and the advertised list
+		// belongs to the session's current model — so it attaches to THAT
+		// model only. Spreading it across the catalog would offer tokens
+		// the runtime rejects when another model is picked (the dispatch
+		// path degrades gracefully with a warning, but the picker should
+		// not lie in the first place). An empty current model on an older
+		// bridge falls back to attaching to everything, matching the
+		// pre-per-model behaviour.
+		annotate: func(models []Model, sessionResult json.RawMessage) {
+			option, ok := parseACPEffortOption(sessionResult)
+			if !ok || len(option.Choices) == 0 {
+				return
+			}
+			thinking := &ModelThinking{
+				SupportedLevels: option.Choices,
+				DefaultLevel:    option.CurrentValue,
+			current := acpModelOptionCurrentValue(sessionResult)
+			for i := range models {
+				if current == "" || models[i].ID == current {
+					models[i].Thinking = thinking
+				}
+		},
+	})
+}
+
+// acpModelOptionCurrentValue reads the `model` config option's currentValue
+// out of an ACP session/new response — the encoded id of the model whose
+// per-session options (notably the reasoning vocabulary) the response
+// describes. Empty when absent.
+func acpModelOptionCurrentValue(raw json.RawMessage) string {
+	type acpOption struct {
+		ID           string `json:"id"`
+		CurrentValue string `json:"currentValue"`
+	}
+	var resp struct {
+		ConfigOptions      []acpOption `json:"configOptions"`
+		ConfigOptionsSnake []acpOption `json:"config_options"`
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return ""
+	options := resp.ConfigOptions
+	if len(options) == 0 {
+		options = resp.ConfigOptionsSnake
+	for _, opt := range options {
+		if opt.ID == "model" {
+			return opt.CurrentValue
+		}
+	return ""
+
+func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, error) {
 	var acpVersion string
 	models, err := discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
 		defaultBin:   "kimi",

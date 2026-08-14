@@ -39,6 +39,7 @@ Multica currently detects these commands:
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE official site](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
+| ZCode | `zcode-acp-server` | [ZCode](https://zcode.z.ai) |
 
 "Supported" means Multica can invoke that CLI. It does not mean Multica provides the tool's account, subscription, or model quota for you.
 
@@ -51,6 +52,7 @@ For Reasonix, run `reasonix setup` and configure a default provider and model be
 For QwenPaw, choose the provider and model in QwenPaw's own configuration. Multica cannot override a QwenPaw model at run time.
 
 For MiniMax Code, install a supported Node.js release (`>=22.19 <23` or `>=24 <27`) and run `npm install --global @minimax-ai/code@latest`. A global npm install places `mcode` on npm's global binary path; if `command -v mcode` or `Get-Command mcode` cannot find it, add that path to `PATH`. Then run `mcode login`. MiniMax Code owns the model selection; Multica cannot override it through ACP.
+For ZCode, install the ZCode desktop app, sign in once in the app, and install the community ACP bridge [zcode-acp-server](https://github.com/william0wang/zcode-acp) (`npm i -g zcode-acp-server`, requires a release that includes william0wang/zcode-acp#38). The bridge drives the runtime the desktop app installed and reuses its credentials, so no separate sign-in is needed.
 
 For DeepSeek Harness, install Node.js 20+ and run `npm install -g @deepseek-ai/dsh`, then add the Multica runtime profile to it (`dsh plugin --profile multica add <bundle>`). The daemon registers DeepSeek Harness only after `dsh --profile multica --probe` succeeds. Set `DEEPSEEK_API_KEY` (or store it in dsh's own settings) before starting the daemon.
 
