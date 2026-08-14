@@ -78,8 +78,8 @@ export function PageHeader({ children, leading, className }: PageHeaderProps) {
     <header
       className={cn(
         "flex h-12 shrink-0 items-center gap-2 border-b",
-        PAGE_GUTTER,
         className,
+        PAGE_GUTTER,
       )}
     >
       {leading ?? <CollapsedNavTrigger />}

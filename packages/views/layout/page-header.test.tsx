@@ -75,6 +75,17 @@ describe("PageHeader base chrome", () => {
     expect(header).toHaveClass("gap-2", PAGE_GUTTER);
   });
 
+  it("does not let a call site override the shared gutter", () => {
+    const header = renderHeader(
+      <PageHeader className="px-8">
+        <h1>Inbox</h1>
+      </PageHeader>,
+    );
+
+    expect(header).toHaveClass(PAGE_GUTTER);
+    expect(header).not.toHaveClass("px-8");
+  });
+
   // Collection and issues headers drifted apart when each declared its own
   // spacing; both must resolve to the base gap and gutter.
   it("resolves the same gutter and gap for collection and issues headers", () => {

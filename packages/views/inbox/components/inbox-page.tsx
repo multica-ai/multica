@@ -65,7 +65,8 @@ import {
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
-import { PageHeader } from "../../layout/page-header";
+import { cn } from "@multica/ui/lib/utils";
+import { PAGE_GUTTER, PageHeader } from "../../layout/page-header";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
 import { InboxContextMenuProvider } from "./inbox-context-menu";
@@ -558,7 +559,9 @@ export function InboxPage() {
   ) : undefined;
 
   const compactBackBar = compactBackAction ? (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">{compactBackAction}</div>
+    <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
+      {compactBackAction}
+    </div>
   ) : null;
 
   const detailContent = selected?.issue_id ? (
@@ -673,7 +676,7 @@ export function InboxPage() {
     if (viewLoading) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          <div className="flex h-12 shrink-0 items-center border-b px-4">
+          <div className={cn("flex h-12 shrink-0 items-center border-b", PAGE_GUTTER)}>
             <Skeleton className="h-5 w-16" />
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
@@ -729,7 +732,7 @@ export function InboxPage() {
       <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
         <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
           <div className="flex flex-col border-r h-full">
-            <div className="flex h-12 shrink-0 items-center border-b px-4">
+            <div className={cn("flex h-12 shrink-0 items-center border-b", PAGE_GUTTER)}>
               <Skeleton className="h-5 w-16" />
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
