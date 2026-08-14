@@ -5,9 +5,9 @@ description: Connect a private Qianwen Skill on Quark S1 glasses to a Multica ag
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-The experimental Qianwen Skill bridge lets a private Skill submit a spoken request to one Multica agent and poll for its eventual text reply. The computer running the Multica daemon stays outbound-only: Qianwen calls the Multica API, and the daemon continues to claim work from Multica as usual.
+The experimental Qianwen Skill bridge lets a private Skill send transcribed text to one Multica agent and poll for assistant text stored in Multica Chat. The Multica daemon stays outbound-only: Qianwen calls the Multica server API, and the daemon continues to claim work from Multica as usual. A self-hosted Multica server still needs a Qianwen-reachable HTTPS endpoint; the bridge does not expose a daemon port.
 
-This first slice uses polling because Qianwen tool APIs must return quickly while agent runs can take much longer. It does not implement Qianwen's industry message-push API, whose public documentation does not currently expose the transport contract needed for an interoperable implementation.
+This first slice uses polling because Qianwen tool APIs must return quickly while agent runs can take much longer. Qianwen's public documentation names an industry message-push capability, but it does not publish the push endpoint, payload, request-signing details, delivery-receipt semantics, numeric rate limits, or device-rendering contract needed for an interoperable implementation.
 
 <Callout type="warning">
 This is a backend-only, single-user preview for a private Skill. There is no installation UI yet. The bridge authenticates the installation token, but it does not yet verify Qianwen `openUserId`, request signatures, timestamps, or nonces. Do not use it for a public or multi-user Skill.
@@ -103,7 +103,7 @@ Poll no faster than the `poll_after_ms` value. The response uses these states:
 | `accepted` | This request ID is durably claimed; another in-flight submit may still be committing its task. |
 | `queued` | A task exists and is waiting for a runtime. |
 | `running` | A runtime has claimed or is running the task. |
-| `completed` | The final user-visible assistant reply is in `output`. |
+| `completed` | The assistant text stored in Multica Chat is in `output`. |
 | `failed` | The task failed, or no task could be scheduled; inspect Multica for details. |
 | `cancelled` | The task was cancelled. |
 | `unknown` | Multica reported a newer task state that this preview does not recognize; inspect Multica. |
@@ -119,7 +119,7 @@ For example:
 }
 ```
 
-Only the assistant text shown in Multica Chat is returned. Raw runtime errors and internal task results are never exposed to the Skill. Long replies are truncated to 8,000 Unicode characters and include `"truncated": true`.
+Only the assistant text stored in Multica Chat is returned. This endpoint does not prove or control how Quark S1 presents that text. Raw runtime errors and internal task results are never exposed to the Skill. For long replies, Multica keeps the first 8,000 Unicode code points, appends an ellipsis, and includes `"truncated": true`.
 
 ## Security and lifecycle
 
@@ -155,8 +155,9 @@ curl --fail-with-body -X DELETE \
 - one independent Multica Chat session per request
 - no group identity binding, attachments, rich UI, streaming, `/issue`, or `/new`
 - no `openUserId` binding, Qianwen request-signature verification, or replay-nonce validation
+- public documentation does not confirm that industry message push is available to private Skills on retail Quark S1 devices
 
-The next transport phase requires Qianwen's official push endpoint, payload, authentication, delivery, and device-rendering contract. Adding that adapter does not require exposing or changing the local daemon.
+The next transport phase requires Qianwen's official push contract and confirmation that private retail Quark S1 integrations are eligible to use it. Adding that adapter does not require exposing a daemon port, but a self-hosted Multica server still needs a Qianwen-reachable HTTPS endpoint.
 
 ## Next
 
