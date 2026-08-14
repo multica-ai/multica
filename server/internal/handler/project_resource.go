@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -108,17 +109,160 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 	return out, nil
 }
 
+// Execution modes for resource_type=local_directory. The zero value (absent
+// field) means in_place, so resources created before worktree mode existed keep
+// their original behavior without a data migration.
+const (
+	// localDirectoryModeInPlace runs the agent directly in the user's
+	// directory, serialised by the daemon's per-path mutex: one task at a
+	// time, edits land in the user's working tree.
+	localDirectoryModeInPlace = "in_place"
+	// localDirectoryModeWorktree runs each task in its own git worktree of
+	// the user's repo, created inside the daemon's env root. Tasks on the
+	// same directory run concurrently and deliver their work as a branch.
+	// Only valid when the directory is a git working tree — the daemon
+	// verifies that at task time, since the server can't see the filesystem.
+	localDirectoryModeWorktree = "worktree"
+)
+
 // localDirectoryRef is the JSONB shape stored for resource_type=local_directory.
-// It pins a project to an existing directory on a specific user machine, so
-// agent tasks run in-place rather than in an isolated git worktree. The
+// It pins a project to an existing directory on a specific user machine. The
 // daemon_id scopes the path to one daemon registration — the same string path
 // on a different machine is a different resource. The optional label is a
 // human-readable hint used by the UI; the row-level project_resource.label
 // column remains the generic column for any resource type.
+//
+// execution_mode selects how tasks share that directory: in_place (default)
+// keeps the historical one-task-at-a-time behavior, worktree gives each task an
+// isolated git worktree so tasks run concurrently.
 type localDirectoryRef struct {
-	LocalPath string `json:"local_path"`
-	DaemonID  string `json:"daemon_id"`
-	Label     string `json:"label,omitempty"`
+	LocalPath     string `json:"local_path"`
+	DaemonID      string `json:"daemon_id"`
+	Label         string `json:"label,omitempty"`
+	ExecutionMode string `json:"execution_mode,omitempty"`
+}
+
+// requireWorktreeCapableDaemon rejects saving a local_directory ref that asks
+// for execution_mode=worktree while the daemon owning the path is too old to
+// implement the mode. An old daemon does not know the field exists: it would
+// json-skip it and run tasks IN PLACE, editing the working copy the user
+// explicitly asked to isolate — and it predates the daemon-side unknown-mode
+// refusal, so only the server can stop it. Gating at save time surfaces the
+// failure at the moment the user can act on it (upgrade the daemon), instead
+// of as a silently-wrong task later.
+//
+// Residual gap, accepted for now: a daemon downgraded AFTER the resource was
+// saved is not caught here; closing that needs a claim-time gate.
+//
+// Returns true to proceed; on false the 422 response has already been written,
+// using the same daemon_version_unsupported code as the quick-create gate so
+// clients can branch on it.
+func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, resourceType string, normalizedRef json.RawMessage) bool {
+	if resourceType != "local_directory" {
+		return true
+	}
+	var ref localDirectoryRef
+	if err := json.Unmarshal(normalizedRef, &ref); err != nil || ref.ExecutionMode != localDirectoryModeWorktree {
+		return true
+	}
+
+	// One machine hosts one runtime row per provider, all registered by the
+	// same daemon binary. A workspace has a handful of runtimes; the unfiltered
+	// list is a tiny read.
+	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check runtime capabilities")
+		return false
+	}
+	// Same signal the claim gate uses: what the daemon advertised, recorded on
+	// its runtime row at registration. Version numbers cannot answer this — a
+	// dev-built daemon reports a git-describe string that the version floor
+	// deliberately exempts (MUL-5707).
+	if daemonAdvertisesWorktree(runtimes, ref.DaemonID) {
+		return true
+	}
+	// Fail closed when no runtime for this daemon advertises it — including a
+	// daemon_id with no registered runtime at all: a worktree resource that can
+	// never dispatch correctly is worse than a save-time error.
+	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+		"error": fmt.Sprintf(
+			"local_directory: %q is set to parallel (worktree) mode, but the Multica runtime on that machine does not support it. Update the Multica app on that machine to the latest version, or keep the resource on in_place.",
+			ref.LocalPath),
+		"code":            "daemon_version_unsupported",
+		"current_version": latestDaemonCLIVersion(runtimes, ref.DaemonID),
+		"min_version":     agentpkg.MinLocalWorktreeCLIVersion,
+		"daemon_id":       ref.DaemonID,
+	})
+	return false
+}
+
+// daemonAdvertisesWorktree reports whether the daemon's MOST RECENTLY SEEN
+// runtime row advertised worktree support.
+//
+// Deliberately not "any row advertised it". Deregistering a runtime only flips
+// the row to offline — its metadata survives — and ListAgentRuntimes returns
+// every row. So a machine that once ran a capable daemon, then downgraded,
+// still has an old capable row sitting next to the fresh incapable one, and an
+// any-match would keep saying yes forever. Newest-wins reads the machine's
+// CURRENT binary, which is the question being asked.
+//
+// A row missing the capability is never skipped: being the newest is what makes
+// it authoritative, not whether its answer is convenient.
+func daemonAdvertisesWorktree(runtimes []db.AgentRuntime, daemonID string) bool {
+	if strings.TrimSpace(daemonID) == "" {
+		return false
+	}
+	var newest *db.AgentRuntime
+	for i := range runtimes {
+		rt := &runtimes[i]
+		if !rt.DaemonID.Valid || rt.DaemonID.String != daemonID {
+			continue
+		}
+		if newest == nil || runtimeSeenAfter(rt, newest) {
+			newest = rt
+		}
+	}
+	if newest == nil {
+		return false
+	}
+	return runtimeHasCapability(newest.Metadata, protocol.DaemonCapabilityLocalWorktreeV1)
+}
+
+// runtimeSeenAfter orders two rows of the same daemon by last_seen_at. A row
+// that never reported (NULL) sorts oldest, so a live row always wins over one
+// that never checked in.
+func runtimeSeenAfter(candidate, current *db.AgentRuntime) bool {
+	if !candidate.LastSeenAt.Valid {
+		return false
+	}
+	if !current.LastSeenAt.Valid {
+		return true
+	}
+	return candidate.LastSeenAt.Time.After(current.LastSeenAt.Time)
+}
+
+// latestDaemonCLIVersion returns the cli_version of the freshest runtime row
+// registered by daemonID, or "" when the daemon has no row carrying one. Rows
+// without a version are skipped rather than treated as authoritative: one
+// machine registers a row per provider, and only the freshest version-bearing
+// row reflects the binary currently running there.
+func latestDaemonCLIVersion(runtimes []db.AgentRuntime, daemonID string) string {
+	current := ""
+	var currentSeen pgtype.Timestamptz
+	for _, rt := range runtimes {
+		if !rt.DaemonID.Valid || rt.DaemonID.String != daemonID {
+			continue
+		}
+		v := readRuntimeCLIVersion(rt.Metadata)
+		if v == "" {
+			continue
+		}
+		if current == "" || (rt.LastSeenAt.Valid && rt.LastSeenAt.Time.After(currentSeen.Time)) {
+			current = v
+			currentSeen = rt.LastSeenAt
+		}
+	}
+	return current
 }
 
 func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
@@ -138,6 +282,13 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 		return nil, errors.New("local_directory: daemon_id is required")
 	}
 	payload.Label = strings.TrimSpace(payload.Label)
+	payload.ExecutionMode = strings.TrimSpace(payload.ExecutionMode)
+	switch payload.ExecutionMode {
+	case "", localDirectoryModeInPlace, localDirectoryModeWorktree:
+	default:
+		return nil, fmt.Errorf("local_directory: execution_mode must be %q or %q, got %q",
+			localDirectoryModeInPlace, localDirectoryModeWorktree, payload.ExecutionMode)
+	}
 	out, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -286,6 +437,10 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if !h.requireWorktreeCapableDaemon(w, r, project.WorkspaceID, req.ResourceType, normalizedRef) {
+		return
+	}
+
 	var label pgtype.Text
 	if req.Label != nil && strings.TrimSpace(*req.Label) != "" {
 		label = pgtype.Text{String: strings.TrimSpace(*req.Label), Valid: true}
@@ -386,6 +541,15 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 	} else if conflict {
 		writeError(w, http.StatusConflict, "another local_directory on this daemon is already attached to the project")
 		return
+	}
+
+	// Gate only when the caller is changing the ref: a label/position-only
+	// update must not start failing because the daemon's version drifted
+	// after the mode was legitimately saved.
+	if _, refProvided := raw["resource_ref"]; refProvided {
+		if !h.requireWorktreeCapableDaemon(w, r, project.WorkspaceID, existing.ResourceType, nextRef) {
+			return
+		}
 	}
 
 	nextLabel := existing.Label

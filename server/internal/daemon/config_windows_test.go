@@ -562,3 +562,113 @@ func stageJunctionExecutable(t *testing.T) (targetExecutable, shimBin string) {
 	createJunction(t, targetBin, shimBin)
 	return targetExecutable, shimBin
 }
+
+// TestCanonicalExecutablePathLaunchesCmdShim covers the npm install shape from
+// #6883: the discovered entry point is a `.cmd` shim (`%APPDATA%\npm\codex.cmd`),
+// which Windows can only run by handing the path to the command interpreter.
+// cmd.exe does not accept extended-length paths, so a launch target that keeps
+// the `\\?\` prefix cannot be executed at all. Every other case in this file
+// stages a real `.exe`, which hides that difference completely.
+func TestCanonicalExecutablePathLaunchesCmdShim(t *testing.T) {
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "codex.cmd")
+	if err := os.WriteFile(shim, []byte("@echo off\r\n> \"%~1\" echo launched\r\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved := canonicalExecutablePath(shim)
+	marker := filepath.Join(dir, "launched.txt")
+	if output, err := exec.Command(resolved, marker).CombinedOutput(); err != nil {
+		t.Fatalf("launch .cmd shim %q: %v\n%s", resolved, err, output)
+	}
+	if _, err := os.ReadFile(marker); err != nil {
+		t.Fatalf("resolved .cmd shim %q did not run: %v", resolved, err)
+	}
+}
+
+// TestResolveAgentEntryForLaunchKeepsCmdShimLaunchable is the same property at
+// the boundary that actually launches tasks. resolveAgentEntryForLaunch is what
+// every built-in provider goes through on Windows, so a `.cmd` entry point has
+// to survive it in runnable form.
+func TestResolveAgentEntryForLaunchKeepsCmdShimLaunchable(t *testing.T) {
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "codex.cmd")
+	if err := os.WriteFile(shim, []byte("@echo off\r\n> \"%~1\" echo launched\r\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := resolveAgentExecutablePath(shim)
+	if err != nil {
+		t.Fatalf("resolveAgentExecutablePath: %v", err)
+	}
+	launchPath, handled, err := executablePathForLaunch(resolved)
+	if !handled {
+		t.Fatal("executablePathForLaunch reported unhandled on windows")
+	}
+	if err != nil {
+		t.Fatalf("executablePathForLaunch: %v", err)
+	}
+
+	marker := filepath.Join(dir, "launched.txt")
+	if output, err := exec.Command(launchPath, marker).CombinedOutput(); err != nil {
+		t.Fatalf("launch resolved .cmd entry %q: %v\n%s", launchPath, err, output)
+	}
+	if _, err := os.ReadFile(marker); err != nil {
+		t.Fatalf("resolved .cmd entry %q did not run: %v", launchPath, err)
+	}
+}
+
+// TestTrimExtendedLengthPrefix pins the rule: drop the prefix when the plain
+// Win32 path can stand on its own, keep it when it is what makes the path
+// nameable or when the remainder is not a drive-qualified path.
+func TestTrimExtendedLengthPrefix(t *testing.T) {
+	longTail := strings.Repeat(`segment\`, 40) + "codex.exe"
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "short drive path drops the prefix",
+			in:   `\\?\C:\Users\dev\AppData\Roaming\npm\codex.cmd`,
+			want: `C:\Users\dev\AppData\Roaming\npm\codex.cmd`,
+		},
+		{
+			name: "path past MAX_PATH keeps the prefix",
+			in:   `\\?\C:\` + longTail,
+			want: `\\?\C:\` + longTail,
+		},
+		{
+			name: "unc path becomes a plain unc path",
+			in:   `\\?\UNC\server\share\bin\codex.cmd`,
+			want: `\\server\share\bin\codex.cmd`,
+		},
+		{
+			// 100 CJK characters: 300 UTF-8 bytes but only 100 UTF-16 code
+			// units, so the whole path is ~123 units — comfortably inside
+			// MAX_PATH. Measuring bytes would call this too long and keep a
+			// prefix that breaks .cmd launches for anyone whose user directory
+			// is not ASCII.
+			name: "non-ascii path is measured in utf-16 code units",
+			in:   `\\?\C:\Users\` + strings.Repeat("目录", 50) + `\npm\codex.cmd`,
+			want: `C:\Users\` + strings.Repeat("目录", 50) + `\npm\codex.cmd`,
+		},
+		{
+			name: "volume guid keeps the prefix",
+			in:   `\\?\Volume{b75e2c83-0000-0000-0000-602f00000000}\bin\codex.exe`,
+			want: `\\?\Volume{b75e2c83-0000-0000-0000-602f00000000}\bin\codex.exe`,
+		},
+		{
+			name: "plain path is untouched",
+			in:   `C:\bin\codex.exe`,
+			want: `C:\bin\codex.exe`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := trimExtendedLengthPrefix(tc.in); got != tc.want {
+				t.Fatalf("trimExtendedLengthPrefix(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

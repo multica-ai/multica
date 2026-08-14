@@ -115,7 +115,7 @@ func TestChannelChat_ReplyLandingInsideDebounceWindowStillAnswersTheNextMessage(
 	stranded := appendChannelUserMessage(t, ctx, sessionID, "挺好的 正常了")
 
 	// Turn 1 finishes inside that window and writes its reply.
-	if _, err := testHandler.TaskService.CompleteTask(ctx, first.ID, completeResult(t, "通了。"), "", "", false, ""); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, first.ID, completeResult(t, "通了。"), "", "", "", false, ""); err != nil {
 		t.Fatalf("complete turn 1: %v", err)
 	}
 

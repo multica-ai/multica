@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-build selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -193,6 +193,12 @@ db-up: ## Start the shared PostgreSQL container used by main and worktrees
 db-down: ## Stop the shared PostgreSQL container without removing its Docker volume
 	@$(COMPOSE) down
 
+db-drop: ## Permanently drop the current env's local database after confirmation
+	$(REQUIRE_ENV)
+	@status=0; bash scripts/drop-database.sh "$(ENV_FILE)" || status=$$?; \
+		if [ "$$status" -eq 2 ]; then exit 0; fi; \
+		exit "$$status"
+
 # Drop + recreate the current env's database, then run all migrations.
 # Use for a clean slate in local dev. Only affects the DB named in
 # ENV_FILE (POSTGRES_DB); the shared postgres container and other
@@ -245,6 +251,9 @@ stop-worktree: ## Stop this worktree's backend and frontend processes
 
 check-worktree: ## Run the full verification pipeline for this worktree
 	@ENV_FILE=$(WORKTREE_ENV_FILE) bash scripts/check.sh
+
+remove-worktree: ## Drop a linked worktree's database, then remove it (WORKTREE=path)
+	@bash scripts/remove-worktree.sh "$(WORKTREE)"
 
 # ---------- Individual commands ----------
 ##@ Individual commands

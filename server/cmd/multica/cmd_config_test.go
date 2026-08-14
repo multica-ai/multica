@@ -20,6 +20,7 @@ func newConfigTestCmd() *cobra.Command {
 
 func TestRunConfigSetPersistsSupportedKeysInProfile(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	workspacesRoot := filepath.Join(t.TempDir(), "multica-dev")
 
 	cmd := newConfigTestCmd()
 	_ = cmd.Flags().Set("profile", "dev")
@@ -35,13 +36,16 @@ func TestRunConfigSetPersistsSupportedKeysInProfile(t *testing.T) {
 	if err := runConfigSet(cmd, []string{"workspace_id", "ws-123"}); err != nil {
 		t.Fatalf("runConfigSet workspace_id: %v", err)
 	}
+	if err := runConfigSet(cmd, []string{"workspaces_root", workspacesRoot}); err != nil {
+		t.Fatalf("runConfigSet workspaces_root: %v", err)
+	}
 	_ = stderr.read()
 
 	cfg, err := cli.LoadCLIConfigForProfile("dev")
 	if err != nil {
 		t.Fatalf("LoadCLIConfigForProfile: %v", err)
 	}
-	if cfg.ServerURL != "http://127.0.0.1:8080" || cfg.AppURL != "http://127.0.0.1:3000" || cfg.WorkspaceID != "ws-123" {
+	if cfg.ServerURL != "http://127.0.0.1:8080" || cfg.AppURL != "http://127.0.0.1:3000" || cfg.WorkspaceID != "ws-123" || cfg.WorkspacesRoot != workspacesRoot {
 		t.Fatalf("config = %#v, want persisted supported keys", cfg)
 	}
 }
@@ -64,6 +68,7 @@ func TestRunConfigShowIncludesProfileAndDefaults(t *testing.T) {
 		"workspace_id:",
 		"device_name:",
 		"runtime_name:",
+		"workspaces_root:",
 		"max_concurrent_tasks:",
 		"poll_interval:",
 		"heartbeat_interval:",
@@ -195,9 +200,11 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 	t.Parallel()
 
 	cfg := cli.CLIConfig{}
+	workspacesRoot := filepath.Join(t.TempDir(), "multica")
 	pairs := []struct{ key, val string }{
 		{"device_name", "vm-1-custom-name"},
 		{"runtime_name", "worker-a"},
+		{"workspaces_root", workspacesRoot},
 		{"max_concurrent_tasks", "4"},
 		{"poll_interval", "10s"},
 		{"heartbeat_interval", "5s"},
@@ -214,6 +221,7 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 	}
 	if cfg.DeviceName != "vm-1-custom-name" ||
 		cfg.RuntimeName != "worker-a" ||
+		cfg.WorkspacesRoot != workspacesRoot ||
 		cfg.MaxConcurrentTasks != 4 ||
 		cfg.PollInterval != "10s" ||
 		cfg.HeartbeatInterval != "5s" ||
@@ -223,6 +231,26 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 		cfg.AutoUpdateCheckInterval != "12h" ||
 		cfg.DisableAutoReload != true {
 		t.Fatalf("cfg after set = %+v", cfg)
+	}
+}
+
+func TestApplyConfigSetNormalizesWorkspacesRoot(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	cfg := cli.CLIConfig{}
+	if err := applyConfigSet(&cfg, "workspaces_root", filepath.Join("data", "multica")); err != nil {
+		t.Fatalf("applyConfigSet: %v", err)
+	}
+	want := filepath.Join(cwd, "data", "multica")
+	if cfg.WorkspacesRoot != want {
+		t.Fatalf("WorkspacesRoot = %q, want absolute path %q", cfg.WorkspacesRoot, want)
+	}
+	if err := applyConfigSet(&cfg, "workspaces_root", ""); err != nil {
+		t.Fatalf("clear workspaces_root: %v", err)
+	}
+	if cfg.WorkspacesRoot != "" {
+		t.Fatalf("WorkspacesRoot = %q, want empty after clear", cfg.WorkspacesRoot)
 	}
 }
 

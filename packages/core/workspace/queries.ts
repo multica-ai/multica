@@ -17,6 +17,7 @@ export const workspaceKeys = {
     ["workspaces", wsId, "squads", squadId, "members-status"] as const,
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
+  mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
 };
 
 export function workspaceListOptions() {
@@ -132,5 +133,27 @@ export function assigneeFrequencyOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceKeys.assigneeFrequency(wsId),
     queryFn: () => api.getAssigneeFrequency(),
+  });
+}
+
+/**
+ * The workspace's MCP server library. Fetched for plain members too — the
+ * payload is names and transports only, and an agent owner needs to see what
+ * is available to assign.
+ */
+export function workspaceMcpServersOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.mcpServers(wsId),
+    queryFn: () => api.listWorkspaceMcpServers(wsId),
+    enabled: wsId !== "",
+  });
+}
+
+/** The workspace MCP servers assigned to one agent, with their toggles. */
+export function agentMcpServersOptions(agentId: string) {
+  return queryOptions({
+    queryKey: ["agents", agentId, "mcp-servers"] as const,
+    queryFn: () => api.listAgentMcpServers(agentId),
+    enabled: agentId !== "",
   });
 }

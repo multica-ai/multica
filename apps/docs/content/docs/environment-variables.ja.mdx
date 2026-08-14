@@ -202,6 +202,7 @@ API key と base URL の両方が空の場合、サーバーサイド LLM 生成
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 単一のツール呼び出しが静穏なままでいられる上限 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 専用の静穏しきい値 |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex のセマンティック静穏しきい値 |
+| `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Codex 初回ターンの無進捗上限を明示的に上書き；`0` はデフォルトを維持。実効の初回ターン待機は依然として `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` と全体の実行タイムアウトに制限される——`MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` をこの値より厳密に大きく（余裕を持たせて）設定すること。さもないと待機はその値で打ち切られ、モデルカタログの起動リトライがスキップされる。同値では不十分：セマンティックタイマーが先に起動するため、同値の場合でもリトライが失われることがある |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server 起動ハンドシェイクの上限 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud は `true`、セルフホストは `false` | CLI の更新を自動でチェックして適用するか |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 更新チェックの間隔 |
@@ -210,7 +211,7 @@ API key と base URL の両方が空の場合、サーバーサイド LLM 生成
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | Linux/macOS 専用。作業ごとのプライベート一時ディレクトリの親ディレクトリ。既存かつ書き込み可能な絶対パスである必要があり、無効な値の場合は `/tmp` にフォールバックせず作業の開始に失敗します。短いパスを選んでください。子ツールがその配下に AF_UNIX ソケットを作成する場合があり、`sun_path` の上限は Linux で 108 バイト、macOS で 104 バイトです |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | デバッグ用にタスクディレクトリを保持 |
 
-各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` と `MULTICA_<PROVIDER>_MODEL` でコマンドパスとデフォルトモデルを上書きできます。QwenPaw だけは例外で、Multica がモデルを渡さないため `MULTICA_QWENPAW_MODEL` はありません。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
+各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` と `MULTICA_<PROVIDER>_MODEL` でコマンドパスとデフォルトモデルを上書きできます。QwenPaw だけは例外で、Multica がモデルを渡さないため `MULTICA_QWENPAW_MODEL` はありません。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -237,6 +238,7 @@ multica config show
 | `workspace_id` | 空 | デフォルトのワークスペース |
 | `device_name` | ホスト名 | ランタイム一覧に表示されるデバイス名 |
 | `runtime_name` | `Local Agent` | ランタイムの表示名 |
+| `workspaces_root` | `~` 配下のプロファイル別パス | タスク作業ディレクトリのルート |
 | `max_concurrent_tasks` | `20` | 同時実行タスク上限。`0` または空は未設定を意味します |
 | `poll_interval` | `30s` | タスクのポーリング間隔 |
 | `heartbeat_interval` | `15s` | ハートビート間隔 |
@@ -252,6 +254,7 @@ multica config show
 - duration 系のキーは正の Go duration（`10s`、`2h` など）を受け付け、`0s` と負の値は拒否されます。唯一の例外は `agent_timeout` で、`0s` は有効な値として実行時間上限を明示的に無効化します。
 - 空文字列を渡すと永続化された値がクリアされ、環境変数または組み込みデフォルトに戻ります。例: `multica config set poll_interval ""`。
 - `max_concurrent_tasks` には非負の整数が必要です。
+- 相対パスの `workspaces_root` は保存時に絶対パスへ変換されます。
 
 ## 可観測性と分析
 

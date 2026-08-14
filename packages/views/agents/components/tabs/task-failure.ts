@@ -45,6 +45,7 @@ const REASON_LABEL: Record<string, string> = {
 
   // Provider-specific operational reasons, outside the canonical taxonomy.
   codex_resume_oversized: "Session too large to resume",
+  local_directory_error: "Local directory error",
 
   // Pre-MUL-1949 coarse values, still present on historical rows.
   agent_error: "Agent execution error",
@@ -66,4 +67,25 @@ export function failureReasonLabel(
 ): string | null {
   if (!reason) return null;
   return REASON_LABEL[reason] ?? reason;
+}
+
+/**
+ * Label for a cancelled task the SERVER cancelled for a persisted reason —
+ * the worktree claim gate refusing a too-old daemon, or a cancel-ack carrying
+ * a preserved-work error. Those are conditions only the user can fix, so the
+ * row must explain itself like a failed row does.
+ *
+ * Returns `null` for a user-initiated cancel (no persisted reason): the user
+ * knows why they clicked, and stamping a label on every ordinary cancel would
+ * bury the rows that actually need attention.
+ */
+export function cancelReasonLabel(task: {
+  status: string;
+  error?: string | null;
+  failure_reason?: string | null;
+}): string | null {
+  if (task.status !== "cancelled") return null;
+  const reason = failureReasonLabel(task.failure_reason);
+  if (reason) return reason;
+  return task.error ? "Cancelled by the system" : null;
 }

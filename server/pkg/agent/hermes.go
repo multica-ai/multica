@@ -157,12 +157,11 @@ func StripHermesProfileArgs(args []string, sel HermesProfileSelection) []string 
 // This is the same pattern as Codex but with the ACP protocol instead of
 // the Codex-specific JSON-RPC methods.
 //
-// opts.ThinkingLevel is deliberately not consumed here: Hermes' ACP surface
-// has nowhere to put a reasoning effort (see ThinkingControlSupported in
-// thinking.go for the evidence and the version it was verified against), and
-// the server rejects the field for this provider before a task is ever
-// dispatched. Wire it up here — alongside the model selection below — once
-// Hermes' ACP adapter carries reasoning onto the session.
+// opts.ThinkingLevel is applied through applyACPEffortOption below, driven by
+// whatever effort option the session advertises. This provider covers two
+// unrelated binaries — Hermes Agent and jcode — with opposite capabilities
+// here, so the catalog is the only honest discriminator; see
+// acpCatalogThinkingProviders in thinking.go for which is which.
 type hermesBackend struct {
 	cfg Config
 }
@@ -354,6 +353,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// resume. Only that is curable by starting a fresh session, so
 		// handshake/network failures below must leave it false.
 		var resumeRejected bool
+		// True only when session/resume actually landed on the session we
+		// asked for. Hermes answers a resume of a session its state.db no
+		// longer holds by silently creating a fresh one (acp_adapter/server.py
+		// resume_session: "not found, creating new"), so this is what decides
+		// whether the turn must carry a continuity notice — see the prompt
+		// assembly below.
+		var resumeLanded bool
 		// The stop reason session/prompt reported, when it answered at all.
 		// Read once the turn has fully settled — see the resumed-session check
 		// after the provider-error promotion below.
@@ -394,6 +400,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			cwd = "."
 		}
 
+		// sessionResult is whichever of session/new or session/resume produced
+		// this session. It carries the configOptions the effort step below
+		// reads, so both branches have to keep hold of it.
+		var sessionResult json.RawMessage
+
 		if opts.ResumeSessionID != "" {
 			// Per ACP Session Setup, session/resume accepts mcpServers and
 			// the runtime re-connects them as part of the resume. Without
@@ -410,9 +421,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			var changed bool
-			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
-			if changed {
+			sessionResult = result
+			sessionID, resumeLanded = resolveHermesResumedSessionID(opts.ResumeSessionID, result)
+			if !resumeLanded {
 				b.cfg.Logger.Warn("agent returned a different session id on resume — original was likely lost; continuing with the new id",
 					"backend", "hermes",
 					"requested", opts.ResumeSessionID,
@@ -431,6 +442,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
+			sessionResult = result
 			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
 				finalStatus = "failed"
@@ -504,6 +516,19 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			b.cfg.Logger.Info("hermes session model set", "model", opts.Model)
 		}
 
+		// 3b. Apply a persisted thinking override through whichever effort
+		// option this session advertises. Which binary answered decides
+		// whether anything happens: jcode advertises `reasoning_effort` and
+		// threads it into the provider request, while Hermes Agent advertises
+		// no configOptions at all and the helper no-ops. Unlike set_model
+		// above this must NOT fail the task — an effort we could not apply
+		// still runs the prompt at the runtime's own default.
+		//
+		// sessionResult stops describing the live session once set_model runs,
+		// because an ACP effort option may depend on the current model.
+		applyACPEffortOption(runCtx, c.request, "hermes", b.cfg.Logger,
+			sessionID, sessionResult, opts.ThinkingLevel, opts.Model == "")
+
 		// 4. Send the prompt and wait for PromptResponse.
 		//
 		// Do NOT prepend opts.SystemPrompt here. Hermes ACP loads project/context
@@ -518,7 +543,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
-				{"type": "text", "text": prompt},
+				{"type": "text", "text": hermesTurnText(prompt, opts.ResumeExpected, resumeLanded, opts.ResumeContinuityNotice)},
 			},
 		})
 		if err != nil {
@@ -1139,13 +1164,17 @@ const hermesResumeLostError = "hermes could not restore the resumed session; it 
 // unknown session as a JSON-RPC error. Its ACP adapter answers
 // `session/prompt` for a session it cannot load with an ordinary success
 // frame carrying stopReason=refusal (acp_adapter/server.py, the one place it
-// emits that reason), and `session/resume` echoes nothing back — the ACP
-// ResumeSessionResponse schema has no sessionId field at all, unlike
-// NewSessionResponse — so resolveResumedSessionID keeps the id we asked for.
-// Nothing in the exchange is an error, which is why the isACPSessionNotFound
-// branches at set_model and prompt time never fire for this runtime and every
-// later dispatch on the same (agent, issue) pair loops on the dead session
-// (GH #6150).
+// emits that reason), and `session/resume` returns an ordinary success frame
+// whatever happened — the ACP ResumeSessionResponse schema has no sessionId
+// field at all, unlike NewSessionResponse. Nothing in the exchange is an
+// error, which is why the isACPSessionNotFound branches at set_model and
+// prompt time never fire for this runtime and every later dispatch on the same
+// (agent, issue) pair loops on the dead session (GH #6150).
+//
+// This stays necessary alongside resolveHermesResumedSessionID, which reads
+// `_meta.hermes.sessionProvenance` to catch the rebind at resume time: that
+// covers the runtime answering with a DIFFERENT session, while this covers it
+// answering with the one we asked for and then refusing to run it.
 //
 // Both conditions are required. stopReason=refusal alone is a legitimate
 // model refusal, and refusing a resumed turn after real work is not a lost
@@ -1833,6 +1862,75 @@ func resolveResumedSessionID(requested string, response json.RawMessage) (string
 		return requested, false
 	}
 	return got, got != requested
+}
+
+// resolveHermesResumedSessionID is the Hermes-specific reading of a
+// session/resume response: it returns the live session id and whether the
+// resume actually LANDED on the session we asked for.
+//
+// The shared resolver above is not enough here because ACP's
+// ResumeSessionResponse has no sessionId field at all (acp/schema.py
+// ResumeSessionResponse), unlike NewSessionResponse. Hermes answers a resume
+// of a session its state.db no longer holds by silently creating a fresh one
+// (acp_adapter/server.py resume_session: "not found, creating new") and
+// replies with an ordinary success frame, so the rebind used to be
+// indistinguishable from a real resume: the daemon re-sent the same dead id
+// every turn and the user got a conversation that restarted from zero with no
+// error anywhere (GH #6806).
+//
+// Hermes does report the session it actually served the request with on
+// `_meta.hermes.sessionProvenance`, which is the only signal available. A
+// response carrying neither shape falls back to the requested id and reports
+// landed=true, so a runtime that reports nothing keeps its previous behaviour
+// rather than declaring every turn's history lost.
+//
+// That residual blind spot is bounded on the daemon side: the resume gate only
+// hands a session id to a run whose session store actually holds a transcript
+// (sessionHomeReachable), so a silent runtime can misreport a stale session but
+// never an absent one.
+func resolveHermesResumedSessionID(requested string, response json.RawMessage) (string, bool) {
+	got := extractACPSessionID(response)
+	if got == "" {
+		got = extractACPProvenanceSessionID(response)
+	}
+	if got == "" {
+		return requested, true
+	}
+	return got, got == requested
+}
+
+// extractACPProvenanceSessionID pulls the session id Hermes reports on
+// `_meta.hermes.sessionProvenance.acpSessionId` — the ACP-facing id of the
+// session the server actually served the request with. `currentHermesSessionId`
+// is the agent-internal id of the same session and is deliberately not read:
+// the two diverge when Hermes compresses a session into a successor, and only
+// the ACP id is the one we address later prompts to.
+func extractACPProvenanceSessionID(result json.RawMessage) string {
+	var r struct {
+		Meta struct {
+			Hermes struct {
+				SessionProvenance struct {
+					ACPSessionID string `json:"acpSessionId"`
+				} `json:"sessionProvenance"`
+			} `json:"hermes"`
+		} `json:"_meta"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(r.Meta.Hermes.SessionProvenance.ACPSessionID)
+}
+
+// hermesTurnText prepends the caller's continuity notice when this task meant
+// to continue a conversation but the resume landed on a fresh session. Same
+// contract as the codex backend's codexTurnInput: the notice is empty whenever
+// the daemon's own prompt already carries it, so a turn can never pay for the
+// paragraph twice.
+func hermesTurnText(prompt string, resumeExpected, resumeLanded bool, notice string) string {
+	if resumeExpected && !resumeLanded {
+		return notice + prompt
+	}
+	return prompt
 }
 
 // buildHermesSessionParams constructs the params map for the ACP `session/new`

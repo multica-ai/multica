@@ -60,6 +60,10 @@ type batchFixture struct {
 	// deregistered accumulates every runtime ID sent to /api/daemon/deregister,
 	// so a test can assert the server was actually told to stop routing work.
 	deregistered []string
+	// offlineReasons is the server's view of WHY each row is offline. The
+	// register upsert overwrites it (see the register handler), which is what
+	// makes "the reason survived a late healthy register" testable.
+	offlineReasons map[string]RuntimeOfflineReason
 	// registerDelay, when non-zero, makes the register handler sleep before
 	// recording the call, widening the window in which two unserialized
 	// register calls for the same workspace would overlap.
@@ -114,6 +118,16 @@ func (fx *batchFixture) runtimeIDFor(workspaceID, key string) string {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
 	return fx.runtimeIDs[workspaceID+"|"+key]
+}
+
+// runtimeOfflineReason returns the server's stored cause for a runtime row, or
+// false when the row carries none — which is what "offline for an unknown
+// reason" looks like to every admission path.
+func (fx *batchFixture) runtimeOfflineReason(id string) (RuntimeOfflineReason, bool) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	reason, ok := fx.offlineReasons[id]
+	return reason, ok
 }
 
 // runtimeOnline reports the server's current status for a runtime row.
@@ -382,6 +396,10 @@ func newBatchFixture(t *testing.T) *batchFixture {
 					}
 				}
 				fx.online[id] = true
+				// The real upsert overwrites metadata wholesale, so a register
+				// drops any recorded reason. This is the mechanism the revived-row
+				// cleanup has to compensate for.
+				delete(fx.offlineReasons, id)
 				resp.Runtimes = append(resp.Runtimes, Runtime{
 					ID:        id,
 					Name:      rt["name"],
@@ -396,7 +414,8 @@ func newBatchFixture(t *testing.T) *batchFixture {
 			_ = json.NewEncoder(w).Encode(resp)
 		case r.URL.Path == "/api/daemon/deregister":
 			var body struct {
-				RuntimeIDs []string `json:"runtime_ids"`
+				RuntimeIDs     []string                        `json:"runtime_ids"`
+				OfflineReasons map[string]RuntimeOfflineReason `json:"offline_reasons"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			fx.mu.Lock()
@@ -409,6 +428,15 @@ func newBatchFixture(t *testing.T) *batchFixture {
 			fx.deregistered = append(fx.deregistered, body.RuntimeIDs...)
 			for _, id := range body.RuntimeIDs {
 				fx.online[id] = false
+				// Mirror the server: the reason is stored on the runtime row, and
+				// a deregister without one leaves whatever was there — which is
+				// how the "revived then cleaned up" interleave loses it.
+				if reason, ok := body.OfflineReasons[id]; ok {
+					if fx.offlineReasons == nil {
+						fx.offlineReasons = make(map[string]RuntimeOfflineReason)
+					}
+					fx.offlineReasons[id] = reason
+				}
 			}
 			fx.mu.Unlock()
 			w.WriteHeader(http.StatusOK)
@@ -813,8 +841,14 @@ func TestDetectBuiltinRuntimes_SelfHealRejectionIsABelowMinimumVerdict(t *testin
 	// the heal, the loop goes on to probe the vanished pinned path, can only
 	// report "version detection failed", and the runtime stays online serving a
 	// CLI that cannot launch.
-	if belowMin["codex"] != "0.0.1" {
-		t.Errorf("below-minimum verdict = %v, want codex 0.0.1", belowMin)
+	if !strings.Contains(belowMin["codex"].reason, "0.0.1") || !strings.Contains(belowMin["codex"].reason, "below minimum") {
+		t.Errorf("demotable verdict = %v, want codex condemned for being below minimum at 0.0.1", belowMin)
+	}
+	// Below-minimum keeps today's behaviour on the trigger paths: it takes the
+	// runtime offline but does not carry the "a human must repair this" code
+	// that refuses new work (MUL-6164 scoped that to the unusable verdict).
+	if belowMin["codex"].offline != nil {
+		t.Errorf("below-minimum verdict must not carry an offline reason: %+v", belowMin["codex"].offline)
 	}
 	// Unlike the direct below-minimum case, the heal verdict gets the bounded
 	// fast-failure retry before it is returned: the heal re-resolves PATH per

@@ -126,14 +126,18 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		return "", "", err
 	}
 
+	// Owned by the fixture user, like every runtime a real daemon registers
+	// with a member credential: a private runtime is bindable only by its
+	// owner, so an ownerless one could not host the agents these tests create
+	// through the API.
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
 		)
-		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
+		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, $5, now())
 		RETURNING id
-	`, workspaceID, "Integration Test Runtime", "integration_test_runtime", "Integration test runtime").Scan(&runtimeID); err != nil {
+	`, workspaceID, "Integration Test Runtime", "integration_test_runtime", "Integration test runtime", userID).Scan(&runtimeID); err != nil {
 		return "", "", err
 	}
 

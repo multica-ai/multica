@@ -12,6 +12,7 @@ export type ShortcutActionId =
   | "toggleChat"
   | "findInIssue"
   | "openThreadNav"
+  | "archiveInboxItem"
   | "send"
   | "goBack"
   | "goForward"
@@ -101,6 +102,12 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     category: "general",
     defaultShortcut: createShortcutChord("O", { primary: true, shift: true }),
     allowInEditable: true,
+  },
+  {
+    id: "archiveInboxItem",
+    category: "general",
+    defaultShortcut: createShortcutChord("E"),
+    allowInEditable: false,
   },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
   // Browser-style history navigation (Mod+[ / Mod+]). Neither bracket is
@@ -270,6 +277,21 @@ export function isEditableShortcutTarget(target: EventTarget | null): boolean {
     target.tagName === "SELECT" ||
     target.closest("[contenteditable='true']") !== null
   );
+}
+
+const PORTAL_LAYER_SELECTOR =
+  '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
+
+/**
+ * Whether an open popup (menu, dialog, listbox) owns the keyboard. Popups are
+ * portaled to the body, so page-level listeners still see their keypresses;
+ * the `data-base-ui-inert` marker catches modal layers even when focus never
+ * left the page.
+ */
+export function isPortalLayerShortcutTarget(target: EventTarget | null): boolean {
+  if (typeof document === "undefined") return false;
+  if (document.querySelector("[data-base-ui-inert]") !== null) return true;
+  return target instanceof Element && target.closest(PORTAL_LAYER_SELECTOR) !== null;
 }
 
 const PRIMARY_RESERVED_KEYS = new Set([

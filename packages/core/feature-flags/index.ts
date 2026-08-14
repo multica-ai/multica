@@ -17,7 +17,12 @@ export type {
 export { FeatureFlagService } from "./service";
 export { StaticProvider } from "./static-provider";
 export { ChainProvider } from "./chain-provider";
-export { COMPOSIO_MCP_APPS_FLAG } from "./keys";
+export {
+  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+  COMPOSIO_MCP_APPS_FLAG,
+  PLUGINS_V1_FLAG,
+  PRIVATE_PLUGINS_V1_FLAG,
+} from "./keys";
 export {
   FeatureFlagsProvider,
   useFeatureFlagService,

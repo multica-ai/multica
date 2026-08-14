@@ -207,6 +207,28 @@ func TestPrepareReasonixTaskStateHome(t *testing.T) {
 	}
 }
 
+func TestPrepareDshTaskSessionRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	got, err := prepareDshTaskSessionRoot("work", "runtime-1", "agent_2")
+	if err != nil {
+		t.Fatalf("prepareDshTaskSessionRoot: %v", err)
+	}
+	want := filepath.Join(home, ".multica", "profiles", "work", "dsh-sessions", "runtime-1", "agent_2")
+	if got != want {
+		t.Fatalf("session root = %q, want %q", got, want)
+	}
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("stat session root: %v", err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Fatalf("session root mode = %o, want 700", info.Mode().Perm())
+	}
+}
+
 func TestLayerCustomEnvKeepsReasonixCredentialsHomeButBlocksStateHome(t *testing.T) {
 	t.Parallel()
 	agentEnv := map[string]string{}
@@ -686,6 +708,8 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "kimi", want: true},
 		// Reasonix loads AGENTS.md from the ACP session cwd.
 		{provider: "reasonix", want: false},
+		// DSH loads AGENTS.md from the agent session cwd.
+		{provider: "dsh", want: false},
 		{provider: "traecli", want: true},
 		// Qwen Code loads the per-task QWEN.md file natively.
 		{provider: "qwen", want: false},
@@ -1934,12 +1958,17 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		sessionID   string
-		priorDir    string
-		envDir      string
-		wantSession string
-		wantReused  bool
+		name      string
+		sessionID string
+		priorDir  string
+		envDir    string
+		// sessionHomeUnreachable models a provider whose session store this run
+		// cannot reach even though the workdir matches — the Hermes
+		// local_directory case (GH #6806). Zero value keeps the cwd-keyed
+		// providers' behaviour.
+		sessionHomeUnreachable bool
+		wantSession            string
+		wantReused             bool
 	}{
 		{
 			name:        "same workdir keeps session",
@@ -1973,6 +2002,19 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 			wantSession: "",
 			wantReused:  false,
 		},
+		{
+			// The local_directory flow: workdir is the user's own directory
+			// and therefore identical across tasks, but reuse is disabled so
+			// the session store is a fresh, empty one. Forwarding the id here
+			// is what made every turn silently restart the conversation.
+			name:                   "matching workdir but unreachable session store drops session",
+			sessionID:              "sess-1",
+			priorDir:               "/repo",
+			envDir:                 "/repo",
+			sessionHomeUnreachable: true,
+			wantSession:            "",
+			wantReused:             false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1980,7 +2022,7 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: tt.priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reused := gateResumeToReusedWorkdir(&task, &taskCtx, tt.envDir, slog.Default())
+			reused := gateResumeToReusedWorkdir(&task, &taskCtx, tt.envDir, !tt.sessionHomeUnreachable, slog.Default())
 
 			if reused != tt.wantReused {
 				t.Fatalf("reused = %v, want %v", reused, tt.wantReused)
@@ -1996,6 +2038,79 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 			wantUnavailable := tt.sessionID != "" && tt.wantSession == ""
 			if taskCtx.PriorSessionResumeUnavailable != wantUnavailable {
 				t.Fatalf("PriorSessionResumeUnavailable = %v, want %v", taskCtx.PriorSessionResumeUnavailable, wantUnavailable)
+			}
+		})
+	}
+}
+
+func TestSessionHomeReachable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		provider   string
+		env        *execenv.Environment
+		envReused  bool
+		wantReturn bool
+	}{
+		{
+			// Every non-Hermes backend keys its sessions by cwd (or resolves
+			// its own store), so this predicate must not narrow their gate.
+			name:       "cwd-keyed provider is always reachable",
+			provider:   "claude",
+			env:        &execenv.Environment{},
+			wantReturn: true,
+		},
+		{
+			name:     "hermes with a mounted store holding history",
+			provider: "hermes",
+			env: &execenv.Environment{
+				HermesSessionStore:          "/profile/hermes-sessions/a/default/issue-1",
+				HermesSessionHistoryPresent: true,
+			},
+			wantReturn: true,
+		},
+		{
+			// Mounted onto nothing: a first turn, a store the GC reclaimed
+			// between turns, a switched profile, or a dangling link. Reading
+			// "mounted" as "resumable" here would forward a dead session id.
+			name:       "hermes with a mounted but empty session store",
+			provider:   "hermes",
+			env:        &execenv.Environment{HermesSessionStore: "/profile/hermes-sessions/a/default/issue-1"},
+			wantReturn: false,
+		},
+		{
+			// A store is mounted, so the env-reuse fallback must not override
+			// the store's own answer — the transcript lives in the store now.
+			name:       "hermes with an empty store is not rescued by env reuse",
+			provider:   "hermes",
+			env:        &execenv.Environment{HermesSessionStore: "/profile/hermes-sessions/a/default/issue-1"},
+			envReused:  true,
+			wantReturn: false,
+		},
+		{
+			// No store, but the prior task's env root — and therefore its
+			// overlay's task-local state.db — carried over.
+			name:       "hermes on a reused env root",
+			provider:   "hermes",
+			env:        &execenv.Environment{},
+			envReused:  true,
+			wantReturn: true,
+		},
+		{
+			// The GH #6806 shape: a fresh overlay with an empty state.db, so
+			// no session recorded by a prior task can be found here.
+			name:       "hermes on a fresh overlay with no store",
+			provider:   "hermes",
+			env:        &execenv.Environment{},
+			wantReturn: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sessionHomeReachable(tt.provider, tt.env, tt.envReused); got != tt.wantReturn {
+				t.Fatalf("sessionHomeReachable() = %v, want %v", got, tt.wantReturn)
 			}
 		})
 	}
@@ -2871,7 +2986,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 		})
 	}
 
-	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "reasonix", "kiro", "qoder", "qoderclicn", "traecli", "pi", "omp", "openclaw"}
+	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "reasonix", "dsh", "kiro", "qoder", "qoderclicn", "traecli", "pi", "omp", "openclaw"}
 	for _, provider := range detectable {
 		t.Run(provider+" does not retry", func(t *testing.T) {
 			t.Parallel()

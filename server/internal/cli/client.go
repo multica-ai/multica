@@ -669,6 +669,44 @@ func (c *APIClient) ImportSkillFile(ctx context.Context, fileData []byte, filena
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// UploadPrivatePlugin installs workspace-private Plugin archive bytes. The
+// filename is transport metadata only; the Server derives source identity from
+// validated manifest content and digests.
+func (c *APIClient) UploadPrivatePlugin(ctx context.Context, path string, archive []byte, filename string, out any) error {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("artifact", filepath.Base(filename))
+	if err != nil {
+		return fmt.Errorf("create Plugin artifact form file: %w", err)
+	}
+	if _, err := part.Write(archive); err != nil {
+		return fmt.Errorf("write Plugin artifact: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("close Plugin artifact upload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setHeaders(req)
+	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return newHTTPError(http.MethodPost, path, resp)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
 // DownloadFile downloads a file from the given URL and returns the response body.
 // This is used for downloading attachments via their signed download_url.
 // Downloads are limited to 100 MB to match the upload size limit.

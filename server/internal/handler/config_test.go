@@ -412,6 +412,15 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if cfg.FeatureFlags["composio_mcp_apps"] {
 		t.Fatalf("composio_mcp_apps: want false by default, got true")
 	}
+	if cfg.FeatureFlags["billing_workspace_subscriptions"] {
+		t.Fatalf("billing_workspace_subscriptions: want false by default, got true")
+	}
+	if cfg.FeatureFlags["plugins_v1"] {
+		t.Fatalf("plugins_v1: want false by default, got true")
+	}
+	if cfg.FeatureFlags["private_plugins_v1"] {
+		t.Fatalf("private_plugins_v1: want false by default, got true")
+	}
 	if !cfg.FeatureFlags["agents_skill_toggles"] {
 		t.Fatalf("agents_skill_toggles: want true for installed v0.4.0 clients, got false")
 	}
@@ -430,5 +439,43 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	}
 	if !cfg.FeatureFlags["composio_mcp_apps"] {
 		t.Fatalf("composio_mcp_apps: want true with flag enabled, got false")
+	}
+}
+
+func TestGetConfigExposesEnabledPluginsV1Flag(t *testing.T) {
+	h := &Handler{}
+	withPluginsV1Flag(t, h, true)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	h.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig enabled plugins_v1: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode enabled config: %v", err)
+	}
+	if !cfg.FeatureFlags["plugins_v1"] {
+		t.Fatal("plugins_v1: want true with flag enabled, got false")
+	}
+}
+
+func TestGetConfigExposesEnabledPrivatePluginsV1Flag(t *testing.T) {
+	h := &Handler{}
+	withPrivatePluginsV1Flag(t, h, true, true)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	h.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig enabled private_plugins_v1: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode enabled config: %v", err)
+	}
+	if !cfg.FeatureFlags["plugins_v1"] || !cfg.FeatureFlags["private_plugins_v1"] {
+		t.Fatalf("private Plugin flags not published together: %#v", cfg.FeatureFlags)
 	}
 }

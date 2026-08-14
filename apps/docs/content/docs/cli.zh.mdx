@@ -227,9 +227,9 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | `issue` | `list` | 列出 issue | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（可重复）、`--limit`、`--offset`、`--sort`、`--full-id` |
 | | `get <id>` | 查看单个 issue | |
 | | `create` | 创建 issue | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重复） |
-| | `update <id>` | 更新 issue 字段 | 与 `create` 同类字段，另有 `--position` |
-| | `assign <id>` | 指派或取消指派 | `--to`（名称模糊匹配成员、智能体或小队）、`--to-id`、`--unassign` |
-| | `status <id> <status>` | 修改状态 | |
+| | `update <id>` | 更新 issue 字段 | 与 `create` 同类字段，另有 `--position`、`--no-start` |
+| | `assign <id>` | 指派或取消指派 | `--to`（名称模糊匹配成员、智能体或小队）、`--to-id`、`--unassign`、`--no-start` |
+| | `status <id> <status>` | 修改状态 | `--no-start` |
 | | `reorder <id>` | 在列内移动 | |
 | | `search <query>` | 搜索 issue | `--limit`、`--include-closed` |
 | | `children <id>` | 按阶段分组列出子 issue | |
@@ -246,7 +246,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `cancel-task <task-id>` | 取消运行中或排队中的 task | `--issue` |
 | `project` | `list/get/create/update/delete` | 管理项目 | |
 | | `status <id> <status>` | 修改项目状态 | |
-| | `resource list/add/update/remove` | 管理项目附加资源 | `--type`、`--url` |
+| | `resource list/add/update/remove` | 管理项目附加资源 | `--type`、`--url`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目录的 `in_place` / `worktree`） |
 | `label` | `list/get/create/update/delete` | 管理工作区标签 | |
 | `property` | `list/get/create/update/archive/unarchive` | 管理工作区自定义属性 | `create`：`--name`、`--type`、`--option`（可重复）；`list`：`--include-archived`；类型创建后不可修改 |
 | `agent` | `list/get/create/update/archive/restore` | 管理智能体 | `--name`、`--runtime-id`（`create` 必填）、`--instructions`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
@@ -255,11 +255,13 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `avatar <id>` | 上传头像 | |
 | | `env get/set <agent-id>` | 读写自定义环境变量（仅 owner 和 admin） | |
 | | `skills list/set/add <agent-id>` | 管理绑定的 skill | `--skill-ids`（`set` 全量替换，`add` 增量添加） |
+| | `mcp list/add/enable/disable/remove <agent-id>` | 给该 agent 分配工作区 MCP 服务 | server id 从 `workspace mcp list` 获取。库里的条目在这里添加之前不会生效；`disable` 只停止下发，保留分配 |
 | `autopilot` | `list/get/create/update/delete` | 管理自动化 | `create`：`--title`、`--agent`、`--mode`（均必填）、`--priority`、`--project`、`--subscriber`（可重复） |
 | | `trigger <id>` | 手动触发一次 | |
 | | `runs <id>` | 查看运行历史 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 管理定时和 webhook 触发器 | |
 | `workspace` | `list/get/create/update/switch` | 管理工作区；`switch` 设置当前 profile 的默认工作区 | |
+| | `mcp list/add/update/remove` | 管理工作区的 MCP 服务库 | 写操作需要 owner/admin。这里添加的服务不会分配给任何 agent——用 `multica agent mcp add` 分配给某个 agent。`list` 只列出名称与 transport；存储的条目是只写的，任何角色都读不回。`--server-config-file` / `--server-config-stdin` 避免 token 进入 shell 历史 |
 | | `member list/invite <email>` | 查看成员、发出邀请 | `invite`：`--role`（member 或 admin，默认 member） |
 | `repo` | `list/add/remove/checkout` | 管理工作区仓库并检出到本机 | `--url`（可重复）；`checkout`：`--ref` |
 | `skill` | `list/get/create/update/delete` | 管理 skill | |
@@ -275,7 +277,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 
 | 命令 | 子命令 | 用途 | 关键 flag |
 | --- | --- | --- | --- |
-| `daemon` | `start` | 启动本机守护进程 | `--foreground`、`--device-name`、`--runtime-name`、`--poll-interval`、`--heartbeat-interval`、`--agent-timeout`（`0` 表示不设上限）、`--max-concurrent-tasks`、`--no-auto-update`；均有对应的 `MULTICA_*` 环境变量 |
+| `daemon` | `start` | 启动本机守护进程 | `--foreground`、`--device-name`、`--runtime-name`、`--workspaces-root`、`--poll-interval`、`--heartbeat-interval`、`--agent-timeout`（`0` 表示不设上限）、`--max-concurrent-tasks`、`--no-auto-update`；均有对应的 `MULTICA_*` 环境变量 |
 | | `stop` / `status` / `restart` | 停止、查看状态、重启（`restart` 与 `start` 同一套 flag） | |
 | | `logs` | 查看守护进程日志 | `--follow`、`--lines` |
 | | `disk-usage` | 查看本机磁盘占用 | `--by-workspace`、`--by-task`、`--top` |
@@ -296,8 +298,21 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | `update` | — | 更新 CLI 到最新版本 | |
 | `version` | — | 查看版本信息 | `--output`（`text` 或 `json`） |
 
+## 在其他编码智能体里操作 Multica
+
+如果你的工作大多发生在 Codex、Claude Code 或 Cursor 里，可以直接在那里操作 Multica，
+不必切回终端。[Multica CLI skill](https://github.com/multica-ai/multica-cli)
+会教这些智能体安全地使用本页的命令：低成本地读 issue 和评论线程、通过文件写评论，
+以及正确处理 mention、状态变更和指派带来的副作用。
+
+它完全通过你已认证的 CLI 运行，本身不授予任何权限 —— 权限仍然只来自你的登录、
+所选 profile 和 workspace。要求 CLI 版本不低于 v0.4.26。该仓库的 README 说明了
+Claude Code 插件市场、Codex skill 安装器、Cursor 以及其他任何加载 Markdown 指令的
+工具的安装方式。
+
 ## 接下来
 
+- [Multica CLI skill](https://github.com/multica-ai/multica-cli) — 在 Codex、Claude Code 或 Cursor 里操作 Multica。
 - [认证与令牌](/auth-tokens) — PAT 的创建、续期和吊销。
 - [故障排查](/troubleshooting) — 命令报错和任务不开始的排查路径。
 - [创建和配置智能体](/agents-create) — `agent create` 各字段的完整语义。

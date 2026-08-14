@@ -31,8 +31,8 @@ var (
 	// ErrRobotOwnedByAnotherWorkspace is returned when the pasted DingTalk robot
 	// is already connected to a live owner in a DIFFERENT Multica workspace — it
 	// would collide with the (channel_type, app_id) routing index. A DingTalk
-	// robot is one bot identity and maps to one agent; reusing it here requires
-	// disconnecting it in the other workspace first.
+	// robot is one bot identity and maps to one installation/default agent;
+	// group-specific routes may target other agents inside that workspace.
 	ErrRobotOwnedByAnotherWorkspace = errors.New("dingtalk: this DingTalk robot is already connected to a different Multica workspace")
 	// ErrRobotOwnedBySameWorkspace is returned when the robot is already connected
 	// to a DIFFERENT (live, non-archived) agent in the SAME workspace, pointing
@@ -124,7 +124,7 @@ func newInstallService(q installQueries, tx engine.TxStarter, box *secretbox.Box
 
 // installPersist carries the resolved fields persistInstall writes. configJSON
 // holds the AppKey (config->>'app_id') used for inbound routing; the ROW itself
-// is keyed by (workspace, agent) — one bot per agent.
+// is keyed by (workspace, agent) — one installation/default agent per bot.
 type installPersist struct {
 	wsID        pgtype.UUID
 	agentID     pgtype.UUID
@@ -139,7 +139,8 @@ type installPersist struct {
 // pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint violation.
 const pgUniqueViolation = "23505"
 
-// persistInstall stores one DingTalk bot per (workspace, agent). Reconnecting
+// persistInstall stores one DingTalk installation per (workspace, default
+// agent). Reconnecting
 // the SAME AppKey updates the row in place and preserves its installation-scoped
 // state. Connecting a DIFFERENT AppKey retires that state and inserts a fresh
 // installation id: DingTalk senderStaffId is only organization-scoped, so user

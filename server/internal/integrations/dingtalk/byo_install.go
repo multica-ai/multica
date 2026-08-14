@@ -38,7 +38,7 @@ type RegisterBYOParams struct {
 }
 
 // RegisterBYO installs a user-supplied ("bring your own") DingTalk robot for an
-// agent. The user creates their own DingTalk Stream-mode robot and pastes its
+// default agent. The user creates their own DingTalk Stream-mode robot and pastes its
 // AppKey (client id) + AppSecret (client secret). There is NO OAuth code
 // exchange: we validate the credentials live by minting an access_token (which
 // proves the AppKey/AppSecret pair is valid), encrypt the AppSecret at rest, and
@@ -86,7 +86,9 @@ func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (
 		return db.ChannelInstallation{}, fmt.Errorf("encode dingtalk installation config: %w", err)
 	}
 
-	// Persist one bot per agent (the row is keyed by workspace + agent). The
+	// Persist one installation per default agent (the row is keyed by workspace
+	// + agent). Group routes can target other agents without another Stream
+	// connection. The
 	// stored config carries the AppKey for inbound routing; persistInstall
 	// reclaims a DEAD prior owner of that AppKey so the robot can move to this
 	// agent, and refuses a LIVE owner with an accurate conflict sentinel.

@@ -41,7 +41,12 @@ func chdirWithDaemonTaskMarker(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
 		t.Fatalf("create marker dir: %v", err)
 	}
-	data := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `"}`)
+	// Task-scoped: a real workdir marker always carries the identity of the
+	// task that wrote it, and that identity is what separates a leftover from
+	// the permanent workspaces root marker, which has managed_by and nothing
+	// else (MUL-6132). Writing the bare form here would model the root marker
+	// rather than the workdir marker these tests are about.
+	data := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `","agent_id":"agent-1","issue_id":"issue-1"}`)
 	if err := os.WriteFile(markerPath, data, 0o644); err != nil {
 		t.Fatalf("write marker: %v", err)
 	}

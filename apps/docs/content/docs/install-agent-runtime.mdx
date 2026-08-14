@@ -21,6 +21,7 @@ Multica currently detects these commands:
 | Codex CLI | `codex` | [Codex CLI](https://developers.openai.com/codex/cli/) |
 | GitHub Copilot CLI | `copilot` | [Install Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) |
 | Cursor Agent | `cursor-agent` | [Install Cursor CLI](https://docs.cursor.com/en/cli/installation) |
+| DeepSeek Harness | `dsh` | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) |
 | DevEco Code | `deveco` | [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) |
 | Grok Build | `grok` | [Grok Build quickstart](https://docs.x.ai/build/overview) |
 | Hermes Agent | `hermes` | [Hermes quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
@@ -46,6 +47,8 @@ After installing, launch the tool once in a terminal on its own and complete its
 For Reasonix, run `reasonix setup` and configure a default provider and model before starting the daemon.
 
 For QwenPaw, choose the provider and model in QwenPaw's own configuration. Multica cannot override a QwenPaw model at run time.
+
+For DeepSeek Harness, install Node.js 20+ and run `npm install -g @deepseek-ai/dsh`, then add the Multica runtime profile to it (`dsh plugin --profile multica add <bundle>`). The daemon registers DeepSeek Harness only after `dsh --profile multica --probe` succeeds. Set `DEEPSEEK_API_KEY` (or store it in dsh's own settings) before starting the daemon.
 
 Those login credentials are stored locally by the tool itself. Multica never receives login tokens from Claude, Codex, Cursor, or any other CLI.
 

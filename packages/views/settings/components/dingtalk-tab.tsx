@@ -16,6 +16,13 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -27,12 +34,16 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { DingTalkMark } from "./dingtalk-mark";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { dingtalkInstallationsOptions, dingtalkKeys } from "@multica/core/dingtalk";
+import {
+  dingtalkGroupRoutesOptions,
+  dingtalkInstallationsOptions,
+  dingtalkKeys,
+} from "@multica/core/dingtalk";
 import { api } from "@multica/core/api";
-import type { DingTalkInstallation } from "@multica/core/types";
+import type { DingTalkGroupRoute, DingTalkInstallation } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { openExternal } from "../../platform";
 import { useT } from "../../i18n";
@@ -52,9 +63,10 @@ function formatInstalledAt(value: string): string {
 // enforces it; the UI hides the button for non-admins to match).
 //
 // Adding a new installation flows through the Agent detail page: the install
-// path is per-agent (each Multica agent gets exactly one robot — the
-// (workspace_id, agent_id, channel_type) UNIQUE in channel_installation), so
-// asking the user to pick an agent here would re-create that page's picker.
+// path selects the robot's default agent (the installation still owns one
+// Stream connection). Additional group-specific agents are managed below via
+// group routing, so asking the user to pick an installation here would
+// re-create the Agent page's picker.
 export function DingTalkTab() {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
@@ -62,6 +74,14 @@ export function DingTalkTab() {
   const user = useAuthStore((s) => s.user);
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const {
+    data: agents,
+    isLoading: agentsLoading,
+    isError: agentsError,
+    isFetching: agentsFetching,
+    isSuccess: agentsLoaded,
+    refetch: retryAgents,
+  } = useQuery(agentListOptions(wsId));
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage =
     currentMember?.role === "owner" || currentMember?.role === "admin";
@@ -71,9 +91,26 @@ export function DingTalkTab() {
   });
   const installations = data?.installations ?? [];
   const configured = data?.configured === true;
+  const groupRoutingSupported = data?.group_routing_supported === true;
+  const hasActiveInstallation = installations.some(
+    (installation) => installation.status === "active",
+  );
+  const {
+    data: groupRouteData,
+    isLoading: routesLoading,
+    isError: routesError,
+    isFetching: routesFetching,
+    refetch: retryGroupRoutes,
+  } = useQuery({
+    ...dingtalkGroupRoutesOptions(wsId),
+    enabled: configured && groupRoutingSupported && hasActiveInstallation && !!wsId,
+  });
+  const groupRoutes = groupRouteData?.routes ?? [];
+  const activeAgents = (agents ?? []).filter((agent) => !agent.archived_at);
 
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [updatingRouteId, setUpdatingRouteId] = useState<string | null>(null);
 
   async function handleDisconnect() {
     if (!disconnectTarget || disconnecting) return;
@@ -89,6 +126,22 @@ export function DingTalkTab() {
       );
     } finally {
       setDisconnecting(false);
+    }
+  }
+
+  async function handleRouteAgentChange(route: DingTalkGroupRoute, agentId: string) {
+    if (!canManage || !agentsLoaded || updatingRouteId || route.agent_id === agentId) return;
+    setUpdatingRouteId(route.id);
+    try {
+      await api.updateDingTalkGroupRoute(wsId, route.id, { agent_id: agentId });
+      await qc.invalidateQueries({ queryKey: dingtalkKeys.groupRoutes(wsId) });
+      toast.success(t(($) => $.dingtalk.group_routes_updated));
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.dingtalk.group_routes_update_failed),
+      );
+    } finally {
+      setUpdatingRouteId(null);
     }
   }
 
@@ -145,6 +198,114 @@ export function DingTalkTab() {
         </section>
       )}
 
+      {configured && groupRoutingSupported && hasActiveInstallation && (
+        <section className="space-y-3">
+          <div className="space-y-1">
+            <h2 className="text-body font-semibold">
+              {t(($) => $.dingtalk.group_routes_title)}
+            </h2>
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.dingtalk.group_routes_description)}
+            </p>
+          </div>
+          {routesLoading ? (
+            <Card>
+              <CardContent>
+                <p className="text-body text-muted-foreground">
+                  {t(($) => $.dingtalk.loading)}
+                </p>
+              </CardContent>
+            </Card>
+          ) : routesError ? (
+            <Card>
+              <CardContent className="space-y-3" role="alert">
+                <div className="space-y-1">
+                  <p className="text-body font-medium">
+                    {t(($) => $.dingtalk.group_routes_error_title)}
+                  </p>
+                  <p className="text-caption text-muted-foreground">
+                    {t(($) => $.dingtalk.group_routes_error_description)}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={routesFetching}
+                  onClick={() => void retryGroupRoutes()}
+                >
+                  {t(($) => $.dingtalk.group_routes_retry)}
+                </Button>
+              </CardContent>
+            </Card>
+          ) : groupRoutes.length === 0 ? (
+            <Card>
+              <CardContent className="space-y-1">
+                <p className="text-body font-medium">
+                  {t(($) => $.dingtalk.group_routes_empty_title)}
+                </p>
+                <p className="text-caption text-muted-foreground">
+                  {t(($) => $.dingtalk.group_routes_empty_description)}
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="divide-y">
+                {agentsLoading ? (
+                  <div className="pb-3">
+                    <p className="text-body text-muted-foreground">
+                      {t(($) => $.dingtalk.group_routes_agents_loading)}
+                    </p>
+                  </div>
+                ) : agentsError ? (
+                  <div className="space-y-3 pb-3" role="alert">
+                    <div className="space-y-1">
+                      <p className="text-body font-medium">
+                        {t(($) => $.dingtalk.group_routes_agents_error_title)}
+                      </p>
+                      <p className="text-caption text-muted-foreground">
+                        {t(($) => $.dingtalk.group_routes_agents_error_description)}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={agentsFetching}
+                      onClick={() => void retryAgents()}
+                    >
+                      {t(($) => $.dingtalk.group_routes_agents_retry)}
+                    </Button>
+                  </div>
+                ) : agentsLoaded && activeAgents.length === 0 ? (
+                  <div className="space-y-1 pb-3">
+                    <p className="text-body font-medium">
+                      {t(($) => $.dingtalk.group_routes_agents_empty_title)}
+                    </p>
+                    <p className="text-caption text-muted-foreground">
+                      {t(($) => $.dingtalk.group_routes_agents_empty_description)}
+                    </p>
+                  </div>
+                ) : null}
+                {groupRoutes.map((route) => (
+                  <GroupRouteRow
+                    key={route.id}
+                    route={route}
+                    agents={activeAgents}
+                    selectedAgentName={agents?.find((agent) => agent.id === route.agent_id)?.name}
+                    canManage={canManage}
+                    selectorAvailable={agentsLoaded && activeAgents.length > 0}
+                    updating={updatingRouteId !== null}
+                    onAgentChange={(agentId) => handleRouteAgentChange(route, agentId)}
+                  />
+                ))}
+              </CardContent>
+            </Card>
+          )}
+        </section>
+      )}
+
       <AlertDialog
         open={!!disconnectTarget}
         onOpenChange={(v) => {
@@ -172,6 +333,70 @@ export function DingTalkTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+function GroupRouteRow({
+  route,
+  agents,
+  selectedAgentName,
+  canManage,
+  selectorAvailable,
+  updating,
+  onAgentChange,
+}: {
+  route: DingTalkGroupRoute;
+  agents: Array<{ id: string; name: string }>;
+  selectedAgentName?: string;
+  canManage: boolean;
+  selectorAvailable: boolean;
+  updating: boolean;
+  onAgentChange: (agentId: string) => void;
+}) {
+  const { t } = useT("settings");
+  const title = route.conversation_title || route.conversation_id;
+  const selectedAgent = agents.find((agent) => agent.id === route.agent_id);
+  const selectedLabel =
+    selectedAgentName ??
+    selectedAgent?.name ??
+    t(($) => $.dingtalk.group_routes_unknown_agent);
+
+  return (
+    <div className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0 space-y-1">
+        <p className="truncate text-body font-medium">{title}</p>
+        <p className="truncate font-mono text-micro text-muted-foreground">
+          {route.conversation_id}
+        </p>
+      </div>
+      {canManage ? (
+        <Select
+          items={agents.map((agent) => ({ value: agent.id, label: agent.name }))}
+          value={route.agent_id}
+          onValueChange={(agentId) => {
+            if (agentId) onAgentChange(agentId);
+          }}
+          disabled={!selectorAvailable || updating}
+        >
+          <SelectTrigger className="w-full sm:w-56" aria-label={t(($) => $.dingtalk.group_routes_agent_label)}>
+            <SelectValue>
+              {selectedLabel}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {agents.map((agent) => (
+              <SelectItem key={agent.id} value={agent.id}>
+                {agent.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <p className="text-caption text-muted-foreground">
+          {selectedLabel}
+        </p>
+      )}
     </div>
   );
 }

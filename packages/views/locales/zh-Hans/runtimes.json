@@ -128,8 +128,12 @@
       "public": "公开"
     },
     "visibility_hint": {
-      "private": "仅你和工作区管理员可以在此运行时上创建智能体。",
+      "private": "仅你可以在此运行时上创建智能体。",
       "public": "工作区内任何成员都可以在此运行时上创建智能体。"
+    },
+    "visibility_hint_readonly": {
+      "private": "仅运行时所有者可以在此运行时上创建智能体，也只有他们能切换为「公开」。",
+      "public": "工作区内任何成员都可以在此运行时上创建智能体。只有运行时所有者能切回「私有」。"
     },
     "visibility_toast_updated": "可见性已设为\"{{visibility}}\"",
     "visibility_toast_failed": "更新可见性失败",

@@ -129,3 +129,18 @@ func TestValidateArtifactRejectsMissingDeclaredEntry(t *testing.T) {
 		t.Fatalf("ValidateArtifact missing entry error = %v", err)
 	}
 }
+
+func TestValidateArtifactRejectsInstallAndBuildHooks(t *testing.T) {
+	for _, name := range []string{"package.json", "install.sh", "postinstall", "build", "build.ps1", "pnpm-lock.yaml"} {
+		t.Run(name, func(t *testing.T) {
+			files := append(referenceArchiveFiles(t), zipFixtureFile{
+				name:    "skills/review-readiness/" + name,
+				content: []byte("declarative-looking but forbidden"),
+			})
+			_, err := ValidateArtifact(buildArchive(t, files))
+			if err == nil || !strings.Contains(err.Error(), "installation or build hook") {
+				t.Fatalf("ValidateArtifact error = %v, want install/build hook rejection", err)
+			}
+		})
+	}
+}

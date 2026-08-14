@@ -38,6 +38,22 @@ const SIDEBAR_DRAG_THRESHOLD = 2
 // header's trigger brings it back.
 const SIDEBAR_AUTO_COLLAPSE_QUERY = "(min-width: 1024px) and (max-width: 1279px)"
 
+/**
+ * Paints an element with whatever the sidebar wrapper is currently filled with.
+ *
+ * A descendant that has to lay down an opaque layer over the wrapper — rather
+ * than over its own parent — must match the wrapper's fill exactly, and that
+ * fill is conditional: `bg-sidebar` while an inset-variant sidebar is mounted,
+ * the consumer's own background otherwise. Naming a token at the descendant
+ * reproduces that condition in a second place, which then drifts (#6874). Use
+ * this class instead: the wrapper publishes its fill as `--sidebar-wrapper-fill`
+ * under the same `:has()` condition that paints it, so the two cannot disagree.
+ *
+ * Consumers that give the wrapper a background must declare the matching
+ * non-inset half, e.g. `bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]`.
+ */
+const SIDEBAR_WRAPPER_FILL_CLASS = "bg-(--sidebar-wrapper-fill)"
+
 function clampSidebarWidth(width: number) {
   return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, width))
 }
@@ -218,7 +234,14 @@ function SidebarProvider({
             } as React.CSSProperties
           }
           className={cn(
-            "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
+            "group/sidebar-wrapper flex min-h-svh w-full",
+            // Both halves of the inset branch carry the identical :has()
+            // condition, so SIDEBAR_WRAPPER_FILL_CLASS can never name a colour
+            // this element is not actually painted with. The non-inset fill is
+            // the consumer's (this component paints nothing then), so the
+            // consumer declares that half of the variable next to its own
+            // background class.
+            "has-data-[variant=inset]:bg-sidebar has-data-[variant=inset]:[--sidebar-wrapper-fill:var(--sidebar)]",
             className
           )}
           {...props}
@@ -908,6 +931,7 @@ function SidebarMenuSubButton({
 }
 
 export {
+  SIDEBAR_WRAPPER_FILL_CLASS,
   Sidebar,
   SidebarContent,
   SidebarFooter,

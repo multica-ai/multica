@@ -67,6 +67,7 @@
   "actions": {
     "row_menu": "操作",
     "add_to_agent": "添加到智能体",
+    "refresh": "从来源更新",
     "my_agents": "我的智能体",
     "other_agents": "其他智能体",
     "no_agents": "暂无可用智能体",
@@ -139,6 +140,23 @@
     "toast_save_failed": "保存 skill 失败",
     "toast_deleted": "已删除 skill",
     "toast_delete_failed": "删除 skill 失败",
+    "refresh": {
+      "button": "更新",
+      "tooltip": "从来源重新下载这个 skill",
+      "source_github": "GitHub",
+      "source_skills_sh": "Skills.sh",
+      "source_clawhub": "ClawHub",
+      "toast_success": "已从 {{source}} 更新 skill",
+      "toast_failed": "更新 skill 失败",
+      "dialog": {
+        "title": "从来源更新这个 skill？",
+        "description": "将从 {{source}} 重新下载\"{{name}}\"，并用最新版本替换它的名称、描述、SKILL.md 和文件。",
+        "warning": "对这个 skill 的本地修改将被覆盖。智能体分配、标签和创建者保持不变。",
+        "cancel": "取消",
+        "confirm": "更新",
+        "refreshing": "更新中..."
+      }
+    },
     "delete_dialog": {
       "title": "删除这个 skill？",
       "description_with_agents_other": "将永久删除\"{{name}}\"，并从当前正在使用它的 {{count}} 个智能体上移除。",

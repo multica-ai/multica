@@ -21,6 +21,7 @@ Multica는 현재 다음 명령을 감지합니다.
 | Codex CLI | `codex` | [Codex CLI](https://developers.openai.com/codex/cli/) |
 | GitHub Copilot CLI | `copilot` | [Copilot CLI 설치](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) |
 | Cursor Agent | `cursor-agent` | [Cursor CLI 설치](https://docs.cursor.com/en/cli/installation) |
+| DeepSeek Harness | `dsh` | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) |
 | DevEco Code | `deveco` | [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) |
 | Grok Build | `grok` | [Grok Build 빠른 시작](https://docs.x.ai/build/overview) |
 | Hermes Agent | `hermes` | [Hermes 빠른 시작](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
@@ -46,6 +47,8 @@ Multica는 현재 다음 명령을 감지합니다.
 Reasonix를 사용할 때는 데몬을 시작하기 전에 `reasonix setup`을 실행해 기본 공급자와 모델을 설정하세요.
 
 QwenPaw를 사용할 때는 QwenPaw 자체 설정에서 공급자와 모델을 선택하세요. Multica는 실행 시 QwenPaw의 모델을 덮어쓸 수 없습니다.
+
+DeepSeek Harness를 사용하려면 Node.js 20+를 설치하고 `npm install -g @deepseek-ai/dsh`를 실행한 뒤 Multica 런타임 프로필을 추가하세요(`dsh plugin --profile multica add <bundle>`). 데몬은 `dsh --profile multica --probe`가 성공한 경우에만 DeepSeek Harness를 등록합니다. 데몬을 시작하기 전에 `DEEPSEEK_API_KEY`를 설정(또는 dsh 자체 설정에 저장)하세요.
 
 로그인 자격 증명은 도구가 로컬에 저장합니다. Multica는 Claude, Codex, Cursor 또는 다른 CLI의 로그인 token을 받지 않습니다.
 

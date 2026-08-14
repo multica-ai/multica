@@ -63,8 +63,15 @@ type CodexHomeOptions struct {
 	// whole shared history back in. Empty means a fresh thread (no rollout to
 	// expose). See prepareCodexSessionsDir (MUL-4424).
 	ResumeSessionID string
-	// IsLocalDirectory marks a local_directory task — one running in the user's
-	// own project directory. These tasks get a fresh codex-home per task ID (the
+	// IsLocalDirectory marks a task whose env root is never reused across task
+	// IDs — every local_directory task, in_place or worktree. Worktree tasks
+	// get a fresh env root per task just like in-place ones do
+	// (shouldReusePriorWorkdir refuses any local assignment), so they need the
+	// same per-issue session store; keying this on "runs in the user's
+	// directory" instead would silently drop a Codex agent's conversation
+	// history between turns on the same issue.
+	//
+	// These tasks get a fresh codex-home per task ID (the
 	// daemon never reuses their workdir), so their sessions/ is pointed at the
 	// per-issue store (SessionStoreKey) that survives across task IDs and holds
 	// ONLY this issue's rollouts — never the machine's whole ~/.codex/sessions.
