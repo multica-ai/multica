@@ -40,6 +40,7 @@ oauth_config:
     bot:
       - app_mentions:read
       - channels:history
+      - files:read
       - groups:history
       - im:history
       - mpim:history
@@ -63,6 +64,10 @@ settings:
 ```
 
 만들기 전에 두 `Multica` 값을 에이전트 이름으로 바꿀 수 있습니다. manifest의 권한이나 이벤트를 삭제하지 마세요. 삭제하면 DM, 채널 멘션, 답글, `/issue`가 작동하지 않을 수 있습니다.
+
+<Callout type="warning">
+첨부 파일 지원이 추가되기 전에 이 Slack app을 설치했다면 Bot scope에 `files:read`를 추가하고 workspace에 app을 다시 설치하세요. app을 다시 설치하기 전에는 새 scope가 기존 Bot token에 적용되지 않습니다.
+</Callout>
 
 Bot은 Socket Mode로 Slack에 능동적으로 연결하므로 공개 Request URL이나 OAuth Redirect URL을 설정할 필요가 없습니다.
 

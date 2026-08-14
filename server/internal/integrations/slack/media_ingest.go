@@ -259,8 +259,9 @@ func (r *slackMediaResolver) validateDownloadURL(parsed *url.URL) error {
 // a file — attaching it would hand the agent a login page as the user's
 // document.
 func slackFileContentType(f slackRawFile, responseType string, data []byte) (string, error) {
-	declared := strings.TrimSpace(f.Mimetype)
-	if responseType == "text/html" && declared != "" && declared != "text/html" {
+	declared := strings.ToLower(strings.TrimSpace(f.Mimetype))
+	responseType = strings.ToLower(strings.TrimSpace(responseType))
+	if responseType == "text/html" && declared != "text/html" {
 		return "", errors.New("download returned an HTML page instead of the file (missing files:read scope?)")
 	}
 	if declared != "" {

@@ -40,6 +40,7 @@ oauth_config:
     bot:
       - app_mentions:read
       - channels:history
+      - files:read
       - groups:history
       - im:history
       - mpim:history
@@ -63,6 +64,10 @@ settings:
 ```
 
 作成前に、2 か所の `Multica` をエージェント名に変更してもかまいません。manifest の権限やイベントは削除しないでください。削除すると、DM、チャンネルでのメンション、返信、`/issue` が動作しないことがあります。
+
+<Callout type="warning">
+添付ファイル対応が追加される前にこの Slack app をインストールしていた場合は、Bot scope に `files:read` を追加し、workspace に app を再インストールしてください。app を再インストールするまで、新しい scope は既存の Bot token に反映されません。
+</Callout>
 
 Bot は Socket Mode で Slack へ接続するため、公開 Request URL や OAuth Redirect URL の設定は不要です。
 

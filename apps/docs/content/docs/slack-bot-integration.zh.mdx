@@ -40,6 +40,7 @@ oauth_config:
     bot:
       - app_mentions:read
       - channels:history
+      - files:read
       - groups:history
       - im:history
       - mpim:history
@@ -63,6 +64,10 @@ settings:
 ```
 
 创建前可以把两个 `Multica` 改成智能体的名字。不要删除 manifest 中的权限或事件，否则私聊、频道提及、回复或 `/issue` 可能无法工作。
+
+<Callout type="warning">
+如果这个 Slack app 是在附件支持上线前安装的，请添加 `files:read` Bot scope，并将 app 重新安装到 workspace。在重新安装 app 前，新增 scope 不会应用到现有 Bot token。
+</Callout>
 
 Bot 使用 Socket Mode 主动连接 Slack，不需要配置公网 Request URL 或 OAuth Redirect URL。
 

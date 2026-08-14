@@ -181,18 +181,33 @@ func TestSlackMediaResolver_BlockedHost(t *testing.T) {
 	}
 }
 
-func TestSlackMediaResolver_HTMLLoginPageIsNotAFile(t *testing.T) {
+func TestSlackMediaResolver_HTMLResponseRequiresExplicitDeclaration(t *testing.T) {
 	html := []byte("<!DOCTYPE html><html><body>Sign in to Slack</body></html>")
-	env := newSlackMediaTestEnv(t, map[string][]byte{"F1": html}, "text/html; charset=utf-8")
-	inst, chatMessageID, msg := slackMediaFixture(t, slackRawFile{
-		ID: "F1", Name: "report.pdf", Mimetype: "application/pdf", DownloadURL: env.fileURL("F1"),
-	})
-	got := env.resolver.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, chatMessageID, msg)
-	if len(got.MediaRefs) != 0 {
-		t.Fatalf("MediaRefs = %d, want 0 for an HTML auth page", len(got.MediaRefs))
-	}
-	if len(env.store.uploads) != 0 {
-		t.Error("the login page must not be stored as the file")
+	for _, tt := range []struct {
+		name         string
+		declaredType string
+		wantRefs     int
+	}{
+		{name: "non-HTML file", declaredType: "application/pdf", wantRefs: 0},
+		{name: "missing MIME type", declaredType: "", wantRefs: 0},
+		{name: "explicit HTML file is case-insensitive", declaredType: "TEXT/HTML", wantRefs: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			env := newSlackMediaTestEnv(t, map[string][]byte{"F1": html}, "Text/HTML; charset=utf-8")
+			inst, chatMessageID, msg := slackMediaFixture(t, slackRawFile{
+				ID: "F1", Name: "report.html", Mimetype: tt.declaredType, DownloadURL: env.fileURL("F1"),
+			})
+			got := env.resolver.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, chatMessageID, msg)
+			if len(got.MediaRefs) != tt.wantRefs {
+				t.Fatalf("MediaRefs = %d, want %d", len(got.MediaRefs), tt.wantRefs)
+			}
+			if tt.wantRefs == 0 && len(env.store.uploads) != 0 {
+				t.Error("the login page must not be stored as the file")
+			}
+			if tt.wantRefs == 1 && got.MediaRefs[0].MimeType != "text/html" {
+				t.Errorf("MimeType = %q, want normalized text/html", got.MediaRefs[0].MimeType)
+			}
+		})
 	}
 }
 

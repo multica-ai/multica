@@ -40,6 +40,7 @@ oauth_config:
     bot:
       - app_mentions:read
       - channels:history
+      - files:read
       - groups:history
       - im:history
       - mpim:history
@@ -63,6 +64,10 @@ settings:
 ```
 
 Before creating, you can replace both occurrences of `Multica` with the agent's name. Do not remove scopes or events from the manifest, or DMs, channel mentions, replies, or `/issue` may stop working.
+
+<Callout type="warning">
+If this Slack app was installed before attachment support was available, add the `files:read` Bot scope and reinstall the app to the workspace. Slack does not apply newly added scopes to the existing Bot token until the app is reinstalled.
+</Callout>
 
 The Bot connects out to Slack over Socket Mode, so no public Request URL or OAuth Redirect URL is needed.
 
