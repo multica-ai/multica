@@ -11,11 +11,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/integrations/qianwen"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -28,12 +30,22 @@ const (
 )
 
 type fakeQianwenService struct {
-	installFn func(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) (qianwen.InstallationResult, error)
-	listFn    func(context.Context, pgtype.UUID) ([]db.ChannelInstallation, error)
-	getFn     func(context.Context, pgtype.UUID, pgtype.UUID) (db.ChannelInstallation, error)
-	revokeFn  func(context.Context, pgtype.UUID) error
-	submitFn  func(context.Context, string, string, qianwen.SubmitRequest) (qianwen.SubmitResult, error)
-	statusFn  func(context.Context, string, string, string) (qianwen.RequestStatus, error)
+	pairingSupportedFn func() bool
+	installFn          func(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) (qianwen.InstallationResult, error)
+	listFn             func(context.Context, pgtype.UUID) ([]db.ChannelInstallation, error)
+	getFn              func(context.Context, pgtype.UUID, pgtype.UUID) (db.ChannelInstallation, error)
+	pairFn             func(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) (qianwen.PairingCodeResult, error)
+	redeemFn           func(context.Context, string, string, qianwen.PairingRedeemRequest) (qianwen.PairingBindingResult, error)
+	revokeFn           func(context.Context, pgtype.UUID) error
+	submitFn           func(context.Context, string, string, qianwen.SubmitInvocation) (qianwen.SubmitResult, error)
+	statusFn           func(context.Context, string, string, qianwen.StatusInvocation) (qianwen.RequestStatus, error)
+}
+
+func (f *fakeQianwenService) PairingSupported() bool {
+	if f.pairingSupportedFn == nil {
+		return true
+	}
+	return f.pairingSupportedFn()
 }
 
 type recordingQianwenRateLimiter struct {
@@ -67,6 +79,20 @@ func (f *fakeQianwenService) GetInWorkspace(ctx context.Context, id, workspaceID
 	return f.getFn(ctx, id, workspaceID)
 }
 
+func (f *fakeQianwenService) MintPairingCode(ctx context.Context, workspaceID, installationID, userID pgtype.UUID) (qianwen.PairingCodeResult, error) {
+	if f.pairFn == nil {
+		return qianwen.PairingCodeResult{}, nil
+	}
+	return f.pairFn(ctx, workspaceID, installationID, userID)
+}
+
+func (f *fakeQianwenService) RedeemPairingCode(ctx context.Context, connectionID, token string, req qianwen.PairingRedeemRequest) (qianwen.PairingBindingResult, error) {
+	if f.redeemFn == nil {
+		return qianwen.PairingBindingResult{}, nil
+	}
+	return f.redeemFn(ctx, connectionID, token, req)
+}
+
 func (f *fakeQianwenService) Revoke(ctx context.Context, id pgtype.UUID) error {
 	if f.revokeFn == nil {
 		return nil
@@ -74,22 +100,23 @@ func (f *fakeQianwenService) Revoke(ctx context.Context, id pgtype.UUID) error {
 	return f.revokeFn(ctx, id)
 }
 
-func (f *fakeQianwenService) Submit(ctx context.Context, connectionID, token string, req qianwen.SubmitRequest) (qianwen.SubmitResult, error) {
+func (f *fakeQianwenService) Submit(ctx context.Context, connectionID, token string, req qianwen.SubmitInvocation) (qianwen.SubmitResult, error) {
 	if f.submitFn == nil {
 		return qianwen.SubmitResult{}, nil
 	}
 	return f.submitFn(ctx, connectionID, token, req)
 }
 
-func (f *fakeQianwenService) Status(ctx context.Context, connectionID, token, requestID string) (qianwen.RequestStatus, error) {
+func (f *fakeQianwenService) Status(ctx context.Context, connectionID, token string, request qianwen.StatusInvocation) (qianwen.RequestStatus, error) {
 	if f.statusFn == nil {
 		return qianwen.RequestStatus{}, nil
 	}
-	return f.statusFn(ctx, connectionID, token, requestID)
+	return f.statusFn(ctx, connectionID, token, request)
 }
 
 func qianwenRequest(method, target, body string, params ...string) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	setQianwenHandlerInvocationHeaders(req)
 	rctx := chi.NewRouteContext()
 	for i := 0; i+1 < len(params); i += 2 {
 		rctx.URLParams.Add(params[i], params[i+1])
@@ -97,12 +124,20 @@ func qianwenRequest(method, target, body string, params ...string) *http.Request
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }
 
+func setQianwenHandlerInvocationHeaders(req *http.Request) {
+	req.Header.Set("X-Qianwen-Open-User-Id", "Opaque/OpenUserID+Ciphertext==")
+	req.Header.Set("X-Qianwen-Open-Uuid", "CaseSensitive-OpenUUID-Ciphertext==")
+	req.Header.Set("X-Qianwen-Timestamp", "1786726800123")
+	req.Header.Set("X-Qianwen-Nonce", "0123456789abcdef0123456789abcdef")
+	req.Header.Set("X-Qianwen-Signature", strings.Repeat("ab", sha256.Size))
+}
+
 func TestSubmitQianwenRequestRequiresBearer(t *testing.T) {
 	called := 0
 	credentialLimiter := &recordingQianwenRateLimiter{allow: true}
 	badCredentialDebt := &recordingQianwenRateLimiter{allow: true}
 	h := &Handler{Qianwen: &fakeQianwenService{
-		submitFn: func(context.Context, string, string, qianwen.SubmitRequest) (qianwen.SubmitResult, error) {
+		submitFn: func(context.Context, string, string, qianwen.SubmitInvocation) (qianwen.SubmitResult, error) {
 			called++
 			return qianwen.SubmitResult{}, nil
 		},
@@ -152,7 +187,7 @@ func TestSubmitQianwenRequestRejectsMalformedConnectionBeforeCredentialLimiter(t
 	called := 0
 	h := &Handler{
 		Qianwen: &fakeQianwenService{
-			submitFn: func(context.Context, string, string, qianwen.SubmitRequest) (qianwen.SubmitResult, error) {
+			submitFn: func(context.Context, string, string, qianwen.SubmitInvocation) (qianwen.SubmitResult, error) {
 				called++
 				return qianwen.SubmitResult{}, nil
 			},
@@ -188,10 +223,10 @@ func TestQianwenCredentialLimiterHashesConnectionAndTokenAcrossPublicEndpoints(t
 	credentialLimiter := &recordingQianwenRateLimiter{allow: true}
 	h := &Handler{
 		Qianwen: &fakeQianwenService{
-			submitFn: func(context.Context, string, string, qianwen.SubmitRequest) (qianwen.SubmitResult, error) {
+			submitFn: func(context.Context, string, string, qianwen.SubmitInvocation) (qianwen.SubmitResult, error) {
 				return qianwen.SubmitResult{RequestID: requestID, Status: "accepted"}, nil
 			},
-			statusFn: func(context.Context, string, string, string) (qianwen.RequestStatus, error) {
+			statusFn: func(context.Context, string, string, qianwen.StatusInvocation) (qianwen.RequestStatus, error) {
 				return qianwen.RequestStatus{RequestID: requestID, Status: "completed"}, nil
 			},
 		},
@@ -245,7 +280,7 @@ func TestQianwenCredentialLimiterHashesConnectionAndTokenAcrossPublicEndpoints(t
 func TestSubmitQianwenRequestRejectsOversizeAndTrailingJSON(t *testing.T) {
 	called := 0
 	h := &Handler{Qianwen: &fakeQianwenService{
-		submitFn: func(context.Context, string, string, qianwen.SubmitRequest) (qianwen.SubmitResult, error) {
+		submitFn: func(context.Context, string, string, qianwen.SubmitInvocation) (qianwen.SubmitResult, error) {
 			called++
 			return qianwen.SubmitResult{}, nil
 		},
@@ -290,11 +325,11 @@ func TestSubmitQianwenRequestAcceptedContract(t *testing.T) {
 		requestID = "56a41a0c-cb13-476a-a75b-230792a277e1"
 	)
 	h := &Handler{Qianwen: &fakeQianwenService{
-		submitFn: func(ctx context.Context, gotConnectionID, gotToken string, req qianwen.SubmitRequest) (qianwen.SubmitResult, error) {
+		submitFn: func(ctx context.Context, gotConnectionID, gotToken string, req qianwen.SubmitInvocation) (qianwen.SubmitResult, error) {
 			if gotConnectionID != qianwenHandlerTestConnectionID || gotToken != qianwenHandlerTestAccessToken {
 				t.Fatalf("credentials = (%q, %q), want (%q, %q)", gotConnectionID, gotToken, qianwenHandlerTestConnectionID, qianwenHandlerTestAccessToken)
 			}
-			if req.RequestID != requestID || req.Query != "run tests" {
+			if req.Request.RequestID != requestID || req.Request.Query != "run tests" {
 				t.Fatalf("request = %+v", req)
 			}
 			if deadline, ok := ctx.Deadline(); !ok || deadline.IsZero() {
@@ -342,7 +377,7 @@ func TestGetQianwenRequestStatusMapsServiceErrors(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &Handler{Qianwen: &fakeQianwenService{
-				statusFn: func(context.Context, string, string, string) (qianwen.RequestStatus, error) {
+				statusFn: func(context.Context, string, string, qianwen.StatusInvocation) (qianwen.RequestStatus, error) {
 					return qianwen.RequestStatus{}, tc.err
 				},
 			}}
@@ -364,9 +399,9 @@ func TestGetQianwenRequestStatusMapsServiceErrors(t *testing.T) {
 func TestGetQianwenRequestStatusSuccessContract(t *testing.T) {
 	const requestID = "56a41a0c-cb13-476a-a75b-230792a277e1"
 	h := &Handler{Qianwen: &fakeQianwenService{
-		statusFn: func(ctx context.Context, connectionID, token, gotRequestID string) (qianwen.RequestStatus, error) {
-			if connectionID != qianwenHandlerTestConnectionID || token != qianwenHandlerTestAccessToken || gotRequestID != requestID {
-				t.Fatalf("Status args = (%q, %q, %q)", connectionID, token, gotRequestID)
+		statusFn: func(ctx context.Context, connectionID, token string, invocation qianwen.StatusInvocation) (qianwen.RequestStatus, error) {
+			if connectionID != qianwenHandlerTestConnectionID || token != qianwenHandlerTestAccessToken || invocation.RequestID != requestID {
+				t.Fatalf("Status args = (%q, %q, %q)", connectionID, token, invocation.RequestID)
 			}
 			if _, ok := ctx.Deadline(); !ok {
 				t.Fatal("Status context has no deadline")
@@ -466,14 +501,255 @@ func TestQianwenManagementReturnsTokenOnlyFromInstall(t *testing.T) {
 		}
 	}
 	var listed struct {
-		Installations []QianwenInstallationResponse `json:"installations"`
-		Configured    bool                          `json:"configured"`
+		Installations    []QianwenInstallationResponse `json:"installations"`
+		Configured       bool                          `json:"configured"`
+		PairingSupported bool                          `json:"pairing_supported"`
 	}
 	if err := json.Unmarshal(listW.Body.Bytes(), &listed); err != nil {
 		t.Fatalf("decode list response: %v", err)
 	}
-	if !listed.Configured || len(listed.Installations) != 1 || listed.Installations[0].ConnectionID != qianwenHandlerTestConnectionID {
+	if !listed.Configured || !listed.PairingSupported || len(listed.Installations) != 1 || listed.Installations[0].ConnectionID != qianwenHandlerTestConnectionID {
 		t.Fatalf("list response = %+v", listed)
+	}
+}
+
+func TestListQianwenInstallationsReportsPairingCapability(t *testing.T) {
+	tests := []struct {
+		name           string
+		service        QianwenService
+		wantConfigured bool
+		wantPairing    bool
+		wantMode       string
+	}{
+		{
+			name:           "integration disabled",
+			wantConfigured: false,
+			wantPairing:    false,
+		},
+		{
+			name: "configured without pairing capability",
+			service: &fakeQianwenService{
+				pairingSupportedFn: func() bool { return false },
+			},
+			wantConfigured: true,
+			wantPairing:    false,
+			wantMode:       "personal_polling",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := *testHandler
+			h.Qianwen = tt.service
+			req := newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/qianwen/installations", nil)
+			req = withURLParam(req, "id", testWorkspaceID)
+			w := httptest.NewRecorder()
+
+			h.ListQianwenInstallations(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
+			}
+			var got struct {
+				Configured       *bool  `json:"configured"`
+				PairingSupported *bool  `json:"pairing_supported"`
+				Mode             string `json:"mode"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if got.Configured == nil || *got.Configured != tt.wantConfigured {
+				t.Fatalf("configured = %v, want present %v; body=%s", got.Configured, tt.wantConfigured, w.Body.String())
+			}
+			if got.PairingSupported == nil || *got.PairingSupported != tt.wantPairing {
+				t.Fatalf("pairing_supported = %v, want present %v; body=%s", got.PairingSupported, tt.wantPairing, w.Body.String())
+			}
+			if got.Mode != tt.wantMode {
+				t.Fatalf("mode = %q, want %q; body=%s", got.Mode, tt.wantMode, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestInstallQianwenPersonalReturnsUnavailableWhenPairingIsDisabled(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Qianwen Install Pairing Disabled", []byte(`{}`))
+	h := *testHandler
+	h.Qianwen = &fakeQianwenService{
+		pairingSupportedFn: func() bool { return false },
+		installFn: func(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) (qianwen.InstallationResult, error) {
+			return qianwen.InstallationResult{}, qianwen.ErrPairingUnavailable
+		},
+	}
+	req := newRequest(http.MethodPost,
+		"/api/workspaces/"+testWorkspaceID+"/qianwen/installations?agent_id="+agentID, nil)
+	req = withURLParam(req, "id", testWorkspaceID)
+	w := httptest.NewRecorder()
+
+	h.InstallQianwenPersonal(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusServiceUnavailable, w.Body.String())
+	}
+	assertJSONEqual(t, w.Body.Bytes(), `{"error":"qianwen pairing is not enabled"}`)
+}
+
+func TestInstallQianwenPersonalReturnsConflictForActiveInstallation(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Qianwen Active Install Conflict", []byte(`{}`))
+	h := *testHandler
+	h.Qianwen = &fakeQianwenService{
+		installFn: func(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) (qianwen.InstallationResult, error) {
+			return qianwen.InstallationResult{}, qianwen.ErrInstallationAlreadyActive
+		},
+	}
+	req := newRequest(http.MethodPost,
+		"/api/workspaces/"+testWorkspaceID+"/qianwen/installations?agent_id="+agentID, nil)
+	req = withURLParam(req, "id", testWorkspaceID)
+	w := httptest.NewRecorder()
+
+	h.InstallQianwenPersonal(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusConflict, w.Body.String())
+	}
+	assertJSONEqual(t, w.Body.Bytes(), `{"error":"qianwen installation is already active"}`)
+}
+
+func TestMintQianwenPairingCodeHTTPContract(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Qianwen Pairing Contract", []byte(`{}`))
+	installationID := uuid.NewString()
+	expiresAt := time.Date(2026, time.August, 14, 9, 10, 0, 0, time.UTC)
+	h := *testHandler
+	h.Qianwen = &fakeQianwenService{
+		getFn: func(context.Context, pgtype.UUID, pgtype.UUID) (db.ChannelInstallation, error) {
+			return db.ChannelInstallation{
+				ID:          util.MustParseUUID(installationID),
+				WorkspaceID: util.MustParseUUID(testWorkspaceID),
+				AgentID:     util.MustParseUUID(agentID),
+				ChannelType: string(qianwen.TypeQianwen),
+				Status:      "active",
+			}, nil
+		},
+		pairFn: func(_ context.Context, workspaceID, gotInstallationID, userID pgtype.UUID) (qianwen.PairingCodeResult, error) {
+			if uuidToString(workspaceID) != testWorkspaceID {
+				t.Fatalf("workspace id = %s, want %s", uuidToString(workspaceID), testWorkspaceID)
+			}
+			if uuidToString(gotInstallationID) != installationID {
+				t.Fatalf("installation id = %s, want %s", uuidToString(gotInstallationID), installationID)
+			}
+			if uuidToString(userID) != testUserID {
+				t.Fatalf("target user id = %s, want authenticated user %s", uuidToString(userID), testUserID)
+			}
+			return qianwen.PairingCodeResult{Code: "01234567", ExpiresAt: expiresAt}, nil
+		},
+	}
+	req := qianwenRequest(http.MethodPost,
+		"/api/workspaces/"+testWorkspaceID+"/qianwen/installations/"+installationID+"/pairing-codes", "",
+		"id", testWorkspaceID, "installationId", installationID)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+
+	h.MintQianwenPairingCode(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusCreated, w.Body.String())
+	}
+	assertJSONEqual(t, w.Body.Bytes(), `{
+		"pairing_code":"01234567",
+		"expires_at":"2026-08-14T09:10:00Z",
+		"code_visible_once":true
+	}`)
+	if strings.Contains(w.Body.String(), "digest") {
+		t.Fatalf("response exposed pairing-code digest metadata: %s", w.Body.String())
+	}
+}
+
+func TestMintQianwenPairingCodeReturnsUnavailableWhenStrongSecretIsMissing(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Qianwen Pairing Unavailable", []byte(`{}`))
+	installationID := uuid.NewString()
+	h := *testHandler
+	h.Qianwen = &fakeQianwenService{
+		getFn: func(context.Context, pgtype.UUID, pgtype.UUID) (db.ChannelInstallation, error) {
+			return db.ChannelInstallation{
+				ID:          util.MustParseUUID(installationID),
+				WorkspaceID: util.MustParseUUID(testWorkspaceID),
+				AgentID:     util.MustParseUUID(agentID),
+				ChannelType: string(qianwen.TypeQianwen),
+				Status:      "active",
+			}, nil
+		},
+		pairFn: func(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) (qianwen.PairingCodeResult, error) {
+			return qianwen.PairingCodeResult{}, qianwen.ErrPairingUnavailable
+		},
+	}
+	req := qianwenRequest(http.MethodPost,
+		"/api/workspaces/"+testWorkspaceID+"/qianwen/installations/"+installationID+"/pairing-codes", "",
+		"id", testWorkspaceID, "installationId", installationID)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+
+	h.MintQianwenPairingCode(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusServiceUnavailable, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "secret") {
+		t.Fatalf("response exposed deployment-secret configuration: %s", w.Body.String())
+	}
+}
+
+func TestMintQianwenPairingCodeHTTPPersistsWithRealPostgres(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Qianwen Pairing HTTP PG", []byte(`{}`))
+	sessions := engine.NewChatSession(testHandler.Queries, testPool, qianwen.TypeQianwen, engine.SessionTitles{
+		Direct:   "Qianwen glasses request",
+		Fallback: "Qianwen glasses request",
+	})
+	service, err := qianwen.NewService(testHandler.Queries, sessions, testHandler.TaskService, testPool, []byte("qianwen-handler-test-deployment-secret"))
+	if err != nil {
+		t.Fatalf("construct real Qianwen service: %v", err)
+	}
+	installed, err := service.InstallPersonal(context.Background(), util.MustParseUUID(testWorkspaceID), util.MustParseUUID(agentID), util.MustParseUUID(testUserID))
+	if err != nil {
+		t.Fatalf("install Qianwen bridge: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM qianwen_pairing_code WHERE installation_id = $1`, installed.Installation.ID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installed.Installation.ID)
+	})
+
+	h := *testHandler
+	h.Qianwen = service
+	installationID := uuidToString(installed.Installation.ID)
+	req := qianwenRequest(http.MethodPost,
+		"/api/workspaces/"+testWorkspaceID+"/qianwen/installations/"+installationID+"/pairing-codes", "",
+		"id", testWorkspaceID, "installationId", installationID)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+
+	h.MintQianwenPairingCode(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusCreated, w.Body.String())
+	}
+	var response QianwenPairingCodeResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode pairing response: %v", err)
+	}
+	if len(response.PairingCode) != 8 || strings.Trim(response.PairingCode, "0123456789") != "" || !response.CodeVisibleOnce {
+		t.Fatalf("pairing response = %+v, want one-time eight-digit code", response)
+	}
+	var digest []byte
+	var expiresAt, createdAt time.Time
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT code_digest, expires_at, created_at
+		FROM qianwen_pairing_code
+		WHERE installation_id = $1 AND multica_user_id = $2
+	`, installed.Installation.ID, testUserID).Scan(&digest, &expiresAt, &createdAt); err != nil {
+		t.Fatalf("load persisted pairing row: %v", err)
+	}
+	if len(digest) != sha256.Size || string(digest) == response.PairingCode {
+		t.Fatalf("persisted code material = %x, want only a 32-byte keyed digest", digest)
+	}
+	if !expiresAt.Equal(response.ExpiresAt) || expiresAt.Sub(createdAt) != 10*time.Minute {
+		t.Fatalf("persisted TTL = %s - %s, response=%s; want exact 10m", expiresAt, createdAt, response.ExpiresAt)
 	}
 }
 
@@ -519,6 +795,66 @@ func TestInstallQianwenPersonalUsesAgentManagementPermission(t *testing.T) {
 	}
 }
 
+func TestMintQianwenPairingCodeRequiresAgentInvocationPermission(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Qianwen Pairing Permission Gate", []byte(`{}`))
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE agent SET permission_mode = 'private' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("make pairing test agent private: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`DELETE FROM agent_invocation_target WHERE agent_id = $1`, agentID); err != nil {
+		t.Fatalf("remove pairing test agent invocation target: %v", err)
+	}
+	email := "qianwen-pairing-member-" + uuid.NewString() + "@multica.test"
+	var memberID string
+	if err := testPool.QueryRow(context.Background(),
+		`INSERT INTO "user" (name, email) VALUES ('Qianwen Pairing Plain Member', $1) RETURNING id`, email,
+	).Scan(&memberID); err != nil {
+		t.Fatalf("insert plain member: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, memberID,
+	); err != nil {
+		t.Fatalf("add plain workspace member: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, memberID)
+	})
+
+	installationID := uuid.NewString()
+	called := 0
+	h := *testHandler
+	h.Qianwen = &fakeQianwenService{
+		getFn: func(context.Context, pgtype.UUID, pgtype.UUID) (db.ChannelInstallation, error) {
+			return db.ChannelInstallation{
+				ID:          util.MustParseUUID(installationID),
+				WorkspaceID: util.MustParseUUID(testWorkspaceID),
+				AgentID:     util.MustParseUUID(agentID),
+				ChannelType: string(qianwen.TypeQianwen),
+				Status:      "active",
+			}, nil
+		},
+		pairFn: func(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) (qianwen.PairingCodeResult, error) {
+			called++
+			return qianwen.PairingCodeResult{}, nil
+		},
+	}
+	req := qianwenRequest(http.MethodPost,
+		"/api/workspaces/"+testWorkspaceID+"/qianwen/installations/"+installationID+"/pairing-codes", "",
+		"id", testWorkspaceID, "installationId", installationID)
+	req.Header.Set("X-User-ID", memberID)
+	w := httptest.NewRecorder()
+
+	h.MintQianwenPairingCode(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusForbidden, w.Body.String())
+	}
+	if called != 0 {
+		t.Fatalf("MintPairingCode called %d times after invocation denial, want 0", called)
+	}
+}
+
 func TestQianwenManagementRejectsMachineCredentialActors(t *testing.T) {
 	for _, actorSource := range []string{"task_token", "cloud_pat"} {
 		t.Run(actorSource, func(t *testing.T) {
@@ -536,6 +872,10 @@ func TestQianwenManagementRejectsMachineCredentialActors(t *testing.T) {
 				getFn: func(context.Context, pgtype.UUID, pgtype.UUID) (db.ChannelInstallation, error) {
 					calls++
 					return db.ChannelInstallation{}, nil
+				},
+				pairFn: func(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) (qianwen.PairingCodeResult, error) {
+					calls++
+					return qianwen.PairingCodeResult{}, nil
 				},
 				revokeFn: func(context.Context, pgtype.UUID) error {
 					calls++
@@ -563,6 +903,13 @@ func TestQianwenManagementRejectsMachineCredentialActors(t *testing.T) {
 					target: "/api/workspaces/" + testWorkspaceID + "/qianwen/installations",
 					params: []string{"id", testWorkspaceID},
 					call:   h.ListQianwenInstallations,
+				},
+				{
+					name:   "pairing code",
+					method: http.MethodPost,
+					target: "/api/workspaces/" + testWorkspaceID + "/qianwen/installations/" + uuid.NewString() + "/pairing-codes",
+					params: []string{"id", testWorkspaceID, "installationId", uuid.NewString()},
+					call:   h.MintQianwenPairingCode,
 				},
 				{
 					name:   "revoke",

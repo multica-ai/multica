@@ -11,35 +11,115 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const claimQianwenRequest = `-- name: ClaimQianwenRequest :one
+const canQianwenPairingUserInvokeAgent = `-- name: CanQianwenPairingUserInvokeAgent :one
+SELECT EXISTS (
+    SELECT 1
+    FROM channel_installation installation
+    JOIN agent
+      ON agent.id = installation.agent_id
+     AND agent.workspace_id = installation.workspace_id
+     AND agent.archived_at IS NULL
+    JOIN member membership
+      ON membership.workspace_id = installation.workspace_id
+     AND membership.user_id = $1
+    WHERE installation.id = $2
+      AND installation.channel_type = 'qianwen'
+      AND installation.status = 'active'
+      AND (
+            agent.owner_id = $1
+         OR (
+                agent.permission_mode = 'public_to'
+            AND EXISTS (
+                SELECT 1
+                FROM agent_invocation_target target
+                WHERE target.agent_id = agent.id
+                  AND (
+                        (target.target_type = 'workspace' AND target.target_id = installation.workspace_id)
+                     OR (target.target_type = 'member' AND target.target_id = $1)
+                  )
+            )
+         )
+      )
+)
+`
 
+type CanQianwenPairingUserInvokeAgentParams struct {
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+}
+
+// Mirrors the member branch of Handler.canInvokeAgent inside the redemption
+// transaction: private agents are owner-only; public_to agents require either
+// a workspace-wide or exact-member target. Membership and archive state are
+// rechecked after the code was minted.
+func (q *Queries) CanQianwenPairingUserInvokeAgent(ctx context.Context, arg CanQianwenPairingUserInvokeAgentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, canQianwenPairingUserInvokeAgent, arg.MulticaUserID, arg.InstallationID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const claimQianwenRequest = `-- name: ClaimQianwenRequest :one
 WITH owner_guard AS MATERIALIZED (
     SELECT lock_task_owner_rows(
         $3::uuid,
         NULL::uuid,
         NULL::uuid
     ) AS ok
-), authority AS MATERIALIZED (
-    SELECT installation.id
+), agent_guard AS MATERIALIZED (
+    SELECT agent.id, agent.workspace_id, agent.owner_id, agent.permission_mode
     FROM owner_guard
-    JOIN channel_installation AS installation ON owner_guard.ok
+    JOIN agent ON owner_guard.ok
+    WHERE agent.id = $3
+      AND agent.workspace_id = $4
+      AND agent.kind = 'user'
+      AND agent.archived_at IS NULL
+    FOR SHARE OF agent
+), target_guard AS MATERIALIZED (
+    SELECT target.id
+    FROM agent_invocation_target AS target
+    JOIN agent_guard ON target.agent_id = agent_guard.id
+    WHERE agent_guard.permission_mode = 'public_to'
+      AND (
+            (target.target_type = 'workspace' AND target.target_id = agent_guard.workspace_id)
+         OR (target.target_type = 'member' AND target.target_id = $5)
+      )
+    FOR SHARE OF target
+), authority AS MATERIALIZED (
+    SELECT installation.id, binding.multica_user_id
+    FROM agent_guard
+    JOIN channel_installation AS installation
+      ON installation.agent_id = agent_guard.id
+     AND installation.workspace_id = agent_guard.workspace_id
+    JOIN channel_user_binding AS binding
+      ON binding.installation_id = installation.id
+     AND binding.workspace_id = installation.workspace_id
+     AND binding.channel_type = 'qianwen'
+     AND binding.multica_user_id = $5
     JOIN member AS membership
       ON membership.workspace_id = installation.workspace_id
-     AND membership.user_id = installation.installer_user_id
-    WHERE installation.id = $4
-      AND installation.workspace_id = $5
+     AND membership.user_id = binding.multica_user_id
+    WHERE installation.id = $6
+      AND installation.workspace_id = $4
       AND installation.agent_id = $3
-      AND installation.installer_user_id = $6
       AND installation.channel_type = 'qianwen'
       AND installation.status = 'active'
       AND installation.config ->> 'mode' = 'personal_polling'
       AND installation.config ->> 'app_id' = $7::text
       AND installation.config ->> 'access_token_hash' = $8::text
-    FOR SHARE OF installation, membership
+      AND binding.channel_user_id = $9::text
+      AND binding.config ->> 'open_uuid' = $10::text
+      AND binding.config ->> 'identity_scope' = 'skill'
+      AND (
+            agent_guard.owner_id = binding.multica_user_id
+         OR EXISTS (SELECT 1 FROM target_guard)
+      )
+    FOR SHARE OF installation, binding, membership
 )
 INSERT INTO qianwen_skill_request (
     installation_id,
     request_id,
+    multica_user_id,
     query_sha256,
     claim_token,
     claim_expires_at
@@ -47,6 +127,7 @@ INSERT INTO qianwen_skill_request (
 SELECT
     authority.id,
     $1,
+    authority.multica_user_id,
     $2,
     gen_random_uuid(),
     now() + INTERVAL '5 seconds'
@@ -56,34 +137,29 @@ SET claim_token = gen_random_uuid(),
     claim_expires_at = now() + INTERVAL '5 seconds',
     updated_at = now()
 WHERE qianwen_skill_request.query_sha256 = EXCLUDED.query_sha256
+  AND qianwen_skill_request.multica_user_id = EXCLUDED.multica_user_id
   AND qianwen_skill_request.task_id IS NULL
   AND (
       qianwen_skill_request.claim_token IS NULL
       OR qianwen_skill_request.claim_expires_at IS NULL
       OR qianwen_skill_request.claim_expires_at <= now()
   )
-RETURNING qianwen_skill_request.installation_id, qianwen_skill_request.request_id, qianwen_skill_request.query_sha256, qianwen_skill_request.claim_token, qianwen_skill_request.claim_expires_at, qianwen_skill_request.chat_session_id, qianwen_skill_request.task_id, qianwen_skill_request.created_at, qianwen_skill_request.updated_at
+RETURNING qianwen_skill_request.installation_id, qianwen_skill_request.request_id, qianwen_skill_request.multica_user_id, qianwen_skill_request.query_sha256, qianwen_skill_request.claim_token, qianwen_skill_request.claim_expires_at, qianwen_skill_request.chat_session_id, qianwen_skill_request.task_id, qianwen_skill_request.created_at, qianwen_skill_request.updated_at
 `
 
 type ClaimQianwenRequestParams struct {
 	RequestID       pgtype.UUID `json:"request_id"`
 	QuerySha256     []byte      `json:"query_sha256"`
 	AgentID         pgtype.UUID `json:"agent_id"`
-	InstallationID  pgtype.UUID `json:"installation_id"`
 	WorkspaceID     pgtype.UUID `json:"workspace_id"`
-	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+	MulticaUserID   pgtype.UUID `json:"multica_user_id"`
+	InstallationID  pgtype.UUID `json:"installation_id"`
 	ConnectionID    string      `json:"connection_id"`
 	AccessTokenHash string      `json:"access_token_hash"`
+	OpenUserID      string      `json:"open_user_id"`
+	OpenUuid        string      `json:"open_uuid"`
 }
 
-// Qianwen Skill durable request ledger.
-//
-// The ledger intentionally has no foreign keys. Its installation/request key
-// survives installation revocation and chat-session archive/deletion so an
-// external retry cannot turn into a second run merely because presentation
-// rows were retired. Installation lifecycle cleanup explicitly removes
-// orphaned ledger rows; public status reads require the exact installation to
-// exist and be active.
 // Acquire the first owner, or reclaim an unfinished request after its DB-clock
 // lease expires. The owner fence locks the workspace and agent before the
 // ledger write, so workspace/runtime teardown either sees and removes this row
@@ -99,16 +175,19 @@ func (q *Queries) ClaimQianwenRequest(ctx context.Context, arg ClaimQianwenReque
 		arg.RequestID,
 		arg.QuerySha256,
 		arg.AgentID,
-		arg.InstallationID,
 		arg.WorkspaceID,
-		arg.InstallerUserID,
+		arg.MulticaUserID,
+		arg.InstallationID,
 		arg.ConnectionID,
 		arg.AccessTokenHash,
+		arg.OpenUserID,
+		arg.OpenUuid,
 	)
 	var i QianwenSkillRequest
 	err := row.Scan(
 		&i.InstallationID,
 		&i.RequestID,
+		&i.MulticaUserID,
 		&i.QuerySha256,
 		&i.ClaimToken,
 		&i.ClaimExpiresAt,
@@ -116,6 +195,47 @@ func (q *Queries) ClaimQianwenRequest(ctx context.Context, arg ClaimQianwenReque
 		&i.TaskID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const completeQianwenInvocationNonce = `-- name: CompleteQianwenInvocationNonce :one
+UPDATE qianwen_invocation_nonce
+SET outcome = $1,
+    multica_user_id = $2::uuid
+WHERE installation_id = $3
+  AND nonce_digest = $4
+  AND request_digest = $5
+  AND outcome IS NULL
+  AND expires_at > now()
+RETURNING installation_id, nonce_digest, request_digest, outcome, multica_user_id, expires_at, created_at
+`
+
+type CompleteQianwenInvocationNonceParams struct {
+	Outcome        pgtype.Text `json:"outcome"`
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	NonceDigest    []byte      `json:"nonce_digest"`
+	RequestDigest  []byte      `json:"request_digest"`
+}
+
+func (q *Queries) CompleteQianwenInvocationNonce(ctx context.Context, arg CompleteQianwenInvocationNonceParams) (QianwenInvocationNonce, error) {
+	row := q.db.QueryRow(ctx, completeQianwenInvocationNonce,
+		arg.Outcome,
+		arg.MulticaUserID,
+		arg.InstallationID,
+		arg.NonceDigest,
+		arg.RequestDigest,
+	)
+	var i QianwenInvocationNonce
+	err := row.Scan(
+		&i.InstallationID,
+		&i.NonceDigest,
+		&i.RequestDigest,
+		&i.Outcome,
+		&i.MulticaUserID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -128,7 +248,8 @@ SET task_id = $1,
     updated_at = now()
 WHERE installation_id = $2
   AND request_id = $3
-  AND claim_token = $4
+  AND multica_user_id = $4
+  AND claim_token = $5
   AND task_id IS NULL
 `
 
@@ -136,6 +257,7 @@ type CompleteQianwenRequestParams struct {
 	TaskID         pgtype.UUID `json:"task_id"`
 	InstallationID pgtype.UUID `json:"installation_id"`
 	RequestID      pgtype.UUID `json:"request_id"`
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
 	ClaimToken     pgtype.UUID `json:"claim_token"`
 }
 
@@ -147,6 +269,7 @@ func (q *Queries) CompleteQianwenRequest(ctx context.Context, arg CompleteQianwe
 		arg.TaskID,
 		arg.InstallationID,
 		arg.RequestID,
+		arg.MulticaUserID,
 		arg.ClaimToken,
 	)
 	if err != nil {
@@ -155,8 +278,330 @@ func (q *Queries) CompleteQianwenRequest(ctx context.Context, arg CompleteQianwe
 	return result.RowsAffected(), nil
 }
 
+const deleteExpiredQianwenInvocationNonces = `-- name: DeleteExpiredQianwenInvocationNonces :exec
+DELETE FROM qianwen_invocation_nonce
+WHERE installation_id = $1
+  AND expires_at <= now()
+`
+
+func (q *Queries) DeleteExpiredQianwenInvocationNonces(ctx context.Context, installationID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteExpiredQianwenInvocationNonces, installationID)
+	return err
+}
+
+const deleteExpiredQianwenPairingAttempts = `-- name: DeleteExpiredQianwenPairingAttempts :exec
+DELETE FROM qianwen_pairing_attempt
+WHERE installation_id = $1
+  AND attempted_at <= now() - INTERVAL '10 minutes'
+`
+
+func (q *Queries) DeleteExpiredQianwenPairingAttempts(ctx context.Context, installationID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteExpiredQianwenPairingAttempts, installationID)
+	return err
+}
+
+const deleteQianwenCurrentUserState = `-- name: DeleteQianwenCurrentUserState :exec
+WITH cleared_codes AS (
+    DELETE FROM qianwen_pairing_code
+    WHERE qianwen_pairing_code.installation_id = $1
+      AND qianwen_pairing_code.multica_user_id = $2
+), cleared_nonces AS (
+    DELETE FROM qianwen_invocation_nonce
+    WHERE qianwen_invocation_nonce.installation_id = $1
+      AND qianwen_invocation_nonce.multica_user_id = $2
+), cleared_bindings AS (
+    DELETE FROM channel_user_binding
+    WHERE channel_user_binding.installation_id = $1
+      AND channel_user_binding.workspace_id = $3
+      AND channel_user_binding.multica_user_id = $2
+      AND channel_user_binding.channel_type = 'qianwen'
+    RETURNING 1
+)
+SELECT count(*) FROM cleared_bindings
+`
+
+type DeleteQianwenCurrentUserStateParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+}
+
+// This must run as a separate statement after LockSubscriberWrites has
+// returned. Under READ COMMITTED the new statement receives a fresh snapshot,
+// so a redeem that committed while unbind waited cannot escape cleanup.
+func (q *Queries) DeleteQianwenCurrentUserState(ctx context.Context, arg DeleteQianwenCurrentUserStateParams) error {
+	_, err := q.db.Exec(ctx, deleteQianwenCurrentUserState, arg.InstallationID, arg.MulticaUserID, arg.WorkspaceID)
+	return err
+}
+
+const deleteQianwenPairingCode = `-- name: DeleteQianwenPairingCode :execrows
+DELETE FROM qianwen_pairing_code
+WHERE installation_id = $1
+  AND multica_user_id = $2
+  AND code_digest = $3
+`
+
+type DeleteQianwenPairingCodeParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
+	CodeDigest     []byte      `json:"code_digest"`
+}
+
+func (q *Queries) DeleteQianwenPairingCode(ctx context.Context, arg DeleteQianwenPairingCodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteQianwenPairingCode, arg.InstallationID, arg.MulticaUserID, arg.CodeDigest)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteQianwenPairingStateByWorkspaceMember = `-- name: DeleteQianwenPairingStateByWorkspaceMember :exec
+WITH workspace_installations AS MATERIALIZED (
+    SELECT channel_installation.id FROM channel_installation
+    WHERE channel_installation.workspace_id = $1
+      AND channel_installation.channel_type = 'qianwen'
+), cleared_codes AS (
+    DELETE FROM qianwen_pairing_code
+    WHERE qianwen_pairing_code.workspace_id = $1
+      AND qianwen_pairing_code.multica_user_id = $2
+), cleared_nonces AS (
+    DELETE FROM qianwen_invocation_nonce
+    WHERE installation_id IN (SELECT id FROM workspace_installations)
+      AND multica_user_id = $2
+)
+SELECT count(*) FROM workspace_installations
+`
+
+type DeleteQianwenPairingStateByWorkspaceMemberParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+}
+
+// A departing non-installer may still own a pending spoken code or a short-
+// lived successful replay outcome on somebody else's installation. Remove
+// those user-addressable rows in the member-revoke transaction; anonymous
+// failure digests expire within ten minutes and cannot be reversed to a user.
+func (q *Queries) DeleteQianwenPairingStateByWorkspaceMember(ctx context.Context, arg DeleteQianwenPairingStateByWorkspaceMemberParams) error {
+	_, err := q.db.Exec(ctx, deleteQianwenPairingStateByWorkspaceMember, arg.WorkspaceID, arg.MulticaUserID)
+	return err
+}
+
+const findCompletedQianwenInvocationByRequestDigest = `-- name: FindCompletedQianwenInvocationByRequestDigest :one
+SELECT installation_id, nonce_digest, request_digest, outcome, multica_user_id, expires_at, created_at FROM qianwen_invocation_nonce
+WHERE installation_id = $1
+  AND request_digest = $2
+  AND outcome IS NOT NULL
+  AND expires_at > now()
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindCompletedQianwenInvocationByRequestDigestParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	RequestDigest  []byte      `json:"request_digest"`
+}
+
+// A provider retry may generate a fresh timestamp/nonce after losing the first
+// HTTP response. The semantic digest deliberately excludes transport replay
+// fields so the prior stable outcome can be returned without consuming a
+// second code or recording a second failure.
+func (q *Queries) FindCompletedQianwenInvocationByRequestDigest(ctx context.Context, arg FindCompletedQianwenInvocationByRequestDigestParams) (QianwenInvocationNonce, error) {
+	row := q.db.QueryRow(ctx, findCompletedQianwenInvocationByRequestDigest, arg.InstallationID, arg.RequestDigest)
+	var i QianwenInvocationNonce
+	err := row.Scan(
+		&i.InstallationID,
+		&i.NonceDigest,
+		&i.RequestDigest,
+		&i.Outcome,
+		&i.MulticaUserID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getActiveQianwenInvocationUser = `-- name: GetActiveQianwenInvocationUser :one
+SELECT binding.multica_user_id
+FROM channel_installation AS installation
+JOIN channel_user_binding AS binding
+  ON binding.installation_id = installation.id
+ AND binding.workspace_id = installation.workspace_id
+ AND binding.channel_type = 'qianwen'
+JOIN member AS membership
+  ON membership.workspace_id = installation.workspace_id
+ AND membership.user_id = binding.multica_user_id
+JOIN agent
+  ON agent.id = installation.agent_id
+ AND agent.workspace_id = installation.workspace_id
+ AND agent.kind = 'user'
+ AND agent.archived_at IS NULL
+WHERE installation.id = $1
+  AND installation.channel_type = 'qianwen'
+  AND installation.status = 'active'
+  AND installation.config ->> 'mode' = 'personal_polling'
+  AND installation.config ->> 'app_id' = $2::text
+  AND installation.config ->> 'access_token_hash' = $3::text
+  AND binding.channel_user_id = $4::text
+  AND binding.config ->> 'open_uuid' = $5::text
+  AND binding.config ->> 'identity_scope' = 'skill'
+  AND (
+        agent.owner_id = binding.multica_user_id
+     OR (
+            agent.permission_mode = 'public_to'
+        AND EXISTS (
+            SELECT 1
+            FROM agent_invocation_target AS target
+            WHERE target.agent_id = agent.id
+              AND (
+                    (target.target_type = 'workspace' AND target.target_id = installation.workspace_id)
+                 OR (target.target_type = 'member' AND target.target_id = binding.multica_user_id)
+              )
+        )
+     )
+  )
+`
+
+type GetActiveQianwenInvocationUserParams struct {
+	InstallationID  pgtype.UUID `json:"installation_id"`
+	ConnectionID    string      `json:"connection_id"`
+	AccessTokenHash string      `json:"access_token_hash"`
+	OpenUserID      string      `json:"open_user_id"`
+	OpenUuid        string      `json:"open_uuid"`
+}
+
+// Resolve the signed, opaque Qianwen identity to the Multica member that will
+// own the request. qws_ authenticates only the installation; it never supplies
+// the task actor. This read is repeated under locks by ClaimQianwenRequest and
+// LockQianwenSubmitAuthority before either ledger or task state is published.
+func (q *Queries) GetActiveQianwenInvocationUser(ctx context.Context, arg GetActiveQianwenInvocationUserParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getActiveQianwenInvocationUser,
+		arg.InstallationID,
+		arg.ConnectionID,
+		arg.AccessTokenHash,
+		arg.OpenUserID,
+		arg.OpenUuid,
+	)
+	var multica_user_id pgtype.UUID
+	err := row.Scan(&multica_user_id)
+	return multica_user_id, err
+}
+
+const getLiveQianwenInvocationByNonceForUpdate = `-- name: GetLiveQianwenInvocationByNonceForUpdate :one
+SELECT installation_id, nonce_digest, request_digest, outcome, multica_user_id, expires_at, created_at FROM qianwen_invocation_nonce
+WHERE installation_id = $1
+  AND nonce_digest = $2
+  AND expires_at > now()
+FOR UPDATE
+`
+
+type GetLiveQianwenInvocationByNonceForUpdateParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	NonceDigest    []byte      `json:"nonce_digest"`
+}
+
+func (q *Queries) GetLiveQianwenInvocationByNonceForUpdate(ctx context.Context, arg GetLiveQianwenInvocationByNonceForUpdateParams) (QianwenInvocationNonce, error) {
+	row := q.db.QueryRow(ctx, getLiveQianwenInvocationByNonceForUpdate, arg.InstallationID, arg.NonceDigest)
+	var i QianwenInvocationNonce
+	err := row.Scan(
+		&i.InstallationID,
+		&i.NonceDigest,
+		&i.RequestDigest,
+		&i.Outcome,
+		&i.MulticaUserID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getLiveQianwenPairingCode = `-- name: GetLiveQianwenPairingCode :one
+SELECT installation_id, workspace_id, multica_user_id, code_digest, expires_at, created_at FROM qianwen_pairing_code
+WHERE installation_id = $1
+  AND code_digest = $2
+  AND expires_at > now()
+`
+
+type GetLiveQianwenPairingCodeParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	CodeDigest     []byte      `json:"code_digest"`
+}
+
+// This non-locking pre-read identifies the target member whose lifecycle
+// advisory lock must be acquired before the transaction touches workspace,
+// agent, installation, membership, or pairing rows. The row is re-read under
+// FOR UPDATE after every authority fence is held; this result is never trusted
+// for consumption by itself.
+func (q *Queries) GetLiveQianwenPairingCode(ctx context.Context, arg GetLiveQianwenPairingCodeParams) (QianwenPairingCode, error) {
+	row := q.db.QueryRow(ctx, getLiveQianwenPairingCode, arg.InstallationID, arg.CodeDigest)
+	var i QianwenPairingCode
+	err := row.Scan(
+		&i.InstallationID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.CodeDigest,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getLiveQianwenPairingCodeForUpdate = `-- name: GetLiveQianwenPairingCodeForUpdate :one
+SELECT installation_id, workspace_id, multica_user_id, code_digest, expires_at, created_at FROM qianwen_pairing_code
+WHERE installation_id = $1
+  AND code_digest = $2
+  AND expires_at > now()
+FOR UPDATE
+`
+
+type GetLiveQianwenPairingCodeForUpdateParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	CodeDigest     []byte      `json:"code_digest"`
+}
+
+func (q *Queries) GetLiveQianwenPairingCodeForUpdate(ctx context.Context, arg GetLiveQianwenPairingCodeForUpdateParams) (QianwenPairingCode, error) {
+	row := q.db.QueryRow(ctx, getLiveQianwenPairingCodeForUpdate, arg.InstallationID, arg.CodeDigest)
+	var i QianwenPairingCode
+	err := row.Scan(
+		&i.InstallationID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.CodeDigest,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getQianwenPairingAttemptCounts = `-- name: GetQianwenPairingAttemptCounts :one
+SELECT
+    count(*)::bigint AS installation_failures,
+    count(*) FILTER (
+        WHERE identity_digest = $1::bytea
+    )::bigint AS identity_failures
+FROM qianwen_pairing_attempt
+WHERE installation_id = $2
+  AND attempted_at > now() - INTERVAL '10 minutes'
+`
+
+type GetQianwenPairingAttemptCountsParams struct {
+	IdentityDigest []byte      `json:"identity_digest"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+}
+
+type GetQianwenPairingAttemptCountsRow struct {
+	InstallationFailures int64 `json:"installation_failures"`
+	IdentityFailures     int64 `json:"identity_failures"`
+}
+
+func (q *Queries) GetQianwenPairingAttemptCounts(ctx context.Context, arg GetQianwenPairingAttemptCountsParams) (GetQianwenPairingAttemptCountsRow, error) {
+	row := q.db.QueryRow(ctx, getQianwenPairingAttemptCounts, arg.IdentityDigest, arg.InstallationID)
+	var i GetQianwenPairingAttemptCountsRow
+	err := row.Scan(&i.InstallationFailures, &i.IdentityFailures)
+	return i, err
+}
+
 const getQianwenRequest = `-- name: GetQianwenRequest :one
-SELECT installation_id, request_id, query_sha256, claim_token, claim_expires_at, chat_session_id, task_id, created_at, updated_at
+SELECT installation_id, request_id, multica_user_id, query_sha256, claim_token, claim_expires_at, chat_session_id, task_id, created_at, updated_at
 FROM qianwen_skill_request
 WHERE installation_id = $1
   AND request_id = $2
@@ -176,6 +621,7 @@ func (q *Queries) GetQianwenRequest(ctx context.Context, arg GetQianwenRequestPa
 	err := row.Scan(
 		&i.InstallationID,
 		&i.RequestID,
+		&i.MulticaUserID,
 		&i.QuerySha256,
 		&i.ClaimToken,
 		&i.ClaimExpiresAt,
@@ -190,10 +636,9 @@ func (q *Queries) GetQianwenRequest(ctx context.Context, arg GetQianwenRequestPa
 const getQianwenRequestStatus = `-- name: GetQianwenRequestStatus :one
 WITH RECURSIVE request AS (
     SELECT
-        ledger.installation_id, ledger.request_id, ledger.query_sha256, ledger.claim_token, ledger.claim_expires_at, ledger.chat_session_id, ledger.task_id, ledger.created_at, ledger.updated_at,
+        ledger.installation_id, ledger.request_id, ledger.multica_user_id, ledger.query_sha256, ledger.claim_token, ledger.claim_expires_at, ledger.chat_session_id, ledger.task_id, ledger.created_at, ledger.updated_at,
         installation.workspace_id,
-        installation.agent_id,
-        installation.installer_user_id
+        installation.agent_id
     FROM qianwen_skill_request AS ledger
     JOIN channel_installation AS installation
       ON installation.id = ledger.installation_id
@@ -204,12 +649,38 @@ WITH RECURSIVE request AS (
      AND installation.config ->> 'access_token_hash' = $2::text
     JOIN member AS membership
       ON membership.workspace_id = installation.workspace_id
-     AND membership.user_id = installation.installer_user_id
+     AND membership.user_id = ledger.multica_user_id
+    JOIN channel_user_binding AS binding
+      ON binding.installation_id = installation.id
+     AND binding.workspace_id = installation.workspace_id
+     AND binding.channel_type = 'qianwen'
+     AND binding.multica_user_id = ledger.multica_user_id
+     AND binding.channel_user_id = $3::text
+     AND binding.config ->> 'open_uuid' = $4::text
+     AND binding.config ->> 'identity_scope' = 'skill'
     JOIN agent AS installed_agent
       ON installed_agent.id = installation.agent_id
      AND installed_agent.workspace_id = installation.workspace_id
-    WHERE ledger.installation_id = $3
-      AND ledger.request_id = $4
+     AND installed_agent.kind = 'user'
+     AND installed_agent.archived_at IS NULL
+    WHERE ledger.installation_id = $5
+      AND ledger.request_id = $6
+      AND ledger.multica_user_id = $7
+      AND (
+            installed_agent.owner_id = ledger.multica_user_id
+         OR (
+                installed_agent.permission_mode = 'public_to'
+            AND EXISTS (
+                SELECT 1
+                FROM agent_invocation_target AS target
+                WHERE target.agent_id = installed_agent.id
+                  AND (
+                        (target.target_type = 'workspace' AND target.target_id = installation.workspace_id)
+                     OR (target.target_type = 'member' AND target.target_id = ledger.multica_user_id)
+                  )
+            )
+         )
+      )
 ), retry_chain AS (
     SELECT
         task.id,
@@ -224,15 +695,16 @@ WITH RECURSIVE request AS (
     LEFT JOIN chat_session AS session ON session.id = request.chat_session_id
     WHERE task.regenerate_quick_actions_for IS NULL
       AND task.agent_id = request.agent_id
-      AND task.initiator_user_id = request.installer_user_id
-      AND task.originator_user_id = request.installer_user_id
+      AND task.initiator_user_id = request.multica_user_id
+      AND task.originator_user_id = request.multica_user_id
+      AND task.accountable_user_id = request.multica_user_id
       AND (
           (
               session.id IS NOT NULL
               AND session.id = task.chat_session_id
               AND session.workspace_id = request.workspace_id
               AND session.agent_id = request.agent_id
-              AND session.creator_id = request.installer_user_id
+              AND session.creator_id = request.multica_user_id
           )
           OR (
               session.id IS NULL
@@ -254,14 +726,15 @@ WITH RECURSIVE request AS (
     JOIN retry_chain AS parent ON child.retry_of_task_id = parent.id
     JOIN request
       ON child.agent_id = request.agent_id
-     AND child.originator_user_id = request.installer_user_id
+     AND child.originator_user_id = request.multica_user_id
+     AND child.accountable_user_id = request.multica_user_id
      AND (
          (parent.session_alive AND child.chat_session_id = request.chat_session_id)
          OR (NOT parent.session_alive AND child.chat_session_id IS NULL)
      )
      AND (
          child.initiator_user_id IS NULL
-         OR child.initiator_user_id = request.installer_user_id
+         OR child.initiator_user_id = request.multica_user_id
      )
     WHERE child.regenerate_quick_actions_for IS NULL
       AND NOT (child.id = ANY(parent.path))
@@ -306,8 +779,11 @@ LEFT JOIN LATERAL (
 type GetQianwenRequestStatusParams struct {
 	ConnectionID    string      `json:"connection_id"`
 	AccessTokenHash string      `json:"access_token_hash"`
+	OpenUserID      string      `json:"open_user_id"`
+	OpenUuid        string      `json:"open_uuid"`
 	InstallationID  pgtype.UUID `json:"installation_id"`
 	RequestID       pgtype.UUID `json:"request_id"`
+	MulticaUserID   pgtype.UUID `json:"multica_user_id"`
 }
 
 type GetQianwenRequestStatusRow struct {
@@ -324,7 +800,7 @@ type GetQianwenRequestStatusRow struct {
 }
 
 // Public polling read. Authorization is scoped from the caller's active
-// installation through its workspace, agent, installer, isolated chat session,
+// installation through its exact bound identity, workspace, agent, isolated chat session,
 // task, retry descendants, and final assistant message. The ledger and retry
 // lineage deliberately have no foreign keys, so every hop must re-assert that
 // ownership tuple instead of treating a stored UUID as authorization.
@@ -333,8 +809,11 @@ func (q *Queries) GetQianwenRequestStatus(ctx context.Context, arg GetQianwenReq
 	row := q.db.QueryRow(ctx, getQianwenRequestStatus,
 		arg.ConnectionID,
 		arg.AccessTokenHash,
+		arg.OpenUserID,
+		arg.OpenUuid,
 		arg.InstallationID,
 		arg.RequestID,
+		arg.MulticaUserID,
 	)
 	var i GetQianwenRequestStatusRow
 	err := row.Scan(
@@ -352,12 +831,215 @@ func (q *Queries) GetQianwenRequestStatus(ctx context.Context, arg GetQianwenReq
 	return i, err
 }
 
-const lockQianwenSubmitAuthority = `-- name: LockQianwenSubmitAuthority :one
-SELECT installation.id
+const insertQianwenInvocationNonce = `-- name: InsertQianwenInvocationNonce :one
+INSERT INTO qianwen_invocation_nonce (
+    installation_id,
+    nonce_digest,
+    request_digest,
+    expires_at
+) VALUES (
+    $1,
+    $2,
+    $3,
+    now() + INTERVAL '5 minutes'
+)
+RETURNING installation_id, nonce_digest, request_digest, outcome, multica_user_id, expires_at, created_at
+`
+
+type InsertQianwenInvocationNonceParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	NonceDigest    []byte      `json:"nonce_digest"`
+	RequestDigest  []byte      `json:"request_digest"`
+}
+
+func (q *Queries) InsertQianwenInvocationNonce(ctx context.Context, arg InsertQianwenInvocationNonceParams) (QianwenInvocationNonce, error) {
+	row := q.db.QueryRow(ctx, insertQianwenInvocationNonce, arg.InstallationID, arg.NonceDigest, arg.RequestDigest)
+	var i QianwenInvocationNonce
+	err := row.Scan(
+		&i.InstallationID,
+		&i.NonceDigest,
+		&i.RequestDigest,
+		&i.Outcome,
+		&i.MulticaUserID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const insertQianwenPairingFailure = `-- name: InsertQianwenPairingFailure :one
+INSERT INTO qianwen_pairing_attempt (
+    installation_id,
+    identity_digest
+) VALUES (
+    $1,
+    $2
+)
+RETURNING installation_id, identity_digest, attempted_at
+`
+
+type InsertQianwenPairingFailureParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	IdentityDigest []byte      `json:"identity_digest"`
+}
+
+func (q *Queries) InsertQianwenPairingFailure(ctx context.Context, arg InsertQianwenPairingFailureParams) (QianwenPairingAttempt, error) {
+	row := q.db.QueryRow(ctx, insertQianwenPairingFailure, arg.InstallationID, arg.IdentityDigest)
+	var i QianwenPairingAttempt
+	err := row.Scan(&i.InstallationID, &i.IdentityDigest, &i.AttemptedAt)
+	return i, err
+}
+
+const installQianwenPersonal = `-- name: InstallQianwenPersonal :one
+
+WITH member_write_guard AS MATERIALIZED (
+    SELECT pg_advisory_xact_lock(
+        hashtext(($2::uuid)::text),
+        hashtext(($3::uuid)::text)
+    ) AS ok
+), workspace_guard AS MATERIALIZED (
+    SELECT workspace.id
+    FROM workspace
+    JOIN member_write_guard ON true
+    WHERE workspace.id = $2
+    FOR KEY SHARE OF workspace
+), agent_guard AS MATERIALIZED (
+    SELECT agent.id, agent.workspace_id
+    FROM agent
+    JOIN workspace_guard ON workspace_guard.id = agent.workspace_id
+    WHERE agent.id = $4
+      AND agent.kind = 'user'
+      AND agent.archived_at IS NULL
+    FOR SHARE OF agent
+), authority AS MATERIALIZED (
+    SELECT agent_guard.id AS agent_id,
+           agent_guard.workspace_id,
+           membership.user_id AS installer_user_id
+    FROM agent_guard
+    JOIN member AS membership
+      ON membership.workspace_id = agent_guard.workspace_id
+     AND membership.user_id = $3
+    FOR SHARE OF membership
+)
+INSERT INTO channel_installation (
+    workspace_id,
+    agent_id,
+    channel_type,
+    config,
+    installer_user_id
+) SELECT
+    authority.workspace_id,
+    authority.agent_id,
+    'qianwen',
+    $1,
+    authority.installer_user_id
+FROM authority
+ON CONFLICT (workspace_id, agent_id, channel_type) DO UPDATE SET
+    config = EXCLUDED.config,
+    installer_user_id = EXCLUDED.installer_user_id,
+    status = 'active',
+    installed_at = now(),
+    updated_at = now()
+WHERE channel_installation.status = 'revoked'
+RETURNING id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
+`
+
+type InstallQianwenPersonalParams struct {
+	Config          []byte      `json:"config"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+}
+
+// Qianwen Skill durable request ledger.
+//
+// The ledger intentionally has no foreign keys. Its installation/request key
+// survives installation revocation and chat-session archive/deletion so an
+// external retry cannot turn into a second run merely because presentation
+// rows were retired. Installation lifecycle cleanup explicitly removes
+// orphaned ledger rows; public status reads require the exact installation to
+// exist and be active.
+// A live private Skill credential is immutable from the install surface. The
+// provider does not allow a published Tool to be edited, so an active conflict
+// returns no row rather than silently replacing qwc_/qws_. A revoked row may be
+// reactivated after RevokeQianwenInstallation has cleared its pairing authority.
+// Installation shares the member-removal advisory lock, then locks workspace,
+// agent, and active membership in the repository-wide lifecycle order. This
+// fences every no-FK parent sweep: either install commits first and teardown
+// sees it, or teardown commits first and authority yields no row.
+// The conflict predicate is evaluated atomically after any concurrent inserter
+// commits, so at most one caller receives a usable one-time credential.
+func (q *Queries) InstallQianwenPersonal(ctx context.Context, arg InstallQianwenPersonalParams) (ChannelInstallation, error) {
+	row := q.db.QueryRow(ctx, installQianwenPersonal,
+		arg.Config,
+		arg.WorkspaceID,
+		arg.InstallerUserID,
+		arg.AgentID,
+	)
+	var i ChannelInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listQianwenBoundInstallationIDsForUser = `-- name: ListQianwenBoundInstallationIDsForUser :many
+SELECT DISTINCT binding.installation_id
+FROM channel_user_binding AS binding
+JOIN channel_installation AS installation
+  ON installation.id = binding.installation_id
+ AND installation.workspace_id = binding.workspace_id
+ AND installation.channel_type = binding.channel_type
+WHERE binding.workspace_id = $1
+  AND binding.multica_user_id = $2
+  AND binding.channel_type = 'qianwen'
+  AND binding.channel_user_id <> ''
+  AND COALESCE(binding.config ->> 'open_uuid', '') <> ''
+  AND binding.config ->> 'identity_scope' = 'skill'
+`
+
+type ListQianwenBoundInstallationIDsForUserParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+}
+
+// Management-facing, caller-relative binding state. Opaque Qianwen identity
+// values never leave the server; a row only counts when it has the exact
+// skill-scoped shape used by inbound authorization.
+func (q *Queries) ListQianwenBoundInstallationIDsForUser(ctx context.Context, arg ListQianwenBoundInstallationIDsForUserParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listQianwenBoundInstallationIDsForUser, arg.WorkspaceID, arg.MulticaUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var installation_id pgtype.UUID
+		if err := rows.Scan(&installation_id); err != nil {
+			return nil, err
+		}
+		items = append(items, installation_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockQianwenInstallationForPairing = `-- name: LockQianwenInstallationForPairing :one
+SELECT installation.id, installation.workspace_id, installation.agent_id, installation.channel_type, installation.config, installation.status, installation.ws_lease_token, installation.ws_lease_expires_at, installation.installer_user_id, installation.installed_at, installation.created_at, installation.updated_at
 FROM channel_installation AS installation
-JOIN member AS membership
-  ON membership.workspace_id = installation.workspace_id
- AND membership.user_id = installation.installer_user_id
 WHERE installation.id = $1
   AND installation.workspace_id = $2
   AND installation.agent_id = $3
@@ -367,10 +1049,10 @@ WHERE installation.id = $1
   AND installation.config ->> 'mode' = 'personal_polling'
   AND installation.config ->> 'app_id' = $5::text
   AND installation.config ->> 'access_token_hash' = $6::text
-FOR SHARE OF installation, membership
+FOR UPDATE OF installation
 `
 
-type LockQianwenSubmitAuthorityParams struct {
+type LockQianwenInstallationForPairingParams struct {
 	InstallationID  pgtype.UUID `json:"installation_id"`
 	WorkspaceID     pgtype.UUID `json:"workspace_id"`
 	AgentID         pgtype.UUID `json:"agent_id"`
@@ -379,19 +1061,153 @@ type LockQianwenSubmitAuthorityParams struct {
 	AccessTokenHash string      `json:"access_token_hash"`
 }
 
-// CreateChatTask has already acquired lock_task_owner_rows for this agent in
-// the surrounding direct-send transaction. Re-lock the mutable installation
-// credential and membership before publishing the ledger task pointer. FOR
-// SHARE lets independent glasses submits proceed concurrently while forcing a
-// revoke, credential rotation, or member removal to serialize at commit.
-func (q *Queries) LockQianwenSubmitAuthority(ctx context.Context, arg LockQianwenSubmitAuthorityParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, lockQianwenSubmitAuthority,
+// Rechecks every mutable installation authority field under an exclusive row
+// lock. Serializing redemptions per installation makes the rolling DB budget,
+// nonce outcome ledger, and one-time code consume a single state machine while
+// forcing revoke/reconnect to choose a side of the transaction.
+func (q *Queries) LockQianwenInstallationForPairing(ctx context.Context, arg LockQianwenInstallationForPairingParams) (ChannelInstallation, error) {
+	row := q.db.QueryRow(ctx, lockQianwenInstallationForPairing,
 		arg.InstallationID,
 		arg.WorkspaceID,
 		arg.AgentID,
 		arg.InstallerUserID,
 		arg.ConnectionID,
 		arg.AccessTokenHash,
+	)
+	var i ChannelInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockQianwenInstallationForUnbind = `-- name: LockQianwenInstallationForUnbind :one
+SELECT installation.id, installation.workspace_id, installation.agent_id, installation.channel_type, installation.config, installation.status, installation.ws_lease_token, installation.ws_lease_expires_at, installation.installer_user_id, installation.installed_at, installation.created_at, installation.updated_at
+FROM channel_installation AS installation
+WHERE installation.id = $1
+  AND installation.workspace_id = $2
+  AND installation.agent_id = $3
+  AND installation.channel_type = 'qianwen'
+FOR UPDATE OF installation
+`
+
+type LockQianwenInstallationForUnbindParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	AgentID        pgtype.UUID `json:"agent_id"`
+}
+
+// Called after the member advisory, workspace, and agent locks. The exclusive
+// installation lock serializes with redeem; it deliberately accepts revoked
+// rows so repeated self-unbind remains idempotent while the installation
+// record still exists.
+func (q *Queries) LockQianwenInstallationForUnbind(ctx context.Context, arg LockQianwenInstallationForUnbindParams) (ChannelInstallation, error) {
+	row := q.db.QueryRow(ctx, lockQianwenInstallationForUnbind, arg.InstallationID, arg.WorkspaceID, arg.AgentID)
+	var i ChannelInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockQianwenSubmitAuthority = `-- name: LockQianwenSubmitAuthority :one
+WITH agent_guard AS MATERIALIZED (
+    SELECT agent.id, agent.workspace_id, agent.owner_id, agent.permission_mode
+    FROM agent
+    WHERE agent.id = $4
+      AND agent.workspace_id = $3
+      AND agent.kind = 'user'
+      AND agent.archived_at IS NULL
+    FOR SHARE OF agent
+), target_guard AS MATERIALIZED (
+    SELECT target.id
+    FROM agent_invocation_target AS target
+    JOIN agent_guard ON target.agent_id = agent_guard.id
+    WHERE agent_guard.permission_mode = 'public_to'
+      AND (
+            (target.target_type = 'workspace' AND target.target_id = agent_guard.workspace_id)
+         OR (target.target_type = 'member' AND target.target_id = $1)
+      )
+    FOR SHARE OF target
+)
+SELECT installation.id
+FROM agent_guard
+JOIN channel_installation AS installation
+  ON installation.agent_id = agent_guard.id
+ AND installation.workspace_id = agent_guard.workspace_id
+JOIN channel_user_binding AS binding
+  ON binding.installation_id = installation.id
+ AND binding.workspace_id = installation.workspace_id
+ AND binding.channel_type = 'qianwen'
+ AND binding.multica_user_id = $1
+JOIN member AS membership
+  ON membership.workspace_id = installation.workspace_id
+ AND membership.user_id = binding.multica_user_id
+WHERE installation.id = $2
+  AND installation.workspace_id = $3
+  AND installation.agent_id = $4
+  AND installation.channel_type = 'qianwen'
+  AND installation.status = 'active'
+  AND installation.config ->> 'mode' = 'personal_polling'
+  AND installation.config ->> 'app_id' = $5::text
+  AND installation.config ->> 'access_token_hash' = $6::text
+  AND binding.channel_user_id = $7::text
+  AND binding.config ->> 'open_uuid' = $8::text
+  AND binding.config ->> 'identity_scope' = 'skill'
+  AND (
+        agent_guard.owner_id = binding.multica_user_id
+     OR EXISTS (SELECT 1 FROM target_guard)
+  )
+FOR SHARE OF installation, binding, membership
+`
+
+type LockQianwenSubmitAuthorityParams struct {
+	MulticaUserID   pgtype.UUID `json:"multica_user_id"`
+	InstallationID  pgtype.UUID `json:"installation_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	ConnectionID    string      `json:"connection_id"`
+	AccessTokenHash string      `json:"access_token_hash"`
+	OpenUserID      string      `json:"open_user_id"`
+	OpenUuid        string      `json:"open_uuid"`
+}
+
+// CreateChatTask has already acquired lock_task_owner_rows for this agent in
+// the surrounding direct-send transaction. Re-lock the exact opaque identity,
+// bound member, current invocation grant, and mutable installation credential
+// before publishing the ledger task pointer.
+func (q *Queries) LockQianwenSubmitAuthority(ctx context.Context, arg LockQianwenSubmitAuthorityParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockQianwenSubmitAuthority,
+		arg.MulticaUserID,
+		arg.InstallationID,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.ConnectionID,
+		arg.AccessTokenHash,
+		arg.OpenUserID,
+		arg.OpenUuid,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
@@ -405,13 +1221,15 @@ SET claim_token = NULL,
     updated_at = now()
 WHERE installation_id = $1
   AND request_id = $2
-  AND claim_token = $3
+  AND multica_user_id = $3
+  AND claim_token = $4
   AND task_id IS NULL
 `
 
 type ReleaseQianwenRequestClaimParams struct {
 	InstallationID pgtype.UUID `json:"installation_id"`
 	RequestID      pgtype.UUID `json:"request_id"`
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
 	ClaimToken     pgtype.UUID `json:"claim_token"`
 }
 
@@ -419,11 +1237,91 @@ type ReleaseQianwenRequestClaimParams struct {
 // The row remains durable, including when a session was already recorded, so
 // the next claimant can recover that session instead of duplicating it.
 func (q *Queries) ReleaseQianwenRequestClaim(ctx context.Context, arg ReleaseQianwenRequestClaimParams) (int64, error) {
-	result, err := q.db.Exec(ctx, releaseQianwenRequestClaim, arg.InstallationID, arg.RequestID, arg.ClaimToken)
+	result, err := q.db.Exec(ctx, releaseQianwenRequestClaim,
+		arg.InstallationID,
+		arg.RequestID,
+		arg.MulticaUserID,
+		arg.ClaimToken,
+	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const revokeQianwenInstallation = `-- name: RevokeQianwenInstallation :one
+WITH revoked AS MATERIALIZED (
+    UPDATE channel_installation
+    SET status = 'revoked', updated_at = now()
+    WHERE channel_installation.id = $1
+      AND channel_installation.channel_type = 'qianwen'
+    RETURNING channel_installation.id
+), cleared_codes AS (
+    DELETE FROM qianwen_pairing_code
+    WHERE installation_id IN (SELECT id FROM revoked)
+), cleared_attempts AS (
+    DELETE FROM qianwen_pairing_attempt
+    WHERE installation_id IN (SELECT id FROM revoked)
+), cleared_nonces AS (
+    DELETE FROM qianwen_invocation_nonce
+    WHERE installation_id IN (SELECT id FROM revoked)
+), cleared_bindings AS (
+    DELETE FROM channel_user_binding
+    WHERE installation_id IN (SELECT id FROM revoked)
+)
+SELECT count(*)::bigint FROM revoked
+`
+
+// Revocation is the authority boundary for the private Skill credential. The
+// installation row is updated first (the same parent-before-child lock order
+// used by redeem), then every short-lived pairing capability and established
+// Qianwen identity binding is removed in the same transaction. Durable task
+// request rows intentionally survive revocation so an external retry can never
+// turn an already accepted request id into a second run.
+func (q *Queries) RevokeQianwenInstallation(ctx context.Context, installationID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, revokeQianwenInstallation, installationID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const revokeQianwenInstallationsByInstaller = `-- name: RevokeQianwenInstallationsByInstaller :exec
+WITH revoked AS MATERIALIZED (
+    UPDATE channel_installation
+    SET status = 'revoked', updated_at = now()
+    WHERE channel_installation.workspace_id = $1
+      AND channel_installation.installer_user_id = $2
+      AND channel_installation.channel_type = 'qianwen'
+    RETURNING channel_installation.id
+), cleared_codes AS (
+    DELETE FROM qianwen_pairing_code
+    WHERE installation_id IN (SELECT id FROM revoked)
+), cleared_attempts AS (
+    DELETE FROM qianwen_pairing_attempt
+    WHERE installation_id IN (SELECT id FROM revoked)
+), cleared_nonces AS (
+    DELETE FROM qianwen_invocation_nonce
+    WHERE installation_id IN (SELECT id FROM revoked)
+), cleared_bindings AS (
+    DELETE FROM channel_user_binding
+    WHERE installation_id IN (SELECT id FROM revoked)
+)
+SELECT count(*) FROM revoked
+`
+
+type RevokeQianwenInstallationsByInstallerParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+}
+
+// Member removal owns the same (workspace,user) advisory lock as pairing.
+// Revoke every personal Qianwen credential installed by the departing member
+// and clear all identities/codes/replay state for those installations before
+// the member row disappears. Otherwise a later re-invite would silently
+// reactivate the old qws_ credential and every binding it used to authorize.
+func (q *Queries) RevokeQianwenInstallationsByInstaller(ctx context.Context, arg RevokeQianwenInstallationsByInstallerParams) error {
+	_, err := q.db.Exec(ctx, revokeQianwenInstallationsByInstaller, arg.WorkspaceID, arg.MulticaUserID)
+	return err
 }
 
 const setQianwenRequestSession = `-- name: SetQianwenRequestSession :execrows
@@ -432,7 +1330,8 @@ SET chat_session_id = $1,
     updated_at = now()
 WHERE installation_id = $2
   AND request_id = $3
-  AND claim_token = $4
+  AND multica_user_id = $4
+  AND claim_token = $5
   AND task_id IS NULL
 `
 
@@ -440,6 +1339,7 @@ type SetQianwenRequestSessionParams struct {
 	ChatSessionID  pgtype.UUID `json:"chat_session_id"`
 	InstallationID pgtype.UUID `json:"installation_id"`
 	RequestID      pgtype.UUID `json:"request_id"`
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
 	ClaimToken     pgtype.UUID `json:"claim_token"`
 }
 
@@ -453,10 +1353,122 @@ func (q *Queries) SetQianwenRequestSession(ctx context.Context, arg SetQianwenRe
 		arg.ChatSessionID,
 		arg.InstallationID,
 		arg.RequestID,
+		arg.MulticaUserID,
 		arg.ClaimToken,
 	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const upsertQianwenPairingCode = `-- name: UpsertQianwenPairingCode :one
+WITH member_write_guard AS MATERIALIZED (
+    SELECT pg_advisory_xact_lock(
+        hashtext(($2::uuid)::text),
+        hashtext(($3::uuid)::text)
+    ) AS ok
+), workspace_guard AS MATERIALIZED (
+    SELECT workspace.id
+    FROM workspace
+    JOIN member_write_guard ON true
+    WHERE workspace.id = $2
+    FOR KEY SHARE OF workspace
+), installation_hint AS MATERIALIZED (
+    SELECT installation.agent_id
+    FROM channel_installation AS installation
+    JOIN workspace_guard ON workspace_guard.id = installation.workspace_id
+    WHERE installation.id = $4
+      AND installation.workspace_id = $2
+      AND installation.channel_type = 'qianwen'
+), agent_guard AS MATERIALIZED (
+    SELECT agent.id, agent.workspace_id
+    FROM agent
+    JOIN installation_hint ON installation_hint.agent_id = agent.id
+    WHERE agent.workspace_id = $2
+      AND agent.kind = 'user'
+      AND agent.archived_at IS NULL
+      AND (
+            agent.owner_id = $3
+         OR (
+                agent.permission_mode = 'public_to'
+            AND EXISTS (
+                SELECT 1
+                FROM agent_invocation_target target
+                WHERE target.agent_id = agent.id
+                  AND (
+                        (target.target_type = 'workspace' AND target.target_id = agent.workspace_id)
+                     OR (target.target_type = 'member' AND target.target_id = $3)
+                  )
+            )
+         )
+      )
+    FOR SHARE OF agent
+), authority AS MATERIALIZED (
+    SELECT installation.id, installation.workspace_id, membership.user_id
+    FROM agent_guard
+    JOIN channel_installation AS installation
+      ON installation.agent_id = agent_guard.id
+     AND installation.workspace_id = agent_guard.workspace_id
+    JOIN member AS membership
+      ON membership.workspace_id = installation.workspace_id
+     AND membership.user_id = $3
+    WHERE installation.id = $4
+      AND installation.workspace_id = $2
+      AND installation.channel_type = 'qianwen'
+      AND installation.status = 'active'
+      AND installation.config ->> 'mode' = 'personal_polling'
+    FOR SHARE OF installation, membership
+)
+INSERT INTO qianwen_pairing_code (
+    installation_id,
+    workspace_id,
+    multica_user_id,
+    code_digest,
+    expires_at
+)
+SELECT
+    authority.id,
+    authority.workspace_id,
+    authority.user_id,
+    $1,
+    now() + INTERVAL '10 minutes'
+FROM authority
+ON CONFLICT (installation_id, multica_user_id) DO UPDATE
+SET workspace_id = EXCLUDED.workspace_id,
+    code_digest = EXCLUDED.code_digest,
+    expires_at = now() + INTERVAL '10 minutes',
+    created_at = now()
+RETURNING qianwen_pairing_code.installation_id, qianwen_pairing_code.workspace_id, qianwen_pairing_code.multica_user_id, qianwen_pairing_code.code_digest, qianwen_pairing_code.expires_at, qianwen_pairing_code.created_at
+`
+
+type UpsertQianwenPairingCodeParams struct {
+	CodeDigest     []byte      `json:"code_digest"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+}
+
+// Minting is authorized and persisted in one statement. The shared locks make
+// a concurrent installation revoke or membership removal serialize with this
+// write. The unique installation/user key replaces the previous digest, so a
+// repeated mint invalidates the older plaintext immediately. PostgreSQL's
+// transaction clock owns the ten-minute TTL returned to the caller.
+func (q *Queries) UpsertQianwenPairingCode(ctx context.Context, arg UpsertQianwenPairingCodeParams) (QianwenPairingCode, error) {
+	row := q.db.QueryRow(ctx, upsertQianwenPairingCode,
+		arg.CodeDigest,
+		arg.WorkspaceID,
+		arg.MulticaUserID,
+		arg.InstallationID,
+	)
+	var i QianwenPairingCode
+	err := row.Scan(
+		&i.InstallationID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.CodeDigest,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }

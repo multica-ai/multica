@@ -43,6 +43,7 @@ type fakeSessionQueries struct {
 	messages              []string
 	messageID             pgtype.UUID
 	lastCreate            db.CreateChatMessageParams
+	lastSessionCreate     db.CreateChatSessionParams
 	touched               int
 	replyTargets          int
 	lockedWorkspace       int    // count of LockWorkspaceForChatSessionCreate calls
@@ -84,9 +85,10 @@ func (f *fakeSessionQueries) LockWorkspaceForChatSessionCreate(_ context.Context
 	return id, nil
 }
 
-func (f *fakeSessionQueries) CreateChatSession(_ context.Context, _ db.CreateChatSessionParams) (db.ChatSession, error) {
+func (f *fakeSessionQueries) CreateChatSession(_ context.Context, arg db.CreateChatSessionParams) (db.ChatSession, error) {
 	f.nextSession++
 	f.createdSessions++
+	f.lastSessionCreate = arg
 	return db.ChatSession{ID: uid(f.nextSession)}, nil
 }
 
@@ -203,6 +205,45 @@ func TestEnsureSession_CreateThenReuse(t *testing.T) {
 	}
 	if id1 != id2 {
 		t.Errorf("ids differ: %v vs %v", id1, id2)
+	}
+}
+
+func TestEnsureSession_UsesCallerTitleOnlyWhenCreating(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	in := EnsureSessionInput{
+		InstallationID: uid(1),
+		BindingKey:     "request-1",
+		ChatType:       channel.ChatTypeP2P,
+		Sender:         uid(7),
+		Title:          "Inspect build failure",
+	}
+
+	if _, err := s.EnsureSession(context.Background(), in); err != nil {
+		t.Fatalf("EnsureSession(create): %v", err)
+	}
+	if got := f.lastSessionCreate.Title; got != "Inspect build failure" {
+		t.Fatalf("created title = %q, want caller override", got)
+	}
+
+	// Reusing a durable binding must not rename an existing conversation when a
+	// retry arrives with a different title.
+	in.Title = "Must not replace existing title"
+	if _, err := s.EnsureSession(context.Background(), in); err != nil {
+		t.Fatalf("EnsureSession(reuse): %v", err)
+	}
+	if got := f.lastSessionCreate.Title; got != "Inspect build failure" {
+		t.Fatalf("retry changed created title to %q", got)
+	}
+
+	fallback := newFake()
+	if _, err := newTestSession(fallback).EnsureSession(context.Background(), EnsureSessionInput{
+		InstallationID: uid(2), BindingKey: "request-2", ChatType: channel.ChatTypeP2P,
+	}); err != nil {
+		t.Fatalf("EnsureSession(fallback): %v", err)
+	}
+	if got := fallback.lastSessionCreate.Title; got != "D" {
+		t.Fatalf("empty caller title = %q, want configured direct fallback", got)
 	}
 }
 

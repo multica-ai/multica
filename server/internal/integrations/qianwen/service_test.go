@@ -3,14 +3,18 @@ package qianwen
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -32,7 +36,8 @@ type fakeServiceQueries struct {
 
 	upsertResult db.ChannelInstallation
 	upsertErr    error
-	upsertArg    db.UpsertChannelInstallationParams
+	upsertArg    db.InstallQianwenPersonalParams
+	upsertCalls  int
 
 	installation      db.ChannelInstallation
 	installationErr   error
@@ -42,6 +47,10 @@ type fakeServiceQueries struct {
 	memberErr         error
 	memberArg         db.GetMemberByUserAndWorkspaceParams
 	memberCalls       int
+	invocationUser    pgtype.UUID
+	invocationErr     error
+	invocationArg     db.GetActiveQianwenInvocationUserParams
+	invocationCalls   int
 
 	claimResult   db.QianwenSkillRequest
 	claimErr      error
@@ -75,6 +84,22 @@ type fakeServiceQueries struct {
 	requestStatusErr   error
 	requestStatusArg   db.GetQianwenRequestStatusParams
 	requestStatusCalls int
+
+	pairingResult db.QianwenPairingCode
+	pairingErrs   []error
+	pairingArgs   []db.UpsertQianwenPairingCodeParams
+}
+
+func (f *fakeServiceQueries) UpsertQianwenPairingCode(_ context.Context, arg db.UpsertQianwenPairingCodeParams) (db.QianwenPairingCode, error) {
+	f.pairingArgs = append(f.pairingArgs, arg)
+	if len(f.pairingErrs) > 0 {
+		err := f.pairingErrs[0]
+		f.pairingErrs = f.pairingErrs[1:]
+		if err != nil {
+			return db.QianwenPairingCode{}, err
+		}
+	}
+	return f.pairingResult, nil
 }
 
 func (f *fakeServiceQueries) record(event string) {
@@ -83,7 +108,8 @@ func (f *fakeServiceQueries) record(event string) {
 	}
 }
 
-func (f *fakeServiceQueries) UpsertChannelInstallation(_ context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error) {
+func (f *fakeServiceQueries) InstallQianwenPersonal(_ context.Context, arg db.InstallQianwenPersonalParams) (db.ChannelInstallation, error) {
+	f.upsertCalls++
 	f.upsertArg = arg
 	if f.upsertErr != nil {
 		return db.ChannelInstallation{}, f.upsertErr
@@ -110,8 +136,8 @@ func (f *fakeServiceQueries) GetChannelInstallationByAppID(_ context.Context, ar
 	return f.installation, f.installationErr
 }
 
-func (f *fakeServiceQueries) SetChannelInstallationStatus(context.Context, db.SetChannelInstallationStatusParams) error {
-	return nil
+func (f *fakeServiceQueries) RevokeQianwenInstallation(context.Context, pgtype.UUID) (int64, error) {
+	return 1, nil
 }
 
 func (f *fakeServiceQueries) GetMemberByUserAndWorkspace(_ context.Context, arg db.GetMemberByUserAndWorkspaceParams) (db.Member, error) {
@@ -119,6 +145,13 @@ func (f *fakeServiceQueries) GetMemberByUserAndWorkspace(_ context.Context, arg 
 	f.memberCalls++
 	f.memberArg = arg
 	return f.member, f.memberErr
+}
+
+func (f *fakeServiceQueries) GetActiveQianwenInvocationUser(_ context.Context, arg db.GetActiveQianwenInvocationUserParams) (pgtype.UUID, error) {
+	f.record("get_invocation_user")
+	f.invocationCalls++
+	f.invocationArg = arg
+	return f.invocationUser, f.invocationErr
 }
 
 func (f *fakeServiceQueries) ClaimQianwenRequest(_ context.Context, arg db.ClaimQianwenRequestParams) (db.QianwenSkillRequest, error) {
@@ -312,10 +345,11 @@ func TestSubmitClaimsSessionAndUsesAtomicChannelSender(t *testing.T) {
 	}
 	service := mustTestService(t, queries, sessions, tasks)
 
-	result, err := service.Submit(context.Background(), testConnectionID, testAccessToken, SubmitRequest{
+	invocation := signedUnitSubmitInvocation(service, testAccessToken, SubmitRequest{
 		RequestID: "  550E8400-E29B-41D4-A716-446655440000  ",
 		Query:     "  inspect the build  \n",
 	})
+	result, err := service.Submit(context.Background(), testConnectionID, testAccessToken, invocation)
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -331,7 +365,7 @@ func TestSubmitClaimsSessionAndUsesAtomicChannelSender(t *testing.T) {
 	}) {
 		t.Fatalf("membership lookup = %+v", queries.memberArg)
 	}
-	wantTrace := []string{"get_installation", "get_member", "claim", "ensure_session", "set_session", "get_session", "get_agent", "send"}
+	wantTrace := []string{"get_installation", "get_member", "get_invocation_user", "claim", "ensure_session", "set_session", "get_session", "get_agent", "send"}
 	if strings.Join(trace, ",") != strings.Join(wantTrace, ",") {
 		t.Fatalf("call order = %v, want %v", trace, wantTrace)
 	}
@@ -340,9 +374,11 @@ func TestSubmitClaimsSessionAndUsesAtomicChannelSender(t *testing.T) {
 	if queries.claimArg.InstallationID != queries.installation.ID ||
 		queries.claimArg.WorkspaceID != queries.installation.WorkspaceID ||
 		queries.claimArg.AgentID != queries.installation.AgentID ||
-		queries.claimArg.InstallerUserID != queries.installation.InstallerUserID ||
+		queries.claimArg.MulticaUserID != queries.invocationUser ||
 		queries.claimArg.ConnectionID != testConnectionID ||
 		queries.claimArg.AccessTokenHash != hashAccessToken(testAccessToken) ||
+		queries.claimArg.OpenUserID != invocation.Identity.OpenUserID ||
+		queries.claimArg.OpenUuid != invocation.Identity.OpenUUID ||
 		queries.claimArg.RequestID != requestUUID {
 		t.Fatalf("claim args = %+v", queries.claimArg)
 	}
@@ -353,14 +389,16 @@ func TestSubmitClaimsSessionAndUsesAtomicChannelSender(t *testing.T) {
 	if sessions.arg.WorkspaceID != queries.installation.WorkspaceID ||
 		sessions.arg.AgentID != queries.installation.AgentID ||
 		sessions.arg.InstallationID != queries.installation.ID ||
-		sessions.arg.Sender != queries.installation.InstallerUserID ||
-		sessions.arg.BindingKey != testRequestID || sessions.arg.ChatType != channel.ChatTypeP2P {
+		sessions.arg.Sender != queries.invocationUser ||
+		sessions.arg.BindingKey != testRequestID || sessions.arg.ChatType != channel.ChatTypeP2P ||
+		sessions.arg.Title != "inspect the build" {
 		t.Fatalf("EnsureSession input = %+v", sessions.arg)
 	}
 	if queries.setSessionArg != (db.SetQianwenRequestSessionParams{
 		ChatSessionID:  queries.chatSession.ID,
 		InstallationID: queries.installation.ID,
 		RequestID:      requestUUID,
+		MulticaUserID:  queries.invocationUser,
 		ClaimToken:     queries.claimResult.ClaimToken,
 	}) {
 		t.Fatalf("SetQianwenRequestSession args = %+v", queries.setSessionArg)
@@ -369,7 +407,7 @@ func TestSubmitClaimsSessionAndUsesAtomicChannelSender(t *testing.T) {
 		t.Fatalf("session/agent loads = session %s agent %s", util.UUIDToString(queries.chatSessionArg), util.UUIDToString(queries.agentArg))
 	}
 	if tasks.session.ID != queries.chatSession.ID || tasks.agent.ID != queries.agent.ID ||
-		tasks.initiator != queries.installation.InstallerUserID || tasks.content != "inspect the build" {
+		tasks.initiator != queries.invocationUser || tasks.content != "inspect the build" {
 		t.Fatalf("atomic sender input = session %s agent %s initiator %s content %q",
 			util.UUIDToString(tasks.session.ID), util.UUIDToString(tasks.agent.ID), util.UUIDToString(tasks.initiator), tasks.content)
 	}
@@ -406,15 +444,17 @@ func TestSubmitIdempotentReplayDoesNotStartAnotherTask(t *testing.T) {
 			queries.existing = tc.existing
 			queries.existing.InstallationID = queries.installation.ID
 			queries.existing.RequestID = util.MustParseUUID(testRequestID)
+			queries.existing.MulticaUserID = queries.invocationUser
 			queries.existing.QuerySha256 = queryDigest(normalizedQuery)
 			sessions := &fakeSessionEnsurer{id: queries.chatSession.ID}
 			tasks := &fakeTaskSender{}
 			service := mustTestService(t, queries, sessions, tasks)
 
-			got, err := service.Submit(context.Background(), testConnectionID, testAccessToken, SubmitRequest{
+			invocation := signedUnitSubmitInvocation(service, testAccessToken, SubmitRequest{
 				RequestID: strings.ToUpper(testRequestID),
 				Query:     "  " + normalizedQuery + "  ",
 			})
+			got, err := service.Submit(context.Background(), testConnectionID, testAccessToken, invocation)
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
@@ -437,6 +477,7 @@ func TestSubmitRejectsRequestIDReuseWithDifferentQuery(t *testing.T) {
 	queries.existing = db.QianwenSkillRequest{
 		InstallationID: queries.installation.ID,
 		RequestID:      util.MustParseUUID(testRequestID),
+		MulticaUserID:  queries.invocationUser,
 		QuerySha256:    queryDigest("original query"),
 		TaskID:         testPGUUID(9),
 	}
@@ -444,10 +485,11 @@ func TestSubmitRejectsRequestIDReuseWithDifferentQuery(t *testing.T) {
 	tasks := &fakeTaskSender{}
 	service := mustTestService(t, queries, sessions, tasks)
 
-	_, err := service.Submit(context.Background(), testConnectionID, testAccessToken, SubmitRequest{
+	invocation := signedUnitSubmitInvocation(service, testAccessToken, SubmitRequest{
 		RequestID: testRequestID,
 		Query:     "different query",
 	})
+	_, err := service.Submit(context.Background(), testConnectionID, testAccessToken, invocation)
 	if !errors.Is(err, ErrRequestConflict) {
 		t.Fatalf("Submit() error = %v, want ErrRequestConflict", err)
 	}
@@ -466,10 +508,11 @@ func TestSubmitMapsMissingClaimAndLedgerAfterOwnerTeardownToUnauthorized(t *test
 	tasks := &fakeTaskSender{}
 	service := mustTestService(t, queries, sessions, tasks)
 
-	_, err := service.Submit(context.Background(), testConnectionID, testAccessToken, SubmitRequest{
+	invocation := signedUnitSubmitInvocation(service, testAccessToken, SubmitRequest{
 		RequestID: testRequestID,
 		Query:     "request raced with teardown",
 	})
+	_, err := service.Submit(context.Background(), testConnectionID, testAccessToken, invocation)
 	if !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("Submit() error = %v, want ErrUnauthorized", err)
 	}
@@ -502,7 +545,8 @@ func TestSubmitRejectsInvalidRequestsBeforeClaim(t *testing.T) {
 			tasks := &fakeTaskSender{}
 			service := mustTestService(t, queries, sessions, tasks)
 
-			_, err := service.Submit(context.Background(), testConnectionID, testAccessToken, tc.request)
+			_, err := service.Submit(context.Background(), testConnectionID, testAccessToken,
+				signedUnitSubmitInvocation(service, testAccessToken, tc.request))
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("Submit() error = %v, want errors.Is(%v)", err, tc.wantErr)
 			}
@@ -581,10 +625,11 @@ func TestSubmitReleasesClaimOnPrePublishFailure(t *testing.T) {
 			tc.configure(queries, sessions, tasks)
 			service := mustTestService(t, queries, sessions, tasks)
 
-			_, err := service.Submit(context.Background(), testConnectionID, testAccessToken, SubmitRequest{
+			invocation := signedUnitSubmitInvocation(service, testAccessToken, SubmitRequest{
 				RequestID: testRequestID,
 				Query:     "run the task",
 			})
+			_, err := service.Submit(context.Background(), testConnectionID, testAccessToken, invocation)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("Submit() error = %v, want errors.Is(%v)", err, tc.wantErr)
 			}
@@ -600,6 +645,7 @@ func TestSubmitReleasesClaimOnPrePublishFailure(t *testing.T) {
 			wantRelease := db.ReleaseQianwenRequestClaimParams{
 				InstallationID: queries.installation.ID,
 				RequestID:      util.MustParseUUID(testRequestID),
+				MulticaUserID:  queries.invocationUser,
 				ClaimToken:     queries.claimResult.ClaimToken,
 			}
 			if queries.releaseArg != wantRelease {
@@ -640,7 +686,8 @@ func TestSubmitRejectsInvalidCredentials(t *testing.T) {
 			tasks := &fakeTaskSender{}
 			service := mustTestService(t, queries, sessions, tasks)
 
-			_, err := service.Submit(context.Background(), tc.connectionID, tc.token, SubmitRequest{RequestID: testRequestID, Query: "hello"})
+			_, err := service.Submit(context.Background(), tc.connectionID, tc.token,
+				signedUnitSubmitInvocation(service, tc.token, SubmitRequest{RequestID: testRequestID, Query: "hello"}))
 			if !errors.Is(err, ErrUnauthorized) {
 				t.Fatalf("Submit() error = %v, want ErrUnauthorized", err)
 			}
@@ -678,7 +725,8 @@ func TestStatusUsesInstallationAndUUIDScopeAndMapsLifecycle(t *testing.T) {
 			queries.requestStatus = tc.row
 			service := mustTestService(t, queries, &fakeSessionEnsurer{}, &fakeTaskSender{})
 
-			got, err := service.Status(context.Background(), testConnectionID, testAccessToken, strings.ToUpper(testRequestID))
+			invocation := signedUnitStatusInvocation(service, testAccessToken, strings.ToUpper(testRequestID))
+			got, err := service.Status(context.Background(), testConnectionID, testAccessToken, invocation)
 			if err != nil {
 				t.Fatalf("Status() error = %v", err)
 			}
@@ -690,6 +738,9 @@ func TestStatusUsesInstallationAndUUIDScopeAndMapsLifecycle(t *testing.T) {
 				AccessTokenHash: hashAccessToken(testAccessToken),
 				InstallationID:  queries.installation.ID,
 				RequestID:       util.MustParseUUID(testRequestID),
+				MulticaUserID:   queries.invocationUser,
+				OpenUserID:      invocation.Identity.OpenUserID,
+				OpenUuid:        invocation.Identity.OpenUUID,
 			}
 			if queries.requestStatusArg != wantArg {
 				t.Fatalf("status lookup = %+v, want %+v", queries.requestStatusArg, wantArg)
@@ -711,7 +762,8 @@ func TestFailedStatusDoesNotExposeTranscriptOrRawExecutionDetails(t *testing.T) 
 	}
 	service := mustTestService(t, queries, &fakeSessionEnsurer{}, &fakeTaskSender{})
 
-	got, err := service.Status(context.Background(), testConnectionID, testAccessToken, testRequestID)
+	got, err := service.Status(context.Background(), testConnectionID, testAccessToken,
+		signedUnitStatusInvocation(service, testAccessToken, testRequestID))
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -741,7 +793,8 @@ func TestStatusTruncatesCompletedOutputByRune(t *testing.T) {
 	}
 	service := mustTestService(t, queries, &fakeSessionEnsurer{}, &fakeTaskSender{})
 
-	got, err := service.Status(context.Background(), testConnectionID, testAccessToken, testRequestID)
+	got, err := service.Status(context.Background(), testConnectionID, testAccessToken,
+		signedUnitStatusInvocation(service, testAccessToken, testRequestID))
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -772,7 +825,8 @@ func TestStatusWithoutTaskFollowsDatabaseClaimLease(t *testing.T) {
 			queries.requestStatus = db.GetQianwenRequestStatusRow{ClaimActive: tc.claimActive}
 			service := mustTestService(t, queries, &fakeSessionEnsurer{}, &fakeTaskSender{})
 
-			got, err := service.Status(context.Background(), testConnectionID, testAccessToken, testRequestID)
+			got, err := service.Status(context.Background(), testConnectionID, testAccessToken,
+				signedUnitStatusInvocation(service, testAccessToken, testRequestID))
 			if err != nil {
 				t.Fatalf("Status() error = %v", err)
 			}
@@ -790,9 +844,94 @@ func TestStatusReturnsNotFoundWithoutLeakingDatabaseError(t *testing.T) {
 	queries.requestStatusErr = pgx.ErrNoRows
 	service := mustTestService(t, queries, &fakeSessionEnsurer{}, &fakeTaskSender{})
 
-	_, err := service.Status(context.Background(), testConnectionID, testAccessToken, testRequestID)
+	_, err := service.Status(context.Background(), testConnectionID, testAccessToken,
+		signedUnitStatusInvocation(service, testAccessToken, testRequestID))
 	if !errors.Is(err, ErrRequestNotFound) {
 		t.Fatalf("Status() error = %v, want ErrRequestNotFound", err)
+	}
+}
+
+func TestPairingIsUnavailableWithoutStrongDeploymentSecret(t *testing.T) {
+	queries := authenticatedQueries(t)
+	service, err := newService(queries, &fakeSessionEnsurer{}, &fakeTaskSender{}, nil)
+	if err != nil {
+		t.Fatalf("newService() error = %v; the polling bridge must remain available when only pairing is disabled", err)
+	}
+	if service.PairingSupported() {
+		t.Fatal("PairingSupported() = true without a deployment secret, want false")
+	}
+
+	_, err = service.MintPairingCode(
+		context.Background(),
+		queries.installation.WorkspaceID,
+		queries.installation.ID,
+		queries.installation.InstallerUserID,
+	)
+	if !errors.Is(err, ErrPairingUnavailable) {
+		t.Fatalf("MintPairingCode() error = %v, want ErrPairingUnavailable", err)
+	}
+
+	_, err = service.InstallPersonal(
+		context.Background(),
+		queries.installation.WorkspaceID,
+		queries.installation.AgentID,
+		queries.installation.InstallerUserID,
+	)
+	if !errors.Is(err, ErrPairingUnavailable) {
+		t.Fatalf("InstallPersonal() error = %v, want ErrPairingUnavailable", err)
+	}
+	if queries.upsertCalls != 0 {
+		t.Fatalf("installation writes = %d without pairing capability, want 0", queries.upsertCalls)
+	}
+}
+
+func TestPairingSupportedRequiresCompleteServiceCapability(t *testing.T) {
+	queries := authenticatedQueries(t)
+	service, err := newService(queries, &fakeSessionEnsurer{}, &fakeTaskSender{}, []byte("qianwen-unit-test-deployment-secret"))
+	if err != nil {
+		t.Fatalf("newService() error = %v", err)
+	}
+	if service.PairingSupported() {
+		t.Fatal("PairingSupported() = true without transaction-backed queries, want false")
+	}
+}
+
+type unavailableQianwenTestTxStarter struct{}
+
+func (unavailableQianwenTestTxStarter) Begin(context.Context) (pgx.Tx, error) {
+	return nil, errors.New("unexpected test transaction")
+}
+
+func TestMintPairingCodeRetriesInstallationCodeCollision(t *testing.T) {
+	queries := authenticatedQueries(t)
+	queries.pairingErrs = []error{
+		&pgconn.PgError{Code: "23505", ConstraintName: "idx_qianwen_pairing_code_installation_code"},
+		nil,
+	}
+	queries.pairingResult = db.QianwenPairingCode{ExpiresAt: pgtype.Timestamptz{Time: time.Now(), Valid: true}}
+	service := mustTestService(t, queries, &fakeSessionEnsurer{}, &fakeTaskSender{})
+	service.pairingRandom = bytes.NewReader([]byte{
+		0, 0, 0, 1,
+		0, 0, 0, 2,
+	})
+
+	result, err := service.MintPairingCode(
+		context.Background(),
+		queries.installation.WorkspaceID,
+		queries.installation.ID,
+		queries.installation.InstallerUserID,
+	)
+	if err != nil {
+		t.Fatalf("MintPairingCode() error = %v", err)
+	}
+	if result.Code != "00000002" {
+		t.Fatalf("MintPairingCode() code = %q, want collision retry code 00000002", result.Code)
+	}
+	if len(queries.pairingArgs) != 2 {
+		t.Fatalf("UpsertQianwenPairingCode calls = %d, want 2", len(queries.pairingArgs))
+	}
+	if bytes.Equal(queries.pairingArgs[0].CodeDigest, queries.pairingArgs[1].CodeDigest) {
+		t.Fatal("collision retry reused the first code digest")
 	}
 }
 
@@ -815,10 +954,12 @@ func authenticatedQueries(t *testing.T) *fakeServiceQueries {
 		Status:          "active",
 	}
 	return &fakeServiceQueries{
-		installation: installation,
+		installation:   installation,
+		invocationUser: installation.InstallerUserID,
 		claimResult: db.QianwenSkillRequest{
 			InstallationID: installation.ID,
 			RequestID:      util.MustParseUUID(testRequestID),
+			MulticaUserID:  installation.InstallerUserID,
 			ClaimToken:     testPGUUID(7),
 		},
 		setSessionRows: 1,
@@ -841,11 +982,61 @@ func authenticatedQueries(t *testing.T) *fakeServiceQueries {
 
 func mustTestService(t *testing.T, queries serviceQueries, sessions RequestSessionEnsurer, tasks ChannelTaskSender) *Service {
 	t.Helper()
-	service, err := newService(queries, sessions, tasks)
+	service, err := newService(queries, sessions, tasks, []byte("qianwen-unit-test-deployment-secret"))
 	if err != nil {
 		t.Fatalf("newService() error = %v", err)
 	}
+	// Public construction always supplies these transaction-backed dependencies.
+	// Unit tests use interface fakes for the methods under test, so attach inert
+	// sentinels solely to model a fully constructed production Service.
+	service.dbq = &db.Queries{}
+	service.tx = unavailableQianwenTestTxStarter{}
 	return service
+}
+
+func signedUnitSubmitInvocation(service *Service, token string, request SubmitRequest) SubmitInvocation {
+	invocation := SubmitInvocation{
+		Request: request,
+		Identity: InvocationMetadata{
+			OpenUserID: "opaque-unit-user",
+			OpenUUID:   "opaque-unit-device",
+			Timestamp:  fmt.Sprint(service.now().UnixMilli()),
+			Nonce:      "0123456789abcdef0123456789abcdef",
+		},
+	}
+	canonical, err := CanonicalSubmitInvocation(invocation)
+	if err != nil {
+		// Invalid-request tests intentionally exercise malformed bodies. They
+		// still need an envelope, but verification will reject it before any DB
+		// call regardless of the placeholder signature.
+		invocation.Identity.Signature = strings.Repeat("0", sha256.Size*2)
+		return invocation
+	}
+	mac := hmac.New(sha256.New, []byte(token))
+	_, _ = mac.Write([]byte(canonical))
+	invocation.Identity.Signature = hex.EncodeToString(mac.Sum(nil))
+	return invocation
+}
+
+func signedUnitStatusInvocation(service *Service, token, requestID string) StatusInvocation {
+	invocation := StatusInvocation{
+		RequestID: requestID,
+		Identity: InvocationMetadata{
+			OpenUserID: "opaque-unit-user",
+			OpenUUID:   "opaque-unit-device",
+			Timestamp:  fmt.Sprint(service.now().UnixMilli()),
+			Nonce:      "fedcba9876543210fedcba9876543210",
+		},
+	}
+	canonical, err := CanonicalStatusInvocation(invocation)
+	if err != nil {
+		invocation.Identity.Signature = strings.Repeat("0", sha256.Size*2)
+		return invocation
+	}
+	mac := hmac.New(sha256.New, []byte(token))
+	_, _ = mac.Write([]byte(canonical))
+	invocation.Identity.Signature = hex.EncodeToString(mac.Sum(nil))
+	return invocation
 }
 
 func queryDigest(value string) []byte {

@@ -301,7 +301,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		Direct:   "Qianwen glasses request",
 		Fallback: "Qianwen glasses request",
 	})
-	if qianwenService, err := qianwen.NewService(queries, qianwenSessions, h.TaskService); err != nil {
+	pairingSecret := qianwenPairingSecretFromEnv()
+	if len(pairingSecret) == 0 {
+		slog.Warn("qianwen identity pairing disabled (set a 32-byte QIANWEN_PAIRING_SECRET or JWT_SECRET)")
+	}
+	if qianwenService, err := qianwen.NewService(queries, qianwenSessions, h.TaskService, pool, pairingSecret); err != nil {
 		slog.Error("qianwen integration init failed", "error", err)
 	} else {
 		h.Qianwen = qianwenService
@@ -1061,9 +1065,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Private Qianwen Skill ingress. The installation bearer token is the
 	// credential, so these routes intentionally live outside middleware.Auth.
 	// submit acknowledges quickly; status returns the eventual redacted chat
-	// reply. Both handlers enforce body/rate/time limits themselves.
+	// reply; tasks exposes the bound member's safe active-task projection. The
+	// handlers enforce body/query/rate/time limits themselves.
 	r.Post("/api/channels/qianwen/{connectionId}/requests", h.SubmitQianwenRequest)
 	r.Get("/api/channels/qianwen/{connectionId}/requests/{requestId}", h.GetQianwenRequestStatus)
+	r.Get("/api/channels/qianwen/{connectionId}/tasks", h.ListQianwenCurrentTasks)
+	r.Post("/api/channels/qianwen/{connectionId}/binding/redeem", h.RedeemQianwenPairingCode)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -1295,6 +1302,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/qianwen/installations", h.ListQianwenInstallations)
 					r.Post("/qianwen/installations", h.InstallQianwenPersonal)
+					r.Post("/qianwen/installations/{installationId}/pairing-codes", h.MintQianwenPairingCode)
+					r.Delete("/qianwen/installations/{installationId}/bindings/me", h.UnbindQianwenCurrentUser)
 					r.Delete("/qianwen/installations/{installationId}", h.RevokeQianwenInstallation)
 				})
 				r.Group(func(r chi.Router) {
@@ -2013,6 +2022,26 @@ func composioStateSecret() []byte {
 	if v := strings.TrimSpace(os.Getenv("JWT_SECRET")); v != "" {
 		sum := sha256.Sum256([]byte("composio-state:" + v))
 		return sum[:]
+	}
+	return nil
+}
+
+// qianwenPairingSecretFromEnv resolves only explicitly configured strong
+// deployment secrets. It must not use auth.JWTSecret because that helper has a
+// public development fallback, which would make eight-digit code digests
+// offline-enumerable after a database leak.
+func qianwenPairingSecretFromEnv() []byte {
+	if raw, ok := os.LookupEnv("QIANWEN_PAIRING_SECRET"); ok && raw != "" {
+		if len(strings.TrimSpace(raw)) < 32 {
+			return nil
+		}
+		return []byte(raw)
+	}
+	if raw, ok := os.LookupEnv("JWT_SECRET"); ok && raw != "" {
+		if len(strings.TrimSpace(raw)) < 32 {
+			return nil
+		}
+		return []byte(raw)
 	}
 	return nil
 }

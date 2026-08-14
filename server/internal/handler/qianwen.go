@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -20,27 +21,43 @@ import (
 )
 
 const (
-	qianwenBodyLimit      = 20 * 1024
-	qianwenRequestTimeout = 2500 * time.Millisecond
+	qianwenBodyLimit         = 20 * 1024
+	qianwenPairingBodyLimit  = 2 * 1024
+	qianwenRequestTimeout    = 2500 * time.Millisecond
+	qianwenOpenUserIDHeader  = "X-Qianwen-Open-User-Id"
+	qianwenOpenUUIDHeader    = "X-Qianwen-Open-Uuid"
+	qianwenTimestampHeader   = "X-Qianwen-Timestamp"
+	qianwenNonceHeader       = "X-Qianwen-Nonce"
+	qianwenSignatureHeader   = "X-Qianwen-Signature"
+	qianwenPairingRetryAfter = "600"
+	qianwenTaskListLimit     = 10
+	qianwenTaskListMaxLimit  = 20
+	qianwenTaskCursorMax     = 512
 )
 
 // QianwenService is the handler seam implemented by *qianwen.Service. Keeping
 // it narrow lets HTTP contract tests inject a fake without a database.
 type QianwenService interface {
+	PairingSupported() bool
 	InstallPersonal(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) (qianwen.InstallationResult, error)
 	ListByWorkspace(context.Context, pgtype.UUID) ([]db.ChannelInstallation, error)
 	GetInWorkspace(context.Context, pgtype.UUID, pgtype.UUID) (db.ChannelInstallation, error)
+	MintPairingCode(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) (qianwen.PairingCodeResult, error)
+	RedeemPairingCode(context.Context, string, string, qianwen.PairingRedeemRequest) (qianwen.PairingBindingResult, error)
 	Revoke(context.Context, pgtype.UUID) error
-	Submit(context.Context, string, string, qianwen.SubmitRequest) (qianwen.SubmitResult, error)
-	Status(context.Context, string, string, string) (qianwen.RequestStatus, error)
+	UnbindCurrentUser(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID) error
+	Submit(context.Context, string, string, qianwen.SubmitInvocation) (qianwen.SubmitResult, error)
+	Status(context.Context, string, string, qianwen.StatusInvocation) (qianwen.RequestStatus, error)
+	ListCurrentTasks(context.Context, string, string, qianwen.TaskListInvocation) (qianwen.CurrentTaskList, error)
 }
 
 type QianwenInstallationResponse struct {
-	ID           string `json:"id"`
-	AgentID      string `json:"agent_id"`
-	ConnectionID string `json:"connection_id"`
-	Mode         string `json:"mode"`
-	Status       string `json:"status"`
+	ID               string `json:"id"`
+	AgentID          string `json:"agent_id"`
+	ConnectionID     string `json:"connection_id"`
+	Mode             string `json:"mode"`
+	Status           string `json:"status"`
+	CurrentUserBound bool   `json:"current_user_bound"`
 }
 
 type QianwenInstallResponse struct {
@@ -49,6 +66,12 @@ type QianwenInstallResponse struct {
 	TokenVisibleOnce  bool   `json:"token_visible_once"`
 	SubmitPath        string `json:"submit_path"`
 	StatusPathPattern string `json:"status_path_pattern"`
+}
+
+type QianwenPairingCodeResponse struct {
+	PairingCode     string    `json:"pairing_code"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	CodeVisibleOnce bool      `json:"code_visible_once"`
 }
 
 func qianwenInstallationResponse(row db.ChannelInstallation) QianwenInstallationResponse {
@@ -64,7 +87,7 @@ func qianwenInstallationResponse(row db.ChannelInstallation) QianwenInstallation
 
 // requireQianwenHumanActor is the handler-level backstop behind the router's
 // RequireHumanActor middleware. A task or cloud-node credential must never be
-// able to mint, rotate, list, or revoke a long-lived Skill credential on its
+// able to mint, list, or revoke a long-lived Skill credential on its
 // human owner's behalf.
 func requireQianwenHumanActor(w http.ResponseWriter, r *http.Request) bool {
 	if isMachineCredentialActor(r) {
@@ -74,9 +97,9 @@ func requireQianwenHumanActor(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// InstallQianwenPersonal creates or rotates an agent's private polling Skill
-// credential. The plaintext token is returned once; subsequent list calls only
-// expose the public connection id.
+// InstallQianwenPersonal creates an agent's private polling Skill credential or
+// reconnects an explicitly revoked installation. The plaintext token is
+// returned once; subsequent list calls only expose the public connection id.
 func (h *Handler) InstallQianwenPersonal(w http.ResponseWriter, r *http.Request) {
 	if !requireQianwenHumanActor(w, r) {
 		return
@@ -110,6 +133,14 @@ func (h *Handler) InstallQianwenPersonal(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	result, err := h.Qianwen.InstallPersonal(r.Context(), workspaceID, agentID, installerID)
+	if errors.Is(err, qianwen.ErrPairingUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "qianwen pairing is not enabled")
+		return
+	}
+	if errors.Is(err, qianwen.ErrInstallationAlreadyActive) {
+		writeError(w, http.StatusConflict, "qianwen installation is already active")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create qianwen installation")
 		return
@@ -129,7 +160,15 @@ func (h *Handler) ListQianwenInstallations(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if h.Qianwen == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"installations": []QianwenInstallationResponse{}, "configured": false})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"installations":     []QianwenInstallationResponse{},
+			"configured":        false,
+			"pairing_supported": false,
+		})
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
 		return
 	}
 	workspaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
@@ -141,15 +180,264 @@ func (h *Handler) ListQianwenInstallations(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to list qianwen installations")
 		return
 	}
+	currentUserID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	boundInstallationIDs, err := h.Queries.ListQianwenBoundInstallationIDsForUser(r.Context(), db.ListQianwenBoundInstallationIDsForUserParams{
+		WorkspaceID:   workspaceID,
+		MulticaUserID: currentUserID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load qianwen binding state")
+		return
+	}
+	bound := make(map[pgtype.UUID]struct{}, len(boundInstallationIDs))
+	for _, installationID := range boundInstallationIDs {
+		bound[installationID] = struct{}{}
+	}
 	out := make([]QianwenInstallationResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, qianwenInstallationResponse(row))
+		response := qianwenInstallationResponse(row)
+		_, response.CurrentUserBound = bound[row.ID]
+		out = append(out, response)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"installations": out,
-		"configured":    true,
-		"mode":          "personal_polling",
+		"installations":     out,
+		"configured":        true,
+		"pairing_supported": h.Qianwen.PairingSupported(),
+		"mode":              "personal_polling",
 	})
+}
+
+// UnbindQianwenCurrentUser severs only the authenticated member's own opaque
+// Qianwen identity. It never accepts a user id from the route or body and does
+// not revoke the shared installation credential.
+func (h *Handler) UnbindQianwenCurrentUser(w http.ResponseWriter, r *http.Request) {
+	if !requireQianwenHumanActor(w, r) {
+		return
+	}
+	if h.Qianwen == nil {
+		writeError(w, http.StatusServiceUnavailable, "qianwen integration is not enabled")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	installationID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "installationId"), "installation id")
+	if !ok {
+		return
+	}
+	currentUserID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	if err := h.Qianwen.UnbindCurrentUser(r.Context(), workspaceID, installationID, currentUserID); err != nil {
+		if errors.Is(err, qianwen.ErrInstallationNotFound) {
+			writeError(w, http.StatusNotFound, "qianwen installation not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to unbind qianwen identity")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// MintQianwenPairingCode returns an eight-digit code once for the currently
+// authenticated Multica user. The target identity is never accepted from the
+// request body.
+func (h *Handler) MintQianwenPairingCode(w http.ResponseWriter, r *http.Request) {
+	if !requireQianwenHumanActor(w, r) {
+		return
+	}
+	if h.Qianwen == nil {
+		writeError(w, http.StatusServiceUnavailable, "qianwen integration is not enabled")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	installationID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "installationId"), "installation id")
+	if !ok {
+		return
+	}
+	installation, err := h.Qianwen.GetInWorkspace(r.Context(), installationID, workspaceID)
+	if errors.Is(err, qianwen.ErrInstallationNotFound) {
+		writeError(w, http.StatusNotFound, "active qianwen installation not found")
+		return
+	}
+	if err != nil || installation.Status != "active" {
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load qianwen installation")
+		} else {
+			writeError(w, http.StatusNotFound, "active qianwen installation not found")
+		}
+		return
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          installation.AgentID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found in this workspace")
+		return
+	}
+	if agent.ArchivedAt.Valid {
+		writeError(w, http.StatusBadRequest, "agent is archived")
+		return
+	}
+	if !h.canInvokeAgent(r.Context(), agent, "member", userID, userID, uuidToString(workspaceID)) {
+		writeError(w, http.StatusForbidden, "you do not have access to this agent")
+		return
+	}
+	targetUserID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	result, err := h.Qianwen.MintPairingCode(r.Context(), workspaceID, installationID, targetUserID)
+	if errors.Is(err, qianwen.ErrInstallationNotFound) {
+		writeError(w, http.StatusNotFound, "active qianwen installation not found")
+		return
+	}
+	if errors.Is(err, qianwen.ErrPairingUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "qianwen pairing is not enabled")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create qianwen pairing code")
+		return
+	}
+	writeJSON(w, http.StatusCreated, QianwenPairingCodeResponse{
+		PairingCode:     result.Code,
+		ExpiresAt:       result.ExpiresAt,
+		CodeVisibleOnce: true,
+	})
+}
+
+// RedeemQianwenPairingCode is the Qianwen-side half of account pairing. The
+// body carries only the spoken one-time code; opaque user/device identity and
+// replay metadata must arrive in fixed system-derived headers so model output
+// can never choose the Multica actor being bound.
+func (h *Handler) RedeemQianwenPairingCode(w http.ResponseWriter, r *http.Request) {
+	if h.Qianwen == nil {
+		writeError(w, http.StatusServiceUnavailable, "qianwen integration is not enabled")
+		return
+	}
+	connectionID, token, ok := h.qianwenPublicCredentials(w, r)
+	if !ok {
+		return
+	}
+	identity, status, ok := qianwenInvocationMetadataFromHeaders(r)
+	if !ok {
+		if status == http.StatusForbidden {
+			writeError(w, status, "qianwen identity is unavailable")
+		} else {
+			writeError(w, status, "invalid qianwen invocation metadata")
+		}
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, qianwenPairingBodyLimit)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var body struct {
+		PairingCode string `json:"pairing_code"`
+	}
+	if err := decoder.Decode(&body); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		} else {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+		}
+		return
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), qianwenRequestTimeout)
+	defer cancel()
+	_, err := h.Qianwen.RedeemPairingCode(ctx, connectionID, token, qianwen.PairingRedeemRequest{
+		Code:     body.PairingCode,
+		Identity: identity,
+	})
+	if h.writeQianwenPairingError(w, r, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "paired"})
+}
+
+func qianwenInvocationMetadataFromHeaders(r *http.Request) (qianwen.InvocationMetadata, int, bool) {
+	read := func(name string) (string, bool) {
+		values := r.Header.Values(name)
+		returnValue := ""
+		if len(values) == 1 {
+			returnValue = values[0]
+		}
+		return returnValue, len(values) == 1 && returnValue != ""
+	}
+	openUserID, userOK := read(qianwenOpenUserIDHeader)
+	openUUID, uuidOK := read(qianwenOpenUUIDHeader)
+	if !userOK || !uuidOK {
+		if len(r.Header.Values(qianwenOpenUserIDHeader)) > 1 || len(r.Header.Values(qianwenOpenUUIDHeader)) > 1 {
+			return qianwen.InvocationMetadata{}, http.StatusUnauthorized, false
+		}
+		return qianwen.InvocationMetadata{}, http.StatusForbidden, false
+	}
+	timestamp, timestampOK := read(qianwenTimestampHeader)
+	nonce, nonceOK := read(qianwenNonceHeader)
+	signature, signatureOK := read(qianwenSignatureHeader)
+	if !timestampOK || !nonceOK || !signatureOK {
+		return qianwen.InvocationMetadata{}, http.StatusUnauthorized, false
+	}
+	return qianwen.InvocationMetadata{
+		OpenUserID: openUserID,
+		OpenUUID:   openUUID,
+		Timestamp:  timestamp,
+		Nonce:      nonce,
+		Signature:  signature,
+	}, 0, true
+}
+
+func (h *Handler) writeQianwenPairingError(w http.ResponseWriter, r *http.Request, err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, qianwen.ErrUnauthorized):
+		h.chargeQianwenBadCredential(r)
+		writeError(w, http.StatusUnauthorized, "invalid qianwen credentials")
+	case errors.Is(err, qianwen.ErrInvalidInvocation), errors.Is(err, qianwen.ErrStaleInvocation):
+		writeError(w, http.StatusUnauthorized, "invalid qianwen invocation")
+	case errors.Is(err, qianwen.ErrIdentityUnavailable), errors.Is(err, qianwen.ErrPairingAccessDenied):
+		writeError(w, http.StatusForbidden, "qianwen identity cannot be paired")
+	case errors.Is(err, qianwen.ErrPairingCodeInvalid):
+		writeError(w, http.StatusGone, "qianwen pairing code is invalid or expired")
+	case errors.Is(err, qianwen.ErrBindingAlreadyAssigned), errors.Is(err, qianwen.ErrInvocationReplay):
+		writeError(w, http.StatusConflict, "qianwen pairing request conflicts with existing state")
+	case errors.Is(err, qianwen.ErrPairingRateLimited):
+		w.Header().Set("Retry-After", qianwenPairingRetryAfter)
+		writeError(w, http.StatusTooManyRequests, "too many qianwen pairing attempts")
+	case errors.Is(err, qianwen.ErrPairingUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "qianwen pairing is not enabled")
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		writeError(w, http.StatusGatewayTimeout, "qianwen pairing request timed out")
+	default:
+		writeError(w, http.StatusInternalServerError, "qianwen pairing request failed")
+	}
+	return true
 }
 
 func (h *Handler) RevokeQianwenInstallation(w http.ResponseWriter, r *http.Request) {
@@ -207,6 +495,15 @@ func (h *Handler) SubmitQianwenRequest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	identity, identityStatus, ok := qianwenInvocationMetadataFromHeaders(r)
+	if !ok {
+		if identityStatus == http.StatusForbidden {
+			writeError(w, identityStatus, "qianwen identity is unavailable")
+		} else {
+			writeError(w, identityStatus, "invalid qianwen invocation metadata")
+		}
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, qianwenBodyLimit)
 	var req qianwen.SubmitRequest
 	decoder := json.NewDecoder(r.Body)
@@ -225,7 +522,10 @@ func (h *Handler) SubmitQianwenRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), qianwenRequestTimeout)
 	defer cancel()
-	result, err := h.Qianwen.Submit(ctx, connectionID, token, req)
+	result, err := h.Qianwen.Submit(ctx, connectionID, token, qianwen.SubmitInvocation{
+		Request:  req,
+		Identity: identity,
+	})
 	if h.writeQianwenServiceError(w, r, err) {
 		return
 	}
@@ -245,13 +545,93 @@ func (h *Handler) GetQianwenRequestStatus(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	identity, identityStatus, ok := qianwenInvocationMetadataFromHeaders(r)
+	if !ok {
+		if identityStatus == http.StatusForbidden {
+			writeError(w, identityStatus, "qianwen identity is unavailable")
+		} else {
+			writeError(w, identityStatus, "invalid qianwen invocation metadata")
+		}
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), qianwenRequestTimeout)
 	defer cancel()
-	status, err := h.Qianwen.Status(ctx, connectionID, token, chi.URLParam(r, "requestId"))
+	status, err := h.Qianwen.Status(ctx, connectionID, token, qianwen.StatusInvocation{
+		RequestID: chi.URLParam(r, "requestId"),
+		Identity:  identity,
+	})
 	if h.writeQianwenServiceError(w, r, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+// ListQianwenCurrentTasks returns the caller-relative active task projection
+// for a bound Qianwen identity. Like submit and status, the installation
+// bearer plus signed opaque identity are the only authentication inputs.
+func (h *Handler) ListQianwenCurrentTasks(w http.ResponseWriter, r *http.Request) {
+	if h.Qianwen == nil {
+		writeError(w, http.StatusServiceUnavailable, "qianwen integration is not enabled")
+		return
+	}
+	connectionID, token, ok := h.qianwenPublicCredentials(w, r)
+	if !ok {
+		return
+	}
+	identity, identityStatus, ok := qianwenInvocationMetadataFromHeaders(r)
+	if !ok {
+		if identityStatus == http.StatusForbidden {
+			writeError(w, identityStatus, "qianwen identity is unavailable")
+		} else {
+			writeError(w, identityStatus, "invalid qianwen invocation metadata")
+		}
+		return
+	}
+	taskListRequest, err := parseQianwenTaskListQuery(r.URL.RawQuery)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid qianwen task list query")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), qianwenRequestTimeout)
+	defer cancel()
+	result, err := h.Qianwen.ListCurrentTasks(ctx, connectionID, token, qianwen.TaskListInvocation{
+		Request:  taskListRequest,
+		Identity: identity,
+	})
+	if h.writeQianwenServiceError(w, r, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func parseQianwenTaskListQuery(rawQuery string) (qianwen.TaskListRequest, error) {
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return qianwen.TaskListRequest{}, err
+	}
+	for key, value := range values {
+		if (key != "limit" && key != "cursor") || len(value) != 1 {
+			return qianwen.TaskListRequest{}, qianwen.ErrInvalidRequest
+		}
+	}
+
+	request := qianwen.TaskListRequest{Limit: qianwenTaskListLimit}
+	if values.Has("limit") {
+		rawLimit := values.Get("limit")
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil || rawLimit == "" || strconv.Itoa(limit) != rawLimit || limit < 1 || limit > qianwenTaskListMaxLimit {
+			return qianwen.TaskListRequest{}, qianwen.ErrInvalidRequest
+		}
+		request.Limit = limit
+	}
+	if values.Has("cursor") {
+		request.Cursor = values.Get("cursor")
+		if len(request.Cursor) > qianwenTaskCursorMax || strings.ContainsAny(request.Cursor, "\r\n\x00") {
+			return qianwen.TaskListRequest{}, qianwen.ErrInvalidRequest
+		}
+	}
+	return request, nil
 }
 
 // qianwenPublicCredentials applies the public-ingress gates in security order:
@@ -322,6 +702,10 @@ func (h *Handler) writeQianwenServiceError(w http.ResponseWriter, r *http.Reques
 	case errors.Is(err, qianwen.ErrUnauthorized):
 		h.chargeQianwenBadCredential(r)
 		writeError(w, http.StatusUnauthorized, "invalid qianwen credentials")
+	case errors.Is(err, qianwen.ErrIdentityUnavailable), errors.Is(err, qianwen.ErrPairingAccessDenied):
+		writeError(w, http.StatusForbidden, "qianwen identity is not bound")
+	case errors.Is(err, qianwen.ErrInvalidInvocation), errors.Is(err, qianwen.ErrStaleInvocation):
+		writeError(w, http.StatusUnauthorized, "invalid qianwen invocation")
 	case errors.Is(err, qianwen.ErrInvalidRequest), errors.Is(err, qianwen.ErrUnsupportedCommand):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, qianwen.ErrRequestConflict):

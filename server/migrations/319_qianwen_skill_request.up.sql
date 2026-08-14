@@ -11,6 +11,7 @@
 CREATE TABLE qianwen_skill_request (
     installation_id  UUID NOT NULL,
     request_id       UUID NOT NULL,
+    multica_user_id  UUID NOT NULL,
     query_sha256     BYTEA NOT NULL,
     claim_token      UUID,
     claim_expires_at TIMESTAMPTZ,
@@ -27,6 +28,9 @@ COMMENT ON TABLE qianwen_skill_request IS
 
 COMMENT ON COLUMN qianwen_skill_request.query_sha256 IS
     'SHA-256 of the normalized request query; the plaintext lives only in chat_message.';
+
+COMMENT ON COLUMN qianwen_skill_request.multica_user_id IS
+    'Bound Multica user whose signed Qianwen identity submitted the request; no FK by design so the idempotency key survives member removal.';
 
 COMMENT ON COLUMN qianwen_skill_request.claim_token IS
     'Fencing token for the current submit owner; every successful claim or reclaim mints a new UUID.';

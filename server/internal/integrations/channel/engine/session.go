@@ -182,6 +182,11 @@ func newChatSessionWith(q SessionQueries, tx TxStarter, channelType channel.Type
 //
 // Sender is the already-resolved Multica user (the session creator: the sole
 // human for p2p, the installer for group chats — the caller decides which).
+//
+// Title is an optional, already-sanitized first-message title. It is consulted
+// only when a new session is created; retries that reuse an existing binding
+// can never rename that conversation. Empty/whitespace falls back to the
+// channel's configured title for the chat type.
 type EnsureSessionInput struct {
 	WorkspaceID    pgtype.UUID
 	AgentID        pgtype.UUID
@@ -190,6 +195,7 @@ type EnsureSessionInput struct {
 	BindingKey     string
 	BindingConfig  []byte
 	ChatType       channel.ChatType
+	Title          string
 }
 
 // EnsureSession returns the chat_session.id bound to (installation, BindingKey),
@@ -237,11 +243,15 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 		return pgtype.UUID{}, fmt.Errorf("lock workspace for chat session create: %w", err)
 	}
 
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		title = s.titles.forType(in.ChatType)
+	}
 	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
 		WorkspaceID: in.WorkspaceID,
 		AgentID:     in.AgentID,
 		CreatorID:   in.Sender,
-		Title:       s.titles.forType(in.ChatType),
+		Title:       title,
 	})
 	if err != nil {
 		return pgtype.UUID{}, fmt.Errorf("create chat session: %w", err)
