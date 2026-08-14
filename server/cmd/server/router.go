@@ -32,6 +32,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -946,6 +947,50 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
 	}
 
+	// Telegram integration. Same shape as Slack: BYO bot token pasted at
+	// install, one getUpdates long-polling loop per active installation
+	// supervised by the shared engine.Supervisor, resolvers on the generic
+	// channel_* tables, outbound streaming via throttled editMessageText on
+	// the event bus. Gated by MULTICA_TELEGRAM_SECRET_KEY (the at-rest token
+	// encryption key); when unset the handlers return 503 and no Factory is
+	// registered.
+	if telegramKey, err := secretbox.LoadKey("MULTICA_TELEGRAM_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(telegramKey)
+		if err != nil {
+			slog.Error("telegram: secretbox.New failed; telegram integration disabled", "error", err)
+		} else {
+			telegramBindingSvc := telegram.NewBindingTokenService(queries, pool)
+			h.TelegramBindingTokens = telegramBindingSvc
+			telegramReplier := telegram.NewOutboundReplier(telegram.OutboundReplierConfig{
+				Binding: telegramBindingSvc,
+				Decrypt: box.Open,
+				// The bind link (/telegram/bind) is a web-app page: app URL, not
+				// the API URL. Mirrors the Slack replier.
+				AppURL: appURLFromEnv(),
+				Logger: slog.Default(),
+			})
+			telegramTyping := telegram.NewTypingNotifier(box.Open, "", nil, slog.Default())
+			channelRouter.Register(telegram.TypeTelegram, telegram.NewTelegramResolverSet(queries, pool, telegramReplier, telegramTyping))
+			telegramOutbound := telegram.NewOutbound(queries, box.Open, "", nil, slog.Default())
+			telegramOutbound.Register(bus)
+			h.TelegramOutbound = telegramOutbound
+
+			// Per-installation inbound: the Supervisor builds + supervises one
+			// long-polling loop per active Telegram installation.
+			telegram.RegisterTelegram(channelRegistry, telegram.ChannelDeps{Decrypt: box.Open, Logger: slog.Default()})
+
+			installSvc, ierr := telegram.NewInstallService(queries, pool, box, slog.Default())
+			if ierr != nil {
+				slog.Error("telegram: InstallService init failed; install disabled", "error", ierr)
+			} else {
+				h.TelegramInstall = installSvc
+			}
+			slog.Info("telegram integration enabled (per-installation long polling)")
+		}
+	} else {
+		slog.Info("telegram integration disabled (MULTICA_TELEGRAM_SECRET_KEY not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -1525,6 +1570,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/dingtalk/install/byo", h.RegisterDingTalkBYO)
 					r.Patch("/dingtalk/group-routes/{routeId}", h.UpdateDingTalkGroupRoute)
 				})
+
+				// Telegram integration. Same admin/member split as Slack:
+				// listing is member-visible; install + revoke are admin-only.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/telegram/installations", h.ListTelegramInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/telegram/installations/{installationId}", h.RevokeTelegramInstallation)
+					r.Post("/telegram/install", h.RegisterTelegramBot)
+				})
 			})
 		})
 
@@ -1548,6 +1605,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// Lark/Slack: the session is the source of truth for the redeemer's
 		// Multica identity; the token only carries the WeCom userid to bind.
 		r.Post("/api/wecom/binding/redeem", h.RedeemWecomBindingToken)
+		// Telegram binding-token redemption. Same rationale: not
+		// workspace-scoped, identity from the session, token proves only
+		// "this Telegram user id requested binding".
+		r.Post("/api/telegram/binding/redeem", h.RedeemTelegramBindingToken)
 
 		// Composio integration (MUL-3720). User-scoped (no workspace context):
 		// a connection belongs to a user. These four require a logged-in

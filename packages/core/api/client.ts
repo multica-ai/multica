@@ -186,6 +186,10 @@ import type {
   ListWecomInstallationsResponse,
   RegisterWecomBYORequest,
   RedeemWecomBindingTokenResponse,
+  TelegramInstallation,
+  ListTelegramInstallationsResponse,
+  RegisterTelegramRequest,
+  RedeemTelegramBindingTokenResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -331,6 +335,12 @@ import {
   EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
+  TelegramInstallationSchema,
+  ListTelegramInstallationsResponseSchema,
+  RedeemTelegramBindingTokenResponseSchema,
+  EMPTY_TELEGRAM_INSTALLATION,
+  EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
   EMPTY_BILLING_BALANCE,
   EMPTY_BILLING_TRANSACTIONS_PAGE,
   EMPTY_BILLING_BATCHES_PAGE,
@@ -4250,6 +4260,55 @@ export class ApiClient {
       RedeemWecomBindingTokenResponseSchema,
       EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/wecom/binding/redeem" },
+    );
+  }
+
+  async listTelegramInstallations(
+    workspaceId: string,
+  ): Promise<ListTelegramInstallationsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/telegram/installations`);
+    return parseWithFallback(
+      raw,
+      ListTelegramInstallationsResponseSchema,
+      EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/telegram/installations" },
+    );
+  }
+
+  async registerTelegramBot(
+    workspaceId: string,
+    agentId: string,
+    body: RegisterTelegramRequest,
+  ): Promise<TelegramInstallation> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/telegram/install?${search.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    return parseWithFallback(raw, TelegramInstallationSchema, EMPTY_TELEGRAM_INSTALLATION, {
+      endpoint: "POST /api/workspaces/:id/telegram/install",
+    });
+  }
+
+  async deleteTelegramInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/telegram/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async redeemTelegramBindingToken(token: string): Promise<RedeemTelegramBindingTokenResponse> {
+    const raw = await this.fetch<unknown>(`/api/telegram/binding/redeem`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    return parseWithFallback(
+      raw,
+      RedeemTelegramBindingTokenResponseSchema,
+      EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
+      { endpoint: "POST /api/telegram/binding/redeem" },
     );
   }
 }

@@ -87,6 +87,21 @@
     "error_not_member": "你登录的 Multica 账号不是当前工作区成员。",
     "error_unknown": "出现未知错误。请稍后再试，如反复失败请联系工作区管理员。"
   },
+  "telegram_bind": {
+    "page_title": "绑定你的 Telegram 账号",
+    "redeeming": "正在绑定…",
+    "needs_auth_description": "请先登录 Multica 完成绑定。链接中的 token 会把你的 Telegram 账号绑定到当前登录的 Multica 用户，因此需要先登录。",
+    "sign_in": "登录",
+    "done_title": "绑定成功。",
+    "done_description": "你在 Telegram 中发给机器人的下一条消息将直达智能体。可以关闭此页面了。",
+    "error_title": "绑定未完成",
+    "error_admin_hint": "如果问题持续出现，请在 Telegram 中再给机器人发一条消息以获取新链接。",
+    "error_missing_token": "链接缺少 token。请在 Telegram 中再给机器人发一条消息以获取新链接。",
+    "error_expired": "链接无效或已过期（有效期 15 分钟）。请再给机器人发一条消息以获取新链接。",
+    "error_already_bound": "该 Telegram 账号已绑定到另一个 Multica 用户。如需转移账号，请先显式解绑。",
+    "error_not_member": "当前登录的 Multica 账号不是该工作区的成员。",
+    "error_unknown": "出了点问题。请重试；若问题持续，请联系工作区管理员。"
+  },
   "expandable_description": {
     "expand": "查看详情",
     "collapse": "收起"

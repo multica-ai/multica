@@ -400,6 +400,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           title: "로컬 폴더 병렬 모드, DingTalk 그룹별 라우팅, 스킬 원클릭 업데이트",
           changes: [],
           features: [
+            "에이전트를 Telegram에 연결해 DM, 그룹 멘션, 포럼 토픽에서 대화할 수 있어요.",
             "로컬 폴더에서 여러 태스크를 병렬로 돌리고, 각각 브랜치로 결과를 받습니다.",
             "DingTalk 봇 하나로 그룹마다 다른 에이전트를 지정할 수 있어요.",
             "가져온 스킬을 원본에서 원클릭으로 업데이트할 수 있어요.",

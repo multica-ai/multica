@@ -87,6 +87,21 @@
     "error_not_member": "サインインしている Multica アカウントはこのワークスペースのメンバーではありません。",
     "error_unknown": "問題が発生しました。もう一度試し、それでも解決しない場合はワークスペース管理者にお問い合わせください。"
   },
+  "telegram_bind": {
+    "page_title": "Telegram アカウントをリンク",
+    "redeeming": "アカウントをリンクしています…",
+    "needs_auth_description": "リンクを完了するには Multica にサインインしてください。リンク内のトークンはあなたの Telegram アカウントをこの Multica ユーザーに紐付けるため、先にログインが必要です。",
+    "sign_in": "サインイン",
+    "done_title": "リンクが完了しました。",
+    "done_description": "Telegram でボットに送る次のメッセージは、そのままエージェントに届きます。このタブは閉じて構いません。",
+    "error_title": "リンクを完了できませんでした",
+    "error_admin_hint": "問題が続く場合は、Telegram でボットに再度メッセージを送り、新しいリンクを取得してください。",
+    "error_missing_token": "リンクにトークンがありません。Telegram でボットに再度メッセージを送り、新しいリンクを取得してください。",
+    "error_expired": "このリンクは無効か期限切れです（有効期間は 15 分）。ボットに再度メッセージを送って新しいリンクを取得してください。",
+    "error_already_bound": "この Telegram アカウントは別の Multica ユーザーにリンク済みです。アカウントの移行には先に明示的なリンク解除が必要です。",
+    "error_not_member": "サインイン中の Multica アカウントはこのワークスペースのメンバーではありません。",
+    "error_unknown": "問題が発生しました。再試行しても解決しない場合は、ワークスペース管理者にお問い合わせください。"
+  },
   "expandable_description": {
     "expand": "詳細を表示",
     "collapse": "折りたたむ"
