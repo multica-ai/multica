@@ -29,14 +29,8 @@ func TestPrimeBuiltinAdmissionAndExactVersion(t *testing.T) {
 	t.Setenv("MULTICA_PRIME_AGENT_ISOLATED", "1")
 	fx.setProbeVersion("0.7.2")
 	runtimes, demotable, _ = d.detectBuiltinRuntimes(context.Background())
-	if len(demotable) != 0 || len(runtimes) != 1 || runtimes[0]["type"] != "prime" || runtimes[0]["version"] != "0.7.2" {
-		t.Fatalf("eligible runtimes=%v demotable=%v", runtimes, demotable)
-	}
-
-	fx.setProbeVersion("0.7.3")
-	runtimes, demotable, _ = d.detectBuiltinRuntimes(context.Background())
-	if len(runtimes) != 0 || !strings.Contains(demotable["prime"].reason, "exact version 0.7.2") {
-		t.Fatalf("incompatible runtimes=%v demotable=%v", runtimes, demotable)
+	if len(runtimes) != 0 || !strings.Contains(demotable["prime"].reason, "no startup hard-disable") {
+		t.Fatalf("upstream-blocked runtimes=%v demotable=%v", runtimes, demotable)
 	}
 }
 
@@ -52,5 +46,13 @@ func TestPrimeCustomProfileAdmission(t *testing.T) {
 	fx.daemon.appendProfileRuntimes(context.Background(), "ws-1", &runtimes, &failed)
 	if len(runtimes) != 0 || len(failed) != 1 || !strings.Contains(failed[0]["reason"], "MULTICA_PRIME_AGENT_ISOLATED=1") {
 		t.Fatalf("runtimes=%v failed=%v", runtimes, failed)
+	}
+	if os.Geteuid() != 0 {
+		t.Setenv("MULTICA_PRIME_AGENT_ISOLATED", "1")
+		runtimes, failed = nil, nil
+		fx.daemon.appendProfileRuntimes(context.Background(), "ws-1", &runtimes, &failed)
+		if len(runtimes) != 0 || len(failed) != 1 || !strings.Contains(failed[0]["reason"], "no startup hard-disable") {
+			t.Fatalf("upstream-blocked custom profile runtimes=%v failed=%v", runtimes, failed)
+		}
 	}
 }

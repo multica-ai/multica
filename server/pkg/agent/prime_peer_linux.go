@@ -4,7 +4,10 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"net"
+	"os"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -31,4 +34,21 @@ func kernelPrimePeerIdentity(conn net.Conn) (int, int, error) {
 		return 0, 0, sockErr
 	}
 	return int(cred.Pid), int(cred.Uid), nil
+}
+
+func primeProcessStartToken(pid int) (string, error) {
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return "", err
+	}
+	line := string(raw)
+	commandEnd := strings.LastIndex(line, ")")
+	if commandEnd < 0 || commandEnd+2 >= len(line) {
+		return "", errors.New("invalid proc stat")
+	}
+	fields := strings.Fields(line[commandEnd+2:])
+	if len(fields) <= 19 || fields[19] == "" {
+		return "", errors.New("proc start token missing")
+	}
+	return "proc:" + fields[19], nil
 }

@@ -213,7 +213,7 @@ API key と base URL の両方が空の場合、サーバーサイド LLM 生成
 
 各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` と `MULTICA_<PROVIDER>_MODEL` でコマンドパスとデフォルトモデルを上書きできます。QwenPaw だけは例外で、Multica がモデルを渡さないため `MULTICA_QWENPAW_MODEL` はありません。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
 
-Prime Agent は `MULTICA_PRIME_PATH`、`MULTICA_PRIME_MODEL`（`provider/modelId`）、必須の `MULTICA_PRIME_AGENT_ISOLATED=1` を使用します。root または v0.7.2 以外は拒否されます。
+Prime Agent は `MULTICA_PRIME_PATH`、`MULTICA_PRIME_MODEL`（`provider/modelId`）、必須の `MULTICA_PRIME_AGENT_ISOLATED=1` を使用します。root または v0.7.2 以外は拒否され、v0.7.2 も upstream が coding tools を維持したまま schedules/heartbeats を強制停止できないため admission-disabled です。
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

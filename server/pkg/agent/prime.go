@@ -224,7 +224,7 @@ func (b *primeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	if strings.TrimSpace(prompt) == "" {
 		return nil, errors.New("Prime prompt must not be empty")
 	}
-	if err := CheckPrimeAdmission(); err != nil {
+	if err := CheckPrimeAdmission(); err != nil && !(b.cfg.primeTestBypassSafetyAdmission && errors.Is(err, ErrPrimeUpstreamSchedulerUnsafe)) {
 		return nil, err
 	}
 	tmpDir, err := validatePrimeTaskTempDir(b.cfg.Env["TMPDIR"])
@@ -254,13 +254,16 @@ func (b *primeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	if err := validatePrimeArgs(append(append([]string{}, opts.ExtraArgs...), opts.CustomArgs...)); err != nil {
 		return nil, err
 	}
+	if opts.MaxTurns > 0 {
+		return nil, errors.New("Prime Agent managed runtime cannot enforce MaxTurns with the v0.7.2 RPC protocol")
+	}
 
 	socketPath := filepath.Join(tmpDir, "multica-prime-daemon.sock")
 	if err := validateUnusedPrimeSocketPath(tmpDir, socketPath); err != nil {
 		return nil, err
 	}
 	runCtx, cancel := runContext(ctx, opts.Timeout)
-	args := []string{"--mode", "rpc", "--no-extensions", "--daemon-socket", socketPath}
+	args := []string{"--mode", "rpc", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--daemon-socket", socketPath}
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}
@@ -356,6 +359,7 @@ func buildPrimeEnv(extra map[string]string) []string {
 		"PRIME_AGENT_TELEMETRY": "0",
 		"DO_NOT_TRACK":          "1",
 		"PI_SKIP_VERSION_CHECK": "1",
+		"RLM_MAX_DEPTH":         "0",
 	})
 }
 
@@ -367,7 +371,8 @@ func (b *primeBackend) run(ctx context.Context, cancel context.CancelFunc, cmd *
 	started := time.Now()
 	waitDone := make(chan error, 1)
 	go func() { waitDone <- cmd.Wait() }()
-	frames, frameErrs := pumpPrimeFrames(ctx, stdout)
+	ioCtx, ioCancel := context.WithCancel(context.Background())
+	frames, frameErrs := pumpPrimeFrames(ioCtx, stdout)
 	rpc := &primeRPC{in: stdin, frames: frames, errs: frameErrs, events: func(f primeFrame) { mapPrimeEvent(f, msgCh) }}
 	var daemonIdentity *primeDaemonIdentity
 	cleanup := func() (error, error) {
@@ -386,16 +391,34 @@ func (b *primeBackend) run(ctx context.Context, cancel context.CancelFunc, cmd *
 			_ = stdout.Close()
 			clientErr = <-waitDone
 		}
+		ioCancel()
 		return clientErr, shutdownPrimeTaskDaemon(tmpDir, socketPath, daemonIdentity, kernelPrimePeerIdentity)
 	}
 	fail := func(sessionID string, err error, resumeRejected ...bool) {
+		var usage map[string]TokenUsage
+		if sessionID != "" {
+			statsCtx, statsCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			statsResp, statsErr := rpc.request(statsCtx, map[string]any{"type": "get_session_stats"})
+			statsCancel()
+			if statsErr == nil {
+				usage, statsErr = decodePrimeUsage(statsResp.Data, sessionID, opts.Model)
+			}
+			if statsErr != nil {
+				err = fmt.Errorf("%v; Prime session accounting unavailable: %w", err, statsErr)
+			}
+		}
 		clientErr, shutdownErr := cleanup()
 		if shutdownErr != nil {
 			err = fmt.Errorf("%v; Prime task daemon shutdown failed: %w", err, shutdownErr)
 		}
-		b.finishPrime(clientErr, stderr, started, sessionID, err, len(resumeRejected) != 0 && resumeRejected[0], resCh)
+		b.finishPrime(clientErr, stderr, started, sessionID, err, usage, len(resumeRejected) != 0 && resumeRejected[0], resCh)
 	}
 
+	daemonIdentity, err := observePrimeTaskDaemon(tmpDir, socketPath, kernelPrimePeerIdentity)
+	if err != nil {
+		fail("", err)
+		return
+	}
 	stateResp, err := rpc.request(ctx, map[string]any{"type": "get_state"})
 	if err != nil {
 		fail("", err)
@@ -404,11 +427,6 @@ func (b *primeBackend) run(ctx context.Context, cancel context.CancelFunc, cmd *
 	var state primeState
 	if json.Unmarshal(stateResp.Data, &state) != nil || state.SessionID == "" || state.MessageCount == nil || state.IsStreaming {
 		fail("", errors.New("Prime RPC get_state compatibility check failed"))
-		return
-	}
-	daemonIdentity, err = observePrimeTaskDaemon(tmpDir, socketPath, kernelPrimePeerIdentity)
-	if err != nil {
-		fail(state.SessionID, err)
 		return
 	}
 	if opts.ResumeSessionID != "" && state.SessionID != opts.ResumeSessionID {
@@ -486,31 +504,36 @@ func (b *primeBackend) run(ctx context.Context, cancel context.CancelFunc, cmd *
 		fail(state.SessionID, statsErr)
 		return
 	}
-	var s primeStats
-	if json.Unmarshal(statsResp.Data, &s) != nil {
-		fail(state.SessionID, errors.New("invalid Prime session-stats response"))
+	usage, statsErr := decodePrimeUsage(statsResp.Data, state.SessionID, opts.Model)
+	if statsErr != nil {
+		fail(state.SessionID, statsErr)
 		return
 	}
-	scaledCost := s.Cost * CostUSDTicksPerUSD
-	if s.SessionID != state.SessionID || s.Tokens.Input < 0 || s.Tokens.Output < 0 || s.Tokens.CacheRead < 0 || s.Tokens.CacheWrite < 0 || s.Cost < 0 || math.IsNaN(s.Cost) || math.IsInf(s.Cost, 0) || math.IsNaN(scaledCost) || math.IsInf(scaledCost, 0) || scaledCost < 0 || scaledCost >= float64(math.MaxInt64)-2048 {
-		fail(state.SessionID, errors.New("invalid Prime session-stats response"))
-		return
-	}
-	key := opts.Model
-	if key == "" {
-		key = "prime/default"
-	}
-	usage := map[string]TokenUsage{key: {InputTokens: s.Tokens.Input, OutputTokens: s.Tokens.Output, CacheReadTokens: s.Tokens.CacheRead, CacheWriteTokens: s.Tokens.CacheWrite, CostUSDTicks: int64(math.Round(scaledCost))}}
 	clientErr, shutdownErr := cleanup()
 	if shutdownErr != nil {
-		b.finishPrime(clientErr, stderr, started, state.SessionID, shutdownErr, false, resCh)
+		b.finishPrime(clientErr, stderr, started, state.SessionID, shutdownErr, usage, false, resCh)
 		return
 	}
 	if clientErr != nil {
-		b.finishPrime(clientErr, stderr, started, state.SessionID, errors.New("Prime RPC client exited unsuccessfully"), false, resCh)
+		b.finishPrime(clientErr, stderr, started, state.SessionID, errors.New("Prime RPC client exited unsuccessfully"), usage, false, resCh)
 		return
 	}
 	resCh <- Result{Status: "completed", Output: output, SessionID: state.SessionID, Usage: usage, DurationMs: time.Since(started).Milliseconds()}
+}
+
+func decodePrimeUsage(raw json.RawMessage, sessionID, model string) (map[string]TokenUsage, error) {
+	var s primeStats
+	if json.Unmarshal(raw, &s) != nil {
+		return nil, errors.New("invalid Prime session-stats response")
+	}
+	scaledCost := s.Cost * CostUSDTicksPerUSD
+	if s.SessionID != sessionID || s.Tokens.Input < 0 || s.Tokens.Output < 0 || s.Tokens.CacheRead < 0 || s.Tokens.CacheWrite < 0 || s.Cost < 0 || math.IsNaN(s.Cost) || math.IsInf(s.Cost, 0) || math.IsNaN(scaledCost) || math.IsInf(scaledCost, 0) || scaledCost < 0 || scaledCost >= float64(math.MaxInt64)-2048 {
+		return nil, errors.New("invalid Prime session-stats response")
+	}
+	if model == "" {
+		model = "prime/default"
+	}
+	return map[string]TokenUsage{model: {InputTokens: s.Tokens.Input, OutputTokens: s.Tokens.Output, CacheReadTokens: s.Tokens.CacheRead, CacheWriteTokens: s.Tokens.CacheWrite, CostUSDTicks: int64(math.Round(scaledCost))}}, nil
 }
 
 type primeDaemonHello struct {
@@ -520,15 +543,17 @@ type primeDaemonHello struct {
 		Name    string `json:"name"`
 		Version int    `json:"version"`
 	} `json:"protocol"`
-	SchemaID      string `json:"schemaId"`
-	AppVersion    string `json:"appVersion"`
-	SupervisorPID int    `json:"supervisorPid"`
-	ClientID      string `json:"clientId"`
+	SchemaID                 string `json:"schemaId"`
+	AppVersion               string `json:"appVersion"`
+	SupervisorPID            int    `json:"supervisorPid"`
+	SupervisorProcessStartID string `json:"supervisorProcessStartId"`
+	ClientID                 string `json:"clientId"`
 }
 
 type primeDaemonIdentity struct {
-	PID  int
-	PGID int
+	PID        int
+	PGID       int
+	StartToken string
 }
 
 func validatePrimeSocket(tmpDir, socketPath string) error {
@@ -557,32 +582,45 @@ func readPrimeDaemonIdentity(conn net.Conn, socketPath string, peerIdentity func
 	if err != nil {
 		return nil, primeDaemonHello{}, errors.New("Prime daemon kernel peer process identity could not be verified")
 	}
-	identity := &primeDaemonIdentity{PID: peerPID, PGID: peerPGID}
+	startToken, err := primeProcessStartToken(peerPID)
+	if err != nil || startToken == "" {
+		return nil, primeDaemonHello{}, errors.New("Prime daemon process start identity could not be verified")
+	}
+	identity := &primeDaemonIdentity{PID: peerPID, PGID: peerPGID, StartToken: startToken}
 	b, err := newPrimeJSONLReader(conn).ReadFrame()
 	if err != nil {
 		return identity, primeDaemonHello{}, fmt.Errorf("read Prime daemon hello: %w", err)
 	}
 	var hello primeDaemonHello
-	if json.Unmarshal(b, &hello) != nil || hello.Type != "daemon_hello" || hello.Protocol.Name != "prime-agent.daemon" || hello.Protocol.Version != primeDaemonProtocolVersion || hello.SchemaID != primeDaemonSchemaID || hello.AppVersion != PrimeAgentVersion || filepath.Clean(hello.SocketPath) != socketPath || hello.SupervisorPID != peerPID || hello.ClientID == "" {
+	if json.Unmarshal(b, &hello) != nil || hello.Type != "daemon_hello" || hello.Protocol.Name != "prime-agent.daemon" || hello.Protocol.Version != primeDaemonProtocolVersion || hello.SchemaID != primeDaemonSchemaID || hello.AppVersion != PrimeAgentVersion || filepath.Clean(hello.SocketPath) != socketPath || hello.SupervisorPID != peerPID || hello.SupervisorProcessStartID != startToken || hello.ClientID == "" {
 		return identity, hello, errors.New("Prime daemon hello compatibility or identity check failed")
 	}
 	return identity, hello, nil
 }
 
 func observePrimeTaskDaemon(tmpDir, socketPath string, peerIdentity func(net.Conn) (int, int, error)) (*primeDaemonIdentity, error) {
-	if err := validatePrimeSocket(tmpDir, socketPath); err != nil {
-		return nil, fmt.Errorf("observe Prime daemon socket: %w", err)
-	}
 	deadline := time.Now().Add(primeShutdownTimeout)
-	conn, err := net.DialTimeout("unix", socketPath, time.Until(deadline))
-	if err != nil {
-		return nil, errors.New("connect to task-local Prime daemon for identity observation failed")
+	var conn net.Conn
+	for time.Now().Before(deadline) {
+		err := validatePrimeSocket(tmpDir, socketPath)
+		if err == nil {
+			conn, err = net.DialTimeout("unix", socketPath, 250*time.Millisecond)
+			if err == nil {
+				break
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("observe Prime daemon socket: %w", err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if conn == nil {
+		return nil, errors.New("task-local Prime daemon identity observation timed out")
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(deadline)
 	identity, _, err := readPrimeDaemonIdentity(conn, socketPath, peerIdentity)
 	if err != nil && identity != nil {
-		return nil, forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, socketPath, err.Error(), true)
+		return nil, forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, identity.StartToken, socketPath, err.Error(), true)
 	}
 	return identity, err
 }
@@ -592,10 +630,16 @@ func shutdownPrimeTaskDaemon(tmpDir, socketPath string, identity *primeDaemonIde
 		return errors.New("Prime daemon cleanup could not be proven because no authenticated supervisor identity was captured")
 	}
 	if err := validatePrimeSocket(tmpDir, socketPath); errors.Is(err, os.ErrNotExist) {
-		if primeSupervisorGone(identity.PID, identity.PGID) {
+		if primeSupervisorGone(identity.PID, identity.PGID, identity.StartToken) {
+			// Distinguish a genuinely exited supervisor from PID/PGID/start-token
+			// reuse. forcePrimeSupervisor is a no-op for ESRCH but refuses to
+			// signal when any captured identity component changed.
+			if err := forcePrimeSupervisor(identity.PID, identity.PGID, identity.StartToken); err != nil {
+				return fmt.Errorf("Prime daemon supervisor identity changed after socket removal: %w", err)
+			}
 			return nil
 		}
-		return forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, socketPath, "Prime daemon unlinked its socket while supervisor remained alive", false)
+		return forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, identity.StartToken, socketPath, "Prime daemon unlinked its socket while supervisor remained alive", false)
 	} else if err != nil {
 		return err
 	}
@@ -607,12 +651,12 @@ func shutdownPrimeTaskDaemon(tmpDir, socketPath string, identity *primeDaemonIde
 	defer conn.Close()
 	_ = conn.SetDeadline(deadline)
 	observed, hello, err := readPrimeDaemonIdentity(conn, socketPath, peerIdentity)
-	if err != nil || observed.PID != identity.PID || observed.PGID != identity.PGID {
+	if err != nil || observed.PID != identity.PID || observed.PGID != identity.PGID || observed.StartToken != identity.StartToken {
 		cause := "Prime daemon reconnect identity mismatch"
 		if err != nil {
 			cause = err.Error()
 		}
-		return forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, socketPath, cause, true)
+		return forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, identity.StartToken, socketPath, cause, true)
 	}
 	reader := newPrimeJSONLReader(conn)
 	id := fmt.Sprintf("multica-shutdown-%d", time.Now().UnixNano())
@@ -623,7 +667,7 @@ func shutdownPrimeTaskDaemon(tmpDir, socketPath string, identity *primeDaemonIde
 	}
 	payload, _ := json.Marshal(envelope)
 	if _, err := conn.Write(append(payload, '\n')); err != nil {
-		return forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, socketPath, "write shutdown command failed", true)
+		return forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, identity.StartToken, socketPath, "write shutdown command failed", true)
 	}
 	frameBytes, err := reader.ReadFrame()
 	if err == nil {
@@ -634,23 +678,23 @@ func shutdownPrimeTaskDaemon(tmpDir, socketPath string, identity *primeDaemonIde
 			Success bool   `json:"success"`
 		}
 		if json.Unmarshal(frameBytes, &response) != nil || response.ID != id || response.Type != "response" || response.Command != "shutdown" || !response.Success {
-			return forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, socketPath, "shutdown response failed correlation or success validation", true)
+			return forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, identity.StartToken, socketPath, "shutdown response failed correlation or success validation", true)
 		}
 	} else {
-		return forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, socketPath, "read shutdown response failed", true)
+		return forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, identity.StartToken, socketPath, "read shutdown response failed", true)
 	}
 	_ = conn.Close()
-	if waitPrimeSupervisorGone(identity.PID, identity.PGID, socketPath, primeTerminateGrace) {
+	if waitPrimeSupervisorGone(identity.PID, identity.PGID, identity.StartToken, socketPath, primeTerminateGrace) {
 		return nil
 	}
-	return forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, socketPath, "graceful shutdown was not proven", false)
+	return forceAndVerifyPrimeSupervisor(identity.PID, identity.PGID, identity.StartToken, socketPath, "graceful shutdown was not proven", false)
 }
 
-func forceAndVerifyPrimeSupervisor(pid, pgid int, socketPath, cause string, failClosed bool) error {
-	if err := forcePrimeSupervisor(pid, pgid); err != nil {
+func forceAndVerifyPrimeSupervisor(pid, pgid int, startToken, socketPath, cause string, failClosed bool) error {
+	if err := forcePrimeSupervisor(pid, pgid, startToken); err != nil {
 		return fmt.Errorf("%s; targeted Prime supervisor termination failed: %w", cause, err)
 	}
-	if !waitPrimeSupervisorGone(pid, pgid, socketPath, primeTerminateGrace) {
+	if !waitPrimeSupervisorGone(pid, pgid, startToken, socketPath, primeTerminateGrace) {
 		return fmt.Errorf("%s; targeted Prime supervisor termination was not proven", cause)
 	}
 	if failClosed {
@@ -659,17 +703,17 @@ func forceAndVerifyPrimeSupervisor(pid, pgid int, socketPath, cause string, fail
 	return nil
 }
 
-func waitPrimeSupervisorGone(pid, pgid int, socketPath string, timeout time.Duration) bool {
+func waitPrimeSupervisorGone(pid, pgid int, startToken, socketPath string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		_, socketErr := os.Lstat(socketPath)
-		if errors.Is(socketErr, os.ErrNotExist) && primeSupervisorGone(pid, pgid) {
+		if errors.Is(socketErr, os.ErrNotExist) && primeSupervisorGone(pid, pgid, startToken) {
 			return true
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 	_, socketErr := os.Lstat(socketPath)
-	return errors.Is(socketErr, os.ErrNotExist) && primeSupervisorGone(pid, pgid)
+	return errors.Is(socketErr, os.ErrNotExist) && primeSupervisorGone(pid, pgid, startToken)
 }
 
 func mapPrimeEvent(f primeFrame, ch chan Message) {
@@ -703,7 +747,7 @@ func mapPrimeEvent(f primeFrame, ch chan Message) {
 	}
 }
 
-func (b *primeBackend) finishPrime(waitErr error, stderr *stderrTail, started time.Time, sessionID string, err error, resumeRejected bool, resCh chan Result) {
+func (b *primeBackend) finishPrime(waitErr error, stderr *stderrTail, started time.Time, sessionID string, err error, usage map[string]TokenUsage, resumeRejected bool, resCh chan Result) {
 	status := "failed"
 	if errors.Is(err, context.Canceled) {
 		status = "cancelled"
@@ -715,5 +759,5 @@ func (b *primeBackend) finishPrime(waitErr error, stderr *stderrTail, started ti
 	if waitErr != nil {
 		msg = withAgentStderr(msg, "Prime Agent", sanitizeAgentDiagnostic(stderr.Tail()))
 	}
-	resCh <- Result{Status: status, Error: msg, SessionID: sessionID, DurationMs: time.Since(started).Milliseconds(), ResumeRejected: resumeRejected}
+	resCh <- Result{Status: status, Error: msg, SessionID: sessionID, Usage: usage, DurationMs: time.Since(started).Milliseconds(), ResumeRejected: resumeRejected}
 }

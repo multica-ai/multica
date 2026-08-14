@@ -49,7 +49,9 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 <Callout type="warning">
 Prime Agent v0.7.2 executes model-generated code with its current OS permissions; its worker/kernel split is not a security sandbox. Multica registers it only when the daemon is non-root and `MULTICA_PRIME_AGENT_ISOLATED=1` attests an isolated container or restricted OS identity. Do not attach unrestricted host mounts or production credentials.
 
-Managed Prime agents do not use the shared `~/.prime/agent` directory. Multica assigns each runtime/agent pair a private persistent state directory for sessions, settings, authentication, and user-level skills; configure credentials separately for each managed agent or provide explicitly scoped environment credentials. Do not place tenant-shared MCP settings or secrets in Prime project state.
+**Current compatibility status:** Prime Agent v0.7.2 is cataloged but admission-disabled. Its daemon can load and run persisted schedules and heartbeats immediately at startup, before Multica can inspect them, and the official CLI has no startup flag or policy that hard-disables that scheduler while retaining coding tools. Listing or cancelling jobs after startup is inherently racy, so Multica fails closed. Health diagnostics report this upstream blocker; rollback is simply removal of the Prime runtime selection/state because no Prime task is admitted.
+
+Managed Prime agents do not use the shared `~/.prime/agent` directory. Multica assigns each workspace/runtime/agent tuple a private persistent state directory for sessions, settings, authentication, and user-level skills; configure credentials separately for each managed agent or provide explicitly scoped environment credentials. Do not place tenant-shared MCP settings or secrets in Prime project state.
 </Callout>
 
 ## Model sources

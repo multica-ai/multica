@@ -29,7 +29,11 @@ export interface RuntimeCatalogSections {
 // Re-export the whitelist as a typed array so callers (the family picker,
 // the catalog builder) share the single source of truth.
 export const PROTOCOL_FAMILIES: readonly RuntimeProtocolFamily[] =
-  RUNTIME_PROFILE_PROTOCOL_FAMILIES;
+  RUNTIME_PROFILE_PROTOCOL_FAMILIES.filter(
+    // Prime remains reserved in the API/schema for compatibility and admin
+    // diagnostics, but v0.7.2 cannot be offered as a managed runtime safely.
+    (family) => family !== "prime",
+  );
 
 // buildRuntimeCatalog keeps user-owned custom profiles separate from built-in
 // protocol families. The dialog renders customs as the primary management

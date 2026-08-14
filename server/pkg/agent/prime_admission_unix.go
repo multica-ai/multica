@@ -9,6 +9,8 @@ import (
 	"syscall"
 )
 
+var ErrPrimeUpstreamSchedulerUnsafe = errors.New("Prime Agent v0.7.2 is disabled: upstream provides no startup hard-disable for persisted schedules/heartbeats, so work may execute before Multica can inspect or cancel it")
+
 // CheckPrimeAdmission is deliberately an operator attestation, not a sandbox
 // detector. Prime executes model-generated code with its current OS identity.
 func CheckPrimeAdmission() error {
@@ -21,7 +23,7 @@ func CheckPrimeAdmission() error {
 	if os.Geteuid() == 0 {
 		return errors.New("Prime Agent disabled: the Multica daemon must run as a non-root OS identity")
 	}
-	return nil
+	return ErrPrimeUpstreamSchedulerUnsafe
 }
 
 func validatePrimeSocketOwner(info os.FileInfo) error {
@@ -34,18 +36,29 @@ func validatePrimeSocketOwner(info os.FileInfo) error {
 
 func primeSupervisorIdentity(pid int) (int, error) { return syscall.Getpgid(pid) }
 
-func primeSupervisorGone(pid, expectedPGID int) bool {
+func primeSupervisorGone(pid, expectedPGID int, expectedStartToken string) bool {
 	pgid, err := syscall.Getpgid(pid)
-	return errors.Is(err, syscall.ESRCH) || (err == nil && pgid != expectedPGID)
+	if errors.Is(err, syscall.ESRCH) || (err == nil && pgid != expectedPGID) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	startToken, err := primeProcessStartToken(pid)
+	return err == nil && startToken != expectedStartToken
 }
 
-func forcePrimeSupervisor(pid, expectedPGID int) error {
+func forcePrimeSupervisor(pid, expectedPGID int, expectedStartToken string) error {
 	pgid, err := syscall.Getpgid(pid)
 	if errors.Is(err, syscall.ESRCH) {
 		return nil
 	}
 	if err != nil || pgid != expectedPGID {
 		return fmt.Errorf("supervisor process identity changed")
+	}
+	startToken, err := primeProcessStartToken(pid)
+	if err != nil || startToken != expectedStartToken {
+		return fmt.Errorf("supervisor process start identity changed")
 	}
 	if pgid == pid {
 		return syscall.Kill(-pid, syscall.SIGKILL)

@@ -265,6 +265,9 @@ type Config struct {
 	// vendor's binary; it defaults to false so an unset caller fails
 	// closed onto standard behavior.
 	BuiltinRuntime bool
+	// primeTestBypassSafetyAdmission is package-private test plumbing. Shipping
+	// callers cannot enable a runtime blocked by Prime's upstream safety gate.
+	primeTestBypassSafetyAdmission bool
 }
 
 // New creates a Backend for the given agent type.

@@ -5,6 +5,9 @@ package agent
 import (
 	"errors"
 	"net"
+	"os/exec"
+	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -35,4 +38,16 @@ func kernelPrimePeerIdentity(conn net.Conn) (int, int, error) {
 		return 0, 0, sockErr
 	}
 	return pid, int(cred.Uid), nil
+}
+
+func primeProcessStartToken(pid int) (string, error) {
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "lstart=").Output()
+	if err != nil {
+		return "", err
+	}
+	start := strings.TrimSpace(string(out))
+	if start == "" {
+		return "", errors.New("process start token missing")
+	}
+	return "ps:" + start, nil
 }

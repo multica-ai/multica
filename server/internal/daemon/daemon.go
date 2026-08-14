@@ -6796,7 +6796,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentEnv["OPENCLAW_CONFIG_PATH"] = env.OpenclawConfigPath
 	}
 	if provider == "prime" {
-		primeStateDir, err := preparePrimeAgentStateDir(d.cfg.Profile, task.RuntimeID, task.AgentID)
+		primeStateDir, err := preparePrimeAgentStateDir(d.cfg.Profile, task.WorkspaceID, task.RuntimeID, task.AgentID)
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare Prime Agent state directory: %w", err)
 		}
@@ -8341,7 +8341,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "REASONIX_STATE_HOME", "PRIME_AGENT_CODING_AGENT_DIR", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "REASONIX_STATE_HOME", "PRIME_AGENT_CODING_AGENT_DIR", "RLM_MAX_DEPTH", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false
@@ -8478,8 +8478,12 @@ func prepareReasonixTaskStateHome(profile, runtimeID, agentID string) (string, e
 // preparePrimeAgentStateDir isolates Prime's persistent sessions, settings,
 // auth, and user-level skills per Multica runtime/agent pair. Task TMPDIR stays
 // ephemeral and separately owns the detached daemon socket.
-func preparePrimeAgentStateDir(profile, runtimeID, agentID string) (string, error) {
+func preparePrimeAgentStateDir(profile, workspaceID, runtimeID, agentID string) (string, error) {
 	profileDir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return "", err
+	}
+	workspaceSegment, err := validateReasonixStateSegment("workspace", workspaceID)
 	if err != nil {
 		return "", err
 	}
@@ -8491,14 +8495,7 @@ func preparePrimeAgentStateDir(profile, runtimeID, agentID string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(profileDir, "prime-agent-state", runtimeSegment, agentSegment)
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return "", err
-	}
-	if err := os.Chmod(path, 0o700); err != nil {
-		return "", err
-	}
-	return path, nil
+	return securePrimeStateDir(profileDir, "prime-agent-state", workspaceSegment, runtimeSegment, agentSegment)
 }
 
 // prepareDshTaskSessionRoot keeps DSH transcripts private to one Multica

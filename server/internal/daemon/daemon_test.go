@@ -159,6 +159,7 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "CODEX_HOME", want: true},
 		{key: "REASONIX_STATE_HOME", want: true},
 		{key: "PRIME_AGENT_CODING_AGENT_DIR", want: true},
+		{key: "RLM_MAX_DEPTH", want: true},
 		{key: "CURSOR_DATA_DIR", want: true},
 		{key: "cursor_data_dir", want: true},
 		{key: "CURSOR_MCP_AUTH_SOURCE", want: true},
@@ -213,11 +214,11 @@ func TestPreparePrimeAgentStateDir(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	got, err := preparePrimeAgentStateDir("work", "runtime-1", "agent_2")
+	got, err := preparePrimeAgentStateDir("work", "workspace-3", "runtime-1", "agent_2")
 	if err != nil {
 		t.Fatalf("preparePrimeAgentStateDir: %v", err)
 	}
-	want := filepath.Join(home, ".multica", "profiles", "work", "prime-agent-state", "runtime-1", "agent_2")
+	want := filepath.Join(home, ".multica", "profiles", "work", "prime-agent-state", "workspace-3", "runtime-1", "agent_2")
 	if got != want {
 		t.Fatalf("state dir = %q, want %q", got, want)
 	}
@@ -232,6 +233,29 @@ func TestPreparePrimeAgentStateDir(t *testing.T) {
 	layerCustomEnvAndHermesHome(agentEnv, map[string]string{"PRIME_AGENT_CODING_AGENT_DIR": "/shared/unsafe"}, "", nil)
 	if agentEnv["PRIME_AGENT_CODING_AGENT_DIR"] != got {
 		t.Fatal("custom env overrode daemon-owned Prime state directory")
+	}
+	sibling, err := preparePrimeAgentStateDir("work", "workspace-4", "runtime-1", "agent_2")
+	if err != nil || sibling == got || !strings.Contains(sibling, "workspace-4") {
+		t.Fatalf("workspace sibling isolation failed: path=%q err=%v", sibling, err)
+	}
+}
+
+func TestPreparePrimeAgentStateDirRejectsPreplacedSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows Prime admission is disabled and symlink creation requires privileges")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	profileDir := filepath.Join(home, ".multica", "profiles", "work")
+	if err := os.MkdirAll(profileDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(profileDir, "prime-agent-state")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := preparePrimeAgentStateDir("work", "workspace-3", "runtime-1", "agent_2"); err == nil {
+		t.Fatal("preplaced Prime state symlink was accepted")
 	}
 }
 

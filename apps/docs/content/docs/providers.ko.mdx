@@ -46,7 +46,9 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 
 "Multica의 MCP 관리"는 에이전트 설정에 MCP server를 입력하면 Multica가 실행 전에 해당 도구로 전달할 수 있다는 뜻입니다. 도구 자체에 다른 MCP 설정 방법이 없다는 뜻은 아닙니다.
 
-관리형 Prime Agent는 공유 `~/.prime/agent` 디렉터리를 사용하지 않습니다. Multica는 runtime/agent별로 sessions, settings, authentication, user skills를 위한 비공개 영구 디렉터리를 할당합니다. 각 managed agent에서 인증을 별도로 구성하거나 명시적으로 범위가 제한된 환경 자격 증명을 사용하세요. tenant 간에 공유되는 MCP settings나 secrets를 Prime project state에 저장하지 마세요.
+**현재 호환 상태:** Prime Agent v0.7.2는 catalog에는 표시되지만 실행 admission은 비활성화됩니다. 공식 daemon은 Multica가 검사하기 전에 영구 schedules/heartbeats를 실행할 수 있으며 coding tools를 유지하면서 startup 시 이를 hard-disable하는 공식 mechanism이 없습니다. 시작 후 cancel은 경쟁 조건이므로 Multica는 fail closed합니다.
+
+관리형 Prime Agent는 공유 `~/.prime/agent` 디렉터리를 사용하지 않습니다. Multica는 workspace/runtime/agent별로 sessions, settings, authentication, user skills를 위한 비공개 영구 디렉터리를 할당합니다. 각 managed agent에서 인증을 별도로 구성하거나 명시적으로 범위가 제한된 환경 자격 증명을 사용하세요. tenant 간에 공유되는 MCP settings나 secrets를 Prime project state에 저장하지 마세요.
 
 ## 모델 출처
 

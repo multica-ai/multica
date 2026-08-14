@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -70,6 +71,16 @@ func TestPrimeAdmissionRequiresExplicitAttestation(t *testing.T) {
 	}
 }
 
+func TestPrimeAdmissionFailsClosedOnUpstreamScheduler(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root is rejected before the upstream capability gate")
+	}
+	t.Setenv("MULTICA_PRIME_AGENT_ISOLATED", "1")
+	if err := CheckPrimeAdmission(); !errors.Is(err, ErrPrimeUpstreamSchedulerUnsafe) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestPrimeJSONLStrictFraming(t *testing.T) {
 	r := newPrimeJSONLReader(strings.NewReader("{\"text\":\"a\u2028b\u2029c\"}\r\n{}\n"))
 	first, err := r.ReadFrame()
@@ -119,6 +130,13 @@ func TestPrimeModelAndReservedArgs(t *testing.T) {
 		if err := validatePrimeArgs(blocked); err == nil || !strings.Contains(err.Error(), "Multica-managed") {
 			t.Errorf("arguments %q were not rejected with managed-runtime guidance: %v", blocked, err)
 		}
+	}
+}
+
+func TestPrimeRejectsUnenforceableMaxTurns(t *testing.T) {
+	b, dir := primeTestBackend(t, "success", nil)
+	if _, err := b.Execute(context.Background(), "hello", ExecOptions{Cwd: dir, MaxTurns: 1}); err == nil || !strings.Contains(err.Error(), "cannot enforce MaxTurns") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -173,6 +191,10 @@ func TestPrimeDaemonShutdownWireIsTaskLocal(t *testing.T) {
 			if err := supervisor.Start(); err != nil {
 				t.Fatal(err)
 			}
+			supervisorStartToken, err := primeProcessStartToken(supervisor.Process.Pid)
+			if err != nil {
+				t.Fatal(err)
+			}
 			t.Cleanup(func() { _ = supervisor.Process.Kill(); _, _ = supervisor.Process.Wait() })
 			sentinelProcess := exec.Command("sleep", "30")
 			configureProcessGroup(sentinelProcess)
@@ -198,7 +220,7 @@ func TestPrimeDaemonShutdownWireIsTaskLocal(t *testing.T) {
 					"type": "daemon_hello", "socketPath": socketPath,
 					"protocol": map[string]any{"name": "prime-agent.daemon", "version": tc.version},
 					"schemaId": primeDaemonSchemaID, "appVersion": PrimeAgentVersion,
-					"supervisorPid": helloPID, "clientId": "fixture-client",
+					"supervisorPid": helloPID, "supervisorProcessStartId": supervisorStartToken, "clientId": "fixture-client",
 				})
 				if tc.version != primeDaemonProtocolVersion || tc.forgedPID {
 					_ = listener.Close()
@@ -226,7 +248,7 @@ func TestPrimeDaemonShutdownWireIsTaskLocal(t *testing.T) {
 			if pgidErr != nil {
 				t.Fatal(pgidErr)
 			}
-			err = shutdownPrimeTaskDaemon(tmpDir, socketPath, &primeDaemonIdentity{PID: supervisor.Process.Pid, PGID: pgid}, func(net.Conn) (int, int, error) {
+			err = shutdownPrimeTaskDaemon(tmpDir, socketPath, &primeDaemonIdentity{PID: supervisor.Process.Pid, PGID: pgid, StartToken: supervisorStartToken}, func(net.Conn) (int, int, error) {
 				return supervisor.Process.Pid, os.Geteuid(), nil
 			})
 			if (err != nil) != tc.wantErr {
@@ -240,10 +262,10 @@ func TestPrimeDaemonShutdownWireIsTaskLocal(t *testing.T) {
 					t.Fatalf("unexpected wire command: %#v", command)
 				}
 			}
-			if tc.wantKilled && !primeSupervisorGone(supervisor.Process.Pid, supervisor.Process.Pid) {
+			if tc.wantKilled && !primeSupervisorGone(supervisor.Process.Pid, supervisor.Process.Pid, supervisorStartToken) {
 				t.Fatal("verified supervisor survived forced targeted cleanup")
 			}
-			if tc.wantErr && !tc.wantKilled && primeSupervisorGone(supervisor.Process.Pid, supervisor.Process.Pid) {
+			if tc.wantErr && !tc.wantKilled && primeSupervisorGone(supervisor.Process.Pid, supervisor.Process.Pid, supervisorStartToken) {
 				t.Fatal("unverified supervisor was terminated")
 			}
 			if err := syscall.Kill(sentinelProcess.Process.Pid, 0); err != nil {
@@ -314,7 +336,7 @@ func TestPrimeExecuteFakeRPC(t *testing.T) {
 	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	b := &primeBackend{cfg: Config{ExecutablePath: wrapper, Logger: slog.Default(), Env: map[string]string{
+	b := &primeBackend{cfg: Config{ExecutablePath: wrapper, Logger: slog.Default(), primeTestBypassSafetyAdmission: true, Env: map[string]string{
 		"GO_WANT_PRIME_HELPER": "1", "TMPDIR": tmpDir, "PRIME_TEST_SHUTDOWN_FILE": filepath.Join(dir, "prime-shutdown"),
 	}}}
 	session, err := b.Execute(context.Background(), "hello", ExecOptions{Cwd: dir, Model: "openai/gpt-test", ThinkingLevel: "high"})
@@ -373,7 +395,7 @@ func primeTestBackend(t *testing.T, mode string, extraEnv map[string]string) (*p
 	for key, value := range extraEnv {
 		env[key] = value
 	}
-	return &primeBackend{cfg: Config{ExecutablePath: wrapper, Logger: slog.Default(), Env: env}}, dir
+	return &primeBackend{cfg: Config{ExecutablePath: wrapper, Logger: slog.Default(), Env: env, primeTestBypassSafetyAdmission: true}}, dir
 }
 
 func assertPrimeShutdown(t *testing.T, dir string) {
@@ -392,7 +414,7 @@ func TestPrimeRequiresPrivateTaskTMPDIR(t *testing.T) {
 		t.Skip("admission correctly rejects root")
 	}
 	t.Setenv("MULTICA_PRIME_AGENT_ISOLATED", "1")
-	b := &primeBackend{cfg: Config{ExecutablePath: "does-not-matter", Logger: slog.Default()}}
+	b := &primeBackend{cfg: Config{ExecutablePath: "does-not-matter", Logger: slog.Default(), primeTestBypassSafetyAdmission: true}}
 	if _, err := b.Execute(context.Background(), "hello", ExecOptions{}); err == nil || !strings.Contains(err.Error(), "task-private TMPDIR") {
 		t.Fatalf("missing TMPDIR err=%v", err)
 	}
@@ -465,6 +487,9 @@ func TestPrimeTerminalErrorAndResumeMismatch(t *testing.T) {
 		if res.Status != "failed" || !strings.Contains(res.Error, "provider exploded") {
 			t.Fatalf("result=%+v", res)
 		}
+		if res.Usage["prime/default"].InputTokens != 10 {
+			t.Fatalf("terminal failure lost usage: %+v", res.Usage)
+		}
 		assertPrimeShutdown(t, dir)
 	})
 	t.Run("resume mismatch", func(t *testing.T) {
@@ -532,16 +557,71 @@ func TestPrimeUnlinkedSocketStillTerminatesCapturedSupervisor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity := &primeDaemonIdentity{PID: supervisor.Process.Pid, PGID: pgid}
+	startToken, err := primeProcessStartToken(supervisor.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := &primeDaemonIdentity{PID: supervisor.Process.Pid, PGID: pgid, StartToken: startToken}
 	if err := shutdownPrimeTaskDaemon(tmpDir, filepath.Join(tmpDir, "already-unlinked.sock"), identity, kernelPrimePeerIdentity); err != nil {
 		t.Fatal(err)
 	}
-	if !primeSupervisorGone(identity.PID, identity.PGID) {
+	if !primeSupervisorGone(identity.PID, identity.PGID, identity.StartToken) {
 		t.Fatal("captured supervisor survived after unlinking its socket")
 	}
 	if err := syscall.Kill(sentinel.Process.Pid, 0); err != nil {
 		t.Fatalf("sentinel was touched: %v", err)
 	}
+}
+
+func TestPrimeRefusesSignalAfterProcessStartIdentityMismatch(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "prime-reused-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmpDir) })
+	_ = os.Chmod(tmpDir, 0o700)
+	sentinel := exec.Command("sleep", "30")
+	configureProcessGroup(sentinel)
+	if err := sentinel.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sentinel.Process.Kill(); _, _ = sentinel.Process.Wait() })
+	pgid, err := primeSupervisorIdentity(sentinel.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := &primeDaemonIdentity{PID: sentinel.Process.Pid, PGID: pgid, StartToken: "forged-old-process-start"}
+	err = shutdownPrimeTaskDaemon(tmpDir, filepath.Join(tmpDir, "unlinked.sock"), identity, kernelPrimePeerIdentity)
+	if err == nil || !strings.Contains(err.Error(), "start identity changed") {
+		t.Fatalf("err=%v", err)
+	}
+	if err := syscall.Kill(sentinel.Process.Pid, 0); err != nil {
+		t.Fatalf("PID-reuse sentinel was signalled: %v", err)
+	}
+}
+
+func TestPrimeMalformedFirstRPCStillReapsObservedProcess(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	b, dir := primeTestBackend(t, "malformed_first_rpc", map[string]string{"PRIME_TEST_PID_FILE": pidFile})
+	s, err := b.Execute(context.Background(), "hello", ExecOptions{Cwd: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Messages {
+	}
+	res := <-s.Result
+	if res.Status != "failed" || !strings.Contains(res.Error, "malformed Prime RPC") {
+		t.Fatalf("result=%+v", res)
+	}
+	pidRaw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(pidRaw)))
+	if err := syscall.Kill(pid, 0); err == nil {
+		t.Fatalf("observed Prime process %d survived malformed first RPC", pid)
+	}
+	assertPrimeShutdown(t, dir)
 }
 
 func TestPrimeShutdownFailurePreventsCompletedStatus(t *testing.T) {
@@ -573,6 +653,9 @@ func TestPrimeCancellationReapsProcessAndRedactsStderr(t *testing.T) {
 		if res.Status != "timeout" {
 			t.Fatalf("result=%+v", res)
 		}
+		if res.Usage["prime/default"].InputTokens != 10 {
+			t.Fatalf("timeout lost usage: %+v", res.Usage)
+		}
 		pidRaw, err := os.ReadFile(pidFile)
 		if err != nil {
 			t.Fatal(err)
@@ -603,13 +686,15 @@ func TestPrimeRPCProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_PRIME_HELPER") != "1" {
 		return
 	}
-	if os.Getenv("PRIME_AGENT_TELEMETRY") != "0" || os.Getenv("DO_NOT_TRACK") != "1" || os.Getenv("PI_SKIP_VERSION_CHECK") != "1" {
+	if os.Getenv("PRIME_AGENT_TELEMETRY") != "0" || os.Getenv("DO_NOT_TRACK") != "1" || os.Getenv("PI_SKIP_VERSION_CHECK") != "1" || os.Getenv("RLM_MAX_DEPTH") != "0" {
 		os.Exit(91)
 	}
 	joinedArgs := strings.Join(os.Args, " ")
 	mode := os.Getenv("PRIME_TEST_MODE")
-	if !strings.Contains(joinedArgs, "--mode rpc --no-extensions") {
-		os.Exit(93)
+	for _, required := range []string{"--mode rpc", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes"} {
+		if !strings.Contains(joinedArgs, required) {
+			os.Exit(93)
+		}
 	}
 	socketPath := ""
 	for i, arg := range os.Args {
@@ -636,11 +721,12 @@ func TestPrimeRPCProcess(t *testing.T) {
 			}
 			go func(conn net.Conn) {
 				defer conn.Close()
+				startToken, _ := primeProcessStartToken(os.Getpid())
 				_ = json.NewEncoder(conn).Encode(map[string]any{
 					"type": "daemon_hello", "socketPath": socketPath,
 					"protocol": map[string]any{"name": "prime-agent.daemon", "version": primeDaemonProtocolVersion},
 					"schemaId": primeDaemonSchemaID, "appVersion": PrimeAgentVersion,
-					"supervisorPid": os.Getpid(), "clientId": "fake-client",
+					"supervisorPid": os.Getpid(), "supervisorProcessStartId": startToken, "clientId": "fake-client",
 				})
 				var envelope map[string]any
 				if json.NewDecoder(conn).Decode(&envelope) == nil {
@@ -679,6 +765,10 @@ func TestPrimeRPCProcess(t *testing.T) {
 		id, typ := cmd["id"], cmd["type"].(string)
 		switch typ {
 		case "get_state":
+			if mode == "malformed_first_rpc" {
+				_, _ = fmt.Fprintln(os.Stdout, "not-json")
+				continue
+			}
 			sessionID := "prime-session"
 			if mode == "resume_mismatch" {
 				sessionID = "other-session"

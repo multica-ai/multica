@@ -30,6 +30,10 @@ function profile(
 }
 
 describe("buildRuntimeCatalog", () => {
+  it("does not offer admission-disabled Prime profiles for creation", () => {
+    expect(PROTOCOL_FAMILIES).not.toContain("prime");
+  });
+
   it("keeps custom profiles separate from built-in protocol families", () => {
     const catalog = buildRuntimeCatalog([
       profile("prof-1", "Team Codex", "2026-01-02T00:00:00Z"),

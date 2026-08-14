@@ -46,7 +46,9 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 
 "Multica 管理 MCP" 表示你可以在智能体配置中填写 MCP server，由 Multica 在执行前传给对应工具。它不代表该工具本身没有其他 MCP 配置方式。
 
-托管 Prime Agent 不使用共享的 `~/.prime/agent` 目录。Multica 为每个 runtime/agent 分配独立的私有持久目录，用于 sessions、settings、authentication 和 user skills。请为每个 managed agent 单独配置认证，或使用明确限定范围的环境凭据；不要在 Prime project state 中保存跨 tenant 共享的 MCP settings 或 secrets。
+**当前兼容状态：** Prime Agent v0.7.2 会显示在 catalog 中，但执行 admission 已禁用。官方 daemon 可在 Multica 检查前运行持久化 schedules/heartbeats，并且没有在保留 coding tools 的同时于 startup 阶段 hard-disable 调度器的官方 mechanism。启动后再 cancel 存在竞态，因此 Multica 会 fail closed。
+
+托管 Prime Agent 不使用共享的 `~/.prime/agent` 目录。Multica 为每个 workspace/runtime/agent 分配独立的私有持久目录，用于 sessions、settings、authentication 和 user skills。请为每个 managed agent 单独配置认证，或使用明确限定范围的环境凭据；不要在 Prime project state 中保存跨 tenant 共享的 MCP settings 或 secrets。
 
 ## 模型来源
 

@@ -36,9 +36,10 @@ func primeRealTestRoot(t *testing.T) string {
 
 // TestPrimeRealTransportLifecycle verifies the pinned official RPC and detached
 // daemon lifecycle without selecting a model, sending a prompt, authenticating
-// a provider, or consuming quota. It intentionally does not use the consuming
-// real-smoke opt-in gate.
+// a provider, or consuming quota. Repository policy still requires the same
+// explicit real-smoke opt-in before any installed agent binary is executed.
 func TestPrimeRealTransportLifecycle(t *testing.T) {
+	requireRealAgentSmoke(t)
 	if testing.Short() {
 		t.Skip("skipping real-binary lifecycle test in -short mode")
 	}
@@ -68,7 +69,7 @@ func TestPrimeRealTransportLifecycle(t *testing.T) {
 		}
 	}
 	socketPath := filepath.Join(tmpDir, "multica-prime-daemon.sock")
-	cmd := exec.CommandContext(ctx, path, "--mode", "rpc", "--no-extensions", "--daemon-socket", socketPath)
+	cmd := exec.CommandContext(ctx, path, "--mode", "rpc", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--daemon-socket", socketPath)
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return nil }
 	cmd.WaitDelay = 5 * time.Second
@@ -113,6 +114,10 @@ func TestPrimeRealTransportLifecycle(t *testing.T) {
 	frames, frameErrs := pumpPrimeFrames(ctx, stdout)
 	rpc := &primeRPC{in: stdin, frames: frames, errs: frameErrs, events: func(primeFrame) {}}
 
+	identity, err = observePrimeTaskDaemon(tmpDir, socketPath, kernelPrimePeerIdentity)
+	if err != nil {
+		t.Fatalf("observe Prime daemon identity: %v", err)
+	}
 	stateResp, err := rpc.request(ctx, map[string]any{"type": "get_state"})
 	if err != nil {
 		waitSummary := "client still running"
@@ -129,11 +134,6 @@ func TestPrimeRealTransportLifecycle(t *testing.T) {
 	if err := json.Unmarshal(stateResp.Data, &state); err != nil || state.SessionID == "" || state.MessageCount == nil || state.IsStreaming {
 		t.Fatalf("invalid Prime get_state: state=%+v err=%v", state, err)
 	}
-	identity, err = observePrimeTaskDaemon(tmpDir, socketPath, kernelPrimePeerIdentity)
-	if err != nil {
-		t.Fatalf("observe Prime daemon identity: %v", err)
-	}
-
 	_, _ = rpc.write(map[string]any{"type": "abort"})
 	_ = stdin.Close()
 	var clientErr error
@@ -153,7 +153,7 @@ func TestPrimeRealTransportLifecycle(t *testing.T) {
 		t.Fatalf("targeted Prime daemon shutdown: %v", err)
 	}
 	daemonCleaned = true
-	if !primeSupervisorGone(identity.PID, identity.PGID) {
+	if !primeSupervisorGone(identity.PID, identity.PGID, identity.StartToken) {
 		t.Fatal("Prime daemon supervisor survived targeted shutdown")
 	}
 	if clientErr != nil {

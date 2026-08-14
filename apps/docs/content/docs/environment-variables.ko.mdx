@@ -213,7 +213,7 @@ API key와 base URL이 모두 비어 있으면 서버 측 LLM 생성이 꺼지�
 
 각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`와 `MULTICA_<PROVIDER>_MODEL`로 명령 경로와 기본 모델을 덮어쓸 수 있습니다. QwenPaw만 예외로, Multica가 모델을 전달하지 않기 때문에 `MULTICA_QWENPAW_MODEL`이 없습니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness는 `MULTICA_DSH_PATH`와 `MULTICA_DSH_MODEL`을 지원합니다(값은 dsh 모델 카탈로그의 모델 ID, 예: `deepseek-official/deepseek-chat`). 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
 
-Prime Agent는 `MULTICA_PRIME_PATH`, `MULTICA_PRIME_MODEL`(`provider/modelId`), 필수 `MULTICA_PRIME_AGENT_ISOLATED=1`을 사용합니다. root 또는 v0.7.2 이외 버전은 거부됩니다.
+Prime Agent는 `MULTICA_PRIME_PATH`, `MULTICA_PRIME_MODEL`(`provider/modelId`), 필수 `MULTICA_PRIME_AGENT_ISOLATED=1`을 사용합니다. root 또는 v0.7.2 이외 버전은 거부되며, v0.7.2도 upstream이 coding tools를 유지하면서 schedules/heartbeats를 강제로 비활성화할 수 없어 admission-disabled 상태입니다.
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
