@@ -71,7 +71,6 @@ vi.mock("@multica/core/api", () => ({
 import JoinPage from "./page";
 
 const TEST_INFO = {
-  workspace_id: "ws1",
   workspace_name: "Acme",
   workspace_slug: "acme",
   creator_name: "Alice",
@@ -96,6 +95,23 @@ describe("JoinPage", () => {
     );
     expect(screen.getByText("Invited by Alice")).toBeInTheDocument();
     expect(mockJoinByShareLink).not.toHaveBeenCalled();
+  });
+
+  it("warns when the link grants admin access", async () => {
+    mockGetShareLinkInfo.mockResolvedValue({
+      ...TEST_INFO,
+      role: "admin",
+    });
+
+    render(<JoinPage />, { wrapper: createWrapper() });
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "This link grants you administrator access to this workspace.",
+        ),
+      ).toBeInTheDocument(),
+    );
   });
 
   it("shows an error when the link is invalid", async () => {
@@ -153,7 +169,9 @@ describe("JoinPage", () => {
     mockJoinByShareLink.mockRejectedValue(
       new Error("you are already a member of this workspace"),
     );
-    mockListWorkspaces.mockResolvedValue([{ id: "ws1", slug: "acme" }]);
+    // The account's first workspace differs from the invited one — the page
+    // must route to the workspace THIS invite points at (acme), not the first.
+    mockListWorkspaces.mockResolvedValue([{ id: "ws0", slug: "other" }]);
 
     render(<JoinPage />, { wrapper: createWrapper() });
 
