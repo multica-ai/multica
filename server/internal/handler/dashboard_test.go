@@ -70,6 +70,23 @@ func runFinishedToday(now time.Time, loc *time.Location) (started, completed tim
 	return started, started.Add(10 * time.Minute)
 }
 
+// pinDayWindowClock freezes the clock the request-side cutoff reads and hands
+// back the same instant for the fixture, so both sides describe one moment.
+//
+// They read the wall clock at two different points otherwise — the fixture when
+// it is built, the cutoff when the handler runs, with inserts and a rollup in
+// between — and a suite that crosses midnight in that gap writes its run into
+// one day and then asks for the next day's window. The gap is milliseconds, so
+// it is rare and permanent: nothing about the assertions says which day they
+// meant.
+func pinDayWindowClock(t *testing.T, at time.Time) time.Time {
+	t.Helper()
+	prev := dayWindowNow
+	dayWindowNow = func() time.Time { return at }
+	t.Cleanup(func() { dayWindowNow = prev })
+	return at
+}
+
 // TestDashboardFixtureRunLandsInsideTheWindow pins what runFinishedToday
 // promises the two DB fixtures that call it: at any hour, in any zone, the
 // run it places is inside the days=1 window the endpoints open. The window is
@@ -193,7 +210,7 @@ func TestDashboardEndpoints(t *testing.T) {
 	// A 600s run that finished inside today's window at every hour of the
 	// clock — see runFinishedToday for what a `now - 30m` fixture does to the
 	// agent-runtime assertions just after midnight.
-	started, completed := runFinishedToday(time.Now(), dashboardFixtureLoc(t))
+	started, completed := runFinishedToday(pinDayWindowClock(t, time.Now()), dashboardFixtureLoc(t))
 
 	mkTaskWithUsage := func(issueID string, status string, tokens int64) {
 		var taskID string
@@ -1662,7 +1679,7 @@ func TestDashboardFailuresCountNeverStartedTasks(t *testing.T) {
 	// below runs on the exact start-of-day cutoff and filters on
 	// completed_at, so a run timed off the wall clock disappears from it for
 	// the first twenty minutes of the day.
-	started, completed := runFinishedToday(time.Now(), dashboardFixtureLoc(t))
+	started, completed := runFinishedToday(pinDayWindowClock(t, time.Now()), dashboardFixtureLoc(t))
 
 	// startedAt is nullable so the queue-expiry case can be modelled exactly:
 	// completed_at set, started_at absent.
@@ -2023,5 +2040,114 @@ func TestDashboardFailureWireContractKeepsEmptyReason(t *testing.T) {
 				t.Errorf("succeeded rows must serialize an explicit empty failure_reason, got %s", body)
 			}
 		})
+	}
+}
+
+// dashboardRunTimeSeconds inserts one finished run for the fixture agent and
+// returns what agent-runtime reports for it under the given query string. The
+// caller owns the clock: whatever pinDayWindowClock was given is what both the
+// fixture and the handler's cutoff read.
+func dashboardRunTimeSeconds(t *testing.T, at time.Time, loc *time.Location, query string) int64 {
+	t.Helper()
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'clock fixture', $2, 'member',
+			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	started, completed := runFinishedToday(at, loc)
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
+		VALUES ($1, $2, $3, 'completed', $4, $5, $4)
+		RETURNING id
+	`, agentID, issueID, runtimeID, started, completed).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	testHandler.GetDashboardAgentRunTime(w, newRequest("GET", "/api/dashboard/agent-runtime?"+query, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("agent-runtime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var rows []struct {
+		AgentID      string `json:"agent_id"`
+		TotalSeconds int64  `json:"total_seconds"`
+	}
+	_ = json.NewDecoder(w.Body).Decode(&rows)
+	var seconds int64
+	for _, r := range rows {
+		if r.AgentID == agentID {
+			seconds += r.TotalSeconds
+		}
+	}
+	return seconds
+}
+
+// A fixture built a hair before midnight is still counted by a request handled
+// a hair after it.
+//
+// The two sides used to read the wall clock at different moments — the fixture
+// when it was built, the cutoff when the handler ran, with inserts and a rollup
+// in between. Crossing midnight in that gap wrote the run into one day and then
+// asked for the next day's window, and the row vanished. Pinning one instant is
+// what removes the question; this asserts the removal at the instant where it
+// used to bite, rather than trusting that the suite never runs at 23:59.
+func TestDashboardFixtureSurvivesTheMidnightStraddle(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	loc := dashboardFixtureLoc(t)
+	// 23:59:59.9 in the fixture's own zone: one tenth of a second of the day
+	// left when the fixture is built.
+	local := time.Date(2026, 3, 1, 23, 59, 59, 900_000_000, loc)
+	at := pinDayWindowClock(t, local)
+
+	if got := dashboardRunTimeSeconds(t, at, loc, "days=1&"+dashboardFixtureTZParam); got < 600 {
+		t.Errorf("agent-runtime reported %ds for a run built at %s, want >=600 — "+
+			"the fixture and the cutoff have to describe the same day even when the clock is about to turn over",
+			got, local.Format(time.RFC3339Nano))
+	}
+}
+
+// The timezone pin is load-bearing, at an instant that proves it.
+//
+// A request that loses its `?tz=` falls back to the fixture user's stored zone
+// — UTC — while the fixture stays in dashboardFixtureTZ, and the two windows
+// then sit an offset apart. Whether that offset actually hides the run depends
+// on the time of day, so asserting it against the wall clock proves nothing for
+// most of the day. Pinned at 02:00 UTC on a fixed date, Tokyo's day began at
+// 15:00 UTC the day before and UTC's began two hours ago: the run is behind the
+// UTC cutoff and must not be counted.
+func TestDashboardMismatchedRequestTimezoneHidesTheRun(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	loc := dashboardFixtureLoc(t)
+	at := pinDayWindowClock(t, time.Date(2026, 3, 1, 2, 0, 0, 0, time.UTC))
+
+	matched := dashboardRunTimeSeconds(t, at, loc, "days=1&"+dashboardFixtureTZParam)
+	if matched < 600 {
+		t.Fatalf("the matched-timezone request reported %ds, want >=600 — this test's premise is gone", matched)
+	}
+	if mismatched := dashboardRunTimeSeconds(t, at, loc, "days=1&tz=UTC"); mismatched != 0 {
+		t.Errorf("a request pinned to UTC counted %ds of a run the fixture placed in %s — "+
+			"the pin is meant to be the thing that keeps the two windows together, so a mismatch has to be visible here",
+			mismatched, dashboardFixtureTZ)
 	}
 }
