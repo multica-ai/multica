@@ -88,7 +88,26 @@ type ResolvedInstallation struct {
 
 // ResolvedIdentity is the sender mapped to a Multica user.
 type ResolvedIdentity struct {
+	// UserID is the Multica principal used for durable ownership. For an
+	// explicitly-enabled external channel user this is the installation owner,
+	// because the external user has no Multica account.
 	UserID pgtype.UUID
+	// External distinguishes an unbound channel user from a workspace member.
+	// It prevents the router from treating the ownership principal as the real
+	// task initiator and leaking that member's connected-app overlay.
+	External bool
+	// ChannelUserID is the platform-native sender id for audit/debug context.
+	ChannelUserID string
+}
+
+// TaskInitiatorUserID returns an attributable Multica member only. External
+// senders intentionally degrade to the existing owner-fallback attribution
+// path and therefore never inherit the installation owner's user-scoped tools.
+func (i ResolvedIdentity) TaskInitiatorUserID() pgtype.UUID {
+	if i.External {
+		return pgtype.UUID{}
+	}
+	return i.UserID
 }
 
 // EnsureSessionParams carries the inputs for SessionBinder.EnsureSession.
@@ -349,7 +368,7 @@ type IssueCreator interface {
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to
 // trigger a chat run. Shared across platforms.
 type TaskEnqueuer interface {
-	EnqueueChannelChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64) (db.AgentTaskQueue, error)
+	EnqueueChannelChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, options ...service.ChatTaskEnqueueOptions) (db.AgentTaskQueue, error)
 	PromoteChannelChatTasksIfMediaReady(ctx context.Context, sessionID pgtype.UUID) error
 	PromoteDeferredChannelIssueTask(ctx context.Context, taskID pgtype.UUID) error
 }

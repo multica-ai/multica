@@ -2,8 +2,10 @@ package lark
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -11,6 +13,14 @@ import (
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestUpdateInboundAccessModeRejectsUnknownValue(t *testing.T) {
+	svc := &InstallationService{}
+	err := svc.UpdateInboundAccessMode(context.Background(), uuidFrom(0x11), InboundAccessMode("everyone"))
+	if !errors.Is(err, ErrInvalidInboundAccessMode) {
+		t.Fatalf("UpdateInboundAccessMode error = %v, want ErrInvalidInboundAccessMode", err)
+	}
+}
 
 func uuidFrom(b byte) pgtype.UUID {
 	var u pgtype.UUID
@@ -62,6 +72,7 @@ func TestInstallationConfigRoundTrip(t *testing.T) {
 		InstallerUserID:    uuidFrom(0x44),
 		Region:             "lark",
 		BotUnionID:         pgtype.Text{String: "on_union_999", Valid: true},
+		InboundAccessMode:  InboundAccessFeishuUsers,
 	}
 
 	cfg, err := encodeInstallConfig(in)
@@ -99,12 +110,26 @@ func TestInstallationConfigRoundTrip(t *testing.T) {
 	if got.TenantKey != in.TenantKey || got.BotUnionID != in.BotUnionID {
 		t.Fatalf("optional config mismatch: tenant=%+v union=%+v", got.TenantKey, got.BotUnionID)
 	}
+	if got.InboundAccessMode != InboundAccessFeishuUsers {
+		t.Fatalf("inbound access mode = %q, want %q", got.InboundAccessMode, InboundAccessFeishuUsers)
+	}
 	// Flat columns must come straight from the row, not the config.
 	if got.Status != "active" || got.WsLeaseToken.String != "node-1-g3" {
 		t.Fatalf("flat columns not preserved: status=%q lease=%q", got.Status, got.WsLeaseToken.String)
 	}
 	if got.ID != in.ID || got.WorkspaceID != in.WorkspaceID || got.InstallerUserID != in.InstallerUserID {
 		t.Fatalf("flat id columns not preserved: %+v", got)
+	}
+}
+
+func TestInstallationConfigDefaultsToWorkspaceMembersOnly(t *testing.T) {
+	cfg := []byte(`{"app_id":"cli_app_123","region":"feishu"}`)
+	got, err := installationFromRow(db.ChannelInstallation{Config: cfg})
+	if err != nil {
+		t.Fatalf("installationFromRow: %v", err)
+	}
+	if got.InboundAccessMode != InboundAccessWorkspaceMembers {
+		t.Fatalf("inbound access mode = %q, want secure default %q", got.InboundAccessMode, InboundAccessWorkspaceMembers)
 	}
 }
 

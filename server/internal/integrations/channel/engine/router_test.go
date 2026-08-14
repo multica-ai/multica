@@ -303,6 +303,7 @@ type fakeTasks struct {
 	initiator           pgtype.UUID
 	initiators          []pgtype.UUID
 	contextRevisions    []int64
+	options             service.ChatTaskEnqueueOptions
 	err                 error
 }
 
@@ -320,7 +321,7 @@ func (f *fakeTasks) PromoteDeferredChannelIssueTask(_ context.Context, taskID pg
 	return nil
 }
 
-func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool, contextRevision int64) (db.AgentTaskQueue, error) {
+func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool, contextRevision int64, options ...service.ChatTaskEnqueueOptions) (db.AgentTaskQueue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.called = true
@@ -330,6 +331,9 @@ func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, 
 	f.initiator = initiator
 	f.initiators = append(f.initiators, initiator)
 	f.contextRevisions = append(f.contextRevisions, contextRevision)
+	if len(options) > 0 {
+		f.options = options[0]
+	}
 	return db.AgentTaskQueue{}, f.err
 }
 func (f *fakeTasks) wasCalled() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.called }
@@ -359,6 +363,11 @@ func (f *fakeTasks) initiatorArgs() []pgtype.UUID {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]pgtype.UUID(nil), f.initiators...)
+}
+func (f *fakeTasks) optionsArg() service.ChatTaskEnqueueOptions {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.options
 }
 
 type fakeReader struct {
@@ -852,8 +861,8 @@ func TestRouter_ContextGenerationsUseIndependentBatchWindows(t *testing.T) {
 	sessionID := h.binder.ensureID
 	initiator := h.ident.id.UserID
 
-	h.router.scheduleRun(h.router.sets[channel.TypeFeishu], h.inst.inst, msg, sessionID, initiator, 1)
-	h.router.scheduleRun(h.router.sets[channel.TypeFeishu], h.inst.inst, msg, sessionID, initiator, 2)
+	h.router.scheduleRun(h.router.sets[channel.TypeFeishu], h.inst.inst, msg, sessionID, initiator, 1, false)
+	h.router.scheduleRun(h.router.sets[channel.TypeFeishu], h.inst.inst, msg, sessionID, initiator, 2, false)
 	if got := h.router.batcher.pendingCount(); got != 2 {
 		t.Fatalf("pending generation windows = %d, want 2", got)
 	}
@@ -935,7 +944,7 @@ func TestRouter_RecoveryDoesNotDelayLiveOlderGeneration(t *testing.T) {
 	h.router.batcher = newTestBatcher(timers)
 	msg := p2pMessage(t)
 	h.router.scheduleRun(h.router.sets[channel.TypeFeishu], h.inst.inst, msg,
-		h.binder.ensureID, h.ident.id.UserID, 1)
+		h.binder.ensureID, h.ident.id.UserID, 1, false)
 
 	h.binder.appendResult.ContextRevision = 2
 	h.binder.appendResult.PendingContexts = []PendingContext{
@@ -1407,6 +1416,65 @@ func TestRouter_P2PSessionCreatorIsSender(t *testing.T) {
 	}
 	if h.binder.lastEnsure.Sender != h.ident.id.UserID {
 		t.Fatalf("p2p session creator must be the sender")
+	}
+}
+
+func TestRouter_ExternalChannelUserDoesNotInheritInstallerIdentity(t *testing.T) {
+	h := newHarness(t)
+	h.ident.id = ResolvedIdentity{
+		UserID:        h.inst.inst.InstallerUserID,
+		External:      true,
+		ChannelUserID: "ou_external",
+	}
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if h.binder.lastEnsure.Sender != h.inst.inst.InstallerUserID {
+		t.Fatalf("external p2p session creator must use the installation principal")
+	}
+	if h.binder.lastAppend.Sender != h.inst.inst.InstallerUserID {
+		t.Fatalf("external message persistence must use the installation principal")
+	}
+	if !waitFor(time.Second, h.tasks.wasCalled) {
+		t.Fatal("external message did not schedule an agent run")
+	}
+	if h.tasks.initiatorArg().Valid {
+		t.Fatalf("external user must be unattributed so installer connected-app overlays cannot leak: %+v", h.tasks.initiatorArg())
+	}
+	if !h.tasks.optionsArg().DisableOwnerConnectedApps {
+		t.Fatal("external user task must explicitly disable Agent owner connected apps")
+	}
+}
+
+func TestRouter_ExternalIssueIsAttributedToAgentNotInstaller(t *testing.T) {
+	h := newHarness(t)
+	h.ident.id = ResolvedIdentity{
+		UserID:        h.inst.inst.InstallerUserID,
+		External:      true,
+		ChannelUserID: "ou_external",
+	}
+	h.binder.appendResult = AppendResult{
+		DedupMarked:  true,
+		IssueCommand: &IssueCommand{Title: "商城推送问题"},
+	}
+	h.issues.result = service.IssueCreateResult{
+		Issue: db.Issue{ID: uuidFromString(t, "77777777-7777-7777-7777-777777777777"), Number: 42, Title: "商城推送问题"},
+	}
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !h.issues.called {
+		t.Fatal("external /issue did not create an issue")
+	}
+	if h.issues.params.CreatorType != "agent" || h.issues.params.CreatorID != h.inst.inst.AgentID {
+		t.Fatalf("external issue creator = %s/%+v, want receiving agent", h.issues.params.CreatorType, h.issues.params.CreatorID)
+	}
+	if h.issues.params.CreatorID == h.inst.inst.InstallerUserID {
+		t.Fatal("external /issue must not impersonate the installer")
+	}
+	if !h.issues.opts.DisableOwnerConnectedApps {
+		t.Fatal("external /issue task must explicitly disable Agent owner connected apps")
 	}
 }
 

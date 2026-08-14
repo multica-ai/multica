@@ -14,14 +14,19 @@ import "github.com/jackc/pgx/v5/pgtype"
 // (stashing this struct in Raw) so the resolvers can read the platform-
 // specific fields the normalized envelope does not carry.
 type InboundMessage struct {
-	EventType    string
-	EventID      string
-	AppID        string
+	EventType string
+	EventID   string
+	AppID     string
+	// TenantKey is the tenant that owns the authenticated app/event.
+	TenantKey    string
 	ChatID       ChatID
 	ChatType     ChatType
 	MessageID    string
 	SenderOpenID OpenID
-	Body         string
+	// SenderTenantKey identifies the tenant of the human sender. It may differ
+	// from TenantKey for an external participant in a cross-tenant group.
+	SenderTenantKey string
+	Body            string
 	// Content is the raw msg_type-specific JSON string Lark sends in
 	// event.message.content. Text/post decoding consumes it immediately; media
 	// ingestion keeps it so the adapter can extract image_key/file_key before

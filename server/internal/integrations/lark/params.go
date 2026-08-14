@@ -34,6 +34,13 @@ type SetInstallationStatusParams struct {
 	Status string
 }
 
+// SetInstallationInboundAccessModeParams changes one installation's inbound
+// identity policy without rewriting the rest of its encrypted config.
+type SetInstallationInboundAccessModeParams struct {
+	ID   pgtype.UUID
+	Mode InboundAccessMode
+}
+
 // SetInstallationBotUnionIDParams records the bot's union_id (backfill).
 type SetInstallationBotUnionIDParams struct {
 	ID         pgtype.UUID

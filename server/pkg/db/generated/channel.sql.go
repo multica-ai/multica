@@ -2137,6 +2137,42 @@ func (q *Queries) SetChannelInstallationConfig(ctx context.Context, arg SetChann
 	return err
 }
 
+const setChannelInstallationConfigValue = `-- name: SetChannelInstallationConfigValue :execrows
+UPDATE channel_installation
+SET config = jsonb_set(
+        COALESCE(config, '{}'::jsonb),
+        ARRAY[$1::text],
+        $2::jsonb,
+        true
+    ),
+    updated_at = now()
+WHERE id = $3
+  AND channel_type = $4
+`
+
+type SetChannelInstallationConfigValueParams struct {
+	ConfigKey   string      `json:"config_key"`
+	ConfigValue []byte      `json:"config_value"`
+	ID          pgtype.UUID `json:"id"`
+	ChannelType string      `json:"channel_type"`
+}
+
+// Atomically updates one top-level config key without rewriting credentials or
+// racing another platform-specific config writer. The channel discriminator
+// keeps the generic installation id from crossing adapter boundaries.
+func (q *Queries) SetChannelInstallationConfigValue(ctx context.Context, arg SetChannelInstallationConfigValueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setChannelInstallationConfigValue,
+		arg.ConfigKey,
+		arg.ConfigValue,
+		arg.ID,
+		arg.ChannelType,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setChannelInstallationStatus = `-- name: SetChannelInstallationStatus :exec
 UPDATE channel_installation
 SET status = $2, updated_at = now()

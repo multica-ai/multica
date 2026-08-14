@@ -56,6 +56,24 @@ type Installation struct {
 	UpdatedAt          pgtype.Timestamptz
 	BotUnionID         pgtype.Text
 	Region             string
+	InboundAccessMode  InboundAccessMode
+}
+
+// InboundAccessMode controls who may invoke one Feishu-bound Agent. The zero
+// value intentionally normalizes to workspace_members so installations created
+// before this option existed remain fail-closed.
+type InboundAccessMode string
+
+const (
+	InboundAccessWorkspaceMembers InboundAccessMode = "workspace_members"
+	InboundAccessFeishuUsers      InboundAccessMode = "feishu_users"
+)
+
+func normalizeInboundAccessMode(mode InboundAccessMode) InboundAccessMode {
+	if mode == InboundAccessFeishuUsers {
+		return mode
+	}
+	return InboundAccessWorkspaceMembers
 }
 
 // UserBinding is the flat view of a channel_user_binding row. ChannelUserID is
@@ -126,12 +144,13 @@ type OutboundCardMessage struct {
 // rather than as a json []byte field, so MIME-wrapped base64 from the SQL
 // backfill round-trips too. omitempty mirrors the migration's jsonb_strip_nulls.
 type feishuInstallConfig struct {
-	AppID              string `json:"app_id"`
-	AppSecretEncrypted string `json:"app_secret_encrypted,omitempty"`
-	TenantKey          string `json:"tenant_key,omitempty"`
-	BotOpenID          string `json:"bot_open_id,omitempty"`
-	BotUnionID         string `json:"bot_union_id,omitempty"`
-	Region             string `json:"region,omitempty"`
+	AppID              string            `json:"app_id"`
+	AppSecretEncrypted string            `json:"app_secret_encrypted,omitempty"`
+	TenantKey          string            `json:"tenant_key,omitempty"`
+	BotOpenID          string            `json:"bot_open_id,omitempty"`
+	BotUnionID         string            `json:"bot_union_id,omitempty"`
+	Region             string            `json:"region,omitempty"`
+	InboundAccessMode  InboundAccessMode `json:"inbound_access_mode,omitempty"`
 }
 
 // feishuBindingConfig is the JSON shape of channel_user_binding.config.
@@ -169,6 +188,7 @@ func installationFromRow(row db.ChannelInstallation) (Installation, error) {
 		UpdatedAt:          row.UpdatedAt,
 		BotUnionID:         textOrNull(cfg.BotUnionID),
 		Region:             cfg.Region,
+		InboundAccessMode:  normalizeInboundAccessMode(cfg.InboundAccessMode),
 	}, nil
 }
 
@@ -176,11 +196,12 @@ func installationFromRow(row db.ChannelInstallation) (Installation, error) {
 // feishu fields of an Installation. The secret is emitted as unwrapped base64.
 func encodeInstallConfig(inst Installation) ([]byte, error) {
 	cfg := feishuInstallConfig{
-		AppID:      inst.AppID,
-		TenantKey:  inst.TenantKey.String,
-		BotOpenID:  inst.BotOpenID,
-		BotUnionID: inst.BotUnionID.String,
-		Region:     inst.Region,
+		AppID:             inst.AppID,
+		TenantKey:         inst.TenantKey.String,
+		BotOpenID:         inst.BotOpenID,
+		BotUnionID:        inst.BotUnionID.String,
+		Region:            inst.Region,
+		InboundAccessMode: normalizeInboundAccessMode(inst.InboundAccessMode),
 	}
 	if len(inst.AppSecretEncrypted) > 0 {
 		cfg.AppSecretEncrypted = base64.StdEncoding.EncodeToString(inst.AppSecretEncrypted)
