@@ -90,8 +90,7 @@ import {
   CollectionPageState,
 } from "../../layout/collection-page";
 import { useT } from "../../i18n";
-import { PAGE_GUTTER } from "../../layout/page-header";
-import { cn } from "@multica/ui/lib/utils";
+import { PAGE_TOOLBAR } from "../../layout/page-header";
 
 // Column template — the simplest member of the ListGrid family (squads are
 // the fewest entity, 1-5 rows): subgrid template + var tracks + two-zone
@@ -501,7 +500,7 @@ function SquadListToolbar({
   const sortLabel = SORT_LABELS[sortField];
 
   return (
-    <div className={cn("flex h-12 shrink-0 items-center justify-between gap-2", PAGE_GUTTER)}>
+    <div className={PAGE_TOOLBAR}>
       <div className="flex min-w-0 items-center gap-2">
         <div className="hidden shrink-0 items-center gap-1 md:flex">
           {SQUAD_SCOPES.map((s) => (

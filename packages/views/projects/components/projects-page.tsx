@@ -109,7 +109,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
-import { PAGE_GUTTER } from "../../layout/page-header";
+import { PAGE_GUTTER, PAGE_TOOLBAR } from "../../layout/page-header";
 import { cn } from "@multica/ui/lib/utils";
 
 // Sort order maps for the enum columns (header sort needs a total order).
@@ -965,7 +965,7 @@ export function ProjectsPage() {
       ) : (
         <>
           {/* Toolbar */}
-          <div className={cn("flex h-12 shrink-0 items-center justify-between gap-2", PAGE_GUTTER)}>
+          <div className={PAGE_TOOLBAR}>
             <div className="flex min-w-0 items-center gap-2">
               <div className="relative hidden md:block">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />

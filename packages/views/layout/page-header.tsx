@@ -16,6 +16,16 @@ import { SidebarTrigger, useSidebarSafe } from "@multica/ui/components/ui/sideba
 export const PAGE_GUTTER = "px-4";
 
 /**
+ * The filter/actions row directly under a `PageHeader`: same height and
+ * gutter so the two read as one chrome block. Shared for the same reason as
+ * `PAGE_GUTTER` — the toolbars drifted when each page spelled its own row.
+ */
+export const PAGE_TOOLBAR = cn(
+  "flex h-12 shrink-0 items-center justify-between gap-2",
+  PAGE_GUTTER,
+);
+
+/**
  * The way back to the nav wherever it is not a permanent column: a sheet below
  * the compact breakpoint, auto-collapsed from there up to `xl`.
  *

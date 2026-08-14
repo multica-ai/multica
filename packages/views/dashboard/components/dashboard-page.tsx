@@ -26,7 +26,8 @@ import {
 } from "@multica/core/dashboard";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
-import { PageHeader, PAGE_GUTTER } from "../../layout/page-header";
+import { PAGE_GUTTER } from "../../layout/page-header";
+import { CollectionPageHeader } from "../../layout/collection-page";
 import { KpiCard } from "../../runtimes/components/shared";
 import { useNavigation } from "../../navigation";
 import {
@@ -461,36 +462,36 @@ export function DashboardPage() {
       onValueChange={handleTabChange}
       className="flex h-full min-h-0 flex-col gap-0"
     >
-      <PageHeader className="gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <h1 className="text-body font-medium">{t(($) => $.title)}</h1>
-        </div>
-        {/* Data freshness cluster: the timestamp and the action that advances
-            it stay together. Refresh re-pulls the same scope, so it lives here
-            with the page metadata rather than among the scope controls. */}
-        <div className="flex shrink-0 items-center gap-1">
-          {tzLabel ? (
-            <span className="hidden text-caption text-muted-foreground lg:inline">
-              {updatedLabel
-                ? t(($) => $.header.timezone_and_updated, {
-                    tz: tzLabel,
-                    time: updatedLabel,
-                  })
-                : tzLabel}
-            </span>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t(($) => $.header.refresh)}
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-          >
-            <RefreshCw className={isRefreshing ? "animate-spin" : undefined} />
-          </Button>
-        </div>
-      </PageHeader>
+      <CollectionPageHeader
+        icon={BarChart3}
+        title={t(($) => $.title)}
+        actions={
+          /* Data freshness cluster: the timestamp and the action that advances
+             it stay together. Refresh re-pulls the same scope, so it lives here
+             with the page metadata rather than among the scope controls. */
+          <div className="flex items-center gap-1">
+            {tzLabel ? (
+              <span className="hidden text-caption text-muted-foreground lg:inline">
+                {updatedLabel
+                  ? t(($) => $.header.timezone_and_updated, {
+                      tz: tzLabel,
+                      time: updatedLabel,
+                    })
+                  : tzLabel}
+              </span>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t(($) => $.header.refresh)}
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+            >
+              <RefreshCw className={isRefreshing ? "animate-spin" : undefined} />
+            </Button>
+          </div>
+        }
+      />
 
       {/* View toolbar, same grammar as the issues surface header: view
           switching on the left, page-scoped filters on the right. Both tabs

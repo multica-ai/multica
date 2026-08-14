@@ -217,9 +217,7 @@ export function ChatPage() {
 
   const listHeader = (
     <PageHeader>
-      <div className="flex flex-1 items-center gap-2">
-        <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
-      </div>
+      <h1 className="flex-1 text-body font-semibold">{t(($) => $.page.title)}</h1>
       {newChatButton}
     </PageHeader>
   );
