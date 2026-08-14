@@ -12,8 +12,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
-
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // errSkillNotRefreshable marks a skill whose stored provenance cannot be
@@ -128,8 +126,9 @@ func (h *Handler) RefreshSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Permission before any upstream fetch, so a forbidden caller cannot burn
-	// the 45s fetch budget. Mirrors canManageSkill, keeping the member row to
-	// re-check permission inside the overwrite transaction.
+	// the 45s fetch budget. This is only the early reject: the overwrite tx
+	// re-reads membership and applies the same rule itself, because the fetch
+	// in between runs for up to importFetchTimeout.
 	workspaceID := uuidToString(skill.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "skill not found", "owner", "admin", "member")
 	if !ok {
@@ -174,13 +173,15 @@ func (h *Handler) RefreshSkill(w http.ResponseWriter, r *http.Request) {
 		TargetSkillID: skill.ID,
 		UserID:        userID,
 		NewName:       newName,
-		AllowOverwrite: func(uid string, s db.Skill) bool {
-			return isAdmin || (s.CreatedBy.Valid && uuidToString(s.CreatedBy) == uid)
-		},
-		Description: imported.description,
-		Content:     imported.content,
-		Config:      mergeSkillConfigOrigin(skill.Config, imported.origin),
-		Files:       importedSkillFileRequests(imported),
+		Authz:         overwriteAuthzCreatorOrManager,
+		// Second hazard in the same window: an edit made while the fetch runs
+		// would be replaced without warning. Return 409 so the user re-confirms
+		// against what the skill now says.
+		ExpectedUpdatedAt: skill.UpdatedAt,
+		Description:       imported.description,
+		Content:           imported.content,
+		Config:            mergeSkillConfigOrigin(skill.Config, imported.origin),
+		Files:             importedSkillFileRequests(imported),
 	})
 	if err != nil {
 		switch {
@@ -190,6 +191,8 @@ func (h *Handler) RefreshSkill(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "only the skill creator or a workspace admin can update this skill from its source")
 		case errors.Is(err, errSkillOverwriteNameConflict):
 			writeError(w, http.StatusConflict, "a skill named \""+newName+"\" already exists in this workspace")
+		case errors.Is(err, errSkillOverwriteStale):
+			writeError(w, http.StatusConflict, "this skill was edited while the update was downloading; review the changes and try again")
 		default:
 			writeError(w, http.StatusInternalServerError, "failed to update skill from source: "+err.Error())
 		}

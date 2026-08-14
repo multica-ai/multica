@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -45,8 +46,37 @@ func createImportTargetSkillWithConfig(t *testing.T, name, ownerID, configJSON s
 func installClawHubFixture(t *testing.T, slug, displayName, summary string, files map[string]string) *int {
 	t.Helper()
 
+	return installClawHubFixtureGated(t, slug, displayName, summary, files, nil)
+}
+
+// installGatedClawHubFixture is installClawHubFixture with a barrier. The first
+// upstream request closes fetching and then blocks until the test closes
+// release, which is what lets a test mutate the database while the refresh is
+// parked mid-fetch — the window the in-tx permission and staleness re-checks
+// exist to cover.
+func installGatedClawHubFixture(t *testing.T, slug, displayName, summary string, files map[string]string) (fetching <-chan struct{}, release chan<- struct{}) {
+	t.Helper()
+
+	started := make(chan struct{})
+	gate := make(chan struct{})
+	var once sync.Once
+	installClawHubFixtureGated(t, slug, displayName, summary, files, func() {
+		once.Do(func() {
+			close(started)
+			<-gate
+		})
+	})
+	return started, gate
+}
+
+func installClawHubFixtureGated(t *testing.T, slug, displayName, summary string, files map[string]string, gate func()) *int {
+	t.Helper()
+
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if gate != nil {
+			gate()
+		}
 		requests++
 		switch {
 		case r.URL.Path == "/api/v1/skills/"+slug:
@@ -275,6 +305,93 @@ func TestRefreshSkill_PlainMemberNonCreatorForbidden(t *testing.T) {
 	// Permission is checked before the fetch: the upstream must never be hit.
 	if *requests != 0 {
 		t.Fatalf("forbidden refresh must not contact the upstream, got %d requests", *requests)
+	}
+}
+
+// The request-time permission check happens before a fetch that may run for
+// importFetchTimeout. A caller demoted or removed during that window must not
+// land the overwrite, so the write tx re-reads membership and rejects here.
+func TestRefreshSkill_RoleRevokedDuringFetchForbidden(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	// The skill belongs to the workspace owner. The caller is a separate
+	// admin, so their role is the only thing authorizing them.
+	adminID := createRuntimeLocalSkillTestMember(t, "admin")
+	slug := fmt.Sprintf("refresh-revoked-%d", time.Now().UnixNano())
+	skillID := createImportTargetSkillWithConfig(t, slug, testUserID, clawhubOriginConfig(slug), nil)
+
+	fetching, release := installGatedClawHubFixture(t, slug, slug, "incoming", map[string]string{"SKILL.md": "# incoming"})
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- doRefreshSkill(t, adminID, skillID) }()
+
+	select {
+	case <-fetching:
+	case <-time.After(10 * time.Second):
+		t.Fatal("upstream fetch never started")
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, adminID); err != nil {
+		t.Fatalf("revoke membership: %v", err)
+	}
+	close(release)
+
+	var w *httptest.ResponseRecorder
+	select {
+	case w = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("refresh never returned")
+	}
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 after membership was revoked mid-fetch, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, desc, _, _ := getSkillRow(t, skillID); desc != "original description" {
+		t.Fatalf("revoked refresh must not mutate the skill, description = %q", desc)
+	}
+}
+
+// An edit that lands while the upstream fetch is in flight must survive. The
+// write tx compares updated_at against the row the request read, so the
+// overwrite fails with 409 and the edit stays.
+func TestRefreshSkill_ConcurrentEditConflicts(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	slug := fmt.Sprintf("refresh-raced-%d", time.Now().UnixNano())
+	skillID := createImportTargetSkillWithConfig(t, slug, testUserID, clawhubOriginConfig(slug), nil)
+
+	fetching, release := installGatedClawHubFixture(t, slug, slug, "incoming", map[string]string{"SKILL.md": "# incoming"})
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- doRefreshSkill(t, testUserID, skillID) }()
+
+	select {
+	case <-fetching:
+	case <-time.After(10 * time.Second):
+		t.Fatal("upstream fetch never started")
+	}
+	// Another member edits the body without renaming the skill.
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE skill SET content = $2, updated_at = now() WHERE id = $1`,
+		skillID, "# someone else's edit"); err != nil {
+		t.Fatalf("concurrent edit: %v", err)
+	}
+	close(release)
+
+	var w *httptest.ResponseRecorder
+	select {
+	case w = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("refresh never returned")
+	}
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 after a concurrent edit, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, _, content, _ := getSkillRow(t, skillID); content != "# someone else's edit" {
+		t.Fatalf("concurrent edit must survive, content = %q", content)
 	}
 }
 

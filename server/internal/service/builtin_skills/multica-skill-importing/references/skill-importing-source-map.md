@@ -124,16 +124,18 @@ that omit `on_conflict` still receive a bare `SkillWithFilesResponse`.
 
 | Behavior | File:line |
 |---|---|
-| `RefreshSkill` handler | `server/internal/handler/skill_refresh.go:120` |
+| `RefreshSkill` handler | `server/internal/handler/skill_refresh.go:118` |
 | Route `r.Post("/refresh", h.RefreshSkill)` | `server/cmd/server/router.go:1594` |
 | Reads stored provenance `config.origin.{type,source_url}` | `parseSkillOrigin`, `server/internal/handler/skill_refresh.go:32` |
 | Refreshable origins are `github` / `skills_sh` / `clawhub` only | `refreshableOriginSource`, `server/internal/handler/skill_refresh.go:57` |
 | Re-runs the matching import fetcher from the stored `source_url` | `fetchImportedSkillFromOrigin`, `server/internal/handler/skill_refresh.go:75` |
 | Non-refreshable origin → 422 | `errSkillNotRefreshable`, `server/internal/handler/skill_refresh.go:22` |
-| Permission: creator or workspace owner/admin, checked before the fetch | `server/internal/handler/skill_refresh.go:120` (body) — broader than import-overwrite's creator-only rule |
-| Merges only `config.origin`, preserving other config keys | `mergeSkillConfigOrigin`, `server/internal/handler/skill_refresh.go:99` |
-| In-place overwrite preserving id/creator/bindings, adopting upstream rename | `overwriteSkillWithFiles` with `NewName` + `AllowOverwrite`, `server/internal/handler/skill_create.go:119-122`, tx helper `:133` |
-| Upstream rename colliding with another skill → 409 | `errSkillOverwriteNameConflict`, `server/internal/handler/skill_create.go:104` |
+| Permission: creator or workspace owner/admin, checked before the fetch | `server/internal/handler/skill_refresh.go:118` (body) — broader than import-overwrite's creator-only rule |
+| Permission re-read inside the write tx, so a demotion during the fetch → 403 | `authorizeSkillOverwrite`, `server/internal/handler/skill_create.go:154` |
+| Merges only `config.origin`, preserving other config keys | `mergeSkillConfigOrigin`, `server/internal/handler/skill_refresh.go:97` |
+| In-place overwrite preserving id/creator/bindings, adopting upstream rename | `overwriteSkillWithFiles` with `NewName` + `Authz`, `server/internal/handler/skill_create.go:134-139`, tx helper `:202` |
+| Upstream rename colliding with another skill → 409 | `errSkillOverwriteNameConflict`, `server/internal/handler/skill_create.go:105` |
+| An edit landing during the fetch → 409, the edit is kept | `ExpectedUpdatedAt` compare-and-set, `server/internal/handler/skill_create.go:143` |
 | Fetch failures map like import (413/502/503/504) | `importFetchErrorResponse` (grep in `server/internal/handler/skill.go`) |
 | CLI `skill refresh <id>` def / runner | `server/cmd/multica/cmd_skill.go:66`, `runSkillRefresh` at `:425` |
 | Handler tests | `server/internal/handler/skill_refresh_test.go` |
