@@ -136,6 +136,53 @@ func TestBuildDaemonStartArgsForwardsNoAutoReload(t *testing.T) {
 	}
 }
 
+func TestDaemonSuccessorEnvScopesQoderCloudPAT(t *testing.T) {
+	t.Parallel()
+
+	valuesFor := func(env []string, key string) []string {
+		var values []string
+		for _, entry := range env {
+			name, value, found := strings.Cut(entry, "=")
+			if found && strings.EqualFold(name, key) {
+				values = append(values, value)
+			}
+		}
+		return values
+	}
+
+	t.Run("ordinary environment has no secret", func(t *testing.T) {
+		base := []string{"PATH=/usr/bin", "LANG=en_US.UTF-8"}
+		got := daemonSuccessorEnv(base, "")
+		if values := valuesFor(got, qoderCloudPATEnv); len(values) != 0 {
+			t.Fatalf("ordinary environment contains Qoder Cloud PAT: %v", values)
+		}
+	})
+
+	t.Run("successor receives exactly one in-memory secret", func(t *testing.T) {
+		base := []string{
+			"PATH=/usr/bin",
+			qoderCloudPATEnv + "=stale-one",
+			strings.ToLower(qoderCloudPATEnv) + "=stale-two",
+		}
+		got := daemonSuccessorEnv(base, " successor-secret ")
+		values := valuesFor(got, qoderCloudPATEnv)
+		if len(values) != 1 || values[0] != "successor-secret" {
+			t.Fatalf("successor PAT values = %v, want exactly one current value", values)
+		}
+		if values := valuesFor(base, qoderCloudPATEnv); len(values) != 2 {
+			t.Fatal("daemonSuccessorEnv mutated its input")
+		}
+	})
+
+	t.Run("empty in-memory PAT removes stale values", func(t *testing.T) {
+		base := []string{"PATH=/usr/bin", qoderCloudPATEnv + "=stale"}
+		got := daemonSuccessorEnv(base, "  ")
+		if values := valuesFor(got, qoderCloudPATEnv); len(values) != 0 {
+			t.Fatalf("empty PAT injected stale values: %v", values)
+		}
+	})
+}
+
 // TestNoAutoReloadFlagRegisteredOnBothDaemonCommands: `daemon restart` mirrors
 // every `daemon start` flag, and a knob registered on only one of them fails at
 // parse time for users who restart rather than start.

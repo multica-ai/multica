@@ -45,6 +45,7 @@ func TestNormalizePR3LabelsCollapseUnknownValues(t *testing.T) {
 		{"cloudruntime_status_2xx_string", metrics.NormalizeCloudRuntimeStatus, "200", "ok", "error"},
 		{"cloudruntime_status_5xx_string", metrics.NormalizeCloudRuntimeStatus, "503", "5xx", "error"},
 		{"cloudruntime_status_garbage", metrics.NormalizeCloudRuntimeStatus, "lol", "error", "error"},
+		{"runtime_provider_qodercloud", metrics.NormalizeRuntimeProvider, "qodercloud", "qodercloud", "other"},
 		{"daemon_ws_kind_unknown", metrics.NormalizeDaemonWSKind, "future_event", "other", "other"},
 		{"feedback_kind_unknown", metrics.NormalizeFeedbackKind, "rant", "other", "other"},
 		{"contact_sales_source_unknown", metrics.NormalizeContactSalesSource, "homepage_modal", "other", "other"},

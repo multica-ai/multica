@@ -141,6 +141,7 @@ var (
 		"deveco":        "deveco",
 		"pi":            "pi",
 		"qoder":         "qoder",
+		"qodercloud":    "qodercloud",
 		"qoderclicn":    "qoderclicn",
 		"qwen":          "qwen",
 		"traecli":       "traecli",

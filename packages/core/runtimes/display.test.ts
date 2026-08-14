@@ -63,8 +63,16 @@ describe("runtimeDisplayLabel", () => {
   });
 
   it("uses the daemon's provider display name for overridden slugs", () => {
-    // DSH, Qoder CN, Trae, Qwen Code, and QwenPaw use display names that differ from
-    // title-cased slugs; aliases must match the daemon's no-alias names.
+    // Qoder Cloud, DSH, Qoder CN, Trae, Qwen Code, and QwenPaw use display
+    // names that differ from title-cased slugs; aliases must match the
+    // daemon's no-alias names.
+    expect(
+      runtimeDisplayLabel({
+        name: "Qoder Cloud (host)",
+        custom_name: "box",
+        provider: "qodercloud",
+      }),
+    ).toBe("box (Qoder Cloud)");
     expect(
       runtimeDisplayLabel({
         name: "DeepSeek Harness (host)",
