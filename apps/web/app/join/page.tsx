@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Badge } from "@multica/ui/components/ui/badge";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { ShareLinkInfo, Workspace } from "@multica/core/types";
@@ -122,15 +123,12 @@ function JoinInner() {
                   Invited by {info.creator_name}
                 </p>
               )}
-              {info.role === "admin" ? (
-                <p className="text-center text-body text-destructive">
-                  This link grants you administrator access to this workspace.
-                </p>
-              ) : (
-                <p className="text-center text-body text-muted-foreground">
-                  You&apos;ll join as a member.
-                </p>
-              )}
+              <p className="flex items-center justify-center gap-2 text-center text-body text-muted-foreground">
+                <span>You&apos;ll join this workspace as</span>
+                <Badge variant={info.role === "admin" ? "destructive" : "outline"}>
+                  {info.role === "admin" ? "Administrator" : "Member"}
+                </Badge>
+              </p>
               {!user && (
                 <p className="text-center text-body text-muted-foreground">
                   You&apos;ll need to log in to join this workspace.

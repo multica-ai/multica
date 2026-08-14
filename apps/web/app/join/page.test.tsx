@@ -97,7 +97,7 @@ describe("JoinPage", () => {
     expect(mockJoinByShareLink).not.toHaveBeenCalled();
   });
 
-  it("warns when the link grants admin access", async () => {
+  it("shows an Administrator badge when the link grants admin access", async () => {
     mockGetShareLinkInfo.mockResolvedValue({
       ...TEST_INFO,
       role: "admin",
@@ -107,14 +107,13 @@ describe("JoinPage", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(
-          "This link grants you administrator access to this workspace.",
-        ),
+        screen.getByText("You'll join this workspace as"),
       ).toBeInTheDocument(),
     );
+    expect(screen.getByText("Administrator")).toBeInTheDocument();
   });
 
-  it("shows the member role when the link grants member access", async () => {
+  it("shows a Member badge when the link grants member access", async () => {
     mockGetShareLinkInfo.mockResolvedValue({
       ...TEST_INFO,
       role: "member",
@@ -124,9 +123,10 @@ describe("JoinPage", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText("You'll join as a member."),
+        screen.getByText("You'll join this workspace as"),
       ).toBeInTheDocument(),
     );
+    expect(screen.getByText("Member")).toBeInTheDocument();
   });
 
   it("shows an error when the link is invalid", async () => {
