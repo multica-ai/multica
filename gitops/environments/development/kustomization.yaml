@@ -43,4 +43,4 @@ images:
     newTag: "afa2cebc"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "ce88c110"
+    newTag: "afa2cebc"
