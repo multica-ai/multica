@@ -759,8 +759,45 @@ func TestCodexFirstTurnNoProgressTimeoutClamp(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := codexFirstTurnNoProgressTimeout(tc.semantic); got != tc.want {
-				t.Fatalf("codexFirstTurnNoProgressTimeout(%s) = %s, want %s", tc.semantic, got, tc.want)
+			if got := codexFirstTurnNoProgressTimeout(tc.semantic, 0); got != tc.want {
+				t.Fatalf("codexFirstTurnNoProgressTimeout(%s, 0) = %s, want %s", tc.semantic, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCodexFirstTurnNoProgressTimeoutExplicitOverride covers the
+// MULTICA_CODEX_FIRST_TURN_TIMEOUT path added for GH #3262 / #5959: a positive
+// configured value is honored as-is for the first-turn watchdog ceiling,
+// including upward past the default that the semantic inactivity timeout alone
+// can never raise. This resolver only sets that one timer's duration; the
+// effective first-item wait is still min(ceiling, semantic, execution) because
+// the semantic timer runs concurrently — see
+// TestCodexExecuteFirstTurnOverrideAboveSemanticIsTruncated for that runtime
+// interaction. A non-positive override changes nothing — the function falls back
+// to the pinned default/scaling behaviour asserted by
+// TestCodexFirstTurnNoProgressTimeoutClamp.
+func TestCodexFirstTurnNoProgressTimeoutExplicitOverride(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		semantic   time.Duration
+		configured time.Duration
+		want       time.Duration
+	}{
+		{name: "override above the ceiling is honored in full", semantic: 0, configured: 5 * time.Minute, want: 5 * time.Minute},
+		{name: "override wins over the default 10m semantic", semantic: 10 * time.Minute, configured: 2 * time.Minute, want: 2 * time.Minute},
+		{name: "override wins over a value that would otherwise scale down", semantic: 30 * time.Second, configured: 90 * time.Second, want: 90 * time.Second},
+		{name: "override raises the resolver ceiling above the default", semantic: 0, configured: 30 * time.Minute, want: 30 * time.Minute},
+		{name: "zero override keeps the default ceiling", semantic: 0, configured: 0, want: 60 * time.Second},
+		{name: "negative override is ignored and falls back to the ceiling", semantic: 10 * time.Minute, configured: -1 * time.Second, want: 60 * time.Second},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexFirstTurnNoProgressTimeout(tc.semantic, tc.configured); got != tc.want {
+				t.Fatalf("codexFirstTurnNoProgressTimeout(%s, %s) = %s, want %s", tc.semantic, tc.configured, got, tc.want)
 			}
 		})
 	}
@@ -2982,6 +3019,63 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
 		}
 	}
+}
+
+// TestCodexExecuteFirstTurnOverrideAboveSemanticIsTruncated pins the competing-
+// timer contract for MULTICA_CODEX_FIRST_TURN_TIMEOUT (GH #3262 / #5959): the
+// first status:running arms the semantic-inactivity timer and the first-turn
+// timer together, so a first-turn override ABOVE the semantic timeout cannot
+// extend the first-item wait — the semantic timer fires first. That also
+// reclassifies the failure as semantic inactivity, so the model-catalog startup
+// retry (GH #3291) does NOT run even though the catalog-refresh-failure signal is
+// present in stderr. The resolver tests cannot observe this; this drives the real
+// run loop. It is the inverse of TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics,
+// where the first-turn timer is the smaller of the two and wins.
+func TestCodexExecuteFirstTurnOverrideAboveSemanticIsTruncated(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-trunc"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-trunc","turn":{"id":"turn-trunc"}}}'`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	// First-turn override (5s) sits far above the semantic timeout (100ms).
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  100 * time.Millisecond,
+		FirstTurnNoProgressTimeout: 5 * time.Second,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	// The semantic timer won the race: the failure must be classified as semantic
+	// inactivity, not first-turn no-progress. The override did not extend the wait.
+	if !strings.Contains(result.Error, CodexSemanticInactivityMarker) {
+		t.Fatalf("expected semantic-inactivity classification, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, CodexFirstTurnNoProgressMarker) {
+		t.Fatalf("first-turn override above the semantic timeout must not win the race: %q", result.Error)
+	}
+	// The catalog-refresh-failure signal is present, but because the failure is
+	// classified as semantic (not first-turn) the #3291 startup retry is skipped:
+	// exactly one attempt runs.
+	assertCodexAttemptCount(t, fakePath, "1")
 }
 
 func TestCodexExecuteFirstItemWaitLifecycle(t *testing.T) {

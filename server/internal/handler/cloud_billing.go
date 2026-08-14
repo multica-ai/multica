@@ -157,6 +157,38 @@ func (h *Handler) GetCloudWorkspaceEntitlements(w http.ResponseWriter, r *http.R
 	h.proxyCloudSubscription(w, r, http.MethodGet, "/api/v1/entitlements/"+workspaceID, userID, nil, nil)
 }
 
+// GetCloudWorkspaceSubscriptionSummary forwards cloud's Billing-page read:
+// the resolved entitlement plus local subscription facts (seats, interval,
+// cancellation and grace state, Portal availability). Member-readable like
+// entitlements; cloud re-verifies membership against its product database.
+//
+// Cloud serves this from its own database without calling Stripe, so this stays
+// available while Stripe is degraded. A cloud that predates the endpoint
+// answers 404 and the client treats the page as unavailable — never as Free.
+func (h *Handler) GetCloudWorkspaceSubscriptionSummary(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requireCloudSubscriptionWorkspace(w, r)
+	if !ok {
+		return
+	}
+	h.proxyCloudSubscription(w, r, http.MethodGet, "/api/v1/subscriptions/"+workspaceID+"/summary", userID, nil, nil)
+}
+
+// GetCloudWorkspaceSubscriptionPrices forwards cloud's validated per-seat price
+// read so the client never hardcodes an amount that Stripe can change.
+//
+// Member-readable: seeing what Pro costs is not a privileged action, and cloud
+// scopes the read to a workspace this caller belongs to. Cloud returns only
+// currency, minor-unit amount and interval — Price and Product IDs stay server
+// side — and answers 503 when a configured Price cannot be validated, which the
+// client renders as "price confirmed at Checkout" rather than a guessed number.
+func (h *Handler) GetCloudWorkspaceSubscriptionPrices(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requireCloudSubscriptionWorkspace(w, r)
+	if !ok {
+		return
+	}
+	h.proxyCloudSubscription(w, r, http.MethodGet, "/api/v1/subscriptions/"+workspaceID+"/prices", userID, nil, nil)
+}
+
 // CreateCloudWorkspaceSubscriptionCheckout injects the middleware-resolved
 // workspace into the upstream body. A caller cannot use a valid role in one
 // workspace to smuggle a different workspace_id through JSON.

@@ -115,6 +115,7 @@
       "toggleChat": { "label": "チャットウィンドウを切り替え", "description": "フローティングチャットを開閉します。開いたときは入力欄にフォーカスします。" },
       "findInIssue": { "label": "タスク内を検索", "description": "開いているタスクの詳細を検索します。" },
       "openThreadNav": { "label": "スレッドナビゲーターを開く", "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。" },
+      "archiveInboxItem": { "label": "通知をアーカイブ", "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。" },
       "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログでタスクを作成します。" },
       "goBack": { "label": "戻る", "description": "ブラウザーのように履歴を戻ります。" },
       "goForward": { "label": "進む", "description": "ブラウザーのように履歴を進みます。" },
@@ -183,7 +184,8 @@
       "labels": "ラベル",
       "properties": "プロパティ",
       "quick_actions": "クイックアクション",
-      "plugins": "Plugins"
+    "plugins": "Plugins",
+    "billing": "請求とプラン"
     }
   },
   "plugins": {
@@ -200,6 +202,8 @@
     "read_only_description": "ワークスペースの owner と admin が Plugin とバインドを変更できます。",
     "empty": "利用可能な bundled Plugins はありません。",
     "official": "公式",
+    "private": "プライベート",
+    "unverified": "未検証",
     "signed": "署名検証済み",
     "signature_unverified": "署名未検証",
     "incompatible": "互換性のない release",
@@ -211,6 +215,7 @@
     "health": "状態:",
     "bindings": "有効なスコープ",
     "unknown_agent": "不明なエージェント",
+    "unknown_member": "不明なメンバー",
     "workspace_scope": "ワークスペース",
     "agent_scope": "エージェント",
     "binding_disabled": "Plugin バインドを無効にしました",
@@ -222,6 +227,11 @@
     "disabled": "新しい作業で Plugin を無効にしました",
     "upgraded": "Plugin をアップグレードしました",
     "rolled_back": "Plugin をロールバックしました",
+    "source": "ソースとアップロード者",
+    "private_upload": "ワークスペースへのプライベートアップロード",
+    "uploaded_by": "アップロード者",
+    "uninstall": "アンインストール",
+    "uninstalled": "今後の実行から Plugin をアンインストールしました",
     "upgrade_to": "v{{version}} にアップグレード",
     "rollback_to": "v{{version}} にロールバック",
     "action_failed": "Plugin 操作に失敗しました",

@@ -5,6 +5,7 @@ codex
 copilot
 cursor-agent
 deveco
+dsh
 grok
 hermes
 kimi

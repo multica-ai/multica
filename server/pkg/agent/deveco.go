@@ -182,11 +182,11 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		case <-runCtx.Done():
 		}
 		if cmd.Process != nil {
-			signalProcessGroup(cmd.Process, syscall.SIGTERM)
+			signalProcessGroup(cmd, syscall.SIGTERM)
 			select {
 			case <-procDone: // exited within the grace window
 			case <-time.After(devecoTerminateGrace()):
-				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				signalProcessGroup(cmd, syscall.SIGKILL)
 			}
 		}
 		_ = stdout.Close()

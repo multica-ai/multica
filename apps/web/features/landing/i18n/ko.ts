@@ -118,7 +118,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 21개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 22개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -193,7 +193,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 21개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 22개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -268,6 +268,34 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.4.25",
+          date: "2026-08-13",
+          title: "로컬 폴더 병렬 모드, DingTalk 그룹별 라우팅, 스킬 원클릭 업데이트",
+          changes: [],
+          features: [
+            "로컬 폴더에서 여러 태스크를 병렬로 돌리고, 각각 브랜치로 결과를 받습니다.",
+            "DingTalk 봇 하나로 그룹마다 다른 에이전트를 지정할 수 있어요.",
+            "가져온 스킬을 원본에서 원클릭으로 업데이트할 수 있어요.",
+            "Issue 멘션에 마우스를 올리면 제목, 담당자, 진행 상황이 보입니다.",
+            "jcode 에이전트의 사고 강도를 고를 수 있어요.",
+            "셀프호스팅에서 태스크 임시 파일을 더 큰 디스크에 둘 수 있어요.",
+          ],
+          improvements: [
+            "`multica daemon logs`가 로그 파일 위치를 바로 알려줍니다.",
+            "Hermes 태스크가 어떤 HERMES_HOME을 읽었는지 알려줍니다.",
+          ],
+          fixes: [
+            "오프라인 런타임을 정리해도 태스크 기록이 사라지지 않습니다.",
+            "Hermes 대화가 태스크가 끝난 뒤에도 기록을 잃지 않습니다.",
+            "npm으로 설치한 에이전트가 Windows에서 실행됩니다.",
+            "Windows에서 Codex 잔여 프로세스가 남지 않습니다.",
+            "보드 카드의 아바타를 클릭하면 담당자를 바꿀 수 있어요.",
+            "런타임 활동과 간트의 날짜가 화면 언어에 맞춰 표시됩니다.",
+            "다크 모드에서 탭과 페이지 사이 경계선 색이 달라지지 않습니다.",
+            "기본 제공 Bug 분류 오토파일럿이 정상적으로 실행됩니다.",
+          ],
+        },
         {
           version: "0.4.24",
           date: "2026-08-12",

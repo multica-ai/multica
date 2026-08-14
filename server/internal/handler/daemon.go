@@ -27,7 +27,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
-	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -457,10 +456,15 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		if runtime.Status == "offline" {
 			status = "offline"
 		}
+		// Persist what this daemon advertised, so surfaces that cannot see the
+		// live request — the resource-save gate and the UI — decide from the
+		// same signal the claim path uses, instead of re-deriving it from a
+		// version string (MUL-5707).
 		metadata, _ := json.Marshal(map[string]any{
-			"version":     runtime.Version,
-			"cli_version": req.CLIVersion,
-			"launched_by": req.LaunchedBy,
+			"version":      runtime.Version,
+			"cli_version":  req.CLIVersion,
+			"launched_by":  req.LaunchedBy,
+			"capabilities": requestClientCapabilities(r),
 		})
 
 		var registered db.AgentRuntime
@@ -1427,6 +1431,44 @@ func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, cl
 
 // requestHasClientCapability reports whether the caller advertised a capability
 // in X-Client-Capabilities. Daemons and app clients share the header.
+// requestClientCapabilities returns the advertised capability list, trimmed and
+// with empties dropped. Nil when the header is absent — which is exactly what an
+// older daemon looks like.
+func requestClientCapabilities(r *http.Request) []string {
+	raw := strings.Split(r.Header.Get("X-Client-Capabilities"), ",")
+	out := make([]string, 0, len(raw))
+	for _, part := range raw {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// runtimeHasCapability reports whether a stored runtime row advertised the
+// capability at registration. Absent metadata means an older daemon that never
+// sent the header, so this fails closed.
+func runtimeHasCapability(metadata []byte, capability string) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+	var m struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := json.Unmarshal(metadata, &m); err != nil {
+		return false
+	}
+	for _, c := range m.Capabilities {
+		if c == capability {
+			return true
+		}
+	}
+	return false
+}
+
 func requestHasClientCapability(r *http.Request, capability string) bool {
 	for _, part := range strings.Split(r.Header.Get("X-Client-Capabilities"), ",") {
 		if strings.TrimSpace(part) == capability {
@@ -2669,6 +2711,37 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
+	// Surface a bounded snapshot of the same agent's other in-flight issue
+	// tasks. Queued tasks cannot coordinate yet and are intentionally omitted.
+	// This is advisory context, not a queue gate: cross-issue parallelism and
+	// serial handoffs remain valid, while the prompt can stop an unaware second
+	// run from opening a duplicate PR. Scope the query to the already-validated
+	// runtime workspace so corrupt cross-tenant task links never leak.
+	if siblings, err := h.Queries.ListActiveSiblingIssueTasks(r.Context(), db.ListActiveSiblingIssueTasksParams{
+		AgentID:     task.AgentID,
+		TaskID:      task.ID,
+		WorkspaceID: parseUUID(resp.WorkspaceID),
+	}); err == nil {
+		resp.ActiveSiblingRuns = make([]ActiveSiblingRunData, 0, len(siblings))
+		for _, sibling := range siblings {
+			resp.ActiveSiblingRuns = append(resp.ActiveSiblingRuns, ActiveSiblingRunData{
+				TaskID:          uuidToString(sibling.TaskID),
+				IssueID:         uuidToString(sibling.IssueID),
+				IssueIdentifier: fmt.Sprintf("%s-%d", sibling.IssuePrefix, sibling.IssueNumber),
+				IssueTitle:      sibling.IssueTitle,
+				Status:          sibling.Status,
+				CreatedAt:       timestampToString(sibling.CreatedAt),
+				StartedAt:       timestampToString(sibling.StartedAt),
+			})
+		}
+	} else {
+		slog.Warn("task claim: failed to load active sibling runs",
+			"task_id", uuidToString(task.ID),
+			"agent_id", uuidToString(task.AgentID),
+			"error", err,
+		)
+	}
+
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
 	// system prompt that workspace owners set in Settings → General. Inject it
 	// into the brief regardless of task kind (issue / chat / autopilot /
@@ -2697,7 +2770,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// user asked to isolate. That is the exact outcome worktree mode exists to
 	// prevent, so it fails closed here, against the version of the runtime that
 	// is actually claiming.
-	if reason := worktreeClaimBlockReason(resp.ProjectResources, runtime); reason != "" {
+	if reason := worktreeClaimBlockReason(
+		resp.ProjectResources,
+		runtime,
+		requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeV1),
+	); reason != "" {
 		slog.Error("task claim: runtime too old for worktree mode; cancelling rather than running in place",
 			"task_id", uuidToString(task.ID),
 			"runtime_id", runtimeID,
@@ -2751,11 +2828,22 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 // worktreeClaimBlockReason returns a user-facing reason when this runtime must
 // not run the task, or "" when it may proceed.
 //
+// The decision is made on the CAPABILITY the daemon advertised on this very
+// request, not on its version string. A daemon without the implementation does
+// not merely lose concurrency — it json-skips execution_mode and runs the task
+// in place, editing the working copy the user asked to isolate. Version strings
+// could not answer that reliably: the git-describe dev-build exemption that
+// keeps `make daemon` unblocked let a v0.4.23-era daemon straight through, and
+// two tasks silently ran in the user's own directory (MUL-5707).
+//
 // Only resources bound to the claiming runtime's own daemon are considered: a
 // project may carry one local_directory per machine, and another machine's
 // worktree resource says nothing about this one's ability to run the task.
-func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime) string {
+func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, hasWorktreeCapability bool) string {
 	if !runtime.DaemonID.Valid || runtime.DaemonID.String == "" {
+		return ""
+	}
+	if hasWorktreeCapability {
 		return ""
 	}
 	for _, res := range resources {
@@ -2769,16 +2857,11 @@ func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentR
 		if ref.ExecutionMode != localDirectoryModeWorktree || ref.DaemonID != runtime.DaemonID.String {
 			continue
 		}
-		current := readRuntimeCLIVersion(runtime.Metadata)
-		if err := agentpkg.CheckMinCLIVersionFor(current, agentpkg.MinLocalWorktreeCLIVersion); err != nil {
-			shown := current
-			if strings.TrimSpace(shown) == "" {
-				shown = "unknown"
-			}
-			return fmt.Sprintf(
-				"this project's local directory %q is set to run tasks in isolated git worktrees, but the Multica runtime on that machine is %s and needs %s or newer; update it, or switch the resource back to in_place",
-				ref.LocalPath, shown, agentpkg.MinLocalWorktreeCLIVersion)
-		}
+		return fmt.Sprintf(
+			"This machine's Multica runtime does not support parallel (worktree) mode, which %q is set to use. "+
+				"Update the Multica app on that machine to the latest version, then re-run this task. "+
+				"Refusing to run rather than falling back to editing the directory directly, which is what this mode exists to prevent.",
+			ref.LocalPath)
 	}
 	return ""
 }

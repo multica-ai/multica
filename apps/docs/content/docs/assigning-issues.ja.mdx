@@ -67,10 +67,14 @@ Multica はエージェントのために[タスク](/tasks)を作成します�
 
 ```bash
 multica issue assign MUL-42 --to "Agent name"
+multica issue assign MUL-42 --to-id <agent-uuid> --no-start
+multica issue status MUL-42 in_progress --no-start
 multica issue assign MUL-42 --unassign
 ```
 
 スクリプトでは `--to-id <uuid>` を使うと、同名のオブジェクトへの誤マッチを避けられます。UUID は `multica agent list --output json` または `multica workspace member list --output json` で確認できます。
+
+割り当てで担当だけを記録し、新しいタスクを作成しない場合（たとえば同じエージェントが別の実行ですでにそのイシューを処理している場合）は、`--no-start` を使用します。`issue update` と `issue status` でも同じフラグを使用できます。担当とステータスの両方を変更する所有権のみのフローでは、両方のコマンドにこのフラグを指定してください。割り当てを抑止しても、後続のステータス変更による実行は自動では抑止されません。
 
 ## 次のステップ
 

@@ -168,3 +168,67 @@ export const MIN_LOCAL_WORKTREE_CLI_VERSION = "0.4.24";
 export function localWorktreeSupported(detected: string | undefined | null): boolean {
   return meetsMinCliVersion(detected, MIN_LOCAL_WORKTREE_CLI_VERSION);
 }
+
+/**
+ * Capability a daemon advertises when it implements worktree mode for
+ * local_directory resources. Mirrors `DaemonCapabilityLocalWorktreeV1` in
+ * `server/pkg/protocol/messages.go`.
+ */
+export const LOCAL_WORKTREE_CAPABILITY = "local-worktree-v1";
+
+/**
+ * Whether a runtime advertised worktree support at registration.
+ *
+ * This replaces a version comparison on purpose. A daemon without the
+ * implementation does not merely lose concurrency — it ignores `execution_mode`
+ * and edits the user's working copy, which is what the mode exists to prevent.
+ * Version strings could not answer that: a dev build reports a git-describe
+ * string that `meetsMinCliVersion` deliberately exempts, so a daemon with no
+ * worktree code at all passed the check (MUL-5707).
+ *
+ * Absent metadata (an older daemon that never sent the header) is `false` —
+ * this must fail closed, and the server enforces the same thing at claim time.
+ */
+export function runtimeSupportsLocalWorktree(metadata: unknown): boolean {
+  if (!metadata || typeof metadata !== "object") return false;
+  const caps = (metadata as { capabilities?: unknown }).capabilities;
+  return Array.isArray(caps) && caps.includes(LOCAL_WORKTREE_CAPABILITY);
+}
+
+/** Minimal runtime shape this module needs; keeps callers from importing types. */
+type RuntimeCapabilityRow = {
+  daemon_id?: string | null;
+  last_seen_at?: string | null;
+  metadata?: unknown;
+};
+
+/**
+ * Whether the machine behind `daemonId` currently runs a daemon that supports
+ * worktree mode, judged by its MOST RECENTLY SEEN runtime row.
+ *
+ * Deliberately not "any row advertised it". Deregistering a runtime only marks
+ * the row offline — its metadata survives — so a machine that once ran a
+ * capable daemon and then downgraded still has an old capable row beside the
+ * fresh incapable one, and an any-match would answer yes forever. The server's
+ * `daemonAdvertisesWorktree` uses the same newest-wins rule; the two must agree
+ * or the UI offers a mode the API will refuse.
+ */
+export function daemonSupportsLocalWorktree(
+  runtimes: RuntimeCapabilityRow[],
+  daemonId: string | null | undefined,
+): boolean {
+  if (!daemonId) return false;
+  let newest: RuntimeCapabilityRow | undefined;
+  for (const rt of runtimes) {
+    if (rt.daemon_id !== daemonId) continue;
+    if (!newest) {
+      newest = rt;
+      continue;
+    }
+    // A row that never reported sorts oldest, so a live row always wins.
+    const candidateSeen = rt.last_seen_at ?? "";
+    const currentSeen = newest.last_seen_at ?? "";
+    if (candidateSeen > currentSeen) newest = rt;
+  }
+  return newest ? runtimeSupportsLocalWorktree(newest.metadata) : false;
+}

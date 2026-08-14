@@ -981,14 +981,15 @@ type PluginHealth struct {
 }
 
 type PluginIdentity struct {
-	ID            pgtype.UUID        `json:"id"`
-	PluginKey     string             `json:"plugin_key"`
-	DisplayName   string             `json:"display_name"`
-	PublisherID   string             `json:"publisher_id"`
-	PublisherType string             `json:"publisher_type"`
-	TrustTier     string             `json:"trust_tier"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	RetiredAt     pgtype.Timestamptz `json:"retired_at"`
+	ID               pgtype.UUID        `json:"id"`
+	PluginKey        string             `json:"plugin_key"`
+	DisplayName      string             `json:"display_name"`
+	PublisherID      string             `json:"publisher_id"`
+	PublisherType    string             `json:"publisher_type"`
+	TrustTier        string             `json:"trust_tier"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	RetiredAt        pgtype.Timestamptz `json:"retired_at"`
+	OwnerWorkspaceID pgtype.UUID        `json:"owner_workspace_id"`
 }
 
 type PluginInstallation struct {

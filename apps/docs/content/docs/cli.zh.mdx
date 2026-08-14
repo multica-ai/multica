@@ -227,9 +227,9 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | `issue` | `list` | 列出 issue | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（可重复）、`--limit`、`--offset`、`--sort`、`--full-id` |
 | | `get <id>` | 查看单个 issue | |
 | | `create` | 创建 issue | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重复） |
-| | `update <id>` | 更新 issue 字段 | 与 `create` 同类字段，另有 `--position` |
-| | `assign <id>` | 指派或取消指派 | `--to`（名称模糊匹配成员、智能体或小队）、`--to-id`、`--unassign` |
-| | `status <id> <status>` | 修改状态 | |
+| | `update <id>` | 更新 issue 字段 | 与 `create` 同类字段，另有 `--position`、`--no-start` |
+| | `assign <id>` | 指派或取消指派 | `--to`（名称模糊匹配成员、智能体或小队）、`--to-id`、`--unassign`、`--no-start` |
+| | `status <id> <status>` | 修改状态 | `--no-start` |
 | | `reorder <id>` | 在列内移动 | |
 | | `search <query>` | 搜索 issue | `--limit`、`--include-closed` |
 | | `children <id>` | 按阶段分组列出子 issue | |
@@ -246,7 +246,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `cancel-task <task-id>` | 取消运行中或排队中的 task | `--issue` |
 | `project` | `list/get/create/update/delete` | 管理项目 | |
 | | `status <id> <status>` | 修改项目状态 | |
-| | `resource list/add/update/remove` | 管理项目附加资源 | `--type`、`--url` |
+| | `resource list/add/update/remove` | 管理项目附加资源 | `--type`、`--url`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目录的 `in_place` / `worktree`） |
 | `label` | `list/get/create/update/delete` | 管理工作区标签 | |
 | `property` | `list/get/create/update/archive/unarchive` | 管理工作区自定义属性 | `create`：`--name`、`--type`、`--option`（可重复）；`list`：`--include-archived`；类型创建后不可修改 |
 | `agent` | `list/get/create/update/archive/restore` | 管理智能体 | `--name`、`--runtime-id`（`create` 必填）、`--instructions`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
@@ -275,7 +275,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 
 | 命令 | 子命令 | 用途 | 关键 flag |
 | --- | --- | --- | --- |
-| `daemon` | `start` | 启动本机守护进程 | `--foreground`、`--device-name`、`--runtime-name`、`--poll-interval`、`--heartbeat-interval`、`--agent-timeout`（`0` 表示不设上限）、`--max-concurrent-tasks`、`--no-auto-update`；均有对应的 `MULTICA_*` 环境变量 |
+| `daemon` | `start` | 启动本机守护进程 | `--foreground`、`--device-name`、`--runtime-name`、`--workspaces-root`、`--poll-interval`、`--heartbeat-interval`、`--agent-timeout`（`0` 表示不设上限）、`--max-concurrent-tasks`、`--no-auto-update`；均有对应的 `MULTICA_*` 环境变量 |
 | | `stop` / `status` / `restart` | 停止、查看状态、重启（`restart` 与 `start` 同一套 flag） | |
 | | `logs` | 查看守护进程日志 | `--follow`、`--lines` |
 | | `disk-usage` | 查看本机磁盘占用 | `--by-workspace`、`--by-task`、`--top` |

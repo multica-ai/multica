@@ -139,6 +139,7 @@ func TestClassifyRules(t *testing.T) {
 
 		// 11. Runtime missing executable.
 		{"executable not found", "executable not found in $PATH", ReasonAgentRuntimeMissingExecutable},
+		{"exec format error", "start claude: fork/exec /usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe: exec format error", ReasonAgentRuntimeMissingExecutable},
 
 		// 12. Runtime version unsupported.
 		{"below the minimum supported version", "claude CLI 0.1.0 is below the minimum supported version 0.5.0", ReasonAgentRuntimeVersionUnsupported},
@@ -440,5 +441,60 @@ func TestNormalizeDaemonReason_UpgradedReasonIsPlatformSide(t *testing.T) {
 	got := NormalizeDaemonReason(string(ReasonAgentUnknown), "resolve skill bundles: context deadline exceeded")
 	if got.IsAgentError() {
 		t.Errorf("%q must be platform-side: the agent process never started", got)
+	}
+}
+
+// TestProviderUnconfigured pins the predicate the daemon uses to decide whether
+// a failure is worth annotating with the HERMES_HOME it actually read (GH
+// #6872). The wrapped fixture is the shape the error really arrives in — the
+// runtime's message nested inside the ACP transport's JSON-RPC framing — so a
+// future refactor to equality matching fails here rather than in production.
+func TestProviderUnconfigured(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{
+			"wrapped acp error as the daemon receives it",
+			`hermes session/new failed: session/new: Internal error (code=-32603, ` +
+				`data={"details":"No LLM provider configured. Run ` + "`hermes model`" + ` to select a provider."})`,
+			true,
+		},
+		{"bare runtime message", "No LLM provider configured. Run `hermes model` to select a provider.", true},
+		{"lowercased by a forwarder", "error: no llm provider configured", true},
+		// A credential that exists but was rejected is a different failure with
+		// a different fix; the annotation would misdirect the user.
+		{"rejected credential", "401 unauthorized: invalid api key", false},
+		// The provider WAS resolved — it just could not be reached.
+		{"provider unreachable", "connection refused: https://example.invalid/v1", false},
+		{"empty", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ProviderUnconfigured(tc.in); got != tc.want {
+				t.Errorf("ProviderUnconfigured(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestProviderUnconfiguredAgreesWithClassify keeps the shared phrase honest:
+// the predicate and rule 2 read the same const, so anything the predicate
+// recognises must still be filed as a config problem. If these two ever
+// disagree, the daemon would be annotating failures the platform files as
+// something else entirely.
+func TestProviderUnconfiguredAgreesWithClassify(t *testing.T) {
+	t.Parallel()
+
+	const errText = "No LLM provider configured. Run `hermes model` to select a provider."
+	if !ProviderUnconfigured(errText) {
+		t.Fatal("precondition: the predicate should match its own phrase")
+	}
+	if got := Classify(errText); got != ReasonAgentMissingConfig {
+		t.Errorf("Classify(%q) = %q, want %q", errText, got, ReasonAgentMissingConfig)
 	}
 }

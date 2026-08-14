@@ -103,7 +103,9 @@
     "local_rename_label": "本地目录显示名",
     "local_no_daemon_tooltip": "尚未识别到本机 daemon，agent 暂时无法打开此目录。",
     "local_other_machine_tooltip": "此目录仅在最初注册它的电脑上可用。",
-    "chat_hint_prefix": "Agent 将在",
+    "chat_hint_prefix": "智能体将直接在以下目录中工作：",
+    "chat_hint_worktree_prefix": "智能体将在以下仓库的独立 worktree 中工作：",
+    "chat_hint_worktree_note": "不会改动你的工作副本，每条任务的结果以 agent/… 分支交回。",
     "toast_local_attached": "已添加本地目录",
     "toast_local_renamed": "已重命名",
     "toast_local_rename_failed": "重命名失败",
@@ -133,7 +135,8 @@
     "mode_badge_worktree": "并行",
     "mode_badge_worktree_tooltip": "任务在各自的 git worktree 中同时运行，并以分支形式交付结果。你的工作区不会被改动。",
     "toast_local_mode_updated": "已更新执行方式",
-    "toast_local_mode_update_failed": "无法更新执行方式"
+    "toast_local_mode_update_failed": "无法更新执行方式",
+    "mode_badge_in_place": "原地"
   },
   "delete_dialog": {
     "title": "删除项目",

@@ -115,6 +115,7 @@
       "toggleChat": { "label": "채팅 창 전환", "description": "플로팅 채팅 창을 열거나 닫습니다. 열면 메시지 입력란에 포커스합니다." },
       "findInIssue": { "label": "태스크에서 찾기", "description": "열린 태스크 상세 내용에서 검색합니다." },
       "openThreadNav": { "label": "스레드 내비게이터 열기", "description": "열린 태스크의 댓글 스레드를 나열하고 검색해 이동합니다." },
+      "archiveInboxItem": { "label": "알림 보관", "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다." },
       "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 태스크를 만듭니다." },
       "goBack": { "label": "뒤로 가기", "description": "브라우저처럼 기록을 따라 뒤로 이동합니다." },
       "goForward": { "label": "앞으로 가기", "description": "브라우저처럼 기록을 따라 앞으로 이동합니다." },
@@ -183,7 +184,8 @@
       "labels": "레이블",
       "properties": "속성",
       "quick_actions": "퀵 액션",
-      "plugins": "Plugins"
+    "plugins": "Plugins",
+    "billing": "결제 및 요금제"
     }
   },
   "plugins": {
@@ -200,6 +202,8 @@
     "read_only_description": "워크스페이스 owner와 admin이 Plugin 및 바인딩을 변경할 수 있습니다.",
     "empty": "사용 가능한 bundled Plugins가 없습니다.",
     "official": "공식",
+    "private": "비공개",
+    "unverified": "확인되지 않음",
     "signed": "서명 확인됨",
     "signature_unverified": "서명 미확인",
     "incompatible": "호환되지 않는 release",
@@ -211,6 +215,7 @@
     "health": "상태:",
     "bindings": "활성 범위",
     "unknown_agent": "알 수 없는 에이전트",
+    "unknown_member": "알 수 없는 멤버",
     "workspace_scope": "워크스페이스",
     "agent_scope": "에이전트",
     "binding_disabled": "Plugin 바인딩을 비활성화했습니다",
@@ -222,6 +227,11 @@
     "disabled": "새 작업에서 Plugin을 비활성화했습니다",
     "upgraded": "Plugin을 업그레이드했습니다",
     "rolled_back": "Plugin을 롤백했습니다",
+    "source": "소스 및 업로더",
+    "private_upload": "워크스페이스 비공개 업로드",
+    "uploaded_by": "업로드한 사용자",
+    "uninstall": "제거",
+    "uninstalled": "향후 실행에서 Plugin을 제거했습니다",
     "upgrade_to": "v{{version}}로 업그레이드",
     "rollback_to": "v{{version}}로 롤백",
     "action_failed": "Plugin 작업에 실패했습니다",

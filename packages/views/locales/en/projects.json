@@ -105,6 +105,8 @@
     "local_no_daemon_tooltip": "Local daemon isn't reporting an ID yet — the agent can't open this directory.",
     "local_other_machine_tooltip": "Only available on the machine that registered this directory.",
     "chat_hint_prefix": "Agent will work in-place at",
+    "chat_hint_worktree_prefix": "Agent will work in an isolated worktree of",
+    "chat_hint_worktree_note": "Your working copy stays untouched — each task hands its work back as an agent/… branch.",
     "toast_local_attached": "Local directory attached",
     "toast_local_renamed": "Renamed",
     "toast_local_rename_failed": "Failed to rename",
@@ -134,7 +136,8 @@
     "mode_badge_worktree": "Parallel",
     "mode_badge_worktree_tooltip": "Tasks run at the same time in their own git worktree and hand back a branch. Your working copy is untouched.",
     "toast_local_mode_updated": "Execution mode updated",
-    "toast_local_mode_update_failed": "Could not update the execution mode"
+    "toast_local_mode_update_failed": "Could not update the execution mode",
+    "mode_badge_in_place": "Direct"
   },
   "delete_dialog": {
     "title": "Delete project",

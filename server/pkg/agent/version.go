@@ -42,17 +42,20 @@ const MinQuickCreateCLIVersion = "0.2.21"
 // older floor above; only requests using these optional fields need this gate.
 const MinQuickCreateFieldsCLIVersion = "0.4.3"
 
-// MinLocalWorktreeCLIVersion is the first daemon release that implements
-// execution_mode=worktree for local_directory resources (MUL-5707). A daemon
-// older than this does not know the field exists: it json-skips it and runs
-// the task IN PLACE, editing the working copy the user explicitly asked to
-// isolate. (Daemons FROM this version refuse unknown future modes themselves —
-// see localDirectoryAssignment.ValidateExecutionMode — but a daemon that
-// predates the field cannot refuse what it cannot see, so the server has to.)
-// The handler rejects saving a worktree-mode resource while the owning
-// daemon's registered CLI version is missing or below this floor. Hard
-// requirement, fail closed. Keep in sync with the release that actually ships
-// worktree mode when tagging.
+// MinLocalWorktreeCLIVersion is the release that first shipped
+// execution_mode=worktree for local_directory resources (MUL-5707).
+//
+// NOTHING GATES ON THIS. It is a display value: the number shown in the 422
+// payload and the UI hint so a user knows roughly which release to update to.
+// The gates themselves read protocol.DaemonCapabilityLocalWorktreeV1, which
+// the daemon advertises only when it actually implements the mode.
+//
+// It stopped being a gate because it could not be one. A daemon without the
+// implementation does not lose a field — it runs the task IN PLACE, editing the
+// working copy the user asked to isolate. Version strings cannot answer that:
+// CheckMinCLIVersionFor exempts git-describe dev builds so `make daemon` stays
+// unblocked, and a v0.4.23-era daemon reporting "v0.4.21-24-gcd3c0bb89" sailed
+// through the floor and ran two tasks in the user's own directory.
 const MinLocalWorktreeCLIVersion = "0.4.24"
 
 // MinHandoffCLIVersion is the lowest multica CLI version whose daemon renders

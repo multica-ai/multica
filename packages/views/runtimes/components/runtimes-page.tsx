@@ -572,7 +572,7 @@ function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
 function RuntimesPageSkeleton() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PageHeader className="justify-between px-5">
+      <PageHeader>
         <Skeleton className="h-4 w-24" />
       </PageHeader>
       <div className="mx-auto w-full max-w-[1440px] p-6">

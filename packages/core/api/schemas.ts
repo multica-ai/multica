@@ -21,6 +21,13 @@ import type {
   Comment,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
+  WorkspaceSubscriptionEntitlements,
+  WorkspaceSubscriptionSummary,
+  WorkspaceSubscriptionPrice,
+  WorkspaceSubscriptionPrices,
+  CreateWorkspaceSubscriptionCheckoutResponse,
+  WorkspaceSubscriptionSeatReconcileResult,
+  CreateWorkspaceSubscriptionPortalResponse,
   CronPreviewResponse,
   DingTalkGroupRoute,
   DingTalkInstallation,
@@ -86,7 +93,28 @@ export const PluginInstallationSchema = z.object({
   lifecycle_status: z.string().default("error"),
   health_state: z.string().optional(),
   health_reason: z.string().optional(),
+  description: z.string().optional(),
+  publisher: z.string().default(""),
+  publisher_type: z.string().default(""),
+  trust_tier: z.string().default(""),
+  source_kind: z.string().default("bundled"),
+  source_ref: z.string().default(""),
+  uploader_id: z.string().optional(),
+  manifest_digest: z.string().default(""),
+  archive_digest: z.string().default(""),
+  artifact_digest: z.string().default(""),
+  signature_verified: z.boolean().default(false),
+  requested_capabilities: z.array(z.string()).default([]),
+  available_versions: z.array(z.string()).default([]),
   contributions: z.array(z.string()).default([]),
+  contribution_details: z.array(z.object({
+    key: z.string(),
+    type: z.string().default(""),
+    name: z.string().default(""),
+    description: z.string().default(""),
+    entry_path: z.string().default(""),
+    entry_digest: z.string().default(""),
+  }).loose()).default([]),
   bindings: z.array(PluginBindingSchema).default([]),
 }).loose();
 
@@ -99,7 +127,19 @@ export const EMPTY_PLUGIN_INSTALLATION: PluginInstallation = {
   desired_generation: 0,
   active_generation: 0,
   lifecycle_status: "error",
+  publisher: "",
+  publisher_type: "",
+  trust_tier: "",
+  source_kind: "bundled",
+  source_ref: "",
+  manifest_digest: "",
+  archive_digest: "",
+  artifact_digest: "",
+  signature_verified: false,
+  requested_capabilities: [],
+  available_versions: [],
   contributions: [],
+  contribution_details: [],
   bindings: [],
 };
 
@@ -2123,6 +2163,170 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
 };
+
+// ---------------------------------------------------------------------------
+// Workspace subscriptions (`/api/cloud-subscriptions/*`)
+//
+// These schemas are the compatibility boundary with multica-cloud. Three rules
+// hold for all of them:
+//
+//  1. There is no fallback value. Callers get `null` on any parse failure and
+//     must render "unavailable" — never a synthetic Free plan, because that
+//     turns an upstream outage or an older cloud into a silent downgrade of a
+//     paying workspace.
+//  2. `.loose()` keeps unknown keys, so a cloud that adds fields does not break
+//     an older client.
+//  3. `plan` and `status` stay open strings. A new plan or Stripe status must
+//     surface as unknown rather than be coerced into a known one.
+
+const WorkspaceSubscriptionIntervalSchema = z.enum(["month", "year"]);
+
+// Stripe hosts Checkout and Portal, so those URLs leave the app. `z.string()
+// .url()` is not enough on its own — `new URL("javascript:...")` parses — and
+// the caller hands this value to location.assign, so the scheme is pinned here.
+const StripeHostedURLSchema = z.string().url().refine(
+  (value) => value.startsWith("https://"),
+  { message: "Stripe hosted URL must use HTTPS" },
+);
+
+
+export const WorkspaceSubscriptionEntitlementsSchema = z
+  .object({
+    workspace_id: z.string(),
+    plan: z.string(),
+    status: z.string(),
+    // Cloud documents seats as >= 1, but accepting 0 costs nothing and keeps a
+    // workspace that momentarily reports no human members readable instead of
+    // failing the whole snapshot.
+    seats: z.number().int().nonnegative(),
+    issue_window: z.number().int().nonnegative().nullable(),
+    autopilot_runs: z.number().int().nonnegative().nullable(),
+    current_period_end: z.string().nullable().optional(),
+    snapshot_expires_at: z.string().nullable().optional(),
+    version: z.number().int().nonnegative(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceSubscriptionEntitlements => ({
+      workspaceId: value.workspace_id,
+      plan: value.plan,
+      status: value.status,
+      seats: value.seats,
+      issueWindow: value.issue_window,
+      autopilotRuns: value.autopilot_runs,
+      currentPeriodEnd: value.current_period_end ?? null,
+      snapshotExpiresAt: value.snapshot_expires_at ?? null,
+      version: value.version,
+    }),
+  );
+
+export const WorkspaceSubscriptionSummarySchema = z
+  .object({
+    entitlement: WorkspaceSubscriptionEntitlementsSchema,
+    billing_interval: WorkspaceSubscriptionIntervalSchema.nullable().optional(),
+    actual_seats: z.number().int().nonnegative(),
+    billed_seats: z.number().int().nonnegative().nullable().optional(),
+    pending_seat_quantity: z.number().int().nonnegative().nullable().optional(),
+    cancel_at_period_end: z.boolean().optional(),
+    grace_until: z.string().nullable().optional(),
+    has_stripe_customer: z.boolean().optional(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceSubscriptionSummary => ({
+      entitlement: value.entitlement,
+      billingInterval: value.billing_interval ?? null,
+      actualSeats: value.actual_seats,
+      billedSeats: value.billed_seats ?? null,
+      pendingSeatQuantity: value.pending_seat_quantity ?? null,
+      cancelAtPeriodEnd: value.cancel_at_period_end ?? false,
+      graceUntil: value.grace_until ?? null,
+      hasStripeCustomer: value.has_stripe_customer ?? false,
+    }),
+  );
+
+const WorkspaceSubscriptionPriceSchema = (
+  expected: "month" | "year",
+) =>
+  z
+    .object({
+      currency: z.string().min(1),
+      // Reject 0 and negatives: a free or malformed Price must read as
+      // "price unavailable", not as a real amount shown next to a purchase
+      // button.
+      unit_amount: z.number().int().positive(),
+      // Pinned to the slot it arrived in. Cloud validates this too, but a
+      // schema that accepted a yearly Price under `month` would let the UI
+      // quote a yearly amount as a monthly one — the schema is an independent
+      // boundary, so it checks the correspondence itself.
+      interval: z.literal(expected),
+      interval_count: z.literal(1),
+    })
+    .loose()
+    .transform(
+      (value): WorkspaceSubscriptionPrice => ({
+        currency: value.currency,
+        unitAmount: value.unit_amount,
+        interval: value.interval,
+        intervalCount: value.interval_count,
+      }),
+    );
+
+export const WorkspaceSubscriptionPricesSchema = z
+  .object({
+    month: WorkspaceSubscriptionPriceSchema("month"),
+    year: WorkspaceSubscriptionPriceSchema("year"),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceSubscriptionPrices => ({
+      month: value.month,
+      year: value.year,
+    }),
+  );
+
+export const CreateWorkspaceSubscriptionCheckoutResponseSchema = z
+  .object({
+    request_id: z.string(),
+    session_id: z.string(),
+    url: StripeHostedURLSchema,
+  })
+  .loose()
+  .transform(
+    (value): CreateWorkspaceSubscriptionCheckoutResponse => ({
+      requestId: value.request_id,
+      sessionId: value.session_id,
+      url: value.url,
+    }),
+  );
+
+export const WorkspaceSubscriptionSeatReconcileResultSchema = z
+  .object({
+    workspace_id: z.string(),
+    billed_seats: z.number().int().nonnegative(),
+    actual_seats: z.number().int().nonnegative(),
+    action: z.string(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceSubscriptionSeatReconcileResult => ({
+      workspaceId: value.workspace_id,
+      billedSeats: value.billed_seats,
+      actualSeats: value.actual_seats,
+      action: value.action,
+    }),
+  );
+
+export const CreateWorkspaceSubscriptionPortalResponseSchema = z
+  .object({
+    url: StripeHostedURLSchema,
+  })
+  .loose()
+  .transform(
+    (value): CreateWorkspaceSubscriptionPortalResponse => ({
+      url: value.url,
+    }),
+  );
 
 // ---------------------------------------------------------------------------
 // Runtime model discovery (`POST /api/runtimes/:id/models`,

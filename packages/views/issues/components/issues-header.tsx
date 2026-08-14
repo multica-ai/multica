@@ -112,6 +112,8 @@ import {
 } from "@multica/core/issues/stores/issues-scope-store";
 import { actorKindForViewVariant } from "@multica/core/issues/surface/scope";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { cn } from "@multica/ui/lib/utils";
+import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
@@ -994,7 +996,7 @@ export function IssuesHeader({
 
   return (
     <>
-    <div className="min-h-12 shrink-0 px-4 py-2 [-webkit-overflow-scrolling:touch]">
+    <div className={cn("min-h-12 shrink-0 py-2 [-webkit-overflow-scrolling:touch]", PAGE_GUTTER)}>
       <div className="flex w-full min-w-0 items-start justify-between gap-2">
         {/* Left: the view bar — built-in tabs and saved views as one flat,
             per-user ordered row; wraps instead of overflowing. */}

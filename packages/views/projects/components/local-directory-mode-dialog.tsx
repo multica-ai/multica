@@ -75,8 +75,6 @@ export function LocalDirectoryModeDialog({
     if (open) setSelected(value);
   }, [open, value]);
 
-  const worktreeDisabled = unavailableReason !== undefined;
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
@@ -91,38 +89,13 @@ export function LocalDirectoryModeDialog({
           {path}
         </div>
 
-        <div className="flex flex-col gap-2">
-          <ModeOption
-            icon={<Pencil className="size-4" />}
-            title={t(($) => $.resources.mode_in_place_title)}
-            description={t(($) => $.resources.mode_in_place_description)}
-            identifier="in_place"
-            selected={selected === "in_place"}
-            onSelect={() => setSelected("in_place")}
-          />
-          <ModeOption
-            icon={<GitBranch className="size-4" />}
-            title={t(($) => $.resources.mode_worktree_title)}
-            description={t(($) => $.resources.mode_worktree_description)}
-            identifier="worktree"
-            selected={selected === "worktree"}
-            disabled={worktreeDisabled}
-            disabledReason={
-              unavailableReason === "not_git"
-                ? t(($) => $.resources.mode_worktree_needs_git)
-                : unavailableReason === "daemon_outdated"
-                  ? t(($) => $.resources.mode_worktree_needs_upgrade, {
-                      current:
-                        currentVersion && currentVersion.length > 0
-                          ? currentVersion
-                          : t(($) => $.resources.mode_version_unknown),
-                      min: minVersion ?? "",
-                    })
-                  : undefined
-            }
-            onSelect={() => setSelected("worktree")}
-          />
-        </div>
+        <LocalDirectoryModeOptions
+          value={selected}
+          onChange={setSelected}
+          unavailableReason={unavailableReason}
+          currentVersion={currentVersion}
+          minVersion={minVersion}
+        />
 
         {errorMessage && (
           <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-caption text-destructive">
@@ -145,6 +118,67 @@ export function LocalDirectoryModeDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface LocalDirectoryModeOptionsProps {
+  value: LocalDirectoryExecutionMode;
+  onChange: (mode: LocalDirectoryExecutionMode) => void;
+  unavailableReason?: WorktreeUnavailableReason;
+  currentVersion?: string;
+  minVersion?: string;
+}
+
+/**
+ * The two-option choice itself, without any surrounding chrome.
+ *
+ * Shared so the dialog (editing an existing resource) and the compact picker in
+ * the create-project modal offer literally the same options, copy and blocked
+ * states — the decision is identical, only the container differs.
+ */
+export function LocalDirectoryModeOptions({
+  value,
+  onChange,
+  unavailableReason,
+  currentVersion,
+  minVersion,
+}: LocalDirectoryModeOptionsProps) {
+  const { t } = useT("projects");
+  const worktreeDisabled = unavailableReason !== undefined;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <ModeOption
+        icon={<Pencil className="size-4" />}
+        title={t(($) => $.resources.mode_in_place_title)}
+        description={t(($) => $.resources.mode_in_place_description)}
+        identifier="in_place"
+        selected={value === "in_place"}
+        onSelect={() => onChange("in_place")}
+      />
+      <ModeOption
+        icon={<GitBranch className="size-4" />}
+        title={t(($) => $.resources.mode_worktree_title)}
+        description={t(($) => $.resources.mode_worktree_description)}
+        identifier="worktree"
+        selected={value === "worktree"}
+        disabled={worktreeDisabled}
+        disabledReason={
+          unavailableReason === "not_git"
+            ? t(($) => $.resources.mode_worktree_needs_git)
+            : unavailableReason === "daemon_outdated"
+              ? t(($) => $.resources.mode_worktree_needs_upgrade, {
+                  current:
+                    currentVersion && currentVersion.length > 0
+                      ? currentVersion
+                      : t(($) => $.resources.mode_version_unknown),
+                  min: minVersion ?? "",
+                })
+              : undefined
+        }
+        onSelect={() => onChange("worktree")}
+      />
+    </div>
   );
 }
 

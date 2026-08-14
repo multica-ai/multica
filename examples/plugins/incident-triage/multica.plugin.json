@@ -1,0 +1,26 @@
+{
+  "api_version": "multica.plugin/v1",
+  "kind": "Plugin",
+  "metadata": {
+    "key": "dev.multica.incident-triage",
+    "name": "Incident Triage",
+    "description": "Private incident intake and handoff guidance for workspace Agents.",
+    "version": "0.1.0",
+    "publisher": "multica.examples"
+  },
+  "compatibility": {
+    "host_api": ">=1.0.0 <2.0.0",
+    "required_daemon_features": ["execution-manifest-v1", "agent-skill-v1"]
+  },
+  "requested_capabilities": ["agent.skill.contribute"],
+  "contributes": {
+    "agent_skills": [
+      {
+        "key": "incident-triage",
+        "name": "Incident Triage",
+        "description": "Structure incident intake, severity assessment, evidence capture, and handoff.",
+        "entry": "skills/incident-triage/SKILL.md"
+      }
+    ]
+  }
+}

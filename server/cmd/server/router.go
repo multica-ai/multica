@@ -59,6 +59,7 @@ var corsAllowedHeaders = []string{
 	"Accept",
 	"Authorization",
 	"Content-Type",
+	"Idempotency-Key",
 	"X-Workspace-ID",
 	"X-Workspace-Slug",
 	"X-Request-ID",
@@ -1160,6 +1161,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/runtime-profiles", h.ListRuntimeProfiles)
 					r.Get("/runtime-profiles/{profileId}", h.GetRuntimeProfile)
 					r.Get("/plugins", h.ListPlugins)
+					r.Get("/plugins/private", h.ListPrivatePlugins)
+					r.Get("/plugins/private/{pluginRef}", h.GetPrivatePluginStatus)
 					r.Get("/plugins/catalog", h.ListPluginCatalog)
 					r.Get("/plugins/catalog/{pluginKey}", h.GetPluginCatalogRelease)
 				})
@@ -1180,10 +1183,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
 					r.Delete("/runtime-profiles/{profileId}", h.DeleteRuntimeProfile)
 					r.Post("/plugins/install", h.InstallPlugin)
+					r.Post("/plugins/private/install", h.InstallPrivatePlugin)
 					r.Post("/plugins/{installationId}/upgrade", h.UpgradePlugin)
 					r.Post("/plugins/{installationId}/enable", h.EnablePlugin)
 					r.Post("/plugins/{installationId}/disable", h.DisablePlugin)
 					r.Post("/plugins/{installationId}/rollback", h.RollbackPlugin)
+					r.Delete("/plugins/{installationId}", h.UninstallPlugin)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
@@ -1347,14 +1352,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		// Workspace subscriptions use the same cloud transport and Stripe
 		// webhook as the existing owner-credit billing surface, but every request
-		// is workspace-scoped. Entitlements are member-readable; Checkout, seat
-		// reconcile, and Portal mutations require owner/admin. The handlers also
-		// enforce billing_workspace_subscriptions so a route refactor cannot
+		// is workspace-scoped. Entitlements, summary and prices are
+		// member-readable; Checkout, seat reconcile, and Portal mutations require
+		// owner/admin. The handlers also enforce
+		// billing_workspace_subscriptions so a route refactor cannot
 		// accidentally bypass the rollout flag.
 		r.Route("/api/cloud-subscriptions", func(r chi.Router) {
 			r.Use(handler.RequireHumanActor)
 
-			r.With(middleware.RequireWorkspaceMember(queries)).Get("/entitlements", h.GetCloudWorkspaceEntitlements)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireWorkspaceMember(queries))
+				r.Get("/entitlements", h.GetCloudWorkspaceEntitlements)
+				r.Get("/summary", h.GetCloudWorkspaceSubscriptionSummary)
+				r.Get("/prices", h.GetCloudWorkspaceSubscriptionPrices)
+			})
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
 				r.Post("/checkout-sessions", h.CreateCloudWorkspaceSubscriptionCheckout)

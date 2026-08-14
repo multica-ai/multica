@@ -647,6 +647,23 @@ func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]stri
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("read shared config: %w", err)
 		}
+		// The overlay is about to be seeded from a home that carries no
+		// provider config, so the task runs with whatever the child's
+		// environment supplies and nothing else. That is a legitimate setup
+		// (an image that ships Hermes and injects OPENAI_API_KEY has no
+		// config.yaml and works fine), which is why this stays a warning
+		// rather than a hard failure — but when it is instead a source-home
+		// misresolution, this line is the only place the two paths can be
+		// told apart, and until GH #6872 it printed nothing at all. Name the
+		// source home: the user's own config is somewhere else, and Hermes'
+		// own error ("run `hermes model`") cannot say where.
+		if fi, statErr := os.Stat(sharedHome); statErr != nil || !fi.IsDir() {
+			logger.Warn("execenv: hermes source home does not exist; this task runs without file-backed provider config or credentials, though the environment may still supply them",
+				"source_home", sharedHome, "overlay_home", hermesHome)
+		} else {
+			logger.Warn("execenv: hermes source home has no config.yaml; this task runs without a configured provider unless the environment supplies one",
+				"source_home", sharedHome, "overlay_home", hermesHome)
+		}
 		doc := &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}}
 		if err := setHermesExternalDirs(doc, computeHermesExternalDirs(sharedHome, nil, env)); err != nil {
 			return err

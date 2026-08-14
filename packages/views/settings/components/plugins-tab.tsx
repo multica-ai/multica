@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, CheckCircle2, Loader2, PackageCheck, ShieldCheck } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, PackageCheck, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { useCurrentMember } from "@multica/core/permissions";
 import {
   comparePluginVersions,
@@ -13,6 +13,7 @@ import {
   useInstallPlugin,
   useRollbackPlugin,
   useSetPluginEnabled,
+  useUninstallPlugin,
   useUpgradePlugin,
 } from "@multica/core/plugins";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -50,10 +51,12 @@ export function PluginsTab() {
   const catalogQuery = useQuery(pluginCatalogOptions(wsId));
   const installationsQuery = useQuery(pluginInstallationsOptions(wsId));
   const agentsQuery = useQuery(agentListOptions(wsId));
+  const membersQuery = useQuery(memberListOptions(wsId));
   const installMutation = useInstallPlugin(wsId);
   const upgradeMutation = useUpgradePlugin(wsId);
   const enabledMutation = useSetPluginEnabled(wsId);
   const rollbackMutation = useRollbackPlugin(wsId);
+  const uninstallMutation = useUninstallPlugin(wsId);
   const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({});
   const [selectedScopes, setSelectedScopes] = useState<Record<string, BindingScope>>({});
   const [selectedAgents, setSelectedAgents] = useState<Record<string, string>>({});
@@ -71,12 +74,18 @@ export function PluginsTab() {
     return [...grouped.entries()];
   }, [catalogQuery.data?.releases]);
 
-  const installations = useMemo(
-    () => new Map((installationsQuery.data?.plugins ?? []).map((installation) => [installation.plugin_key, installation])),
+  const officialInstallations = useMemo(
+    () => new Map((installationsQuery.data?.plugins ?? [])
+      .filter((installation) => installation.source_kind !== "private_dev")
+      .map((installation) => [installation.plugin_key, installation])),
     [installationsQuery.data?.plugins],
   );
+  const privateInstallations = (installationsQuery.data?.plugins ?? [])
+    .filter((installation) => installation.source_kind === "private_dev");
   const agents = (agentsQuery.data ?? []).filter((agent) => !agent.archived_at);
-  const isMutating = installMutation.isPending || upgradeMutation.isPending || enabledMutation.isPending || rollbackMutation.isPending;
+  const members = membersQuery.data ?? [];
+  const isMutating = installMutation.isPending || upgradeMutation.isPending || enabledMutation.isPending
+    || rollbackMutation.isPending || uninstallMutation.isPending;
 
   const reportError = (error: unknown) => {
     toast.error(error instanceof Error ? error.message : t(($) => $.plugins.action_failed));
@@ -138,7 +147,7 @@ export function PluginsTab() {
         </Alert>
       ) : null}
 
-      {releasesByPlugin.length === 0 ? (
+      {releasesByPlugin.length === 0 && privateInstallations.length === 0 ? (
         <SettingsCard>
           <div className="p-6 text-center text-body text-muted-foreground">
             {t(($) => $.plugins.empty)}
@@ -149,7 +158,7 @@ export function PluginsTab() {
       {releasesByPlugin.map(([pluginKey, versions]) => {
         const latest = versions[0];
         if (!latest) return null;
-        const installation = installations.get(pluginKey) ?? latest.installation;
+        const installation = officialInstallations.get(pluginKey) ?? latest.installation;
         const selectedVersion = selectedVersions[pluginKey] ?? latest.version;
         const selectedRelease = versions.find((release) => release.version === selectedVersion) ?? latest;
         const upgrade = installation && comparePluginVersions(latest.version, installation.desired_version) > 0 ? latest : null;
@@ -375,9 +384,183 @@ export function PluginsTab() {
                           {t(($) => $.plugins.rollback_to, { version: rollback.version })}
                         </Button>
                       ) : null}
+                      <Button
+                        variant="destructive"
+                        disabled={!canManage || isMutating}
+                        onClick={() => uninstallMutation.mutateAsync(installation.id)
+                          .then(() => toast.success(t(($) => $.plugins.uninstalled))).catch(reportError)}
+                      >
+                        {uninstallMutation.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                        {t(($) => $.plugins.uninstall)}
+                      </Button>
                     </div>
                   </div>
                 )}
+              </div>
+            </SettingsCard>
+          </SettingsSection>
+        );
+      })}
+
+      {privateInstallations.map((installation) => {
+        const scope = selectedScopes[installation.id] ?? "workspace";
+        const selectedAgent = selectedAgents[installation.id] ?? agents[0]?.id ?? "";
+        const state = installationState(installation);
+        const activeBindings = installation.bindings.filter((binding) => binding.enabled === true);
+        const uploaderName = members.find((member) => member.user_id === installation.uploader_id)?.name;
+        const rollbackVersion = [...installation.available_versions]
+          .sort((left, right) => comparePluginVersions(right, left))
+          .find((version) => comparePluginVersions(version, installation.desired_version) < 0);
+        return (
+          <SettingsSection key={installation.id}>
+            <SettingsCard>
+              <div className="space-y-5 p-4 sm:p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <PackageCheck className="size-4 text-brand" />
+                      <h3 className="text-title font-semibold">{installation.display_name}</h3>
+                      <Badge variant="outline">{t(($) => $.plugins.private)}</Badge>
+                      <Badge variant="destructive">{t(($) => $.plugins.unverified)}</Badge>
+                      <Badge variant={state === "failed" ? "destructive" : state === "healthy" ? "default" : "secondary"}>
+                        {state === "activating" ? <Loader2 className="animate-spin" /> : null}
+                        {t(($) => $.plugins.states[state])}
+                      </Badge>
+                    </div>
+                    {installation.description ? <p className="mt-1 text-body text-muted-foreground">{installation.description}</p> : null}
+                    <p className="mt-1 break-all font-mono text-caption text-muted-foreground">{installation.plugin_key}</p>
+                  </div>
+                  <Badge variant="outline">{installation.desired_version}</Badge>
+                </div>
+
+                <div className="grid gap-4 text-caption sm:grid-cols-2">
+                  <div>
+                    <div className="font-medium text-foreground">{t(($) => $.plugins.review.contributes)}</div>
+                    <ul className="mt-1 space-y-1 text-muted-foreground">
+                      {installation.contribution_details.map((contribution) => (
+                        <li key={contribution.key}>
+                          <span className="font-medium text-foreground">{contribution.name || contribution.key}</span>
+                          {" · "}{contribution.type}{contribution.description ? ` — ${contribution.description}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <div className="font-medium text-foreground">{t(($) => $.plugins.review.permissions)}</div>
+                    <p className="mt-1 text-muted-foreground">
+                      {installation.requested_capabilities.join(", ") || t(($) => $.plugins.review.none)}
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium text-foreground">{t(($) => $.plugins.review.publisher)}</div>
+                    <p className="mt-1 break-all text-muted-foreground">{installation.publisher}</p>
+                  </div>
+                  <div>
+                    <div className="font-medium text-foreground">{t(($) => $.plugins.source)}</div>
+                    <p className="mt-1 text-muted-foreground">
+                      {t(($) => $.plugins.private_upload)}
+                      {installation.uploader_id ? ` · ${t(($) => $.plugins.uploaded_by)} ${uploaderName ?? t(($) => $.plugins.unknown_member)}` : ""}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4 border-t border-surface-border pt-4">
+                  <div className="flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
+                    <span>{t(($) => $.plugins.active_version)} {installation.active_version || t(($) => $.plugins.none)}</span>
+                    <span>·</span>
+                    <span>{t(($) => $.plugins.health)} {installation.health_state || installation.lifecycle_status}</span>
+                  </div>
+
+                  {activeBindings.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="text-caption font-medium">{t(($) => $.plugins.bindings)}</div>
+                      {activeBindings.map((binding) => {
+                        const agentName = binding.scope_type === "agent"
+                          ? agents.find((agent) => agent.id === binding.scope_id)?.name ?? t(($) => $.plugins.unknown_agent)
+                          : workspace?.name ?? t(($) => $.plugins.workspace_scope);
+                        return (
+                          <div key={`${binding.scope_type}:${binding.scope_id}`} className="flex items-center justify-between gap-3 rounded-lg bg-muted px-3 py-2">
+                            <span className="text-caption">{binding.scope_type === "agent" ? t(($) => $.plugins.agent_scope) : t(($) => $.plugins.workspace_scope)} · {agentName}</span>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              disabled={!canManage || isMutating}
+                              onClick={() => enabledMutation.mutateAsync({
+                                installationId: installation.id,
+                                enabled: false,
+                                binding: { scope_type: binding.scope_type === "agent" ? "agent" : "workspace", scope_id: binding.scope_id },
+                              }).then(() => toast.success(t(($) => $.plugins.binding_disabled))).catch(reportError)}
+                            >
+                              {t(($) => $.plugins.disable_binding)}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : <p className="text-caption text-muted-foreground">{t(($) => $.plugins.no_bindings)}</p>}
+
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <Select
+                      items={[
+                        { value: "workspace", label: t(($) => $.plugins.workspace_scope) },
+                        { value: "agent", label: t(($) => $.plugins.agent_scope) },
+                      ]}
+                      value={scope}
+                      onValueChange={(value) => value && setSelectedScopes((current) => ({ ...current, [installation.id]: value as BindingScope }))}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="workspace">{t(($) => $.plugins.workspace_scope)}</SelectItem>
+                        <SelectItem value="agent">{t(($) => $.plugins.agent_scope)}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {scope === "agent" ? (
+                      <Select
+                        items={agents.map((agent) => ({ value: agent.id, label: agent.name }))}
+                        value={selectedAgent}
+                        onValueChange={(value) => value && setSelectedAgents((current) => ({ ...current, [installation.id]: value }))}
+                      >
+                        <SelectTrigger className="max-w-56"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {agents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    ) : null}
+                    <Button
+                      disabled={!canManage || isMutating || (scope === "agent" && !selectedAgent)}
+                      onClick={() => enabledMutation.mutateAsync({
+                        installationId: installation.id,
+                        enabled: true,
+                        binding: { scope_type: scope, scope_id: scope === "workspace" ? wsId : selectedAgent },
+                      }).then(() => toast.success(t(($) => $.plugins.enabled))).catch(reportError)}
+                    >
+                      {enabledMutation.isPending ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
+                      {t(($) => $.plugins.enable_scope)}
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {rollbackVersion ? (
+                      <Button
+                        variant="outline"
+                        disabled={!canManage || isMutating}
+                        onClick={() => rollbackMutation.mutateAsync({ installationId: installation.id, version: rollbackVersion })
+                          .then(() => toast.success(t(($) => $.plugins.rolled_back))).catch(reportError)}
+                      >
+                        {t(($) => $.plugins.rollback_to, { version: rollbackVersion })}
+                      </Button>
+                    ) : null}
+                    <Button
+                      variant="destructive"
+                      disabled={!canManage || isMutating}
+                      onClick={() => uninstallMutation.mutateAsync(installation.id)
+                        .then(() => toast.success(t(($) => $.plugins.uninstalled))).catch(reportError)}
+                    >
+                      {uninstallMutation.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                      {t(($) => $.plugins.uninstall)}
+                    </Button>
+                  </div>
+                </div>
               </div>
             </SettingsCard>
           </SettingsSection>

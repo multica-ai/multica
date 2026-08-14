@@ -49,10 +49,11 @@ export interface AgentInvocationTargetInput {
 
 // Runtime visibility is a separate axis from agent visibility — different
 // vocabulary because it gates a different action. "private" (default) means
-// only the runtime owner and workspace admins can bind agents to it;
-// "public" opens binding to any workspace member. Older backends that
-// haven't shipped MUL-2062 omit the field; the consumer must default to
-// "private" so the strictest behavior is the fallback.
+// only the runtime owner can bind agents to it — workspace admins included,
+// and only the owner may flip the flag (MUL-6126); "public" opens binding to
+// any workspace member. Older backends that haven't shipped MUL-2062 omit the
+// field; the consumer must default to "private" so the strictest behavior is
+// the fallback.
 export type RuntimeVisibility = "private" | "public";
 
 export interface RuntimeDevice {
@@ -118,6 +119,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "cursor",
   "kimi",
   "reasonix",
+  "dsh",
   "kiro",
   "antigravity",
   "qoder",

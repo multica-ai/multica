@@ -82,6 +82,19 @@ multica workspace member invite teammate@example.com
 multica workspace member invite admin@example.com --role admin
 ```
 
+## Private Plugin development
+
+```bash
+multica plugin init ./my-plugin
+multica plugin validate ./my-plugin
+multica plugin pack ./my-plugin --output ./my-plugin.zip
+multica plugin install ./my-plugin.zip --workspace <workspace>
+multica plugin list --workspace <workspace>
+multica plugin status [installation-id|plugin-key] --workspace <workspace>
+```
+
+Private acquisition requires workspace `owner` or `admin` access and both Plugin feature flags. See [Private Skill Plugins](/docs/developers/private-plugins) for the manifest contract, trust model, immutable versions, scope management, and current limits.
+
 ## Common issue operations
 
 ```bash
@@ -235,9 +248,9 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | `issue` | `list` | List issues | `--status`, `--priority`, `--assignee`, `--project`, `--metadata` (repeatable), `--limit`, `--offset`, `--sort`, `--full-id` |
 | | `get <id>` | Show a single issue | |
 | | `create` | Create an issue | `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable) |
-| | `update <id>` | Update issue fields | Same fields as `create`, plus `--position` |
-| | `assign <id>` | Assign or unassign | `--to` (fuzzy name match against members, agents, and squads), `--to-id`, `--unassign` |
-| | `status <id> <status>` | Change status | |
+| | `update <id>` | Update issue fields | Same fields as `create`, plus `--position`, `--no-start` |
+| | `assign <id>` | Assign or unassign | `--to` (fuzzy name match against members, agents, and squads), `--to-id`, `--unassign`, `--no-start` |
+| | `status <id> <status>` | Change status | `--no-start` |
 | | `reorder <id>` | Move within a column | |
 | | `search <query>` | Search issues | `--limit`, `--include-closed` |
 | | `children <id>` | List sub-issues grouped by stage | |
@@ -254,7 +267,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `cancel-task <task-id>` | Cancel a running or queued task | `--issue` |
 | `project` | `list/get/create/update/delete` | Manage projects | |
 | | `status <id> <status>` | Change project status | |
-| | `resource list/add/update/remove` | Manage project resources | `--type`, `--url` |
+| | `resource list/add/update/remove` | Manage project resources | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` for a local directory) |
 | `label` | `list/get/create/update/delete` | Manage workspace labels | |
 | `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type`, `--option` (repeatable); `list`: `--include-archived`; the type cannot be changed after creation |
 | `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
@@ -283,7 +296,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 
 | Command | Subcommand | Purpose | Key flags |
 | --- | --- | --- | --- |
-| `daemon` | `start` | Start the local daemon | `--foreground`, `--device-name`, `--runtime-name`, `--poll-interval`, `--heartbeat-interval`, `--agent-timeout` (`0` means no limit), `--max-concurrent-tasks`, `--no-auto-update`; each has a matching `MULTICA_*` environment variable |
+| `daemon` | `start` | Start the local daemon | `--foreground`, `--device-name`, `--runtime-name`, `--workspaces-root`, `--poll-interval`, `--heartbeat-interval`, `--agent-timeout` (`0` means no limit), `--max-concurrent-tasks`, `--no-auto-update`; each has a matching `MULTICA_*` environment variable |
 | | `stop` / `status` / `restart` | Stop, check status, restart (`restart` takes the same flags as `start`) | |
 | | `logs` | View daemon logs | `--follow`, `--lines` |
 | | `disk-usage` | View local disk usage | `--by-workspace`, `--by-task`, `--top` |

@@ -167,32 +167,78 @@ func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Re
 	}
 
 	// One machine hosts one runtime row per provider, all registered by the
-	// same daemon binary, so the freshest row's metadata.cli_version is the
-	// machine's current binary. A workspace has a handful of runtimes; the
-	// unfiltered list is a tiny read.
+	// same daemon binary. A workspace has a handful of runtimes; the unfiltered
+	// list is a tiny read.
 	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), workspaceID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to check daemon version")
+		writeError(w, http.StatusInternalServerError, "failed to check runtime capabilities")
 		return false
 	}
-	current := latestDaemonCLIVersion(runtimes, ref.DaemonID)
-	minimum := agentpkg.MinLocalWorktreeCLIVersion
-	if err := agentpkg.CheckMinCLIVersionFor(current, minimum); err != nil {
-		// Fail closed on missing/unparsable versions too — including a
-		// daemon_id with no registered runtime at all: a worktree resource
-		// that can never dispatch correctly is worse than a save-time error.
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-			"error": fmt.Sprintf(
-				"local_directory: execution_mode=worktree needs daemon version %s or newer, but daemon %s reports %q; upgrade the daemon (or keep the resource on in_place)",
-				minimum, ref.DaemonID, current),
-			"code":            "daemon_version_unsupported",
-			"current_version": current,
-			"min_version":     minimum,
-			"daemon_id":       ref.DaemonID,
-		})
+	// Same signal the claim gate uses: what the daemon advertised, recorded on
+	// its runtime row at registration. Version numbers cannot answer this — a
+	// dev-built daemon reports a git-describe string that the version floor
+	// deliberately exempts (MUL-5707).
+	if daemonAdvertisesWorktree(runtimes, ref.DaemonID) {
+		return true
+	}
+	// Fail closed when no runtime for this daemon advertises it — including a
+	// daemon_id with no registered runtime at all: a worktree resource that can
+	// never dispatch correctly is worse than a save-time error.
+	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+		"error": fmt.Sprintf(
+			"local_directory: %q is set to parallel (worktree) mode, but the Multica runtime on that machine does not support it. Update the Multica app on that machine to the latest version, or keep the resource on in_place.",
+			ref.LocalPath),
+		"code":            "daemon_version_unsupported",
+		"current_version": latestDaemonCLIVersion(runtimes, ref.DaemonID),
+		"min_version":     agentpkg.MinLocalWorktreeCLIVersion,
+		"daemon_id":       ref.DaemonID,
+	})
+	return false
+}
+
+// daemonAdvertisesWorktree reports whether the daemon's MOST RECENTLY SEEN
+// runtime row advertised worktree support.
+//
+// Deliberately not "any row advertised it". Deregistering a runtime only flips
+// the row to offline — its metadata survives — and ListAgentRuntimes returns
+// every row. So a machine that once ran a capable daemon, then downgraded,
+// still has an old capable row sitting next to the fresh incapable one, and an
+// any-match would keep saying yes forever. Newest-wins reads the machine's
+// CURRENT binary, which is the question being asked.
+//
+// A row missing the capability is never skipped: being the newest is what makes
+// it authoritative, not whether its answer is convenient.
+func daemonAdvertisesWorktree(runtimes []db.AgentRuntime, daemonID string) bool {
+	if strings.TrimSpace(daemonID) == "" {
 		return false
 	}
-	return true
+	var newest *db.AgentRuntime
+	for i := range runtimes {
+		rt := &runtimes[i]
+		if !rt.DaemonID.Valid || rt.DaemonID.String != daemonID {
+			continue
+		}
+		if newest == nil || runtimeSeenAfter(rt, newest) {
+			newest = rt
+		}
+	}
+	if newest == nil {
+		return false
+	}
+	return runtimeHasCapability(newest.Metadata, protocol.DaemonCapabilityLocalWorktreeV1)
+}
+
+// runtimeSeenAfter orders two rows of the same daemon by last_seen_at. A row
+// that never reported (NULL) sorts oldest, so a live row always wins over one
+// that never checked in.
+func runtimeSeenAfter(candidate, current *db.AgentRuntime) bool {
+	if !candidate.LastSeenAt.Valid {
+		return false
+	}
+	if !current.LastSeenAt.Valid {
+		return true
+	}
+	return candidate.LastSeenAt.Time.After(current.LastSeenAt.Time)
 }
 
 // latestDaemonCLIVersion returns the cli_version of the freshest runtime row

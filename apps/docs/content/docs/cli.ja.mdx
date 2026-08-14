@@ -227,9 +227,9 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | `issue` | `list` | イシューを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（繰り返し可）、`--limit`、`--offset`、`--sort`、`--full-id` |
 | | `get <id>` | 単一のイシューを表示 | |
 | | `create` | イシューを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可） |
-| | `update <id>` | イシューのフィールドを更新 | `create` と同系のフィールドに加え `--position` |
-| | `assign <id>` | 割り当てまたは割り当て解除 | `--to`（メンバー、エージェント、スクワッドを名前であいまいマッチ）、`--to-id`、`--unassign` |
-| | `status <id> <status>` | ステータスを変更 | |
+| | `update <id>` | イシューのフィールドを更新 | `create` と同系のフィールドに加え `--position`、`--no-start` |
+| | `assign <id>` | 割り当てまたは割り当て解除 | `--to`（メンバー、エージェント、スクワッドを名前であいまいマッチ）、`--to-id`、`--unassign`、`--no-start` |
+| | `status <id> <status>` | ステータスを変更 | `--no-start` |
 | | `reorder <id>` | カラム内で移動 | |
 | | `search <query>` | イシューを検索 | `--limit`、`--include-closed` |
 | | `children <id>` | サブイシューをステージごとに一覧 | |
@@ -246,7 +246,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `cancel-task <task-id>` | 実行中またはキュー中のタスクをキャンセル | `--issue` |
 | `project` | `list/get/create/update/delete` | プロジェクトを管理 | |
 | | `status <id> <status>` | プロジェクトのステータスを変更 | |
-| | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url` |
+| | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url`、`--local-path`、`--daemon-id`、`--execution-mode`（ローカルディレクトリの `in_place` / `worktree`） |
 | `label` | `list/get/create/update/delete` | ワークスペースのラベルを管理 | |
 | `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`、`--option`（繰り返し可）；`list`: `--include-archived`；タイプは作成後に変更できません |
 | `agent` | `list/get/create/update/archive/restore` | エージェントを管理 | `--name`、`--runtime-id`（`create` では必須）、`--instructions`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
@@ -275,7 +275,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 
 | コマンド | サブコマンド | 用途 | 主なフラグ |
 | --- | --- | --- | --- |
-| `daemon` | `start` | ローカルデーモンを起動 | `--foreground`、`--device-name`、`--runtime-name`、`--poll-interval`、`--heartbeat-interval`、`--agent-timeout`（`0` は上限なし）、`--max-concurrent-tasks`、`--no-auto-update`；それぞれに対応する `MULTICA_*` 環境変数があります |
+| `daemon` | `start` | ローカルデーモンを起動 | `--foreground`、`--device-name`、`--runtime-name`、`--workspaces-root`、`--poll-interval`、`--heartbeat-interval`、`--agent-timeout`（`0` は上限なし）、`--max-concurrent-tasks`、`--no-auto-update`；それぞれに対応する `MULTICA_*` 環境変数があります |
 | | `stop` / `status` / `restart` | 停止、状態の確認、再起動（`restart` は `start` と同じフラグ） | |
 | | `logs` | デーモンのログを表示 | `--follow`、`--lines` |
 | | `disk-usage` | ローカルのディスク使用量を表示 | `--by-workspace`、`--by-task`、`--top` |

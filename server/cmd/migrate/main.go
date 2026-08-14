@@ -103,6 +103,7 @@ var concurrentIndexCleanups = map[string]string{
 	"305_dingtalk_group_route_installation_conversation_unique": "idx_dingtalk_group_route_installation_conversation",
 	"306_dingtalk_group_route_workspace_index":                  "idx_dingtalk_group_route_workspace",
 	"307_dingtalk_group_route_id_unique":                        "idx_dingtalk_group_route_id_unique",
+	"311_plugin_identity_scoped_key_index":                      "idx_plugin_identity_scoped_key",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -120,6 +121,7 @@ var concurrentDownIndexCleanups = map[string]string{
 	"301_drop_redundant_sys_cron_job_plan_index":            "idx_sys_cron_exec_job_plan",
 	"302_drop_redundant_channel_chat_session_binding_index": "idx_channel_chat_session_binding_session",
 	"303_drop_redundant_lark_chat_session_binding_index":    "idx_lark_chat_session_binding_session",
+	"312_drop_global_plugin_identity_key_index":             "idx_plugin_identity_key",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {

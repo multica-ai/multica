@@ -7,14 +7,10 @@ import (
 	"testing"
 )
 
-// The worktree version floor is enforced in three places that must agree:
-//
-//	server  — refuses to save a worktree resource below it, and refuses to hand
-//	          a worktree task to a runtime below it at claim time;
-//	frontend — disables the option and explains why before the user submits.
-//
-// If they drift, the UI offers a mode the server will refuse, or worse, the
-// frontend permits a version the server no longer gates. Pin them together.
+// The worktree floor is no longer a gate — the capability is (MUL-5707). It
+// survives as the version number shown to the user in the 422 payload and the
+// UI hint, and those two must still quote the same release: telling someone to
+// update to 0.4.24 in one place and 0.4.30 in another is its own bug.
 func TestWorktreeCLIVersionFloorMatchesFrontend(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "packages", "core", "runtimes", "cli-version.ts")
 	src, err := os.ReadFile(path)
@@ -26,7 +22,7 @@ func TestWorktreeCLIVersionFloorMatchesFrontend(t *testing.T) {
 		t.Fatal("MIN_LOCAL_WORKTREE_CLI_VERSION not found in packages/core/runtimes/cli-version.ts")
 	}
 	if got := string(m[1]); got != MinLocalWorktreeCLIVersion {
-		t.Errorf("frontend floor %s != server floor %s; the save gate, the claim gate and the UI must agree",
+		t.Errorf("frontend shows %s but the server's 422 quotes %s; the update hint must name one release",
 			got, MinLocalWorktreeCLIVersion)
 	}
 }

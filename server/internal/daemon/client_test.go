@@ -36,6 +36,11 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 		for _, want := range []string{
 			protocol.DaemonCapabilitySkillBundlesV1,
 			protocol.DaemonCapabilityCoalescedCommentsV1,
+			// The worktree gate is decided entirely from this header: if the
+			// daemon stops advertising it, every worktree task on this machine
+			// is cancelled with an upgrade prompt (MUL-5707). Pin it here so
+			// dropping it from the list can never be a silent change.
+			protocol.DaemonCapabilityLocalWorktreeV1,
 		} {
 			if !capabilities[want] {
 				t.Errorf("X-Client-Capabilities missing %q: %v", want, capabilities)

@@ -5374,6 +5374,7 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 // this map at init so their display names stay in lockstep with the
 // descriptor.
 var runtimeDisplayNameOverrides = map[string]string{
+	"dsh":        "DeepSeek Harness",
 	"traecli":    "Trae",
 	"grok":       "Grok",
 	"qoderclicn": "Qoder CN",
@@ -6153,6 +6154,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		hermesSourceHome = res.SourceHome
 		hermesSourceMustExist = res.MustExist
+		// Which home the overlay is seeded from decides whether the task sees
+		// the user's provider config at all, and it is derived from the daemon
+		// PROCESS environment — invisible from the shell the user tests
+		// `hermes acp` in, which is why a mismatch reads as "works by hand,
+		// fails under Multica" (GH #6872). One line, at Info, so the answer is
+		// in the daemon log before anything fails rather than reconstructed
+		// afterwards.
+		taskLog.Info("hermes home resolved",
+			"source_home", hermesSourceHome,
+			"from_custom_env", strings.TrimSpace(agentEnvOverrides["HERMES_HOME"]) != "",
+			"must_exist", hermesSourceMustExist,
+		)
 		hermesEnv = sanitizeAgentEnv(agentEnvOverrides)
 		if hermesEnv == nil {
 			hermesEnv = map[string]string{}
@@ -6586,6 +6599,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		agentEnv["REASONIX_STATE_HOME"] = reasonixStateHome
 	}
+	if provider == "dsh" {
+		dshSessionRoot, err := prepareDshTaskSessionRoot(d.cfg.Profile, task.RuntimeID, task.AgentID)
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("prepare dsh session root: %w", err)
+		}
+		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
+		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
+	}
 	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
 	}
@@ -6713,14 +6734,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
 	execOpts := agent.ExecOptions{
-		Cwd:                       env.WorkDir,
-		Model:                     model,
-		ThreadName:                deriveTaskThreadName(task),
-		Timeout:                   d.cfg.AgentTimeout,
-		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
-		IdleWatchdogTimeout:       idleWatchdogTimeout,
-		HandshakeTimeout:          d.cfg.CodexHandshakeTimeout,
-		ResumeSessionID:           task.PriorSessionID,
+		Cwd:                        env.WorkDir,
+		Model:                      model,
+		ThreadName:                 deriveTaskThreadName(task),
+		Timeout:                    d.cfg.AgentTimeout,
+		SemanticInactivityTimeout:  d.cfg.CodexSemanticInactivityTimeout,
+		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
+		IdleWatchdogTimeout:        idleWatchdogTimeout,
+		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
+		ResumeSessionID:            task.PriorSessionID,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
 		// resume gates (a dropped resume is surfaced via the prompt instead). If it
 		// survived to here, the backend must disclose the loss when the live
@@ -7092,6 +7114,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// fact.
 			failureReason = taskfailure.Classify(errMsg).String()
 		}
+		// After the classifiers above have read errMsg. The hint is fixed
+		// prose chosen to match none of the resume guards (see its const), so
+		// ordering is not what makes it safe — but it keeps the machine
+		// decisions reading exactly what the runtime reported, and leaves the
+		// annotation on the outside where a future edit is visibly a change to
+		// human-facing text rather than to classifier input.
+		errMsg = annotateHermesProviderUnconfigured(errMsg, provider, env.HermesHome != "")
 		return TaskResult{
 			Status:        "blocked",
 			Comment:       errMsg,
@@ -7307,6 +7336,11 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	session, err := backend.Execute(agentCtx, prompt, opts)
 	if err != nil {
+		// One provider-agnostic boundary for launches: every backend's
+		// cmd.Start() failure arrives here, so diagnosing ENOEXEC at this point
+		// covers claude, opencode and any CLI added later without a wrap in
+		// each backend (MUL-6164).
+		err = agent.ExplainExecError(err)
 		taskLog.Debug("backend execute returned error", "error", err)
 		return agent.Result{}, 0, err
 	}
@@ -8127,6 +8161,49 @@ func hermesLaunchArgs(customArgs []string, overlayActive bool) []string {
 	return agent.StripHermesProfileArgs(customArgs, sel)
 }
 
+// hermesProviderUnconfiguredHint is appended verbatim to a "no LLM provider
+// configured" failure. It is a CONSTANT, and that is a correctness property,
+// not a style choice — see annotateHermesProviderUnconfigured.
+//
+// It must stay clear of every phrase the resume guards match, because this text
+// is persisted in agent_task_queue.error and re-scanned there indefinitely:
+// service.ResumeUnsafeFailure, taskfailure.Classify, and the ILIKE/regex guards
+// in pkg/db/queries/agent.sql (GetLastTaskSession / GetLastChatTaskSession).
+// TestAnnotationCannotChangeMachineDecisions pins that.
+const hermesProviderUnconfiguredHint = " [multica] hermes did not read the HERMES_HOME your shell uses: " +
+	"this task ran against a per-task overlay, seeded from the home the daemon process resolved. " +
+	"The daemon log line \"hermes home resolved\" for this task names that source home — if your hermes " +
+	"config lives somewhere else, set HERMES_HOME in the agent's custom_env to point at it."
+
+// annotateHermesProviderUnconfigured explains a "no LLM provider configured"
+// failure that Hermes itself cannot explain.
+//
+// Hermes reports it against whichever HERMES_HOME it was started with and tells
+// the user to run `hermes model` — but under Multica it was started with a
+// per-task overlay, seeded from a source home the daemon resolved from ITS OWN
+// process environment. When that disagrees with where the user keeps their
+// config, the remedy Hermes names edits a file the task will never read, and
+// every attempt fails identically. That is GH #6872: eight documented
+// workarounds, none of which could have worked.
+//
+// The two paths themselves are deliberately NOT interpolated here. They are
+// user-controlled (HERMES_HOME comes from the agent's custom_env, the overlay
+// root from MULTICA_WORKSPACES_ROOT), and this string is persisted as the
+// task's error text, which the resume guards keep matching against for the life
+// of the row. A source home under /srv/400-invalid_request_error/ would trip
+// ResumeUnsafeFailure and the SQL guard, dropping a healthy session pointer —
+// a directory name must never decide whether a session can be resumed. So the
+// hint is fixed prose and names the log line that does carry the paths.
+//
+// Text only: the caller has already classified the failure, and this changes no
+// reason, status, or control flow.
+func annotateHermesProviderUnconfigured(errMsg, provider string, overlayActive bool) string {
+	if provider != "hermes" || !overlayActive || !taskfailure.ProviderUnconfigured(errMsg) {
+		return errMsg
+	}
+	return errMsg + hermesProviderUnconfiguredHint
+}
+
 func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayHome string, logger *slog.Logger) {
 	for k, v := range customEnv {
 		if isBlockedEnvKey(k) {
@@ -8161,6 +8238,32 @@ func prepareReasonixTaskStateHome(profile, runtimeID, agentID string) (string, e
 		return "", err
 	}
 	path := filepath.Join(profileDir, "reasonix-state", runtimeSegment, agentSegment)
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// prepareDshTaskSessionRoot keeps DSH transcripts private to one Multica
+// runtime/agent pair. Credentials and the user's DSH profile remain in the
+// ordinary DSH_HOME; only session persistence is redirected.
+func prepareDshTaskSessionRoot(profile, runtimeID, agentID string) (string, error) {
+	profileDir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return "", err
+	}
+	runtimeSegment, err := validateReasonixStateSegment("runtime", runtimeID)
+	if err != nil {
+		return "", err
+	}
+	agentSegment, err := validateReasonixStateSegment("agent", agentID)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(profileDir, "dsh-sessions", runtimeSegment, agentSegment)
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return "", err
 	}

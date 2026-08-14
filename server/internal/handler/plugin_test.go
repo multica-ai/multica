@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/testutil/plugintest"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/plugincontract"
 )
 
 type failPluginDetailQueryDB struct {
@@ -68,6 +71,7 @@ func TestPluginHTTPLifecycleForInstalledReferenceRelease(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM plugin_binding WHERE installation_id IN (SELECT id FROM plugin_installation WHERE workspace_id = $1)`, testWorkspaceID)
 		testPool.Exec(ctx, `DELETE FROM plugin_grant WHERE installation_id IN (SELECT id FROM plugin_installation WHERE workspace_id = $1)`, testWorkspaceID)
 		testPool.Exec(ctx, `DELETE FROM plugin_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE workspace_id = $1 AND action = 'plugin_uninstalled'`, testWorkspaceID)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
@@ -136,6 +140,7 @@ func TestPluginHTTPLifecycleForInstalledReferenceRelease(t *testing.T) {
 	}{
 		{name: "contributions", queryFragment: "FROM plugin_contribution"},
 		{name: "bindings", queryFragment: "FROM plugin_binding"},
+		{name: "available releases", queryFragment: "FROM plugin_release release"},
 		{name: "active release", queryRowFragment: "FROM plugin_release\nWHERE id = $1", failQueryRowAtMatch: 2},
 	} {
 		t.Run("list fails closed when "+test.name+" cannot be read", func(t *testing.T) {
@@ -193,6 +198,19 @@ func TestPluginHTTPLifecycleForInstalledReferenceRelease(t *testing.T) {
 	if recorder.Code != http.StatusNotFound || bytes.Contains(recorder.Body.Bytes(), []byte("no rows")) {
 		t.Fatalf("safe missing rollback status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
+
+	recorder = httptest.NewRecorder()
+	testHandler.UninstallPlugin(recorder, pluginHandlerRequest(http.MethodDelete, "/plugins/"+installed.ID, nil, params))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("official uninstall status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var uninstallAuditCount int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM activity_log
+		WHERE workspace_id = $1 AND action = 'plugin_uninstalled'
+	`, testWorkspaceID).Scan(&uninstallAuditCount); err != nil || uninstallAuditCount != 1 {
+		t.Fatalf("official uninstall audit count=%d err=%v", uninstallAuditCount, err)
+	}
 }
 
 func TestPluginManagementUnavailableWhenFlagDisabled(t *testing.T) {
@@ -202,18 +220,23 @@ func TestPluginManagementUnavailableWhenFlagDisabled(t *testing.T) {
 			"id":             testWorkspaceID,
 			"installationId": "00000000-0000-0000-0000-000000000001",
 			"pluginKey":      plugintest.ReviewReadinessPluginKey,
+			"pluginRef":      plugintest.ReviewReadinessPluginKey,
 		})
 	}
 
 	for name, handler := range map[string]http.HandlerFunc{
-		"list installed": h.ListPlugins,
-		"list catalog":   h.ListPluginCatalog,
-		"catalog detail": h.GetPluginCatalogRelease,
-		"install":        h.InstallPlugin,
-		"upgrade":        h.UpgradePlugin,
-		"enable":         h.EnablePlugin,
-		"disable":        h.DisablePlugin,
-		"rollback":       h.RollbackPlugin,
+		"list installed":  h.ListPlugins,
+		"list catalog":    h.ListPluginCatalog,
+		"catalog detail":  h.GetPluginCatalogRelease,
+		"install":         h.InstallPlugin,
+		"upgrade":         h.UpgradePlugin,
+		"enable":          h.EnablePlugin,
+		"disable":         h.DisablePlugin,
+		"rollback":        h.RollbackPlugin,
+		"private list":    h.ListPrivatePlugins,
+		"private status":  h.GetPrivatePluginStatus,
+		"private install": h.InstallPrivatePlugin,
+		"uninstall":       h.UninstallPlugin,
 	} {
 		t.Run(name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
@@ -225,5 +248,134 @@ func TestPluginManagementUnavailableWhenFlagDisabled(t *testing.T) {
 				t.Fatalf("disabled response leaked catalog data: %s", recorder.Body.String())
 			}
 		})
+	}
+}
+
+func TestPrivatePluginManagementRequiresBothFlags(t *testing.T) {
+	for _, flags := range []struct {
+		name                   string
+		plugins, privatePlugin bool
+	}{
+		{name: "base off", plugins: false, privatePlugin: true},
+		{name: "private off", plugins: true, privatePlugin: false},
+	} {
+		t.Run(flags.name, func(t *testing.T) {
+			h := &Handler{}
+			withPrivatePluginsV1Flag(t, h, flags.plugins, flags.privatePlugin)
+			for name, handler := range map[string]http.HandlerFunc{
+				"list":    h.ListPrivatePlugins,
+				"status":  h.GetPrivatePluginStatus,
+				"install": h.InstallPrivatePlugin,
+			} {
+				t.Run(name, func(t *testing.T) {
+					recorder := httptest.NewRecorder()
+					handler(recorder, pluginHandlerRequest(http.MethodGet, "/plugins/private", nil, map[string]string{"id": testWorkspaceID}))
+					if recorder.Code != http.StatusServiceUnavailable {
+						t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestPrivatePluginHTTPUploadListAndUninstall(t *testing.T) {
+	withPrivatePluginsV1Flag(t, testHandler, true, true)
+	cleanup := func() {
+		ctx := context.Background()
+		testPool.Exec(ctx, `DELETE FROM plugin_health WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM plugin_capability_snapshot WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM plugin_workspace_capability_state WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM plugin_binding WHERE installation_id IN (SELECT id FROM plugin_installation WHERE workspace_id = $1)`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM plugin_grant WHERE installation_id IN (SELECT id FROM plugin_installation WHERE workspace_id = $1)`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM plugin_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM plugin_contribution WHERE release_id IN (SELECT id FROM plugin_release WHERE plugin_id IN (SELECT id FROM plugin_identity WHERE owner_workspace_id = $1))`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM plugin_artifact_file WHERE release_id IN (SELECT id FROM plugin_release WHERE plugin_id IN (SELECT id FROM plugin_identity WHERE owner_workspace_id = $1))`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM plugin_release WHERE plugin_id IN (SELECT id FROM plugin_identity WHERE owner_workspace_id = $1)`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM plugin_identity WHERE owner_workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE workspace_id = $1 AND action LIKE 'plugin_private_%'`, testWorkspaceID)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	archive, _, err := plugincontract.PackDirectory(filepath.Join("..", "..", "..", "examples", "plugins", "incident-triage"))
+	if err != nil {
+		t.Fatalf("pack example private Plugin: %v", err)
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("artifact", "incident-triage.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(archive); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := pluginHandlerRequest(http.MethodPost, "/plugins/private/install", body.Bytes(), map[string]string{"id": testWorkspaceID})
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	recorder := httptest.NewRecorder()
+	testHandler.InstallPrivatePlugin(recorder, request)
+	if recorder.Code != http.StatusCreated || !bytes.Contains(recorder.Body.Bytes(), []byte(`"trust_tier":"private_dev"`)) || !bytes.Contains(recorder.Body.Bytes(), []byte(`"signature_verified":false`)) {
+		t.Fatalf("private install status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var installed pluginInstallationResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &installed); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder = httptest.NewRecorder()
+	testHandler.ListPrivatePlugins(recorder, pluginHandlerRequest(http.MethodGet, "/plugins/private", nil, map[string]string{"id": testWorkspaceID}))
+	if recorder.Code != http.StatusOK || !bytes.Contains(recorder.Body.Bytes(), []byte("dev.multica.incident-triage")) {
+		t.Fatalf("private list status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	recorder = httptest.NewRecorder()
+	testHandler.GetPrivatePluginStatus(recorder, pluginHandlerRequest(http.MethodGet, "/plugins/private/dev.multica.incident-triage", nil, map[string]string{
+		"id": testWorkspaceID, "pluginRef": "dev.multica.incident-triage",
+	}))
+	if recorder.Code != http.StatusOK || !bytes.Contains(recorder.Body.Bytes(), []byte(`"desired_version":"0.1.0"`)) {
+		t.Fatalf("private status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	params := map[string]string{"id": testWorkspaceID, "installationId": installed.ID}
+	recorder = httptest.NewRecorder()
+	testHandler.EnablePlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins/enable", nil, params))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("private enable status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	withPrivatePluginsV1Flag(t, testHandler, true, false)
+	recorder = httptest.NewRecorder()
+	testHandler.ListPlugins(recorder, pluginHandlerRequest(http.MethodGet, "/plugins", nil, map[string]string{"id": testWorkspaceID}))
+	if recorder.Code != http.StatusOK || !bytes.Contains(recorder.Body.Bytes(), []byte("dev.multica.incident-triage")) {
+		t.Fatalf("private Plugin must remain visible for teardown when flag is off: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	recorder = httptest.NewRecorder()
+	testHandler.EnablePlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins/enable", nil, params))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("private enable with flag off status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	recorder = httptest.NewRecorder()
+	testHandler.DisablePlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins/disable", nil, params))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("private disable with flag off status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder = httptest.NewRecorder()
+	testHandler.UninstallPlugin(recorder, pluginHandlerRequest(http.MethodDelete, "/plugins/"+installed.ID, nil, map[string]string{
+		"id": testWorkspaceID, "installationId": installed.ID,
+	}))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("private uninstall status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	withPrivatePluginsV1Flag(t, testHandler, true, true)
+	recorder = httptest.NewRecorder()
+	testHandler.GetPrivatePluginStatus(recorder, pluginHandlerRequest(http.MethodGet, "/plugins/private/dev.multica.incident-triage", nil, map[string]string{
+		"id": testWorkspaceID, "pluginRef": "dev.multica.incident-triage",
+	}))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("uninstalled private status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

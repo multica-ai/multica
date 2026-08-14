@@ -14,6 +14,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "hermes",
   "kimi",
   "reasonix",
+  "dsh",
   "kiro",
   "opencode",
   "openclaw",

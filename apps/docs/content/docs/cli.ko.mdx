@@ -227,9 +227,9 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | `issue` | `list` | 이슈 목록 | `--status`, `--priority`, `--assignee`, `--project`, `--metadata`(반복 가능), `--limit`, `--offset`, `--sort`, `--full-id` |
 | | `get <id>` | 이슈 하나 확인 | |
 | | `create` | 이슈 생성 | `--title`(필수), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment`(반복 가능) |
-| | `update <id>` | 이슈 필드 업데이트 | `create`와 같은 종류의 필드에 `--position` 추가 |
-| | `assign <id>` | 할당 또는 할당 해제 | `--to`(이름으로 멤버, 에이전트, 스쿼드 fuzzy match), `--to-id`, `--unassign` |
-| | `status <id> <status>` | 상태 변경 | |
+| | `update <id>` | 이슈 필드 업데이트 | `create`와 같은 종류의 필드에 `--position`, `--no-start` 추가 |
+| | `assign <id>` | 할당 또는 할당 해제 | `--to`(이름으로 멤버, 에이전트, 스쿼드 fuzzy match), `--to-id`, `--unassign`, `--no-start` |
+| | `status <id> <status>` | 상태 변경 | `--no-start` |
 | | `reorder <id>` | 열 안에서 이동 | |
 | | `search <query>` | 이슈 검색 | `--limit`, `--include-closed` |
 | | `children <id>` | 단계별로 묶은 하위 이슈 목록 | |
@@ -246,7 +246,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `cancel-task <task-id>` | 실행 중 또는 큐 대기 중인 태스크 취소 | `--issue` |
 | `project` | `list/get/create/update/delete` | 프로젝트 관리 | |
 | | `status <id> <status>` | 프로젝트 상태 변경 | |
-| | `resource list/add/update/remove` | 프로젝트 추가 리소스 관리 | `--type`, `--url` |
+| | `resource list/add/update/remove` | 프로젝트 추가 리소스 관리 | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode`(로컬 디렉터리의 `in_place` / `worktree`) |
 | `label` | `list/get/create/update/delete` | 워크스페이스 라벨 관리 | |
 | `property` | `list/get/create/update/archive/unarchive` | 워크스페이스 사용자 지정 속성 관리 | `create`: `--name`, `--type`, `--option`(반복 가능). `list`: `--include-archived`. 유형은 생성 후 변경 불가 |
 | `agent` | `list/get/create/update/archive/restore` | 에이전트 관리 | `--name`, `--runtime-id`(`create`에서 필수), `--instructions`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
@@ -275,7 +275,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 
 | 명령 | 하위 명령 | 용도 | 주요 flag |
 | --- | --- | --- | --- |
-| `daemon` | `start` | 로컬 데몬 시작 | `--foreground`, `--device-name`, `--runtime-name`, `--poll-interval`, `--heartbeat-interval`, `--agent-timeout`(`0`은 상한 없음), `--max-concurrent-tasks`, `--no-auto-update`. 모두 대응하는 `MULTICA_*` 환경 변수가 있음 |
+| `daemon` | `start` | 로컬 데몬 시작 | `--foreground`, `--device-name`, `--runtime-name`, `--workspaces-root`, `--poll-interval`, `--heartbeat-interval`, `--agent-timeout`(`0`은 상한 없음), `--max-concurrent-tasks`, `--no-auto-update`. 모두 대응하는 `MULTICA_*` 환경 변수가 있음 |
 | | `stop` / `status` / `restart` | 중지, 상태 확인, 다시 시작(`restart`와 `start`의 flag가 같음) | |
 | | `logs` | 데몬 로그 확인 | `--follow`, `--lines` |
 | | `disk-usage` | 로컬 디스크 사용량 확인 | `--by-workspace`, `--by-task`, `--top` |

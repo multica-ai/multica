@@ -115,6 +115,7 @@
       "toggleChat": { "label": "Toggle chat window", "description": "Open or close the floating chat window. Opening it focuses the message input." },
       "findInIssue": { "label": "Find in issue", "description": "Search within the open issue detail." },
       "openThreadNav": { "label": "Open thread navigator", "description": "List, search, and jump between the comment threads of the open issue." },
+      "archiveInboxItem": { "label": "Archive notification", "description": "Archive the open inbox notification, or restore it while reading the archive." },
       "send": { "label": "Send", "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog." },
       "goBack": { "label": "Go back", "description": "Navigate back through history, like a browser." },
       "goForward": { "label": "Go forward", "description": "Navigate forward through history, like a browser." },
@@ -183,7 +184,8 @@
       "labels": "Labels",
       "properties": "Properties",
       "quick_actions": "Quick Actions",
-      "plugins": "Plugins"
+    "plugins": "Plugins",
+    "billing": "Billing"
     }
   },
   "plugins": {
@@ -200,6 +202,8 @@
     "read_only_description": "Workspace owners and admins can install or change Plugin bindings.",
     "empty": "No bundled Plugins are available.",
     "official": "Official",
+    "private": "Private",
+    "unverified": "Unverified",
     "signed": "Signature verified",
     "signature_unverified": "Signature unverified",
     "incompatible": "Incompatible release",
@@ -211,6 +215,7 @@
     "health": "Health:",
     "bindings": "Enabled scopes",
     "unknown_agent": "Unknown agent",
+    "unknown_member": "Unknown member",
     "workspace_scope": "Workspace",
     "agent_scope": "Agent",
     "binding_disabled": "Plugin binding disabled",
@@ -222,6 +227,11 @@
     "disabled": "Plugin disabled for new tasks",
     "upgraded": "Plugin upgraded",
     "rolled_back": "Plugin rolled back",
+    "source": "Source and uploader",
+    "private_upload": "Private workspace upload",
+    "uploaded_by": "Uploaded by",
+    "uninstall": "Uninstall",
+    "uninstalled": "Plugin uninstalled for future runs",
     "upgrade_to": "Upgrade to v{{version}}",
     "rollback_to": "Rollback to v{{version}}",
     "action_failed": "Plugin action failed",

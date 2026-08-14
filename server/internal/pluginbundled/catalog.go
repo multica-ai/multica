@@ -199,7 +199,7 @@ func loadRelease(source fs.FS, verifier plugincontract.ReleaseVerifier, metadata
 		}
 		return CatalogEntry{}, releaseDiagnostic(metadata.SourceRef, code)
 	}
-	compatible, why := compatibleWithV1Host(release.Manifest)
+	compatible, why := CompatibleWithV1Host(release.Manifest)
 	return CatalogEntry{
 		Release:          release,
 		PublisherType:    metadata.PublisherType,
@@ -269,7 +269,9 @@ func buildArchive(source fs.FS, releaseDir, signatureFile string) ([]byte, error
 	return buffer.Bytes(), nil
 }
 
-func compatibleWithV1Host(manifest plugincontract.Manifest) (bool, string) {
+// CompatibleWithV1Host applies the V1 host and daemon compatibility contract
+// to both bundled and workspace-private releases.
+func CompatibleWithV1Host(manifest plugincontract.Manifest) (bool, string) {
 	if manifest.Compatibility.HostAPI != ">=1.0.0 <2.0.0" {
 		return false, "host_api_unsupported"
 	}

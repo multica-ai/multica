@@ -73,6 +73,10 @@
     "created_with_agent": "通过智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}"
   },
+  "toasts": {
+    "archived": "已归档通知",
+    "unarchived": "已恢复通知"
+  },
   "errors": {
     "mark_read_failed": "标为已读失败",
     "mark_unread_failed": "标为未读失败",

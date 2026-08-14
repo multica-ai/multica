@@ -157,12 +157,11 @@ func StripHermesProfileArgs(args []string, sel HermesProfileSelection) []string 
 // This is the same pattern as Codex but with the ACP protocol instead of
 // the Codex-specific JSON-RPC methods.
 //
-// opts.ThinkingLevel is deliberately not consumed here: Hermes' ACP surface
-// has nowhere to put a reasoning effort (see ThinkingControlSupported in
-// thinking.go for the evidence and the version it was verified against), and
-// the server rejects the field for this provider before a task is ever
-// dispatched. Wire it up here — alongside the model selection below — once
-// Hermes' ACP adapter carries reasoning onto the session.
+// opts.ThinkingLevel is applied through applyACPEffortOption below, driven by
+// whatever effort option the session advertises. This provider covers two
+// unrelated binaries — Hermes Agent and jcode — with opposite capabilities
+// here, so the catalog is the only honest discriminator; see
+// acpCatalogThinkingProviders in thinking.go for which is which.
 type hermesBackend struct {
 	cfg Config
 }
@@ -401,6 +400,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			cwd = "."
 		}
 
+		// sessionResult is whichever of session/new or session/resume produced
+		// this session. It carries the configOptions the effort step below
+		// reads, so both branches have to keep hold of it.
+		var sessionResult json.RawMessage
+
 		if opts.ResumeSessionID != "" {
 			// Per ACP Session Setup, session/resume accepts mcpServers and
 			// the runtime re-connects them as part of the resume. Without
@@ -417,6 +421,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
+			sessionResult = result
 			sessionID, resumeLanded = resolveHermesResumedSessionID(opts.ResumeSessionID, result)
 			if !resumeLanded {
 				b.cfg.Logger.Warn("agent returned a different session id on resume — original was likely lost; continuing with the new id",
@@ -437,6 +442,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
+			sessionResult = result
 			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
 				finalStatus = "failed"
@@ -509,6 +515,19 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			}
 			b.cfg.Logger.Info("hermes session model set", "model", opts.Model)
 		}
+
+		// 3b. Apply a persisted thinking override through whichever effort
+		// option this session advertises. Which binary answered decides
+		// whether anything happens: jcode advertises `reasoning_effort` and
+		// threads it into the provider request, while Hermes Agent advertises
+		// no configOptions at all and the helper no-ops. Unlike set_model
+		// above this must NOT fail the task — an effort we could not apply
+		// still runs the prompt at the runtime's own default.
+		//
+		// sessionResult stops describing the live session once set_model runs,
+		// because an ACP effort option may depend on the current model.
+		applyACPEffortOption(runCtx, c.request, "hermes", b.cfg.Logger,
+			sessionID, sessionResult, opts.ThinkingLevel, opts.Model == "")
 
 		// 4. Send the prompt and wait for PromptResponse.
 		//

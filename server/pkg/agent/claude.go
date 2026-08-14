@@ -200,7 +200,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			}
 			closeStdin()
 			if cmd.Process != nil {
-				signalProcessGroup(cmd.Process, syscall.SIGTERM)
+				signalProcessGroup(cmd, syscall.SIGTERM)
 				// Escalate to a group SIGKILL unless the WHOLE process group has
 				// exited within the grace window. This must key off the process
 				// group, not procDone: procDone only means cmd.Wait() returned
@@ -209,8 +209,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				// and skip the SIGKILL — leaking exactly the orphan this fix
 				// targets. waitProcessGroupGone returns as soon as the group is
 				// empty, so the graceful case adds no latency.
-				if !waitProcessGroupGone(cmd.Process, claudeTerminateGrace()) {
-					signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				if !waitProcessGroupGone(cmd, claudeTerminateGrace()) {
+					signalProcessGroup(cmd, syscall.SIGKILL)
 				}
 			}
 			_ = stdout.Close()
@@ -1120,7 +1120,11 @@ func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 	cmd.WaitDelay = 2 * time.Second
 	data, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("detect version for %s: %w", execPath, err)
+		// One provider-agnostic boundary for probes: DetectVersion routes every
+		// provider through here, so an ENOEXEC diagnosis added at this point
+		// reaches the reason the daemon reports for a skipped runtime
+		// (MUL-6164).
+		return "", fmt.Errorf("detect version for %s: %w", execPath, ExplainExecError(err))
 	}
 	return extractVersionLine(string(data)), nil
 }
