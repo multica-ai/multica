@@ -122,9 +122,13 @@ function JoinInner() {
                   Invited by {info.creator_name}
                 </p>
               )}
-              {info.role === "admin" && (
+              {info.role === "admin" ? (
                 <p className="text-center text-body text-destructive">
                   This link grants you administrator access to this workspace.
+                </p>
+              ) : (
+                <p className="text-center text-body text-muted-foreground">
+                  You&apos;ll join as a member.
                 </p>
               )}
               {!user && (

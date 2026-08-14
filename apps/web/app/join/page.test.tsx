@@ -114,6 +114,21 @@ describe("JoinPage", () => {
     );
   });
 
+  it("shows the member role when the link grants member access", async () => {
+    mockGetShareLinkInfo.mockResolvedValue({
+      ...TEST_INFO,
+      role: "member",
+    });
+
+    render(<JoinPage />, { wrapper: createWrapper() });
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("You'll join as a member."),
+      ).toBeInTheDocument(),
+    );
+  });
+
   it("shows an error when the link is invalid", async () => {
     mockGetShareLinkInfo.mockRejectedValue(new Error("not found"));
 
