@@ -464,7 +464,9 @@ func TestAntigravityBackendProviderErrorSurfacesAsFailed(t *testing.T) {
 // letting it run to a fake "completed + empty" success. This covers the same
 // validation regardless of whether opts.Model originated from agent.model, a
 // persisted/API value, or the daemon-wide MULTICA_ANTIGRAVITY_MODEL default —
-// they all collapse to opts.Model before Execute runs this check.
+// they all collapse to opts.Model before Execute runs this check. Callers
+// resolve any display label to its ID first (antigravityResolveModelLabel),
+// so validation is ID-only.
 func TestAntigravityModelError(t *testing.T) {
 	t.Parallel()
 
@@ -476,11 +478,6 @@ func TestAntigravityModelError(t *testing.T) {
 	// Exact ID hit → accepted.
 	if err := antigravityModelError("claude-opus-4-6-thinking", catalog); err != nil {
 		t.Errorf("valid model id rejected: %v", err)
-	}
-
-	// Label hit → accepted (legacy value persisted as the display label).
-	if err := antigravityModelError("Claude Opus 4.6 (Thinking)", catalog); err != nil {
-		t.Errorf("valid model label rejected: %v", err)
 	}
 
 	// Empty model → accepted (flag omitted, agy resolves its own default).
@@ -516,6 +513,13 @@ func TestAntigravityModelError(t *testing.T) {
 	if err := antigravityModelError("claude-opus", catalog); err == nil {
 		t.Error("near-miss model (dropped suffix) should be rejected")
 	}
+
+	// A bare display label must now be rejected here — callers are expected to
+	// resolve labels to ids via antigravityResolveModelLabel first. Letting a
+	// label through to agy would be the very no-op this guard exists to prevent.
+	if err := antigravityModelError("Claude Opus 4.6 (Thinking)", catalog); err == nil {
+		t.Error("bare display label should be rejected; callers must resolve it to the id first")
+	}
 }
 
 // TestAntigravityNormaliseModel pins the legacy-value fix from #6867: a model
@@ -540,6 +544,41 @@ func TestAntigravityNormaliseModel(t *testing.T) {
 		if got := antigravityNormaliseModel(tc.input); got != tc.want {
 			t.Errorf("antigravityNormaliseModel(%q) = %q, want %q", tc.input, got, tc.want)
 		}
+	}
+}
+
+// TestAntigravityResolveModelLabel pins the label→id resolution that keeps a
+// legacy display-label value (or a MULTICA_ANTIGRAVITY_MODEL default set under
+// the old docs) working: the label is mapped to its bare id so what reaches
+// `agy --model` is a value agy accepts (#6867 review).
+func TestAntigravityResolveModelLabel(t *testing.T) {
+	t.Parallel()
+
+	catalog := []Model{
+		{ID: "gemini-3.5-flash-medium", Label: "Gemini 3.5 Flash (Medium)", Provider: "antigravity"},
+		{ID: "claude-opus-4-6-thinking", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
+	}
+
+	tests := []struct {
+		name  string
+		model string
+		want  string
+	}{
+		{"empty stays empty", "", ""},
+		{"bare id passes through", "gemini-3.5-flash-medium", "gemini-3.5-flash-medium"},
+		{"label resolves to id", "Gemini 3.5 Flash (Medium)", "gemini-3.5-flash-medium"},
+		{"label resolves to id (case 2)", "Claude Opus 4.6 (Thinking)", "claude-opus-4-6-thinking"},
+		{"unknown value passes through", "Totally Made Up Model", "Totally Made Up Model"},
+	}
+	for _, tc := range tests {
+		if got := antigravityResolveModelLabel(tc.model, catalog); got != tc.want {
+			t.Errorf("%s: antigravityResolveModelLabel(%q) = %q, want %q", tc.name, tc.model, got, tc.want)
+		}
+	}
+
+	// Empty catalog → pass-through (agy resolves the value itself).
+	if got := antigravityResolveModelLabel("Gemini 3.5 Flash (Medium)", nil); got != "Gemini 3.5 Flash (Medium)" {
+		t.Errorf("empty catalog should pass through, got %q", got)
 	}
 }
 

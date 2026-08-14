@@ -49,12 +49,6 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		return nil, fmt.Errorf("agy executable not found at %q: %w", execPath, err)
 	}
 
-	// Normalise a legacy agent.model value that was persisted as the full
-	// `id\tLabel` line the old parser stored (#6867). agy --model only accepts
-	// the bare id, so strip everything from the first tab onward. A value with
-	// no tab passes through unchanged.
-	opts.Model = antigravityNormaliseModel(opts.Model)
-
 	// Guard against agy's silent no-op on an unrecognised --model: it exits 0
 	// with empty output, which would otherwise surface as a "completed" but
 	// empty task. opts.Model is the single funnel for both agent.model and the
@@ -67,6 +61,18 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	// hiccup (see antigravityModelError).
 	if opts.Model != "" {
 		catalog, _ := ListModels(ctx, "antigravity", execPath)
+
+		// Resolve the model to the bare id `agy --model` accepts. Two legacy
+		// shapes need normalising (#6867): a tab-joined `id\tLabel` line the
+		// old parser stored, and a pure display label set under the old docs.
+		// antigravityNormaliseModel strips the tab; antigravityResolveModelLabel
+		// maps a bare label to its id using the catalog. Both are read-time
+		// shims — the corrupted value stays persisted until the picker rewrites
+		// it via the new parser — but they keep existing agents running without
+		// a manual re-set.
+		opts.Model = antigravityNormaliseModel(opts.Model)
+		opts.Model = antigravityResolveModelLabel(opts.Model, catalog.Models)
+
 		if err := antigravityModelError(opts.Model, catalog.Models); err != nil {
 			return nil, err
 		}
@@ -478,10 +484,33 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 // no tab pass through unchanged. This lets agents whose model was persisted
 // by the old parser (which stored the entire `agy models` line including the
 // tab and label) keep working without a manual re-set (#6867).
+//
+// This is a read-time shim, not a data fix: the corrupted value stays
+// persisted until the picker rewrites it via the new parser.
 func antigravityNormaliseModel(model string) string {
 	model = strings.TrimSpace(model)
 	if idx := strings.IndexByte(model, '\t'); idx >= 0 {
 		return strings.TrimSpace(model[:idx])
+	}
+	return model
+}
+
+// antigravityResolveModelLabel maps a bare display label to its model id using
+// the `agy models` catalog. If `model` matches a catalog entry's Label (but
+// not its ID), it returns the matching ID so what reaches `agy --model` is a
+// value agy accepts; otherwise it returns `model` unchanged. When the catalog
+// is empty (discovery failed) the value passes through so agy resolves it.
+func antigravityResolveModelLabel(model string, available []Model) string {
+	if model == "" || len(available) == 0 {
+		return model
+	}
+	for _, m := range available {
+		if m.ID == model {
+			return model // already a bare id
+		}
+		if m.Label == model {
+			return m.ID
+		}
 	}
 	return model
 }
@@ -491,17 +520,17 @@ func antigravityNormaliseModel(model string) string {
 // returns nil otherwise. An empty `available` means discovery couldn't produce
 // a catalog (agy missing, transient failure) — we fail OPEN there and let agy
 // resolve the value, so a discovery hiccup never blocks a run. The match is
-// against the model ID (the bare value `agy --model` accepts) and, as a
-// fallback for legacy persisted values, the display Label. A near-miss (extra
-// space, dropped suffix) is correctly rejected since agy would silently
-// no-op on it anyway.
+// against the model ID — the bare value `agy --model` accepts. Callers should
+// resolve any label to its ID first (see antigravityResolveModelLabel). A
+// near-miss (extra space, dropped suffix) is correctly rejected since agy
+// would silently no-op on it anyway.
 func antigravityModelError(model string, available []Model) error {
 	if model == "" || len(available) == 0 {
 		return nil
 	}
 	ids := make([]string, 0, len(available))
 	for _, m := range available {
-		if m.ID == model || m.Label == model {
+		if m.ID == model {
 			return nil
 		}
 		ids = append(ids, m.ID)
