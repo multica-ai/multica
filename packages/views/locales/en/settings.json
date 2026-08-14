@@ -984,5 +984,34 @@
         "description": "Create and work on issues"
       }
     }
+  },
+  "pushover": {
+    "integration": {
+      "section_title": "Pushover",
+      "section_description": "Connect Multica to Pushover so Workspace Members can optionally receive push notifications.",
+      "enabled_label": "Pushover integration enabled",
+      "not_enabled_label": "Pushover integration not enabled",
+      "application_description": "Set PUSHOVER_APPLICATION_TOKEN on the server to enable Pushover installations. Self-hosters: see the project README for details."
+    },
+    "profile": {
+      "section_title": "Pushover",
+      "section_description": "Receive push notifications via Pushover.",
+      "user_key_label": "User Key",
+      "user_key_description_before": "Get your user key from the ",
+      "dashboard_link": "Pushover dashboard",
+      "user_key_description_after": "",
+      "user_key_placeholder": "Enter your Pushover User Key",
+      "login_codes_label": "Login codes",
+      "login_codes_description": "Receive login codes via Pushover",
+      "disconnect": "Disconnect Pushover",
+      "send_test": "Send Test Notification",
+      "connected": "Pushover connected",
+      "connect_failed": "Failed to connect Pushover",
+      "save_failed": "Failed to save Pushover settings",
+      "disconnected": "Pushover disconnected",
+      "disconnect_failed": "Failed to disconnect Pushover",
+      "test_sent": "Test notification sent",
+      "test_failed": "Failed to send test notification"
+    }
   }
 }

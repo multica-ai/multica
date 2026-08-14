@@ -20,6 +20,7 @@ interface ConfigState {
   // section is hidden. Defaults to false so unknown / older servers and the
   // managed cloud (which omits the field) keep it hidden.
   vcsIntegrationAvailable: boolean;
+  pushoverAvailable: boolean;
   featureFlags: Record<string, boolean>;
   // The running API build version, surfaced in the Help popover so
   // self-hosted operators can confirm what's deployed. Empty for dev builds
@@ -31,6 +32,7 @@ interface ConfigState {
     googleClientId?: string;
     workspaceCreationDisabled?: boolean;
     vcsIntegrationAvailable?: boolean;
+    pushoverAvailable?: boolean;
   }) => void;
   setDaemonConfig: (config: {
     daemonServerUrl?: string;
@@ -49,6 +51,7 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
   vcsIntegrationAvailable: false,
+  pushoverAvailable: false,
   featureFlags: {},
   serverVersion: "",
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
@@ -57,7 +60,8 @@ export const configStore = createStore<ConfigState>((set) => ({
     googleClientId = "",
     workspaceCreationDisabled = false,
     vcsIntegrationAvailable = false,
-  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable }),
+    pushoverAvailable = false,
+  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable, pushoverAvailable }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),

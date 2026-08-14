@@ -80,6 +80,10 @@ export interface User {
   profile_description: string;
   /** Pinned IANA tz; null means "use browser-detected tz at render time". */
   timezone: string | null;
+  /** Whether a write-only Pushover routing key is stored for this account. */
+  pushover_user_key_configured?: boolean;
+  /** Whether login codes should also be delivered through Pushover. */
+  pushover_login_codes_enabled?: boolean;
   created_at: string;
   updated_at: string;
 }

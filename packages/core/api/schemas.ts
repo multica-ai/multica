@@ -558,6 +558,8 @@ export interface AppConfigResponse {
    * (self-host only; off on the managed cloud). Absent/false hides the whole
    * Settings → Integrations "Git providers" section. */
   vcs_integration_available?: boolean;
+  /** Whether the backend has a valid PUSHOVER_APPLICATION_TOKEN. */
+  pushover_available?: boolean;
   feature_flags?: Record<string, boolean>;
   server_version?: string;
 }
@@ -752,6 +754,7 @@ export const AppConfigSchema = z.object({
   daemon_app_url: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
   vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
+  pushover_available: BooleanWithDefaultSchema(false),
   feature_flags: FeatureFlagsSchema,
   server_version: OptionalStringSchema,
 }).loose();
@@ -765,6 +768,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_app_url: "",
   workspace_creation_disabled: false,
   vcs_integration_available: false,
+  pushover_available: false,
   feature_flags: {},
 };
 
@@ -1925,6 +1929,8 @@ export const UserSchema = z.object({
   language: z.string().nullable().default(null),
   profile_description: z.string().default(""),
   timezone: z.string().nullable().default(null),
+  pushover_user_key_configured: BooleanWithDefaultSchema(false),
+  pushover_login_codes_enabled: BooleanWithDefaultSchema(false),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -1940,6 +1946,8 @@ export const EMPTY_USER: User = {
   language: null,
   profile_description: "",
   timezone: null,
+  pushover_user_key_configured: false,
+  pushover_login_codes_enabled: false,
   created_at: "",
   updated_at: "",
 };

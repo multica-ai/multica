@@ -76,7 +76,11 @@ describe("Settings IntegrationsTab", () => {
     configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
     // Reset the self-host-only VCS gate to its default (hidden) so tests stay
     // isolated; individual tests opt in below.
-    configStore.getState().setAuthConfig({ allowSignup: true, vcsIntegrationAvailable: false });
+    configStore.getState().setAuthConfig({
+      allowSignup: true,
+      vcsIntegrationAvailable: false,
+      pushoverAvailable: false,
+    });
   });
 
   it("hides Composio and disables the toolkits query when the feature flag is off", () => {
@@ -146,5 +150,21 @@ describe("Settings IntegrationsTab", () => {
     renderTab();
 
     expect(screen.getByTestId("vcs-tab")).toBeInTheDocument();
+  });
+
+  it("shows Pushover setup instructions when the instance has no application token", () => {
+    renderTab();
+
+    expect(screen.getByText("Pushover integration not enabled")).toBeInTheDocument();
+    expect(screen.getByText(/Set PUSHOVER_APPLICATION_TOKEN on the server/i)).toBeInTheDocument();
+  });
+
+  it("shows Pushover enabled state when configured for the instance", () => {
+    configStore.getState().setAuthConfig({ allowSignup: true, pushoverAvailable: true });
+
+    renderTab();
+
+    expect(screen.getByText("Pushover integration enabled")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /create Pushover application/i })).toBeNull();
   });
 });

@@ -657,6 +657,40 @@ describe("UserSchema timezone drift", () => {
   });
 });
 
+describe("UserSchema Pushover drift", () => {
+  const base = {
+    id: "11111111-1111-1111-1111-111111111111",
+    name: "Ada",
+    email: "ada@example.com",
+  };
+
+  it("defaults Pushover settings off for older servers", () => {
+    const parsed = UserSchema.parse(base);
+    expect(parsed.pushover_user_key_configured).toBe(false);
+    expect(parsed.pushover_login_codes_enabled).toBe(false);
+  });
+
+  it("preserves configured and enabled settings", () => {
+    const parsed = UserSchema.parse({
+      ...base,
+      pushover_user_key_configured: true,
+      pushover_login_codes_enabled: true,
+    });
+    expect(parsed.pushover_user_key_configured).toBe(true);
+    expect(parsed.pushover_login_codes_enabled).toBe(true);
+  });
+
+  it("defaults malformed Pushover booleans without rejecting the user", () => {
+    const parsed = UserSchema.parse({
+      ...base,
+      pushover_user_key_configured: "yes",
+      pushover_login_codes_enabled: 1,
+    });
+    expect(parsed.pushover_user_key_configured).toBe(false);
+    expect(parsed.pushover_login_codes_enabled).toBe(false);
+  });
+});
+
 describe("SquadListSchema member preview drift", () => {
   const baseSquad = {
     id: "squad-1",
@@ -850,6 +884,12 @@ describe("AppConfigSchema cdn_signed drift", () => {
   it("keeps cdn_signed=true from a signing-enabled server", () => {
     const parsed = AppConfigSchema.parse({ cdn_signed: true });
     expect(parsed.cdn_signed).toBe(true);
+  });
+
+  it("defaults malformed or absent Pushover availability to false", () => {
+    expect(AppConfigSchema.parse({}).pushover_available).toBe(false);
+    expect(AppConfigSchema.parse({ pushover_available: "yes" }).pushover_available).toBe(false);
+    expect(AppConfigSchema.parse({ pushover_available: true }).pushover_available).toBe(true);
   });
 
   it("parses frontend feature flag decisions", () => {

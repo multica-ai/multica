@@ -7,6 +7,7 @@ import { SlackTab } from "./slack-tab";
 import { DingTalkTab } from "./dingtalk-tab";
 import { VCSTab } from "./vcs-tab";
 import { WecomTab } from "./wecom-tab";
+import { PushoverTab } from "./pushover-tab";
 import { ApiError } from "@multica/core/api";
 import { composioToolkitsOptions } from "@multica/core/composio";
 import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
@@ -18,7 +19,8 @@ import { IntegrationChannelIcon } from "./integration-channel-icon";
 // Integrations is the umbrella tab for third-party platform connections.
 // GitHub has its own top-level tab (see github-tab.tsx); everything else
 // — currently Lark, Composio, Slack, the self-hosted Git providers (Forgejo /
-// Gitea / GitLab), and WeCom smart-bot, with Linear etc. to follow —
+// Gitea / GitLab), WeCom smart-bot, and Pushover, with Linear
+// etc. to follow —
 // lives in here under its own section heading so additional integrations slot
 // in without changing the IA. IntegrationsTab is just the host; each
 // integration owns its own description and install flow.
@@ -93,6 +95,9 @@ export function IntegrationsTab() {
         description={t(($) => $.wecom.page_description)}
       >
         <WecomTab />
+      </SettingsSection>
+      <SettingsSection title={t(($) => $.pushover.integration.section_title)}>
+        <PushoverTab />
       </SettingsSection>
     </SettingsTab>
   );

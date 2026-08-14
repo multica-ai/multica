@@ -143,6 +143,12 @@ type WorkspaceSetRefreshNotifier interface {
 	NotifyWorkspacesChanged(userID string)
 }
 
+type LoginCodePusher interface {
+	Enabled() bool
+	SendLoginCode(ctx context.Context, userKey, code string) error
+	SendTestNotification(ctx context.Context, userKey string) error
+}
+
 // DaemonPendingWorkNotifier pushes a runtime-scoped "heartbeat now" hint to the
 // daemon so a queued heartbeat-carried request (model discovery) is picked up
 // immediately instead of on the daemon's next scheduled tick (MUL-5444).
@@ -166,6 +172,7 @@ type Handler struct {
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
 	EmailService           *service.EmailService
+	PushoverService        LoginCodePusher
 	UpdateStore            UpdateStore
 	ModelListStore         ModelListStore
 	LocalSkillListStore    LocalSkillListStore

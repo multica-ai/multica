@@ -45,6 +45,9 @@ type AppConfig struct {
 	// false so the managed-cloud response keeps its previous shape; the UI
 	// defaults absent to false (hidden).
 	VCSIntegrationAvailable bool `json:"vcs_integration_available,omitempty"`
+	// PushoverAvailable exposes only whether the instance has a valid
+	// application token. The token itself remains server-side.
+	PushoverAvailable bool `json:"pushover_available,omitempty"`
 
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
@@ -83,6 +86,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
+	config.PushoverAvailable = h.PushoverService != nil && h.PushoverService.Enabled()
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
 	// Only surface the build version on self-hosted deployments. The managed
 	// cloud is continuously deployed and its users can't choose the build, so

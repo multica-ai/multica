@@ -983,5 +983,34 @@
     "byo_credentials_unverifiable": "WeCom에 연결하지 못해 이 봇을 확인할 수 없었어요. 인증 정보는 변경되지 않았어요. 잠시 후 다시 시도해 주세요.",
     "byo_install_failed": "봇을 저장하지 못했어요. 저희 쪽 문제입니다. 인증 정보는 변경되지 않았어요. 다시 시도해 보시고, 계속 실패하면 지원팀에 문의해 주세요.",
     "byo_failed_toast": "WeCom 봇을 연결하지 못했어요"
+  },
+  "pushover": {
+    "integration": {
+      "section_title": "Pushover",
+      "section_description": "Multica를 Pushover에 연결하여 워크스페이스 멤버가 선택적으로 푸시 알림을 받을 수 있게 하세요.",
+      "enabled_label": "Pushover 연동 활성화됨",
+      "not_enabled_label": "Pushover 연동 활성화되지 않음",
+      "application_description": "서버에 PUSHOVER_APPLICATION_TOKEN을 설정하여 Pushover 연동을 활성화하세요. 셀프 호스팅 사용자는 프로젝트 README에서 자세한 내용을 확인하세요."
+    },
+    "profile": {
+      "section_title": "Pushover",
+      "section_description": "Pushover로 푸시 알림을 받으세요.",
+      "user_key_label": "User Key",
+      "user_key_description_before": "",
+      "dashboard_link": "Pushover 대시보드",
+      "user_key_description_after": "에서 User Key를 확인하세요.",
+      "user_key_placeholder": "Pushover User Key 입력",
+      "login_codes_label": "로그인 코드",
+      "login_codes_description": "Pushover로 로그인 코드를 받으세요",
+      "disconnect": "Pushover 연결 해제",
+      "send_test": "테스트 알림 보내기",
+      "connected": "Pushover에 연결했어요",
+      "connect_failed": "Pushover에 연결하지 못했어요",
+      "save_failed": "Pushover 설정을 저장하지 못했어요",
+      "disconnected": "Pushover 연결을 해제했어요",
+      "disconnect_failed": "Pushover 연결을 해제하지 못했어요",
+      "test_sent": "테스트 알림을 보냈어요",
+      "test_failed": "테스트 알림을 보내지 못했어요"
+    }
   }
 }

@@ -983,5 +983,34 @@
         "description": "创建并处理任务"
       }
     }
+  },
+  "pushover": {
+    "integration": {
+      "section_title": "Pushover",
+      "section_description": "将 Multica 连接到 Pushover，让工作区成员可以选择接收推送通知。",
+      "enabled_label": "Pushover 集成已启用",
+      "not_enabled_label": "Pushover 集成未启用",
+      "application_description": "在服务器上设置 PUSHOVER_APPLICATION_TOKEN 以启用 Pushover 安装。自托管用户：详情请参阅项目 README。"
+    },
+    "profile": {
+      "section_title": "Pushover",
+      "section_description": "通过 Pushover 接收推送通知。",
+      "user_key_label": "用户密钥",
+      "user_key_description_before": "从 ",
+      "dashboard_link": "Pushover 控制台",
+      "user_key_description_after": " 获取用户密钥。",
+      "user_key_placeholder": "输入 Pushover 用户密钥",
+      "login_codes_label": "登录验证码",
+      "login_codes_description": "通过 Pushover 接收登录验证码",
+      "disconnect": "断开 Pushover",
+      "send_test": "发送测试通知",
+      "connected": "Pushover 已连接",
+      "connect_failed": "无法连接 Pushover",
+      "save_failed": "无法保存 Pushover 设置",
+      "disconnected": "Pushover 已断开连接",
+      "disconnect_failed": "无法断开 Pushover",
+      "test_sent": "测试通知已发送",
+      "test_failed": "无法发送测试通知"
+    }
   }
 }

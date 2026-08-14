@@ -983,5 +983,34 @@
         "description": "タスクの作成と作業"
       }
     }
+  },
+  "pushover": {
+    "integration": {
+      "section_title": "Pushover",
+      "section_description": "Multica を Pushover に接続し、ワークスペースメンバーが必要に応じてプッシュ通知を受信できるようにします。",
+      "enabled_label": "Pushover 連携は有効です",
+      "not_enabled_label": "Pushover 連携は有効ではありません",
+      "application_description": "サーバーで PUSHOVER_APPLICATION_TOKEN を設定して Pushover 連携を有効にします。セルフホストの場合は、詳細をプロジェクトの README で確認してください。"
+    },
+    "profile": {
+      "section_title": "Pushover",
+      "section_description": "Pushover でプッシュ通知を受信します。",
+      "user_key_label": "User Key",
+      "user_key_description_before": "",
+      "dashboard_link": "Pushover ダッシュボード",
+      "user_key_description_after": "から User Key を取得します。",
+      "user_key_placeholder": "Pushover User Key を入力",
+      "login_codes_label": "ログインコード",
+      "login_codes_description": "Pushover でログインコードを受信します",
+      "disconnect": "Pushover の接続を解除",
+      "send_test": "テスト通知を送信",
+      "connected": "Pushover に接続しました",
+      "connect_failed": "Pushover に接続できませんでした",
+      "save_failed": "Pushover 設定を保存できませんでした",
+      "disconnected": "Pushover の接続を解除しました",
+      "disconnect_failed": "Pushover の接続を解除できませんでした",
+      "test_sent": "テスト通知を送信しました",
+      "test_failed": "テスト通知を送信できませんでした"
+    }
   }
 }

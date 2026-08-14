@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 func TestGetConfigReportsCdnSignedMode(t *testing.T) {
@@ -135,6 +136,28 @@ func TestGetConfigHonorsVCSIntegrationSwitch(t *testing.T) {
 	}
 	if string(raw) != "true" {
 		t.Fatalf("vcs_integration_available: want true, got %s", raw)
+	}
+}
+
+func TestGetConfigReportsPushoverAvailabilityWithoutExposingToken(t *testing.T) {
+	origPushover := testHandler.PushoverService
+	t.Cleanup(func() { testHandler.PushoverService = origPushover })
+
+	t.Setenv("PUSHOVER_APPLICATION_TOKEN", "abcdefghijklmnopqrstuvwxyz1234")
+	testHandler.PushoverService = service.NewPushoverService()
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+
+	var cfg map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if string(cfg["pushover_available"]) != "true" {
+		t.Fatalf("pushover_available: want true, got %s", cfg["pushover_available"])
+	}
+	if _, exposed := cfg["pushover_application_token"]; exposed {
+		t.Fatal("PUSHOVER_APPLICATION_TOKEN must never be exposed by /api/config")
 	}
 }
 
