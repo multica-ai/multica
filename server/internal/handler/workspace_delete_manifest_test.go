@@ -98,6 +98,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"plugin_workspace_capability_state": workspaceDelete,
 	"project":                           workspaceDelete,
 	"project_resource":                  workspaceDelete,
+	"qianwen_skill_request":             workspaceDelete,
 	"quick_action":                      workspaceDelete,
 	"runtime_profile":                   workspaceDelete,
 	"schema_migrations":                 workspaceDeleteKeep,

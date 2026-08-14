@@ -393,6 +393,10 @@ deleted_channel_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)
 ),
+deleted_qianwen_requests AS (
+    DELETE FROM qianwen_skill_request
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
 deleted_channel_inbound_audit AS (
     DELETE FROM channel_inbound_audit
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)

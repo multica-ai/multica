@@ -104,6 +104,7 @@ var concurrentIndexCleanups = map[string]string{
 	"306_dingtalk_group_route_workspace_index":                  "idx_dingtalk_group_route_workspace",
 	"307_dingtalk_group_route_id_unique":                        "idx_dingtalk_group_route_id_unique",
 	"311_plugin_identity_scoped_key_index":                      "idx_plugin_identity_scoped_key",
+	"320_qianwen_skill_request_unique":                          "idx_qianwen_skill_request_installation_request",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

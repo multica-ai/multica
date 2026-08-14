@@ -1075,6 +1075,22 @@ type ProjectResource struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 }
 
+// Durable Qianwen request idempotency ledger. No FKs by design: installation revocation and chat archive/deletion must not erase an accepted request key.
+type QianwenSkillRequest struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	RequestID      pgtype.UUID `json:"request_id"`
+	// SHA-256 of the normalized request query; the plaintext lives only in chat_message.
+	QuerySha256 []byte `json:"query_sha256"`
+	// Fencing token for the current submit owner; every successful claim or reclaim mints a new UUID.
+	ClaimToken pgtype.UUID `json:"claim_token"`
+	// DB-clock lease deadline after which an unfinished request may be reclaimed.
+	ClaimExpiresAt pgtype.Timestamptz `json:"claim_expires_at"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	TaskID         pgtype.UUID        `json:"task_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type QuickAction struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

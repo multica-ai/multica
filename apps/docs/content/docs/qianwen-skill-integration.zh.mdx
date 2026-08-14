@@ -1,0 +1,165 @@
+---
+title: 千问 Skill 桥接（实验性）
+description: 通过异步提交和状态查询工具，将夸克 S1 眼镜上的私有千问 Skill 连接到 Multica 智能体。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+实验性的千问 Skill 桥接允许私有 Skill 向一个 Multica 智能体提交语音请求，并轮询最终的文字回复。运行 Multica daemon 的计算机只需保持出站连接：千问调用 Multica API，而 daemon 仍像往常一样从 Multica 领取任务。
+
+首个版本采用轮询，因为千问工具 API 必须快速返回，而智能体执行可能耗时更久。它尚未实现千问行业消息推送 API；该 API 的公开文档目前没有提供实现互操作所需的传输协议约定。
+
+<Callout type="warning">
+这是面向私有 Skill 的纯后端、单用户预览版本，目前还没有安装界面。桥接会验证安装 token，但尚未验证千问 `openUserId`、请求签名、时间戳或 nonce。请勿将其用于公开或多用户 Skill。
+</Callout>
+
+## 开始之前
+
+你需要：
+
+- 一个 Multica 工作区、智能体和已连接的 runtime
+- 一个已绑定到夸克 S1 的私有千问 Skill
+- 工作区和智能体 UUID
+- 用于一次性管理请求的 Multica personal access token
+- 一个千问云端可以访问的 Multica API URL
+
+Multica personal access token 只用于创建或轮换桥接凭据，绝不能放进千问。Skill 会收到一个独立、权限受限的 `qws_` token，它只能为一个安装提交请求和读取结果。
+
+## 1. 创建私有连接
+
+在 shell 中设置这些值，然后调用管理 endpoint：
+
+```bash
+export MULTICA_API_URL='https://api.multica.ai'
+export MULTICA_TOKEN='mul_...'
+export MULTICA_WORKSPACE_ID='...'
+export MULTICA_AGENT_ID='...'
+
+curl --fail-with-body -X POST \
+  "$MULTICA_API_URL/api/workspaces/$MULTICA_WORKSPACE_ID/qianwen/installations?agent_id=$MULTICA_AGENT_ID" \
+  -H "Authorization: Bearer $MULTICA_TOKEN"
+```
+
+响应中包含公开的 `connection_id`、一个 `access_token`，以及两个相对工具路径：
+
+```json
+{
+  "id": "installation-uuid",
+  "agent_id": "agent-uuid",
+  "connection_id": "qwc_...",
+  "mode": "personal_polling",
+  "status": "active",
+  "access_token": "qws_...",
+  "token_visible_once": true,
+  "submit_path": "/api/channels/qianwen/qwc_.../requests",
+  "status_path_pattern": "/api/channels/qianwen/qwc_.../requests/{request_id}"
+}
+```
+
+立即保存 `qws_` token。Multica 只存储它的 SHA-256 摘要，之后无法再次显示明文 token。对同一智能体重复发起创建请求会轮换两项 Skill 凭据，并立即使之前的凭据失效。
+
+## 2. 配置提交工具
+
+使用以下参数创建一个千问 HTTP 工具：
+
+```http
+POST {MULTICA_API_URL}/api/channels/qianwen/{connection_id}/requests
+Authorization: Bearer {access_token}
+Content-Type: application/json
+
+{
+  "request_id": "per-call UUID",
+  "query": "the user's transcribed request"
+}
+```
+
+`request_id` 是幂等 key。为新命令生成一个非零 UUID；如果千问重试同一命令，必须复用完全相同的 UUID。使用相同的规范化 `query` 重复提交一个已接受的 ID，不会启动第二次智能体执行。如果同一个 ID 搭配不同文本复用，则返回 HTTP `409`，而不是悄悄返回首个命令的结果。
+
+请求成功时返回 HTTP `202`：
+
+```json
+{
+  "request_id": "0deecf44-7a87-4aa6-bb23-c0ee9926524d",
+  "status": "accepted",
+  "poll_after_ms": 2000
+}
+```
+
+对于请求的 owner，任务、从 channel 接入的用户消息和持久化请求指针会在确认响应前以原子方式提交。并发的幂等重试可能在 owner 仍在提交时收到相同的 `202`；随后状态工具会报告持久化结果。Multica 不会等待智能体执行本身完成。提交处理受 2.5 秒服务端 deadline 限制，以便工具能在千问的三秒限制内响应；遇到超时或 `503` 响应时，可以安全地使用同一个 request ID 重试。
+
+## 3. 配置状态工具
+
+创建第二个千问 HTTP 工具，接收提交工具返回的 `request_id`：
+
+```http
+GET {MULTICA_API_URL}/api/channels/qianwen/{connection_id}/requests/{request_id}
+Authorization: Bearer {access_token}
+```
+
+轮询频率不要快于 `poll_after_ms` 的值。响应会使用以下状态：
+
+| Status | 含义 |
+|---|---|
+| `accepted` | 此 request ID 已被持久化认领；另一个正在执行的提交可能仍在提交其任务。 |
+| `queued` | 任务已存在，正在等待 runtime。 |
+| `running` | runtime 已领取或正在执行任务。 |
+| `completed` | 用户可见的最终智能体回复位于 `output` 中。 |
+| `failed` | 任务失败，或无法调度任务；请在 Multica 中查看详情。 |
+| `cancelled` | 任务已取消。 |
+| `unknown` | Multica 报告了此预览版本无法识别的较新任务状态；请在 Multica 中查看。 |
+
+例如：
+
+```json
+{
+  "request_id": "0deecf44-7a87-4aa6-bb23-c0ee9926524d",
+  "status": "completed",
+  "task_id": "task-uuid",
+  "output": "The tests pass after updating the parser fixture."
+}
+```
+
+只会返回 Multica Chat 中向用户展示的智能体文本。原始 runtime 错误和内部任务结果绝不会暴露给 Skill。长回复会截断为 8,000 个 Unicode 字符，并包含 `"truncated": true`。
+
+## 安全与生命周期
+
+- 安装 token 代表私有 Skill 的安装者；请求 body 不能选择其他 Multica 用户。
+- 当前预览版本无法在千问身份层证明调用者就是该安装者。请将 bearer token 视为单用户共享密钥，绝不要公开该 Skill。
+- 每个提交和状态请求都会重新检查安装者是否仍是工作区成员。
+- 状态读取范围仅限通过身份验证的安装和 request UUID。
+- 每条命令都会获得独立的 Multica Chat session，避免一个眼镜请求继承另一个请求的智能体上下文。
+- 归档或删除该 Chat 不会释放 request ID 以供再次执行。硬删除可能会让轮询结果中的回复文本消失，因为可见的对话记录已被有意移除。
+- 此预览版本会拒绝 `/issue` 和 `/new`，因为尚未实现它们针对 channel 的结果语义。
+
+列出工作区的千问安装，但不显示其 token：
+
+```bash
+curl --fail-with-body \
+  "$MULTICA_API_URL/api/workspaces/$MULTICA_WORKSPACE_ID/qianwen/installations" \
+  -H "Authorization: Bearer $MULTICA_TOKEN"
+```
+
+撤销一个安装，并立即停止提交和状态访问：
+
+```bash
+curl --fail-with-body -X DELETE \
+  "$MULTICA_API_URL/api/workspaces/$MULTICA_WORKSPACE_ID/qianwen/installations/{installation_id}" \
+  -H "Authorization: Bearer $MULTICA_TOKEN"
+```
+
+## 当前限制
+
+- 仅支持私有、单用户 Skill
+- 仅支持文本输入和文本输出
+- 必须显式轮询状态；不支持眼镜主动通知或唤醒
+- 每个请求使用一个独立的 Multica Chat session
+- 不支持群组身份绑定、附件、富 UI、流式传输、`/issue` 或 `/new`
+- 不支持 `openUserId` 绑定、千问请求签名验证或重放 nonce 验证
+
+下一阶段的传输能力需要千问提供正式的推送 endpoint、payload、身份验证、投递和设备渲染协议约定。添加该适配器不需要暴露或更改本地 daemon。
+
+## 接下来
+
+- [聊天集成](/channels) — 共享的路由与授权模型
+- [Daemon 与 runtime](/daemon-runtimes) — 智能体任务实际运行的位置
+- [身份验证 token](/auth-tokens) — 如何安全处理一次性管理 PAT

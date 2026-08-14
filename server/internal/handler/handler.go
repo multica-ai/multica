@@ -262,6 +262,12 @@ type Handler struct {
 	DingTalkInstall *dingtalk.InstallService
 	// DingTalkBindingTokens mints and redeems the single-use account-link tokens.
 	DingTalkBindingTokens *dingtalk.BindingTokenService
+	// Qianwen exposes a short-lived HTTP ingress for a private glasses Skill.
+	// Unlike the long-connection channels it needs no deployment secret: each
+	// installation owns a random bearer token whose digest is stored in the
+	// generic channel_installation config. Nil only in narrowly constructed
+	// tests; cmd/server wires it unconditionally.
+	Qianwen QianwenService
 	// SlackHistory backs the agent-facing `multica chat history` command: it
 	// reads a chat session's bound Slack conversation on demand (MUL-3871). Nil
 	// unless Slack is configured; GetChatChannelHistory then reports "no channel

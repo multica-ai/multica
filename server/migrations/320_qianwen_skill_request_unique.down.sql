@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_qianwen_skill_request_installation_request;

@@ -1267,6 +1267,130 @@ func TestEnqueueChatTaskStampsChatEvidence(t *testing.T) {
 	}
 }
 
+// TestDirectChatSendChannelProvenanceAndAtomicFinalize pins the channel stamp
+// and proves its ledger finalizer participates in the same transaction.
+func TestDirectChatSendChannelProvenanceAndAtomicFinalize(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+
+	agent, err := q.GetAgent(ctx, util.MustParseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+	newSession := func(label string) db.ChatSession {
+		t.Helper()
+		var sessionID string
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
+			VALUES ($1, $2, $3, $4) RETURNING id`, workspaceID, agentID, userID, label).Scan(&sessionID); err != nil {
+			t.Fatalf("seed %s session: %v", label, err)
+		}
+		t.Cleanup(func() {
+			pool.Exec(context.Background(), `DELETE FROM chat_message WHERE chat_session_id = $1`, sessionID)
+			pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE chat_session_id = $1`, sessionID)
+			pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, sessionID)
+		})
+		session, err := q.GetChatSession(ctx, util.MustParseUUID(sessionID))
+		if err != nil {
+			t.Fatalf("load %s session: %v", label, err)
+		}
+		return session
+	}
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	initiator := util.MustParseUUID(userID)
+	webResult, err := svc.SendDirectChatMessage(ctx, newSession("web send"), agent, initiator, "from web", nil, "member", initiator)
+	if err != nil {
+		t.Fatalf("SendDirectChatMessage: %v", err)
+	}
+	var finalizedTask db.AgentTaskQueue
+	channelResult, err := svc.SendChannelDirectChatMessage(ctx, newSession("channel send"), agent, initiator, "from channel", func(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue) error {
+		storedTask, err := qtx.GetAgentTask(ctx, task.ID)
+		if err != nil {
+			return fmt.Errorf("callback load task: %w", err)
+		}
+		if storedTask.ID != task.ID {
+			return fmt.Errorf("callback task id = %s, want %s", util.UUIDToString(storedTask.ID), util.UUIDToString(task.ID))
+		}
+		input, err := qtx.ListChatInputMessages(ctx, task.ID)
+		if err != nil {
+			return fmt.Errorf("callback load input: %w", err)
+		}
+		if len(input) != 1 || input[0].Content != "from channel" {
+			return fmt.Errorf("callback input = %+v, want the channel message", input)
+		}
+		finalizedTask = task
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SendChannelDirectChatMessage: %v", err)
+	}
+	if finalizedTask.ID != channelResult.Task.ID {
+		t.Fatalf("finalizer task = %s, want returned task %s", util.UUIDToString(finalizedTask.ID), util.UUIDToString(channelResult.Task.ID))
+	}
+
+	for _, tc := range []struct {
+		name string
+		msg  db.ChatMessage
+		want bool
+	}{
+		{name: "web/mobile", msg: webResult.Message, want: false},
+		{name: "channel", msg: channelResult.Message, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.msg.ChannelIngested != tc.want {
+				t.Fatalf("returned channel_ingested = %v, want %v", tc.msg.ChannelIngested, tc.want)
+			}
+			var stored bool
+			if err := pool.QueryRow(ctx, `SELECT channel_ingested FROM chat_message WHERE id = $1`, tc.msg.ID).Scan(&stored); err != nil {
+				t.Fatalf("read stored channel_ingested: %v", err)
+			}
+			if stored != tc.want {
+				t.Fatalf("stored channel_ingested = %v, want %v", stored, tc.want)
+			}
+		})
+	}
+
+	rollbackSession := newSession("channel finalize rollback")
+	finalizeErr := errors.New("ledger finalize failed")
+	callbackSawTask := false
+	rolledBack, err := svc.SendChannelDirectChatMessage(ctx, rollbackSession, agent, initiator, "must roll back", func(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue) error {
+		if _, err := qtx.GetAgentTask(ctx, task.ID); err != nil {
+			return fmt.Errorf("callback load rollback task: %w", err)
+		}
+		input, err := qtx.ListChatInputMessages(ctx, task.ID)
+		if err != nil {
+			return fmt.Errorf("callback load rollback input: %w", err)
+		}
+		if len(input) != 1 || !input[0].ChannelIngested {
+			return fmt.Errorf("callback rollback input = %+v, want one channel-ingested message", input)
+		}
+		callbackSawTask = true
+		return finalizeErr
+	})
+	if !errors.Is(err, finalizeErr) {
+		t.Fatalf("SendChannelDirectChatMessage error = %v, want %v", err, finalizeErr)
+	}
+	if rolledBack != nil {
+		t.Fatalf("SendChannelDirectChatMessage result = %+v, want nil on finalize failure", rolledBack)
+	}
+	if !callbackSawTask {
+		t.Fatal("finalizer did not observe the uncommitted task")
+	}
+	var taskCount, messageCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT
+			(SELECT count(*) FROM agent_task_queue WHERE chat_session_id = $1),
+			(SELECT count(*) FROM chat_message WHERE chat_session_id = $1)`, rollbackSession.ID).Scan(&taskCount, &messageCount); err != nil {
+		t.Fatalf("count rolled-back rows: %v", err)
+	}
+	if taskCount != 0 || messageCount != 0 {
+		t.Fatalf("finalize failure persisted tasks=%d messages=%d, want both zero", taskCount, messageCount)
+	}
+}
+
 func TestEnqueueChatTaskDefersForChannelMediaAndPromotesWhenReady(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()

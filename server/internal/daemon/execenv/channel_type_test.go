@@ -2,6 +2,37 @@ package execenv
 
 import "testing"
 
+func TestSurfacePersistsTranscript(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		channelType string
+		want        bool
+	}{
+		{name: "web chat", channelType: "", want: true},
+		{name: "feishu", channelType: ChannelTypeFeishu, want: true},
+		{name: "wecom", channelType: ChannelTypeWecom, want: true},
+		{name: "dingtalk", channelType: ChannelTypeDingtalk, want: true},
+		{
+			name:        "qianwen skill on Quark S1",
+			channelType: ChannelTypeQianwen,
+			want:        true,
+		},
+		{name: "slack reads the live channel", channelType: ChannelTypeSlack, want: false},
+		{name: "unknown surface fails closed", channelType: "discord", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := SurfacePersistsTranscript(tc.channelType); got != tc.want {
+				t.Errorf("SurfacePersistsTranscript(%q) = %v, want %v", tc.channelType, got, tc.want)
+			}
+		})
+	}
+}
+
 // ChannelCarriesFiles is the delivery half of the MUL-4899 channel policy. It
 // decides whether an agent is told to run `multica attachment upload` or to
 // describe its file in words, so a wrong answer is not cosmetic: a false
@@ -117,9 +148,23 @@ func TestChannelCarriesFiles(t *testing.T) {
 // it into the wecom conversation".
 func TestEveryKnownChannelHasADisplayName(t *testing.T) {
 	t.Parallel()
-	for _, ct := range []string{ChannelTypeSlack, ChannelTypeFeishu, ChannelTypeWecom} {
+	for _, ct := range []string{
+		ChannelTypeSlack,
+		ChannelTypeFeishu,
+		ChannelTypeWecom,
+		ChannelTypeDingtalk,
+		ChannelTypeQianwen,
+	} {
 		if name := ChannelDisplayName(ct); name == ct {
 			t.Errorf("channel %q has no display name — the brief would name it %q", ct, name)
 		}
+	}
+}
+
+func TestQianwenChannelDisplayName(t *testing.T) {
+	t.Parallel()
+
+	if got := ChannelDisplayName(ChannelTypeQianwen); got != "Qianwen" {
+		t.Errorf("ChannelDisplayName(%q) = %q, want %q", ChannelTypeQianwen, got, "Qianwen")
 	}
 }

@@ -1,0 +1,165 @@
+---
+title: Qianwen Skill 브리지(실험적)
+description: Quark S1 안경의 비공개 Qianwen Skill을 비동기 제출 및 상태 도구로 Multica 에이전트에 연결합니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+실험적 Qianwen Skill 브리지를 사용하면 비공개 Skill에서 하나의 Multica 에이전트로 음성 요청을 제출하고 최종 텍스트 응답을 폴링할 수 있습니다. Multica 데몬을 실행하는 컴퓨터는 계속 아웃바운드 통신만 사용합니다. Qianwen이 Multica API를 호출하고, 데몬은 기존과 동일하게 Multica에서 작업을 가져옵니다.
+
+이 첫 번째 구현은 Qianwen 도구 API가 빠르게 응답해야 하지만 에이전트 실행은 훨씬 더 오래 걸릴 수 있기 때문에 폴링을 사용합니다. 상호 운용 가능한 구현에 필요한 전송 규약이 현재 공개 문서에 제공되지 않아 Qianwen의 산업용 메시지 푸시 API는 구현하지 않습니다.
+
+<Callout type="warning">
+비공개 Skill을 위한 백엔드 전용 단일 사용자 미리 보기입니다. 아직 설치 UI가 없습니다. 브리지는 설치 토큰을 인증하지만 Qianwen `openUserId`, 요청 서명, 타임스탬프, nonce는 아직 검증하지 않습니다. 공개 또는 다중 사용자 Skill에 사용하지 마세요.
+</Callout>
+
+## 시작하기 전에
+
+다음 항목이 필요합니다.
+
+- Multica 워크스페이스, 에이전트, 연결된 런타임
+- Quark S1에 연결된 비공개 Qianwen Skill
+- 워크스페이스와 에이전트 UUID
+- 일회성 관리 요청에 사용할 Multica 개인 액세스 토큰
+- Qianwen 클라우드에서 접근할 수 있는 Multica API URL
+
+Multica 개인 액세스 토큰은 브리지 자격 증명을 생성하거나 교체할 때만 사용합니다. 이 토큰을 Qianwen에 넣지 마세요. Skill에는 별도의 제한된 권한 범위를 가진 `qws_` 토큰이 제공되며, 하나의 설치에 대해서만 요청을 제출하고 결과를 읽을 수 있습니다.
+
+## 1. 비공개 연결 만들기
+
+셸에서 값을 설정한 다음 관리 엔드포인트를 호출합니다.
+
+```bash
+export MULTICA_API_URL='https://api.multica.ai'
+export MULTICA_TOKEN='mul_...'
+export MULTICA_WORKSPACE_ID='...'
+export MULTICA_AGENT_ID='...'
+
+curl --fail-with-body -X POST \
+  "$MULTICA_API_URL/api/workspaces/$MULTICA_WORKSPACE_ID/qianwen/installations?agent_id=$MULTICA_AGENT_ID" \
+  -H "Authorization: Bearer $MULTICA_TOKEN"
+```
+
+응답에는 공개 `connection_id`, `access_token`, 두 개의 상대 도구 경로가 포함됩니다.
+
+```json
+{
+  "id": "installation-uuid",
+  "agent_id": "agent-uuid",
+  "connection_id": "qwc_...",
+  "mode": "personal_polling",
+  "status": "active",
+  "access_token": "qws_...",
+  "token_visible_once": true,
+  "submit_path": "/api/channels/qianwen/qwc_.../requests",
+  "status_path_pattern": "/api/channels/qianwen/qwc_.../requests/{request_id}"
+}
+```
+
+`qws_` 토큰을 즉시 저장하세요. Multica는 SHA-256 다이제스트만 저장하며 평문 토큰을 다시 표시할 수 없습니다. 같은 에이전트에 대해 생성 요청을 반복하면 Skill 자격 증명 두 개가 모두 교체되고 이전 자격 증명은 즉시 무효화됩니다.
+
+## 2. 제출 도구 설정
+
+다음 값으로 Qianwen HTTP 도구를 만듭니다.
+
+```http
+POST {MULTICA_API_URL}/api/channels/qianwen/{connection_id}/requests
+Authorization: Bearer {access_token}
+Content-Type: application/json
+
+{
+  "request_id": "per-call UUID",
+  "query": "the user's transcribed request"
+}
+```
+
+`request_id`는 멱등성 키입니다. 새 명령마다 0이 아닌 UUID 하나를 생성하고, Qianwen이 해당 명령을 재시도하면 정확히 같은 UUID를 다시 사용하세요. 이미 수락된 ID를 동일하게 정규화된 `query`와 다시 사용해도 두 번째 에이전트 실행은 시작되지 않습니다. 다른 텍스트와 함께 재사용하면 첫 번째 명령의 결과를 조용히 반환하는 대신 HTTP `409`를 반환합니다.
+
+성공한 요청은 HTTP `202`를 반환합니다.
+
+```json
+{
+  "request_id": "0deecf44-7a87-4aa6-bb23-c0ee9926524d",
+  "status": "accepted",
+  "poll_after_ms": 2000
+}
+```
+
+요청 처리 소유자의 경우, 태스크와 채널에서 유입된 사용자 메시지, 영구적인 요청 포인터가 응답을 반환하기 전에 하나의 트랜잭션으로 커밋됩니다. 해당 소유자가 아직 커밋하는 중이어도 동시에 들어온 멱등한 재시도는 같은 `202`를 받을 수 있으며, 이후 상태 도구가 영구적으로 저장된 결과를 보고합니다. Multica는 에이전트 실행 자체가 끝날 때까지 기다리지 않습니다. 도구가 Qianwen의 3초 제한 안에 응답할 수 있도록 제출 처리에는 2.5초의 서버 기한이 적용됩니다. 타임아웃 또는 `503` 응답은 같은 요청 ID로 안전하게 재시도할 수 있습니다.
+
+## 3. 상태 도구 설정
+
+제출 도구가 반환한 `request_id`를 받는 두 번째 Qianwen HTTP 도구를 만듭니다.
+
+```http
+GET {MULTICA_API_URL}/api/channels/qianwen/{connection_id}/requests/{request_id}
+Authorization: Bearer {access_token}
+```
+
+`poll_after_ms` 값보다 자주 폴링하지 마세요. 응답은 다음 상태를 사용합니다.
+
+| 상태 | 의미 |
+|---|---|
+| `accepted` | 이 요청 ID는 영구적으로 확보된 상태입니다. 다른 진행 중인 제출 처리가 아직 태스크를 커밋하는 중일 수 있습니다. |
+| `queued` | 태스크가 있으며 런타임을 기다리고 있습니다. |
+| `running` | 런타임이 태스크를 가져갔거나 실행 중입니다. |
+| `completed` | 사용자에게 표시되는 최종 아시스턴트 응답이 `output`에 있습니다. |
+| `failed` | 태스크가 실패했거나 태스크를 예약할 수 없었습니다. 자세한 내용은 Multica에서 확인하세요. |
+| `cancelled` | 태스크가 취소되었습니다. |
+| `unknown` | 이 미리 보기가 인식하지 못하는 더 새로운 태스크 상태를 Multica가 보고했습니다. Multica에서 확인하세요. |
+
+예:
+
+```json
+{
+  "request_id": "0deecf44-7a87-4aa6-bb23-c0ee9926524d",
+  "status": "completed",
+  "task_id": "task-uuid",
+  "output": "The tests pass after updating the parser fixture."
+}
+```
+
+Multica Chat에 표시되는 아시스턴트 텍스트만 반환됩니다. 가공하지 않은 런타임 오류와 내부 태스크 결과는 Skill에 노출되지 않습니다. 긴 응답은 8,000 Unicode 문자에서 잘리고 `"truncated": true`가 포함됩니다.
+
+## 보안 및 수명 주기
+
+- 설치 토큰은 비공개 Skill의 설치 수행자를 나타내며, 요청 본문에서 다른 Multica 사용자를 선택할 수 없습니다.
+- 현재 미리 보기는 Qianwen 신원 계층에서 호출자가 해당 설치 수행자임을 증명할 수 없습니다. 베어러 토큰을 단일 사용자용 공유 비밀 값으로 취급하고 Skill을 공개하지 마세요.
+- 모든 제출 및 상태 요청에서 설치 수행자가 여전히 워크스페이스 멤버인지 다시 확인합니다.
+- 상태 조회는 인증된 설치와 요청 UUID 범위로 제한됩니다.
+- 각 명령은 별도의 Multica Chat 세션을 사용합니다. 따라서 한 안경 요청이 다른 요청의 에이전트 컨텍스트를 상속하지 않습니다.
+- 해당 Chat을 보관하거나 삭제해도 요청 ID를 다시 실행할 수 있게 되지 않습니다. 완전 삭제는 표시되는 대화 내용을 의도적으로 제거하므로 폴링 결과에서 응답 텍스트가 사라질 수 있습니다.
+- `/issue`와 `/new`는 채널 고유의 결과 의미가 이 미리 보기에 구현되지 않아 거부됩니다.
+
+토큰을 노출하지 않고 워크스페이스의 Qianwen 설치 목록을 표시합니다.
+
+```bash
+curl --fail-with-body \
+  "$MULTICA_API_URL/api/workspaces/$MULTICA_WORKSPACE_ID/qianwen/installations" \
+  -H "Authorization: Bearer $MULTICA_TOKEN"
+```
+
+설치 하나를 취소하여 제출 및 상태 접근을 모두 즉시 중지합니다.
+
+```bash
+curl --fail-with-body -X DELETE \
+  "$MULTICA_API_URL/api/workspaces/$MULTICA_WORKSPACE_ID/qianwen/installations/{installation_id}" \
+  -H "Authorization: Bearer $MULTICA_TOKEN"
+```
+
+## 현재 제한 사항
+
+- 비공개 단일 사용자 Skill만 지원
+- 텍스트 입력과 텍스트 출력만 지원
+- 명시적 상태 폴링만 지원하며 안경으로 능동 알림이나 깨우기 알림을 보내지 않음
+- 요청마다 독립된 Multica Chat 세션 하나
+- 그룹 신원 연결, 첨부 파일, 리치 UI, 스트리밍, `/issue`, `/new` 미지원
+- `openUserId` 연결, Qianwen 요청 서명 검증, 재전송 nonce 검증 미지원
+
+다음 전송 단계에는 Qianwen 공식 푸시 엔드포인트, 페이로드, 인증, 전달, 디바이스 렌더링 규약이 필요합니다. 이 어댑터를 추가해도 로컬 데몬을 노출하거나 변경할 필요가 없습니다.
+
+## 다음 단계
+
+- [채팅 연동](/channels) — 공통 라우팅 및 권한 부여 모델
+- [데몬 및 런타임](/daemon-runtimes) — 에이전트 작업이 실제로 실행되는 위치
+- [인증 토큰](/auth-tokens) — 일회성 관리 PAT를 안전하게 처리하는 방법

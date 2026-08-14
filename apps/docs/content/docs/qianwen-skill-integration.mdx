@@ -1,0 +1,165 @@
+---
+title: Qianwen Skill bridge (experimental)
+description: Connect a private Qianwen Skill on Quark S1 glasses to a Multica agent with asynchronous submit and status tools.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The experimental Qianwen Skill bridge lets a private Skill submit a spoken request to one Multica agent and poll for its eventual text reply. The computer running the Multica daemon stays outbound-only: Qianwen calls the Multica API, and the daemon continues to claim work from Multica as usual.
+
+This first slice uses polling because Qianwen tool APIs must return quickly while agent runs can take much longer. It does not implement Qianwen's industry message-push API, whose public documentation does not currently expose the transport contract needed for an interoperable implementation.
+
+<Callout type="warning">
+This is a backend-only, single-user preview for a private Skill. There is no installation UI yet. The bridge authenticates the installation token, but it does not yet verify Qianwen `openUserId`, request signatures, timestamps, or nonces. Do not use it for a public or multi-user Skill.
+</Callout>
+
+## Before you start
+
+You need:
+
+- a Multica workspace, agent, and connected runtime
+- a private Qianwen Skill bound to your Quark S1
+- the workspace and agent UUIDs
+- a Multica personal access token for the one-time management request
+- a Multica API URL that Qianwen's cloud can reach
+
+The Multica personal access token is used only to create or rotate the bridge credential. Never put that token in Qianwen. The Skill receives a separate, narrowly scoped `qws_` token that can submit and read results only for one installation.
+
+## 1. Create the private connection
+
+Set the values in your shell, then call the management endpoint:
+
+```bash
+export MULTICA_API_URL='https://api.multica.ai'
+export MULTICA_TOKEN='mul_...'
+export MULTICA_WORKSPACE_ID='...'
+export MULTICA_AGENT_ID='...'
+
+curl --fail-with-body -X POST \
+  "$MULTICA_API_URL/api/workspaces/$MULTICA_WORKSPACE_ID/qianwen/installations?agent_id=$MULTICA_AGENT_ID" \
+  -H "Authorization: Bearer $MULTICA_TOKEN"
+```
+
+The response contains a public `connection_id`, an `access_token`, and the two relative tool paths:
+
+```json
+{
+  "id": "installation-uuid",
+  "agent_id": "agent-uuid",
+  "connection_id": "qwc_...",
+  "mode": "personal_polling",
+  "status": "active",
+  "access_token": "qws_...",
+  "token_visible_once": true,
+  "submit_path": "/api/channels/qianwen/qwc_.../requests",
+  "status_path_pattern": "/api/channels/qianwen/qwc_.../requests/{request_id}"
+}
+```
+
+Save the `qws_` token immediately. Multica stores only its SHA-256 digest and cannot show the plaintext token again. Repeating the create request for the same agent rotates both Skill credentials and immediately invalidates the previous ones.
+
+## 2. Configure the submit tool
+
+Create a Qianwen HTTP tool with these values:
+
+```http
+POST {MULTICA_API_URL}/api/channels/qianwen/{connection_id}/requests
+Authorization: Bearer {access_token}
+Content-Type: application/json
+
+{
+  "request_id": "per-call UUID",
+  "query": "the user's transcribed request"
+}
+```
+
+`request_id` is the idempotency key. Generate one non-zero UUID for a new command and reuse exactly the same UUID if Qianwen retries that command. Reusing an accepted ID with the same normalized `query` never starts a second agent run. Reusing it with different text returns HTTP `409` instead of silently returning the first command's result.
+
+A successful request returns HTTP `202`:
+
+```json
+{
+  "request_id": "0deecf44-7a87-4aa6-bb23-c0ee9926524d",
+  "status": "accepted",
+  "poll_after_ms": 2000
+}
+```
+
+For the request owner, the task, channel-ingested user message, and durable request pointer commit atomically before the acknowledgement. A concurrent idempotent retry can receive the same `202` while that owner is still committing; the status tool then reports the durable result. Multica does not wait for the agent run itself. Submit work is bounded by a 2.5-second server deadline so the tool can answer within Qianwen's three-second limit; a timeout or `503` response is safe to retry with the same request ID.
+
+## 3. Configure the status tool
+
+Create a second Qianwen HTTP tool that receives the `request_id` returned by the submit tool:
+
+```http
+GET {MULTICA_API_URL}/api/channels/qianwen/{connection_id}/requests/{request_id}
+Authorization: Bearer {access_token}
+```
+
+Poll no faster than the `poll_after_ms` value. The response uses these states:
+
+| Status | Meaning |
+|---|---|
+| `accepted` | This request ID is durably claimed; another in-flight submit may still be committing its task. |
+| `queued` | A task exists and is waiting for a runtime. |
+| `running` | A runtime has claimed or is running the task. |
+| `completed` | The final user-visible assistant reply is in `output`. |
+| `failed` | The task failed, or no task could be scheduled; inspect Multica for details. |
+| `cancelled` | The task was cancelled. |
+| `unknown` | Multica reported a newer task state that this preview does not recognize; inspect Multica. |
+
+For example:
+
+```json
+{
+  "request_id": "0deecf44-7a87-4aa6-bb23-c0ee9926524d",
+  "status": "completed",
+  "task_id": "task-uuid",
+  "output": "The tests pass after updating the parser fixture."
+}
+```
+
+Only the assistant text shown in Multica Chat is returned. Raw runtime errors and internal task results are never exposed to the Skill. Long replies are truncated to 8,000 Unicode characters and include `"truncated": true`.
+
+## Security and lifecycle
+
+- The installation token represents the installer of a private Skill; the request body cannot choose another Multica user.
+- The current preview cannot prove that the caller is that installer at the Qianwen identity layer. Treat the bearer token as a single-user shared secret and never publish the Skill.
+- Every submit and status request re-checks that the installer is still a member of the workspace.
+- Status reads are scoped to the authenticated installation and request UUID.
+- Each command gets a separate Multica Chat session. This prevents one glasses request from inheriting another request's agent context.
+- Archiving or deleting that Chat does not free the request ID for execution again. A hard delete can remove the reply text from polling because the visible transcript was intentionally removed.
+- `/issue` and `/new` are rejected in this preview because their channel-specific result semantics are not implemented.
+
+List the workspace's Qianwen installations without revealing their tokens:
+
+```bash
+curl --fail-with-body \
+  "$MULTICA_API_URL/api/workspaces/$MULTICA_WORKSPACE_ID/qianwen/installations" \
+  -H "Authorization: Bearer $MULTICA_TOKEN"
+```
+
+Revoke one installation and immediately stop both submit and status access:
+
+```bash
+curl --fail-with-body -X DELETE \
+  "$MULTICA_API_URL/api/workspaces/$MULTICA_WORKSPACE_ID/qianwen/installations/{installation_id}" \
+  -H "Authorization: Bearer $MULTICA_TOKEN"
+```
+
+## Current limits
+
+- private, single-user Skill only
+- text input and text output only
+- explicit status polling; no proactive glasses notification or wake-up
+- one independent Multica Chat session per request
+- no group identity binding, attachments, rich UI, streaming, `/issue`, or `/new`
+- no `openUserId` binding, Qianwen request-signature verification, or replay-nonce validation
+
+The next transport phase requires Qianwen's official push endpoint, payload, authentication, delivery, and device-rendering contract. Adding that adapter does not require exposing or changing the local daemon.
+
+## Next
+
+- [Chat integrations](/channels) — the shared routing and authorization model
+- [Daemon and runtimes](/daemon-runtimes) — where agent work actually runs
+- [Authentication tokens](/auth-tokens) — how to handle the one-time management PAT safely

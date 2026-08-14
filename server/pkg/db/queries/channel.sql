@@ -233,6 +233,10 @@ cleared_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup
     WHERE installation_id IN (SELECT id FROM dead)
 ),
+cleared_qianwen_requests AS (
+    DELETE FROM qianwen_skill_request
+    WHERE installation_id IN (SELECT id FROM dead)
+),
 detached_audit AS (
     -- Reclaim keeps the DETACH semantics: the workspace still exists, so a
     -- NULL-installation audit row stays meaningful for operator triage. The hard-
@@ -281,6 +285,9 @@ cleared_user_bindings AS (
 ),
 cleared_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_qianwen_requests AS (
+    DELETE FROM qianwen_skill_request WHERE installation_id IN (SELECT id FROM doomed)
 ),
 cleared_audit AS (
     -- Hard delete: purge audit rows rather than detaching them into permanently
