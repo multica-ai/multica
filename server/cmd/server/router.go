@@ -547,11 +547,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// reaction on a failed run, which the outbound replier does not handle.
 			slackTyping := slack.NewTypingIndicatorManager(queries, box.Open, slog.Default())
 			slackTyping.Register(bus)
-			// Inbound media: file attachments on a Slack message are fetched
-			// with the installation's bot token and stored as chat attachments.
-			// Without an object store there is nothing to point an attachment
-			// at, so the resolver is left nil and messages ingest text-only.
-			// Same nil-guard as DingTalk / WeCom below.
+			// Slack attachments require object storage because each chat
+			// attachment points to an uploaded object. When storage is disabled,
+			// leave the media resolver unset and ingest Slack messages as text.
 			var slackMedia engine.MediaResolver
 			if store != nil {
 				slackMedia = slack.NewMediaResolver(

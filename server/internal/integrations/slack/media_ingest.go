@@ -1,19 +1,15 @@
 package slack
 
-// media_ingest.go — the engine.MediaResolver for Slack.
+// Slack media ingestion runs after a message has been accepted and persisted,
+// keeping network and storage I/O off the connector acknowledgement path.
 //
-// The shape is the one lark/media_ingest.go established and the Router depends
-// on: HasMedia is a pure in-memory look at the payload we already have,
-// ResolveMedia runs detached from the connector ACK path, every upload is
-// covered by an intent-ledger row written BEFORE the PUT, and nothing is ever
-// deleted inline — a failure anywhere leaves the row for the reconciler.
+// HasMedia only inspects the translated event payload. ResolveMedia fetches
+// each file and records a durable intent before uploading it, so failures or
+// crashes leave enough state for the reconciler to remove unbound objects.
 //
-// What is Slack-specific is the middle: the inbound event already carries each
-// file's url_private(_download), a Slack-hosted URL that yields the bytes when
-// fetched with the installation's bot token as a bearer credential. Because
-// that token is attached to the request, the download client refuses any URL
-// whose host is not Slack's own — a forged event must never exfiltrate the
-// token to an attacker-controlled host.
+// Slack private file URLs require the installation's bot token as a bearer
+// credential. The download client therefore accepts only HTTPS URLs on
+// Slack-owned hosts, including every redirect destination.
 
 import (
 	"context"
@@ -47,9 +43,9 @@ const (
 	maxDownloadRedirects = 3
 )
 
-// mediaStorage is the slice of storage.Storage this resolver drives.
-// ObjectURL is a pure function of configuration, which is what lets the
-// intent ledger persist the object's URL before the object exists.
+// mediaStorage defines the object-store operations required for ingestion.
+// ObjectURL must derive the final URL without performing I/O so the resolver
+// can persist that URL in the intent ledger before uploading the object.
 type mediaStorage interface {
 	Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error)
 	ObjectURL(key string) string
@@ -68,9 +64,9 @@ type slackMediaResolver struct {
 
 var _ engine.MediaResolver = (*slackMediaResolver)(nil)
 
-// NewMediaResolver builds the Slack MediaResolver. storage and ledger are
-// required — without either there is nothing durable to point an attachment
-// at, and the resolver degrades to logging and leaving the message text-only.
+// NewMediaResolver builds the Slack media resolver. Storage and the intent
+// ledger are both required; ResolveMedia logs and returns the original message
+// unchanged if either dependency is unavailable.
 func NewMediaResolver(decrypt Decrypter, storage mediaStorage, ledger engine.MediaIntentLedger, logger *slog.Logger) engine.MediaResolver {
 	if logger == nil {
 		logger = slog.Default()
@@ -87,9 +83,9 @@ func NewMediaResolver(decrypt Decrypter, storage mediaStorage, ledger engine.Med
 			if len(via) >= maxDownloadRedirects {
 				return errors.New("too many redirects")
 			}
-			// Go strips the Authorization header on cross-host redirects, but
-			// the host policy holds regardless: the client only ever talks to
-			// Slack.
+			// Validate every redirect before net/http follows it. This host check
+			// prevents redirected requests from leaving Slack's domains regardless
+			// of how net/http propagates the Authorization header.
 			return r.validateDownloadURL(req.URL)
 		},
 	}
