@@ -53,7 +53,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { useIntentNavigate } from "../../navigation";
 import { isRefreshableOrigin, readOrigin } from "../lib/origin";
-import { RefreshSkillDialog } from "./refresh-skill-dialog";
+import { useRefreshSourceLabel } from "./refresh-skill-dialog";
 import type { SkillRow } from "./skills-page";
 
 // Shared context the row kebab and the batch toolbar both need. Assembled
@@ -403,6 +403,143 @@ export function AddToAgentDialog({
 }
 
 // ---------------------------------------------------------------------------
+// Update-from-source confirmation (single row and batch share one dialog)
+// ---------------------------------------------------------------------------
+
+// Each refresh is its own server transaction, so a batch is not atomic. Keep
+// the fan-out modest: the server re-downloads a bundle per skill, and the
+// upstreams are third-party hosts.
+const REFRESH_BATCH_CONCURRENCY = 4;
+
+export function RefreshSkillsDialog({
+  rows,
+  ctx,
+  open,
+  onOpenChange,
+  onRefreshed,
+}: {
+  rows: SkillRow[];
+  ctx: SkillActionsContext;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onRefreshed?: () => void;
+}) {
+  const { t } = useT("skills");
+  const qc = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
+  const single = rows.length === 1 ? rows[0] : null;
+  const count = rows.length;
+  const source = useRefreshSourceLabel(single ? readOrigin(single.skill) : null);
+
+  // Every refresh that lands is committed and overwrites local edits, so a
+  // failure part-way through must not read as "nothing happened". Settle every
+  // row, then report what actually landed: aborting on the first rejection
+  // would also skip the cache invalidation the finished overwrites need.
+  const handleConfirm = async () => {
+    setRefreshing(true);
+    const results: PromiseSettledResult<unknown>[] = [];
+    for (let i = 0; i < rows.length; i += REFRESH_BATCH_CONCURRENCY) {
+      const chunk = rows.slice(i, i + REFRESH_BATCH_CONCURRENCY);
+      results.push(
+        ...(await Promise.allSettled(
+          chunk.map((row) => api.refreshSkill(row.skill.id)),
+        )),
+      );
+    }
+    const rejected = results.filter((r) => r.status === "rejected");
+    const failed = rejected.length;
+    const succeeded = results.length - failed;
+
+    if (succeeded > 0) {
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(ctx.wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(ctx.wsId) });
+    }
+
+    if (failed === 0) {
+      toast.success(
+        single
+          ? t(($) => $.detail.refresh.toast_success, { source })
+          : t(($) => $.actions.refreshed_toast, { count }),
+      );
+    } else if (succeeded === 0) {
+      const reason = (rejected[0] as PromiseRejectedResult | undefined)?.reason;
+      toast.error(
+        reason instanceof Error && reason.message
+          ? reason.message
+          : t(($) => $.detail.refresh.toast_failed),
+      );
+    } else {
+      toast.warning(
+        t(($) => $.actions.refresh_partial_toast, {
+          succeeded,
+          failed,
+          total: count,
+        }),
+      );
+    }
+
+    setRefreshing(false);
+    onOpenChange(false);
+    // Clear the selection only when every row landed. On a partial failure the
+    // selection stays so the user can see what was picked and retry.
+    if (failed === 0) onRefreshed?.();
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!refreshing) onOpenChange(v);
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {single
+              ? t(($) => $.detail.refresh.dialog.title)
+              : t(($) => $.actions.refresh_dialog_title, { count })}
+          </DialogTitle>
+          <DialogDescription>
+            {single
+              ? t(($) => $.detail.refresh.dialog.description, {
+                  name: single.skill.name,
+                  source,
+                })
+              : t(($) => $.actions.refresh_dialog_desc, { count })}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="rounded-md bg-warning/10 px-3 py-2 text-caption text-muted-foreground">
+          {t(($) => $.detail.refresh.dialog.warning)}
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={refreshing}
+          >
+            {t(($) => $.detail.refresh.dialog.cancel)}
+          </Button>
+          <Button type="button" onClick={handleConfirm} disabled={refreshing}>
+            {refreshing ? (
+              <>
+                <Loader2 className="size-3 animate-spin" />
+                {t(($) => $.detail.refresh.dialog.refreshing)}
+              </>
+            ) : (
+              <>
+                <RotateCw className="size-3" />
+                {t(($) => $.detail.refresh.dialog.confirm)}
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Delete confirmation (single row and batch share one dialog)
 // ---------------------------------------------------------------------------
 
@@ -598,10 +735,9 @@ export function SkillRowActions({
         onOpenChange={setAddOpen}
       />
       {canRefresh && (
-        <RefreshSkillDialog
-          skill={row.skill}
-          origin={origin}
-          wsId={ctx.wsId}
+        <RefreshSkillsDialog
+          rows={[row]}
+          ctx={ctx}
           open={refreshOpen}
           onOpenChange={setRefreshOpen}
         />
@@ -631,11 +767,30 @@ export function SkillBatchToolbar({
 }) {
   const { t } = useT("skills");
   const [addOpen, setAddOpen] = useState(false);
+  const [refreshOpen, setRefreshOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   if (rows.length === 0) return null;
 
   const allDeletable = rows.every((r) => r.canEdit);
+  // Same gate as the row kebab, applied to every selected row: a manual skill
+  // or one the user cannot edit has nothing to re-download.
+  const allRefreshable = rows.every(
+    (r) => r.canEdit && isRefreshableOrigin(readOrigin(r.skill)),
+  );
+
+  const refreshButton = (
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={!allRefreshable}
+      onClick={() => setRefreshOpen(true)}
+      className={cn(!allRefreshable && "pointer-events-none")}
+    >
+      <RotateCw className="mr-1 size-3.5" />
+      {t(($) => $.actions.update)}
+    </Button>
+  );
 
   const deleteButton = (
     <Button
@@ -679,6 +834,19 @@ export function SkillBatchToolbar({
           {t(($) => $.actions.add_to_agent)}
         </Button>
 
+        {allRefreshable ? (
+          refreshButton
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={<span className="inline-flex">{refreshButton}</span>}
+            />
+            <TooltipContent side="top">
+              {t(($) => $.actions.refresh_no_permission)}
+            </TooltipContent>
+          </Tooltip>
+        )}
+
         {allDeletable ? (
           deleteButton
         ) : (
@@ -698,6 +866,13 @@ export function SkillBatchToolbar({
         ctx={ctx}
         open={addOpen}
         onOpenChange={setAddOpen}
+      />
+      <RefreshSkillsDialog
+        rows={rows}
+        ctx={ctx}
+        open={refreshOpen}
+        onOpenChange={setRefreshOpen}
+        onRefreshed={onClear}
       />
       <DeleteSkillsDialog
         rows={rows}
