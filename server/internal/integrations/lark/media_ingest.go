@@ -285,6 +285,23 @@ func mediaResourcesFromMessage(lm InboundMessage) []larkMediaResource {
 			sizeBytes: sizeBytes,
 			messageID: lm.MessageID,
 		}}
+	case "file", "audio":
+		if payload.FileKey == "" {
+			return nil
+		}
+		kind := channel.MsgTypeFile
+		if lm.MessageType == "audio" {
+			kind = channel.MsgTypeAudio
+		}
+		return []larkMediaResource{{
+			key:       payload.FileKey,
+			kind:      kind,
+			fetchType: "file",
+			filename:  filename,
+			mimeType:  mimeType,
+			sizeBytes: sizeBytes,
+			messageID: lm.MessageID,
+		}}
 	default:
 		return nil
 	}
@@ -357,6 +374,8 @@ func mediaFilename(lm InboundMessage, res larkMediaResource, got DownloadedResou
 		prefix = "feishu-image"
 	case channel.MsgTypeVideo:
 		prefix = "feishu-video"
+	case channel.MsgTypeAudio:
+		prefix = "feishu-audio"
 	}
 	name := prefix + "-" + safePathSegment(lm.MessageID)
 	if index > 0 {

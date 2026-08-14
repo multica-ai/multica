@@ -257,6 +257,8 @@ func TestFeishuMediaResolver_HasMedia(t *testing.T) {
 		{"text", InboundMessage{MessageID: "om_t", MessageType: "text", Body: "hello", Content: `{"text":"hello"}`}, false},
 		{"image", InboundMessage{MessageID: "om_i", MessageType: "image", Body: "[Image]", Content: `{"image_key":"img_k"}`}, true},
 		{"video", InboundMessage{MessageID: "om_v", MessageType: "media", Body: "[Video]", Content: `{"file_key":"file_k"}`}, true},
+		{"file", InboundMessage{MessageID: "om_f", MessageType: "file", Body: "[File: spec.html]", Content: `{"file_key":"file_k","file_name":"spec.html"}`}, true},
+		{"audio", InboundMessage{MessageID: "om_a", MessageType: "audio", Body: "[Audio]", Content: `{"file_key":"audio_k"}`}, true},
 		{"post with image", InboundMessage{MessageID: "om_p", MessageType: "post",
 			Content: `{"content":[[{"tag":"img","image_key":"img_post"}]]}`}, true},
 		{"post text only", InboundMessage{MessageID: "om_pt", MessageType: "post",
@@ -267,6 +269,90 @@ func TestFeishuMediaResolver_HasMedia(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := resolver.HasMedia(channelMessageFromLark(tc.lm)); got != tc.want {
 				t.Fatalf("HasMedia = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFeishuMediaResolver_AttachesStandaloneFileAndAudioMediaRefs(t *testing.T) {
+	tests := []struct {
+		name        string
+		messageType string
+		body        string
+		content     string
+		contentType string
+		filename    string
+		wantType    channel.MsgType
+		wantKey     string
+	}{
+		{
+			name:        "html file",
+			messageType: "file",
+			body:        "[File: integration.html]",
+			content:     `{"file_key":"file_standalone","file_name":"integration.html","mime_type":"text/html"}`,
+			contentType: "text/html",
+			filename:    "integration.html",
+			wantType:    channel.MsgTypeFile,
+			wantKey:     "file_standalone",
+		},
+		{
+			name:        "zip file",
+			messageType: "file",
+			body:        "[File: integration.zip]",
+			content:     `{"file_key":"zip_standalone","file_name":"integration.zip","mime_type":"application/zip"}`,
+			contentType: "application/zip",
+			filename:    "integration.zip",
+			wantType:    channel.MsgTypeFile,
+			wantKey:     "zip_standalone",
+		},
+		{
+			name:        "audio",
+			messageType: "audio",
+			body:        "[Audio]",
+			content:     `{"file_key":"audio_standalone"}`,
+			contentType: "audio/ogg",
+			filename:    "voice.ogg",
+			wantType:    channel.MsgTypeAudio,
+			wantKey:     "audio_standalone",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sender := &fakeSender{downloaded: DownloadedResource{
+				Data:        []byte("payload"),
+				ContentType: tc.contentType,
+				Filename:    tc.filename,
+				SizeBytes:   7,
+			}}
+			storage := &fakeMediaStorage{}
+			resolver := NewFeishuMediaResolver(sender, fakeCreds{secret: "plain"}, storage, &fakeMediaLedger{}, newDiscardLogger())
+			lm := InboundMessage{
+				MessageID:   "om_" + tc.name,
+				MessageType: tc.messageType,
+				Body:        tc.body,
+				Content:     tc.content,
+			}
+
+			got := resolver.ResolveMedia(context.Background(), testMediaInstallation(t), engine.ResolvedIdentity{},
+				uuidFromString(t, "22222222-2222-2222-2222-222222222222"), uuidFromString(t, "33333333-3333-4333-8333-333333333333"), channelMessageFromLark(lm))
+
+			if len(sender.downloadCalls) != 1 {
+				t.Fatalf("download calls = %d, want 1", len(sender.downloadCalls))
+			}
+			call := sender.downloadCalls[0]
+			if call.MessageID != lm.MessageID || call.FileKey != tc.wantKey || call.Type != "file" {
+				t.Fatalf("download params wrong: %+v", call)
+			}
+			if len(storage.uploads) != 1 {
+				t.Fatalf("uploads = %d, want 1", len(storage.uploads))
+			}
+			if len(got.MediaRefs) != 1 {
+				t.Fatalf("media refs = %+v, want 1", got.MediaRefs)
+			}
+			ref := got.MediaRefs[0]
+			if ref.Type != tc.wantType || ref.Filename != tc.filename || ref.MimeType != tc.contentType || ref.SizeBytes != 7 {
+				t.Fatalf("media ref wrong: %+v", ref)
 			}
 		})
 	}
