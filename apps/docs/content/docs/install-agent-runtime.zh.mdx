@@ -41,12 +41,6 @@ Multica 当前会检测以下命令：
 
 "受支持"表示 Multica 能够调用对应 CLI，不代表 Multica 会替你提供该工具的账号、订阅或模型额度。
 
-<Callout type="info">
-ZCode 是**非官方社区客户端集成**。Multica 会探测 PATH 上的任意 `zcode` 命令；它不由 Multica 发布或维护。请用上游 `zcode` CLI 安装并登录（`zcode login`），并在 `~/.zcode/cli/config.json` 中配置模型——Multica 无法在运行时覆盖模型。
-
-公开发布的 `zcode` CLI 每轮返回一个 JSON 摘要，进度在该轮结束时才出现。实时流式（思考、工具调用、增量文本）需要支持 `--stream-json` 的构建版本。Multica 每次运行都会检查已安装的 `zcode --help` 并自动选择最佳模式：支持 `--stream-json` 时用流式；只支持 `--json` 时用摘要模式；两者都不支持则拒绝该 runtime（不强制 CLI 版本，因为 zcode 版本字符串非标准且跨版本漂移）。绑定到 ZCode 智能体的技能会写入任务工作目录的 `.zcode/skills/`。
-</Callout>
-
 ## 2. 在本机完成登录
 
 安装后，先在终端中单独启动一次工具，并按照它自己的流程登录或配置模型服务。工具在终端中无法完成请求时，守护进程调用它同样会失败。
