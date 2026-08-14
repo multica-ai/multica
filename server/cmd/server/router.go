@@ -547,7 +547,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// reaction on a failed run, which the outbound replier does not handle.
 			slackTyping := slack.NewTypingIndicatorManager(queries, box.Open, slog.Default())
 			slackTyping.Register(bus)
-			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier, slackTyping))
+			// Inbound media: file attachments on a Slack message are fetched
+			// with the installation's bot token and stored as chat attachments.
+			// Without an object store there is nothing to point an attachment
+			// at, so the resolver is left nil and messages ingest text-only.
+			// Same nil-guard as DingTalk / WeCom below.
+			var slackMedia engine.MediaResolver
+			if store != nil {
+				slackMedia = slack.NewMediaResolver(
+					box.Open,
+					store,
+					engine.NewDBMediaIntentLedger(queries),
+					slog.Default(),
+				)
+			}
+			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier, slackTyping, slackMedia))
 			slack.NewOutbound(queries, box.Open, slog.Default()).Register(bus)
 
 			// On-demand history reader behind the unified `multica chat history`

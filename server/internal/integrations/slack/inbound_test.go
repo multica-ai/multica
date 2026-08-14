@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -172,6 +173,67 @@ func TestInboundFromAppMention(t *testing.T) {
 	// The bot's own app_mention echo (BotID set) must be skipped.
 	if _, ok := translateAppMention("UBOT", eventsAPI(nil), &slackevents.AppMentionEvent{User: "UBOT", Channel: "C1", TimeStamp: "1.9"}); ok {
 		t.Error("bot's own mention should be skipped")
+	}
+}
+
+func TestInboundFromMessage_FileShare(t *testing.T) {
+	msg, ok := translateMessage("UBOT", eventsAPI(nil), &slackevents.MessageEvent{
+		User:        "UALICE",
+		Text:        "here is the doc",
+		SubType:     "file_share",
+		Channel:     "D123",
+		ChannelType: "im",
+		TimeStamp:   "1700000000.000800",
+		Message: &slack.Msg{
+			Files: []slack.File{
+				{ID: "F1", Name: "report.pdf", Mimetype: "application/pdf", Size: 42, URLPrivateDownload: "https://files.slack.com/files-pri/T1-F1/download/report.pdf"},
+				// url_private_download absent: fall back to url_private.
+				{ID: "F2", Name: "shot.png", Mimetype: "image/png", URLPrivate: "https://files.slack.com/files-pri/T1-F2/shot.png"},
+				// no downloadable URL at all: skipped.
+				{ID: "F3", Name: "external.doc"},
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("file_share message should be ingestable")
+	}
+	var raw slackRawEvent
+	if err := json.Unmarshal(msg.Raw, &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	if len(raw.Files) != 2 {
+		t.Fatalf("raw files = %d, want 2 (the URL-less file skipped)", len(raw.Files))
+	}
+	if raw.Files[0].ID != "F1" || raw.Files[0].Name != "report.pdf" || raw.Files[0].Mimetype != "application/pdf" || raw.Files[0].Size != 42 {
+		t.Errorf("file[0] = %+v", raw.Files[0])
+	}
+	if raw.Files[0].DownloadURL != "https://files.slack.com/files-pri/T1-F1/download/report.pdf" {
+		t.Errorf("file[0] url = %q, want url_private_download", raw.Files[0].DownloadURL)
+	}
+	if raw.Files[1].ID != "F2" || raw.Files[1].DownloadURL != "https://files.slack.com/files-pri/T1-F2/shot.png" {
+		t.Errorf("file[1] = %+v, want url_private fallback", raw.Files[1])
+	}
+}
+
+func TestInboundFromAppMention_Files(t *testing.T) {
+	msg, ok := translateAppMention("UBOT", eventsAPI(nil), &slackevents.AppMentionEvent{
+		User:      "UALICE",
+		Text:      "<@UBOT> look at this",
+		Channel:   "C123",
+		TimeStamp: "1700000000.000900",
+		Files: []slack.File{
+			{ID: "F9", Name: "log.txt", Mimetype: "text/plain", URLPrivateDownload: "https://files.slack.com/files-pri/T1-F9/download/log.txt"},
+		},
+	})
+	if !ok {
+		t.Fatal("app_mention with files should be ingestable")
+	}
+	var raw slackRawEvent
+	if err := json.Unmarshal(msg.Raw, &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	if len(raw.Files) != 1 || raw.Files[0].ID != "F9" {
+		t.Errorf("raw files = %+v, want the mention's file", raw.Files)
 	}
 }
 

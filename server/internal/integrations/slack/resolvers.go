@@ -30,8 +30,10 @@ const originSlackChat = "slack_chat"
 // engine.OutboundReplier to disable them (the inbound pipeline — route,
 // identity, dedup, session, /issue, run trigger — is fully functional without
 // it). typing shows the "processing" reaction on ingest; pass nil to disable it
-// (MUL-3874). (MUL-3666 wired the replier; stage 3 had both nil.)
-func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, typing *TypingIndicatorManager) engine.ResolverSet {
+// (MUL-3874). (MUL-3666 wired the replier; stage 3 had both nil.) media
+// downloads inbound file attachments into object storage; pass nil to disable
+// it (messages then ingest text-only, as before).
+func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, typing *TypingIndicatorManager, media engine.MediaResolver) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &installationResolver{q: q},
 		Identity:     &identityResolver{q: q},
@@ -42,6 +44,7 @@ func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.Outb
 			Fallback: "Slack chat",
 		})},
 		Audit:      &auditor{q: q},
+		Media:      media,
 		Replier:    replier,
 		OriginType: originSlackChat,
 	}
