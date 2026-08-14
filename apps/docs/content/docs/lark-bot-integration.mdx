@@ -35,6 +35,14 @@ The first time a member messages the Bot, they receive an account binding link:
 
 Only after binding can Multica confirm which workspace member a message comes from. Non-members cannot use the Bot.
 
+### Allow Feishu users without a Multica account
+
+By default, every Bot keeps the membership check above. For a restricted, consultation-only agent, its owner or a workspace owner/admin can open **Agents → Integrations** and enable **Allow Feishu users without Multica login**. People in the same Feishu tenant can then invoke that Bot without joining the Multica workspace or binding an account. Users from another tenant are still rejected.
+
+<Callout type="warn">
+Guest users can invoke the agent's configured workspace capabilities. They never inherit the person who installed the Bot's personal connected apps, but you should still enable this option only on an agent whose instructions, repositories, MCP servers, and filesystem mode are safe for that audience.
+</Callout>
+
 ## Hand work to the agent in Feishu
 
 ### Direct messages
