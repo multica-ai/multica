@@ -28,6 +28,7 @@ const ApiError = vi.hoisted(() => {
 const mockBeginInstall = vi.hoisted(() => vi.fn());
 const mockGetStatus = vi.hoisted(() => vi.fn());
 const mockDeleteInstallation = vi.hoisted(() => vi.fn());
+const mockUpdateInstallation = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
 
 type MemberRole = "owner" | "admin" | "member" | "guest";
@@ -109,6 +110,7 @@ vi.mock("@multica/core/api", () => ({
     beginLarkInstall: mockBeginInstall,
     getLarkInstallStatus: mockGetStatus,
     deleteLarkInstallation: mockDeleteInstallation,
+    updateLarkInstallation: mockUpdateInstallation,
   },
   ApiError,
 }));
@@ -182,6 +184,7 @@ function resetFixtures() {
     install_supported: true,
   };
   agentNameByIdRef.current = new Map();
+  mockUpdateInstallation.mockResolvedValue({});
 }
 
 describe("LarkAgentBindButton (CTA gate)", () => {
@@ -482,6 +485,66 @@ describe("LarkAgentBotConnectedBadge (Unbind / Disconnect)", () => {
     expect(screen.getByTestId("lark-agent-bot-disconnect")).toBeTruthy();
     // Fixture omits region → Feishu copy.
     expect(screen.getByRole("link", { name: /Manage in Feishu/i })).toBeTruthy();
+  });
+
+  it("defaults guest access to off for installations created before the option existed", () => {
+    render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    expect(
+      screen.getByRole("switch", {
+        name: /Allow Feishu users without Multica login/i,
+      }).getAttribute("aria-checked"),
+    ).toBe("false");
+  });
+
+  it("enables guest access only for this Agent installation", async () => {
+    const user = userEvent.setup();
+    render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    await user.click(
+      screen.getByRole("switch", {
+        name: /Allow Feishu users without Multica login/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mockUpdateInstallation).toHaveBeenCalledWith(
+        "workspace-1",
+        "inst-1",
+        { inbound_access_mode: "feishu_users" },
+      );
+    });
+    expect(mockInvalidate).toHaveBeenCalledWith({
+      queryKey: ["lark", "installations", "workspace-1"],
+    });
+    expect(screen.getByText(/Only enable this for restricted Agents/i)).toBeTruthy();
+  });
+
+  it("can restore the secure members-only mode", async () => {
+    installationsRef.current.installations = [
+      {
+        ...(installationsRef.current.installations[0] as Record<string, unknown>),
+        inbound_access_mode: "feishu_users",
+      },
+    ];
+    const user = userEvent.setup();
+    render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    const toggle = screen.getByRole("switch", {
+      name: /Allow Feishu users without Multica login/i,
+    });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    await user.click(toggle);
+    await waitFor(() => {
+      expect(mockUpdateInstallation).toHaveBeenCalledWith(
+        "workspace-1",
+        "inst-1",
+        { inbound_access_mode: "workspace_members" },
+      );
+    });
   });
 
   it("opens the confirm dialog and does NOT call the API until the user confirms", async () => {

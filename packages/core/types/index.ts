@@ -206,6 +206,7 @@ export type {
 } from "./vcs";
 export type {
   LarkInstallation,
+  LarkInboundAccessMode,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
