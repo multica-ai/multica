@@ -77,6 +77,9 @@ func TestMulticaOperatorPublicSkillContract(t *testing.T) {
 		"operational design, not software design",
 		"Present two or more mutually exclusive choices as a numbered list",
 		"Accept a number-only reply",
+		"Return a clickable link for every created or updated Issue",
+		"If the CLI response has no Issue URL, build one only from the known Multica app URL, workspace slug, and verified Issue identifier or ID",
+		"Never guess the app URL or workspace slug",
 	} {
 		if !strings.Contains(normalizedBody, contract) {
 			t.Errorf("SKILL.md is missing native-host contract anchor %q", contract)
@@ -107,6 +110,9 @@ func TestMulticaOperatorPublicSkillContract(t *testing.T) {
 		"After the user confirms it, execute the plan directly",
 		"Create a repository design document, specification, or implementation plan only when the user explicitly requests that artifact",
 		"material deviation",
+		"When an Issue has no unfinished dependency, create it directly as `todo`",
+		"Use `backlog` only to park an Issue whose dependencies are not ready",
+		"Do not create a ready Issue as `backlog` only to move it immediately to `todo`",
 		"trigger last",
 		"returned resource ID",
 		"resume",

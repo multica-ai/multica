@@ -72,6 +72,16 @@ For each request:
 A successful command result is already fresh verification evidence. Do not
 repeat the same read solely to satisfy the final verification step.
 
+Return a clickable link for every created or updated Issue whenever the source
+values are available. Prefer an Issue URL returned by the CLI. If the CLI
+response has no Issue URL, build one only from the known Multica app URL,
+workspace slug, and verified Issue identifier or ID:
+`<app-url>/<workspace-slug>/issues/<identifier-or-id>`. URL-encode every path
+segment. Never guess the app URL or workspace slug, especially for self-hosted
+deployments. If either is unavailable, return the verified Issue identifier and
+state briefly that the CLI did not expose enough information to form a safe
+link.
+
 Read `references/source-map.md` before changing CLI or server claims.
 
 Read `references/extensions.md` when another installed skill declares that it

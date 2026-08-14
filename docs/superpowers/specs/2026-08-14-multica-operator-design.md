@@ -98,6 +98,15 @@ Whenever the Operator presents two or more mutually exclusive choices, it uses
 a numbered list and accepts a number-only reply as the selected displayed
 option. It asks again only for an invalid or ambiguous selection.
 
+For every created or updated Issue, the result includes a clickable Web link
+when its source values are known. A URL returned by the CLI is preferred;
+otherwise the Operator combines the known Multica app URL, workspace slug, and
+verified Issue identifier or ID using the official
+`/<workspace-slug>/issues/<identifier-or-id>` route. It never guesses the Web
+origin or workspace slug for a self-hosted deployment. If the required values
+are unavailable, it returns the verified identifier and reports that a safe
+link could not be formed.
+
 Resource choice follows observed sharing risk:
 
 - dedicated resources may be adjusted when evidence is sufficient;
@@ -141,10 +150,12 @@ the user to review the same plan again in a file. Those artifacts are created
 only when the user explicitly requests them and do not become another approval
 gate unless requested.
 
-Execution follows dependency order. Passive dependencies and backlog Issues
-are prepared first; an Autopilot is created only after its Agent, Project, and
-prompt are ready; triggers are enabled last. Returned IDs become the identity
-for dependent commands and resume checks.
+Execution follows dependency order. An Issue with no unfinished dependency is
+created directly as `todo`; `backlog` is reserved for Issues that must wait for
+dependencies. The Operator does not create a ready Issue in `backlog` merely to
+move it immediately to `todo`. An Autopilot is created only after its Agent,
+Project, and prompt are ready, and triggers are enabled last. Returned IDs
+become the identity for dependent commands and resume checks.
 
 If observed state differs materially from the approved plan, execution pauses
 before the changed step. On command failure, dependent steps stop and the

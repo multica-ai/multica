@@ -136,11 +136,16 @@ commands.
 
 Keep setup passive until dependencies are ready:
 
-1. create or verify passive dependencies;
-2. create parked child Issues as `backlog`;
-3. create an Autopilot only after its Agent, Project, and prompt are ready;
-4. add or enable its trigger last;
-5. move approved Issues to `todo` only when dependencies are ready.
+1. Create or verify passive dependencies.
+2. When an Issue has no unfinished dependency, create it directly as `todo`.
+3. Use `backlog` only to park an Issue whose dependencies are not ready.
+4. Create an Autopilot only after its Agent, Project, and prompt are ready.
+5. Add or enable its trigger last.
+6. Move a parked Issue to `todo` only after its dependencies become ready.
+
+Do not create a ready Issue as `backlog` only to move it immediately to `todo`.
+That redundant transition adds a write and delays execution without protecting
+anything.
 
 On failure, stop dependent steps. Report completed resources and IDs, the
 observed error, steps not run, and the exact resume point. To resume, get every
