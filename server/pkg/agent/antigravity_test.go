@@ -42,21 +42,22 @@ func TestBuildAntigravityArgsBasic(t *testing.T) {
 func TestBuildAntigravityArgsModel(t *testing.T) {
 	t.Parallel()
 
-	// agy 1.0.6's --model takes the exact human display string (spaces +
-	// parens), not a slug. It must ride as a single argv element so no shell
-	// quoting is required, and it must sit before the user's custom args.
+	// agy 1.0.6's --model takes the bare model id (e.g.
+	// "claude-opus-4-6-thinking"), not the display label. It must ride as a
+	// single argv element so no shell quoting is required, and it must sit
+	// before the user's custom args.
 	args := buildAntigravityArgs(
 		"hello",
 		"/tmp/agy.log",
 		20*time.Minute,
-		ExecOptions{Cwd: "/work", Model: "Claude Opus 4.6 (Thinking)"},
+		ExecOptions{Cwd: "/work", Model: "claude-opus-4-6-thinking"},
 		quietAntigravityLogger(),
 	)
 
 	want := []string{
 		"-p", "hello",
 		"--dangerously-skip-permissions",
-		"--model", "Claude Opus 4.6 (Thinking)",
+		"--model", "claude-opus-4-6-thinking",
 		"--print-timeout", "20m0s",
 		"--log-file", "/tmp/agy.log",
 		"--add-dir", "/work",
@@ -468,13 +469,18 @@ func TestAntigravityModelError(t *testing.T) {
 	t.Parallel()
 
 	catalog := []Model{
-		{ID: "Gemini 3.5 Flash (Medium)", Label: "Gemini 3.5 Flash (Medium)", Provider: "antigravity"},
-		{ID: "Claude Opus 4.6 (Thinking)", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
+		{ID: "gemini-3.5-flash-medium", Label: "Gemini 3.5 Flash (Medium)", Provider: "antigravity"},
+		{ID: "claude-opus-4-6-thinking", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
 	}
 
-	// Exact catalog hit → accepted.
+	// Exact ID hit → accepted.
+	if err := antigravityModelError("claude-opus-4-6-thinking", catalog); err != nil {
+		t.Errorf("valid model id rejected: %v", err)
+	}
+
+	// Label hit → accepted (legacy value persisted as the display label).
 	if err := antigravityModelError("Claude Opus 4.6 (Thinking)", catalog); err != nil {
-		t.Errorf("valid model rejected: %v", err)
+		t.Errorf("valid model label rejected: %v", err)
 	}
 
 	// Empty model → accepted (flag omitted, agy resolves its own default).
@@ -502,13 +508,38 @@ func TestAntigravityModelError(t *testing.T) {
 		t.Errorf("error should point the user at `agy models`: %v", err)
 	}
 
-	// Near-miss (trailing space / dropped suffix) → still rejected, because agy
-	// needs the exact display string and would no-op on anything else.
-	if err := antigravityModelError("Claude Opus 4.6 (Thinking) ", catalog); err == nil {
+	// Near-miss (trailing space on the id) → still rejected, because agy
+	// needs the exact id and would no-op on anything else.
+	if err := antigravityModelError("claude-opus-4-6-thinking ", catalog); err == nil {
 		t.Error("near-miss model (trailing space) should be rejected")
 	}
-	if err := antigravityModelError("Claude Opus 4.6", catalog); err == nil {
+	if err := antigravityModelError("claude-opus", catalog); err == nil {
 		t.Error("near-miss model (dropped suffix) should be rejected")
+	}
+}
+
+// TestAntigravityNormaliseModel pins the legacy-value fix from #6867: a model
+// persisted as the full `id\tLabel` line (by the old parser) is stripped to
+// the bare id before being passed to `agy --model`. Values with no tab pass
+// through unchanged.
+func TestAntigravityNormaliseModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"gemini-3.6-flash-medium", "gemini-3.6-flash-medium"},
+		{"gemini-3.6-flash-medium\tGemini 3.6 Flash (Medium)", "gemini-3.6-flash-medium"},
+		{"  gemini-3.6-flash-medium  ", "gemini-3.6-flash-medium"},
+		{"  gemini-3.6-flash-medium\tGemini 3.6 Flash (Medium)  ", "gemini-3.6-flash-medium"},
+		{"Plain Display Name", "Plain Display Name"},
+	}
+	for _, tc := range tests {
+		if got := antigravityNormaliseModel(tc.input); got != tc.want {
+			t.Errorf("antigravityNormaliseModel(%q) = %q, want %q", tc.input, got, tc.want)
+		}
 	}
 }
 

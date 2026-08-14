@@ -49,6 +49,12 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		return nil, fmt.Errorf("agy executable not found at %q: %w", execPath, err)
 	}
 
+	// Normalise a legacy agent.model value that was persisted as the full
+	// `id\tLabel` line the old parser stored (#6867). agy --model only accepts
+	// the bare id, so strip everything from the first tab onward. A value with
+	// no tab passes through unchanged.
+	opts.Model = antigravityNormaliseModel(opts.Model)
+
 	// Guard against agy's silent no-op on an unrecognised --model: it exits 0
 	// with empty output, which would otherwise surface as a "completed" but
 	// empty task. opts.Model is the single funnel for both agent.model and the
@@ -423,16 +429,16 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 // buildAntigravityArgs assembles the argv for a daemon-compatible one-shot agy
 // invocation.
 //
-//	agy -p <prompt> --dangerously-skip-permissions [--model <display name>]
+//	agy -p <prompt> --dangerously-skip-permissions [--model <model id>]
 //	    --print-timeout <duration> --log-file <tmp>
 //	    [--conversation <id>] [--add-dir <cwd>]
 //
 // agy 1.0.6 added a `--model` flag (MUL-3125), so opts.Model is now wired
-// through when set. The value is the exact human display string `agy models`
-// prints (e.g. "Claude Opus 4.6 (Thinking)"), NOT a provider/model slug —
-// it's passed verbatim as a single exec arg, so spaces and parens need no
-// shell quoting. agy still exposes no --system-prompt; runtime instructions
-// are delivered via AGENTS.md in the task workdir.
+// through when set. The value is the bare model id that `agy models`
+// advertises (e.g. "gemini-3.6-flash-medium"), NOT the display label —
+// it's passed verbatim as a single exec arg. agy still exposes no
+// --system-prompt; runtime instructions are delivered via AGENTS.md in
+// the task workdir.
 //
 // agy silently no-ops on a model string it doesn't recognise (empty output,
 // exit 0), so Execute validates opts.Model against the `agy models` catalog
@@ -467,13 +473,27 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 	return args
 }
 
+// antigravityNormaliseModel strips a tab-joined `id\tLabel` suffix from a
+// model value, returning the bare id that `agy --model` accepts. Values with
+// no tab pass through unchanged. This lets agents whose model was persisted
+// by the old parser (which stored the entire `agy models` line including the
+// tab and label) keep working without a manual re-set (#6867).
+func antigravityNormaliseModel(model string) string {
+	model = strings.TrimSpace(model)
+	if idx := strings.IndexByte(model, '\t'); idx >= 0 {
+		return strings.TrimSpace(model[:idx])
+	}
+	return model
+}
+
 // antigravityModelError returns an actionable error when `model` is non-empty
 // and definitively absent from `available` (the `agy models` catalog); it
 // returns nil otherwise. An empty `available` means discovery couldn't produce
 // a catalog (agy missing, transient failure) — we fail OPEN there and let agy
 // resolve the value, so a discovery hiccup never blocks a run. The match is
-// exact because agy's --model wants the precise display string; a near-miss
-// (extra space, dropped suffix) is correctly rejected since agy would silently
+// against the model ID (the bare value `agy --model` accepts) and, as a
+// fallback for legacy persisted values, the display Label. A near-miss (extra
+// space, dropped suffix) is correctly rejected since agy would silently
 // no-op on it anyway.
 func antigravityModelError(model string, available []Model) error {
 	if model == "" || len(available) == 0 {
@@ -481,7 +501,7 @@ func antigravityModelError(model string, available []Model) error {
 	}
 	ids := make([]string, 0, len(available))
 	for _, m := range available {
-		if m.ID == model {
+		if m.ID == model || m.Label == model {
 			return nil
 		}
 		ids = append(ids, m.ID)

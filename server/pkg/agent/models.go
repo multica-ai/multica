@@ -2054,13 +2054,14 @@ func acpModelLabel(name, modelID string) string {
 }
 
 // discoverAntigravityModels runs `agy models` and returns the catalog the
-// installed Antigravity CLI advertises (one display name per line).
+// installed Antigravity CLI advertises. Each output line is `id\tLabel`;
+// the bare id is what `agy --model` accepts and the label is the
+// human-readable display name.
 //
 // Unlike cursor / pi / opencode there is deliberately NO static fallback.
-// agy's `--model` takes the exact human display string (e.g.
-// "Claude Opus 4.6 (Thinking)") and silently no-ops on any value it doesn't
-// recognise — empty output, exit 0 — so a guessed static list would risk
-// offering a model the installed CLI can't honour, turning a typo into a
+// agy's `--model` silently no-ops on any value it doesn't recognise —
+// empty output, exit 0 — so a guessed static list would risk offering a
+// model the installed CLI can't honour, turning a typo into a
 // "successful" empty run. On any discovery failure we return an empty
 // catalog instead; agent.model stays unset and agy resolves its own
 // default. cachedDiscovery never caches empty results, so this retries on
@@ -2085,24 +2086,39 @@ func discoverAntigravityModels(ctx context.Context, executablePath string) ([]Mo
 	return parseAntigravityModels(string(out)), nil
 }
 
-// parseAntigravityModels turns `agy models` output — one model display name
-// per line — into Model entries. The display string IS the value `--model`
-// expects, so ID and Label are identical and the daemon ships opts.Model
-// verbatim. Blank and duplicate lines are skipped.
+// parseAntigravityModels turns `agy models` output into Model entries.
+//
+// `agy models` prints one model per line in the form `id\tLabel` (e.g.
+// "gemini-3.6-flash-medium\tGemini 3.6 Flash (Medium)"). The bare id (before
+// the tab) is what `agy --model` accepts; the label after the tab is the
+// human-readable display name. Older `agy` versions that printed just the
+// display name with no tab are handled too — the whole line becomes both ID
+// and Label. Blank and duplicate lines are skipped.
 func parseAntigravityModels(output string) []Model {
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var models []Model
 	seen := map[string]bool{}
 	for scanner.Scan() {
-		name := strings.TrimSpace(scanner.Text())
-		if name == "" || seen[name] {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
 			continue
 		}
-		seen[name] = true
+		id, label := line, line
+		if idx := strings.IndexByte(line, '\t'); idx >= 0 {
+			id = strings.TrimSpace(line[:idx])
+			label = strings.TrimSpace(line[idx+1:])
+			if id == "" {
+				id = label
+			}
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
 		models = append(models, Model{
-			ID:       name,
-			Label:    name,
+			ID:       id,
+			Label:    label,
 			Provider: "antigravity",
 		})
 	}
