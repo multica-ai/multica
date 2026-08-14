@@ -706,6 +706,9 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		// runtime brief duplicates it at the start of every user turn.
 		{provider: "kiro", want: false},
 		{provider: "kimi", want: true},
+		// Qoder Cloud has no access to the daemon's local task workdir, so its
+		// dedicated cloud-safe system prompt must be delivered inline.
+		{provider: "qodercloud", want: true},
 		// Reasonix loads AGENTS.md from the ACP session cwd.
 		{provider: "reasonix", want: false},
 		// DSH loads AGENTS.md from the agent session cwd.

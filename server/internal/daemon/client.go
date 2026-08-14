@@ -1047,3 +1047,53 @@ func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
 	}
 	return json.NewDecoder(resp.Body).Decode(respBody)
 }
+
+// requestJSONBounded performs a JSON request with an explicit successful
+// response limit. It is used by hosted-agent custom tools, where even a
+// workspace-authorized response must not become unbounded model context.
+func (c *Client) requestJSONBounded(ctx context.Context, method, path string, reqBody any, respBody any, maxResponseBytes int64) error {
+	var body io.Reader
+	if reqBody != nil {
+		data, err := json.Marshal(reqBody)
+		if err != nil {
+			return err
+		}
+		body = bytes.NewReader(data)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	if err != nil {
+		return err
+	}
+	if reqBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	c.setIdentityHeaders(req)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusBadRequest {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return &requestError{Method: method, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+	if respBody == nil {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
+		return nil
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return err
+	}
+	if int64(len(data)) > maxResponseBytes {
+		return fmt.Errorf("%s %s response exceeded %d bytes", method, path, maxResponseBytes)
+	}
+	if err := json.Unmarshal(data, respBody); err != nil {
+		return fmt.Errorf("decode %s %s response: %w", method, path, err)
+	}
+	return nil
+}

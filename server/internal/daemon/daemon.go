@@ -56,6 +56,10 @@ var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered"
 // recover the task on a fresh attempt.
 var errTaskPrepareTimeout = errors.New("task preparation timed out")
 
+// errQoderCloudUnsupportedSurface prevents a hosted Qoder Agent from being
+// dispatched into workflows the bounded custom-tool bridge does not support.
+var errQoderCloudUnsupportedSurface = errors.New("Qoder Cloud runtime does not support this task surface")
+
 // errSkillBundleUnavailable marks a task that died in preparation because the
 // daemon could not download one of the agent's skill bundles. Carrying it as a
 // sentinel — rather than leaving handleTask to pattern-match the wrapped
@@ -2087,6 +2091,14 @@ const (
 // not installed" apart from "CLI installed but dropped at registration", which
 // was previously only visible in the daemon log (MUL-5439).
 func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) (string, string, builtinProbeVerdict) {
+	if entry.Remote {
+		version := strings.TrimSpace(entry.Version)
+		if version == "" {
+			version = "cloud-api-v1"
+		}
+		return version, "", builtinProbeOK
+	}
+
 	var (
 		lastErr  error
 		attempts int
@@ -2244,8 +2256,9 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 // split exists to prevent. Only a below-minimum verdict may demote.
 func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string, map[string]string, map[string]string) {
 	type detected struct {
-		name    string
-		version string
+		name        string
+		version     string
+		runtimeMode string
 	}
 	// Snapshot before any probe runs: everything sampled below is at least as
 	// new as every verdict recorded up to this point, which is exactly the
@@ -2276,7 +2289,11 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 				return nil
 			}
 			mu.Lock()
-			results = append(results, detected{name: name, version: version})
+			results = append(results, detected{
+				name:        name,
+				version:     version,
+				runtimeMode: runtimeModeForEntry(entry),
+			})
 			mu.Unlock()
 			return nil
 		})
@@ -2314,13 +2331,67 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
 		runtimes = append(runtimes, map[string]string{
-			"name":    displayName,
-			"type":    r.name,
-			"version": r.version,
-			"status":  "online",
+			"name":         displayName,
+			"type":         r.name,
+			"version":      r.version,
+			"status":       "online",
+			"runtime_mode": r.runtimeMode,
 		})
 	}
 	return runtimes, belowMin, unavailable
+}
+
+func runtimeModeForEntry(entry AgentEntry) string {
+	if strings.EqualFold(strings.TrimSpace(entry.RuntimeMode), "cloud") {
+		return "cloud"
+	}
+	return "local"
+}
+
+func (d *Daemon) runtimeUsesRemoteEntry(runtimeID, provider string) bool {
+	if _, custom := d.customProfileLaunchForRuntime(runtimeID); custom {
+		return false
+	}
+	entry, ok := d.agents()[provider]
+	return ok && entry.Remote
+}
+
+func backendEnvironmentForEntry(entry AgentEntry, env map[string]string) map[string]string {
+	if entry.Remote {
+		return nil
+	}
+	return env
+}
+
+func validateQoderCloudTaskSurface(provider string, task Task) error {
+	if provider != "qodercloud" {
+		return nil
+	}
+	if task.AutopilotRunID != "" ||
+		task.AutopilotID != "" ||
+		task.QuickCreatePrompt != "" ||
+		task.RegenerateQuickActionsFor != "" ||
+		task.IsLeaderTask ||
+		task.SquadID != "" {
+		return fmt.Errorf("%w; autopilot, quick-create, quick-actions, and squad workflows require a compatible local runtime", errQoderCloudUnsupportedSurface)
+	}
+	if task.ChatSessionID != "" {
+		if task.IssueID != "" || task.TriggerCommentID != "" {
+			return fmt.Errorf("%w; mixed chat and issue context is invalid", errQoderCloudUnsupportedSurface)
+		}
+		return nil
+	}
+	if task.IssueID == "" {
+		return fmt.Errorf("%w; expected a chat or issue task", errQoderCloudUnsupportedSurface)
+	}
+	return nil
+}
+
+func gateResumeForEntry(entry AgentEntry, task *Task, taskCtx *execenv.TaskContextForEnv, envWorkDir string, sessionHomeReachable bool, taskLog *slog.Logger) bool {
+	if entry.Remote {
+		return task.PriorSessionID != ""
+	}
+	return gateResumeToReusedWorkdir(task, taskCtx, envWorkDir, sessionHomeReachable, taskLog)
 }
 
 // cloneRuntimeEntries deep-copies a registration runtime payload. Callers that
@@ -3872,7 +3943,9 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	} else if entry, ok := d.agents()[rt.Provider]; ok {
 		// Built-in provider: self-heal a pinned executable path an in-place
 		// upgrade deleted (MUL-4486).
-		entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
+		if !entry.Remote {
+			entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
+		}
 		execPath = entry.Path
 	} else {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
@@ -4800,6 +4873,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 	provider := rt.Provider
+	remoteRuntime := d.runtimeUsesRemoteEntry(task.RuntimeID, provider)
 
 	// Task-scoped logger with short ID for readable concurrent logs.
 	taskLog := d.logger.With("task", shortID(task.ID))
@@ -4835,12 +4909,14 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// fires only after execenv.Prepare/Reuse has put env.WorkDir on disk,
 	// so consumers that read status==running can resolve the workdir path
 	// without racing the daemon's os.MkdirAll.
-	localRelease, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, taskLog)
-	if abort {
-		return
-	}
-	if localRelease != nil {
-		defer localRelease()
+	if !remoteRuntime {
+		localRelease, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, taskLog)
+		if abort {
+			return
+		}
+		if localRelease != nil {
+			defer localRelease()
+		}
 	}
 
 	// Hold a process-wide active-root guard for the rest of this task so
@@ -4852,15 +4928,17 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// reportTaskResult and execenv.WriteGCMeta below. markActiveEnvRoot
 	// is reference-counted, so the duplicate marks runTask installs are
 	// correctly nested within these.
-	predictedEnvRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
-	if predictedEnvRoot != "" {
-		d.markActiveEnvRoot(predictedEnvRoot)
-		defer d.unmarkActiveEnvRoot(predictedEnvRoot)
-	}
-	if task.PriorWorkDir != "" {
-		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != predictedEnvRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
+	if !remoteRuntime {
+		predictedEnvRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+		if predictedEnvRoot != "" {
+			d.markActiveEnvRoot(predictedEnvRoot)
+			defer d.unmarkActiveEnvRoot(predictedEnvRoot)
+		}
+		if task.PriorWorkDir != "" {
+			if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != predictedEnvRoot {
+				d.markActiveEnvRoot(priorRoot)
+				defer d.unmarkActiveEnvRoot(priorRoot)
+			}
 		}
 	}
 
@@ -5377,6 +5455,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"dsh":        "DeepSeek Harness",
 	"traecli":    "Trae",
 	"grok":       "Grok",
+	"qodercloud": "Qoder Cloud",
 	"qoderclicn": "Qoder CN",
 	"qwen":       "Qwen Code",
 	"qwenpaw":    "QwenPaw",
@@ -5401,11 +5480,10 @@ func providerDisplayName(name string) string {
 	return strings.ToUpper(name[:1]) + name[1:]
 }
 
-// providerNeedsInlineSystemPrompt reports whether the runtime brief must ride
-// along in the turn itself (agent.ExecOptions.SystemPrompt) because the CLI
-// will not pick up the per-task context file execenv writes into the workdir.
-// This is the ONLY place that decides it, and it is the reason every other
-// backend sees an empty SystemPrompt.
+// providerNeedsInlineSystemPrompt reports whether a provider needs an inline
+// system prompt because it cannot consume the per-task context file execenv
+// writes into the workdir. Local providers receive the runtime brief; the
+// remote Qoder Cloud provider receives only qoderCloudChatSystemPrompt.
 //
 // Adding a provider here is a real fix only when that CLI genuinely ignores its
 // context file — traecli was added because it reads .trae/rules/ and not
@@ -5421,11 +5499,25 @@ func providerDisplayName(name string) string {
 // 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kimi", "traecli", "qwenpaw":
+	case "openclaw", "kimi", "qodercloud", "traecli", "qwenpaw":
 		return true
 	default:
 		return false
 	}
+}
+
+// inlineSystemPromptForProvider enforces the cloud trust boundary at the last
+// point before ExecOptions reaches a backend. Qoder Cloud must never receive
+// runtimeBrief: that document describes local CLI, repository, attachment,
+// skill, credential, and workdir capabilities that the remote backend lacks.
+func inlineSystemPromptForProvider(provider string, task Task, runtimeBrief string) string {
+	if provider == "qodercloud" {
+		return qoderCloudChatSystemPrompt(task)
+	}
+	if providerNeedsInlineSystemPrompt(provider) {
+		return runtimeBrief
+	}
+	return ""
 }
 
 // gateResumeToReusedWorkdir clears the task's prior session unless this run
@@ -5848,6 +5940,46 @@ func (d *Daemon) prepareExecutionEnvironment(ctx context.Context, params execenv
 	return execenv.PrepareIsolated(ctx, command, params, d.logger)
 }
 
+// prepareRemoteExecutionEnvironment creates only the directories required for
+// task lifecycle bookkeeping. It deliberately does not call execenv.Prepare:
+// that local-runtime preparer materializes skills, project resources, MCP
+// config, and provider sidecars which Qoder Cloud cannot see or use.
+func prepareRemoteExecutionEnvironment(params execenv.PrepareParams) (*execenv.Environment, error) {
+	root := execenv.PredictRootDir(params.WorkspacesRoot, params.WorkspaceID, params.TaskID)
+	if root == "" {
+		return nil, errors.New("remote execenv: workspaces root, workspace ID, and task ID are required")
+	}
+	if err := os.RemoveAll(root); err != nil {
+		return nil, fmt.Errorf("remote execenv: reset task root: %w", err)
+	}
+	workDir := filepath.Join(root, "workdir")
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		return nil, fmt.Errorf("remote execenv: create bookkeeping workdir: %w", err)
+	}
+	return &execenv.Environment{RootDir: root, WorkDir: workDir}, nil
+}
+
+func (d *Daemon) prepareNewExecutionEnvironment(ctx context.Context, entry AgentEntry, params execenv.PrepareParams) (*execenv.Environment, error) {
+	if entry.Remote {
+		return prepareRemoteExecutionEnvironment(params)
+	}
+	return d.prepareExecutionEnvironment(ctx, params)
+}
+
+func (d *Daemon) ensureTaskSkillBundlesForEntry(ctx context.Context, entry AgentEntry, task *Task) error {
+	if entry.Remote {
+		return nil
+	}
+	return d.ensureTaskSkillBundles(ctx, task)
+}
+
+func injectRuntimeConfigForEntry(entry AgentEntry, workDir, provider string, taskCtx execenv.TaskContextForEnv) (string, error) {
+	if entry.Remote {
+		return "", nil
+	}
+	return execenv.InjectRuntimeConfig(workDir, provider, taskCtx)
+}
+
 func (d *Daemon) reuseExecutionEnvironment(ctx context.Context, params execenv.ReuseParams) (*execenv.Environment, error) {
 	if d.executionEnvironmentCommand == nil {
 		return execenv.Reuse(params, d.logger), nil
@@ -5906,6 +6038,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.WorkspaceID == "" {
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
+	if err := validateQoderCloudTaskSurface(provider, task); err != nil {
+		return TaskResult{}, err
+	}
 
 	prepareTimeout := d.effectiveTaskPrepareTimeout()
 	prepareCtx, cancelPrepare := context.WithTimeoutCause(ctx, prepareTimeout, errTaskPrepareTimeout)
@@ -5921,15 +6056,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskResult = TaskResult{}
 		returnErr = fmt.Errorf("%w after %s", errTaskPrepareTimeout, prepareTimeout)
 	}()
-
-	// task.Repos is the authoritative repo list for this task — when the
-	// claimed task belongs to a project with github_repo resources the server
-	// has already narrowed it to project repos only. Make sure those URLs are
-	// in the per-workspace allowlist and the local cache, otherwise
-	// `multica repo checkout` would reject project-only URLs that aren't also
-	// bound at the workspace level.
-	d.registerTaskRepos(task.WorkspaceID, task.ID, task.Repos)
-	defer d.clearTaskRepoRefs(task.WorkspaceID, task.ID)
 
 	entry, ok := d.agents()[provider]
 	// A custom runtime profile (MUL-3284) overrides the executable path: the
@@ -5951,6 +6077,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var usesCustomProfileCommand bool
 	if customSpec, isCustom := d.customProfileLaunchForRuntime(task.RuntimeID); isCustom {
 		usesCustomProfileCommand = true
+		entry.Remote = false
+		entry.RuntimeMode = "local"
 		entry.Path = customSpec.path
 		resolvedVersion = customSpec.version
 		profileFixedArgs = customSpec.fixedArgs
@@ -5959,7 +6087,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			"task_id", task.ID, "runtime_id", task.RuntimeID,
 			"provider", provider, "command_path", customSpec.path,
 			"fixed_args", len(profileFixedArgs))
-	} else if ok {
+	} else if ok && !entry.Remote {
 		// Built-in provider: self-heal a pinned executable path that an in-place
 		// upgrade deleted (MUL-4486). Only reached when no custom profile owns
 		// the launch, so a custom runtime's path is never second-guessed and a
@@ -5974,10 +6102,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
 	}
 
+	// task.Repos is the authoritative repo list for a local runtime task. A
+	// remote runtime cannot call the daemon's checkout endpoint, so registering
+	// those URLs would create a capability it cannot consume and unnecessarily
+	// retain repository metadata for the lifetime of the cloud turn.
+	if !entry.Remote {
+		d.registerTaskRepos(task.WorkspaceID, task.ID, task.Repos)
+		defer d.clearTaskRepoRefs(task.WorkspaceID, task.ID)
+	}
+
 	stopPrepareLease := d.startTaskPrepareLeaseExtender(prepareCtx, task, taskLog)
 	defer stopPrepareLease()
 
-	if err := d.ensureTaskSkillBundles(prepareCtx, &task); err != nil {
+	if err := d.ensureTaskSkillBundlesForEntry(prepareCtx, entry, &task); err != nil {
 		return TaskResult{}, err
 	}
 
@@ -6047,7 +6184,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
 	d.markActiveEnvRoot(predictedRoot)
 	defer d.unmarkActiveEnvRoot(predictedRoot)
-	if task.PriorWorkDir != "" {
+	if !entry.Remote && task.PriorWorkDir != "" {
 		priorRoot := filepath.Dir(task.PriorWorkDir)
 		if priorRoot != predictedRoot {
 			d.markActiveEnvRoot(priorRoot)
@@ -6074,7 +6211,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Resolve any local_directory assignment again here so runTask can plumb
 	// LocalWorkDir into execenv. handleTask already validated + locked the
 	// path for worker tasks; leader tasks intentionally skip the assignment.
-	localAssignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	var localAssignment *localDirectoryAssignment
+	if !entry.Remote {
+		localAssignment, _ = localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	}
 	// Reuse intentionally skipped for local_directory tasks: the prior
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
@@ -6086,7 +6226,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentMcpConfig json.RawMessage
 	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
-	if task.Agent != nil {
+	if task.Agent != nil && !entry.Remote {
 		agentMcpConfig = task.Agent.McpConfig
 		effectiveMcpConfig = agentMcpConfig
 		if merged, mergeErr := mergeRuntimeAndAgentMcpConfig(provider, agentMcpConfig); mergeErr != nil {
@@ -6213,7 +6353,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	envReused := false
-	if shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
+	if !entry.Remote && shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
 		var err error
 		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
@@ -6337,7 +6477,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			if localAssignment != nil {
 				prepParams.LocalWorkDir = localAssignment.AbsPath
 			}
-			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
+			env, err = d.prepareNewExecutionEnvironment(prepareCtx, entry, prepParams)
 			if err != nil {
 				return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 			}
@@ -6453,15 +6593,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}()
 	}
-	taskTempDir, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
-	if err != nil {
-		return TaskResult{}, fmt.Errorf("prepare task temp dir: %w", err)
-	}
-	defer func() {
-		if cerr := os.RemoveAll(taskTempDir); cerr != nil {
-			taskLog.Warn("task temp dir cleanup failed", "path", taskTempDir, "error", cerr)
+	var taskTempDir string
+	if !entry.Remote {
+		preparedTempDir, tempErr := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
+		if tempErr != nil {
+			return TaskResult{}, fmt.Errorf("prepare task temp dir: %w", tempErr)
 		}
-	}()
+		taskTempDir = preparedTempDir
+		defer func() {
+			if cerr := os.RemoveAll(taskTempDir); cerr != nil {
+				taskLog.Warn("task temp dir cleanup failed", "path", taskTempDir, "error", cerr)
+			}
+		}()
+	}
 
 	// Issue #3999 race A: now that env.WorkDir is on disk, transition the
 	// server-side state machine dispatched (or waiting_local_directory) →
@@ -6483,7 +6627,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
-	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, sessionHomeReachable(provider, env, envReused), taskLog)
+	reused := gateResumeForEntry(entry, &task, &taskCtx, env.WorkDir, sessionHomeReachable(provider, env, envReused), taskLog)
 	// A reused workdir is necessary but not sufficient for a Codex resume: the
 	// prior thread's rollout must actually be present in this task's CODEX_HOME
 	// sessions (MUL-4424 isolates them). Drop the resume before the brief is
@@ -6493,8 +6637,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
 	}
 
-	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+	// Local runtimes discover their workflow through provider sidecars. Remote
+	// runtimes skip this write entirely and receive their cloud-safe system
+	// prompt directly through ExecOptions.
+	runtimeBrief, err := injectRuntimeConfigForEntry(entry, env.WorkDir, provider, taskCtx)
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
@@ -6508,26 +6654,31 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// MULTICA_TOKEN is bound to (agent, task) by the server. Never fall back
 	// to the daemon's own credential here: doing so lets agent CLI writes land
 	// as the runtime owner's member actor and can retrigger the same agent.
-	agentToken, err := taskScopedAuthToken(task)
-	if err != nil {
-		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
-		return TaskResult{}, err
-	}
-	agentEnv := taskMulticaEnvironment(task, agentName, agentToken, env.MulticaConfigRoot, d.cfg.WorkspacesRoot, d.cfg.ServerBaseURL, d.cfg.HealthPort, slot, taskTempDir)
-	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
-		agentEnv[repoCheckoutModeEnv] = checkoutMode
-	}
-	if task.AutopilotRunID != "" {
-		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
-	}
-	if task.AutopilotID != "" {
-		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
+	// A remote runtime spawns no local CLI: skip the token mint and the local
+	// environment entirely so no Multica credential can reach a hosted backend.
+	agentEnv := make(map[string]string)
+	if !entry.Remote {
+		agentToken, err := taskScopedAuthToken(task)
+		if err != nil {
+			taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
+			return TaskResult{}, err
+		}
+		agentEnv = taskMulticaEnvironment(task, agentName, agentToken, env.MulticaConfigRoot, d.cfg.WorkspacesRoot, d.cfg.ServerBaseURL, d.cfg.HealthPort, slot, taskTempDir)
+		if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
+			agentEnv[repoCheckoutModeEnv] = checkoutMode
+		}
+		if task.AutopilotRunID != "" {
+			agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
+		}
+		if task.AutopilotID != "" {
+			agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
+		}
 	}
 	// Quick-create marker — when set, the multica CLI's `issue create`
 	// command stamps the new issue with origin_type=quick_create +
 	// origin_id=<task_id> so the completion handler can find it
 	// deterministically (see GetIssueByOrigin).
-	if task.QuickCreatePrompt != "" {
+	if task.QuickCreatePrompt != "" && !entry.Remote {
 		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
 		if len(task.QuickCreateAttachmentIDs) > 0 {
 			if raw, err := json.Marshal(task.QuickCreateAttachmentIDs); err == nil {
@@ -6541,9 +6692,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
 	// inherit the daemon's PATH. Prepend the directory of the running
 	// multica binary so that `multica` commands in the agent always resolve.
-	if selfBin, err := resolveSelfExecutable(); err == nil {
-		binDir := filepath.Dir(selfBin)
-		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+	if !entry.Remote {
+		if selfBin, err := resolveSelfExecutable(); err == nil {
+			binDir := filepath.Dir(selfBin)
+			agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+		}
 	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
@@ -6590,7 +6743,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		agentCustomEnv = task.Agent.CustomEnv
 	}
-	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	if !entry.Remote {
+		layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	}
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
@@ -6606,8 +6761,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
 		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
 	}
-	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
-		return TaskResult{}, err
+	if !entry.Remote {
+		if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
+			return TaskResult{}, err
+		}
+	}
+	// A hosted backend must never receive the task-scoped Multica token or
+	// user-configured custom_env. Qoder Cloud gets only its dedicated PAT via
+	// Config.QoderCloud; registration payloads and logs never carry that value.
+	agentEnv = backendEnvironmentForEntry(entry, agentEnv)
+	qoderCloudConfig := agent.QoderCloudConfig{}
+	if entry.Remote && provider == "qodercloud" {
+		qoderCloudConfig = d.cfg.QoderCloud
 	}
 	// Resolve the backend through the unified runtime resolver: built-in
 	// runtime identities (e.g. "omp") dispatch through NewRuntime, protocol
@@ -6624,6 +6789,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		DaemonVersion:  d.cfg.CLIVersion,
 		CodexVersion:   codexVersion,
 		BuiltinRuntime: !usesCustomProfileCommand,
+		QoderCloud:     qoderCloudConfig,
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
@@ -6647,7 +6813,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		extraArgs = append(append([]string{}, profileFixedArgs...), extraArgs...)
 	}
 	var mcpConfig json.RawMessage
-	if task.Agent != nil {
+	if task.Agent != nil && !entry.Remote {
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = effectiveMcpConfig
 	}
@@ -6664,15 +6830,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// cursor regression happened — static guesses drift from
 	// whatever the upstream CLI actually accepts.
 	model := ""
-	if task.Agent != nil && task.Agent.Model != "" {
-		model = task.Agent.Model
-	}
-	if model == "" {
-		model = entry.Model
+	if !entry.Remote {
+		if task.Agent != nil && task.Agent.Model != "" {
+			model = task.Agent.Model
+		}
+		if model == "" {
+			model = entry.Model
+		}
 	}
 	thinkingLevel := ""
 	serviceTier := ""
-	if task.Agent != nil {
+	if task.Agent != nil && !entry.Remote {
 		thinkingLevel = task.Agent.ThinkingLevel
 		serviceTier = task.Agent.ServiceTier
 	}
@@ -6681,7 +6849,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// runtime default instead of failing the task. Catalog lookup errors pass
 	// through so a transient discovery failure does not silently disable a
 	// previously valid user choice.
-	if serviceTier != "" {
+	if serviceTier != "" && !entry.Remote {
 		ok, err := agent.ValidateServiceTier(ctx, provider, entry.Path, model, serviceTier)
 		if err != nil {
 			taskLog.Warn("service_tier: catalog lookup failed; passing through",
@@ -6710,7 +6878,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// model follows config.toml (any model) and so fails closed, dropping the
 	// level here. Discovery errors fail open for resolved models: if we can't
 	// list models, we keep the persisted level and let the CLI object.
-	if thinkingLevel != "" {
+	if thinkingLevel != "" && !entry.Remote {
 		ok, err := agent.ValidateThinkingLevel(ctx, provider, entry.Path, model, thinkingLevel)
 		if err != nil {
 			taskLog.Warn("thinking_level: catalog lookup failed; passing through",
@@ -6764,6 +6932,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ClaudeSettingsPath:     env.ClaudeSettingsPath,
 		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
+	if provider == "qodercloud" {
+		customToolHandler, err := newQoderCloudCustomToolHandler(d.cfg.ServerBaseURL, d.cfg.CLIVersion, task)
+		if err != nil {
+			taskLog.Error("qoder cloud custom tool bridge unavailable; refusing to start agent", "error", err)
+			return TaskResult{}, err
+		}
+		execOpts.CustomToolHandler = customToolHandler
+	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
 	//   - openclaw is pinned to the task workdir via the per-task config we
@@ -6774,21 +6950,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	//     workdir bootstrap reliably end-to-end.
 	//   - kimi is wrapped through its own CLI whose cwd handling is opaque
 	//     enough that we can't trust the file-based path either.
-	// Pass the full runtime brief inline (CLI catalog + workflow steps + agent
-	// identity/persona + skills + project context) so the backend prepends the
-	// same payload that file-based runtimes pick up from disk. Without this,
-	// these providers silently miss the workflow section and never call
-	// `multica issue status` / `multica issue comment add`, leaving issues
-	// stuck in `todo`.
+	// Local providers receive the full runtime brief inline (CLI catalog +
+	// workflow steps + agent identity/persona + skills + project context), so
+	// the backend prepends the same payload that file-based runtimes pick up
+	// from disk. Qoder Cloud is the exception: it receives the dedicated
+	// bounded tool-aware system prompt and never the local runtime brief.
 	//
 	// Hermes and Kiro are intentionally excluded: their ACP sessions start in
 	// the task cwd and load AGENTS.md themselves. Kiro documents root AGENTS.md
 	// as always included, and a real kiro-cli 2.13.0 ACP smoke confirms it.
 	// Prepending the full runtime brief into the ACP user prompt duplicates that
 	// context and bloats every turn.
-	if providerNeedsInlineSystemPrompt(provider) {
-		execOpts.SystemPrompt = runtimeBrief
-	}
+	execOpts.SystemPrompt = inlineSystemPromptForProvider(provider, task, runtimeBrief)
 
 	// A quick-actions refresh task from a server that predates server-side
 	// generation (MUL-5573). This daemon no longer has a suggestion pass to run
@@ -6865,14 +7038,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		task.PriorSessionResumeUnavailable = true
 		execOpts.ResumeContinuityNotice = ""
 		taskCtx.PriorSessionResumed = false
-		if freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); briefErr != nil {
+		if freshBrief, briefErr := injectRuntimeConfigForEntry(entry, env.WorkDir, provider, taskCtx); briefErr != nil {
 			taskLog.Warn("execenv: re-inject cold runtime config for fresh retry failed (non-fatal)", "error", briefErr)
 		} else {
 			runtimeBrief = freshBrief
-			if providerNeedsInlineSystemPrompt(provider) {
-				execOpts.SystemPrompt = runtimeBrief
-			}
 		}
+		execOpts.SystemPrompt = inlineSystemPromptForProvider(provider, task, runtimeBrief)
 		freshPrompt := BuildPrompt(task, provider)
 
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)

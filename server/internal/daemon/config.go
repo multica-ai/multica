@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -132,6 +133,10 @@ type Config struct {
 	CodebuddyArgs                   []string
 	QwenArgs                        []string
 	QwenpawArgs                     []string
+	// QoderCloud contains the hosted Qoder credentials and resource IDs used
+	// only by the qodercloud backend. It is never included in registration
+	// payloads, runtime metadata, task custom_env, or logs.
+	QoderCloud agent.QoderCloudConfig
 
 	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
 	// executable path to use for that profile on THIS machine (MUL-3284).
@@ -233,9 +238,25 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		}
 	}
 
+	// Read (and scrub) the Qoder Cloud opt-in BEFORE any local CLI discovery:
+	// qoderCloudConfigFromEnv removes MULTICA_QODERCLOUD_PAT from the process
+	// environment so no probed CLI child can ever inherit the credential.
+	qoderCloud, qoderCloudEnabled, qoderCloudErr := qoderCloudConfigFromEnv()
+	if qoderCloudErr != nil {
+		return Config{}, qoderCloudErr
+	}
+
 	// Discover installed agent CLIs. Extracted so the periodic workspace sync
 	// can re-run the same discovery on a live daemon (MUL-5439).
 	agents := probeAgentCLIs()
+	if qoderCloudEnabled {
+		// Qoder Cloud is a virtual built-in runtime. It intentionally has no
+		// executable or command name: task execution reaches the hosted API.
+		if agents == nil {
+			agents = make(map[string]AgentEntry)
+		}
+		agents["qodercloud"] = qoderCloudAgentEntry(qoderCloud)
+	}
 	if len(agents) == 0 && !overrides.AllowNoAgents {
 		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, or qwenpaw and ensure it is on PATH")
 	}
@@ -548,8 +569,77 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodebuddyArgs:                   codebuddyArgs,
 		QwenArgs:                        qwenArgs,
 		QwenpawArgs:                     qwenpawArgs,
+		QoderCloud:                      qoderCloud,
 		ProfileCommandOverrides:         profileCommandOverrides,
 	}, nil
+}
+
+// qoderCloudConfigFromEnv reads the opt-in Qoder Cloud runtime configuration.
+// Only the dedicated Multica PAT variable is accepted. The PAT is copied into
+// Config and then removed from the process environment before any local CLI
+// discovery can spawn a child. This global removal is safe because the hosted
+// backend receives the immutable in-memory Config value; no runtime path reads
+// the PAT from the environment after LoadConfig. It also runs while disabled,
+// so a stray variable cannot leak into unrelated local agent CLIs. Returned
+// errors name only variables and never include credential values.
+func qoderCloudConfigFromEnv() (agent.QoderCloudConfig, bool, error) {
+	pat, patWasSet := os.LookupEnv("MULTICA_QODERCLOUD_PAT")
+	pat = strings.TrimSpace(pat)
+	if patWasSet {
+		if err := os.Unsetenv("MULTICA_QODERCLOUD_PAT"); err != nil {
+			return agent.QoderCloudConfig{}, false, fmt.Errorf("remove MULTICA_QODERCLOUD_PAT from process environment: %w", err)
+		}
+	}
+
+	if !boolFromEnv("MULTICA_QODERCLOUD_ENABLED", false) {
+		return agent.QoderCloudConfig{}, false, nil
+	}
+
+	config := agent.QoderCloudConfig{
+		BaseURL:       strings.TrimSpace(os.Getenv("MULTICA_QODERCLOUD_BASE_URL")),
+		PAT:           pat,
+		AgentID:       strings.TrimSpace(os.Getenv("MULTICA_QODERCLOUD_AGENT_ID")),
+		EnvironmentID: strings.TrimSpace(os.Getenv("MULTICA_QODERCLOUD_ENVIRONMENT_ID")),
+	}
+
+	var missing []string
+	if config.PAT == "" {
+		missing = append(missing, "MULTICA_QODERCLOUD_PAT")
+	}
+	if config.AgentID == "" {
+		missing = append(missing, "MULTICA_QODERCLOUD_AGENT_ID")
+	}
+	if config.EnvironmentID == "" {
+		missing = append(missing, "MULTICA_QODERCLOUD_ENVIRONMENT_ID")
+	}
+	if len(missing) > 0 {
+		return agent.QoderCloudConfig{}, false, fmt.Errorf(
+			"MULTICA_QODERCLOUD_ENABLED is set but required configuration is missing: %s",
+			strings.Join(missing, ", "),
+		)
+	}
+
+	if raw := strings.TrimSpace(os.Getenv("MULTICA_QODERCLOUD_AGENT_VERSION")); raw != "" {
+		version, err := strconv.Atoi(raw)
+		if err != nil || version <= 0 {
+			return agent.QoderCloudConfig{}, false, fmt.Errorf("MULTICA_QODERCLOUD_AGENT_VERSION must be a positive integer")
+		}
+		config.AgentVersion = version
+	}
+
+	return config, true, nil
+}
+
+func qoderCloudAgentEntry(config agent.QoderCloudConfig) AgentEntry {
+	version := "cloud-api-v1"
+	if config.AgentVersion > 0 {
+		version = fmt.Sprintf("cloud-api-v1 · agent-v%d", config.AgentVersion)
+	}
+	return AgentEntry{
+		Remote:      true,
+		RuntimeMode: "cloud",
+		Version:     version,
+	}
 }
 
 // officialCloudHost is the hostname of Multica's hosted cloud. It's the only

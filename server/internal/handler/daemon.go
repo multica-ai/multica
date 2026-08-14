@@ -182,10 +182,11 @@ type DaemonRegisterRequest struct {
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
 	Runtimes        []struct {
-		Name    string `json:"name"`
-		Type    string `json:"type"`
-		Version string `json:"version"` // agent CLI version (claude/codex)
-		Status  string `json:"status"`
+		Name        string `json:"name"`
+		Type        string `json:"type"`
+		Version     string `json:"version"` // agent CLI version (claude/codex)
+		Status      string `json:"status"`
+		RuntimeMode string `json:"runtime_mode"`
 		// ProfileID, when non-empty, marks this as an instance of a custom
 		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
 		// Type carries the protocol family for both built-in and custom rows
@@ -270,6 +271,21 @@ func workspaceReposResponse(workspaceID string, raw []byte, settingsRaw []byte) 
 // a blank input.
 func normalizeProvider(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// normalizeDaemonRuntimeMode validates the runtime-mode value accepted from a
+// daemon registration. Older daemons omit it, which remains local. Keeping the
+// accepted set closed prevents an arbitrary high-cardinality value reaching
+// storage and telemetry labels.
+func normalizeDaemonRuntimeMode(s string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "local":
+		return "local", true
+	case "cloud":
+		return "cloud", true
+	default:
+		return "", false
+	}
 }
 
 // inheritMachineCustomName gives a freshly-inserted runtime the machine's
@@ -402,6 +418,22 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "at least one runtime or failed profile is required")
 		return
 	}
+	for i := range req.Runtimes {
+		runtimeMode, valid := normalizeDaemonRuntimeMode(req.Runtimes[i].RuntimeMode)
+		if !valid {
+			writeError(w, http.StatusBadRequest, "runtime_mode must be local or cloud")
+			return
+		}
+		if strings.TrimSpace(req.Runtimes[i].ProfileID) != "" && runtimeMode != "local" {
+			writeError(w, http.StatusBadRequest, "custom runtime profiles must use runtime_mode local")
+			return
+		}
+		if runtimeMode == "cloud" && normalizeProvider(req.Runtimes[i].Type) != "qodercloud" {
+			writeError(w, http.StatusBadRequest, "runtime_mode cloud is only supported for qodercloud")
+			return
+		}
+		req.Runtimes[i].RuntimeMode = runtimeMode
+	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
 	if !ok {
 		return
@@ -435,6 +467,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]AgentRuntimeResponse, 0, len(req.Runtimes))
 	for _, runtime := range req.Runtimes {
+		runtimeMode := runtime.RuntimeMode
 		provider := normalizeProvider(runtime.Type)
 		if provider == "" {
 			provider = "unknown"
@@ -488,7 +521,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 						WorkspaceID: wsUUID,
 						DaemonID:    strToText(req.DaemonID),
 						Name:        name,
-						RuntimeMode: "local",
+						RuntimeMode: runtimeMode,
 						Provider:    profile.ProtocolFamily,
 						Status:      status,
 						DeviceInfo:  deviceInfo,
@@ -507,7 +540,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if err != nil {
-				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
+				runtimeFailedEvent := analytics.RuntimeFailed(
 					uuidToString(ownerID),
 					req.WorkspaceID,
 					req.DaemonID,
@@ -515,7 +548,9 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 					"registration_failed",
 					"db_error",
 					true,
-				))
+				)
+				runtimeFailedEvent.Properties["runtime_mode"] = runtimeMode
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, runtimeFailedEvent)
 				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
 				return
 			}
@@ -545,7 +580,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				WorkspaceID: wsUUID,
 				DaemonID:    strToText(req.DaemonID),
 				Name:        name,
-				RuntimeMode: "local",
+				RuntimeMode: runtimeMode,
 				Provider:    provider,
 				Status:      status,
 				DeviceInfo:  deviceInfo,
@@ -553,7 +588,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				OwnerID:     ownerID,
 			})
 			if err != nil {
-				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
+				runtimeFailedEvent := analytics.RuntimeFailed(
 					uuidToString(ownerID),
 					req.WorkspaceID,
 					req.DaemonID,
@@ -561,7 +596,9 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 					"registration_failed",
 					"db_error",
 					true,
-				))
+				)
+				runtimeFailedEvent.Properties["runtime_mode"] = runtimeMode
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, runtimeFailedEvent)
 				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
 				return
 			}
@@ -595,7 +632,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// Inserted is false for normal daemon reconnects/upserts, so
 		// runtime_ready is a first-ready-per-runtime-row signal.
 		if inserted {
-			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeRegistered(
+			runtimeRegisteredEvent := analytics.RuntimeRegistered(
 				uuidToString(ownerID),
 				req.WorkspaceID,
 				uuidToString(registered.ID),
@@ -603,16 +640,20 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				provider,
 				runtime.Version,
 				req.CLIVersion,
-			))
+			)
+			runtimeRegisteredEvent.Properties["runtime_mode"] = runtimeMode
+			obsmetrics.RecordEvent(h.Analytics, h.Metrics, runtimeRegisteredEvent)
 			if registered.Status == "online" {
-				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeReady(
+				runtimeReadyEvent := analytics.RuntimeReady(
 					uuidToString(ownerID),
 					req.WorkspaceID,
 					uuidToString(registered.ID),
 					req.DaemonID,
 					provider,
 					0,
-				))
+				)
+				runtimeReadyEvent.Properties["runtime_mode"] = runtimeMode
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, runtimeReadyEvent)
 			}
 		}
 
@@ -930,13 +971,15 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
 			continue
 		}
-		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeOffline(
+		runtimeOfflineEvent := analytics.RuntimeOffline(
 			uuidToString(rt.OwnerID),
 			wsID,
 			uuidToString(rt.ID),
 			rt.DaemonID.String,
 			rt.Provider,
-		))
+		)
+		runtimeOfflineEvent.Properties["runtime_mode"] = rt.RuntimeMode
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, runtimeOfflineEvent)
 
 		affectedWorkspaces[wsID] = true
 	}

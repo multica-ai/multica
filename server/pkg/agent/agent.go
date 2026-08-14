@@ -1,7 +1,7 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, DevEco Code,
 // OpenClaw, Hermes, Pi, Oh-My-Pi, Cursor, Kimi, Reasonix, Kiro, Antigravity, Qoder,
-// Trae, Grok, Qwen Code, QwenPaw). It
+// Qoder Cloud, Trae, Grok, Qwen Code, QwenPaw). It
 // mirrors the happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
 
@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 )
 
@@ -20,6 +21,29 @@ type Backend interface {
 	// Session.Result for the final outcome.
 	Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error)
 }
+
+// CustomToolCall is a client-side tool request emitted by a hosted provider.
+// CallID is the provider's stable correlation id and must be returned with the
+// result. Handlers must treat it as an idempotency key because providers may
+// replay an event after a stream reconnect.
+type CustomToolCall struct {
+	Name   string
+	CallID string
+	Input  map[string]any
+}
+
+// CustomToolResult is the bounded text returned to the hosted provider.
+// IsError tells the model that the tool failed in a recoverable way; it does
+// not fail the surrounding agent turn by itself.
+type CustomToolResult struct {
+	Content string
+	IsError bool
+}
+
+// CustomToolHandler executes one exact, caller-defined client-side tool. It is
+// deliberately narrower than a generic shell or HTTP callback: the daemon
+// supplies an allowlisted dispatcher and keeps all credentials local.
+type CustomToolHandler func(context.Context, CustomToolCall) (CustomToolResult, error)
 
 // ExecOptions configures a single execution.
 type ExecOptions struct {
@@ -79,6 +103,10 @@ type ExecOptions struct {
 	// knows the resume is gone, and the backend covers only the case the daemon
 	// cannot see — a live resume RPC rejected mid-run.
 	ResumeContinuityNotice string
+	// CustomToolHandler handles provider-side custom tool requests on the
+	// caller's host. Hosted backends must never receive the credentials used by
+	// this callback. A nil handler returns an error result to the model.
+	CustomToolHandler CustomToolHandler
 	// ExtraArgs is honoured only by backends that opt in by reading it; the
 	// rest ignore it. Deliberately not enumerated here — the previous list
 	// went stale as backends were added, which is how MULTICA_QWENPAW_ARGS
@@ -260,10 +288,30 @@ type Config struct {
 	// vendor's binary; it defaults to false so an unset caller fails
 	// closed onto standard behavior.
 	BuiltinRuntime bool
+	// QoderCloud contains credentials and immutable resource selection for the
+	// hosted Qoder Cloud Agents API backend. It is deliberately separate from
+	// Env: the PAT must never be copied into a child-process environment,
+	// runtime metadata, or a user-editable custom runtime profile.
+	QoderCloud QoderCloudConfig
+}
+
+// QoderCloudConfig configures the built-in-only Qoder Cloud Agents backend.
+// HTTPClient is injectable for tests; nil uses a standard client whose request
+// lifetime is controlled by ExecOptions.Timeout and the caller context.
+type QoderCloudConfig struct {
+	BaseURL       string
+	PAT           string
+	AgentID       string
+	EnvironmentID string
+	AgentVersion  int
+	HTTPClient    *http.Client
 }
 
 // New creates a Backend for the given agent type.
 // Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw".
+// Supported built-in types additionally include "qodercloud". It is omitted
+// from SupportedTypes because that slice is specifically the custom runtime
+// profile protocol-family whitelist, while Qoder Cloud has no local command.
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -382,6 +430,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &antigravityBackend{cfg: cfg}, nil
 	case "qoder", "qoderclicn":
 		return &qoderBackend{cfg: cfg, defaultExecutable: qoderDefaultBinary(agentType)}, nil
+	case "qodercloud":
+		return &qoderCloudBackend{cfg: cfg}, nil
 	case "traecli":
 		return &traecliBackend{cfg: cfg}, nil
 	case "grok":
@@ -391,7 +441,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "qwenpaw":
 		return &qwenpawBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, qodercloud, traecli, grok, qwen, qwenpaw)", agentType)
 	}
 }
 
@@ -424,6 +474,7 @@ var launchHeaders = map[string]string{
 	"pi":          "pi (json mode)",
 	"qoder":       "qodercli --acp",
 	"qoderclicn":  "qoderclicn --acp",
+	"qodercloud":  "Qoder Cloud API v1",
 	"traecli":     "traecli acp serve",
 	"grok":        "grok agent stdio",
 	"qwen":        "qwen -p (stream-json)",

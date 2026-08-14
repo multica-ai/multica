@@ -929,6 +929,130 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
 }
 
+func TestNormalizeDaemonRuntimeMode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input string
+		want  string
+		ok    bool
+	}{
+		{input: "", want: "local", ok: true},
+		{input: " LOCAL ", want: "local", ok: true},
+		{input: "cloud", want: "cloud", ok: true},
+		{input: "remote", ok: false},
+		{input: "cloud-prod", ok: false},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.input, func(t *testing.T) {
+			t.Parallel()
+			got, ok := normalizeDaemonRuntimeMode(test.input)
+			if got != test.want || ok != test.ok {
+				t.Fatalf("normalizeDaemonRuntimeMode(%q) = (%q, %v), want (%q, %v)", test.input, got, ok, test.want, test.ok)
+			}
+		})
+	}
+}
+
+func TestDaemonRegisterRejectsInvalidRuntimeModeBeforeDatabaseAccess(t *testing.T) {
+	workspaceID := "00000000-0000-0000-0000-000000000001"
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": workspaceID,
+		"daemon_id":    "invalid-runtime-mode",
+		"runtimes": []map[string]any{
+			{"name": "invalid", "type": "qodercloud", "runtime_mode": "remote"},
+		},
+	}, workspaceID, "invalid-runtime-mode")
+	w := httptest.NewRecorder()
+
+	(&Handler{}).DaemonRegister(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "runtime_mode must be local or cloud") {
+		t.Fatalf("unexpected response: %s", w.Body.String())
+	}
+}
+
+func TestDaemonRegisterRejectsCloudModeForLocalProvider(t *testing.T) {
+	workspaceID := "00000000-0000-0000-0000-000000000001"
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": workspaceID,
+		"daemon_id":    "invalid-cloud-provider",
+		"runtimes": []map[string]any{
+			{"name": "Claude", "type": "claude", "runtime_mode": "cloud"},
+		},
+	}, workspaceID, "invalid-cloud-provider")
+	w := httptest.NewRecorder()
+
+	(&Handler{}).DaemonRegister(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "only supported for qodercloud") {
+		t.Fatalf("unexpected response: %s", w.Body.String())
+	}
+}
+
+func TestDaemonRegisterPersistsQoderCloudRuntimeModeWithoutSecrets(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	const registrationSecret = "pat-must-not-land-in-runtime-metadata"
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-daemon-qoder-cloud",
+		"device_name":  "test-device",
+		"runtimes": []map[string]any{
+			{
+				"name":         "Qoder Cloud",
+				"type":         "qodercloud",
+				"version":      "cloud-api-v1",
+				"status":       "online",
+				"runtime_mode": "cloud",
+				"pat":          registrationSecret,
+			},
+		},
+	}, testWorkspaceID, "test-daemon-qoder-cloud")
+
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	runtimes, ok := resp["runtimes"].([]any)
+	if !ok || len(runtimes) != 1 {
+		t.Fatalf("runtimes = %#v", resp["runtimes"])
+	}
+	runtime := runtimes[0].(map[string]any)
+	runtimeID := runtime["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	if runtime["runtime_mode"] != "cloud" {
+		t.Fatalf("response runtime_mode = %#v, want cloud", runtime["runtime_mode"])
+	}
+
+	var runtimeMode string
+	var metadata []byte
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT runtime_mode, metadata FROM agent_runtime WHERE id = $1
+	`, runtimeID).Scan(&runtimeMode, &metadata); err != nil {
+		t.Fatalf("read registered runtime: %v", err)
+	}
+	if runtimeMode != "cloud" {
+		t.Fatalf("stored runtime_mode = %q, want cloud", runtimeMode)
+	}
+	if strings.Contains(string(metadata), registrationSecret) || strings.Contains(string(metadata), "pat") {
+		t.Fatalf("runtime metadata retained secret material: %s", metadata)
+	}
+}
+
 func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
