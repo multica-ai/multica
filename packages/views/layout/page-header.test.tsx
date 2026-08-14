@@ -113,6 +113,33 @@ describe("PageHeader leading spacing", () => {
     expect(container.querySelector("header")).toHaveClass("gap-2");
   });
 
+  it("leads the collection header on the same gutter as the issues header", () => {
+    const collection = renderWithI18n(
+      <SidebarProvider>
+        <CollectionPageHeader icon={Zap} title="Autopilot" count={2} />
+      </SidebarProvider>,
+    );
+    const issues = renderWithI18n(
+      <SidebarProvider>
+        <PageHeader className="gap-2">
+          <ListTodo className="h-4 w-4" />
+          <h1>Issues</h1>
+        </PageHeader>
+      </SidebarProvider>,
+    );
+
+    // Whatever the base gutter is, a collection page must not override it —
+    // that 4px is what made the Autopilot title sit right of Issues at every
+    // width, including >= xl where the nav trigger is not even rendered.
+    const gutterOf = (r: { container: HTMLElement }) =>
+      Array.from(r.container.querySelector("header")!.classList).find((c) =>
+        /^px-/.test(c),
+      );
+
+    expect(gutterOf(collection)).toBe("px-4");
+    expect(gutterOf(collection)).toBe(gutterOf(issues));
+  });
+
   it("leads the collection header on the same gap as the issues header", () => {
     const collection = renderWithI18n(
       <SidebarProvider>

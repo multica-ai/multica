@@ -300,7 +300,7 @@ export function SquadDetailPage() {
 function SquadDetailSkeleton() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="px-5">
+      <PageHeader>
         <Skeleton className="h-5 w-48" />
       </PageHeader>
       <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
@@ -742,7 +742,7 @@ function SquadDetailInspector({
   return (
     <aside className="flex w-full flex-col rounded-lg border bg-background md:h-full md:min-h-0 md:overflow-y-auto">
       {/* Identity */}
-      <div className="flex flex-col gap-3 border-b px-5 pb-5 pt-5">
+      <div className="flex flex-col gap-3 border-b px-4 pb-5 pt-5">
         {canManage ? (
           <>
             <AvatarUploadControl
@@ -780,7 +780,7 @@ function SquadDetailInspector({
       </div>
 
       {/* Details — read-only */}
-      <div className="border-b px-5 py-4">
+      <div className="border-b px-4 py-4">
         <div className="mb-1 -mx-2 px-2 text-micro font-medium uppercase tracking-wider text-muted-foreground">
           {t(($) => $.inspector.details_section)}
         </div>

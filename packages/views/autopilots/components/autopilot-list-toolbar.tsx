@@ -191,7 +191,7 @@ export function AutopilotListToolbar({
   );
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
+    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">
       {/* Left: scope buttons + result count. Scope is the promoted status
           dimension (it does NOT appear in the filter dropdown). No search
           box: scope buttons already partition the (small) set, so search

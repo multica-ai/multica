@@ -460,7 +460,7 @@ export function DashboardPage() {
       onValueChange={handleTabChange}
       className="flex h-full min-h-0 flex-col gap-0"
     >
-      <PageHeader className="gap-2 px-5">
+      <PageHeader className="gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" />
           <h1 className="text-body font-medium">{t(($) => $.title)}</h1>
@@ -495,7 +495,7 @@ export function DashboardPage() {
           switching on the left, page-scoped filters on the right. Both tabs
           share the range and project filter, which is why the filters live
           here and not inside a tab. */}
-      <div className="h-12 shrink-0 overflow-x-auto border-b px-5 [-webkit-overflow-scrolling:touch]">
+      <div className="h-12 shrink-0 overflow-x-auto border-b px-4 [-webkit-overflow-scrolling:touch]">
         <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
           <TabsList variant="line" className="gap-0 p-0 group-data-horizontal/tabs:h-full">
             <TabsTrigger

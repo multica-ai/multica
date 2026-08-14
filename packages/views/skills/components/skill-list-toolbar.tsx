@@ -176,7 +176,7 @@ export function SkillListToolbar({
   );
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
+    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">
       {/* Left: name search + result count. The count only appears while
           search/filters narrow the list — in the idle state it would just
           duplicate the total already shown in the page header. Below md the

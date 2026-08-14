@@ -570,7 +570,7 @@ function DetailHeader({
 
 function BackHeader({ paths, title }: { paths: string; title: string }) {
   return (
-    <PageHeader className="px-5">
+    <PageHeader>
       <div className="flex flex-1 items-center gap-2">
         <AppLink
           href={paths}

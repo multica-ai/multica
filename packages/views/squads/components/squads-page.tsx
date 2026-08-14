@@ -499,7 +499,7 @@ function SquadListToolbar({
   const sortLabel = SORT_LABELS[sortField];
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
+    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">
       <div className="flex min-w-0 items-center gap-2">
         <div className="hidden shrink-0 items-center gap-1 md:flex">
           {SQUAD_SCOPES.map((s) => (
