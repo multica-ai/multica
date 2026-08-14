@@ -276,11 +276,13 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `avatar <id>` | Upload an avatar | |
 | | `env get/set <agent-id>` | Read and write custom environment variables (owner and admin only) | |
 | | `skills list/set/add <agent-id>` | Manage attached skills | `--skill-ids` (`set` replaces the full list, `add` appends) |
+| | `mcp list/add/enable/disable/remove <agent-id>` | Assign workspace MCP servers to this agent | Take the server id from `workspace mcp list`. A library entry does nothing until it is added here; `disable` stops sending it without dropping the assignment |
 | `autopilot` | `list/get/create/update/delete` | Manage automations | `create`: `--title`, `--agent`, `--mode` (all required), `--priority`, `--project`, `--subscriber` (repeatable) |
 | | `trigger <id>` | Trigger a run manually | |
 | | `runs <id>` | View run history | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Manage schedule and webhook triggers | |
 | `workspace` | `list/get/create/update/switch` | Manage workspaces; `switch` sets the current profile's default workspace | |
+| | `mcp list/add/update/remove` | Manage the workspace's MCP server library | Writes are owner/admin. A server added here is assigned to no agent — give it to one with `multica agent mcp add`. `list` shows names and transports only; the stored entry is write-only and never returned. `--server-config-file` / `--server-config-stdin` keep tokens out of shell history |
 | | `member list/invite <email>` | View members, send invites | `invite`: `--role` (member or admin, default member) |
 | `repo` | `list/add/remove/checkout` | Manage workspace repositories and check them out locally | `--url` (repeatable); `checkout`: `--ref` |
 | `skill` | `list/get/create/update/delete` | Manage skills | |
@@ -317,8 +319,24 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | `update` | — | Update the CLI to the latest version | |
 | `version` | — | Print version information | `--output` (`text` or `json`) |
 
+## Driving Multica from another coding agent
+
+If most of your work already happens inside Codex, Claude Code, or Cursor, you can
+operate Multica from there instead of switching to a terminal. The
+[Multica CLI skill](https://github.com/multica-ai/multica-cli) teaches those agents
+to drive the commands on this page safely: reading issues and comment threads
+without burning tokens, writing comments through a file, and handling the side
+effects that mentions, status changes, and assignments carry.
+
+It runs entirely through your authenticated CLI and grants no access of its own —
+permissions still come from your login, selected profile, and workspace. It requires
+CLI v0.4.26 or newer. The repository README covers installation for the Claude Code
+plugin marketplace, the Codex skill installer, Cursor, and any other tool that loads
+Markdown instructions.
+
 ## Next steps
 
+- [Multica CLI skill](https://github.com/multica-ai/multica-cli) — operate Multica from Codex, Claude Code, or Cursor.
 - [Authentication and tokens](/auth-tokens) — creating, renewing, and revoking PATs.
 - [Troubleshooting](/troubleshooting) — diagnosing command errors and tasks that never start.
 - [Create and configure an agent](/agents-create) — the full semantics of every `agent create` field.

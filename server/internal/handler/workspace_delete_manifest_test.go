@@ -80,6 +80,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"lark_outbound_card_message":        workspaceDelete,
 	"lark_user_binding":                 workspaceDelete,
 	"member":                            workspaceDelete,
+	"agent_mcp_server":                  workspaceDelete,
+	"workspace_mcp_server":              workspaceDelete,
 	"notification_preference":           workspaceDelete,
 	"personal_access_token":             workspaceDeleteKeep,
 	"pinned_item":                       workspaceDelete,

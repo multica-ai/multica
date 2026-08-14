@@ -294,6 +294,32 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.26",
+        date: "2026-08-14",
+        title: "DeepSeek Harness 运行时、看板拖拽平移、Inbox 归档快捷键",
+        changes: [],
+        features: [
+          "你现在可以用 DeepSeek Harness 跑智能体了。",
+          "在看板空白处按住拖动，就能左右平移看板。",
+          "在 Inbox 里按 E 就能归档当前打开的那条通知。",
+          "自托管时可以把任务工作目录放到你指定的磁盘上。",
+        ],
+        improvements: [
+          "各个页面的标题和工具栏现在都对齐同一条左边线。",
+          "Codex 首轮启动慢时，你可以给它更长的等待时间。",
+          "指派 Issue 或改状态时，可以选择不启动新任务。",
+        ],
+        fixes: [
+          "跑不起来的智能体 CLI 会直接告诉你怎么修好。",
+          "别人的私有运行时不会再被 API 或 CLI 拿去用。",
+          "任务残留不会再让整个目录里的 multica 命令失效。",
+          "用 Volta 或 Vite Plus 装的智能体现在能被识别了。",
+          "对话里最后一条回复和输入框之间的间距回来了。",
+          "深色模式下当前标签页不再出现暗色方块，悬停圆角也完整了。",
+          "智能体不会再为同一个 Issue 重复开一份工作。",
+        ],
+      },
+      {
         version: "0.4.25",
         date: "2026-08-13",
         title: "本地目录并行模式、钉钉分群路由、技能一键更新",

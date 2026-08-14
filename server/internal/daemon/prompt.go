@@ -95,9 +95,9 @@ func buildActiveSiblingRunsBlock(currentIssueID string, runs []ActiveSiblingRunD
 	}
 	var b strings.Builder
 	b.WriteString("## Active sibling runs\n\n")
-	b.WriteString("This agent has other in-flight issue tasks. They may be intentional, but before starting overlapping code or PR work, check for a claim or handoff in the current target issue's comment history")
-	fmt.Fprintf(&b, " with `multica issue comment list %s --roots-only --summary --compact --output json`", currentIssueID)
-	b.WriteString(", then inspect any relevant sibling task with the concrete `run-messages` command below. If another run assigned this issue, coordinate with that work instead of independently opening a second PR. If you only need to claim ownership or change status for work already underway, use `--no-start` on `multica issue assign`, `multica issue update`, or `multica issue status`.\n\n")
+	b.WriteString("This agent has other in-flight issue tasks. Before starting overlapping code or PR work, check this issue's comment history for a claim or handoff")
+	fmt.Fprintf(&b, " (`multica issue comment list %s --roots-only --summary --compact --output json`)", currentIssueID)
+	b.WriteString(" and inspect relevant siblings with the `run-messages` commands below — coordinate with existing work instead of opening a second PR. For writes that only record ownership or status of work already underway, use `--no-start` on `multica issue assign`/`update`/`status`.\n\n")
 	for _, run := range runs {
 		issueLabel := run.IssueIdentifier
 		if issueLabel == "" {

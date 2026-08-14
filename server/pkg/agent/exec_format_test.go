@@ -179,3 +179,58 @@ func TestExplainExecErrorMatchesRealExecFailure(t *testing.T) {
 		t.Errorf("a real launch failure should carry the repair command: %v", ExplainExecError(err))
 	}
 }
+
+// The repair command is meant to be pasted into a terminal on the machine that
+// reported it, so it has to be written for THAT machine's shell. Windows was
+// getting POSIX syntax: `cd 'C:\\...' && node install.cjs` is wrong twice over
+// — cmd.exe treats the quotes as literal characters, and PowerShell 5.1, which
+// still ships with Windows, has no `&&`.
+func TestRepairCommandIsWrittenForTheHostShell(t *testing.T) {
+	posix := repairCommand("/usr/lib/node_modules/@anthropic-ai/claude-code", "node install.cjs", shellBash)
+	if posix != "cd '/usr/lib/node_modules/@anthropic-ai/claude-code' && node install.cjs" {
+		t.Errorf("posix repair = %q", posix)
+	}
+
+	windows := repairCommand(`C:\Program Files\nodejs\node_modules\@anthropic-ai\claude-code`, "node install.cjs", shellPowerShell)
+	want := "Set-Location 'C:\\Program Files\\nodejs\\node_modules\\@anthropic-ai\\claude-code'\nnode install.cjs"
+	if windows != want {
+		t.Errorf("windows repair =\n%q\nwant\n%q", windows, want)
+	}
+	// No `&&` anywhere: PowerShell 5.1 would reject the whole line.
+	if strings.Contains(windows, "&&") {
+		t.Errorf("windows repair uses &&, which PowerShell 5.1 cannot run: %q", windows)
+	}
+}
+
+// Paths with a quote in them are rare and catastrophic: the pasted command
+// silently targets a different directory.
+func TestRepairCommandQuotesPathsPerShell(t *testing.T) {
+	if got := repairCommand("/home/it's mine/pkg", "node install.cjs", shellBash); got != `cd '/home/it'\''s mine/pkg' && node install.cjs` {
+		t.Errorf("posix quoting = %q", got)
+	}
+	if got := repairCommand(`C:\Users\it's mine\pkg`, "node install.cjs", shellPowerShell); got != "Set-Location 'C:\\Users\\it''s mine\\pkg'\nnode install.cjs" {
+		t.Errorf("powershell quoting = %q", got)
+	}
+}
+
+// The shell travels with the command so whoever renders it can label the code
+// block truthfully instead of guessing.
+func TestExecFormatRepairReportsItsShell(t *testing.T) {
+	_, execPath := writePlaceholderPackage(t, "@anthropic-ai/claude-code", "node install.cjs")
+
+	repair, ok := execFormatRepairForShell(execPath, shellPowerShell)
+	if !ok {
+		t.Fatal("expected a repair for a staged npm package")
+	}
+	if repair.Shell != shellPowerShell {
+		t.Errorf("repair shell = %q, want %q", repair.Shell, shellPowerShell)
+	}
+	if !strings.HasPrefix(repair.Command, "Set-Location ") {
+		t.Errorf("repair command is not PowerShell: %q", repair.Command)
+	}
+	// And the host default still resolves to something coherent.
+	host, ok := ExecFormatRepairFor(execPath)
+	if !ok || host.Shell == "" || host.Command == "" {
+		t.Errorf("host repair is incomplete: %+v", host)
+	}
+}

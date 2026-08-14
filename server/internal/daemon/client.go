@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -789,10 +790,32 @@ func (c *Client) GetTaskGCCheck(ctx context.Context, taskID string) (*TaskGCStat
 	return &resp, nil
 }
 
-func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {
-	return c.postJSON(ctx, "/api/daemon/deregister", map[string]any{
-		"runtime_ids": runtimeIDs,
-	}, nil)
+// RuntimeOfflineCodeNotExecutable marks a runtime taken offline because the OS
+// refuses to execute its agent CLI. It is the one deregistration cause that no
+// amount of waiting fixes, which is what the server needs to know: work for an
+// offline machine may queue until the machine returns, but work for this one
+// must be refused with an explanation (MUL-6164).
+const RuntimeOfflineCodeNotExecutable = "not_executable"
+
+// RuntimeOfflineReason is why a runtime went offline, in the form clients can
+// act on: a stable code they switch on and localize, and the command that
+// repairs the install. Prose stays in Detail for logs — never as the thing a
+// client parses.
+type RuntimeOfflineReason struct {
+	Code   string                  `json:"code"`
+	Detail string                  `json:"detail,omitempty"`
+	Repair *agent.ExecFormatRepair `json:"repair,omitempty"`
+}
+
+// Deregister takes runtimes offline. reasons is optional and keyed by runtime
+// id: a daemon shutting down has nothing to explain, while one that condemned a
+// broken CLI does.
+func (c *Client) Deregister(ctx context.Context, runtimeIDs []string, reasons map[string]RuntimeOfflineReason) error {
+	body := map[string]any{"runtime_ids": runtimeIDs}
+	if len(reasons) > 0 {
+		body["offline_reasons"] = reasons
+	}
+	return c.postJSON(ctx, "/api/daemon/deregister", body, nil)
 }
 
 // RegisterResponse holds the server's response to a daemon registration.

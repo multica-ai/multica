@@ -163,6 +163,28 @@
       "start_date": "開始日"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "このワークスペースの MCP サーバーライブラリ。ここに追加してもどのエージェントにも割り当てられません。エージェントの所有者が各エージェントの MCP タブで割り当て、エージェントごとにオン/オフを切り替えます。",
+    "servers_title": "共有サーバー",
+    "write_only_note": "保存された設定は書き込み専用です — url、コマンド、ヘッダー、環境変数は二度と表示されないため、サーバーの編集は設定の置き換えになります。名前の変更は安全です。割り当ては維持されます。",
+    "add_server": "サーバーを追加",
+    "edit_server": "サーバーを編集",
+    "remove_server": "サーバーを削除",
+    "empty_title": "共有 MCP サーバーはありません",
+    "empty_description": "まずここにサーバーを追加し、使用するエージェントの MCP タブから割り当ててください。",
+    "disabled_badge": "無効",
+    "admin_only_note": "共有 MCP サーバーを変更できるのはワークスペースの owner と admin のみです。",
+    "delete_title": "共有サーバーを削除しますか？",
+    "delete_description": "{{name}} はライブラリからも、割り当てられている全エージェントからも削除され、各エージェントの次のタスクから反映されます。",
+    "delete_confirm": "削除",
+    "cancel": "キャンセル",
+    "added_toast": "共有 MCP サーバーを追加しました",
+    "updated_toast": "共有 MCP サーバーを更新しました",
+    "removed_toast": "共有 MCP サーバーを削除しました",
+    "save_failed_toast": "共有 MCP サーバーを保存できませんでした",
+    "remove_failed_toast": "共有 MCP サーバーを削除できませんでした"
+  },
   "page": {
     "title": "設定",
     "my_account": "マイアカウント",
@@ -185,6 +207,7 @@
       "properties": "プロパティ",
       "quick_actions": "クイックアクション",
     "plugins": "Plugins",
+    "mcp": "MCP",
     "billing": "請求とプラン"
     }
   },

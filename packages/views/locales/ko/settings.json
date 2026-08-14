@@ -163,6 +163,28 @@
       "start_date": "시작일"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "이 워크스페이스의 MCP 서버 라이브러리입니다. 여기에 추가해도 어떤 에이전트에도 할당되지 않으며, 에이전트 소유자가 해당 에이전트의 MCP 탭에서 할당하고 에이전트별로 켜고 끌 수 있습니다.",
+    "servers_title": "공유 서버",
+    "write_only_note": "저장된 설정은 쓰기 전용이라 url, 명령, 헤더, 환경 변수는 다시 표시되지 않으므로 서버 편집은 설정을 교체하는 것입니다. 이름 변경은 안전하며 할당은 유지됩니다.",
+    "add_server": "서버 추가",
+    "edit_server": "서버 편집",
+    "remove_server": "서버 제거",
+    "empty_title": "공유 MCP 서버가 없습니다",
+    "empty_description": "여기에 서버를 추가한 뒤, 사용할 에이전트의 MCP 탭에서 할당하세요.",
+    "disabled_badge": "비활성화됨",
+    "admin_only_note": "공유 MCP 서버는 워크스페이스 owner와 admin만 변경할 수 있습니다.",
+    "delete_title": "공유 서버를 제거할까요?",
+    "delete_description": "{{name}}은(는) 라이브러리와 할당된 모든 에이전트에서 제거되며 각 에이전트의 다음 작업부터 적용됩니다.",
+    "delete_confirm": "제거",
+    "cancel": "취소",
+    "added_toast": "공유 MCP 서버를 추가했습니다",
+    "updated_toast": "공유 MCP 서버를 업데이트했습니다",
+    "removed_toast": "공유 MCP 서버를 제거했습니다",
+    "save_failed_toast": "공유 MCP 서버를 저장하지 못했습니다",
+    "remove_failed_toast": "공유 MCP 서버를 제거하지 못했습니다"
+  },
   "page": {
     "title": "설정",
     "my_account": "내 계정",
@@ -185,6 +207,7 @@
       "properties": "속성",
       "quick_actions": "퀵 액션",
     "plugins": "Plugins",
+    "mcp": "MCP",
     "billing": "결제 및 요금제"
     }
   },

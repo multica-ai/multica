@@ -406,7 +406,13 @@ type Daemon struct {
 	// Guarded by d.mu — deliberately the same lock every register-response
 	// apply takes, which is what totally orders "record the verdict" against
 	// "apply a response" instead of merely narrowing the window between them.
-	demotedProviders map[string]demotionRecord // provider -> the rejected version and when it was rejected
+	demotedProviders map[string]demotionRecord // provider -> the evidence that condemned it and when
+
+	// notExecutableSince is when each provider was FIRST observed to be
+	// unrunnable, for the confirmation window in confirmNotExecutable. Entries
+	// are cleared by the round that finds the provider healthy again. Guarded
+	// by d.mu.
+	notExecutableSince map[string]time.Time
 
 	// demotionSeq is a monotonic counter stamped onto each demotion record so a
 	// probe round can tell whether its evidence predates a verdict.
@@ -1478,12 +1484,12 @@ func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *Register
 // ID rotation is still handled: when the response returns a different ID for a
 // built-in provider the workspace already had, that specific old ID is replaced
 // rather than accumulating a duplicate heartbeat.
-func (d *Daemon) mergeBuiltinRegisterResponse(workspaceID string, resp *RegisterResponse) (newIDs, rejectedIDs []string, ok bool) {
+func (d *Daemon) mergeBuiltinRegisterResponse(workspaceID string, resp *RegisterResponse) (newIDs []string, revived revivedRuntimes, ok bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	ws, exists := d.workspaces[workspaceID]
 	if !exists {
-		return nil, nil, false
+		return nil, revivedRuntimes{}, false
 	}
 
 	// Index the workspace's current built-in runtimes by provider so a rotated
@@ -1510,7 +1516,7 @@ func (d *Daemon) mergeBuiltinRegisterResponse(workspaceID string, resp *Register
 		// guard in applyRegisterResponseInPlace. The caller deregisters the row
 		// the server upserted back.
 		if d.providerDemotedLocked(rt.Provider) {
-			rejectedIDs = append(rejectedIDs, rt.ID)
+			revived.add(d, rt.ID, rt.Provider)
 			continue
 		}
 		d.runtimeIndex[rt.ID] = rt
@@ -1543,7 +1549,7 @@ func (d *Daemon) mergeBuiltinRegisterResponse(workspaceID string, resp *Register
 	if len(resp.Settings) > 0 {
 		ws.settings = resp.Settings
 	}
-	return newIDs, rejectedIDs, true
+	return newIDs, revived, true
 }
 
 // providerDemotedLocked reports whether provider is currently held below the
@@ -1555,16 +1561,79 @@ func (d *Daemon) providerDemotedLocked(provider string) bool {
 	return demoted
 }
 
-// demotionRecord is a confirmed below-minimum verdict: the version that was
-// rejected, plus the demotionSeq tick that establishes when it was reached.
-type demotionRecord struct {
-	version string
-	seq     uint64
+// demotedOfflineReasonLocked returns the structured cause recorded for a
+// demoted provider, or nil when the verdict carries none (below-minimum) or the
+// provider is not demoted. Callers must hold d.mu.
+func (d *Daemon) demotedOfflineReasonLocked(provider string) *RuntimeOfflineReason {
+	record, demoted := d.demotedProviders[provider]
+	if !demoted {
+		return nil
+	}
+	return record.offline
 }
 
-// markProvidersDemoted records a CONFIRMED below-minimum verdict so a register
-// response still in flight cannot revive the provider. Callers must hold d.mu.
-func (d *Daemon) markProvidersDemotedLocked(providers map[string]string) {
+// revivedRuntimes are the rows a register response brought back for a provider
+// the daemon has already condemned: the ids to take offline again, and the
+// cause to re-attach per row because that register's upsert just overwrote it.
+type revivedRuntimes struct {
+	ids     []string
+	reasons map[string]RuntimeOfflineReason
+}
+
+// reasonsFor narrows the causes to the rows actually being deregistered. The
+// caller re-checks tracking first — a row that came back legitimately in the
+// meantime is dropped from the list — and sending a cause for a row we are no
+// longer taking offline would attach it to a healthy runtime.
+func (r revivedRuntimes) reasonsFor(runtimeIDs []string) map[string]RuntimeOfflineReason {
+	if len(r.reasons) == 0 {
+		return nil
+	}
+	out := make(map[string]RuntimeOfflineReason, len(runtimeIDs))
+	for _, id := range runtimeIDs {
+		if reason, ok := r.reasons[id]; ok {
+			out[id] = reason
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// add records one revived row. Callers must hold d.mu (it reads the demotion
+// record), and it is a no-op for a provider with no structured cause — those
+// rows still need deregistering, they just have nothing to re-attach.
+func (r *revivedRuntimes) add(d *Daemon, runtimeID, provider string) {
+	r.ids = append(r.ids, runtimeID)
+	reason := d.demotedOfflineReasonLocked(provider)
+	if reason == nil {
+		return
+	}
+	if r.reasons == nil {
+		r.reasons = make(map[string]RuntimeOfflineReason, 1)
+	}
+	r.reasons[runtimeID] = *reason
+}
+
+// demotionRecord is a confirmed verdict about the binary on disk: the evidence
+// that produced it (the rejected version, or why the CLI could not be run),
+// plus the demotionSeq tick that establishes when it was reached.
+//
+// offline is the structured half, kept because the server can lose it. A
+// register sent before the verdict still upserts the runtime row, and that
+// upsert overwrites metadata wholesale — so the reason this daemon just stored
+// is gone, and the cleanup that takes the revived row offline again has to
+// re-attach it. Without that the server ends up "offline, no reason", which
+// downgrades the refusal back to "wait for the machine" (MUL-6164).
+type demotionRecord struct {
+	evidence string
+	offline  *RuntimeOfflineReason
+	seq      uint64
+}
+
+// markProvidersDemoted records a CONFIRMED verdict so a register response still
+// in flight cannot revive the provider. Callers must hold d.mu.
+func (d *Daemon) markProvidersDemotedLocked(providers map[string]runtimeVerdict) {
 	if len(providers) == 0 {
 		return
 	}
@@ -1574,9 +1643,53 @@ func (d *Daemon) markProvidersDemotedLocked(providers map[string]string) {
 	// One tick per verdict batch: every record written here is newer than any
 	// probe round that snapshotted the counter before this call.
 	d.demotionSeq++
-	for provider, version := range providers {
-		d.demotedProviders[provider] = demotionRecord{version: version, seq: d.demotionSeq}
+	for provider, verdict := range providers {
+		d.demotedProviders[provider] = demotionRecord{
+			evidence: verdict.reason,
+			offline:  verdict.offline,
+			seq:      d.demotionSeq,
+		}
 	}
+}
+
+// notExecutableConfirmWindow is how long a "the OS will not run this file"
+// verdict must keep reproducing before the daemon acts on it.
+//
+// The verdict itself is deterministic, but the file is not: the repair we tell
+// users to run (`node <pkg>/install.cjs`) overwrites the bin entry in place, and
+// a probe that lands mid-copy sees a truncated file. Requiring a second sighting
+// this far apart makes an overwrite window impossible to mistake for a broken
+// install, and costs a genuinely broken install only one extra probe round.
+// A var so tests can collapse the wait.
+var notExecutableConfirmWindow = time.Minute
+
+// confirmNotExecutable records that this round found provider unrunnable and
+// reports whether the verdict is now old enough to act on.
+//
+// The first sighting only starts the clock. Two sightings are required no matter
+// how the window is configured, so concurrent probe rounds — four callers reach
+// detectBuiltinRuntimes — cannot combine into an instant demotion.
+func (d *Daemon) confirmNotExecutable(provider string, now time.Time) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	first, seen := d.notExecutableSince[provider]
+	if !seen {
+		if d.notExecutableSince == nil {
+			d.notExecutableSince = make(map[string]time.Time, 1)
+		}
+		d.notExecutableSince[provider] = now
+		return false
+	}
+	return now.Sub(first) >= notExecutableConfirmWindow
+}
+
+// clearNotExecutable forgets the pending verdict for a provider that probed OK,
+// so a later unrelated failure starts its own confirmation window instead of
+// inheriting a stale one.
+func (d *Daemon) clearNotExecutable(provider string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.notExecutableSince, provider)
 }
 
 // demotionSeqSnapshot returns the current demotion counter. A probe round takes
@@ -1614,13 +1727,13 @@ func (d *Daemon) clearProviderDemotions(providers []string, sampledAfter uint64)
 			continue
 		}
 		if record.seq > sampledAfter {
-			d.logger.Info("keeping below-minimum hold: this probe round started before the verdict",
-				"provider", provider, "rejected_version", record.version)
+			d.logger.Info("keeping demotion hold: this probe round started before the verdict",
+				"provider", provider, "verdict", record.evidence)
 			continue
 		}
 		delete(d.demotedProviders, provider)
-		d.logger.Info("agent CLI is back at or above the minimum supported version",
-			"provider", provider, "rejected_version", record.version)
+		d.logger.Info("agent CLI is usable again",
+			"provider", provider, "previous_verdict", record.evidence)
 	}
 }
 
@@ -1679,7 +1792,7 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 		// runtime_gone trigger only deleted its own. Eagerly mark those offline,
 		// matching the drift path, instead of leaving them claimable until the
 		// stale-heartbeat sweep.
-		d.deregisterDroppedRuntimes(ctx, workspaceID, droppedIDs, "runtime_gone recovery")
+		d.deregisterDroppedRuntimes(ctx, workspaceID, droppedIDs, "runtime_gone recovery", nil)
 		return nil
 	})
 	if err != nil {
@@ -1917,7 +2030,7 @@ func (d *Daemon) deregisterRuntimes() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := d.client.Deregister(ctx, runtimeIDs); err != nil {
+	if err := d.client.Deregister(ctx, runtimeIDs, nil); err != nil {
 		d.logger.Warn("failed to deregister runtimes on shutdown", "error", err)
 	} else {
 		d.logger.Info("deregistered runtimes", "count", len(runtimeIDs))
@@ -2056,24 +2169,66 @@ var runtimeVersionProbeRetryDelay = 500 * time.Millisecond
 // Overridable for tests.
 var runtimeVersionProbeRetryWindow = time.Second
 
-// builtinProbeVerdict distinguishes the two ways a provider can fail its probe,
+// builtinProbeVerdict distinguishes the ways a provider can fail its probe,
 // which callers must treat differently.
 //
 // "Could not read a version" is transient by construction — the CLI was busy,
 // mid-upgrade, or fork/exec hiccuped — so the right response is to leave
-// whatever is registered alone and try again. "Read a version and it is below
-// the minimum supported one" is a confirmed verdict about a binary that is on
-// disk right now, and leaving it registered means the daemon keeps handing it
-// work it cannot run correctly. Collapsing both into one bool made the second
-// case indistinguishable from a hiccup, which is what let a downgraded CLI keep
-// claiming tasks.
+// whatever is registered alone and try again. The other two are confirmed
+// verdicts about a binary that is on disk right now, and leaving either
+// registered means the daemon keeps handing work to a CLI it has already proven
+// it cannot use: "read a version and it is below the minimum supported one",
+// and "the OS refuses to execute the file at all". Collapsing these into one
+// bool made a confirmed verdict indistinguishable from a hiccup, which is what
+// let a downgraded CLI keep claiming tasks.
 type builtinProbeVerdict int
 
 const (
 	builtinProbeOK builtinProbeVerdict = iota
 	builtinProbeUnavailable
 	builtinProbeBelowMinimum
+	// builtinProbeNotExecutable: the file resolved, but the OS rejected it as
+	// not a runnable program (an npm placeholder stub whose postinstall was
+	// blocked is the case in the field — MUL-6164). Deterministic in the same
+	// sense as below-minimum: the same bytes will be refused every time until
+	// someone reinstalls, so retrying is not what fixes it.
+	builtinProbeNotExecutable
 )
+
+// runtimeVerdict is one provider's confirmed verdict: the human reason that
+// goes to /health and the daemon log, plus — when the cause is one the user has
+// to act on — the structured record the server stores on the runtime row.
+//
+// The two halves are deliberately separate. The reason is prose for an operator
+// reading logs; offline is a stable code plus a repair command for clients,
+// which localize their own sentence around it. dispatch/reason.go's rule is
+// that a reason code is decided at its source and never reverse-engineered from
+// a human-readable string, and this is that source.
+type runtimeVerdict struct {
+	reason  string
+	offline *RuntimeOfflineReason
+}
+
+// newRuntimeVerdict pairs a probe verdict with what the server needs to know
+// about it. Only a verdict the user must repair carries an offline reason: a
+// below-minimum CLI keeps today's behaviour (the runtime goes offline and work
+// queues) because changing when THAT blocks a trigger is a separate product
+// decision from this one.
+//
+// execPath is the pinned entry point, which is the right path for this verdict:
+// a file the OS refuses to execute is present, so the self-heal that would have
+// re-resolved a vanished path never runs, and the probe failed on this exact
+// file.
+func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string) runtimeVerdict {
+	if verdict != builtinProbeNotExecutable {
+		return runtimeVerdict{reason: reason}
+	}
+	offline := &RuntimeOfflineReason{Code: RuntimeOfflineCodeNotExecutable, Detail: reason}
+	if repair, ok := agent.ExecFormatRepairFor(execPath); ok {
+		offline.Repair = &repair
+	}
+	return runtimeVerdict{reason: reason, offline: offline}
+}
 
 // probeBuiltinRuntime resolves and version-detects one built-in provider,
 // retrying a fast failure up to runtimeVersionProbeAttempts times. The verdict
@@ -2192,6 +2347,18 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 		d.logger.Debug("agent version detected", "name", name, "version", version, "path", resolved.Path)
 		return version, "", builtinProbeOK
 	}
+	// The OS refusing to execute the file is not a failed probe, it is a
+	// finding: the CLI is installed, resolvable, and unrunnable. Report it as
+	// its own verdict so the caller can take the runtime offline instead of
+	// keeping it online for a binary that cannot start (MUL-6164). The
+	// diagnosis attached in pkg/agent rides along as the reason, so /health
+	// carries the repair command and not just the errno.
+	if agent.IsExecFormatError(lastErr) {
+		d.logger.Warn("skip registering runtime: agent CLI is not executable on this machine",
+			"name", name, "attempts", attempts, "error", lastErr)
+		return "", fmt.Sprintf("agent CLI is not executable: %v", lastErr), builtinProbeNotExecutable
+	}
+
 	d.logger.Warn("skip registering runtime", "name", name, "attempts", attempts, "error", lastErr)
 	reason := "version detection failed"
 	if lastErr != nil {
@@ -2225,8 +2392,8 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 // batch of workspaces at once calls this ONCE and passes the payload to
 // registerRuntimesForWorkspaceBatch for each workspace (MUL-5225).
 //
-// The second return value is THIS round's below-minimum verdicts, provider to
-// the version that was read and rejected. It is returned rather than read back
+// The second return value is THIS round's confirmed verdicts, provider to the
+// evidence against it. It is returned rather than read back
 // out of skippedAgents because that pair is a diagnostic snapshot of whichever
 // round published last: four different goroutines call this (the discovery
 // loop, the workspace sync, a runtime_gone re-register, a profile drift
@@ -2242,7 +2409,7 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 // payload because the probe failed, which is transient — tearing a working
 // runtime down over it is exactly what the unavailable/below-minimum verdict
 // split exists to prevent. Only a below-minimum verdict may demote.
-func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string, map[string]string, map[string]string) {
+func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string, map[string]runtimeVerdict, map[string]string) {
 	type detected struct {
 		name    string
 		version string
@@ -2255,7 +2422,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 		mu          sync.Mutex
 		results     []detected
 		skipped     = map[string]string{}
-		belowMin    = map[string]string{}
+		demotable   = map[string]runtimeVerdict{}
 		unavailable = map[string]string{}
 		g           errgroup.Group
 	)
@@ -2265,16 +2432,25 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 		g.Go(func() error {
 			version, reason, verdict := d.probeBuiltinRuntime(ctx, name, entry)
 			if verdict != builtinProbeOK {
+				// A not-executable verdict is deterministic, but the file can be
+				// unreadable for a moment while an installer overwrites it in
+				// place — which is exactly the repair we are telling users to
+				// run. Demote only once the verdict has survived a second probe
+				// a confirmation window later; until then it is treated as
+				// transient, which costs one more round and nothing else.
+				demote := verdict == builtinProbeBelowMinimum ||
+					(verdict == builtinProbeNotExecutable && d.confirmNotExecutable(name, time.Now()))
 				mu.Lock()
 				skipped[name] = reason
-				if verdict == builtinProbeBelowMinimum {
-					belowMin[name] = version
+				if demote {
+					demotable[name] = newRuntimeVerdict(verdict, reason, entry.Path)
 				} else {
 					unavailable[name] = reason
 				}
 				mu.Unlock()
 				return nil
 			}
+			d.clearNotExecutable(name)
 			mu.Lock()
 			results = append(results, detected{name: name, version: version})
 			mu.Unlock()
@@ -2320,7 +2496,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 			"status":  "online",
 		})
 	}
-	return runtimes, belowMin, unavailable
+	return runtimes, demotable, unavailable
 }
 
 // cloneRuntimeEntries deep-copies a registration runtime payload. Callers that
@@ -2370,29 +2546,30 @@ func (d *Daemon) registerRuntimesForWorkspaceLocked(ctx context.Context, workspa
 // transient, so dropping the rows would tear a working runtime down over one
 // failed probe.
 //
-// Below-minimum is the half that is easy to get wrong, because the verdict IS
-// confirmed — a version was read and rejected. What is missing on these paths is
-// not the evidence but the authority to act on it. Taking a runtime offline for
-// being too old requires two things neither the runtime_gone recovery nor the
-// profile-drift refresh has: the claim barrier, so the rows are never pulled out
-// from under a task that is still executing, and a seq-stamped hold, so a
-// register sent before the verdict cannot revive the provider when it lands.
-// demoteBelowMinimumRuntimes has both and is the single owner of the demotion.
-// A path that drops the rows without them reaches the same verdict and leaves no
-// record that it did, so the next in-flight response quietly undoes it.
+// Demotable is the half that is easy to get wrong, because the verdict IS
+// confirmed — a version was read and rejected, or the OS refused to run the
+// file. What is missing on these paths is not the evidence but the authority to
+// act on it. Taking a runtime offline requires two things neither the
+// runtime_gone recovery nor the profile-drift refresh has: the claim barrier, so
+// the rows are never pulled out from under a task that is still executing, and a
+// seq-stamped hold, so a register sent before the verdict cannot revive the
+// provider when it lands. demoteUnusableRuntimes has both and is the single
+// owner of the demotion. A path that drops the rows without them reaches the
+// same verdict and leaves no record that it did, so the next in-flight response
+// quietly undoes it.
 //
-// Preserving here costs at most one refresh tick of a too-old CLI staying
+// Preserving here costs at most one refresh tick of an unusable CLI staying
 // online, which is the pre-demotion status quo rather than a new exposure.
-func preserveProvidersFromProbe(unavailable, belowMinimum map[string]string) map[string]string {
-	if len(belowMinimum) == 0 {
+func preserveProvidersFromProbe(unavailable map[string]string, demotable map[string]runtimeVerdict) map[string]string {
+	if len(demotable) == 0 {
 		return unavailable
 	}
-	preserve := make(map[string]string, len(unavailable)+len(belowMinimum))
+	preserve := make(map[string]string, len(unavailable)+len(demotable))
 	for provider, reason := range unavailable {
 		preserve[provider] = reason
 	}
-	for provider, version := range belowMinimum {
-		preserve[provider] = "below minimum supported version: " + version
+	for provider, verdict := range demotable {
+		preserve[provider] = verdict.reason
 	}
 	return preserve
 }
@@ -3080,7 +3257,7 @@ func (d *Daemon) applyProfileDriftRegistration(ctx context.Context, workspaceID 
 	// so the runtime list reflects reality immediately; a 5xx blip here is
 	// fine because the server's stale-heartbeat sweep will pick them up
 	// within ~150 s as a backstop.
-	d.deregisterDroppedRuntimes(ctx, workspaceID, droppedIDs, "profile drift")
+	d.deregisterDroppedRuntimes(ctx, workspaceID, droppedIDs, "profile drift", nil)
 
 	// Intentionally NO RecoverOrphans here: see method doc.
 	return nil
@@ -3144,7 +3321,7 @@ func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceI
 		"workspace_id", workspaceID, "deregistered_runtime_ids", dropped,
 		"preserved_providers", preserveProviders)
 
-	d.deregisterDroppedRuntimes(ctx, workspaceID, dropped, "zero-runtime convergence")
+	d.deregisterDroppedRuntimes(ctx, workspaceID, dropped, "zero-runtime convergence", nil)
 	d.notifyRuntimeSetChanged()
 	return nil
 }
@@ -3483,10 +3660,10 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			// below-minimum must not be the way that provider comes back.
 			d.mu.Lock()
 			runtimeIDs = make([]string, 0, len(resp.Runtimes))
-			var revivedIDs []string
+			var revived revivedRuntimes
 			for _, rt := range resp.Runtimes {
 				if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
-					revivedIDs = append(revivedIDs, rt.ID)
+					revived.add(d, rt.ID, rt.Provider)
 					continue
 				}
 				runtimeIDs = append(runtimeIDs, rt.ID)
@@ -3525,7 +3702,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			// them offline before anything else touches this workspace — and never
 			// RecoverOrphans them below: that reports tasks for a runtime the
 			// daemon does not track and will never claim for.
-			d.deregisterRevivedRuntimes(ctx, id, revivedIDs)
+			d.deregisterRevivedRuntimes(ctx, id, revived)
 			return nil
 		})
 		if err != nil {

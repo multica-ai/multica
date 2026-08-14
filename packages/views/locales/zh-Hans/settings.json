@@ -163,6 +163,28 @@
       "start_date": "开始日期"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "本工作区的 MCP 服务库。在这里添加不会分配给任何智能体——由智能体的负责人在该智能体自己的 MCP 页里分配，并可按智能体单独开关。",
+    "servers_title": "共享服务",
+    "write_only_note": "已保存的配置是只写的——URL、命令、请求头和环境变量不会再次展示，因此编辑一个服务等于整条替换它的配置。改名是安全的：已分配的智能体不受影响。",
+    "add_server": "添加服务",
+    "edit_server": "编辑服务",
+    "remove_server": "移除服务",
+    "empty_title": "还没有共享的 MCP 服务",
+    "empty_description": "先在这里添加服务，再到需要用它的智能体的 MCP 页里分配。",
+    "disabled_badge": "已禁用",
+    "admin_only_note": "只有工作区 owner 和 admin 可以修改共享的 MCP 服务。",
+    "delete_title": "移除共享服务？",
+    "delete_description": "{{name}} 将从服务库以及所有已分配的智能体上移除，在它们的下一个任务起生效。",
+    "delete_confirm": "移除",
+    "cancel": "取消",
+    "added_toast": "已添加共享 MCP 服务",
+    "updated_toast": "已更新共享 MCP 服务",
+    "removed_toast": "已移除共享 MCP 服务",
+    "save_failed_toast": "共享 MCP 服务保存失败",
+    "remove_failed_toast": "共享 MCP 服务移除失败"
+  },
   "page": {
     "title": "设置",
     "my_account": "我的账号",
@@ -185,6 +207,7 @@
       "properties": "属性",
       "quick_actions": "快捷操作",
     "plugins": "Plugins",
+    "mcp": "MCP",
     "billing": "账单与套餐"
     }
   },

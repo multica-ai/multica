@@ -2220,12 +2220,15 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
 	}
-	if !agent.RuntimeID.Valid {
-		writeAgentUnavailable(w, "agent has no runtime", ReasonAgentRuntimeRequired)
+	// Quick-create needs the agent to run NOW, so any non-ready verdict refuses
+	// — but with the verdict's own code, so "CLI cannot run" no longer arrives
+	// as "runtime is offline" and sends the user to reconnect a machine that is
+	// already connected (MUL-6164).
+	if verdict, err := service.AgentReadiness(r.Context(), h.Queries, agent); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check agent runtime")
 		return
-	}
-	if !h.isRuntimeOnline(r.Context(), agent.RuntimeID) {
-		writeAgentUnavailable(w, "agent's runtime is offline", ReasonRuntimeOffline)
+	} else if !verdict.Ready() {
+		writeAgentUnavailable(w, verdict.Detail, verdict.Reason)
 		return
 	}
 
@@ -3341,11 +3344,24 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 	}
 
 	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil {
 		return false
 	}
-
-	return true
+	// The shared verdict, not a local re-check (service.AgentReadiness). Only a
+	// BLOCKED verdict stops the enqueue: an offline machine still queues,
+	// because that work runs when the machine comes back.
+	verdict, err := service.AgentReadiness(ctx, h.Queries, agent)
+	if err != nil || !verdict.Blocked() {
+		return err == nil
+	}
+	// Assignment has no response the assigner reads for this outcome, so a
+	// refusal that needs human repair leaves the explanation on the issue
+	// (MUL-6164). An unbound agent keeps its silent skip: the agent list
+	// already shows it has no runtime, and nothing about it is new here.
+	if verdict.Reason == ReasonRuntimeUnusable {
+		h.noteRuntimeUnusable(ctx, issue, agent, verdict)
+	}
+	return false
 }
 
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {

@@ -204,27 +204,23 @@ on it. These are the contracts, not advice:
 
 ## Claim ownership without duplicating a run
 
-Assigning an active issue to an agent normally starts a run. When an agent is
-already doing the work and only needs to record ownership, suppress that side
-effect explicitly:
+Assigning an active issue to an agent normally starts a run. When the work is
+already underway and the write only records ownership or progress, pass
+`--no-start` on every command in that flow — suppressing the assignment alone
+does not suppress a later status update:
 
 ```bash
 multica issue assign <issue-id> --to-id <agent-id> --no-start
-# Or when assignment is part of a wider update:
 multica issue update <issue-id> --assignee-id <agent-id> --no-start
-# Keep a status change in the same ownership-only flow from starting a run:
 multica issue status <issue-id> in_progress --no-start
 ```
 
-Before self-assigning, inspect the target issue's comment history for an existing
-claim, then use the concrete `run-messages` commands in any `## Active sibling
-runs` block to inspect work already underway. Apply `--no-start` to every
-assignment or status change that belongs to that ownership-only flow; suppressing
-the assignment alone does not suppress a later status update. The server also
-suppresses a trusted self-assignment when the exact target `(issue, agent)` pair
-already has a non-terminal task. It deliberately does not block a same-agent
-handoff to a fresh issue: cross-issue serial and batch workflows keep their
-existing start behavior.
+Before self-assigning, check the target issue's comment history for an existing
+claim and any `## Active sibling runs` block (its `run-messages` commands show
+work in flight). The server also suppresses a trusted self-assignment when the
+exact target `(issue, agent)` pair already has a non-terminal task, but it
+deliberately keeps same-agent handoffs to a fresh issue starting runs: cross-issue
+serial chains and triage batches rely on that.
 
 ## Sub-issues: `todo` starts work now, `backlog` parks it
 

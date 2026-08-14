@@ -1160,6 +1160,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// are admin-gated below).
 					r.Get("/runtime-profiles", h.ListRuntimeProfiles)
 					r.Get("/runtime-profiles/{profileId}", h.GetRuntimeProfile)
+					// The workspace MCP library — member-visible so an agent
+					// owner can see what is available to add to their agent.
+					// The payload is names and transports only; the stored
+					// entries are write-only.
+					r.Get("/mcp-servers", h.ListWorkspaceMcpServers)
 					r.Get("/plugins", h.ListPlugins)
 					r.Get("/plugins/private", h.ListPrivatePlugins)
 					r.Get("/plugins/private/{pluginRef}", h.GetPrivatePluginStatus)
@@ -1177,6 +1182,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					// Curating the shared MCP library is an admin action.
+					// Creating an entry binds it to no agent; an agent owner
+					// adds it to their own agent through the agent routes.
+					r.Post("/mcp-servers", h.CreateWorkspaceMcpServer)
+					r.Put("/mcp-servers/{serverId}", h.UpdateWorkspaceMcpServer)
+					r.Delete("/mcp-servers/{serverId}", h.DeleteWorkspaceMcpServer)
 					// Custom runtime profile mutations (admin-only).
 					r.Post("/runtime-profiles", h.CreateRuntimeProfile)
 					r.Patch("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
@@ -1598,6 +1609,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/skills/{skillId}/enabled", h.SetAgentSkillEnabled)
 					r.Put("/runtime-skills/enabled", h.SetAgentRuntimeSkillEnabled)
 					r.Delete("/skills/{skillId}", h.RemoveAgentSkill)
+					// Workspace MCP servers assigned to this agent. Mirrors
+					// the skills routes above: a library entry does nothing
+					// until it is added here, and the binding carries its own
+					// enabled toggle.
+					r.Get("/mcp-servers", h.ListAgentMcpServers)
+					r.Post("/mcp-servers", h.AddAgentMcpServer)
+					r.Put("/mcp-servers/{serverId}/enabled", h.SetAgentMcpServerEnabled)
+					r.Delete("/mcp-servers/{serverId}", h.RemoveAgentMcpServer)
 					// Dedicated env-management endpoint. Admits the agent
 					// owner or a workspace owner/admin; agent actors are
 					// denied. Every reveal / write is audited to
