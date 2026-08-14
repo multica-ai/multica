@@ -125,7 +125,7 @@ function JoinInner() {
               )}
               <p className="flex items-center justify-center gap-2 text-center text-body text-muted-foreground">
                 <span>You&apos;ll join this workspace as</span>
-                <Badge variant={info.role === "admin" ? "destructive" : "outline"}>
+                <Badge variant="outline">
                   {info.role === "admin" ? "Administrator" : "Member"}
                 </Badge>
               </p>
