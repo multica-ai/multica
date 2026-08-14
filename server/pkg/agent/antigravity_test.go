@@ -512,6 +512,58 @@ func TestAntigravityModelError(t *testing.T) {
 	}
 }
 
+// TestAntigravityModelErrorCatalogTrust catches catalog format drift turning
+// model validation into a total outage. Only catalogs made entirely of
+// non-empty, valid UTF-8 IDs without control characters are authoritative.
+func TestAntigravityModelErrorCatalogTrust(t *testing.T) {
+	t.Parallel()
+
+	trusted := []Model{
+		{ID: "gemini-3.7-flash-high", Label: "Gemini 3.7 Flash (High)", Provider: "antigravity"},
+		{ID: "claude-opus-4-6-thinking", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
+	}
+
+	if err := antigravityModelError("gemini-3.7-flash-high", trusted); err != nil {
+		t.Fatalf("trusted catalog rejected an exact ID hit: %v", err)
+	}
+	err := antigravityModelError("not-a-real-model", trusted)
+	if err == nil {
+		t.Fatal("trusted catalog should reject an unknown model")
+	}
+	if !strings.Contains(err.Error(), "gemini-3.7-flash-high") {
+		t.Errorf("error should list model IDs: %v", err)
+	}
+	if strings.Contains(err.Error(), "Gemini 3.7 Flash (High)") {
+		t.Errorf("error should not present display labels as submit-ready IDs: %v", err)
+	}
+
+	untrusted := map[string][]Model{
+		"empty ID": {
+			{ID: "", Label: "Gemini 3.7 Flash (High)", Provider: "antigravity"},
+		},
+		"tab-joined legacy row": {
+			{ID: "gemini-3.7-flash-high\tGemini 3.7 Flash (High)", Label: "Gemini 3.7 Flash (High)", Provider: "antigravity"},
+		},
+		"control character": {
+			{ID: "gemini-3.7-flash-high\x00", Label: "Gemini 3.7 Flash (High)", Provider: "antigravity"},
+		},
+		"invalid UTF-8": {
+			{ID: string([]byte{0xff}), Label: "invalid", Provider: "antigravity"},
+		},
+		"mixed trusted and malformed rows": {
+			trusted[0],
+			{ID: "claude-opus-4-6-thinking\nClaude Opus 4.6 (Thinking)", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
+		},
+	}
+	for name, catalog := range untrusted {
+		t.Run(name, func(t *testing.T) {
+			if err := antigravityModelError("not-a-real-model", catalog); err != nil {
+				t.Errorf("untrusted catalog should fail open, got: %v", err)
+			}
+		})
+	}
+}
+
 // seedAntigravityTranscript writes a transcript.jsonl under appDataDir for the
 // given conversation id, at the real path agy uses
 // (<appDataDir>/brain/<cid>/.system_generated/logs/transcript.jsonl).

@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // antigravityBackend implements Backend by spawning Google's Antigravity CLI
@@ -469,14 +471,15 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 
 // antigravityModelError returns an actionable error when `model` is non-empty
 // and definitively absent from `available` (the `agy models` catalog); it
-// returns nil otherwise. An empty `available` means discovery couldn't produce
-// a catalog (agy missing, transient failure) — we fail OPEN there and let agy
-// resolve the value, so a discovery hiccup never blocks a run. The match is
+// returns nil otherwise. An empty or structurally untrustworthy `available`
+// means discovery couldn't produce a reliable catalog (agy missing, transient
+// failure, or output format drift) — we fail OPEN there and let agy resolve the
+// value, so a discovery hiccup never blocks a run. The match is
 // exact because agy's --model wants the precise display string; a near-miss
 // (extra space, dropped suffix) is correctly rejected since agy would silently
 // no-op on it anyway.
 func antigravityModelError(model string, available []Model) error {
-	if model == "" || len(available) == 0 {
+	if model == "" || !antigravityModelCatalogTrusted(available) {
 		return nil
 	}
 	ids := make([]string, 0, len(available))
@@ -490,6 +493,26 @@ func antigravityModelError(model string, available []Model) error {
 		"antigravity model %q is not available from `agy models`; pick one of: %s",
 		model, strings.Join(ids, ", "),
 	)
+}
+
+// antigravityModelCatalogTrusted reports whether every discovered model has an
+// ID shape that is safe to treat as authoritative. Labels are intentionally
+// ignored: they are display text and may contain spaces.
+func antigravityModelCatalogTrusted(available []Model) bool {
+	if len(available) == 0 {
+		return false
+	}
+	for _, model := range available {
+		if model.ID == "" || !utf8.ValidString(model.ID) {
+			return false
+		}
+		for _, r := range model.ID {
+			if unicode.IsControl(r) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // antigravityNoCapPrintTimeout is the --print-timeout value used when the daemon
