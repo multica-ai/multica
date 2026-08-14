@@ -14,10 +14,8 @@ import (
 // zcode is deliberately absent: zcode-app-cli ships a non-standard, drifting
 // version string (e.g. 3.7.5-11, 3.7.6-12, CLI 0.16.x) while its flag surface
 // is stable, so a parsed semver floor is an unreliable compatibility signal.
-// Instead zcode is capability-gated on its --help output: a build advertising
-// --stream-json takes the streaming path; otherwise one advertising --json
-// takes the summary path; a build advertising neither is rejected at Execute
-// time. See zcodeSupportsStreamJSON / zcodeSupportsJSONSummary.
+// Instead the app-server backend fails closed at Execute time when the binary
+// does not support the `app-server` subcommand (see zcode_appserver.go).
 var MinVersions = map[string]string{
 	"claude":  "2.0.0",
 	"codex":   "0.100.0", // app-server --listen stdio:// added in 0.100.0

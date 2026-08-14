@@ -260,12 +260,11 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	}
 	// ZCode (`zcode`) is the zcode-cli terminal client for the ZCode Desktop
 	// agent runtime (an unofficial community client integration — Multica
-	// detects any zcode on PATH; it is not published by Multica). It runs
-	// headlessly via `zcode --prompt <text>`: a build that advertises
-	// --stream-json streams live events (the agent backend auto-detects this);
-	// otherwise the backend falls back to the universally-supported --json
-	// summary. Discovery probes any zcode the same way as every other CLI
-	// (PATH lookup + --version), independent of the streaming capability.
+	// detects any zcode on PATH; it is not published by Multica). It is driven
+	// headlessly via the native `zcode app-server` JSON-RPC session protocol
+	// (see server/pkg/agent/zcode_appserver.go). Discovery probes any zcode the
+	// same way as every other CLI (PATH lookup + --version), independent of the
+	// app-server capability.
 	// It takes no model env var: the model is fixed by ~/.zcode/cli/config.json
 	// (model.main), so ExecOptions.Model is ignored — see ModelSelectionSupported.
 	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode", ""); ok {
