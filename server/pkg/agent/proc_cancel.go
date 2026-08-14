@@ -51,15 +51,15 @@ func startAgentProcessGroupCancel(cmd *exec.Cmd, runCtx context.Context, procDon
 		case <-runCtx.Done():
 		}
 		if cmd.Process != nil {
-			signalProcessGroup(cmd.Process, syscall.SIGTERM)
+			signalProcessGroup(cmd, syscall.SIGTERM)
 			// Escalate to a group SIGKILL unless the WHOLE process group has
 			// exited within the grace window. This must key off the process
 			// group, not procDone: procDone only means cmd.Wait() returned for
 			// the leader, so a SIGTERM-ignoring descendant that does not hold
 			// the leader's stdout would let the leader exit, close procDone,
 			// and skip the SIGKILL — leaking exactly the orphan this targets.
-			if !waitProcessGroupGone(cmd.Process, grace) {
-				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+			if !waitProcessGroupGone(cmd, grace) {
+				signalProcessGroup(cmd, syscall.SIGKILL)
 			}
 		}
 		if stdout != nil {
