@@ -39,6 +39,7 @@ Multica 当前会检测以下命令：
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 官方站](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/docs/cli) |
+| ZCode | `zcode-acp-server` | [ZCode](https://zcode.z.ai) |
 
 "受支持"表示 Multica 能够调用对应 CLI，不代表 Multica 会替你提供该工具的账号、订阅或模型额度。
 
@@ -51,6 +52,7 @@ Multica 当前会检测以下命令：
 使用 QwenPaw 时，请在 QwenPaw 自身的配置里选择模型服务和模型。Multica 无法在执行时覆盖 QwenPaw 的模型。
 
 使用 MiniMax Code 时，请安装受支持的 Node.js 版本（`>=22.19 <23` 或 `>=24 <27`），并运行 `npm install --global @minimax-ai/code@latest`。全局 npm 安装会把 `mcode` 放入 npm 的全局可执行目录；如果 `command -v mcode` 或 `Get-Command mcode` 找不到它，请将该目录加入 `PATH`。然后运行 `mcode login`。模型由 MiniMax Code 管理，Multica 无法通过 ACP 覆盖它。
+使用 ZCode 时,请安装 ZCode 桌面版并在应用内登录一次,再安装社区 ACP 桥 [zcode-acp-server](https://github.com/william0wang/zcode-acp)(`npm i -g zcode-acp-server`,需要包含 william0wang/zcode-acp#38 修复的版本)。桥会驱动桌面版安装的官方运行时并复用其登录凭据,无需单独登录。
 
 使用 DeepSeek Harness 时，请先安装 Node.js 20+ 并运行 `npm install -g @deepseek-ai/dsh`，然后为它安装 Multica 运行时 profile（`dsh plugin --profile multica add <bundle>`）。守护进程只有在 `dsh --profile multica --probe` 成功后才注册 DeepSeek Harness。启动守护进程前请设置 `DEEPSEEK_API_KEY`（或在 dsh 自身设置中保存）。
 

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -1905,5 +1906,48 @@ func TestDiscoveryCacheKeyIsolatesByExecutable(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Errorf("expected 2 underlying calls (one per executable), got %d", calls)
+	}
+}
+
+// TestACPModelOptionCurrentValue covers the reader the zcode discovery
+// annotate uses to attach the per-model reasoning vocabulary to the model it
+// actually belongs to: camelCase and snake_case option lists, a missing
+// model option, and malformed JSON all behave.
+func TestACPModelOptionCurrentValue(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "camelCase options",
+			raw:  `{"configOptions":[{"id":"thought","currentValue":"max"},{"id":"model","currentValue":"builtin:bigmodel-coding-plan\\GLM-5.3"}]}`,
+			want: `builtin:bigmodel-coding-plan\GLM-5.3`,
+		},
+		{
+			name: "snake_case options",
+			raw:  `{"config_options":[{"id":"model","current_value":"glm-5.1"}]}`,
+			want: "",
+		},
+		{
+			name: "no model option",
+			raw:  `{"configOptions":[{"id":"thought","currentValue":"max"}]}`,
+			want: "",
+		},
+		{
+			name: "malformed json",
+			raw:  `{not json`,
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := acpModelOptionCurrentValue(json.RawMessage(tc.raw)); got != tc.want {
+				t.Fatalf("acpModelOptionCurrentValue(%s) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
 	}
 }
