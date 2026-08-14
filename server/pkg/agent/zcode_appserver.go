@@ -52,6 +52,11 @@ func zcodeTurnPollInterval() time.Duration {
 
 var errZcodeProcessExited = errors.New("zcode app-server process exited")
 
+// zcodeModelUnavailableCode is ZCode's restore-warning rejection: session/send
+// fails with it when a resumed session's stored model is not in the runtime's
+// current model catalog. The session is unusable for further turns.
+const zcodeModelUnavailableCode = -32031
+
 // zcodeRPCError is a JSON-RPC error returned by the app-server. It carries the
 // method that failed so callers can tell a transport failure apart from a
 // protocol-level rejection.
@@ -587,37 +592,35 @@ func (b *zcodeBackend) runTurn(ctx context.Context, prompt string, opts ExecOpti
 		return
 	}
 
-	if _, err := proc.request(runCtx, "session/subscribe", map[string]any{
-		"sessionId": sessionID, "deliveryKind": "desktop-continuous",
-	}); err != nil {
-		resCh <- Result{Status: "failed", Error: withAgentStderr(fmt.Sprintf("zcode session/subscribe failed: %v", err), "zcode", proc.stderrTail())}
-		return
-	}
-
-	handler := proc.attachSession(sessionID)
-	defer proc.detachSession(sessionID)
-
 	// The caller's continuity notice is prepended only when a resume was
 	// expected but the backend landed on a fresh session (see ExecOptions).
 	input := prompt
 	if opts.ResumeExpected && !resumed {
 		input = opts.ResumeContinuityNotice + prompt
 	}
-	if _, err := proc.request(runCtx, "session/send", map[string]any{
-		"sessionId": sessionID, "content": input,
-	}); err != nil {
-		resCh <- Result{Status: "failed", Error: withAgentStderr(fmt.Sprintf("zcode session/send failed: %v", err), "zcode", proc.stderrTail())}
-		return
-	}
-	trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 
-	state := &zcodeTurnState{
-		usage:      map[string]TokenUsage{},
-		sessionID:  sessionID,
-		providerID: providerID,
-		modelID:    modelID,
+	status, out, errMsg, usage, rpcErr := b.runSessionTurn(runCtx, proc, sessionID, input, providerID, modelID, timeout, semanticInactivityTimeout, msgCh)
+
+	// ZCode rejects session/send with -32031 when the resumed session's stored
+	// model is not in its current workspace model catalog (a catalog-state
+	// mismatch on the resume path). The session is unusable for further turns,
+	// so abandon it and retry the turn once on a fresh session instead of
+	// failing the task.
+	if isZcodeModelUnavailable(rpcErr) {
+		b.cfg.Logger.Warn("zcode: resumed session's model unavailable (-32031); retrying on a fresh session",
+			"session_id", sessionID, "error", rpcErr)
+		zcodeCloseSession(proc, sessionID)
+		freshID, cerr := b.createFreshSession(runCtx, proc, providerID, modelID, handshakeTimeout, opts.Cwd)
+		if cerr == nil {
+			freshInput := prompt
+			if opts.ResumeExpected {
+				freshInput = opts.ResumeContinuityNotice + prompt
+			}
+			if s2, o2, e2, u2, r2 := b.runSessionTurn(runCtx, proc, freshID, freshInput, providerID, modelID, timeout, semanticInactivityTimeout, msgCh); r2 == nil {
+				sessionID, status, out, errMsg, usage = freshID, s2, o2, e2, u2
+			}
+		}
 	}
-	status, out, errMsg := b.consumeTurn(runCtx, proc, handler, state, timeout, semanticInactivityTimeout, msgCh)
 
 	b.cfg.Logger.Info("zcode turn finished", "pid", proc.pid(), "session_id", sessionID, "status", status, "duration", time.Since(startTime).Round(time.Millisecond).String())
 	resCh <- Result{
@@ -626,8 +629,53 @@ func (b *zcodeBackend) runTurn(ctx context.Context, prompt string, opts ExecOpti
 		Error:      errMsg,
 		DurationMs: time.Since(startTime).Milliseconds(),
 		SessionID:  sessionID,
-		Usage:      state.usage,
+		Usage:      usage,
 	}
+}
+
+// runSessionTurn subscribes to a session, sends one turn, and consumes its
+// events. It returns the send RPC error separately so callers can detect a
+// ZCode restore-warning rejection (-32031) and fall back to a fresh session.
+func (b *zcodeBackend) runSessionTurn(ctx context.Context, proc *zcodeClient, sessionID, input, providerID, modelID string, timeout, semanticInactivityTimeout time.Duration, msgCh chan<- Message) (status, out, errMsg string, usage map[string]TokenUsage, rpcErr *zcodeRPCError) {
+	if _, err := proc.request(ctx, "session/subscribe", map[string]any{
+		"sessionId": sessionID, "deliveryKind": "desktop-continuous",
+	}); err != nil {
+		return "failed", "", withAgentStderr(fmt.Sprintf("zcode session/subscribe failed: %v", err), "zcode", proc.stderrTail()), nil, nil
+	}
+	handler := proc.attachSession(sessionID)
+	defer proc.detachSession(sessionID)
+	if _, err := proc.request(ctx, "session/send", map[string]any{
+		"sessionId": sessionID, "content": input,
+	}); err != nil {
+		var rpc *zcodeRPCError
+		if errors.As(err, &rpc) {
+			return "failed", "", withAgentStderr(fmt.Sprintf("zcode session/send failed: %v", err), "zcode", proc.stderrTail()), nil, rpc
+		}
+		return "failed", "", withAgentStderr(fmt.Sprintf("zcode session/send failed: %v", err), "zcode", proc.stderrTail()), nil, nil
+	}
+	trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
+	state := &zcodeTurnState{
+		usage:      map[string]TokenUsage{},
+		sessionID:  sessionID,
+		providerID: providerID,
+		modelID:    modelID,
+	}
+	status, out, errMsg = b.consumeTurn(ctx, proc, handler, state, timeout, semanticInactivityTimeout, msgCh)
+	return status, out, errMsg, state.usage, nil
+}
+
+// isZcodeModelUnavailable reports whether err is the ZCode restore-warning
+// rejection thrown by session/send when a resumed session's stored model is
+// not in the runtime's current model catalog (-32031).
+func isZcodeModelUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var rpc *zcodeRPCError
+	if !errors.As(err, &rpc) || rpc == nil {
+		return false
+	}
+	return rpc.Code == zcodeModelUnavailableCode
 }
 
 // ensureSession creates a session in the shared app-server process, resuming
@@ -651,25 +699,44 @@ func (b *zcodeBackend) ensureSession(ctx context.Context, proc *zcodeClient, opt
 		}
 	}
 
+	sid, cerr := b.createFreshSession(ctx, proc, providerID, modelID, handshakeTimeout, opts.Cwd)
+	if cerr != nil {
+		return "", false, errors.New(withAgentStderr(fmt.Sprintf("zcode session/create failed: %v", cerr), "zcode", proc.stderrTail()))
+	}
+	return sid, false, nil
+}
+
+// createFreshSession creates a new session in the shared app-server process
+// with the resolved model and the daemon's workspace.
+func (b *zcodeBackend) createFreshSession(ctx context.Context, proc *zcodeClient, providerID, modelID string, handshakeTimeout time.Duration, cwd string) (string, error) {
 	hctx, hcancel := context.WithTimeout(ctx, handshakeTimeout)
 	defer hcancel()
 	resp, cerr := proc.request(hctx, "session/create", map[string]any{
 		"workspace": map[string]any{
-			"workspaceKey":  zcodeWorkspaceKey(opts.Cwd),
-			"workspacePath": opts.Cwd,
+			"workspaceKey":  zcodeWorkspaceKey(cwd),
+			"workspacePath": cwd,
 		},
 		"model":       map[string]any{"providerId": providerID, "modelId": modelID},
 		"mode":        "build",
 		"persistence": "immediate",
 	})
 	if cerr != nil {
-		return "", false, errors.New(withAgentStderr(fmt.Sprintf("zcode session/create failed: %v", cerr), "zcode", proc.stderrTail()))
+		return "", cerr
 	}
 	sid := zcodeResultSessionID(resp)
 	if sid == "" {
-		return "", false, fmt.Errorf("zcode session/create returned no session id")
+		return "", fmt.Errorf("zcode session/create returned no session id")
 	}
-	return sid, false, nil
+	return sid, nil
+}
+
+// zcodeCloseSession closes a session in the shared app-server process, freeing
+// its resources. Best-effort: a session rejected by -32031 is unusable and only
+// needs to be released, not driven to a clean stop.
+func zcodeCloseSession(proc *zcodeClient, sessionID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), zcodeStopTimeout)
+	defer cancel()
+	_, _ = proc.request(ctx, "session/close", map[string]any{"sessionId": sessionID})
 }
 
 // zcodeTurnState accumulates the live turn.

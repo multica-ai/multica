@@ -440,6 +440,72 @@ func TestZcodeExecuteTurnFailed(t *testing.T) {
 // TestZcodeExecuteRecoversCompletedFromPoll exercises the reliability fallback:
 // notifications are dropped but the turn completed internally; the session/read
 // poll recovers the terminal state and the response text.
+// TestZcodeExecuteFallsBackToFreshOnModelUnavailable covers ZCode's -32031
+// restore-warning rejection: a resumed session whose stored model is no longer
+// in the runtime's model catalog fails at session/send. The backend must
+// abandon that session, create a fresh one, and retry the turn once.
+func TestZcodeExecuteFallsBackToFreshOnModelUnavailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeZcodeAppServer(t, ""+
+		`read line`+"\n"+ // session/resume -> sess_bad
+		`echo '{"id":1,"result":{"session":{"sessionId":"sess_bad"}}}'`+"\n"+
+		`read line`+"\n"+ // session/subscribe (sess_bad)
+		`echo '{"id":2,"result":{"eventSeq":0,"events":[]}}'`+"\n"+
+		`read line`+"\n"+ // session/send (sess_bad) -> -32031
+		`echo '{"id":3,"error":{"code":-32031,"message":"历史任务使用的模型已不可用"}}'`+"\n"+
+		`read line`+"\n"+ // session/close (sess_bad)
+		`echo '{"id":4,"result":{"closed":true}}'`+"\n"+
+		`read line`+"\n"+ // session/create -> sess_fresh
+		`echo '{"id":5,"result":{"session":{"sessionId":"sess_fresh"}}}'`+"\n"+
+		`read line`+"\n"+ // session/subscribe (sess_fresh)
+		`echo '{"id":6,"result":{"eventSeq":0,"events":[]}}'`+"\n"+
+		`read line`+"\n"+ // session/send (sess_fresh) -> capture
+		`echo "$line" > "$0.send"`+"\n"+
+		`echo '{"id":7,"result":{"accepted":true,"sessionId":"sess_fresh"}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"turn.started","sessionId":"sess_fresh","payload":{}}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"turn.completed","sessionId":"sess_fresh","payload":{"response":"ok","usage":{}}}}'`+"\n"+
+		`while read line; do :; done`+"\n")
+
+	result, _ := executeFakeZcode(t, fakePath, Config{Logger: slog.Default(), RuntimeID: "rt-exec-32031"},
+		ExecOptions{
+			Model:                  "bigmodel/GLM-5.2",
+			ResumeSessionID:        "sess_bad",
+			ResumeExpected:         true,
+			ResumeContinuityNotice: "[continuity lost] ",
+		}, 10*time.Second)
+
+	if result.Status != "completed" {
+		t.Fatalf("expected completed via fresh fallback, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.SessionID != "sess_fresh" {
+		t.Fatalf("expected fresh session id sess_fresh, got %q", result.SessionID)
+	}
+
+	// The fresh turn must carry the continuity notice since the resume was
+	// rejected by -32031.
+	data, err := os.ReadFile(fakePath + ".send")
+	if err != nil {
+		t.Fatalf("read captured send line: %v", err)
+	}
+	var req struct {
+		Params struct {
+			SessionID string `json:"sessionId"`
+			Content   string `json:"content"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		t.Fatalf("parse send line %q: %v", data, err)
+	}
+	if req.Params.SessionID != "sess_fresh" {
+		t.Fatalf("fresh send targeted %q, want sess_fresh", req.Params.SessionID)
+	}
+	if !strings.HasPrefix(req.Params.Content, "[continuity lost] ") {
+		t.Fatalf("fresh send content %q missing continuity notice", req.Params.Content)
+	}
+}
+
 func TestZcodeExecuteRecoversCompletedFromPoll(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
