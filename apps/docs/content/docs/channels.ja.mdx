@@ -27,14 +27,14 @@ DingTalk と WeCom はコミュニティメンテナンスです。各リリー�
 
 WeCom が現在扱えるのはテキストメッセージのみです。音声、画像、ファイルのメッセージにはその旨の短い返信が返り、エージェントには渡されません。
 
-Qianwen/Quark S1 連携は実験的なプレビューです。Quark S1 上のプライベート Qianwen Skill からリクエストを送信し、完了結果を明示的にポーリングします。現時点ではメガネへの能動的な通知やプッシュには対応していません。
+実験的な [Qianwen Skill ブリッジ](/qianwen-skill-integration)を使って、Quark S1 上のプライベート Skill を接続できます。Web/Desktop 共通の Settings カードは Multica 側の installation を作成し、現在のユーザー自身の ID ペアリングを管理します。プロバイダー側の Skill とデバイス設定は別です。署名付き Tool で作業を送信し、1 件の結果をポーリングするか、紐づいたユーザーが閲覧できる未完了タスクを一覧できます。このブリッジは pull 専用で、実際の Qianwen Tool と S1 でのスモークテストが引き続き必要です。業界向けメッセージプッシュは別の企業向け商談・導入ルートであり、このポーリング連携の前提ではありません。一般販売の S1 上のプライベート Skill が対象になるかは未確認です。
 
 詳しい手順:
 
 - [Feishu / Lark Bot 連携](/lark-bot-integration)
 - [Slack Bot 連携](/slack-bot-integration)
 - [DingTalk Bot 連携](/dingtalk-bot-integration)
-- [Qianwen Skill ブリッジ（実験的）](/qianwen-skill-integration)
+- [Qianwen Skill ブリッジ（実験的）](/qianwen-skill-integration) — プライベート Quark S1 Skill のペアリング、署名付きリクエストの送信、結果のポーリング、現在のタスク一覧。デバイスへの能動的なプッシュはありません。
 
 ## メッセージが処理される流れ
 
