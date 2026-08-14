@@ -180,6 +180,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				dshHome = filepath.Join(home, ".dsh")
 			}
 			providerRoot = filepath.Join(dshHome, "skills")
+		case "prime":
+			providerRoot = filepath.Join(home, ".prime", "agent", "skills")
 		case "kiro":
 			providerRoot = filepath.Join(home, ".kiro", "skills")
 		case "qoder":

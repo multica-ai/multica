@@ -35,6 +35,7 @@ Multica は、普段使っている AI コーディングツールの代わり�
 | OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
 | Pi | `pi` | ✓ | — | `.pi/skills/` |
+| Prime Agent | `prime-agent` | ✓ | — | `.prime/agent/skills/` |
 | Oh-My-Pi | `omp` | ✓ | — | `.omp/skills/` |
 | Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
@@ -44,6 +45,8 @@ Multica は、普段使っている AI コーディングツールの代わり�
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 
 「Multica による MCP 管理」とは、エージェント設定に MCP server を入力し、Multica が実行前にその設定を対応ツールへ渡せることを意味します。そのツールにほかの MCP 設定方法がない、という意味ではありません。
+
+管理対象の Prime Agent は共有 `~/.prime/agent` を使用しません。Multica は runtime/agent ごとに sessions、settings、authentication、user skills 用の非公開永続ディレクトリを割り当てます。認証は各 managed agent で個別に設定するか、明示的にスコープを限定した環境変数を使用してください。tenant 間で共有する MCP settings や secrets を Prime の project state に保存しないでください。
 
 ## モデルの取得元
 

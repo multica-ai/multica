@@ -398,6 +398,8 @@ func skillsDirPath(workDir, provider string) string {
 		// DSH scans both .dsh/skills and .agents/skills. Prefer its branded
 		// project root so runtime-specific skills stay isolated.
 		return filepath.Join(workDir, ".dsh", "skills")
+	case "prime":
+		return filepath.Join(workDir, ".prime", "agent", "skills")
 	case "kiro":
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.

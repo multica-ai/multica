@@ -158,6 +158,7 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "TEMP", want: true},
 		{key: "CODEX_HOME", want: true},
 		{key: "REASONIX_STATE_HOME", want: true},
+		{key: "PRIME_AGENT_CODING_AGENT_DIR", want: true},
 		{key: "CURSOR_DATA_DIR", want: true},
 		{key: "cursor_data_dir", want: true},
 		{key: "CURSOR_MCP_AUTH_SOURCE", want: true},
@@ -204,6 +205,33 @@ func TestPrepareReasonixTaskStateHome(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
 		t.Fatalf("state home mode = %o, want 700", info.Mode().Perm())
+	}
+}
+
+func TestPreparePrimeAgentStateDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	got, err := preparePrimeAgentStateDir("work", "runtime-1", "agent_2")
+	if err != nil {
+		t.Fatalf("preparePrimeAgentStateDir: %v", err)
+	}
+	want := filepath.Join(home, ".multica", "profiles", "work", "prime-agent-state", "runtime-1", "agent_2")
+	if got != want {
+		t.Fatalf("state dir = %q, want %q", got, want)
+	}
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Fatalf("state dir mode = %o, want 700", info.Mode().Perm())
+	}
+	agentEnv := map[string]string{"PRIME_AGENT_CODING_AGENT_DIR": got}
+	layerCustomEnvAndHermesHome(agentEnv, map[string]string{"PRIME_AGENT_CODING_AGENT_DIR": "/shared/unsafe"}, "", nil)
+	if agentEnv["PRIME_AGENT_CODING_AGENT_DIR"] != got {
+		t.Fatal("custom env overrode daemon-owned Prime state directory")
 	}
 }
 

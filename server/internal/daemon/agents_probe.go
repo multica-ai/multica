@@ -173,6 +173,9 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_PI_PATH", "pi", "MULTICA_PI_MODEL"); ok {
 		agents["pi"] = e
 	}
+	if e, ok := probe("MULTICA_PRIME_PATH", "prime-agent", "MULTICA_PRIME_MODEL"); ok {
+		agents["prime"] = e
+	}
 	// Built-in runtime identities (e.g. omp) are derived from the descriptor
 	// registry in server/pkg/agent/builtin_runtimes.go. Each one probes a
 	// separate CLI independently so a host with both pi and omp installed gets

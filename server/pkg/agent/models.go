@@ -231,6 +231,11 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
 		return Catalog{Models: []Model{}}, nil
+	case "prime":
+		// Prime's catalog is auth-dependent and exposed only inside RPC. Keep
+		// manual provider/modelId entry enabled without starting a session for
+		// an administrative refresh.
+		return Catalog{Models: []Model{}}, nil
 	case "qwenpaw":
 		// QwenPaw's model selection is unsupported (session/set_model
 		// persists to agent scope, not session scope), so there is no
