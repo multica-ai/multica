@@ -124,7 +124,9 @@ git -C "$repo" config user.name "Worktree DB Test"
 git -C "$repo" config user.email "worktree-db-test@example.com"
 printf '.env.worktree\n' >"$repo/.gitignore"
 printf 'base\n' >"$repo/tracked.txt"
-git -C "$repo" add .gitignore tracked.txt
+mkdir -p "$repo/backend"
+printf 'nested\n' >"$repo/backend/tracked.txt"
+git -C "$repo" add .gitignore tracked.txt backend/tracked.txt
 git -C "$repo" commit -qm "test: initialize fixture"
 git -C "$repo" worktree add -q -b feature "$worktree"
 cat >"$worktree/.env.worktree" <<'EOF'
@@ -132,6 +134,19 @@ POSTGRES_DB=multica_worktree_456
 POSTGRES_USER=multica
 DATABASE_URL=postgres://multica:multica@localhost:5432/multica_worktree_456?sslmode=disable
 EOF
+
+: >"$docker_log"
+if printf 'y\n' | (cd "$worktree/backend" && PATH="$stub_dir:$PATH" DOCKER_LOG="$docker_log" \
+  bash "$root_dir/scripts/remove-worktree.sh" "$worktree") >"$output" 2>&1; then
+  fail "remove-worktree must refuse the current worktree from a nested directory"
+fi
+require_contains "$output" "Refusing to remove the current worktree from inside itself."
+if [ ! -d "$worktree" ]; then
+  fail "remove-worktree removed the current worktree from a nested directory"
+fi
+if [ -s "$docker_log" ]; then
+  fail "remove-worktree dropped the database before rejecting the current worktree"
+fi
 
 : >"$docker_log"
 if ! printf 'n\n' | (cd "$repo" && PATH="$stub_dir:$PATH" DOCKER_LOG="$docker_log" \

@@ -22,7 +22,8 @@ if [ ! -d "$candidate" ]; then
 fi
 
 target="$(cd "$candidate" && pwd -P)"
-current="$(pwd -P)"
+current_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+current="$(cd "$current_root" && pwd -P)"
 primary=""
 registered=0
 locked=0
