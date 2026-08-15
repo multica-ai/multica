@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { RuntimeProfile } from "@multica/core/types";
+import {
+  CREATABLE_RUNTIME_PROFILE_PROTOCOL_FAMILIES,
+  type RuntimeProfile,
+} from "@multica/core/types";
 import {
   buildRuntimeCatalog,
   formatCommandLine,
@@ -32,6 +35,23 @@ function profile(
 describe("buildRuntimeCatalog", () => {
   it("does not offer admission-disabled Prime profiles for creation", () => {
     expect(PROTOCOL_FAMILIES).not.toContain("prime");
+    expect(PROTOCOL_FAMILIES).toEqual(
+      CREATABLE_RUNTIME_PROFILE_PROTOCOL_FAMILIES,
+    );
+  });
+
+  it("keeps an existing Prime profile readable for diagnostics", () => {
+    const existing = profile(
+      "prime-existing",
+      "Existing Prime",
+      "2026-01-05T00:00:00Z",
+      false,
+    );
+    existing.protocol_family = "prime";
+    expect(buildRuntimeCatalog([existing]).customs[0]).toMatchObject({
+      kind: "custom",
+      protocolFamily: "prime",
+    });
   });
 
   it("keeps custom profiles separate from built-in protocol families", () => {

@@ -102,10 +102,9 @@ export type AgentRuntime = RuntimeDevice;
 // runtimes against it; those instances carry `profile_id` pointing back here.
 // ---------------------------------------------------------------------------
 
-// The fixed allow-list of base protocol families a custom runtime can wrap.
-// These are the only backends the create flow may select; the server rejects
-// anything else with 400. Kept as a const tuple so the union type is derived
-// from the single source of truth.
+// The readable/factory allow-list for persisted runtime profiles. It includes
+// temporarily admission-disabled families so existing rows remain typed and
+// diagnosable. Public creation uses the narrower list below.
 export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "claude",
   "codebuddy",
@@ -134,6 +133,44 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
 export type RuntimeProtocolFamily =
   (typeof RUNTIME_PROFILE_PROTOCOL_FAMILIES)[number];
 
+// Publicly creatable profile families. Keep this in lockstep with the Go
+// CreatableRuntimeProfileTypes list; Prime remains readable above but is not
+// creatable while its managed-runtime admission is disabled.
+export const CREATABLE_RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
+  "claude",
+  "codebuddy",
+  "codex",
+  "copilot",
+  "opencode",
+  "deveco",
+  "openclaw",
+  "hermes",
+  "pi",
+  "cursor",
+  "kimi",
+  "reasonix",
+  "dsh",
+  "kiro",
+  "antigravity",
+  "qoder",
+  "qoderclicn",
+  "traecli",
+  "grok",
+  "qwen",
+  "qwenpaw",
+] as const;
+
+export type CreatableRuntimeProtocolFamily =
+  (typeof CREATABLE_RUNTIME_PROFILE_PROTOCOL_FAMILIES)[number];
+
+export function isCreatableRuntimeProfileProtocolFamily(
+  family: RuntimeProtocolFamily,
+): family is CreatableRuntimeProtocolFamily {
+  return CREATABLE_RUNTIME_PROFILE_PROTOCOL_FAMILIES.some(
+    (candidate) => candidate === family,
+  );
+}
+
 // Profile visibility mirrors RuntimeVisibility's vocabulary but uses the
 // workspace/private axis the server documents for profiles.
 export type RuntimeProfileVisibility = "workspace" | "private";
@@ -158,7 +195,7 @@ export interface RuntimeProfile {
 // so the server applies its own defaults.
 export interface CreateRuntimeProfileRequest {
   display_name: string;
-  protocol_family: RuntimeProtocolFamily;
+  protocol_family: CreatableRuntimeProtocolFamily;
   command_name: string;
   description?: string;
   fixed_args?: string[];

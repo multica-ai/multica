@@ -62,9 +62,21 @@ func TestPrimeIsReadableButNotCreatableAsRuntimeProfile(t *testing.T) {
 	if IsCreatableRuntimeProfileType("prime") {
 		t.Fatal("admission-disabled Prime must not be publicly creatable")
 	}
+	wantCreatable := map[string]bool{}
+	for _, typ := range SupportedTypes {
+		if typ != "prime" {
+			wantCreatable[typ] = true
+		}
+	}
+	if len(CreatableRuntimeProfileTypes) != len(wantCreatable) {
+		t.Fatalf("creatable profile families=%d, want every supported family except Prime (%d)", len(CreatableRuntimeProfileTypes), len(wantCreatable))
+	}
 	for _, typ := range CreatableRuntimeProfileTypes {
 		if !IsSupportedType(typ) {
 			t.Fatalf("creatable runtime profile family %q is not readable/supported", typ)
+		}
+		if !wantCreatable[typ] {
+			t.Fatalf("unexpected creatable runtime profile family %q", typ)
 		}
 	}
 }

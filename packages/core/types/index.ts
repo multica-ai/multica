@@ -22,6 +22,7 @@ export type {
   RuntimeDevice,
   RuntimeProfile,
   RuntimeProtocolFamily,
+  CreatableRuntimeProtocolFamily,
   RuntimeProfileVisibility,
   CreateRuntimeProfileRequest,
   UpdateRuntimeProfileRequest,
@@ -75,7 +76,11 @@ export type {
   IssueUsageSummary,
   MikaBootstrapResponse,
 } from "./agent";
-export { RUNTIME_PROFILE_PROTOCOL_FAMILIES } from "./agent";
+export {
+  RUNTIME_PROFILE_PROTOCOL_FAMILIES,
+  CREATABLE_RUNTIME_PROFILE_PROTOCOL_FAMILIES,
+  isCreatableRuntimeProfileProtocolFamily,
+} from "./agent";
 export type { Workspace, WorkspaceRepo, WorkspaceMcpServer, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
 export type {
   PluginBinding,

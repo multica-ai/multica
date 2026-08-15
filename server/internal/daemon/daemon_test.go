@@ -1673,6 +1673,30 @@ func TestMergeUsage(t *testing.T) {
 	}
 }
 
+func TestTaskUsageEntriesPreservesCostOnlyAndFiltersOnlyTrulyEmpty(t *testing.T) {
+	entries := taskUsageEntries("prime", map[string]agent.TokenUsage{
+		"prime/cost-only": {CostUSDTicks: 42},
+		"prime/empty":     {},
+		"prime/tokens":    {InputTokens: 3},
+	})
+	if len(entries) != 2 {
+		t.Fatalf("usage entries = %+v, want cost-only and token entries", entries)
+	}
+	got := make(map[string]TaskUsageEntry, len(entries))
+	for _, entry := range entries {
+		got[entry.Model] = entry
+	}
+	if costOnly, ok := got["prime/cost-only"]; !ok || costOnly.Provider != "prime" || costOnly.CostUSDTicks != 42 || costOnly.InputTokens != 0 || costOnly.OutputTokens != 0 {
+		t.Fatalf("Prime-style cost-only usage was lost or changed: %+v", costOnly)
+	}
+	if _, ok := got["prime/empty"]; ok {
+		t.Fatal("truly empty usage entry was not filtered")
+	}
+	if got["prime/tokens"].InputTokens != 3 {
+		t.Fatalf("token usage changed: %+v", got["prime/tokens"])
+	}
+}
+
 // fakeBackend is a test double for agent.Backend that returns preconfigured
 // results. Each call to Execute pops the next entry from the results slice.
 type fakeBackend struct {
@@ -4505,6 +4529,7 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 	t.Parallel()
 
 	var callOrder []string
+	var reportedUsage atomic.Value
 	var mu sync.Mutex
 	recordCall := func(name string) {
 		mu.Lock()
@@ -4521,6 +4546,14 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/usage"):
 			recordCall("usage")
+			var body struct {
+				Usage []TaskUsageEntry `json:"usage"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode usage body: %v", err)
+			} else {
+				reportedUsage.Store(body.Usage)
+			}
 			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			recordCall("status")
@@ -4541,14 +4574,14 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 		cancelPollInterval: time.Hour, // effectively disable poll-cancel path; we want the post-run status check
 	}
 
-	// Inject a fake runner that returns a result with usage tokens, bypassing
-	// real agent process execution.
+	// Feed Prime-style cost-only agent usage through the same conversion helper
+	// runTask uses, then through handleTask's ReportTaskUsage path.
 	d.runner = taskRunnerFunc(func(_ context.Context, _ Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
 		return TaskResult{
 			Status: "completed",
-			Usage: []TaskUsageEntry{
-				{Provider: "anthropic", Model: "claude-opus-4-6", InputTokens: 100, OutputTokens: 50},
-			},
+			Usage: taskUsageEntries("prime", map[string]agent.TokenUsage{
+				"prime/cost-only": {CostUSDTicks: 42},
+			}),
 		}, nil
 	})
 
@@ -4585,6 +4618,10 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 	}
 	if usageIdx > statusIdx {
 		t.Fatalf("usage was reported AFTER status check (order: %v) — regression", order)
+	}
+	reported, _ := reportedUsage.Load().([]TaskUsageEntry)
+	if len(reported) != 1 || reported[0].Provider != "prime" || reported[0].Model != "prime/cost-only" || reported[0].CostUSDTicks != 42 {
+		t.Fatalf("cost-only usage was lost before reporting: %+v", reported)
 	}
 }
 
