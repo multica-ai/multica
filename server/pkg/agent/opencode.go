@@ -345,6 +345,7 @@ type eventResult struct {
 // the accumulated result. This is the core scanner loop, extracted for testability.
 func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventResult {
 	var output strings.Builder
+	var reasoning strings.Builder
 	var sessionID string
 	var usage TokenUsage
 	finalStatus := "completed"
@@ -411,6 +412,8 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			if event.Part.Text != "" {
 				stepProducedOutput = true
 			}
+		case "reasoning":
+			b.handleReasoningEvent(event, ch, &reasoning)
 		case "tool_use":
 			b.handleToolUseEvent(event, ch)
 			stepProducedOutput = true
@@ -483,10 +486,22 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		}
 	}
 
+	// OpenCode reasoning models (e.g. hy3-free) stream their final answer as
+	// `reasoning` events and emit no `text` event. Capture those, and when a
+	// run produced no text output but did produce reasoning, promote the
+	// reasoning to the deliverable output so a completed run is not reported
+	// with an empty Result.Output.
+	finalOutput := strings.TrimSpace(output.String())
+	if finalOutput == "" {
+		if rb := strings.TrimSpace(reasoning.String()); rb != "" {
+			finalOutput = rb
+		}
+	}
+
 	return eventResult{
 		status:            finalStatus,
 		errMsg:            finalError,
-		output:            output.String(),
+		output:            finalOutput,
 		sessionID:         sessionID,
 		usage:             usage,
 		noTerminalSignal:  noTerminalSignal,
@@ -528,6 +543,22 @@ func (b *opencodeBackend) handleTextEvent(event opencodeEvent, ch chan<- Message
 	if text != "" {
 		output.WriteString(text)
 		trySend(ch, Message{Type: MessageText, Content: text})
+	}
+}
+
+// handleReasoningEvent captures `reasoning` events from opencode. Reasoning
+// models stream their thinking (and, for some backends, their entire answer)
+// here rather than in `text` events. We forward it as a thinking message for
+// live visibility and accumulate it so processEvents can promote it to the
+// deliverable output when no text is produced.
+func (b *opencodeBackend) handleReasoningEvent(event opencodeEvent, ch chan<- Message, reasoning *strings.Builder) {
+	text := event.Part.Text
+	if text == "" {
+		text = event.Part.Reasoning
+	}
+	if text != "" {
+		reasoning.WriteString(text)
+		trySend(ch, Message{Type: MessageThinking, Content: text})
 	}
 }
 
@@ -660,6 +691,7 @@ func extractToolOutput(output any) string {
 //
 //	"step_start"  — agent step begins
 //	"text"        — text output from agent (part.text)
+//	"reasoning"   — thinking/answer stream from reasoning models (part.text or part.reasoning)
 //	"tool_use"    — tool invocation with call and result (part.tool, part.callID, part.state)
 //	"error"       — error from opencode (error.name, error.data.message)
 //	"step_finish" — agent step completes (includes token usage)
@@ -680,6 +712,9 @@ type opencodeEventPart struct {
 
 	// Text events
 	Text string `json:"text,omitempty"`
+
+	// Reasoning events (reasoning models stream their thinking/answer here)
+	Reasoning string `json:"reasoning,omitempty"`
 
 	// Tool use events
 	Tool   string             `json:"tool,omitempty"`
