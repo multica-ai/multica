@@ -1542,6 +1542,79 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso instance — minimap jumps drive the scroll container directly.
   const isFlatTimeline = !!highlightCommentId || find.open;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const [postedCommentTarget, setPostedCommentTarget] = useState<{
+    commentId: string;
+    rootId: string;
+  } | null>(null);
+  useEffect(() => setPostedCommentTarget(null), [id]);
+
+  // Only an explicit local submit arms this target. Incoming WebSocket
+  // comments keep the reader's current position; their cache update alone
+  // must never yank the viewport away from what the user is reading.
+  const handleSubmitComment = useCallback(
+    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => {
+      const comment = await submitComment(content, attachmentIds, suppressAgentIds);
+      if (!comment) return false;
+      setPostedCommentTarget({ commentId: comment.id, rootId: comment.id });
+      return true;
+    },
+    [submitComment],
+  );
+  const handleSubmitReply = useCallback(
+    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => {
+      const comment = await submitReply(parentId, content, attachmentIds, suppressAgentIds);
+      if (!comment) return false;
+      setPostedCommentTarget({
+        commentId: comment.id,
+        rootId: comment.parent_id ?? parentId,
+      });
+      return true;
+    },
+    [submitReply],
+  );
+
+  // A successful mutation updates the React Query timeline before it resolves,
+  // but the new row may still be outside Virtuoso's mounted window. First ask
+  // Virtuoso to materialize the owning thread, then measure the real comment
+  // node and scroll only the issue-detail container. Native scrollIntoView is
+  // deliberately avoided because it can move the desktop shell as well.
+  useEffect(() => {
+    if (!postedCommentTarget || !scrollContainerEl) return;
+    const rootIndex = items.findIndex((item) => item.id === postedCommentTarget.rootId);
+    if (rootIndex < 0) return;
+
+    if (!isFlatTimeline) {
+      virtuosoRef.current?.scrollToIndex({
+        index: rootIndex,
+        align: "start",
+        offset: -16,
+        behavior: "auto",
+      });
+    }
+
+    let rafId = 0;
+    let attempts = 0;
+    const reveal = () => {
+      const el = document.getElementById(`comment-${postedCommentTarget.commentId}`);
+      if (el) {
+        const containerRect = scrollContainerEl.getBoundingClientRect();
+        const commentRect = el.getBoundingClientRect();
+        scrollContainerEl.scrollTop = Math.max(
+          0,
+          scrollContainerEl.scrollTop + (commentRect.top - containerRect.top) - 16,
+        );
+        setPostedCommentTarget((current) =>
+          current?.commentId === postedCommentTarget.commentId ? null : current,
+        );
+        return;
+      }
+      attempts += 1;
+      if (attempts < 30) rafId = requestAnimationFrame(reveal);
+    };
+    rafId = requestAnimationFrame(reveal);
+    return () => cancelAnimationFrame(rafId);
+  }, [isFlatTimeline, items, postedCommentTarget, scrollContainerEl]);
+
   const jumpFlashTimerRef = useRef<number | null>(null);
   useEffect(
     () => () => {
@@ -2420,7 +2493,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
             currentUserId={user?.id}
             canModerate={canModerateComments}
-            onReply={submitReply}
+            onReply={handleSubmitReply}
             onEdit={editComment}
             onDelete={deleteComment}
             onToggleReaction={handleToggleReaction}
@@ -3099,7 +3172,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 keeps the previous issue's in-memory content and the
                 next keystroke would flush it into the new issue's
                 draft key. */}
-            <CommentInput key={id} issueId={id} onSubmit={submitComment} />
+            <CommentInput key={id} issueId={id} onSubmit={handleSubmitComment} />
           </div>
         </div>
         </div>

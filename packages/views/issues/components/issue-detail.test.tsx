@@ -434,6 +434,7 @@ vi.mock("@multica/core/issues/stores", async () => ({
 // background instead, which is mechanism-independent and observable without
 // layout.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
+const virtuosoScrollToIndexSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
@@ -445,7 +446,7 @@ vi.mock("react-virtuoso", () => ({
       // since the deep-link cold-path drives the container's scrollTop on the
       // real DOM node, not Virtuoso's imperative API.
       scrollIntoView: vi.fn(),
-      scrollToIndex: vi.fn(),
+      scrollToIndex: virtuosoScrollToIndexSpy,
     }));
     return (
       <div data-testid="virtuoso-mock">
@@ -1078,6 +1079,88 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
+  });
+
+  it("reveals a newly posted comment in the virtualized timeline", async () => {
+    mockApiObj.createComment.mockResolvedValue({
+      id: "comment-new",
+      issue_id: "issue-1",
+      author_type: "member",
+      author_id: "user-1",
+      content: "A newly posted comment",
+      type: "comment",
+      parent_id: null,
+      reactions: [],
+      attachments: [],
+      created_at: "2026-01-18T00:00:00Z",
+      updated_at: "2026-01-18T00:00:00Z",
+      resolved_at: null,
+      resolved_by_type: null,
+      resolved_by_id: null,
+    });
+
+    renderIssueDetail();
+    await screen.findByText("Started working on this");
+
+    fireEvent.click(screen.getByTestId("comment-composer-shell"));
+    const editor = await screen.findByPlaceholderText("Leave a comment...");
+    fireEvent.change(editor, { target: { value: "A newly posted comment" } });
+    const send = screen
+      .getAllByRole("button", { name: "Send" })
+      .find((button) => !(button as HTMLButtonElement).disabled);
+    expect(send).toBeDefined();
+    fireEvent.click(send!);
+
+    await screen.findByText("A newly posted comment");
+    await waitFor(() => {
+      expect(virtuosoScrollToIndexSpy).toHaveBeenCalledWith({
+        index: 2,
+        align: "start",
+        offset: -16,
+        behavior: "auto",
+      });
+    });
+  });
+
+  it("reveals a newly posted reply inside its thread", async () => {
+    mockApiObj.createComment.mockResolvedValue({
+      id: "reply-new",
+      issue_id: "issue-1",
+      author_type: "member",
+      author_id: "user-1",
+      content: "A newly posted reply",
+      type: "comment",
+      parent_id: "comment-1",
+      reactions: [],
+      attachments: [],
+      created_at: "2026-01-18T00:00:00Z",
+      updated_at: "2026-01-18T00:00:00Z",
+      resolved_at: null,
+      resolved_by_type: null,
+      resolved_by_id: null,
+    });
+
+    renderIssueDetail();
+    await screen.findByText("Started working on this");
+
+    fireEvent.click(screen.getAllByTestId("reply-composer-shell")[0]!);
+    const editor = (await screen.findAllByPlaceholderText("Leave a reply..."))[0]!;
+    fireEvent.change(editor, { target: { value: "A newly posted reply" } });
+    const send = screen
+      .getAllByRole("button", { name: "Send" })
+      .find((button) => !(button as HTMLButtonElement).disabled);
+    expect(send).toBeDefined();
+    fireEvent.click(send!);
+
+    await screen.findByText("A newly posted reply");
+    await waitFor(() => {
+      expect(virtuosoScrollToIndexSpy).toHaveBeenCalledWith({
+        index: 0,
+        align: "start",
+        offset: -16,
+        behavior: "auto",
+      });
+    });
   });
 
   it("reruns the source task from an agent failure comment", async () => {

@@ -297,32 +297,32 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     [t],
   );
 
-  // Returns true on success, false on failure. The composer keeps the user's
-  // text (editor locked + button spinning) until this settles and clears only
-  // on success — so a slow send no longer leaves the box full next to an
-  // already-posted comment, and a failed send keeps the draft.
+  // Returns the created comment on success, null on failure. Callers use the
+  // result both as the composer's acceptance signal and for post-create UI
+  // work that needs the authoritative comment id (for example, revealing the
+  // newly posted row in a virtualized timeline).
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<boolean> => {
-      if (!content.trim() || !userId) return false;
+    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<Comment | null> => {
+      if (!content.trim() || !userId) return null;
       try {
         const comment = await createComment({ content, attachmentIds, suppressAgentIds });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
-        return true;
+        return comment;
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : t(($) => $.comment.send_failed),
         );
-        return false;
+        return null;
       }
     },
     [userId, createComment, warnUnhandledTriggers, t],
   );
 
   const submitReply = useCallback(
-    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<boolean> => {
-      if (!content.trim() || !userId) return false;
+    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<Comment | null> => {
+      if (!content.trim() || !userId) return null;
       try {
         const comment = await createComment({
           content,
@@ -332,14 +332,14 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           suppressAgentIds,
         });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
-        return true;
+        return comment;
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : t(($) => $.comment.send_reply_failed),
         );
-        return false;
+        return null;
       }
     },
     [userId, createComment, warnUnhandledTriggers, t],
