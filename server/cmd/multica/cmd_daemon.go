@@ -225,6 +225,33 @@ const (
 	errLogMaxBytes = 5 * 1024 * 1024
 )
 
+// qoderCloudPATEnv is removed from the foreground daemon's process environment
+// during LoadConfig. It is re-injected only into a daemon successor during
+// self-restart, never into agent/model/version children.
+const qoderCloudPATEnv = "MULTICA_QODERCLOUD_PAT"
+
+// daemonSuccessorEnv builds the environment for a self-restarted foreground
+// daemon. LoadConfig deliberately removes the Qoder Cloud PAT from the current
+// process before any general-purpose child can inherit it. A daemon successor
+// is the one exception: it needs the in-memory copy to reconstruct its own
+// Config, after which its LoadConfig immediately removes the variable again.
+// Existing occurrences are always removed first so the child receives exactly
+// one canonical value, and an empty PAT never leaves a stale value behind.
+func daemonSuccessorEnv(base []string, qoderCloudPAT string) []string {
+	out := make([]string, 0, len(base)+1)
+	for _, entry := range base {
+		key, _, found := strings.Cut(entry, "=")
+		if found && strings.EqualFold(key, qoderCloudPATEnv) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	if qoderCloudPAT = strings.TrimSpace(qoderCloudPAT); qoderCloudPAT != "" {
+		out = append(out, qoderCloudPATEnv+"="+qoderCloudPAT)
+	}
+	return out
+}
+
 // newDaemonLogRotator builds the size-based rotating writer backing daemon.log.
 // Rotated files are gzip-compressed to keep the on-disk footprint small. The
 // bulk of daemon.log volume is the daemon's own slog output plus agent
@@ -1095,6 +1122,8 @@ func runDaemonForeground(cmd *cobra.Command) error {
 
 		args := buildDaemonStartArgs(cmd)
 		child := exec.Command(restartBin, args...)
+		successorEnv := daemonSuccessorEnv(os.Environ(), cfg.QoderCloud.PAT)
+		child.Env = successorEnv
 
 		// The successor is a fresh foreground daemon that will open daemon.log
 		// through its own rotating writer; hand it the raw-stderr sink so its
@@ -1120,6 +1149,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 			// duplicate cleanup here.
 			if isAccessDeniedSpawnErr(err) {
 				child = exec.Command(restartBin, args...)
+				child.Env = successorEnv
 				child.Stdout = logFile
 				child.Stderr = logFile
 				child.SysProcAttr = daemonSysProcAttr(false)

@@ -64,4 +64,16 @@ describe("ProviderLogo", () => {
     expect(logo?.querySelector("path")).not.toBeNull();
     expect(logo?.classList.contains("runtime-logo")).toBe(true);
   });
+
+  it("reuses the Qoder mark for Qoder Cloud", () => {
+    const qoder = render(
+      <ProviderLogo provider="qoder" className="runtime-logo" />,
+    );
+    const qoderCloud = render(
+      <ProviderLogo provider="qodercloud" className="runtime-logo" />,
+    );
+
+    expect(qoderCloud.container.querySelector("svg")).not.toBeNull();
+    expect(qoderCloud.container.innerHTML).toBe(qoder.container.innerHTML);
+  });
 });

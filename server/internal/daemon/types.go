@@ -18,6 +18,16 @@ type AgentEntry struct {
 	// Daemon.resolveAgentEntry and MUL-4486.
 	Command string
 	Model   string // model override (optional)
+	// Remote marks a built-in provider that is reached over its hosted API
+	// instead of by spawning a local executable. Remote entries deliberately
+	// leave Path and Command empty.
+	Remote bool
+	// RuntimeMode is sent to the server during registration. Empty means
+	// "local" for backwards compatibility with existing entries.
+	RuntimeMode string
+	// Version is the registration-facing version for a remote runtime. Local
+	// runtimes continue to detect their CLI version from Path.
+	Version string
 }
 
 // Runtime represents a registered daemon runtime.

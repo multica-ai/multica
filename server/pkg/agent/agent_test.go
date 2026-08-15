@@ -217,6 +217,20 @@ func TestLaunchHeaderReturnsEmptyForUnknownType(t *testing.T) {
 	}
 }
 
+func TestQoderCloudIsBuiltinOnly(t *testing.T) {
+	t.Parallel()
+
+	if IsSupportedType("qodercloud") {
+		t.Fatal("qodercloud must not be eligible for custom runtime profiles")
+	}
+	if LaunchHeader("qodercloud") != "Qoder Cloud API v1" {
+		t.Fatalf("unexpected Qoder Cloud launch header: %q", LaunchHeader("qodercloud"))
+	}
+	if ModelSelectionSupported("qodercloud") {
+		t.Fatal("qodercloud must keep model selection managed by the remote Agent")
+	}
+}
+
 func TestRunContextZeroTimeoutHasNoDeadline(t *testing.T) {
 	t.Parallel()
 	// A zero (or negative) timeout must NOT impose a wall-clock deadline:

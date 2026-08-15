@@ -239,6 +239,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// makes model selection session-scoped, restore a discovery helper
 		// here modelled on discoverTraecliModels.
 		return Catalog{Models: []Model{}}, nil
+	case "qodercloud":
+		// A Qoder Cloud Agent owns its model configuration remotely. Multica
+		// intentionally exposes no local model catalog or per-run override.
+		return Catalog{Models: []Model{}}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
@@ -272,6 +276,11 @@ func ModelSelectionSupported(providerType string) bool {
 		// unsupported — the runtime uses whatever model is configured in
 		// the agent profile. If QwenPaw makes model selection session-scoped
 		// upstream, this can be reverted to `true`.
+		return false
+	case "qodercloud":
+		// Model selection belongs to the pinned remote Agent version. A turn
+		// must not mutate that shared hosted resource or pretend opts.Model is
+		// an API-supported session override.
 		return false
 	default:
 		return true
