@@ -81,6 +81,7 @@ type Task struct {
 	QuickCreatePrompt        string                `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
 	QuickCreateAttachmentIDs []string              `json:"quick_create_attachment_ids,omitempty"` // attachments uploaded in the quick-create prompt and bound by issue create
 	HandoffNote              string                `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the opening prompt + issue_context.md
+	Kind                     string                `json:"kind,omitempty"`                        // server-side source discriminator: comment, autopilot, chat, quick_create, or direct
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
@@ -115,6 +116,13 @@ type Task struct {
 	// Empty or non-task-scoped values are fatal for writable agent tasks; the
 	// daemon must not fall back to its own token. See MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+}
+
+func (t Task) IsQuickCreateTask() bool {
+	if t.Kind != "" {
+		return t.Kind == "quick_create" && t.IssueID == "" && t.ChatSessionID == "" && t.AutopilotRunID == ""
+	}
+	return t.QuickCreatePrompt != "" && t.IssueID == "" && t.ChatSessionID == "" && t.AutopilotRunID == ""
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

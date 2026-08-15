@@ -616,7 +616,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// issue (comment-triggered or assignment-triggered). Chat / quick-create /
 	// run-only autopilot don't carry an issue id and would just generate a
 	// failed `metadata list` call on every entry.
-	hasIssueContext := ctx.ChatSessionID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == ""
+	hasIssueContext := ctx.ChatSessionID == "" && !ctx.isQuickCreateTask() && ctx.AutopilotRunID == ""
 	if hasIssueContext {
 		b.WriteString("## Issue Metadata\n\n")
 		b.WriteString("Each issue carries a small KV `metadata` bag — a high-signal scratchpad where agents pin the handful of facts that future runs on this same issue will look up over and over (the PR URL, the deploy URL, what we're blocked on). It is NOT a place to record every fact you discover — that's what comments and the description are for. Most runs write **zero** new keys; that's the expected case, not a failure.\n\n")
@@ -627,7 +627,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- **Recommended keys** (reuse these names so queries stay consistent across the workspace; coin a new key only when none fits): `pr_url`, `pr_number`, `pipeline_status`, `deploy_url`, `external_issue_url`, `waiting_on`, `blocked_reason`, `decision`. Use snake_case ASCII. The list is short on purpose — most issues only need 1-2 of these pinned, not the full set.\n\n")
 	}
 
-	isAssignmentTriggered := ctx.ChatSessionID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == "" && ctx.TriggerCommentID == ""
+	isAssignmentTriggered := ctx.ChatSessionID == "" && !ctx.isQuickCreateTask() && ctx.AutopilotRunID == "" && ctx.TriggerCommentID == ""
 	if isAssignmentTriggered {
 		b.WriteString("## Instruction Precedence\n\n")
 		b.WriteString("Agent Identity instructions have priority over the assignment workflow below. ")
@@ -647,7 +647,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
 		b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first. Use `--ref <branch-or-sha>` when you need an exact revision\n")
 		b.WriteString("- Keep responses concise and direct\n\n")
-	} else if ctx.QuickCreatePrompt != "" {
+	} else if ctx.isQuickCreateTask() {
 		// Quick-create task: detailed field / output rules live in the
 		// per-turn prompt (BuildPrompt → buildQuickCreatePrompt) so they
 		// have a single source of truth. Quick-create is one-shot, so the
@@ -739,7 +739,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// `done`, and the agent has nothing to do or avoid on that path.
 	// Section is skipped for chat, quick-create, and run-only autopilot
 	// runs (no parent/child semantics there).
-	if ctx.IssueID != "" && ctx.ChatSessionID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == "" {
+	if ctx.IssueID != "" && ctx.ChatSessionID == "" && !ctx.isQuickCreateTask() && ctx.AutopilotRunID == "" {
 		b.WriteString("## Sub-issue Creation\n\n")
 		b.WriteString("**Choosing `--status` when creating sub-issues.** `--status todo` = **start now** (the default — an agent assignee fires immediately). `--status backlog` = **wait** (assignee is set but no trigger fires; promote later with `multica issue status <child-id> todo`). Parallel children: all `--status todo`. Strict serial Step 1→2→3: only Step 1 is `todo`; Steps 2/3 are `--status backlog` from the start, promoted in turn.\n\n")
 		b.WriteString("**Ordering with stages.** When sub-issues run in phases or wait on each other, group them with `--stage <N>` (N ≥ 1) rather than hand-promoting the backlog chain above. Children sharing a stage run together; once a whole stage finishes (every child in it terminal — `done`/`cancelled`) you are woken once to review and promote the next stage. Create the first stage's children at `--status todo` and later stages at `--stage k --status backlog`; with no `--stage` the whole sibling set behaves as one implicit stage (woken once, when the last child finishes). Reach for stages whenever a plan has more than one step or a step must wait for a group — it is the intended way to express order, and it is cheaper than tracking the chain by hand. Run `multica issue children <id>` to see children grouped by stage before promoting.\n\n")
@@ -814,7 +814,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	switch {
 	case ctx.AutopilotRunID != "":
 		b.WriteString("This is a run-only autopilot task, so there may be no issue comment to post. Your final assistant output is captured automatically as the autopilot run result. Keep it concise and state the outcome.\n")
-	case ctx.QuickCreatePrompt != "":
+	case ctx.isQuickCreateTask():
 		b.WriteString("This is a quick-create task. There is NO existing issue to comment on. Your final stdout is captured automatically and the platform writes the user's success/failure inbox notification based on whether `multica issue create` succeeded.\n\n")
 		b.WriteString("- Do NOT call `multica issue comment add` — the issue you just created has no conversation context for this run.\n")
 		b.WriteString("- Print exactly one final line: `Created <identifier-or-id>: <title>` after a successful `multica issue create`. Use the created issue's `identifier` from JSON output when available; otherwise use its `id`. Do not assume any workspace issue prefix such as `MUL-`; workspaces can use custom prefixes.\n")

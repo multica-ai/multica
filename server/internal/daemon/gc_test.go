@@ -1296,6 +1296,12 @@ func TestGCMetaForTask(t *testing.T) {
 			want: execenv.GCKindChat,
 			idOK: func(m execenv.GCMeta) bool { return m.ChatSessionID == "c1" && m.IssueID == "" },
 		},
+		{
+			name: "issue wins over stale quick-create prompt",
+			task: Task{ID: "t6", WorkspaceID: "ws", IssueID: "i1", Kind: "direct", QuickCreatePrompt: "do the thing"},
+			want: execenv.GCKindIssue,
+			idOK: func(m execenv.GCMeta) bool { return m.IssueID == "i1" && m.TaskID == "" },
+		},
 	}
 	for _, tc := range cases {
 		tc := tc

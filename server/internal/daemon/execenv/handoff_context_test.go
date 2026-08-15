@@ -31,3 +31,20 @@ func TestRenderIssueContext_NoHandoffNote(t *testing.T) {
 		t.Fatalf("unexpected Handoff Note section when no note set:\n%s", md)
 	}
 }
+
+func TestRenderIssueContext_IssueTaskIgnoresStaleQuickCreatePrompt(t *testing.T) {
+	md := renderIssueContext("cursor", TaskContextForEnv{
+		IssueID:           "issue-1",
+		TaskKind:          "direct",
+		QuickCreatePrompt: "create exactly one issue",
+	})
+	if strings.Contains(md, "# Quick Create Task") {
+		t.Fatalf("issue context inherited quick-create sidecar:\n%s", md)
+	}
+	if !strings.Contains(md, "# Task Assignment") {
+		t.Fatalf("issue context lost assignment sidecar:\n%s", md)
+	}
+	if !strings.Contains(md, "**Issue ID:** issue-1") {
+		t.Fatalf("issue context lost issue id:\n%s", md)
+	}
+}

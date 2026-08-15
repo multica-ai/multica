@@ -203,6 +203,27 @@ func TestBuildQuickCreatePromptParentPinning(t *testing.T) {
 	}
 }
 
+func TestBuildPromptIssueTaskIgnoresStaleQuickCreatePrompt(t *testing.T) {
+	task := Task{
+		IssueID:           "issue-123",
+		Kind:              "direct",
+		QuickCreatePrompt: "create exactly one issue",
+	}
+	out := BuildPrompt(task, "cursor")
+	if strings.Contains(out, "quick-create assistant") {
+		t.Fatalf("issue-bound task must not use quick-create prompt:\n%s", out)
+	}
+	if strings.Contains(out, "single `multica issue create` command") {
+		t.Fatalf("issue-bound task inherited quick-create single-create rule:\n%s", out)
+	}
+	if !strings.Contains(out, "Your assigned issue ID is: issue-123") {
+		t.Fatalf("issue-bound task lost assignment prompt:\n%s", out)
+	}
+	if !strings.Contains(out, "multica issue get issue-123 --output json") {
+		t.Fatalf("issue-bound task must still instruct issue read:\n%s", out)
+	}
+}
+
 // TestBuildPromptSquadLeaderNoActionForMemberTrigger verifies that the
 // squad leader no_action prohibition is injected in the per-turn prompt
 // regardless of whether the triggering comment was posted by an agent or

@@ -30,23 +30,31 @@ const (
 )
 
 // classifyTask maps a TaskContextForEnv to the single taskKind the slim
-// brief should be assembled for. Precedence (documented for the tiebreak
-// case, although the daemon never sets two specific-kind flags at once):
-// chat → quick-create → autopilot run-only → comment-triggered →
-// assignment-triggered.
+// brief should be assembled for. Linked task sources win over a non-empty
+// QuickCreatePrompt because older claim payloads can retain quick-create
+// data after the task has been linked back to the issue it created.
 func classifyTask(ctx TaskContextForEnv) taskKind {
 	switch {
 	case ctx.ChatSessionID != "":
 		return kindChat
-	case ctx.QuickCreatePrompt != "":
-		return kindQuickCreate
 	case ctx.AutopilotRunID != "":
 		return kindAutopilotRunOnly
 	case ctx.TriggerCommentID != "":
 		return kindCommentTriggered
+	case ctx.IssueID != "":
+		return kindAssignmentTriggered
+	case ctx.isQuickCreateTask():
+		return kindQuickCreate
 	default:
 		return kindAssignmentTriggered
 	}
+}
+
+func (ctx TaskContextForEnv) isQuickCreateTask() bool {
+	if ctx.TaskKind != "" {
+		return ctx.TaskKind == "quick_create" && ctx.IssueID == "" && ctx.ChatSessionID == "" && ctx.AutopilotRunID == ""
+	}
+	return ctx.QuickCreatePrompt != "" && ctx.IssueID == "" && ctx.ChatSessionID == "" && ctx.AutopilotRunID == ""
 }
 
 // hasIssueContext returns true for the kinds that operate on a real Multica

@@ -3205,7 +3205,7 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 	case task.IssueID != "":
 		meta.Kind = execenv.GCKindIssue
 		meta.IssueID = task.IssueID
-	case task.QuickCreatePrompt != "":
+	case task.IsQuickCreateTask():
 		// Quick-create tasks reach WriteGCMeta before the server runs
 		// LinkTaskToIssue, so IssueID is always empty here. Persist the
 		// task ID instead and let the GC loop ask the server for terminal
@@ -3534,6 +3534,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotSource:                  task.AutopilotSource,
 		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:                task.QuickCreatePrompt,
+		TaskKind:                         task.Kind,
 		HandoffNote:                      task.HandoffNote,
 		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
 		RequestingUserName:               task.RequestingUserName,
@@ -3719,7 +3720,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// command stamps the new issue with origin_type=quick_create +
 	// origin_id=<task_id> so the completion handler can find it
 	// deterministically (see GetIssueByOrigin).
-	if task.QuickCreatePrompt != "" {
+	if task.IsQuickCreateTask() {
 		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
 		if len(task.QuickCreateAttachmentIDs) > 0 {
 			if raw, err := json.Marshal(task.QuickCreateAttachmentIDs); err == nil {

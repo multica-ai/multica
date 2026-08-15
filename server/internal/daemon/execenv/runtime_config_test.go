@@ -581,6 +581,34 @@ func TestSubIssueCreationSectionSkippedForNonIssueModes(t *testing.T) {
 	}
 }
 
+func TestIssueBriefIgnoresStaleQuickCreatePrompt(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("cursor", TaskContextForEnv{
+		IssueID:           "issue-123",
+		TaskKind:          "direct",
+		QuickCreatePrompt: "create exactly one issue",
+	})
+	for _, banned := range []string{
+		"This task was triggered by quick-create",
+		"Run exactly one `multica issue create` invocation",
+		"Do NOT call `multica issue get`",
+		"Do NOT call `multica issue comment add`",
+	} {
+		if strings.Contains(out, banned) {
+			t.Fatalf("issue brief inherited quick-create guardrail %q\n---\n%s", banned, out)
+		}
+	}
+	for _, required := range []string{
+		"## Issue Metadata",
+		"## Sub-issue Creation",
+		"Final results MUST be delivered via `multica issue comment add`",
+	} {
+		if !strings.Contains(out, required) {
+			t.Fatalf("issue brief missing %q\n---\n%s", required, out)
+		}
+	}
+}
+
 // writeRuntimeConfigFile is the safe replacement for the previous
 // unconditional os.WriteFile of CLAUDE.md / AGENTS.md. The two
 // states it must handle correctly are: file missing, file present without

@@ -492,7 +492,7 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.AutopilotRunID != "" {
 		return renderAutopilotContext(ctx)
 	}
-	if ctx.QuickCreatePrompt != "" {
+	if ctx.isQuickCreateTask() {
 		return renderQuickCreateContext(ctx)
 	}
 

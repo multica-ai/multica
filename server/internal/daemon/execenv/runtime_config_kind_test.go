@@ -25,7 +25,8 @@ func withSlimBrief(t *testing.T) {
 }
 
 // TestClassifyTask pins the precedence rule on classifyTask. All five
-// kinds plus tiebreak cases for safety.
+// kinds plus tiebreak cases for safety. Linked task sources win over stale
+// QuickCreatePrompt payloads.
 func TestClassifyTask(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -40,8 +41,12 @@ func TestClassifyTask(t *testing.T) {
 		{"assignment-triggered", TaskContextForEnv{IssueID: "i"}, kindAssignmentTriggered},
 		{"assignment-bare", TaskContextForEnv{}, kindAssignmentTriggered},
 		{"tiebreak-chat-vs-quick", TaskContextForEnv{ChatSessionID: "c", QuickCreatePrompt: "p"}, kindChat},
-		{"tiebreak-quick-vs-autopilot", TaskContextForEnv{QuickCreatePrompt: "p", AutopilotRunID: "r"}, kindQuickCreate},
+		{"tiebreak-autopilot-vs-quick", TaskContextForEnv{QuickCreatePrompt: "p", AutopilotRunID: "r"}, kindAutopilotRunOnly},
 		{"tiebreak-autopilot-vs-comment", TaskContextForEnv{AutopilotRunID: "r", IssueID: "i", TriggerCommentID: "c"}, kindAutopilotRunOnly},
+		{"tiebreak-issue-vs-quick", TaskContextForEnv{IssueID: "i", QuickCreatePrompt: "p"}, kindAssignmentTriggered},
+		{"tiebreak-comment-vs-quick", TaskContextForEnv{IssueID: "i", TriggerCommentID: "c", QuickCreatePrompt: "p"}, kindCommentTriggered},
+		{"explicit-kind-quick-create", TaskContextForEnv{TaskKind: "quick_create", QuickCreatePrompt: "p"}, kindQuickCreate},
+		{"explicit-kind-direct-vs-quick", TaskContextForEnv{TaskKind: "direct", IssueID: "i", QuickCreatePrompt: "p"}, kindAssignmentTriggered},
 	}
 	for _, tc := range cases {
 		tc := tc

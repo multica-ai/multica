@@ -24,7 +24,7 @@ func BuildPrompt(task Task, provider string) string {
 	if task.AutopilotRunID != "" {
 		return buildAutopilotPrompt(task)
 	}
-	if task.QuickCreatePrompt != "" {
+	if task.IsQuickCreateTask() {
 		return buildQuickCreatePrompt(task)
 	}
 	var b strings.Builder

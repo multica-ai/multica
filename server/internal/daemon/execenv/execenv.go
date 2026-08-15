@@ -86,6 +86,7 @@ type TaskContextForEnv struct {
 	AutopilotSource         string
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
+	TaskKind                string // server-side source discriminator when available
 	HandoffNote             string // assignment handoff instruction; rendered into issue_context.md (MUL-3375)
 	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
