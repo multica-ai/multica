@@ -496,7 +496,10 @@ func (d *Daemon) deregisterRevivedRuntimes(ctx context.Context, workspaceID stri
 	// metadata, so the reason the demotion stored is gone and the server would
 	// otherwise be left with a bare "offline" — which reads as "wait for the
 	// machine" on every admission path (MUL-6164).
-	if err := d.client.Deregister(ctx, runtimeIDs, revived.reasonsFor(runtimeIDs)); err != nil {
+	//
+	// recoverInFlight=false: this is runtime-set convergence, and the daemon is
+	// still executing on these runtimes.
+	if err := d.client.Deregister(ctx, runtimeIDs, revived.reasonsFor(runtimeIDs), false); err != nil {
 		d.logger.Warn("deregister of revived demoted runtimes failed",
 			"workspace_id", workspaceID, "runtime_ids", runtimeIDs, "error", err)
 	}
@@ -520,7 +523,8 @@ func (d *Daemon) deregisterDroppedRuntimes(ctx context.Context, workspaceID stri
 	if len(runtimeIDs) == 0 {
 		return
 	}
-	if err := d.client.Deregister(ctx, runtimeIDs, offlineReasons); err != nil {
+	// recoverInFlight=false: convergence, not shutdown — work may still be running.
+	if err := d.client.Deregister(ctx, runtimeIDs, offlineReasons, false); err != nil {
 		d.logger.Warn("deregister of dropped runtimes failed",
 			"workspace_id", workspaceID, "runtime_ids", runtimeIDs, "reason", reason, "error", err)
 	}

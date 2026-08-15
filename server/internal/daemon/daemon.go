@@ -2030,7 +2030,9 @@ func (d *Daemon) deregisterRuntimes() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := d.client.Deregister(ctx, runtimeIDs, nil); err != nil {
+	// recoverInFlight=true: this process is draining and will stop executing,
+	// so the server may safely fail-and-retry whatever these runtimes still hold.
+	if err := d.client.Deregister(ctx, runtimeIDs, nil, true); err != nil {
 		d.logger.Warn("failed to deregister runtimes on shutdown", "error", err)
 	} else {
 		d.logger.Info("deregistered runtimes", "count", len(runtimeIDs))

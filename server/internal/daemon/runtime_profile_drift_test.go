@@ -107,6 +107,7 @@ type driftFixture struct {
 	recoverOrphansCalls []string // runtime IDs the server received recover-orphans for, in order
 	recoverOrphansMu    sync.Mutex
 	deregisterCalls     [][]string // each entry is one Deregister call's runtime_ids payload, in order
+	deregisterRecover   []bool     // each entry is that call's recover_in_flight flag, same order
 	deregisterMu        sync.Mutex
 	currentProfiles     []RuntimeProfile
 }
@@ -127,6 +128,16 @@ func (fx *driftFixture) recordedRecoverOrphans() []string {
 	defer fx.recoverOrphansMu.Unlock()
 	out := make([]string, len(fx.recoverOrphansCalls))
 	copy(out, fx.recoverOrphansCalls)
+	return out
+}
+
+// recordedDeregisterRecoverFlags returns the recover_in_flight flag of every
+// Deregister call the fake server received, in order.
+func (fx *driftFixture) recordedDeregisterRecoverFlags() []bool {
+	fx.deregisterMu.Lock()
+	defer fx.deregisterMu.Unlock()
+	out := make([]bool, len(fx.deregisterRecover))
+	copy(out, fx.deregisterRecover)
 	return out
 }
 
@@ -177,13 +188,15 @@ func newDriftFixture(t *testing.T, initial []RuntimeProfile) *driftFixture {
 			_, _ = w.Write([]byte(`{"orphaned":0,"retried":0}`))
 		case r.URL.Path == "/api/daemon/deregister":
 			var body struct {
-				RuntimeIDs []string `json:"runtime_ids"`
+				RuntimeIDs      []string `json:"runtime_ids"`
+				RecoverInFlight bool     `json:"recover_in_flight"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			fx.deregisterMu.Lock()
 			ids := make([]string, len(body.RuntimeIDs))
 			copy(ids, body.RuntimeIDs)
 			fx.deregisterCalls = append(fx.deregisterCalls, ids)
+			fx.deregisterRecover = append(fx.deregisterRecover, body.RecoverInFlight)
 			fx.deregisterMu.Unlock()
 			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/runtime-profiles"):
@@ -689,5 +702,53 @@ func TestRefreshWorkspaceRuntimeProfiles_FetchErrorIsBestEffort(t *testing.T) {
 	d.mu.Unlock()
 	if gotSig != knownSig {
 		t.Errorf("transient fetch error must not clobber cached sig; want %q got %q", knownSig, gotSig)
+	}
+}
+
+// Profile convergence must never ask the server to recover in-flight tasks.
+// The daemon is still executing on those runtimes — only a drained shutdown
+// may opt in. Companion to
+// TestRefreshWorkspaceRuntimeProfiles_DriftWithRunningRuntimeSkipsOrphanRecovery,
+// which covers the /recover-orphans call; this covers the flag now carried on
+// /api/daemon/deregister, which the server uses for the same decision.
+func TestRefreshWorkspaceRuntimeProfiles_ConvergenceDeregisterDoesNotRecoverInFlight(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{"company-codex": "/opt/bin/company-codex"})
+	initial := []RuntimeProfile{{
+		ID: "prof-1", WorkspaceID: "ws-1", DisplayName: "Company Codex",
+		ProtocolFamily: "codex", CommandName: "company-codex",
+		Visibility: "workspace", Enabled: true,
+	}}
+	fx := newDriftFixture(t, initial)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{}
+
+	resp, profileSig, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("initial register: %v", err)
+	}
+	if len(resp.Runtimes) != 1 {
+		t.Fatalf("setup expected exactly one runtime; got %d", len(resp.Runtimes))
+	}
+	runtimeID := resp.Runtimes[0].ID
+	d.runtimeIndex[runtimeID] = resp.Runtimes[0]
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", []string{runtimeID}, "", nil, nil)
+	d.workspaces["ws-1"].profileSetSig = profileSig
+
+	// User disables the only profile: convergence deregisters the stale runtime.
+	fx.setProfiles(nil)
+	if err := d.refreshWorkspaceRuntimeProfiles(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("refreshWorkspaceRuntimeProfiles: %v", err)
+	}
+
+	flags := fx.recordedDeregisterRecoverFlags()
+	if len(flags) == 0 {
+		t.Fatalf("expected convergence to deregister the stale runtime; got no deregister calls")
+	}
+	for i, got := range flags {
+		if got {
+			t.Errorf("deregister call %d set recover_in_flight=true during profile convergence; "+
+				"that hard-fails tasks this daemon is still executing", i)
+		}
 	}
 }

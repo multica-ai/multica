@@ -905,6 +905,11 @@ func (h *Handler) setRuntimeOffline(ctx context.Context, runtimeID pgtype.UUID, 
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
+// deregisterRecoverTimeout bounds the detached recover_in_flight operation.
+// Generous relative to the caller's 5s deadline — this work deliberately
+// outlives the client — but finite, so a wedged query cannot pin the handler.
+const deregisterRecoverTimeout = 2 * time.Minute
+
 func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RuntimeIDs []string `json:"runtime_ids"`
@@ -912,6 +917,15 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 		// causes the user must repair — a daemon shutting down sends none, so an
 		// older daemon simply keeps today's behaviour (MUL-6164).
 		OfflineReasons map[string]json.RawMessage `json:"offline_reasons"`
+		// RecoverInFlight asks us to fail-and-retry whatever these runtimes
+		// were still executing. Default false on purpose: this endpoint also
+		// serves live runtime-set convergence (see
+		// refreshRuntimeProfilesForWorkspace, which deregisters runtimes when a
+		// profile is disabled or removed), and there the daemon is still
+		// running those tasks. Recovering them would hard-fail rows whose local
+		// execution continues, so the completion gets rejected and a duplicate
+		// attempt runs. Only the drained shutdown path sets this.
+		RecoverInFlight bool `json:"recover_in_flight"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -930,9 +944,39 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	// Track affected workspaces for WS notifications.
 	affectedWorkspaces := make(map[string]bool)
 
+	// Total across runtimes, for the response and the log line only.
+	orphanedCount, retriedCount := 0, 0
+
+	// One context for the whole authorized recovery, not just its final step.
+	//
+	// The shutdown caller gives Deregister a 5s deadline, and recovery commits
+	// rows as `failed` before HandleFailedTasks hands them to the retry
+	// pipeline. If the deadline fires in between, those rows are terminal with
+	// no retry, no event, no agent reconcile and no issue rollback — and the
+	// stale-task sweeper cannot repair them, because it only scans non-terminal
+	// tasks. So the operation has to outlive the client.
+	//
+	// It has to cover the lookup and the offline flip too, not only the
+	// recovery calls: runtime A's pipeline can easily outrun 5s, and the next
+	// iteration would then hit GetAgentRuntime/SetAgentRuntimeOffline on an
+	// already-cancelled context, fail instantly, and skip runtime B entirely —
+	// leaving it neither offline nor recovered while the client has already
+	// given up and exited.
+	//
+	// Bounded, per the detached-work pattern used elsewhere in this package
+	// (see reportTerminalTask): WithoutCancel preserves values and drops the
+	// caller's cancellation, and the server-owned timeout keeps a wedged query
+	// or pipeline from pinning the handler forever.
+	opCtx := r.Context()
+	if req.RecoverInFlight {
+		var cancel context.CancelFunc
+		opCtx, cancel = context.WithTimeout(context.WithoutCancel(r.Context()), deregisterRecoverTimeout)
+		defer cancel()
+	}
+
 	for i, rid := range req.RuntimeIDs {
 		// Look up the runtime and verify ownership.
-		rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUIDs[i])
+		rt, err := h.Queries.GetAgentRuntime(opCtx, runtimeUUIDs[i])
 		if err != nil {
 			slog.Warn("deregister: runtime not found", "runtime_id", rid, "error", err)
 			continue
@@ -944,9 +988,47 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if err := h.setRuntimeOffline(r.Context(), rt.ID, req.OfflineReasons[rid]); err != nil {
+		if err := h.setRuntimeOffline(opCtx, rt.ID, req.OfflineReasons[rid]); err != nil {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
 			continue
+		}
+
+		// Recover whatever this runtime was still executing. Deregistration is
+		// the one moment the server knows for certain that a runtime is going
+		// away, and until now it dropped that knowledge on the floor: the
+		// runtime went offline and its dispatched/running tasks were left
+		// behind, with nothing marking them failed and nothing retrying them.
+		//
+		// The startup path already does this — the daemon calls
+		// POST /runtimes/{id}/recover-orphans and RecoverOrphanedTasks funnels
+		// the rows through HandleFailedTasks for the retry. But that only
+		// rescues a task if the SAME runtime id comes back to ask for it, and
+		// a daemon that is replaced rather than restarted re-registers under
+		// fresh ids: a new host, a new container, a wiped state directory. The
+		// orphans stay pinned to ids nobody will ever query again, and the only
+		// thing that eventually notices is the stale-task sweeper, up to a
+		// 2.5h in-process timeout later.
+		//
+		// Doing it here closes the asymmetry with the same query and the same
+		// post-failure pipeline, so a graceful shutdown — which is what a
+		// rolling deploy or a scale-down is — costs a retry instead of a lost
+		// task.
+		if req.RecoverInFlight {
+			rows, err := h.Queries.RecoverOrphanedTasksForRuntime(opCtx, rt.ID)
+			if err != nil {
+				// Not fatal: the runtime is already offline, and the stale-task
+				// sweeper remains as the backstop it has always been.
+				slog.Warn("deregister: recover orphans failed", "runtime_id", rid, "error", err)
+			} else if len(rows) > 0 {
+				// Drain this runtime before touching the next one, so a failure
+				// scanning runtime N+1 cannot leave runtime N's rows terminal
+				// and unretried. Same shared pipeline RecoverOrphanedTasks
+				// uses: task:failed events, agent status reconcile, issue
+				// rollback, and auto-retry for the reasons retryableReasons
+				// allows — runtime_recovery among them.
+				orphanedCount += len(rows)
+				retriedCount += h.TaskService.HandleFailedTasks(opCtx, rows)
+			}
 		}
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeOffline(
 			uuidToString(rt.OwnerID),
@@ -966,8 +1048,17 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	slog.Info("daemon deregistered", "runtime_ids", req.RuntimeIDs)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	slog.Info("daemon deregistered",
+		"runtime_ids", req.RuntimeIDs,
+		"recover_in_flight", req.RecoverInFlight,
+		"orphaned", orphanedCount,
+		"retried", retriedCount,
+	)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "ok",
+		"orphaned": orphanedCount,
+		"retried":  retriedCount,
+	})
 }
 
 type DaemonHeartbeatRequest struct {

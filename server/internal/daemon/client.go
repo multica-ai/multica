@@ -810,8 +810,14 @@ type RuntimeOfflineReason struct {
 // Deregister takes runtimes offline. reasons is optional and keyed by runtime
 // id: a daemon shutting down has nothing to explain, while one that condemned a
 // broken CLI does.
-func (c *Client) Deregister(ctx context.Context, runtimeIDs []string, reasons map[string]RuntimeOfflineReason) error {
-	body := map[string]any{"runtime_ids": runtimeIDs}
+// recoverInFlight asks the server to also fail-and-retry whatever those
+// runtimes were still executing. Pass true ONLY when this process is shutting
+// down and has stopped executing, never for live runtime-set convergence:
+// RecoverOrphanedTasksForRuntime hard-fails every dispatched/running task on
+// the runtime, so on profile drift it would kill work that is still running
+// locally (see refreshRuntimeProfilesForWorkspace).
+func (c *Client) Deregister(ctx context.Context, runtimeIDs []string, reasons map[string]RuntimeOfflineReason, recoverInFlight bool) error {
+	body := map[string]any{"runtime_ids": runtimeIDs, "recover_in_flight": recoverInFlight}
 	if len(reasons) > 0 {
 		body["offline_reasons"] = reasons
 	}
