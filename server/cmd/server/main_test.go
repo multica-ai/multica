@@ -7,6 +7,8 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strconv"
 	"strings"
@@ -15,6 +17,10 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/realtime"
 )
 
 func TestRedisClientName(t *testing.T) {
@@ -297,6 +303,60 @@ func TestEnvBool(t *testing.T) {
 				t.Errorf("envBool(%q, %v) = %v, want %v", tt.key, tt.def, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestQianwenPairingSecretFromEnvFailsClosed(t *testing.T) {
+	strongPairingSecret := strings.Repeat("p", 32)
+	strongJWTSecret := strings.Repeat("j", 32)
+
+	t.Run("prefers dedicated secret", func(t *testing.T) {
+		t.Setenv("QIANWEN_PAIRING_SECRET", strongPairingSecret)
+		t.Setenv("JWT_SECRET", strongJWTSecret)
+		if got := qianwenPairingSecretFromEnv(); string(got) != strongPairingSecret {
+			t.Fatalf("qianwenPairingSecretFromEnv() = %q, want dedicated secret", got)
+		}
+	})
+
+	t.Run("falls back to explicitly configured JWT secret", func(t *testing.T) {
+		t.Setenv("QIANWEN_PAIRING_SECRET", "")
+		t.Setenv("JWT_SECRET", strongJWTSecret)
+		if got := qianwenPairingSecretFromEnv(); string(got) != strongJWTSecret {
+			t.Fatalf("qianwenPairingSecretFromEnv() = %q, want explicit JWT secret", got)
+		}
+	})
+
+	for _, tc := range []struct {
+		name          string
+		pairingSecret string
+		jwtSecret     string
+	}{
+		{name: "no configured secret"},
+		{name: "short dedicated secret", pairingSecret: "too-short"},
+		{name: "short JWT fallback", jwtSecret: "too-short"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("QIANWEN_PAIRING_SECRET", tc.pairingSecret)
+			t.Setenv("JWT_SECRET", tc.jwtSecret)
+			if got := qianwenPairingSecretFromEnv(); got != nil {
+				t.Fatalf("qianwenPairingSecretFromEnv() = %q, want nil", got)
+			}
+		})
+	}
+}
+
+func TestMainRouterExposesPublicQianwenCurrentTasksRoute(t *testing.T) {
+	router := NewRouter(nil, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/channels/qianwen/qwc_MDAwMDAwMDAwMDAwMDAwMDAw/tasks", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	// No browser session middleware should intercept this route. With no
+	// installation bearer, the Qianwen ingress itself must answer 401.
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d from public Qianwen credential gate; body=%s", w.Code, http.StatusUnauthorized, w.Body.String())
 	}
 }
 

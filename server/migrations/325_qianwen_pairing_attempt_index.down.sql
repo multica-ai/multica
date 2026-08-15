@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_qianwen_pairing_attempt_installation_time;

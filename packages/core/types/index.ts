@@ -218,6 +218,13 @@ export type {
   RedeemWecomBindingTokenResponse,
 } from "./wecom";
 export type {
+  QianwenInstallation,
+  ListQianwenInstallationsResponse,
+  QianwenInstallResponse,
+  QianwenPairingCodeResponse,
+  QianwenAgentSummary,
+} from "./qianwen";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,

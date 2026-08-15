@@ -29,6 +29,7 @@ import (
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/qianwen"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -291,6 +292,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// into one agent run instead of one per message (MUL-2968).
 	channelRouter.EnableRunBatching(engine.DefaultChatRunBatchWindow)
 	h.ChannelRouter = channelRouter
+	// Qianwen Skill tools have a three-second response ceiling and every request
+	// is an independent turn, so this polling bridge deliberately bypasses the
+	// shared Router's in-memory debounce. It reuses the shared session service,
+	// then atomically commits task + channel message + request-ledger pointer via
+	// TaskService before returning 202.
+	qianwenSessions := engine.NewChatSession(queries, pool, qianwen.TypeQianwen, engine.SessionTitles{
+		Direct:   "Qianwen glasses request",
+		Fallback: "Qianwen glasses request",
+	})
+	pairingSecret := qianwenPairingSecretFromEnv()
+	if len(pairingSecret) == 0 {
+		slog.Warn("qianwen identity pairing disabled (set a 32-byte QIANWEN_PAIRING_SECRET or JWT_SECRET)")
+	}
+	if qianwenService, err := qianwen.NewService(queries, qianwenSessions, h.TaskService, pool, pairingSecret); err != nil {
+		slog.Error("qianwen integration init failed", "error", err)
+	} else {
+		h.Qianwen = qianwenService
+	}
 	// Media intent-ledger reconciler: settles uploaded-but-unbound objects.
 	// Built ONLY when a storage backend exists — store is nil when S3 is not
 	// configured and the local upload dir failed to initialize, and a
@@ -1043,6 +1062,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Auth group made a missing cookie a hard 401, breaking the flow for exactly
 	// the browsers above; the other four composio endpoints stay session-gated.
 	r.Get("/api/integrations/composio/callback", h.ComposioCallback)
+	// Private Qianwen Skill ingress. The installation bearer token is the
+	// credential, so these routes intentionally live outside middleware.Auth.
+	// submit acknowledges quickly; status returns the eventual redacted chat
+	// reply; tasks exposes the bound member's safe active-task projection. The
+	// handlers enforce body/query/rate/time limits themselves.
+	r.Post("/api/channels/qianwen/{connectionId}/requests", h.SubmitQianwenRequest)
+	r.Get("/api/channels/qianwen/{connectionId}/requests/{requestId}", h.GetQianwenRequestStatus)
+	r.Get("/api/channels/qianwen/{connectionId}/tasks", h.ListQianwenCurrentTasks)
+	r.Post("/api/channels/qianwen/{connectionId}/binding/redeem", h.RedeemQianwenPairingCode)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -1268,6 +1296,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/dingtalk/installations", h.ListDingTalkInstallations)
 					r.Get("/dingtalk/group-routes", h.ListDingTalkGroupRoutes)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(handler.RequireHumanActor)
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/qianwen/installations", h.ListQianwenInstallations)
+					r.Post("/qianwen/installations", h.InstallQianwenPersonal)
+					r.Post("/qianwen/installations/{installationId}/pairing-codes", h.MintQianwenPairingCode)
+					r.Delete("/qianwen/installations/{installationId}/bindings/me", h.UnbindQianwenCurrentUser)
+					r.Delete("/qianwen/installations/{installationId}", h.RevokeQianwenInstallation)
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
@@ -1985,6 +2022,26 @@ func composioStateSecret() []byte {
 	if v := strings.TrimSpace(os.Getenv("JWT_SECRET")); v != "" {
 		sum := sha256.Sum256([]byte("composio-state:" + v))
 		return sum[:]
+	}
+	return nil
+}
+
+// qianwenPairingSecretFromEnv resolves only explicitly configured strong
+// deployment secrets. It must not use auth.JWTSecret because that helper has a
+// public development fallback, which would make eight-digit code digests
+// offline-enumerable after a database leak.
+func qianwenPairingSecretFromEnv() []byte {
+	if raw, ok := os.LookupEnv("QIANWEN_PAIRING_SECRET"); ok && raw != "" {
+		if len(strings.TrimSpace(raw)) < 32 {
+			return nil
+		}
+		return []byte(raw)
+	}
+	if raw, ok := os.LookupEnv("JWT_SECRET"); ok && raw != "" {
+		if len(strings.TrimSpace(raw)) < 32 {
+			return nil
+		}
+		return []byte(raw)
 	}
 	return nil
 }

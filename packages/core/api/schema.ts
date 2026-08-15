@@ -14,6 +14,9 @@ export interface ParseOptions {
   /** Endpoint identifier used in the warning log so we can grep for which
    *  contract drifted in production telemetry. */
   endpoint: string;
+  /** Response bodies such as one-time credentials must fail closed without
+   *  copying either the raw body or schema issue messages into telemetry. */
+  redactFailureDetails?: boolean;
 }
 
 /**
@@ -21,9 +24,10 @@ export interface ParseOptions {
  * returning the parsed value on success or `fallback` on failure.
  *
  * On failure we log a warning with the endpoint and zod's structured error,
- * but never throw — the UI layer must keep rendering. This is the boundary
- * defense that turns "API contract drifted" from a white-screen incident
- * into a degraded-but-rendering page.
+ * unless the caller requests fail-closed redaction for a secret-bearing body.
+ * We never throw — the UI layer must keep rendering. This is the boundary
+ * defense that turns "API contract drifted" from a white-screen incident into
+ * a degraded-but-rendering page.
  *
  * The return type is anchored to `T` (inferred from `fallback`), not to the
  * schema's `z.infer` type. Schemas are intentionally **lenient** — string
@@ -43,12 +47,14 @@ export function parseWithFallback<T>(
 ): T {
   const result = schema.safeParse(data);
   if (result.success) return result.data as T;
+  const failureDetails = opts.redactFailureDetails ? "[REDACTED]" : result.error.issues;
+  const received = opts.redactFailureDetails ? "[REDACTED]" : data;
   schemaLogger.warn(
     `API response failed schema validation: ${opts.endpoint}`,
     {
       endpoint: opts.endpoint,
-      issues: result.error.issues,
-      received: data,
+      issues: failureDetails,
+      received,
     },
   );
   return fallback;

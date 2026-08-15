@@ -9,6 +9,8 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 目前支持飞书/Lark、Slack、钉钉和企业微信。它们使用相同的会话、身份和执行机制，但安装方式不同。
 
+此外还提供一个实验性的[千问 skill 桥接](/qianwen-skill-integration)，用于夸克 S1 私有 skill。Web/Desktop 共用的设置卡片负责创建 Multica installation，并管理当前用户自己的身份配对；供应商侧 skill 和设备配置是另一件事。已签名的 Tools 可以提交 task、轮询单个结果，或列出绑定用户可见的非终态 task。该桥接完全采用 pull 模式，并且仍需真实千问 Tool 与 S1 冒烟验证。行业消息推送是独立的企业商务接入路线，不是当前轮询集成的前置条件；普通零售 S1 私有 skill 是否有资格使用尚未确认。
+
 ## 选择平台
 
 | | 飞书 / Lark | Slack | 钉钉 | 企业微信 |
@@ -32,18 +34,19 @@ import { Callout } from "fumadocs-ui/components/callout";
 - [飞书 / Lark Bot 接入](/lark-bot-integration)
 - [Slack Bot 接入](/slack-bot-integration)
 - [钉钉 Bot 接入](/dingtalk-bot-integration)
+- [千问 skill 桥接（实验性）](/qianwen-skill-integration)
 
 ## 消息的执行流程
 
 1. Multica 根据 Bot 找到对应的工作区和智能体。
 2. 在群聊或频道中，只有明确 @ Bot 的消息会继续处理；私聊不需要 @。
 3. Multica 校验发送者的账号绑定和工作区成员身份。
-4. 消息进入一段[智能体对话](/chat)，并创建一次执行任务。
+4. 消息进入一段[智能体对话](/chat)，并创建一个 task。
 5. 智能体的回复回到原来的私聊或讨论串。
 
 没有 @ Bot 的频道消息不会触发智能体，也不会被加入它的对话上下文。
 
-普通消息按上述流程处理。`/issue` 是命令，不是对话轮次：Multica 会在原平台返回处理结果，但不会把命令加入 Multica Chat。Slack 原生 slash 命令仍按独立的异步创建任务流程处理。
+普通消息按上述流程处理。`/issue` 是命令，不是对话轮次：Multica 会在原平台返回处理结果，但不会把命令加入 Multica Chat。Slack 原生 slash 命令仍按独立的异步创建 task 流程处理。
 
 ## 会话隔离
 
@@ -90,4 +93,5 @@ MULTICA_WECOM_SECRET_KEY=<base64 编码的 32 字节密钥>
 - [飞书 / Lark Bot 接入](/lark-bot-integration)
 - [Slack Bot 接入](/slack-bot-integration)
 - [钉钉 Bot 接入](/dingtalk-bot-integration)
+- [千问 skill 桥接（实验性）](/qianwen-skill-integration) — 配对夸克 S1 私有 skill、提交已签名请求、轮询结果并查询当前 task；不支持主动设备推送。
 - [与智能体对话](/chat)

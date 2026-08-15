@@ -1,0 +1,323 @@
+---
+title: Qianwen Skill 브리지(실험적)
+description: Quark S1의 비공개 Qianwen Skill을 신원 연결, 서명된 제출 및 상태 폴링, 현재 작업 검색을 통해 Multica에 연결합니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+실험적 Qianwen Skill 브리지를 사용하면 비공개 Skill이 전사된 텍스트를 Multica Agent에 제출하고, 결과를 폴링하며, 호출자가 현재 볼 수 있는 작업을 나열할 수 있습니다. Qianwen은 HTTPS를 통해 Multica 서버를 호출합니다. Multica 데몬은 계속 아웃바운드 통신만 사용하며 Multica에서 작업을 가져옵니다. 데몬이나 로컬 CLI 포트를 노출할 필요가 없습니다.
+
+이 브리지는 폴링 방식입니다. 완료된 결과를 안경에 능동적으로 푸시하지 않습니다. Qianwen 공개 자료에는 산업용 메시지 푸시 경로가 언급되어 있지만 이는 비즈니스 온보딩 기능이며, 이 연동에서 사용할 수 있는 공개 엔드포인트, 페이로드, 서명, 전달, 속도 제한 또는 Quark S1 렌더링 규약은 제공되지 않습니다.
+
+<Callout type="warning">
+비공개 Skill을 사용하세요. Multica 구현은 연결된 불투명 Qianwen 신원과 서명된 요청을 검증하지만, [프로바이더 측 승인 게이트](#프로바이더-측-승인-게이트)에 나열된 Tool 동작은 실제 Qianwen 계정과 Quark S1을 사용한 스모크 테스트가 여전히 필요합니다. 이 문서는 실제 기기 테스트가 통과했다고 주장하지 않습니다.
+</Callout>
+
+## 두 가지 연결 이해하기
+
+서로 분리된 두 가지 상태가 있습니다.
+
+1. **Multica 측 설치.** 워크스페이스 Agent 관리자가 하나의 Agent에 대한 연결을 만듭니다. Multica는 공개 `qwc_` 연결 ID와 비밀 `qws_` 설치 토큰을 반환합니다. 공유 Settings 카드에는 이 Multica 연결이 활성 상태인지, 로그인한 Multica 사용자에게 신원 연결이 있는지가 표시됩니다.
+2. **Qianwen 측 Skill 및 기기 설정.** Qianwen에서 비공개 Skill과 해당 Tool을 만들고 설정한 뒤, 프로바이더 규칙에 따라 게시하거나 사용할 수 있게 하고 안경에 연결합니다. Multica는 이 상태를 관찰할 수 없습니다.
+
+따라서 Multica의 "Connection active"는 Qianwen Skill이 게시되었거나, Quark S1이 온라인이거나, 기기에서 Skill을 사용할 수 있다는 뜻이 아닙니다. 마찬가지로 "Identity linked"는 Multica가 현재 Multica 사용자를 Qianwen에서 받은 불투명한 신원 값의 정확한 쌍에 연결했다는 뜻일 뿐입니다.
+
+## 시작하기 전에
+
+다음 항목이 필요합니다.
+
+- Multica 워크스페이스, Agent, 연결된 런타임
+- 설치를 생성하거나 취소할 때 해당 Agent를 관리할 권한
+- 비공개 Qianwen Skill 프로젝트와 대상 Quark S1에 대한 접근 권한
+- Qianwen 클라우드가 HTTPS로 접근할 수 있는 Multica API URL
+- `openUserId` 및 `openUuid`의 프로바이더 측 시스템 컨텍스트, 밀리초 타임스탬프, 문서에 정의된 `random_string32` 값, HMAC-SHA256을 지원하는 Tool 스크립트
+
+`qws_` 값은 Qianwen 전용 설치 비밀 값입니다. Multica 개인 액세스 토큰(PAT)이 **아닙니다**. Multica PAT를 Qianwen에 넣지 마세요. PAT는 선택적인 Multica 관리 API 호출을 인증하는 데 사용할 수 있지만 Multica 측에만 두어야 합니다.
+
+자체 호스팅하는 경우 설치를 생성하거나 신원을 연결하기 전에 32바이트 이상의 비밀 값을 설정하세요.
+
+```dotenv
+QIANWEN_PAIRING_SECRET=<deployment-secret-of-at-least-32-bytes>
+```
+
+명시적으로 설정된 32바이트 이상의 `JWT_SECRET`이 대체 값으로 사용됩니다. 둘 다 없으면 Settings 응답은 `pairing_supported: false`를 보고합니다. 이 경우 설치 생성과 페어링 코드 발급은 비활성화되지만, 기존 연결이 있는 활성 설치는 계속 제출하고, 상태를 폴링하며, 현재 작업을 나열할 수 있습니다.
+
+## 1. Multica 설치 만들기
+
+Web 또는 Desktop 앱에서 **Settings → Integrations → Qianwen · Quark S1**을 열고 관리할 수 있는 Agent를 선택한 다음 연결을 만드세요. 이 카드는 Web/Desktop이 공유하는 Settings 보기에 포함되며, 현재 모바일 앱에는 포함되지 않습니다.
+
+한 번만 표시되는 대화 상자에는 다음 항목이 나타납니다.
+
+- `connection_id`: `qwc_`로 시작하며 모든 공개 Tool 경로에서 사용됩니다
+- `access_token`: `qws_`로 시작하며 Bearer 자격 증명과 HMAC 키로 모두 사용됩니다
+
+대화 상자를 확인하기 전에 `qws_` 값을 저장하세요. Multica는 SHA-256 다이제스트만 보관하므로 평문을 다시 표시할 수 없습니다.
+
+활성 설치는 변경할 수 없습니다. 같은 워크스페이스 Agent에 대해 생성을 반복하면 HTTP `409`를 반환하며 어느 자격 증명도 교체하지 않습니다. 다시 만들기 전에 설치를 취소하세요. 취소된 설치를 다시 만들면 새 `qwc_`와 한 번만 표시되는 새 `qws_`가 생성되므로 프로바이더 측 Tool 설정도 교체해야 합니다.
+
+동등한 관리 엔드포인트는 다음과 같습니다.
+
+```http
+POST /api/workspaces/{workspace_id}/qianwen/installations?agent_id={agent_id}
+Authorization: Bearer {MULTICA_PAT}
+```
+
+성공 응답에는 한 번만 표시되는 비밀 값이 포함됩니다.
+
+```json
+{
+  "id": "installation-uuid",
+  "agent_id": "agent-uuid",
+  "connection_id": "qwc_...",
+  "mode": "personal_polling",
+  "status": "active",
+  "current_user_bound": false,
+  "access_token": "qws_...",
+  "token_visible_once": true,
+  "submit_path": "/api/channels/qianwen/qwc_.../requests",
+  "status_path_pattern": "/api/channels/qianwen/qwc_.../requests/{request_id}"
+}
+```
+
+## 2. 비공개 Qianwen Skill 설정하기
+
+HTTP Tool 네 개를 설정하세요. 첫 번째 Tool은 신원을 한 번 연결하고, 나머지 세 개는 런타임 인터페이스입니다.
+
+| 목적 | 메서드 및 경로 | 쿼리 또는 본문 |
+|---|---|---|
+| 현재 신원 연결 | `POST /api/channels/qianwen/{connection_id}/binding/redeem` | JSON 본문 `{"pairing_code":"eight-digit string"}` |
+| 명령 제출 | `POST /api/channels/qianwen/{connection_id}/requests` | `request_id`와 `query`를 포함하는 JSON 본문 |
+| 결과 하나 폴링 | `GET /api/channels/qianwen/{connection_id}/requests/{request_id}` | 본문 없음 |
+| 현재 작업 나열 | `GET /api/channels/qianwen/{connection_id}/tasks?limit={limit}&cursor={cursor}` | `limit`의 기본값은 10이며 최대 20입니다. 첫 페이지에서는 `cursor`를 생략하세요. |
+
+모든 호출에서 다음 고정 헤더를 보내세요. 신원 및 재전송 방지 필드는 모델이 생성한 인수가 아니라 프로바이더 시스템 컨텍스트나 Tool 런타임 상태에서 가져와야 합니다.
+
+```http
+Authorization: Bearer {qws_access_token}
+X-Qianwen-Open-User-Id: {openUserId}
+X-Qianwen-Open-Uuid: {openUuid}
+X-Qianwen-Timestamp: {current_unix_time_in_milliseconds}
+X-Qianwen-Nonce: {fresh_random_string32}
+X-Qianwen-Signature: {hex_hmac_sha256}
+```
+
+POST 요청에서는 `Content-Type: application/json`도 보내세요.
+
+`openUserId`와 `openUuid`를 대소문자를 구분하는 암호화된 불투명 값으로 취급하세요. 복호화, 정규화, 공백 제거를 하지 말고 모델이 이를 바꾸게 해서는 안 됩니다. Multica는 시계 오차가 2분 이내인 타임스탬프를 허용하며 nonce가 정확히 32 UTF-8바이트여야 합니다. 호출마다 새로운 `random_string32` 값을 구성하세요. 실제 바이트 형식과 재사용 동작은 실제 Tool에서 확인해야 합니다.
+
+서명자는 다음 값을 계산합니다.
+
+```text
+hex(HMAC-SHA256(key = qws_access_token, message = UTF-8(canonical_text)))
+```
+
+따라서 같은 `qws_` 값을 비공개 Bearer 설정과 비공개 서명자 설정 매개변수 모두에서 사용할 수 있어야 합니다. Qianwen 공개 Tool 문서는 설정된 `Authorization` 헤더를 스크립트에서 읽을 수 있다고 보장하지 않습니다. 이 비밀 값을 모델 매개변수나 응답 필드로 노출하지 마세요.
+
+파싱된 Tool 입력에서 `\n` 구분자를 사용하고 끝에 줄바꿈을 붙이지 않은 `canonical_text`를 구성하세요. 원시 HTTP 본문, 이스케이프된 경로 또는 설정된 `Authorization` 헤더에 접근할 수 있다고 가정하지 마세요.
+
+페어링 코드 사용:
+
+```text
+QIANWEN-HMAC-SHA256-V1
+binding_redeem
+{timestamp}
+{nonce}
+{openUserId}
+{openUuid}
+{pairing_code}
+```
+
+제출. `request_id`는 표준 UUID 텍스트로 정규화하되 JSON 본문으로 보내는 정확한 UTF-8 `query` 문자열을 해시하세요.
+
+```text
+QIANWEN-HMAC-SHA256-V1
+request_submit
+{timestamp}
+{nonce}
+{openUserId}
+{openUuid}
+{canonical_request_id}
+{sha256_hex_of_exact_query_utf8}
+```
+
+상태:
+
+```text
+QIANWEN-HMAC-SHA256-V1
+request_status
+{timestamp}
+{nonce}
+{openUserId}
+{openUuid}
+{canonical_request_id}
+```
+
+현재 작업. 정규화된 limit(생략 시 `10`)에 서명하고 cursor를 생략하면 `-`를 사용하세요. 그 외에는 Multica가 반환한 불투명 cursor를 변경하지 않고 그대로 서명하세요.
+
+```text
+QIANWEN-HMAC-SHA256-V1
+task_list
+{timestamp}
+{nonce}
+{openUserId}
+{openUuid}
+{normalized_limit}
+{cursor_or_dash}
+```
+
+이는 프로토콜 정의이며 그대로 복사해 사용할 수 있는 완전한 Groovy 프로그램이 아닙니다. 실제 Tool 런타임에서 Qianwen 편집기의 실제 컨텍스트 매핑과 HMAC 구현을 확인하세요.
+
+## 3. Multica 사용자별 신원 연결하기
+
+하나의 Multica 설치는 여러 워크스페이스 멤버의 연결을 보관할 수 있습니다. 각 사용자가 자신의 신원을 별도로 연결합니다.
+
+1. 연결할 사용자로 Multica에 로그인합니다.
+2. Qianwen Settings 카드를 열고 활성 설치에서 **Generate pairing code**를 선택합니다.
+3. 앞의 0을 포함하여 코드를 8자 문자열로 유지하세요. 코드는 한 번만 표시되고, 해당 사용자의 이전 대기 중 코드를 대체하며, 10분 후 만료됩니다.
+4. 비공개 Skill을 통해 코드를 말하거나 입력하여 서명된 신원 연결 Tool을 호출하게 합니다.
+5. `{"status":"paired"}` 성공 응답을 받은 뒤 Multica 카드에서 **Refresh status**를 선택하고 **Identity linked**가 표시되는지 확인합니다.
+
+코드는 로그인한 Multica 사용자를 식별합니다. 고정된 `openUserId` 및 `openUuid` 헤더는 Qianwen 호출자를 식별합니다. 코드 사용 트랜잭션은 HMAC, 타임스탬프, nonce, 멤버십, Agent 호출 권한을 검증하고 코드를 소비한 뒤 불투명한 신원 쌍의 정확한 값을 기록합니다. 같은 타임스탬프와 nonce를 재사용하면서 의미만 다른 정확한 전송 재생은 거부됩니다. 프로바이더의 멱등한 재시도는 이미 커밋된 최종 결과를 복구할 수 있습니다.
+
+## 4. 명령 제출하기
+
+제출 Tool은 다음 요청을 보냅니다.
+
+```http
+POST {MULTICA_API_URL}/api/channels/qianwen/{connection_id}/requests
+Authorization: Bearer {qws_access_token}
+X-Qianwen-Open-User-Id: {openUserId}
+X-Qianwen-Open-Uuid: {openUuid}
+X-Qianwen-Timestamp: {timestamp}
+X-Qianwen-Nonce: {nonce}
+X-Qianwen-Signature: {signature}
+Content-Type: application/json
+
+{
+  "request_id": "0deecf44-7a87-4aa6-bb23-c0ee9926524d",
+  "query": "the user's transcribed request"
+}
+```
+
+새 명령에는 0이 아닌 UUID 하나를 생성하세요. 해당 명령을 재시도할 때는 같은 UUID를 다시 사용하세요. 수락된 ID를 공백 제거 후 같은 query와 다시 사용하면 멱등하게 처리됩니다. 다른 텍스트에 다시 사용하면 HTTP `409`를 반환합니다.
+
+제출에 성공하면 HTTP `202`를 반환합니다.
+
+```json
+{
+  "request_id": "0deecf44-7a87-4aa6-bb23-c0ee9926524d",
+  "status": "accepted",
+  "poll_after_ms": 2000
+}
+```
+
+Multica는 응답 전에 작업, 채널 메시지, 영구 요청 포인터를 커밋하지만 Agent 실행이 끝날 때까지 기다리지는 않습니다. 공개 Qianwen 핸들러에는 Qianwen이 명시한 3초 Tool 응답 상한에 맞추기 위해 2.5초의 서버 기한이 적용됩니다. 타임아웃이나 `503` 응답이 발생하면 같은 `request_id`로 재시도하세요. 같은 명령에 새 ID를 만들지 마세요.
+
+각 명령은 독립된 Multica Chat 세션을 시작합니다. `/issue`와 `/new`는 해당 채널에 맞는 결과 의미가 여기에는 구현되지 않았기 때문에 거부됩니다.
+
+## 5. 결과 하나 폴링하기
+
+같은 `request_id`와 서명된 신원을 사용하세요.
+
+```http
+GET {MULTICA_API_URL}/api/channels/qianwen/{connection_id}/requests/{request_id}
+Authorization: Bearer {qws_access_token}
+X-Qianwen-Open-User-Id: {openUserId}
+X-Qianwen-Open-Uuid: {openUuid}
+X-Qianwen-Timestamp: {timestamp}
+X-Qianwen-Nonce: {nonce}
+X-Qianwen-Signature: {signature}
+```
+
+`poll_after_ms`보다 자주 폴링하지 마세요. 응답 상태는 `accepted`, `queued`, `running`, `completed`, `failed`, `cancelled`, `unknown`입니다. 완료 응답에는 다음 내용이 포함될 수 있습니다.
+
+```json
+{
+  "request_id": "0deecf44-7a87-4aa6-bb23-c0ee9926524d",
+  "status": "completed",
+  "task_id": "task-uuid",
+  "output": "The tests pass after updating the parser fixture."
+}
+```
+
+Multica Chat에 저장된 어시스턴트 텍스트만 반환됩니다. 원시 런타임 오류와 내부 작업 결과 페이로드는 노출되지 않습니다. 더 긴 응답은 처음 8,000개의 Unicode 코드 포인트를 유지하고 줄임표를 추가하며 `"truncated": true`를 포함합니다.
+
+폴링은 풀 방식뿐입니다. 사용자가 Skill에 다시 확인하도록 요청하거나, 프로바이더가 요청 ID를 보관했다가 나중에 상태 Tool을 호출해야 합니다. 작업이 완료되어도 Multica가 안경을 깨우지는 않습니다.
+
+## 6. 현재 작업 묻기
+
+현재 작업 Tool을 사용하면 연결된 사용자가 요청 ID를 모르더라도 아직 진행 중인 작업을 물어볼 수 있습니다.
+
+```http
+GET {MULTICA_API_URL}/api/channels/qianwen/{connection_id}/tasks?limit=10
+Authorization: Bearer {qws_access_token}
+X-Qianwen-Open-User-Id: {openUserId}
+X-Qianwen-Open-Uuid: {openUuid}
+X-Qianwen-Timestamp: {timestamp}
+X-Qianwen-Nonce: {nonce}
+X-Qianwen-Signature: {signature}
+```
+
+목록에는 설치 수행자가 소유한 작업만도, 워크스페이스의 모든 작업도 아닌, 연결된 Multica 사용자가 Multica의 기존 Agent `VIEW` 규칙에 따라 볼 수 있는 모든 미종료 작업이 포함됩니다. Chat 작업에는 작성자만 볼 수 있다는 추가 제한이 적용됩니다. 보관되었거나 시스템용인 Agent, 종료된 작업, 빠른 작업 재생성 작업, 접근할 수 없는 비공개 또는 팀 대상 Agent는 제외됩니다.
+
+응답은 의도적으로 안전한 검색용 정보만 제공합니다.
+
+```json
+{
+  "tasks": [
+    {
+      "task_id": "task-uuid",
+      "request_id": "0deecf44-7a87-4aa6-bb23-c0ee9926524d",
+      "display_title": "Update the parser fixture",
+      "source": "chat",
+      "agent_name": "Coding Agent",
+      "status": "running",
+      "created_at": "2026-08-15T08:00:00Z",
+      "started_at": "2026-08-15T08:00:02Z"
+    }
+  ],
+  "has_more": false
+}
+```
+
+Multica가 작업을 이 Qianwen 설치 및 신원과 안전하게 연결할 수 있을 때만 `request_id`가 포함됩니다. 목록은 출력, 오류, 프롬프트, 컨텍스트, 전사 내용, 파일 시스템 경로, 프로바이더 ID 또는 자격 증명을 반환하지 않습니다. Qianwen 작업의 결과에는 정확한 상태 Tool을 사용하세요. `has_more`가 true이면 반환된 `next_cursor`를 변경하지 않고 다음 서명 요청에 보내세요.
+
+## 신원 연결 해제와 설치 취소
+
+Settings 카드는 서로 다른 두 가지 작업을 제공합니다.
+
+- **Unlink my identity**는 `DELETE /api/workspaces/{workspace_id}/qianwen/installations/{installation_id}/bindings/me`를 호출합니다. 로그인한 Multica 사용자의 Qianwen 신원 연결과 대기 중인 페어링 상태만 제거합니다. 설치와 다른 사용자의 연결은 활성 상태로 유지됩니다. 해당 사용자가 제출, 상태 또는 현재 작업을 다시 사용하려면 신원을 다시 연결해야 합니다.
+- **Revoke connection**은 `DELETE /api/workspaces/{workspace_id}/qianwen/installations/{installation_id}`를 호출합니다. Agent 관리자가 모든 사용자에 대해 설치를 비활성화하고, `qwc_`/`qws_` 인그레스를 무효화하며, 페어링 권한과 연결을 지웁니다. 기존 Multica 작업과 기록은 삭제되지 않습니다.
+
+설치를 취소해도 프로바이더 측 Skill을 수정하거나 삭제하지 않습니다. Qianwen에서 해당 설정을 별도로 정리하거나 교체하세요.
+
+## 선택적 산업용 OpenAPI 경로
+
+산업용 OpenAPI는 향후 제3자가 시작하는 푸시 어댑터를 위한 별도의 선택적 경로입니다. 이 PR에서 구현하는 Skill 주도 폴링 흐름의 전제 조건이 **아닙니다**.
+
+공식 [Qianwen AI 하드웨어 플랫폼 개요](https://device.qianwen.com/docs?docId=6668302)는 셀프서비스 Skill 플랫폼과 산업용 플랫폼을 구분합니다. 산업용 플랫폼은 완전한 셀프서비스 설정 콘솔이 없는 기업 맞춤화 서비스로 설명됩니다. 파트너가 자체 서비스와 설정 자료를 준비한 다음 Qianwen의 비즈니스 및 솔루션 담당자와 오프라인으로 설정과 연동 테스트를 진행합니다.
+
+공식 [산업용 OpenAPI 페이지](https://device.qianwen.com/docs?docId=6668314)는 기기 조회와 메시지 푸시를 나열하지만 SDK를 받으려면 플랫폼에 문의해야 한다고 설명합니다. 완전한 푸시 엔드포인트, 페이로드, 서명 및 전달 규약은 해당 페이지에 공개되어 있지 않습니다. 관심 있는 기업은 [협력 의향을 제출](https://alidocs.dingtalk.com/notable/share/form/v013M0OzeZmNQ03gqze_lce4g5E_0Bs85cM?source=link)한 뒤 비즈니스 협의, 솔루션 설계, 자격 증명 및 SDK 제공, 공동 테스트 절차를 이어갈 수 있습니다.
+
+이 페이지들에는 일반 소매용 Quark S1의 비공개 Skill이 산업용 푸시를 사용할 수 있다는 확인이 없습니다. Qianwen이 이 별도의 기업용 경로를 승인하고 연동 규약을 제공하기 전까지는 구현된 전송 방식으로 폴링을 유지하세요.
+
+## 프로바이더 측 승인 게이트
+
+Multica 서버와 공유 Settings 화면에는 위 규약이 구현되어 있습니다. 다음 Qianwen/Quark 동작은 공개 문서나 이 변경의 실제 기기 테스트로 확인되지 않았습니다.
+
+- 실제 Qianwen Tool Groovy 런타임에서 필요한 바이트 및 16진수 동작으로 HmacSHA256을 사용할 수 있는지
+- `random_string32`가 정확히 32 UTF-8바이트를 생성하고 호출마다 적합한 새로운 값을 제공하는지
+- `openUserId`와 `openUuid`의 실제 시스템 컨텍스트 필드 매핑, 그리고 두 값이 Tool 호출, Skill 업데이트, 기기 재연결 전반에서 안정적으로 유지되는지
+- Skill이 제출에서 이후 상태 호출까지 `request_id`를 보관하고 전달할 수 있는지(이후 사용자 턴 포함)
+- 일반 Tool 텍스트 응답이 Quark S1에서 실제로 읽을 수 있는 내용으로 렌더링되는지
+- 반환된 작업 제목과 Agent 출력을 Qianwen이 데이터로만 처리하고 사용자 확인 없이 후속 Tool 호출을 실행하지 않는지
+- 게시된 Tool의 자격 증명을 변경하기 위해 프로바이더 UI에서 실제로 Tool을 삭제하고 다시 만들어야 하는지, 그리고 그것이 신원 값에 어떤 영향을 주는지. 사용 가능한 프로바이더 설명은 서로 모순되므로 계정 수준에서 확인해야 합니다
+- 일반 소매용 S1 비공개 Skill이 산업용 메시지 푸시를 사용할 자격이 있는지. 기업 온보딩 페이지에는 확인되어 있지 않습니다
+
+이 연동을 준비 완료로 판단하기 전에 실제 Tool에서 서명 스모크 테스트를 한 번 실행하고, 실제 신원을 연결하고, 요청을 제출하여 그 ID를 유지하고, 완료될 때까지 폴링하고, 현재 작업 목록을 요청하며, S1에서 일반 텍스트가 표시되는지 확인하세요. 이러한 검사가 통과하기 전까지는 프로바이더 측 연결과 안경 내 표시를 검증되지 않은 상태로 취급하세요.
+
+## 다음 단계
+
+- [채팅 연동](/channels) — 공유 라우팅 및 권한 부여 모델
+- [데몬 및 런타임](/daemon-runtimes) — Agent 작업이 실제로 실행되는 위치
+- [인증 토큰](/auth-tokens) — Multica PAT를 Qianwen 외부에 두기 위한 지침

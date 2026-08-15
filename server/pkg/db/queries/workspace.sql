@@ -141,6 +141,18 @@ cleared_draft_restores AS (
 cleared_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM ws_installations)
 ),
+cleared_qianwen_pairing_codes AS (
+    DELETE FROM qianwen_pairing_code WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_qianwen_pairing_attempts AS (
+    DELETE FROM qianwen_pairing_attempt WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_qianwen_invocation_nonces AS (
+    DELETE FROM qianwen_invocation_nonce WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_qianwen_requests AS (
+    DELETE FROM qianwen_skill_request WHERE installation_id IN (SELECT id FROM ws_installations)
+),
 cleared_audit AS (
     -- Purge, don't detach: the workspace is gone and channel_inbound_audit has no
     -- workspace_id and no reaper, so a detached (NULL) row would be permanently

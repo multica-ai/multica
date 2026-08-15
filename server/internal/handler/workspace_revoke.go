@@ -125,6 +125,25 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		}
 	}
 
+	// Personal Qianwen credentials act with their installer's authority. A
+	// departing installer must not leave an active qws_ token that silently
+	// comes back to life if they are invited again; revoke it and clear all
+	// installation-scoped pairing authority in this transaction. A departing
+	// non-installer may still own a pending code or short-lived paired outcome
+	// on another member's installation, so prune those user-scoped rows too.
+	if err := qtx.RevokeQianwenInstallationsByInstaller(ctx, db.RevokeQianwenInstallationsByInstallerParams{
+		WorkspaceID:   workspaceID,
+		MulticaUserID: userID,
+	}); err != nil {
+		return empty, err
+	}
+	if err := qtx.DeleteQianwenPairingStateByWorkspaceMember(ctx, db.DeleteQianwenPairingStateByWorkspaceMemberParams{
+		WorkspaceID:   workspaceID,
+		MulticaUserID: userID,
+	}); err != nil {
+		return empty, err
+	}
+
 	// channel_user_binding used to carry a member FK with ON DELETE CASCADE, so
 	// a removed member's IM bindings vanished automatically. MUL-3515 §4 dropped
 	// every channel_* foreign key, moving that integrity rule to the application

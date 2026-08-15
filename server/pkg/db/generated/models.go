@@ -1075,6 +1075,53 @@ type ProjectResource struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 }
 
+// Short-lived signed-request digests and outcomes for replay-safe Qianwen idempotency.
+type QianwenInvocationNonce struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	NonceDigest    []byte             `json:"nonce_digest"`
+	RequestDigest  []byte             `json:"request_digest"`
+	Outcome        pgtype.Text        `json:"outcome"`
+	MulticaUserID  pgtype.UUID        `json:"multica_user_id"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+// DB-clock rolling failure log for Qianwen pairing; keyed identity digests only.
+type QianwenPairingAttempt struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	IdentityDigest []byte             `json:"identity_digest"`
+	AttemptedAt    pgtype.Timestamptz `json:"attempted_at"`
+}
+
+// Current one-time Qianwen pairing-code digest per installation and Multica user; no plaintext and no foreign keys.
+type QianwenPairingCode struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
+	// HMAC-SHA-256 under a Qianwen-specific key derived from the deployment secret.
+	CodeDigest []byte             `json:"code_digest"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+// Durable Qianwen request idempotency ledger. No FKs by design: installation revocation and chat archive/deletion must not erase an accepted request key.
+type QianwenSkillRequest struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	RequestID      pgtype.UUID `json:"request_id"`
+	// Bound Multica user whose signed Qianwen identity submitted the request; no FK by design so the idempotency key survives member removal.
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	// SHA-256 of the normalized request query; the plaintext lives only in chat_message.
+	QuerySha256 []byte `json:"query_sha256"`
+	// Fencing token for the current submit owner; every successful claim or reclaim mints a new UUID.
+	ClaimToken pgtype.UUID `json:"claim_token"`
+	// DB-clock lease deadline after which an unfinished request may be reclaimed.
+	ClaimExpiresAt pgtype.Timestamptz `json:"claim_expires_at"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	TaskID         pgtype.UUID        `json:"task_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type QuickAction struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

@@ -9,6 +9,8 @@ Chat integrations let the team ask an agent questions, @-mention it in a group c
 
 Feishu/Lark, Slack, DingTalk, and WeCom are supported today. They share the same session, identity, and execution mechanics but install differently.
 
+An experimental [Qianwen Skill bridge](/qianwen-skill-integration) is also available for private Quark S1 Skills. Its Shared Web/Desktop Settings card creates a Multica installation and manages caller-relative identity pairing; the provider-side Skill and device setup remains separate. Signed Tools submit work, poll one result, or list the bound user's visible non-terminal tasks. The bridge is pull-only and still requires a real Qianwen Tool and S1 smoke test. Industry message push is a separate enterprise business-onboarding route, not a prerequisite for this polling integration, and retail S1 private-Skill eligibility is unconfirmed.
+
 ## Choose a platform
 
 | | Feishu / Lark | Slack | DingTalk | WeCom |
@@ -32,6 +34,7 @@ Step-by-step guides:
 - [Feishu / Lark Bot integration](/lark-bot-integration)
 - [Slack Bot integration](/slack-bot-integration)
 - [DingTalk Bot integration](/dingtalk-bot-integration)
+- [Qianwen Skill bridge (experimental)](/qianwen-skill-integration)
 
 ## How a message is processed
 
@@ -90,4 +93,5 @@ WeCom additionally requires a **single backend replica**: its only outbound path
 - [Feishu / Lark Bot integration](/lark-bot-integration) — connect an agent by scanning a QR code.
 - [Slack Bot integration](/slack-bot-integration) — create a Slack app and paste its tokens into Multica.
 - [DingTalk Bot integration](/dingtalk-bot-integration) — create a Stream-mode robot and paste its credentials into Multica.
+- [Qianwen Skill bridge (experimental)](/qianwen-skill-integration) — pair a private Quark S1 Skill, submit signed requests, poll results, and list current tasks; no proactive device push.
 - [Chat](/chat) — the conversation and execution model behind every Bot.

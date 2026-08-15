@@ -1881,6 +1881,12 @@ type DirectChatSendResult struct {
 	Queued             bool
 }
 
+// ChannelDirectChatFinalize appends channel-specific ledger state to the
+// direct-send transaction. Returning an error rolls back the task, message,
+// session touch, and ledger write together; task notifications happen only
+// after the callback and transaction both succeed.
+type ChannelDirectChatFinalize func(context.Context, *db.Queries, db.AgentTaskQueue) error
+
 var ErrChatSessionAlreadyStarted = errors.New("chat session already has a user message")
 
 // SendDirectChatMessage atomically persists one web/mobile direct-chat turn:
@@ -1903,6 +1909,36 @@ func (s *TaskService) SendDirectChatMessage(
 	attachmentIDs []pgtype.UUID,
 	uploaderType string,
 	uploaderID pgtype.UUID,
+) (*DirectChatSendResult, error) {
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, false, nil)
+}
+
+// SendChannelDirectChatMessage atomically persists a channel-originated direct
+// message and its owning task. Channel callers do not accept web attachments;
+// their durable message is stamped channel_ingested so downstream delivery and
+// cancellation logic retain its external-channel provenance.
+func (s *TaskService) SendChannelDirectChatMessage(
+	ctx context.Context,
+	session db.ChatSession,
+	agent db.Agent,
+	initiatorUserID pgtype.UUID,
+	content string,
+	finalize ChannelDirectChatFinalize,
+) (*DirectChatSendResult, error) {
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, nil, "", pgtype.UUID{}, true, finalize)
+}
+
+func (s *TaskService) sendDirectChatMessage(
+	ctx context.Context,
+	session db.ChatSession,
+	agent db.Agent,
+	initiatorUserID pgtype.UUID,
+	content string,
+	attachmentIDs []pgtype.UUID,
+	uploaderType string,
+	uploaderID pgtype.UUID,
+	channelIngested bool,
+	finalize ChannelDirectChatFinalize,
 ) (*DirectChatSendResult, error) {
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
@@ -2007,11 +2043,12 @@ func (s *TaskService) SendDirectChatMessage(
 		// Create the user message already owned by this task (task_id = task.id),
 		// so it belongs to this immutable input batch the instant it exists.
 		msg, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
-			ChatSessionID: session.ID,
-			Role:          "user",
-			Content:       content,
-			TaskID:        task.ID,
-			MessageKind:   pgtype.Text{String: protocol.ChatMessageKindMessage, Valid: true},
+			ChatSessionID:   session.ID,
+			Role:            "user",
+			Content:         content,
+			TaskID:          task.ID,
+			MessageKind:     pgtype.Text{String: protocol.ChatMessageKindMessage, Valid: true},
+			ChannelIngested: pgtype.Bool{Bool: channelIngested, Valid: true},
 		})
 		if err != nil {
 			return fmt.Errorf("create user chat message: %w", err)
@@ -2035,6 +2072,11 @@ func (s *TaskService) SendDirectChatMessage(
 
 		if err := qtx.TouchChatSession(ctx, session.ID); err != nil {
 			return fmt.Errorf("touch chat session: %w", err)
+		}
+		if finalize != nil {
+			if err := finalize(ctx, qtx, task); err != nil {
+				return fmt.Errorf("finalize channel direct chat: %w", err)
+			}
 		}
 		return nil
 	}); err != nil {

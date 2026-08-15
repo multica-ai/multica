@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_qianwen_invocation_nonce_installation_nonce;

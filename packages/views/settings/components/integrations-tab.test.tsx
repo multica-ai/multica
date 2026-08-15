@@ -57,6 +57,10 @@ vi.mock("./wecom-tab", () => ({
   WecomTab: () => <div data-testid="wecom-tab" />,
 }));
 
+vi.mock("./qianwen-tab", () => ({
+  QianwenTab: () => <div data-testid="qianwen-tab" />,
+}));
+
 import { IntegrationsTab } from "./integrations-tab";
 
 afterEach(cleanup);
@@ -99,7 +103,7 @@ describe("Settings IntegrationsTab", () => {
   it("shows each channel description below its icon and title", () => {
     renderTab();
 
-    for (const channel of ["lark", "slack", "dingtalk", "wecom"]) {
+    for (const channel of ["lark", "slack", "dingtalk", "wecom", "qianwen"]) {
       const icon = screen.getByTestId(`integration-channel-icon-${channel}`);
       const title = icon.closest("h3");
       const description = title?.nextElementSibling;
@@ -118,11 +122,18 @@ describe("Settings IntegrationsTab", () => {
   it("gives every channel its own brand mark", () => {
     renderTab();
 
-    const shapes = ["lark", "slack", "dingtalk", "wecom"].map(
+    const shapes = ["lark", "slack", "dingtalk", "wecom", "qianwen"].map(
       (channel) => screen.getByTestId(`integration-channel-icon-${channel}`).innerHTML,
     );
 
     expect(new Set(shapes).size).toBe(shapes.length);
+  });
+
+  it("shows the shared Qianwen and Quark S1 integration card", () => {
+    renderTab();
+
+    expect(screen.getByTestId("qianwen-tab")).toBeInTheDocument();
+    expect(screen.getByText("Qianwen · Quark S1")).toBeInTheDocument();
   });
 
   it("hides Composio when the feature flag is on but the server reports 503", () => {
