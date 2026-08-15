@@ -26,18 +26,16 @@ const queriesRef = vi.hoisted(() => ({
     {
       id: "agent-owned",
       name: "Owned Agent",
-      owner_id: "user-1",
-      archived_at: null,
-      permission_mode: "private",
-      invocation_targets: [],
+      archivedAt: null,
+      canManage: true,
+      canInvoke: true,
     },
     {
       id: "agent-other",
       name: "Other Agent",
-      owner_id: "user-2",
-      archived_at: null,
-      permission_mode: "public_to",
-      invocation_targets: [{ target_type: "workspace", target_id: "workspace-1" }],
+      archivedAt: null,
+      canManage: false,
+      canInvoke: true,
     },
   ] as Array<Record<string, unknown>>,
   members: [{ user_id: "user-1", role: "member" }],
@@ -88,11 +86,11 @@ vi.mock("@multica/core/auth", () => {
 });
 
 vi.mock("@multica/core/workspace/queries", () => ({
-  agentListOptions: () => ({ queryKey: ["agents"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
 }));
 
 vi.mock("@multica/core/qianwen", () => ({
+  qianwenAgentListOptions: () => ({ queryKey: ["agents"] }),
   qianwenInstallationsOptions: () => ({ queryKey: ["qianwen", "installations"] }),
   useInstallQianwenPersonal: () => ({
     mutateAsync: install,
@@ -147,20 +145,16 @@ describe("QianwenTab", () => {
       {
         id: "agent-owned",
         name: "Owned Agent",
-        owner_id: "user-1",
-        archived_at: null,
-        permission_mode: "private",
-        invocation_targets: [],
+        archivedAt: null,
+        canManage: true,
+        canInvoke: true,
       },
       {
         id: "agent-other",
         name: "Other Agent",
-        owner_id: "user-2",
-        archived_at: null,
-        permission_mode: "public_to",
-        invocation_targets: [
-          { target_type: "workspace", target_id: "workspace-1" },
-        ],
+        archivedAt: null,
+        canManage: false,
+        canInvoke: true,
       },
     ];
     queriesRef.members = [{ user_id: "user-1", role: "member" }];
@@ -387,6 +381,42 @@ describe("QianwenTab", () => {
     });
   });
 
+  it("keeps a redacted linked identity unlinkable without exposing Agent management", async () => {
+    const user = userEvent.setup();
+    queriesRef.installations = {
+      configured: true,
+      pairingSupported: true,
+      installations: [
+        {
+          id: "installation-redacted-linked",
+          agentId: "",
+          connectionId: "",
+          mode: "",
+          status: "active",
+          currentUserBound: true,
+        },
+      ],
+    };
+    unbindCurrentUser.mockResolvedValue(undefined);
+
+    renderTab();
+
+    const linkedStatus = screen.getByText("Identity linked");
+    const redactedRow = linkedStatus.closest<HTMLElement>('[role="group"]');
+    expect(redactedRow).not.toBeNull();
+    const row = within(redactedRow as HTMLElement);
+    expect(row.queryByText("Owned Agent")).toBeNull();
+    expect(row.queryByText("Other Agent")).toBeNull();
+    expect(row.queryByText(/qwc_/)).toBeNull();
+    expect(row.queryByRole("button", { name: "Generate pairing code" })).toBeNull();
+    expect(row.queryByRole("button", { name: "Revoke connection" })).toBeNull();
+
+    await user.click(row.getByRole("button", { name: "Unlink my identity" }));
+    expect(unbindCurrentUser).toHaveBeenCalledWith({
+      installationId: "installation-redacted-linked",
+    });
+  });
+
   it("never exposes a raw mutation error in the UI notification", async () => {
     const user = userEvent.setup();
     queriesRef.installations = {
@@ -425,10 +455,9 @@ describe("QianwenTab", () => {
       {
         id: "agent-private-other",
         name: "Private Agent",
-        owner_id: "user-2",
-        archived_at: null,
-        permission_mode: "private",
-        invocation_targets: [],
+        archivedAt: null,
+        canManage: true,
+        canInvoke: false,
       },
     ];
     queriesRef.installations = {
@@ -493,6 +522,22 @@ describe("QianwenTab", () => {
   it("excludes an Agent with an active connection but allows a revoked one to reconnect", async () => {
     const user = userEvent.setup();
     queriesRef.members = [{ user_id: "user-1", role: "admin" }];
+    queriesRef.agents = [
+      {
+        id: "agent-owned",
+        name: "Owned Agent",
+        archivedAt: null,
+        canManage: true,
+        canInvoke: true,
+      },
+      {
+        id: "agent-other",
+        name: "Other Agent",
+        archivedAt: null,
+        canManage: true,
+        canInvoke: true,
+      },
+    ];
     queriesRef.installations = {
       configured: true,
       pairingSupported: true,

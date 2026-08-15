@@ -31,3 +31,12 @@ export interface QianwenPairingCodeResponse {
   expiresAt: string;
   codeVisibleOnce: true;
 }
+
+/** Camel-case agent projection consumed by the Qianwen Settings surface. */
+export interface QianwenAgentSummary {
+  id: string;
+  name: string;
+  archivedAt: string | null;
+  canManage: boolean;
+  canInvoke: boolean;
+}

@@ -1,13 +1,89 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, setApiInstance } from "../api";
-import { qianwenInstallationsOptions, qianwenKeys } from "./queries";
+import type { Agent } from "../types";
+import {
+  qianwenAgentListOptions,
+  qianwenInstallationsOptions,
+  qianwenKeys,
+} from "./queries";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function makeAgent(overrides: Partial<Agent> = {}): Agent {
+  return {
+    id: "agent-1",
+    workspace_id: "workspace-1",
+    runtime_id: "runtime-1",
+    name: "Agent",
+    description: "",
+    instructions: "",
+    avatar_url: null,
+    runtime_mode: "local",
+    runtime_config: {},
+    custom_args: [],
+    visibility: "workspace",
+    permission_mode: "public_to",
+    invocation_targets: [],
+    status: "idle",
+    max_concurrent_tasks: 1,
+    model: "",
+    owner_id: null,
+    skills: [],
+    created_at: "2026-08-15T00:00:00Z",
+    updated_at: "2026-08-15T00:00:00Z",
+    archived_at: null,
+    archived_by: null,
+    ...overrides,
+  };
+}
+
 describe("Qianwen installation queries", () => {
+  it("projects legacy agent cache records to a camelCase Qianwen view model", () => {
+    const activeOwnedAgent = makeAgent({
+      id: "agent-owned",
+      name: "Owned Agent",
+      owner_id: "user-1",
+      archived_at: null,
+      permission_mode: "private",
+      invocation_targets: [],
+    });
+    const archivedWorkspaceAgent = makeAgent({
+      id: "agent-workspace",
+      name: "Workspace Agent",
+      owner_id: "user-2",
+      archived_at: "2026-08-15T03:00:00Z",
+      permission_mode: "public_to",
+      invocation_targets: [
+        { target_type: "workspace", target_id: "workspace-1" },
+      ],
+    });
+
+    const select = qianwenAgentListOptions("workspace-1", {
+      userId: "user-1",
+      role: "member",
+    }).select;
+
+    expect(select?.([activeOwnedAgent, archivedWorkspaceAgent])).toEqual([
+      {
+        id: "agent-owned",
+        name: "Owned Agent",
+        archivedAt: null,
+        canManage: true,
+        canInvoke: true,
+      },
+      {
+        id: "agent-workspace",
+        name: "Workspace Agent",
+        archivedAt: "2026-08-15T03:00:00Z",
+        canManage: false,
+        canInvoke: true,
+      },
+    ]);
+  });
+
   it("isolates caller-relative binding state by workspace and current user", () => {
     expect(qianwenKeys.installations("workspace-1", "user-1")).toEqual([
       "qianwen",

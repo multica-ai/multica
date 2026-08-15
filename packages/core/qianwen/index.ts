@@ -1,4 +1,8 @@
-export { qianwenInstallationsOptions, qianwenKeys } from "./queries";
+export {
+  qianwenAgentListOptions,
+  qianwenInstallationsOptions,
+  qianwenKeys,
+} from "./queries";
 export {
   useInstallQianwenPersonal,
   useMintQianwenPairingCode,

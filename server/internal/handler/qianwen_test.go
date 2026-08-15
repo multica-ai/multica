@@ -3,13 +3,13 @@ package handler
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,6 +56,43 @@ type recordingQianwenRateLimiter struct {
 func (l *recordingQianwenRateLimiter) Allow(_ context.Context, key string) bool {
 	l.keys = append(l.keys, key)
 	return l.allow
+}
+
+type blockingQianwenDeadlineLimiter struct {
+	hadDeadline bool
+	remaining   time.Duration
+	contextErr  error
+}
+
+type blockingQianwenRequestBody struct {
+	closed chan struct{}
+	once   sync.Once
+}
+
+func newBlockingQianwenRequestBody() *blockingQianwenRequestBody {
+	return &blockingQianwenRequestBody{closed: make(chan struct{})}
+}
+
+func (b *blockingQianwenRequestBody) Read([]byte) (int, error) {
+	<-b.closed
+	return 0, errors.New("blocking request body closed")
+}
+
+func (b *blockingQianwenRequestBody) Close() error {
+	b.once.Do(func() { close(b.closed) })
+	return nil
+}
+
+func (l *blockingQianwenDeadlineLimiter) Allow(ctx context.Context, _ string) bool {
+	deadline, ok := ctx.Deadline()
+	l.hadDeadline = ok
+	if !ok {
+		return false
+	}
+	l.remaining = time.Until(deadline)
+	<-ctx.Done()
+	l.contextErr = ctx.Err()
+	return false
 }
 
 func (f *fakeQianwenService) InstallPersonal(ctx context.Context, workspaceID, agentID, installerID pgtype.UUID) (qianwen.InstallationResult, error) {
@@ -130,6 +167,176 @@ func setQianwenHandlerInvocationHeaders(req *http.Request) {
 	req.Header.Set("X-Qianwen-Timestamp", "1786726800123")
 	req.Header.Set("X-Qianwen-Nonce", "0123456789abcdef0123456789abcdef")
 	req.Header.Set("X-Qianwen-Signature", strings.Repeat("ab", sha256.Size))
+}
+
+func TestStartQianwenRequestDeadlineUsesProviderBudget(t *testing.T) {
+	baseRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	req, finish := startQianwenRequestDeadline(baseRequest)
+	defer finish()
+
+	deadline, ok := req.Context().Deadline()
+	if !ok {
+		t.Fatal("Qianwen request context has no deadline")
+	}
+	budget := time.Until(deadline)
+	if budget <= 2*time.Second || budget > qianwenRequestTimeout {
+		t.Fatalf("Qianwen request budget = %s, want the configured 2.5s provider budget", budget)
+	}
+}
+
+func TestQianwenPublicHandlersShareDeadlineWithIngressLimiter(t *testing.T) {
+	const parentTimeout = 250 * time.Millisecond
+	requestID := "56a41a0c-cb13-476a-a75b-230792a277e1"
+	tests := []struct {
+		name    string
+		request func() *http.Request
+		handle  func(*Handler, http.ResponseWriter, *http.Request)
+	}{
+		{
+			name: "redeem",
+			request: func() *http.Request {
+				req := qianwenRequest(http.MethodPost,
+					"/api/channels/qianwen/"+qianwenHandlerTestConnectionID+"/binding/redeem",
+					`{"pairing_code":"01234567"}`,
+					"connectionId", qianwenHandlerTestConnectionID,
+				)
+				req.Header.Set("Authorization", "Bearer "+qianwenHandlerTestAccessToken)
+				return req
+			},
+			handle: func(h *Handler, w http.ResponseWriter, r *http.Request) {
+				h.RedeemQianwenPairingCode(w, r)
+			},
+		},
+		{
+			name: "submit",
+			request: func() *http.Request {
+				req := qianwenRequest(http.MethodPost,
+					"/api/channels/qianwen/"+qianwenHandlerTestConnectionID+"/requests",
+					`{"request_id":"`+requestID+`","query":"run tests"}`,
+					"connectionId", qianwenHandlerTestConnectionID,
+				)
+				req.Header.Set("Authorization", "Bearer "+qianwenHandlerTestAccessToken)
+				return req
+			},
+			handle: func(h *Handler, w http.ResponseWriter, r *http.Request) {
+				h.SubmitQianwenRequest(w, r)
+			},
+		},
+		{
+			name: "status",
+			request: func() *http.Request {
+				req := qianwenRequest(http.MethodGet,
+					"/api/channels/qianwen/"+qianwenHandlerTestConnectionID+"/requests/"+requestID,
+					"",
+					"connectionId", qianwenHandlerTestConnectionID,
+					"requestId", requestID,
+				)
+				req.Header.Set("Authorization", "Bearer "+qianwenHandlerTestAccessToken)
+				return req
+			},
+			handle: func(h *Handler, w http.ResponseWriter, r *http.Request) {
+				h.GetQianwenRequestStatus(w, r)
+			},
+		},
+		{
+			name: "current tasks",
+			request: func() *http.Request {
+				req := qianwenRequest(http.MethodGet,
+					"/api/channels/qianwen/"+qianwenHandlerTestConnectionID+"/tasks",
+					"",
+					"connectionId", qianwenHandlerTestConnectionID,
+				)
+				req.Header.Set("Authorization", "Bearer "+qianwenHandlerTestAccessToken)
+				return req
+			},
+			handle: func(h *Handler, w http.ResponseWriter, r *http.Request) {
+				h.ListQianwenCurrentTasks(w, r)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			limiter := &blockingQianwenDeadlineLimiter{}
+			h := &Handler{
+				Qianwen:                      &fakeQianwenService{},
+				WebhookAbsoluteIPRateLimiter: limiter,
+			}
+			w := httptest.NewRecorder()
+			req := tt.request()
+			parentCtx, cancel := context.WithTimeout(req.Context(), parentTimeout)
+			defer cancel()
+			req = req.WithContext(parentCtx)
+			started := time.Now()
+
+			tt.handle(h, w, req)
+
+			elapsed := time.Since(started)
+			if !limiter.hadDeadline {
+				t.Fatal("ingress limiter context has no shared request deadline")
+			}
+			if limiter.remaining <= 0 || limiter.remaining > parentTimeout {
+				t.Fatalf("limiter deadline remaining = %s, want the earlier parent deadline", limiter.remaining)
+			}
+			if !errors.Is(limiter.contextErr, context.DeadlineExceeded) {
+				t.Fatalf("limiter context error = %v, want deadline exceeded", limiter.contextErr)
+			}
+			if elapsed < 100*time.Millisecond || elapsed >= 2*time.Second {
+				t.Fatalf("handler elapsed = %s, want the shared parent deadline to expire promptly", elapsed)
+			}
+			if w.Code != http.StatusTooManyRequests {
+				t.Fatalf("status = %d, want %d after limiter budget expires; body=%s", w.Code, http.StatusTooManyRequests, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestSubmitQianwenRequestDeadlineInterruptsBlockingBodyRead(t *testing.T) {
+	const parentTimeout = 250 * time.Millisecond
+	called := 0
+	h := &Handler{Qianwen: &fakeQianwenService{
+		submitFn: func(context.Context, string, string, qianwen.SubmitInvocation) (qianwen.SubmitResult, error) {
+			called++
+			return qianwen.SubmitResult{}, nil
+		},
+	}}
+	body := newBlockingQianwenRequestBody()
+	req := qianwenRequest(http.MethodPost,
+		"/api/channels/qianwen/"+qianwenHandlerTestConnectionID+"/requests",
+		"",
+		"connectionId", qianwenHandlerTestConnectionID,
+	)
+	req.Body = body
+	req.Header.Set("Authorization", "Bearer "+qianwenHandlerTestAccessToken)
+	parentCtx, cancel := context.WithTimeout(req.Context(), parentTimeout)
+	defer cancel()
+	req = req.WithContext(parentCtx)
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	started := time.Now()
+	go func() {
+		h.SubmitQianwenRequest(w, req)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		elapsed := time.Since(started)
+		if elapsed < 100*time.Millisecond || elapsed >= 2*time.Second {
+			t.Fatalf("handler elapsed = %s, want body read interrupted by the shared parent deadline", elapsed)
+		}
+		if w.Code != http.StatusGatewayTimeout {
+			t.Fatalf("status = %d, want %d for deadline-interrupted body; body=%s", w.Code, http.StatusGatewayTimeout, w.Body.String())
+		}
+		if called != 0 {
+			t.Fatalf("Submit called %d times after body-read timeout, want 0", called)
+		}
+	case <-time.After(2 * time.Second):
+		_ = body.Close()
+		<-done
+		t.Fatal("handler did not interrupt the blocking request body after its context deadline")
+	}
 }
 
 func TestSubmitQianwenRequestRequiresBearer(t *testing.T) {
@@ -259,9 +466,11 @@ func TestSubmitQianwenRequestRejectsMalformedConnectionBeforeCredentialLimiter(t
 	}
 }
 
-func TestQianwenCredentialLimiterHashesConnectionAndTokenAcrossPublicEndpoints(t *testing.T) {
+func TestQianwenPublicBudgetsSeparateWritesReadsAndKeepAggregateCaps(t *testing.T) {
 	const requestID = "56a41a0c-cb13-476a-a75b-230792a277e1"
-	credentialLimiter := &recordingQianwenRateLimiter{allow: true}
+	readLimiter := &recordingQianwenRateLimiter{allow: true}
+	writeLimiter := &recordingQianwenRateLimiter{allow: true}
+	aggregateLimiter := &recordingQianwenRateLimiter{allow: true}
 	h := &Handler{
 		Qianwen: &fakeQianwenService{
 			submitFn: func(context.Context, string, string, qianwen.SubmitInvocation) (qianwen.SubmitResult, error) {
@@ -271,7 +480,9 @@ func TestQianwenCredentialLimiterHashesConnectionAndTokenAcrossPublicEndpoints(t
 				return qianwen.RequestStatus{RequestID: requestID, Status: "completed"}, nil
 			},
 		},
-		WebhookRateLimiter: credentialLimiter,
+		WebhookRateLimiter:           readLimiter,
+		WebhookIPRateLimiter:         writeLimiter,
+		WebhookAbsoluteIPRateLimiter: aggregateLimiter,
 	}
 
 	submitReq := qianwenRequest(http.MethodPost, "/api/channels/qianwen/"+qianwenHandlerTestConnectionID+"/requests",
@@ -294,27 +505,199 @@ func TestQianwenCredentialLimiterHashesConnectionAndTokenAcrossPublicEndpoints(t
 		t.Fatalf("status query = %d, want %d; body=%s", statusW.Code, http.StatusOK, statusW.Body.String())
 	}
 
-	if len(credentialLimiter.keys) != 2 {
-		t.Fatalf("credential limiter calls = %d, want 2", len(credentialLimiter.keys))
+	if len(writeLimiter.keys) != 1 {
+		t.Fatalf("write limiter calls = %d, want submit only; keys=%q", len(writeLimiter.keys), writeLimiter.keys)
 	}
-	if credentialLimiter.keys[0] == credentialLimiter.keys[1] {
-		t.Fatalf("different bearer tokens shared limiter key %q", credentialLimiter.keys[0])
+	if want := "qianwen:write:" + qianwenCredentialRateLimitKey(qianwenHandlerTestConnectionID, qianwenHandlerTestAccessToken); writeLimiter.keys[0] != want {
+		t.Fatalf("write key = %q, want scoped installation digest %q", writeLimiter.keys[0], want)
 	}
-	for i, token := range []string{qianwenHandlerTestAccessToken, qianwenHandlerTestOtherToken} {
-		key := credentialLimiter.keys[i]
-		if len(key) != sha256.Size*2 {
-			t.Fatalf("key %d length = %d, want %d", i, len(key), sha256.Size*2)
+	if len(readLimiter.keys) != 1 {
+		t.Fatalf("read limiter calls = %d, want credential-scoped parsed status identity only; keys=%q", len(readLimiter.keys), readLimiter.keys)
+	}
+	identity, _, ok := qianwenInvocationMetadataFromHeaders(statusReq)
+	if !ok {
+		t.Fatal("status fixture identity is invalid")
+	}
+	if want := qianwenReadIdentityRateLimitKey(qianwenHandlerTestConnectionID, qianwenHandlerTestOtherToken, identity); readLimiter.keys[0] != want {
+		t.Fatalf("read key = %q, want credential-scoped exact parsed identity digest %q", readLimiter.keys[0], want)
+	}
+	if len(aggregateLimiter.keys) != 4 {
+		t.Fatalf("aggregate limiter calls = %d, want IP + installation for each endpoint; keys=%q", len(aggregateLimiter.keys), aggregateLimiter.keys)
+	}
+	if aggregateLimiter.keys[0] != aggregateLimiter.keys[2] {
+		t.Fatalf("same client IP used different aggregate buckets: %q vs %q", aggregateLimiter.keys[0], aggregateLimiter.keys[2])
+	}
+	if aggregateLimiter.keys[1] == aggregateLimiter.keys[3] {
+		t.Fatalf("different installation credentials shared aggregate bucket %q", aggregateLimiter.keys[1])
+	}
+	allKeys := append(append(append([]string{}, writeLimiter.keys...), readLimiter.keys...), aggregateLimiter.keys...)
+	for _, key := range allKeys {
+		for _, secret := range []string{qianwenHandlerTestConnectionID, qianwenHandlerTestAccessToken, qianwenHandlerTestOtherToken, identity.OpenUserID, identity.OpenUUID} {
+			if strings.Contains(key, secret) {
+				t.Fatalf("rate-limit key leaked plaintext credential or identity material %q: %q", secret, key)
+			}
 		}
-		if _, err := hex.DecodeString(key); err != nil {
-			t.Fatalf("key %d is not fixed hexadecimal: %q: %v", i, key, err)
+	}
+}
+
+func TestQianwenInvalidCredentialCannotExhaustValidCredentialReadBudget(t *testing.T) {
+	const requestID = "56a41a0c-cb13-476a-a75b-230792a277e1"
+	h := &Handler{
+		Qianwen: &fakeQianwenService{
+			statusFn: func(_ context.Context, _ string, token string, _ qianwen.StatusInvocation) (qianwen.RequestStatus, error) {
+				if token != qianwenHandlerTestAccessToken {
+					return qianwen.RequestStatus{}, qianwen.ErrUnauthorized
+				}
+				return qianwen.RequestStatus{RequestID: requestID, Status: "running"}, nil
+			},
+		},
+		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 60, Window: time.Minute}),
+		WebhookIPRateLimiter:         NewMemoryWebhookIPRateLimiter(WebhookRateLimit{Limit: 1_000, Window: time.Minute}),
+		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(WebhookRateLimit{Limit: 1_000, Window: time.Minute}),
+	}
+
+	statusRequest := func(token string) *httptest.ResponseRecorder {
+		req := qianwenRequest(http.MethodGet,
+			"/api/channels/qianwen/"+qianwenHandlerTestConnectionID+"/requests/"+requestID,
+			"",
+			"connectionId", qianwenHandlerTestConnectionID,
+			"requestId", requestID,
+		)
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		h.GetQianwenRequestStatus(w, req)
+		return w
+	}
+
+	// A shape-valid but unauthenticated credential may target the same exact
+	// opaque identity. Its failed reads must not spend the valid credential's
+	// per-identity polling budget.
+	for requestNumber := 1; requestNumber <= 60; requestNumber++ {
+		w := statusRequest(qianwenHandlerTestOtherToken)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("invalid credential read %d status = %d, want %d; body=%s", requestNumber, w.Code, http.StatusUnauthorized, w.Body.String())
 		}
-		if strings.Contains(key, qianwenHandlerTestConnectionID) || strings.Contains(key, token) {
-			t.Fatalf("key %d leaked plaintext credential material: %q", i, key)
+	}
+
+	valid := statusRequest(qianwenHandlerTestAccessToken)
+	if valid.Code != http.StatusOK {
+		t.Fatalf("valid credential was affected by invalid credential exhaustion: status=%d, want %d; body=%s", valid.Code, http.StatusOK, valid.Body.String())
+	}
+}
+
+func TestQianwenReadBudgetSupportsThreeBoundUsersPollingEveryTwoSeconds(t *testing.T) {
+	const requestID = "56a41a0c-cb13-476a-a75b-230792a277e1"
+	type boundIdentity struct {
+		openUserID string
+		openUUID   string
+	}
+	identities := []boundIdentity{
+		{openUserID: "Opaque-Bound-User-A", openUUID: "Opaque-Bound-Device-A"},
+		{openUserID: "Opaque-Bound-User-B", openUUID: "Opaque-Bound-Device-B"},
+		{openUserID: "Opaque-Bound-User-C", openUUID: "Opaque-Bound-Device-C"},
+	}
+	known := make(map[string]bool, len(identities))
+	for _, identity := range identities {
+		known[identity.openUserID+"\x00"+identity.openUUID] = true
+	}
+	h := &Handler{
+		Qianwen: &fakeQianwenService{
+			statusFn: func(_ context.Context, _ string, _ string, invocation qianwen.StatusInvocation) (qianwen.RequestStatus, error) {
+				key := invocation.Identity.OpenUserID + "\x00" + invocation.Identity.OpenUUID
+				if !known[key] {
+					return qianwen.RequestStatus{}, qianwen.ErrPairingAccessDenied
+				}
+				return qianwen.RequestStatus{RequestID: requestID, Status: "running"}, nil
+			},
+		},
+		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 60, Window: time.Minute}),
+		WebhookIPRateLimiter:         NewMemoryWebhookIPRateLimiter(WebhookRateLimit{Limit: 1_000, Window: time.Minute}),
+		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(WebhookRateLimit{Limit: 1_000, Window: time.Minute}),
+	}
+
+	poll := func(identity boundIdentity) *httptest.ResponseRecorder {
+		req := qianwenRequest(http.MethodGet,
+			"/api/channels/qianwen/"+qianwenHandlerTestConnectionID+"/requests/"+requestID,
+			"",
+			"connectionId", qianwenHandlerTestConnectionID,
+			"requestId", requestID,
+		)
+		req.Header.Set("Authorization", "Bearer "+qianwenHandlerTestAccessToken)
+		req.Header.Set(qianwenOpenUserIDHeader, identity.openUserID)
+		req.Header.Set(qianwenOpenUUIDHeader, identity.openUUID)
+		w := httptest.NewRecorder()
+		h.GetQianwenRequestStatus(w, req)
+		return w
+	}
+
+	// poll_after_ms=2000 means 30 status reads per minute per bound identity.
+	// Three users on one installation must therefore complete 90 reads without
+	// colliding in a shared installation credential bucket.
+	for round := 0; round < 30; round++ {
+		for userIndex, identity := range identities {
+			w := poll(identity)
+			if w.Code != http.StatusOK {
+				t.Fatalf("poll round %d user %d status = %d, want %d; body=%s", round+1, userIndex+1, w.Code, http.StatusOK, w.Body.String())
+			}
 		}
-		sum := sha256.Sum256([]byte(qianwenHandlerTestConnectionID + "\x00" + token))
-		if want := hex.EncodeToString(sum[:]); key != want {
-			t.Fatalf("key %d = %q, want SHA-256 tuple digest %q", i, key, want)
+	}
+
+	// A single identity retains a finite 60/min read ceiling: its next 30
+	// burst reads fit, while request 61 is rejected without affecting peers.
+	for requestNumber := 31; requestNumber <= 60; requestNumber++ {
+		w := poll(identities[0])
+		if w.Code != http.StatusOK {
+			t.Fatalf("identity A read %d status = %d, want %d; body=%s", requestNumber, w.Code, http.StatusOK, w.Body.String())
 		}
+	}
+	limited := poll(identities[0])
+	if limited.Code != http.StatusTooManyRequests {
+		t.Fatalf("identity A read 61 status = %d, want %d; body=%s", limited.Code, http.StatusTooManyRequests, limited.Body.String())
+	}
+	peer := poll(identities[1])
+	if peer.Code != http.StatusOK {
+		t.Fatalf("identity B was affected by identity A exhaustion: status=%d body=%s", peer.Code, peer.Body.String())
+	}
+}
+
+func TestQianwenInstallationAggregateCapRejectsAcrossDifferentClientIPsBeforeService(t *testing.T) {
+	const requestID = "56a41a0c-cb13-476a-a75b-230792a277e1"
+	serviceCalls := 0
+	h := &Handler{
+		Qianwen: &fakeQianwenService{
+			statusFn: func(context.Context, string, string, qianwen.StatusInvocation) (qianwen.RequestStatus, error) {
+				serviceCalls++
+				return qianwen.RequestStatus{RequestID: requestID, Status: "running"}, nil
+			},
+		},
+		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 10, Window: time.Minute}),
+		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(WebhookRateLimit{Limit: 1, Window: time.Minute}),
+	}
+
+	statusRequest := func(remoteAddr string) *httptest.ResponseRecorder {
+		req := qianwenRequest(http.MethodGet,
+			"/api/channels/qianwen/"+qianwenHandlerTestConnectionID+"/requests/"+requestID,
+			"",
+			"connectionId", qianwenHandlerTestConnectionID,
+			"requestId", requestID,
+		)
+		req.RemoteAddr = remoteAddr
+		req.Header.Set("Authorization", "Bearer "+qianwenHandlerTestAccessToken)
+		w := httptest.NewRecorder()
+		h.GetQianwenRequestStatus(w, req)
+		return w
+	}
+
+	first := statusRequest("198.51.100.10:4000")
+	if first.Code != http.StatusOK {
+		t.Fatalf("first status = %d, want %d; body=%s", first.Code, http.StatusOK, first.Body.String())
+	}
+	second := statusRequest("198.51.100.11:4000")
+	if second.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status from a different IP = %d, want installation cap %d; body=%s", second.Code, http.StatusTooManyRequests, second.Body.String())
+	}
+	if serviceCalls != 1 {
+		t.Fatalf("service calls = %d, want aggregate installation cap before second DB/service call", serviceCalls)
 	}
 }
 

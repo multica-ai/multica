@@ -222,6 +222,7 @@ export type {
   ListQianwenInstallationsResponse,
   QianwenInstallResponse,
   QianwenPairingCodeResponse,
+  QianwenAgentSummary,
 } from "./qianwen";
 export type {
   Autopilot,

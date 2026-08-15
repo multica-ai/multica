@@ -4,19 +4,15 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useCurrentMember } from "@multica/core/permissions";
 import {
-  canAssignAgentToIssue,
-  canEditAgent,
-  useCurrentMember,
-} from "@multica/core/permissions";
-import {
+  qianwenAgentListOptions,
   qianwenInstallationsOptions,
   useInstallQianwenPersonal,
   useMintQianwenPairingCode,
   useRevokeQianwenInstallation,
   useUnbindQianwenCurrentUser,
 } from "@multica/core/qianwen";
-import { agentListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -55,7 +51,12 @@ export function QianwenTab() {
   const installationsQuery = useQuery(
     qianwenInstallationsOptions(wsId, currentMember.userId ?? ""),
   );
-  const agentsQuery = useQuery(agentListOptions(wsId));
+  const agentsQuery = useQuery(
+    qianwenAgentListOptions(wsId, {
+      userId: currentMember.userId,
+      role: currentMember.role,
+    }),
+  );
   const installMutation = useInstallQianwenPersonal(wsId);
   const pairingMutation = useMintQianwenPairingCode(wsId);
   const unbindMutation = useUnbindQianwenCurrentUser(wsId);
@@ -90,19 +91,11 @@ export function QianwenTab() {
     () =>
       (agentsQuery.data ?? []).filter(
         (agent) =>
-          !agent.archived_at &&
+          !agent.archivedAt &&
           !activeInstalledAgentIds.has(agent.id) &&
-          canEditAgent(agent, {
-            userId: currentMember.userId,
-            role: currentMember.role,
-          }).allowed,
+          agent.canManage,
       ),
-    [
-      activeInstalledAgentIds,
-      agentsQuery.data,
-      currentMember.role,
-      currentMember.userId,
-    ],
+    [activeInstalledAgentIds, agentsQuery.data],
   );
   const agentOptions = manageableAgents.map((agent) => ({
     value: agent.id,
@@ -249,18 +242,8 @@ export function QianwenTab() {
           <CardContent className="divide-y divide-surface-border">
             {installations.map((installation) => {
               const agent = agentsById.get(installation.agentId);
-              const canRevoke =
-                agent !== undefined &&
-                canEditAgent(agent, {
-                  userId: currentMember.userId,
-                  role: currentMember.role,
-                }).allowed;
-              const canPair =
-                agent !== undefined &&
-                canAssignAgentToIssue(agent, {
-                  userId: currentMember.userId,
-                  role: currentMember.role,
-                }).allowed;
+              const canRevoke = agent?.canManage === true;
+              const canPair = agent?.canInvoke === true;
               let connectionStatus: string;
               switch (installation.status) {
                 case "active":
