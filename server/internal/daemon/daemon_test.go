@@ -437,6 +437,61 @@ func TestCodexTaskShellEnvInheritsRealHome(t *testing.T) {
 	}
 }
 
+func TestPinTaskUserHomeEnvUsesDaemonHomeAndXDGDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
+
+	env := map[string]string{
+		"HOME":            "/stale/task/home",
+		"XDG_CONFIG_HOME": "/stale/task/home/.config",
+	}
+	if err := pinTaskUserHomeEnv(env); err != nil {
+		t.Fatalf("pinTaskUserHomeEnv: %v", err)
+	}
+
+	want := map[string]string{
+		"HOME":            home,
+		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
+		"XDG_CACHE_HOME":  filepath.Join(home, ".cache"),
+		"XDG_DATA_HOME":   filepath.Join(home, ".local", "share"),
+		"XDG_STATE_HOME":  filepath.Join(home, ".local", "state"),
+	}
+	for key, value := range want {
+		if got := env[key]; got != value {
+			t.Errorf("%s = %q, want %q", key, got, value)
+		}
+	}
+}
+
+func TestPinTaskUserHomeEnvPreservesDaemonXDGOverrides(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "/daemon/config")
+	t.Setenv("XDG_CACHE_HOME", "/daemon/cache")
+	t.Setenv("XDG_DATA_HOME", "/daemon/data")
+	t.Setenv("XDG_STATE_HOME", "/daemon/state")
+
+	env := map[string]string{}
+	if err := pinTaskUserHomeEnv(env); err != nil {
+		t.Fatalf("pinTaskUserHomeEnv: %v", err)
+	}
+	for key, want := range map[string]string{
+		"HOME":            home,
+		"XDG_CONFIG_HOME": "/daemon/config",
+		"XDG_CACHE_HOME":  "/daemon/cache",
+		"XDG_DATA_HOME":   "/daemon/data",
+		"XDG_STATE_HOME":  "/daemon/state",
+	} {
+		if got := env[key]; got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
 func TestCodexShellAuthorizedCustomEnvNamesUsesDaemonBlocklist(t *testing.T) {
 	t.Parallel()
 

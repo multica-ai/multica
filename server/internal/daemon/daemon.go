@@ -6003,6 +6003,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"TMP":                  taskTempDir,
 		"TEMP":                 taskTempDir,
 	}
+	// Pin the daemon user's real HOME and XDG base directories explicitly on
+	// every agent child. Relying only on ambient inheritance is too fragile:
+	// provider wrappers and resumed environments created by older daemons have
+	// historically redirected HOME to <envRoot>/home, which makes host CLI
+	// logins (a1, gh, aws, kubectl, ...) appear missing inside the task. HOME is
+	// already blocked from agent custom_env below, so this is the authoritative
+	// runtime-owner identity boundary rather than a user-overridable setting.
+	if err := pinTaskUserHomeEnv(agentEnv); err != nil {
+		return TaskResult{}, fmt.Errorf("pin task user home: %w", err)
+	}
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode
 	}
@@ -7518,6 +7528,37 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	return false
+}
+
+// pinTaskUserHomeEnv makes the daemon user's config roots explicit in the
+// child environment. XDG variables preserve daemon-level overrides when set;
+// otherwise they use the freedesktop defaults below HOME. Keeping this in the
+// launch layer applies the same credential-discovery contract to every agent
+// provider, including reused task environments.
+func pinTaskUserHomeEnv(agentEnv map[string]string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve daemon user home: %w", err)
+	}
+	home = strings.TrimSpace(home)
+	if home == "" {
+		return errors.New("daemon user home is empty")
+	}
+
+	agentEnv["HOME"] = home
+	for key, fallback := range map[string]string{
+		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
+		"XDG_CACHE_HOME":  filepath.Join(home, ".cache"),
+		"XDG_DATA_HOME":   filepath.Join(home, ".local", "share"),
+		"XDG_STATE_HOME":  filepath.Join(home, ".local", "state"),
+	} {
+		value := strings.TrimSpace(os.Getenv(key))
+		if value == "" {
+			value = fallback
+		}
+		agentEnv[key] = value
+	}
+	return nil
 }
 
 // layerCustomEnvAndHermesHome applies the agent's custom_env onto the child env
