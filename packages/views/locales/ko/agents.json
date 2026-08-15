@@ -128,6 +128,8 @@
     "back_to_agents_full": "에이전트로 돌아가기",
     "not_found_title": "에이전트를 찾을 수 없습니다",
     "not_found_default": "이 에이전트가 보관되었거나 삭제되었을 수 있습니다.",
+    "load_failed_title": "이 에이전트를 불러오지 못했습니다",
+    "load_failed_default": "이 에이전트를 가져오는 중 문제가 발생했습니다.",
     "no_access_title": "이 에이전트에 접근할 수 없습니다",
     "no_access_hint": "비공개 에이전트는 에이전트 소유자 또는 워크스페이스 관리자만 볼 수 있습니다.",
     "try_again": "다시 시도",

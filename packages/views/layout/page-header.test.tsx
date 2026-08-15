@@ -8,13 +8,18 @@ import {
   CollectionPageHeader,
   CollectionPageHeaderAction,
 } from "./collection-page";
-import { PAGE_GUTTER, PageHeader } from "./page-header";
+import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "./page-header";
 
 // The layout rules under test are documented on `PageHeader` itself; each
 // test here pins one of them against the rendered output.
 
-function renderHeader(ui: React.ReactElement) {
-  const { container } = renderWithI18n(<SidebarProvider>{ui}</SidebarProvider>);
+function renderHeader(
+  ui: React.ReactElement,
+  providerProps?: { hasExternalTrigger?: boolean },
+) {
+  const { container } = renderWithI18n(
+    <SidebarProvider {...providerProps}>{ui}</SidebarProvider>,
+  );
   return within(container).getByRole("banner");
 }
 
@@ -84,6 +89,40 @@ describe("PageHeader base chrome", () => {
 
     expect(header).toHaveClass(PAGE_GUTTER);
     expect(header).not.toHaveClass("px-8");
+  });
+
+  // A shell that keeps its own trigger on screen (the desktop window toolbar)
+  // gets no fallback one: the header's copy is the same icon 50px below the
+  // shell's, and a list/detail surface stacked a third alongside it (MUL-6218).
+  it("drops its trigger under a shell that keeps its own on screen", () => {
+    const header = renderHeader(
+      <PageHeader>
+        <h1>Inbox</h1>
+      </PageHeader>,
+      { hasExternalTrigger: true },
+    );
+
+    expect(header.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
+    expect(within(header).getByRole("heading")).toBe(header.firstElementChild);
+  });
+
+  // The pages that build their own chrome (settings) reach for the trigger
+  // directly, so the rule has to live in the trigger and not in `PageHeader`.
+  it("drops a directly rendered trigger under that shell too", () => {
+    const { container } = renderWithI18n(
+      <SidebarProvider hasExternalTrigger>
+        <CollapsedNavTrigger />
+      </SidebarProvider>,
+    );
+
+    expect(container.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
+  });
+
+  // Outside a `SidebarProvider` there is no nav to reopen at all.
+  it("renders nothing when no sidebar is mounted", () => {
+    const { container } = renderWithI18n(<CollapsedNavTrigger />);
+
+    expect(container.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
   });
 
   // Collection and issues headers drifted apart when each declared its own

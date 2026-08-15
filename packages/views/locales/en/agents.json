@@ -136,6 +136,8 @@
     "back_to_agents_full": "Back to agents",
     "not_found_title": "Agent not found",
     "not_found_default": "This agent may have been archived or deleted.",
+    "load_failed_title": "Couldn't load this agent",
+    "load_failed_default": "Something went wrong fetching this agent.",
     "no_access_title": "You don't have access to this agent",
     "no_access_hint": "Only the agent owner or a workspace admin can view this private agent.",
     "try_again": "Try again",

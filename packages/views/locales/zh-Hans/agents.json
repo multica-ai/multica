@@ -128,6 +128,8 @@
     "back_to_agents_full": "返回智能体列表",
     "not_found_title": "未找到该智能体",
     "not_found_default": "该智能体可能已被归档或删除。",
+    "load_failed_title": "无法加载该智能体",
+    "load_failed_default": "获取该智能体时出错。",
     "no_access_title": "你没有访问该智能体的权限",
     "no_access_hint": "只有该私密智能体的拥有者或工作区管理员可以查看。",
     "try_again": "重试",

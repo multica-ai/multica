@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { Agent, Squad, Workspace } from "../types";
 
@@ -9,6 +9,8 @@ export const workspaceKeys = {
   invitations: (wsId: string) => ["workspaces", wsId, "invitations"] as const,
   myInvitations: () => ["invitations", "mine"] as const,
   agents: (wsId: string) => ["workspaces", wsId, "agents"] as const,
+  agent: (wsId: string, agentId: string) =>
+    ["workspaces", wsId, "agents", "detail", agentId] as const,
   squads: (wsId: string) => ["workspaces", wsId, "squads"] as const,
   // Per-squad member status. Lives under the workspace key tree so
   // workspace switches naturally drop the cache, and so a broad
@@ -47,6 +49,39 @@ export function agentListOptions(wsId: string) {
     queryKey: workspaceKeys.agents(wsId),
     queryFn: () =>
       api.listAgents({ workspace_id: wsId, include_archived: true }),
+  });
+}
+
+export function agentDetailOptions(wsId: string, agentId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.agent(wsId, agentId),
+    queryFn: () => api.getAgent(agentId),
+    enabled: !!wsId && !!agentId,
+    retry: false,
+  });
+}
+
+/**
+ * Makes an authoritative agent response immediately visible to both agent
+ * detail and list consumers. A cold list stays cold so one agent is never
+ * mistaken for the complete workspace list.
+ */
+export function cacheAgentResponse(
+  queryClient: QueryClient,
+  wsId: string,
+  agent: Agent,
+  options: { insertIntoList?: boolean } = {},
+) {
+  queryClient.setQueryData(workspaceKeys.agent(wsId, agent.id), agent);
+  queryClient.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (current) => {
+    if (!current) return current;
+    const existingIndex = current.findIndex((item) => item.id === agent.id);
+    if (existingIndex === -1) {
+      return options.insertIntoList === false ? current : [...current, agent];
+    }
+    return current.map((item, index) =>
+      index === existingIndex ? agent : item,
+    );
   });
 }
 

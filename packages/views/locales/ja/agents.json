@@ -120,6 +120,8 @@
     "back_to_agents_full": "エージェントに戻る",
     "not_found_title": "エージェントが見つかりません",
     "not_found_default": "このエージェントはアーカイブまたは削除された可能性があります。",
+    "load_failed_title": "エージェントを読み込めませんでした",
+    "load_failed_default": "エージェントの取得中に問題が発生しました。",
     "no_access_title": "このエージェントにアクセスできません",
     "no_access_hint": "この非公開エージェントは、エージェントのオーナーまたはワークスペースの admin のみが閲覧できます。",
     "try_again": "再試行",
