@@ -44,8 +44,11 @@ func primeSupervisorGone(pid, expectedPGID int, expectedStartToken string) bool 
 	if err != nil {
 		return false
 	}
-	startToken, err := primeProcessStartToken(pid)
-	return err == nil && startToken != expectedStartToken
+	startToken, terminated, err := primeProcessIdentityState(pid)
+	if errors.Is(err, syscall.ESRCH) || os.IsNotExist(err) {
+		return true
+	}
+	return err == nil && (startToken != expectedStartToken || terminated)
 }
 
 func forcePrimeSupervisor(pid, expectedPGID int, expectedStartToken string) error {

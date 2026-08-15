@@ -36,19 +36,29 @@ func kernelPrimePeerIdentity(conn net.Conn) (int, int, error) {
 	return int(cred.Pid), int(cred.Uid), nil
 }
 
-func primeProcessStartToken(pid int) (string, error) {
+func primeProcessIdentityState(pid int) (string, bool, error) {
 	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	line := string(raw)
 	commandEnd := strings.LastIndex(line, ")")
 	if commandEnd < 0 || commandEnd+2 >= len(line) {
-		return "", errors.New("invalid proc stat")
+		return "", false, errors.New("invalid proc stat")
 	}
 	fields := strings.Fields(line[commandEnd+2:])
 	if len(fields) <= 19 || fields[19] == "" {
-		return "", errors.New("proc start token missing")
+		return "", false, errors.New("proc start token missing")
 	}
-	return "proc:" + fields[19], nil
+	// Field 3 (fields[0] after stripping pid/comm) is the process state.
+	// A killed child may remain in /proc as Z until its parent calls Wait; it
+	// cannot execute and is therefore a proven terminated supervisor, not a
+	// live process that cleanup should keep signalling.
+	terminated := fields[0] == "Z" || fields[0] == "X" || fields[0] == "x"
+	return "proc:" + fields[19], terminated, nil
+}
+
+func primeProcessStartToken(pid int) (string, error) {
+	token, _, err := primeProcessIdentityState(pid)
+	return token, err
 }

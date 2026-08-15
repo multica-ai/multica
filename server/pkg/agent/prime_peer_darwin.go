@@ -40,14 +40,19 @@ func kernelPrimePeerIdentity(conn net.Conn) (int, int, error) {
 	return pid, int(cred.Uid), nil
 }
 
-func primeProcessStartToken(pid int) (string, error) {
+func primeProcessIdentityState(pid int) (string, bool, error) {
 	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "lstart=").Output()
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	start := strings.TrimSpace(string(out))
 	if start == "" {
-		return "", errors.New("process start token missing")
+		return "", false, errors.New("process start token missing")
 	}
-	return "ps:" + start, nil
+	return "ps:" + start, false, nil
+}
+
+func primeProcessStartToken(pid int) (string, error) {
+	token, _, err := primeProcessIdentityState(pid)
+	return token, err
 }

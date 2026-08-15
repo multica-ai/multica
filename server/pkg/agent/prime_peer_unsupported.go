@@ -16,3 +16,7 @@ func kernelPrimePeerIdentity(net.Conn) (int, int, error) {
 func primeProcessStartToken(int) (string, error) {
 	return "", errors.New("process start identity is unavailable")
 }
+
+func primeProcessIdentityState(int) (string, bool, error) {
+	return "", false, errors.New("process start identity is unavailable")
+}
