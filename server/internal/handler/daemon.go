@@ -972,6 +972,14 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 		var cancel context.CancelFunc
 		opCtx, cancel = context.WithTimeout(context.WithoutCancel(r.Context()), deregisterRecoverTimeout)
 		defer cancel()
+		// Rebind the request too, not just the ctx we pass to queries: the
+		// authorization check below takes *http.Request and reads r.Context()
+		// (MembershipCache.Get and its DB fallback). Leaving it on the caller's
+		// context makes verifyDaemonWorkspaceAccess fail closed the moment the
+		// client goes away, and every runtime is skipped before anything is
+		// even taken offline — the same class of bug as doing the lookup and
+		// the offline flip on the dead context.
+		r = r.WithContext(opCtx)
 	}
 
 	for i, rid := range req.RuntimeIDs {
