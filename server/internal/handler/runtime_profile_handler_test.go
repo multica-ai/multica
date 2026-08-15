@@ -7,9 +7,57 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type runtimeProfileCreationGateDB struct {
+	queryRows           int
+	userID, workspaceID string
+}
+
+func (*runtimeProfileCreationGateDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	panic("creation gate unexpectedly reached Exec")
+}
+
+func (*runtimeProfileCreationGateDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	panic("creation gate unexpectedly reached Query")
+}
+
+func (f *runtimeProfileCreationGateDB) QueryRow(context.Context, string, ...any) pgx.Row {
+	f.queryRows++
+	if f.queryRows != 1 {
+		panic("creation gate unexpectedly reached persistence QueryRow")
+	}
+	return runtimeProfileMemberRow{userID: f.userID, workspaceID: f.workspaceID}
+}
+
+type runtimeProfileMemberRow struct{ userID, workspaceID string }
+
+func (r runtimeProfileMemberRow) Scan(dest ...any) error {
+	*dest[0].(*pgtype.UUID) = parseUUID("00000000-0000-0000-0000-000000000003")
+	*dest[1].(*pgtype.UUID) = parseUUID(r.workspaceID)
+	*dest[2].(*pgtype.UUID) = parseUUID(r.userID)
+	*dest[3].(*string) = "admin"
+	*dest[4].(*pgtype.Timestamptz) = pgtype.Timestamptz{Time: time.Unix(0, 0), Valid: true}
+	return nil
+}
+
+func TestRuntimeProfileResponseKeepsExistingPrimeFamilyReadable(t *testing.T) {
+	resp := runtimeProfileToResponse(db.RuntimeProfile{
+		DisplayName:    "Existing Prime",
+		ProtocolFamily: "prime",
+		CommandName:    "prime-agent",
+		Visibility:     "workspace",
+	})
+	if resp.ProtocolFamily != "prime" || resp.DisplayName != "Existing Prime" {
+		t.Fatalf("existing Prime profile was not preserved for diagnostics: %+v", resp)
+	}
+}
 
 // insertRuntimeProfileFixture creates a runtime_profile in testWorkspaceID and
 // returns its id, registering cleanup.
@@ -323,6 +371,28 @@ func TestCreateRuntimeProfile_ForcesWorkspaceVisibility(t *testing.T) {
 	}
 	if dbVis != "workspace" {
 		t.Fatalf("stored visibility = %q, want workspace", dbVis)
+	}
+}
+
+func TestCreateRuntimeProfile_RejectsAdmissionDisabledPrime(t *testing.T) {
+	const userID = "00000000-0000-0000-0000-000000000001"
+	const workspaceID = "00000000-0000-0000-0000-000000000002"
+	fakeDB := &runtimeProfileCreationGateDB{userID: userID, workspaceID: workspaceID}
+	h := &Handler{Queries: db.New(fakeDB)}
+	const commandName = "must-not-create-prime-profile"
+	w := httptest.NewRecorder()
+	req := newRequestAs(userID, "POST", "/api/workspaces/"+workspaceID+"/runtime-profiles", map[string]any{
+		"display_name":    "Rejected Prime Profile",
+		"protocol_family": "prime",
+		"command_name":    commandName,
+	})
+	req = withURLParam(req, "id", workspaceID)
+	h.CreateRuntimeProfile(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "not available for new runtime profiles") {
+		t.Fatalf("expected direct API creation rejection, got %d: %s", w.Code, w.Body.String())
+	}
+	if fakeDB.queryRows != 1 {
+		t.Fatalf("rejected Prime request reached persistence: queryRows=%d", fakeDB.queryRows)
 	}
 }
 

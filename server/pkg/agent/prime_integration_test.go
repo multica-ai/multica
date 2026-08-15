@@ -131,7 +131,7 @@ func TestPrimeRealTransportLifecycle(t *testing.T) {
 		t.Fatal(diagnostic)
 	}
 	var state primeState
-	if err := json.Unmarshal(stateResp.Data, &state); err != nil || state.SessionID == "" || state.MessageCount == nil || state.IsStreaming {
+	if err := json.Unmarshal(stateResp.Data, &state); err != nil || state.SessionID == "" || state.MessageCount == nil || state.IsStreaming == nil || *state.IsStreaming {
 		t.Fatalf("invalid Prime get_state: state=%+v err=%v", state, err)
 	}
 	_, _ = rpc.write(map[string]any{"type": "abort"})

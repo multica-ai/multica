@@ -273,8 +273,8 @@ type Config struct {
 // New creates a Backend for the given agent type.
 // Supported types include first-party coding CLIs plus the managed Prime Agent runtime.
 //
-// SupportedTypes is the canonical whitelist of agent types eligible to back a
-// custom runtime profile. It MUST stay in lockstep with the
+// SupportedTypes is the canonical readable/factory whitelist of agent protocol
+// families. It MUST stay in lockstep with the
 // runtime_profile.protocol_family CHECK constraint (migration 120, widened by
 // migration 134 to add qoder, migration 136 to add traecli, migration 175 to
 // add deveco, migration 179 to add grok, migration 202 to add qwen,
@@ -314,11 +314,33 @@ var SupportedTypes = []string{
 	"prime",
 }
 
-// IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
-// Used to validate a custom runtime profile's protocol_family before it is
-// persisted or registered.
+// CreatableRuntimeProfileTypes is the public profile-creation whitelist.
+// Prime stays readable in SupportedTypes for migration compatibility and
+// diagnostics, but v0.7.2 is admission-disabled and must not be newly exposed
+// through API or CLI profile creation.
+var CreatableRuntimeProfileTypes = []string{
+	"claude", "codebuddy", "codex", "copilot", "opencode", "deveco",
+	"openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh",
+	"kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok",
+	"qwen", "qwenpaw",
+}
+
+// IsSupportedType reports whether agentType is in the readable/factory
+// whitelist. Daemons use it for existing profile registration; public writes
+// must use IsCreatableRuntimeProfileType instead.
 func IsSupportedType(agentType string) bool {
 	for _, t := range SupportedTypes {
+		if t == agentType {
+			return true
+		}
+	}
+	return false
+}
+
+// IsCreatableRuntimeProfileType reports whether clients may persist a new
+// custom profile for this family. Existing rows use IsSupportedType on reads.
+func IsCreatableRuntimeProfileType(agentType string) bool {
+	for _, t := range CreatableRuntimeProfileTypes {
 		if t == agentType {
 			return true
 		}

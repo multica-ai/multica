@@ -23,7 +23,9 @@ import (
 // for their workspace, resolve command_name on PATH, and register an
 // agent_runtime instance carrying the profile_id. The profile only changes how
 // a runtime is launched/displayed; the underlying protocol_family must be a
-// backend Multica officially supports (validated against agent.SupportedTypes).
+// backend Multica publicly allows for new profiles (validated against
+// agent.CreatableRuntimeProfileTypes). Existing rows may use a readable family
+// that is temporarily admission-disabled.
 //
 // Iron rule: a profile carries NO generic per-agent args. Per-agent launch args
 // stay on agent.custom_args. The only args field is fixed_args — args every
@@ -123,7 +125,7 @@ type createRuntimeProfileRequest struct {
 }
 
 // CreateRuntimeProfile creates a workspace runtime profile. Admin-gated by the
-// router. protocol_family is validated against the agent backend whitelist.
+// router. protocol_family is validated against the public creation whitelist.
 func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	wsID := strings.TrimSpace(chi.URLParam(r, "id"))
 	member, ok := h.requireWorkspaceMember(w, r, wsID, "workspace not found")
@@ -149,8 +151,8 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "display_name is required")
 		return
 	}
-	if !agent.IsSupportedType(req.ProtocolFamily) {
-		writeError(w, http.StatusBadRequest, "unsupported protocol_family: must be one of "+strings.Join(agent.SupportedTypes, ", "))
+	if !agent.IsCreatableRuntimeProfileType(req.ProtocolFamily) {
+		writeError(w, http.StatusBadRequest, "protocol_family is not available for new runtime profiles: must be one of "+strings.Join(agent.CreatableRuntimeProfileTypes, ", "))
 		return
 	}
 	if req.CommandName == "" {

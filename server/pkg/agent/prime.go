@@ -59,16 +59,19 @@ type primeFrame struct {
 
 type primeState struct {
 	SessionID    string `json:"sessionId"`
-	IsStreaming  bool   `json:"isStreaming"`
+	IsStreaming  *bool  `json:"isStreaming"`
 	MessageCount *int   `json:"messageCount"`
 }
 
 type primeStats struct {
-	SessionID string `json:"sessionId"`
-	Tokens    struct {
-		Input, Output, CacheRead, CacheWrite int64
+	SessionID *string `json:"sessionId"`
+	Tokens    *struct {
+		Input      *int64 `json:"input"`
+		Output     *int64 `json:"output"`
+		CacheRead  *int64 `json:"cacheRead"`
+		CacheWrite *int64 `json:"cacheWrite"`
 	} `json:"tokens"`
-	Cost float64 `json:"cost"`
+	Cost *float64 `json:"cost"`
 }
 
 type primeJSONLReader struct{ r *bufio.Reader }
@@ -375,6 +378,7 @@ func (b *primeBackend) run(ctx context.Context, cancel context.CancelFunc, cmd *
 	frames, frameErrs := pumpPrimeFrames(ioCtx, stdout)
 	rpc := &primeRPC{in: stdin, frames: frames, errs: frameErrs, events: func(f primeFrame) { mapPrimeEvent(f, msgCh) }}
 	var daemonIdentity *primeDaemonIdentity
+	var baseline *primeStats
 	cleanup := func() (error, error) {
 		_, _ = rpc.write(map[string]any{"type": "abort"})
 		_ = stdin.Close()
@@ -401,7 +405,15 @@ func (b *primeBackend) run(ctx context.Context, cancel context.CancelFunc, cmd *
 			statsResp, statsErr := rpc.request(statsCtx, map[string]any{"type": "get_session_stats"})
 			statsCancel()
 			if statsErr == nil {
-				usage, statsErr = decodePrimeUsage(statsResp.Data, sessionID, opts.Model)
+				var terminal primeStats
+				terminal, statsErr = decodePrimeStats(statsResp.Data, sessionID)
+				if statsErr == nil {
+					if baseline == nil {
+						statsErr = errors.New("Prime session accounting baseline unavailable")
+					} else {
+						usage, statsErr = primeUsageDelta(*baseline, terminal, opts.Model)
+					}
+				}
 			}
 			if statsErr != nil {
 				err = fmt.Errorf("%v; Prime session accounting unavailable: %w", err, statsErr)
@@ -425,7 +437,7 @@ func (b *primeBackend) run(ctx context.Context, cancel context.CancelFunc, cmd *
 		return
 	}
 	var state primeState
-	if json.Unmarshal(stateResp.Data, &state) != nil || state.SessionID == "" || state.MessageCount == nil || state.IsStreaming {
+	if json.Unmarshal(stateResp.Data, &state) != nil || state.SessionID == "" || state.MessageCount == nil || state.IsStreaming == nil || *state.IsStreaming {
 		fail("", errors.New("Prime RPC get_state compatibility check failed"))
 		return
 	}
@@ -433,6 +445,17 @@ func (b *primeBackend) run(ctx context.Context, cancel context.CancelFunc, cmd *
 		fail(state.SessionID, errors.New("Prime RPC resume session mismatch"), true)
 		return
 	}
+	baselineResp, baselineErr := rpc.request(ctx, map[string]any{"type": "get_session_stats"})
+	if baselineErr != nil {
+		fail(state.SessionID, fmt.Errorf("Prime pre-prompt session accounting baseline failed: %w", baselineErr))
+		return
+	}
+	baselineValue, baselineErr := decodePrimeStats(baselineResp.Data, state.SessionID)
+	if baselineErr != nil {
+		fail(state.SessionID, fmt.Errorf("Prime pre-prompt session accounting baseline failed: %w", baselineErr))
+		return
+	}
+	baseline = &baselineValue
 	trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: state.SessionID})
 	if provider != "" {
 		if _, err = rpc.request(ctx, map[string]any{"type": "set_model", "provider": provider, "modelId": model}); err != nil {
@@ -504,7 +527,12 @@ func (b *primeBackend) run(ctx context.Context, cancel context.CancelFunc, cmd *
 		fail(state.SessionID, statsErr)
 		return
 	}
-	usage, statsErr := decodePrimeUsage(statsResp.Data, state.SessionID, opts.Model)
+	terminal, statsErr := decodePrimeStats(statsResp.Data, state.SessionID)
+	if statsErr != nil {
+		fail(state.SessionID, statsErr)
+		return
+	}
+	usage, statsErr := primeUsageDelta(*baseline, terminal, opts.Model)
 	if statsErr != nil {
 		fail(state.SessionID, statsErr)
 		return
@@ -521,19 +549,32 @@ func (b *primeBackend) run(ctx context.Context, cancel context.CancelFunc, cmd *
 	resCh <- Result{Status: "completed", Output: output, SessionID: state.SessionID, Usage: usage, DurationMs: time.Since(started).Milliseconds()}
 }
 
-func decodePrimeUsage(raw json.RawMessage, sessionID, model string) (map[string]TokenUsage, error) {
+func decodePrimeStats(raw json.RawMessage, sessionID string) (primeStats, error) {
 	var s primeStats
-	if json.Unmarshal(raw, &s) != nil {
-		return nil, errors.New("invalid Prime session-stats response")
+	if json.Unmarshal(raw, &s) != nil || s.SessionID == nil || s.Tokens == nil || s.Tokens.Input == nil || s.Tokens.Output == nil || s.Tokens.CacheRead == nil || s.Tokens.CacheWrite == nil || s.Cost == nil {
+		return primeStats{}, errors.New("invalid Prime session-stats response: required field missing or malformed")
 	}
-	scaledCost := s.Cost * CostUSDTicksPerUSD
-	if s.SessionID != sessionID || s.Tokens.Input < 0 || s.Tokens.Output < 0 || s.Tokens.CacheRead < 0 || s.Tokens.CacheWrite < 0 || s.Cost < 0 || math.IsNaN(s.Cost) || math.IsInf(s.Cost, 0) || math.IsNaN(scaledCost) || math.IsInf(scaledCost, 0) || scaledCost < 0 || scaledCost >= float64(math.MaxInt64)-2048 {
-		return nil, errors.New("invalid Prime session-stats response")
+	scaledCost := *s.Cost * CostUSDTicksPerUSD
+	if *s.SessionID != sessionID || *s.Tokens.Input < 0 || *s.Tokens.Output < 0 || *s.Tokens.CacheRead < 0 || *s.Tokens.CacheWrite < 0 || *s.Cost < 0 || math.IsNaN(*s.Cost) || math.IsInf(*s.Cost, 0) || math.IsNaN(scaledCost) || math.IsInf(scaledCost, 0) || scaledCost < 0 || scaledCost >= float64(math.MaxInt64)-2048 {
+		return primeStats{}, errors.New("invalid Prime session-stats response")
+	}
+	return s, nil
+}
+
+func primeUsageDelta(baseline, terminal primeStats, model string) (map[string]TokenUsage, error) {
+	input := *terminal.Tokens.Input - *baseline.Tokens.Input
+	output := *terminal.Tokens.Output - *baseline.Tokens.Output
+	cacheRead := *terminal.Tokens.CacheRead - *baseline.Tokens.CacheRead
+	cacheWrite := *terminal.Tokens.CacheWrite - *baseline.Tokens.CacheWrite
+	cost := *terminal.Cost - *baseline.Cost
+	scaledCost := cost * CostUSDTicksPerUSD
+	if *terminal.SessionID != *baseline.SessionID || input < 0 || output < 0 || cacheRead < 0 || cacheWrite < 0 || cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) || math.IsNaN(scaledCost) || math.IsInf(scaledCost, 0) || scaledCost < 0 || scaledCost >= float64(math.MaxInt64)-2048 {
+		return nil, errors.New("invalid Prime session-stats delta")
 	}
 	if model == "" {
 		model = "prime/default"
 	}
-	return map[string]TokenUsage{model: {InputTokens: s.Tokens.Input, OutputTokens: s.Tokens.Output, CacheReadTokens: s.Tokens.CacheRead, CacheWriteTokens: s.Tokens.CacheWrite, CostUSDTicks: int64(math.Round(scaledCost))}}, nil
+	return map[string]TokenUsage{model: {InputTokens: input, OutputTokens: output, CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite, CostUSDTicks: int64(math.Round(scaledCost))}}, nil
 }
 
 type primeDaemonHello struct {

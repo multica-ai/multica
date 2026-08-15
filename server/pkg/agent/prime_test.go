@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -508,6 +509,117 @@ func TestPrimeTerminalErrorAndResumeMismatch(t *testing.T) {
 	})
 }
 
+func TestPrimeResumeReportsOnlyCurrentTurnUsageDelta(t *testing.T) {
+	b, dir := primeTestBackend(t, "resume_cumulative", nil)
+	s, err := b.Execute(context.Background(), "hello", ExecOptions{Cwd: dir, ResumeSessionID: "prime-session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Messages {
+	}
+	res := <-s.Result
+	if res.Status != "completed" {
+		t.Fatalf("result=%+v", res)
+	}
+	got := res.Usage["prime/default"]
+	if got.InputTokens != 10 || got.OutputTokens != 4 || got.CacheReadTokens != 2 || got.CacheWriteTokens != 1 || got.CostUSDTicks != int64(math.Round(0.01*CostUSDTicksPerUSD)) {
+		t.Fatalf("cumulative resume usage was not reduced to the current-turn delta: %+v", got)
+	}
+	assertPrimeShutdown(t, dir)
+}
+
+func TestPrimeResumeUsageDeltaSurvivesFailureAndCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode string
+		timeout    time.Duration
+		wantStatus string
+	}{
+		{name: "terminal failure", mode: "resume_cumulative_terminal_error", wantStatus: "failed"},
+		{name: "timeout", mode: "resume_cumulative_hang", timeout: 150 * time.Millisecond, wantStatus: "timeout"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, dir := primeTestBackend(t, tc.mode, nil)
+			s, err := b.Execute(context.Background(), "hello", ExecOptions{Cwd: dir, ResumeSessionID: "prime-session", Timeout: tc.timeout})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range s.Messages {
+			}
+			res := <-s.Result
+			if res.Status != tc.wantStatus {
+				t.Fatalf("result=%+v", res)
+			}
+			got := res.Usage["prime/default"]
+			if got.InputTokens != 10 || got.OutputTokens != 4 || got.CacheReadTokens != 2 || got.CacheWriteTokens != 1 {
+				t.Fatalf("resumed %s lost current-turn usage delta: %+v", tc.name, got)
+			}
+			assertPrimeShutdown(t, dir)
+		})
+	}
+}
+
+func TestPrimeStatsRequireEveryField(t *testing.T) {
+	valid := `{"sessionId":"s","tokens":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4},"cost":0.01}`
+	for _, field := range []string{"sessionId", "tokens", "input", "output", "cacheRead", "cacheWrite", "cost"} {
+		t.Run(field, func(t *testing.T) {
+			var value map[string]any
+			if err := json.Unmarshal([]byte(valid), &value); err != nil {
+				t.Fatal(err)
+			}
+			if field == "input" || field == "output" || field == "cacheRead" || field == "cacheWrite" {
+				delete(value["tokens"].(map[string]any), field)
+			} else {
+				delete(value, field)
+			}
+			raw, _ := json.Marshal(value)
+			if _, err := decodePrimeStats(raw, "s"); err == nil || !strings.Contains(err.Error(), "required field") {
+				t.Fatalf("missing %s accepted: %v", field, err)
+			}
+		})
+	}
+	for name, raw := range map[string]string{
+		"mismatched session": `{"sessionId":"other","tokens":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4},"cost":0.01}`,
+		"negative counter":   `{"sessionId":"s","tokens":{"input":-1,"output":2,"cacheRead":3,"cacheWrite":4},"cost":0.01}`,
+		"nonfinite cost":     `{"sessionId":"s","tokens":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4},"cost":NaN}`,
+		"overflow cost":      `{"sessionId":"s","tokens":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4},"cost":1e100}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodePrimeStats(json.RawMessage(raw), "s"); err == nil {
+				t.Fatalf("invalid stats accepted: %s", raw)
+			}
+		})
+	}
+}
+
+func TestPrimeUsageDeltaRejectsCounterRegression(t *testing.T) {
+	baseline, err := decodePrimeStats(json.RawMessage(`{"sessionId":"s","tokens":{"input":10,"output":2,"cacheRead":3,"cacheWrite":4},"cost":0.02}`), "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := decodePrimeStats(json.RawMessage(`{"sessionId":"s","tokens":{"input":9,"output":2,"cacheRead":3,"cacheWrite":4},"cost":0.02}`), "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := primeUsageDelta(baseline, terminal, ""); err == nil || !strings.Contains(err.Error(), "delta") {
+		t.Fatalf("counter regression accepted: %v", err)
+	}
+}
+
+func TestPrimeGetStateRequiresExplicitNotStreaming(t *testing.T) {
+	b, dir := primeTestBackend(t, "state_missing_streaming", nil)
+	s, err := b.Execute(context.Background(), "hello", ExecOptions{Cwd: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Messages {
+	}
+	res := <-s.Result
+	if res.Status != "failed" || !strings.Contains(res.Error, "get_state compatibility") {
+		t.Fatalf("result=%+v", res)
+	}
+	assertPrimeShutdown(t, dir)
+}
+
 func TestPrimeAccountingAndClientExitFailClosed(t *testing.T) {
 	for _, tc := range []struct {
 		mode string
@@ -757,6 +869,8 @@ func TestPrimeRPCProcess(t *testing.T) {
 	}
 	s := bufio.NewScanner(os.Stdin)
 	enc := json.NewEncoder(os.Stdout)
+	prompted := false
+	baselineSeen := false
 	for s.Scan() {
 		var cmd map[string]any
 		if json.Unmarshal(s.Bytes(), &cmd) != nil {
@@ -773,15 +887,23 @@ func TestPrimeRPCProcess(t *testing.T) {
 			if mode == "resume_mismatch" {
 				sessionID = "other-session"
 			}
-			enc.Encode(map[string]any{"type": "response", "id": id, "command": typ, "success": true, "data": map[string]any{"sessionId": sessionID, "isStreaming": false, "messageCount": 0}})
+			state := map[string]any{"sessionId": sessionID, "messageCount": 0}
+			if mode != "state_missing_streaming" {
+				state["isStreaming"] = false
+			}
+			enc.Encode(map[string]any{"type": "response", "id": id, "command": typ, "success": true, "data": state})
 		case "set_model", "set_thinking_level":
 			enc.Encode(map[string]any{"type": "response", "id": id, "command": typ, "success": true})
 		case "prompt":
+			if !baselineSeen {
+				os.Exit(94)
+			}
+			prompted = true
 			enc.Encode(map[string]any{"type": "response", "id": id, "command": typ, "success": true})
-			if mode == "hang" {
+			if mode == "hang" || mode == "resume_cumulative_hang" {
 				continue
 			}
-			if mode == "terminal_error" {
+			if mode == "terminal_error" || mode == "resume_cumulative_terminal_error" {
 				enc.Encode(map[string]any{"type": "agent_end", "messages": []any{map[string]any{"role": "assistant", "stopReason": "error", "errorMessage": "provider exploded"}}})
 				continue
 			}
@@ -793,6 +915,9 @@ func TestPrimeRPCProcess(t *testing.T) {
 		case "get_last_assistant_text":
 			enc.Encode(map[string]any{"type": "response", "id": id, "command": typ, "success": true, "data": map[string]any{"text": "final answer"}})
 		case "get_session_stats":
+			if !prompted {
+				baselineSeen = true
+			}
 			if mode == "stats_error" {
 				enc.Encode(map[string]any{"type": "response", "id": id, "command": typ, "success": false, "error": "stats unavailable"})
 				continue
@@ -805,7 +930,18 @@ func TestPrimeRPCProcess(t *testing.T) {
 				enc.Encode(map[string]any{"type": "response", "id": id, "command": typ, "success": true, "data": map[string]any{"sessionId": "prime-session", "tokens": map[string]any{}, "cost": 1e100}})
 				continue
 			}
-			enc.Encode(map[string]any{"type": "response", "id": id, "command": typ, "success": true, "data": map[string]any{"sessionId": "prime-session", "tokens": map[string]any{"input": 10, "output": 4, "cacheRead": 2, "cacheWrite": 1}, "cost": 0.01}})
+			input, output, cacheRead, cacheWrite, cost := 0, 0, 0, 0, 0.0
+			if strings.HasPrefix(mode, "resume_cumulative") {
+				input, output, cacheRead, cacheWrite, cost = 100, 50, 20, 10, 0.20
+			}
+			if prompted {
+				input += 10
+				output += 4
+				cacheRead += 2
+				cacheWrite += 1
+				cost += 0.01
+			}
+			enc.Encode(map[string]any{"type": "response", "id": id, "command": typ, "success": true, "data": map[string]any{"sessionId": "prime-session", "tokens": map[string]any{"input": input, "output": output, "cacheRead": cacheRead, "cacheWrite": cacheWrite}, "cost": cost}})
 		case "abort":
 			enc.Encode(map[string]any{"type": "response", "id": id, "command": typ, "success": true})
 			recordTargetedCleanup(mode != "shutdown_fail")
