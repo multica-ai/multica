@@ -13,7 +13,7 @@ export type AgentVisibility = "workspace" | "private";
 // may TRIGGER / assign / @mention / chat an agent. The legacy `visibility`
 // field REMAINS but is now DERIVED on the backend from these two: a
 // `public_to` agent WITH a workspace target maps to `visibility: "workspace"`;
-// everything else (private, or public_to scoped only to member/team targets)
+// everything else (private, or public_to scoped only to member/team/agent targets)
 // maps to `visibility: "private"`.
 //
 // Invocation semantics:
@@ -22,6 +22,8 @@ export type AgentVisibility = "workspace" | "private";
 //     bypass — the key behavior change vs the old visibility model)
 //   - permission_mode "public_to" + workspace target: any workspace member
 //   - permission_mode "public_to" + member target: only the matching user
+//   - permission_mode "public_to" + agent target: only the exact active
+//     same-workspace agent actor; direct and non-transitive
 //   - team target: reserved, INERT in v1 (never grants)
 // ---------------------------------------------------------------------------
 
@@ -30,20 +32,20 @@ export type AgentPermissionMode = "private" | "public_to";
 /**
  * A single invocation grant on an agent. `target_id` is `null` for the
  * workspace target (the grant covers every workspace member); it carries the
- * member / team id for the scoped grants.
+ * member / team / agent id for the scoped grants.
  */
 export interface AgentInvocationTarget {
-  target_type: "workspace" | "member" | "team";
+  target_type: "workspace" | "member" | "team" | "agent";
   target_id: string | null;
 }
 
 /**
  * Wire shape for invocation targets on CREATE / UPDATE requests. For a
  * workspace target the client may omit `target_id` (the backend fills the
- * workspace id); member / team targets REQUIRE it.
+ * workspace id); member / team / agent targets REQUIRE it.
  */
 export interface AgentInvocationTargetInput {
-  target_type: "workspace" | "member" | "team";
+  target_type: "workspace" | "member" | "team" | "agent";
   target_id?: string;
 }
 

@@ -73,7 +73,48 @@ sent.
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 `instructions`, `avatar_url`, `runtime_id`, `runtime_config`, `custom_env`,
 `custom_args`, `model`, `thinking_level`, `service_tier`, `visibility`,
-`max_concurrent_tasks`, `mcp_config`, `skill_ids`.
+`permission_mode`, `invocation_targets`, `max_concurrent_tasks`, `mcp_config`,
+`skill_ids`.
+
+## Invocation permission
+
+`permission_mode` + `invocation_targets` are the authorization source for
+assigning, mentioning, chatting with, or otherwise starting an agent. The
+legacy `visibility` field is only a derived compatibility projection:
+
+- `private`: only the human owner may invoke.
+- `public_to` + `workspace`: any member or workspace-internal agent/system
+  principal may invoke.
+- `public_to` + `member`: only that exact human user may invoke.
+- `public_to` + `agent`: only that exact, active, same-workspace agent actor may
+  invoke. This edge is direct and non-transitive: A → B and B → C does not grant
+  A → C.
+- `team` is stored but inert until team membership has an authority source.
+
+The owner can set an exact agent edge from create, update, or copy:
+
+```bash
+multica agent create --name <name> --runtime-id <runtime-id> \
+  --public-to-agent <source-agent-id> --output json
+multica agent update <target-agent-id> \
+  --permission-mode public_to --public-to-agent <source-agent-id> --output json
+multica agent copy <source-agent-id> \
+  --public-to-agent <new-invoker-agent-id> --output json
+```
+
+`--public-to-agent` and `--public-to-member` are repeatable and may be combined.
+An agent target must be a non-archived user agent in the same workspace;
+malformed, missing, archived, system, and cross-workspace ids are rejected.
+Duplicate ids are canonicalized idempotently. Writes are human-owner-only:
+task-scoped agent actors cannot configure these grants even when their backing
+user owns the target. Every successful explicit permission write records a
+minimal `agent_invocation_permission_updated` activity row containing only the
+mode and target type/id pairs.
+
+Invocation permission grants task creation only. They never grant another agent
+access to the target's env, MCP config, human chat transcripts, run history, or
+unrelated workspace data. Agent metadata remains discoverable for routing, with
+secret fields redacted.
 
 ## Copying an agent
 
@@ -94,6 +135,9 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
   `" (copy)"`), `description`, `instructions`, avatar, `custom_args`,
   `max_concurrent_tasks`, invocation permission (`permission_mode` +
   allow-list), and assigned workspace skills.
+- Agent invocation targets are copied verbatim when the copy remains in the
+  same workspace. The server revalidates every target on create, so a stale,
+  archived, or foreign target fails closed instead of being silently widened.
 - A copied `max_concurrent_tasks` is included only when the source value is
   within 1–50. Historical out-of-range values are omitted so the new agent
   receives the server default (`6`); an explicit out-of-range
@@ -125,7 +169,8 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 | `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
 | `custom_env` | `agent.custom_env` (JSON object) | — | daemon (process env); see Env & secrets |
 | `mcp_config` | `agent.mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the column | daemon → provider (provider-specific MCP handling); redacted on read |
-| `visibility` | `agent.visibility` | — | access control; defaults to `private`; gates who can read/route a private agent (e.g. a private squad leader) — NOT the runtime prompt |
+| `visibility` | `agent.visibility` | derived from invocation permission | legacy compatibility projection; `workspace` only for `public_to` + workspace target, otherwise `private` |
+| `permission_mode` + `invocation_targets` | `agent.permission_mode` + `agent_invocation_target` rows | owner-only; agent targets must be active same-workspace agents | authoritative invoke/assign/@mention/chat gate; agent targets match only the immediate actor and are non-transitive |
 | `max_concurrent_tasks` | `agent.max_concurrent_tasks` | integer from 1 through 50; out-of-range values return 400 | scheduler task cap; defaults to `6` |
 
 Defaults when omitted or explicitly `null`: `max_concurrent_tasks` → `6`.
@@ -304,6 +349,8 @@ State-changing (require an explicit instruction — do not run speculatively):
 - `multica agent create` — inserts a new agent row.
 - `multica agent copy` — inserts a new agent row (a fork of an existing agent);
   the source is left untouched.
+- `multica agent update --permission-mode/--public-to-*` — replaces the target
+  agent's invocation allow-list; only the human agent owner may do this.
 - `multica agent skills add` / `set` — mutate bindings (`set` is destructive:
   it drops bindings not in the new list).
 - `multica agent env set` — overwrites the full `custom_env` map and writes an
@@ -322,6 +369,10 @@ State-changing (require an explicit instruction — do not run speculatively):
   clear; only `custom_env` is gated behind the dedicated env endpoint.
 - "`agent get` shows env values." It shows only `has_custom_env` and
   `custom_env_key_count`.
+- "An agent allow-list edge shares the target's data." It does not: the edge
+  authorizes invocation only, not env, MCP, chat, run-history, or unrelated
+  resource reads.
+- "Agent allow-lists are transitive." They are direct actor-id checks only.
 - "An invalid `thinking_level`/`model` combo is caught at create." Only an
   unknown provider-level literal is — model-specific gaps fail at run time.
 - "`set` and `add` are interchangeable for skills." `set` replaces all

@@ -38,7 +38,10 @@ func fullSourceAgent() map[string]any {
 		"thinking_level":       "high",
 		"service_tier":         "priority",
 		"permission_mode":      "public_to",
-		"invocation_targets":   []any{map[string]any{"target_type": "workspace"}},
+		"invocation_targets": []any{
+			map[string]any{"target_type": "workspace"},
+			map[string]any{"target_type": "agent", "target_id": "agent-source"},
+		},
 		"skills": []any{
 			map[string]any{"id": "skill-1", "name": "One"},
 			map[string]any{"id": "skill-2", "name": "Two"},
@@ -133,7 +136,10 @@ func TestAgentCopySameRuntimeCopiesPortableFields(t *testing.T) {
 	if gotBody["permission_mode"] != "public_to" {
 		t.Errorf("permission_mode = %v", gotBody["permission_mode"])
 	}
-	if !reflect.DeepEqual(gotBody["invocation_targets"], []any{map[string]any{"target_type": "workspace"}}) {
+	if !reflect.DeepEqual(gotBody["invocation_targets"], []any{
+		map[string]any{"target_type": "workspace"},
+		map[string]any{"target_type": "agent", "target_id": "agent-source"},
+	}) {
 		t.Errorf("invocation_targets = %v", gotBody["invocation_targets"])
 	}
 	// Skills bind in the same create request.
@@ -322,6 +328,27 @@ func TestAgentCopyPermissionOverrideReplacesSource(t *testing.T) {
 	// workspace target must be gone.
 	if got, ok := gotBody["invocation_targets"].([]any); !ok || len(got) != 0 {
 		t.Errorf("invocation_targets = %v, want empty list", gotBody["invocation_targets"])
+	}
+}
+
+func TestAgentCopyPublicToAgentOverrideReplacesSource(t *testing.T) {
+	var gotBody map[string]any
+	srv := copyMockServer(t, fullSourceAgent(), &gotBody)
+	defer srv.Close()
+	setCopyTestEnv(t, srv.URL)
+
+	cmd := newAgentCopyTestCmd()
+	_ = cmd.Flags().Set("public-to-agent", "agent-allowed")
+
+	if err := runAgentCopy(cmd, []string{"agent-src"}); err != nil {
+		t.Fatalf("runAgentCopy: %v", err)
+	}
+	if gotBody["permission_mode"] != "public_to" {
+		t.Errorf("permission_mode = %v, want public_to", gotBody["permission_mode"])
+	}
+	want := []any{map[string]any{"target_type": "agent", "target_id": "agent-allowed"}}
+	if !reflect.DeepEqual(gotBody["invocation_targets"], want) {
+		t.Errorf("invocation_targets = %#v, want %#v", gotBody["invocation_targets"], want)
 	}
 }
 

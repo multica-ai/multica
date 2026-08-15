@@ -12,7 +12,8 @@ import type { AgentInvocationTarget, AgentPermissionMode } from "../types";
  * (`server/internal/handler/agent_access.go`):
  *   - owner-only      = `private` (only the owner may invoke)
  *   - workspace       = `public_to` with a workspace target (any member/agent/system)
- *   - specific-people = `public_to` without a workspace target (member/team targets)
+ *   - specific-people = `public_to` without a workspace target
+ *     (member/team/agent targets)
  */
 export type AccessScope = "workspace" | "specific-people" | "owner-only";
 

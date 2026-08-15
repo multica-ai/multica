@@ -15,6 +15,9 @@ function member(id: string): AgentInvocationTarget {
 function team(id: string): AgentInvocationTarget {
   return { target_type: "team", target_id: id };
 }
+function agent(id: string): AgentInvocationTarget {
+  return { target_type: "agent", target_id: id };
+}
 
 describe("effectiveAccessScope", () => {
   it("maps private to owner-only", () => {
@@ -31,6 +34,10 @@ describe("effectiveAccessScope", () => {
 
   it("maps public_to + team target only to specific-people", () => {
     expect(effectiveAccessScope("public_to", [team("t-1")])).toBe("specific-people");
+  });
+
+  it("maps public_to + agent target only to specific-people", () => {
+    expect(effectiveAccessScope("public_to", [agent("a-1")])).toBe("specific-people");
   });
 
   it("maps public_to with no targets to specific-people", () => {

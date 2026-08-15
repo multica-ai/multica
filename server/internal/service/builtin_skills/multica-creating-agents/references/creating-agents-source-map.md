@@ -24,6 +24,7 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | MCP flags on `agent update` | 200–202 | Same three channels on update; `--mcp-config null` clears. Unlike `custom_env`, `mcp_config` IS settable via update | `multica agent update --help` |
 | `thinking-level` / `service-tier` flags on `agent update` | 189–190 | Thin pass-throughs; an explicit empty string clears the saved override and restores the runtime/local Codex default | `multica agent update --help` |
 | `max-concurrent-tasks` flags + validation | `cmd_agent.go` 179, 208; `cmd_agent_validation.go` 5–20 | Shared CLI helper enforces 1–50; create/update call it before their HTTP mutation and omitted create flags stay absent | `multica agent create --help`; `multica agent update --help` |
+| Exact agent invocation flags | `cmd_agent.go` `applyAgentPermissionFlags`; `cmd_agent_copy.go` `registerAgentCopyFlags` | `--public-to-agent` is repeatable on create/update/copy and emits `{target_type:"agent",target_id:<uuid>}`; any permission override replaces the whole copied allow-list | `multica agent create --help`; `multica agent update --help`; `multica agent copy --help` |
 | `runAgentCreate` builds body + `POST /api/agents` | 533–628 | Only sets a body key when the flag `Changed`; validates `max_concurrent_tasks` at 605–611, then posts to `/api/agents` (617) | read 533–628 |
 | Body assembly: description/instructions/runtime-config/custom-args/custom-env/mcp-config/model/thinking-level/service-tier | 548–611 | `model`, `thinking_level`, and `service_tier` are `Changed`-gated pass-throughs; omitted flags are not sent | read the `runAgentCreate` body assembly |
 | `runAgentUpdate` sends `thinking_level` / `service_tier` / `mcp_config` | 630–725 | Each override key is added only when its flag is `Changed`; `max_concurrent_tasks` is range-checked at 693–699; `custom_env` is intentionally not a flag here | read the `runAgentUpdate` body assembly |
@@ -44,6 +45,7 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | Concurrency copy compatibility | `runAgentCopy`, `copiedAgentMaxConcurrentTasks` | Explicit `--max-concurrent-tasks` is validated before any request; valid source values are copied, while historical values outside 1–50 are omitted so create defaults to 6 | read the concurrency body assembly |
 | Skills copied in the create transaction | 239 | Source skill ids sent as `skill_ids`, bound in the same `POST /api/agents` tx (267); `--no-skills` opts out | read `runAgentCopy` |
 | Secrets never copied | 240–266 | `custom_env`/`mcp_config`/`runtime_config` set only from explicit secret-safe flags, never read from the source | `multica agent copy --help` |
+| Invocation targets copied / revalidated | `runAgentCopy` permission block; `agent_permission.go` `validateInvocationAgentTargets` | A same-workspace copy preserves new agent target rows verbatim; the create API rejects stale, archived, system, or foreign sources | read `runAgentCopy`; `multica agent copy --help` |
 
 ## Create handler — `server/internal/handler/agent.go`
 
@@ -74,6 +76,18 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | `UpdateAgent` rejects `custom_env` | 910–913 | if `custom_env` present in body → 400 "use PUT /api/agents/{id}/env (or `multica agent env set`)" |
 | `UpdateAgent` persists / clears `mcp_config` | 944–948, 1060–1061 | Tri-state from the raw body: key omitted → no change; literal `null` → `ClearAgentMcpConfig`; object → replace. No 400 like `custom_env` — `mcp_config` IS updatable here |
 | `description` ≤ 255 on update too | 921–924 | same cap re-checked on update |
+| Agent target parse + canonical de-duplication | `agent_permission.go` `parsePermissionInput` | `target_type=agent` requires a UUID; duplicate UUID spellings collapse to one target; unknown types fail 400 |
+| Same-workspace active-source validation | `agent_permission.go` `validateInvocationAgentTargets` | Resolves through `GetAgentInWorkspace` and rejects archived, system, missing, and cross-workspace source ids without enumerating which case occurred |
+| Human-owner-only permission writes + audit | `agent.go` `CreateAgent` / `UpdateAgent`; `agent_permission.go` `createAgentInvocationPermissionActivity` | Agent actors cannot configure invocation permission. Explicit human-owner writes persist the mode, targets, and minimal `agent_invocation_permission_updated` activity row in one transaction |
+| Exact non-transitive invoke gate | `agent_access.go` `canInvokeAgent` | An agent target matches only `actorType=agent` + the immediate actor id, re-resolved as active in the target workspace on every invocation; it never follows another edge or the human originator |
+| Invocation is separate from private-data reads | `agent_access.go` `agentActorMayInspectPrivateData`; `agent.go` `ListAgentTasks`; `chat.go` `gateChatSessionForUser`; `agent_env.go` `authorizeAgentEnv` | A source may invoke an allow-listed target but cannot read its run history, human chat, env, or MCP secrets; metadata reads remain redacted |
+
+## Schema migration — `server/migrations/327_agent_invocation_target_agent.*.sql`
+
+| Contract | Evidence | Behavior |
+|---|---|---|
+| Additive target enum | up migration CHECK | Adds `agent` without changing existing workspace/member/team rows or indexes |
+| Fail-closed rollback | down migration | Deletes agent-target rows before restoring the old CHECK; never converts them into workspace grants |
 
 ## Runtime model/thinking discovery — `server/pkg/agent/{models,thinking}.go`
 

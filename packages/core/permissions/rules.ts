@@ -52,6 +52,7 @@ export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
  *     change — workspace admins NO LONGER bypass a private agent.
  *   - permission_mode "public_to" + workspace target: any workspace member
  *   - permission_mode "public_to" + member target: only the matching user
+ *   - agent target: server-only A2A grant; never grants the current human
  *   - team target: reserved, INERT in v1 (never grants)
  */
 export function canAssignAgentToIssue(
@@ -86,8 +87,9 @@ export function canAssignAgentToIssue(
     return ALLOW;
   }
 
-  // A member grant opens invocation to exactly the targeted user. Team
-  // targets are reserved and INERT in v1 — they never grant.
+  // A member grant opens invocation to exactly the targeted user. Agent
+  // targets apply only to authenticated agent actors on the server; team
+  // targets are reserved and INERT in v1. Neither grants this human caller.
   if (
     targets.some(
       (t) => t.target_type === "member" && t.target_id === ctx.userId,

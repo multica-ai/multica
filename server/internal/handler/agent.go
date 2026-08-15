@@ -1034,8 +1034,9 @@ type CreateAgentRequest struct {
 	// PermissionMode + InvocationTargets are the new invocation-permission
 	// inputs (MUL-3963). When permission_mode is present it is authoritative
 	// and Visibility is ignored; when absent, legacy Visibility is mapped
-	// (private -> private, workspace -> public_to+workspace target). On create
-	// only the caller can be the owner, so targets are accepted unconditionally.
+	// (private -> private, workspace -> public_to+workspace target). Invocation
+	// permission writes require a human owner; an agent actor cannot create an
+	// allow-list on its owner's behalf.
 	PermissionMode     *string                    `json:"permission_mode"`
 	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
 	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
@@ -1125,13 +1126,27 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve invocation permission (MUL-3963). permission_mode is
 	// authoritative when present; otherwise the legacy visibility value is
-	// mapped. On create the caller is always the owner, so targets are
-	// accepted unconditionally.
+	// mapped. A task-scoped agent actor may create an otherwise-private agent,
+	// but cannot author an invocation allow-list on its backing user's behalf.
+	_, hasPermissionMode := rawFields["permission_mode"]
 	_, hasTargets := rawFields["invocation_targets"]
+	_, hasVisibility := rawFields["visibility"]
+	permissionTouched := hasPermissionMode || hasTargets || hasVisibility
 	legacyVis := req.Visibility
-	perm, _, permErr := parsePermissionInput(wsUUID, req.PermissionMode, req.InvocationTargets, req.PermissionMode != nil, hasTargets, &legacyVis)
+	perm, _, permErr := parsePermissionInput(wsUUID, req.PermissionMode, req.InvocationTargets, hasPermissionMode, hasTargets, &legacyVis)
 	if permErr != nil {
 		writeError(w, http.StatusBadRequest, permErr.Error())
+		return
+	}
+	if permissionTouched {
+		actorType, _ := h.resolveActor(r, ownerID, workspaceID)
+		if actorType == "agent" {
+			writeError(w, http.StatusForbidden, "agents may not configure invocation permissions")
+			return
+		}
+	}
+	if err := validateInvocationAgentTargets(r.Context(), h.Queries, wsUUID, perm.targets); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
@@ -1288,6 +1303,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to save agent access")
 		return
 	}
+	if permissionTouched {
+		if err := createAgentInvocationPermissionActivity(
+			r.Context(), qtx, wsUUID, created.ID, parseUUID(ownerID), "create", perm,
+		); err != nil {
+			slog.Error("create agent invocation permission audit failed; rolling back create",
+				append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+			writeError(w, http.StatusInternalServerError, "audit log write failed; agent create rolled back")
+			return
+		}
+	}
 	for _, skillID := range skillUUIDs {
 		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
 			AgentID: created.ID,
@@ -1356,10 +1381,10 @@ type UpdateAgentRequest struct {
 	McpConfig  *json.RawMessage `json:"mcp_config"`
 	Visibility *string          `json:"visibility"`
 	// PermissionMode + InvocationTargets are the invocation-permission inputs
-	// (MUL-3963). Owner-only writes (like composio_toolkit_allowlist): a
-	// non-owner admin passing them is silently ignored, because the invoke
-	// gate is owner/allow-list based and an admin-authored allow-list would
-	// confuse the owner about who can run their agent. permission_mode is
+	// (MUL-3963). Human-owner-only writes: a real change from a non-owner is
+	// rejected, while unchanged fields echoed by PATCH-as-PUT clients are
+	// ignored. Agent actors are not allowed to write them even when their
+	// backing user owns the target. permission_mode is
 	// authoritative when present; otherwise legacy visibility is mapped.
 	PermissionMode     *string                     `json:"permission_mode"`
 	InvocationTargets  *[]AgentInvocationTargetDTO `json:"invocation_targets"`
@@ -1683,14 +1708,19 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	replacePermissionTargets := false
 	var resolvedPerm resolvedPermission
 	if permissionTouched {
-		isAgentOwner := uuidToString(existing.OwnerID) == requestUserID(r)
-		if !isAgentOwner {
+		actorType, _ := h.resolveActor(r, requestUserID(r), uuidToString(existing.WorkspaceID))
+		isHumanAgentOwner := actorType != "agent" && uuidToString(existing.OwnerID) == requestUserID(r)
+		if !isHumanAgentOwner {
 			changed, permErr := h.permissionInputChangesAgent(r.Context(), existing, req, hasPermissionMode, hasTargets)
 			if permErr != nil {
 				writeError(w, http.StatusInternalServerError, "failed to evaluate invocation permission change")
 				return
 			}
 			if changed {
+				if actorType == "agent" {
+					writeError(w, http.StatusForbidden, "agents may not configure invocation permissions")
+					return
+				}
 				writeError(w, http.StatusForbidden, "only the agent owner can change access (permission_mode / invocation_targets)")
 				return
 			}
@@ -1704,6 +1734,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			perm, _, permErr := parsePermissionInput(existing.WorkspaceID, req.PermissionMode, targetsDTO, hasPermissionMode, hasTargets, req.Visibility)
 			if permErr != nil {
 				writeError(w, http.StatusBadRequest, permErr.Error())
+				return
+			}
+			if err := validateInvocationAgentTargets(r.Context(), h.Queries, existing.WorkspaceID, perm.targets); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 			resolvedPerm = perm
@@ -1882,7 +1916,18 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updated, err := h.Queries.UpdateAgent(r.Context(), params)
+	// Persist the agent row, its invocation targets, and the permission audit
+	// in one transaction. A failed target or audit write must not leave a mode
+	// flip committed with the old allow-list (or vice versa).
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start agent update transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	updated, err := qtx.UpdateAgent(r.Context(), params)
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — mirror CreateAgent and
 		// return a clear conflict instead of a 500 that leaks the raw
@@ -1908,7 +1953,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
 	// mcp_config, thinking_level, and service_tier use dedicated clear queries.
 	if shouldClearMcpConfig {
-		updated, err = h.Queries.ClearAgentMcpConfig(r.Context(), updated.ID)
+		updated, err = qtx.ClearAgentMcpConfig(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
@@ -1916,7 +1961,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearThinkingLevel {
-		updated, err = h.Queries.ClearAgentThinkingLevel(r.Context(), updated.ID)
+		updated, err = qtx.ClearAgentThinkingLevel(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
@@ -1924,7 +1969,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearServiceTier {
-		updated, err = h.Queries.ClearAgentServiceTier(r.Context(), updated.ID)
+		updated, err = qtx.ClearAgentServiceTier(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent service_tier failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear service_tier: "+err.Error())
@@ -1932,7 +1977,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearComposioAllowlist {
-		updated, err = h.Queries.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
+		updated, err = qtx.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist: "+err.Error())
@@ -1944,11 +1989,25 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// permission. Done after the row update so a permission_mode flip and its
 	// targets land together.
 	if replacePermissionTargets {
-		if err := h.replaceInvocationTargets(r.Context(), updated.ID, parseUUID(requestUserID(r)), resolvedPerm.targets); err != nil {
+		if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, updated.ID, parseUUID(requestUserID(r)), resolvedPerm.targets); err != nil {
 			slog.Warn("update agent: persist invocation targets failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to update invocation targets: "+err.Error())
 			return
 		}
+		if err := createAgentInvocationPermissionActivity(
+			r.Context(), qtx, updated.WorkspaceID, updated.ID, parseUUID(requestUserID(r)), "update", resolvedPerm,
+		); err != nil {
+			slog.Error("update agent invocation permission audit failed; rolling back update",
+				append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "audit log write failed; agent update rolled back")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("commit agent update failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to commit agent update")
+		return
 	}
 
 	resp := h.agentToResponse(updated)
@@ -2295,11 +2354,13 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Run history is part of the private-agent gate ("查看历史会话"). Same
-	// 403 semantics as GetAgent.
+	// Run history is private agent data. Invocation authority (including an
+	// exact agent allow-list edge) never grants this read; an agent principal
+	// may inspect only its own history.
 	workspaceID := uuidToString(agent.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+	if !agentActorMayInspectPrivateData(actorType, actorID, agent) ||
+		!h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}

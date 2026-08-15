@@ -176,6 +176,7 @@ func init() {
 	agentCreateCmd.Flags().String("permission-mode", "", "Invocation permission mode: private (owner only) or public_to (allow-list via --public-to-*). Authoritative over --visibility when set.")
 	agentCreateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
 	agentCreateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
+	agentCreateCmd.Flags().StringSlice("public-to-agent", nil, "public_to: allow the given same-workspace agent id(s) to invoke this agent. Repeatable.")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks (1-50)")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -205,6 +206,7 @@ func init() {
 	agentUpdateCmd.Flags().String("permission-mode", "", "New invocation permission mode: private or public_to. Authoritative over --visibility. Owner-only.")
 	agentUpdateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
 	agentUpdateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
+	agentUpdateCmd.Flags().StringSlice("public-to-agent", nil, "public_to: allow the given same-workspace agent id(s) to invoke this agent. Repeatable.")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks (1-50)")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -597,7 +599,8 @@ func runAgentGet(cmd *cobra.Command, args []string) error {
 }
 
 // applyAgentPermissionFlags translates the invocation-permission flags
-// (--permission-mode / --public-to-workspace / --public-to-member) into the
+// (--permission-mode / --public-to-workspace / --public-to-member /
+// --public-to-agent) into the
 // permission_mode + invocation_targets request fields (MUL-3963). When none of
 // the flags are set it is a no-op, so the legacy --visibility handling still
 // drives the request. When any public-to-* flag is present without an explicit
@@ -606,7 +609,8 @@ func applyAgentPermissionFlags(cmd *cobra.Command, body map[string]any) {
 	hasMode := cmd.Flags().Changed("permission-mode")
 	hasWorkspace := cmd.Flags().Changed("public-to-workspace")
 	hasMembers := cmd.Flags().Changed("public-to-member")
-	if !hasMode && !hasWorkspace && !hasMembers {
+	hasAgents := cmd.Flags().Changed("public-to-agent")
+	if !hasMode && !hasWorkspace && !hasMembers && !hasAgents {
 		return
 	}
 
@@ -623,6 +627,11 @@ func applyAgentPermissionFlags(cmd *cobra.Command, body map[string]any) {
 	if members, _ := cmd.Flags().GetStringSlice("public-to-member"); len(members) > 0 {
 		for _, m := range members {
 			targets = append(targets, map[string]any{"target_type": "member", "target_id": m})
+		}
+	}
+	if agents, _ := cmd.Flags().GetStringSlice("public-to-agent"); len(agents) > 0 {
+		for _, agentID := range agents {
+			targets = append(targets, map[string]any{"target_type": "agent", "target_id": agentID})
 		}
 	}
 	body["invocation_targets"] = targets
@@ -802,7 +811,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --permission-mode, --public-to-workspace, --public-to-member, --public-to-agent, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())

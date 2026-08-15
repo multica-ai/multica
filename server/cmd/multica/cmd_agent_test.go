@@ -33,6 +33,48 @@ func freshAgentEnvSetCmd() *cobra.Command {
 	return c
 }
 
+func freshAgentPermissionCmd() *cobra.Command {
+	c := &cobra.Command{Use: "agent-permission"}
+	c.Flags().String("permission-mode", "", "")
+	c.Flags().Bool("public-to-workspace", false, "")
+	c.Flags().StringSlice("public-to-member", nil, "")
+	c.Flags().StringSlice("public-to-agent", nil, "")
+	return c
+}
+
+func TestApplyAgentPermissionFlagsIncludesExactAgentTargets(t *testing.T) {
+	cmd := freshAgentPermissionCmd()
+	if err := cmd.Flags().Set("public-to-member", "member-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("public-to-agent", "agent-1,agent-2"); err != nil {
+		t.Fatal(err)
+	}
+
+	body := map[string]any{}
+	applyAgentPermissionFlags(cmd, body)
+
+	if body["permission_mode"] != "public_to" {
+		t.Fatalf("permission_mode = %v, want public_to", body["permission_mode"])
+	}
+	want := []map[string]any{
+		{"target_type": "member", "target_id": "member-1"},
+		{"target_type": "agent", "target_id": "agent-1"},
+		{"target_type": "agent", "target_id": "agent-2"},
+	}
+	if !reflect.DeepEqual(body["invocation_targets"], want) {
+		t.Fatalf("invocation_targets = %#v, want %#v", body["invocation_targets"], want)
+	}
+}
+
+func TestAgentPermissionCommandsExposePublicToAgent(t *testing.T) {
+	for _, cmd := range []*cobra.Command{agentCreateCmd, agentUpdateCmd, agentCopyCmd} {
+		if cmd.Flag("public-to-agent") == nil {
+			t.Errorf("%s is missing --public-to-agent", cmd.CommandPath())
+		}
+	}
+}
+
 func chdirWithDaemonTaskMarker(t *testing.T) {
 	t.Helper()
 

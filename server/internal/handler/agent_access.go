@@ -28,11 +28,13 @@ import (
 //         agent/system principals) may invoke.
 //       * member target    -> only the specific user may invoke.
 //       * team target       -> reserved, inert in V1.
+//       * agent target      -> only that exact, active same-workspace agent
+//         actor may invoke.
 //
-// A2A is judged by the top-of-chain human originator, never by the immediate
-// agent actor: if user U triggers agent A and A @-mentions agent B, B is only
-// invocable when U (the originator) is in B's allow-list. This prevents agents
-// from forming a channel that bypasses the owner's white-list.
+// Member/owner grants in an A2A chain are judged by the top-of-chain human
+// originator. Agent grants are deliberately different: they match only the
+// immediate, server-authenticated agent actor. Grants are never traversed, so
+// A -> B and B -> C does not imply A -> C.
 
 // canInvokeAgent reports whether a run may be enqueued for `agent` on behalf of
 // the given actor. Judgement is by the *effective invoking user*:
@@ -102,6 +104,26 @@ func (h *Handler) canInvokeAgent(ctx context.Context, agent db.Agent, actorType,
 		case "team":
 			// Reserved: team membership does not exist yet in V1, so team
 			// targets never admit anyone (also fail-closed for system/agent).
+		case "agent":
+			// Match only the immediate agent principal, never the human
+			// originator and never another allow-list edge. Re-resolve it in
+			// the target agent's workspace on every invocation so archived,
+			// deleted, system, and cross-workspace source agents fail closed
+			// even when a stale target row remains.
+			if actorType != "agent" || actorID == "" {
+				continue
+			}
+			sourceID, err := util.ParseUUID(actorID)
+			if err != nil || uuidToString(t.TargetID) != uuidToString(sourceID) {
+				continue
+			}
+			source, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+				ID:          sourceID,
+				WorkspaceID: agent.WorkspaceID,
+			})
+			if err == nil && !source.ArchivedAt.Valid {
+				return true
+			}
 		}
 	}
 	return false
@@ -112,7 +134,9 @@ func (h *Handler) canInvokeAgent(ctx context.Context, agent db.Agent, actorType,
 // see canInvokeAgent for that.
 //
 // Rules:
-//   - agent actors always pass (A2A collaboration + inspection preserved).
+//   - agent actors always pass this metadata/view gate so A2A routing can
+//     resolve agents; private-data endpoints must additionally call
+//     agentActorMayInspectPrivateData.
 //   - the agent owner always passes.
 //   - workspace owner/admin pass (governance / inventory visibility retained).
 //   - a regular member passes for a public_to agent only when they hit a
@@ -175,6 +199,15 @@ func memberAllowedToViewAgent(agent db.Agent, targets []db.AgentInvocationTarget
 		return false
 	}
 	return memberHitsInvocationTargets(targets, userID)
+}
+
+// agentActorMayInspectPrivateData keeps invocation authority separate from
+// private-data access. A running agent may inspect its own chats, run history,
+// and activity, but an allow-list edge to another agent never grants those
+// reads. Agent metadata remains available through ListAgents / GetAgent with
+// secret fields redacted so A2A routing can still resolve names and ids.
+func agentActorMayInspectPrivateData(actorType, actorID string, target db.Agent) bool {
+	return actorType != "agent" || (actorID != "" && actorID == uuidToString(target.ID))
 }
 
 // invokeOriginatorFromRequest resolves the top-of-chain human user id for an
@@ -332,11 +365,10 @@ func (h *Handler) taskFromRequestHeader(r *http.Request) (db.AgentTaskQueue, boo
 	return task, true
 }
 
-// accessibleAgentIDs returns the set of agent IDs in the workspace the actor
-// is allowed to see, for use by workspace-wide aggregation endpoints
-// (run counts, activity histograms, task snapshots) that need to filter out
-// private / non-allow-listed agents the member can't access. Returns nil and
-// false on error.
+// accessibleAgentIDs returns the set of agent IDs whose private aggregate data
+// the actor may inspect. Agent principals are limited to themselves regardless
+// of invocation grants; members retain the existing owner/admin/allow-list
+// view rules. Returns nil and false on error.
 func (h *Handler) accessibleAgentIDs(ctx context.Context, workspaceID, actorType, actorID, role string) (map[string]struct{}, bool) {
 	wsUUID, err := util.ParseUUID(workspaceID)
 	if err != nil {
@@ -352,6 +384,9 @@ func (h *Handler) accessibleAgentIDs(ctx context.Context, workspaceID, actorType
 	}
 	allowed := make(map[string]struct{}, len(agents))
 	for _, a := range agents {
+		if actorType == "agent" && actorID != uuidToString(a.ID) {
+			continue
+		}
 		if actorType == "member" {
 			if !memberAllowedToViewAgent(a, targetsByAgent[uuidToString(a.ID)], actorID, role) {
 				continue

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // createPermissionTestMember inserts a fresh workspace member and returns its
@@ -227,7 +228,11 @@ func createPublicToAgentWithTargets(t *testing.T, name string, targets []map[str
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, resp.ID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM activity_log WHERE details->>'agent_id' = $1`, resp.ID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_invocation_target WHERE agent_id = $1`, resp.ID)
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, resp.ID)
+	})
 	return resp.ID
 }
 
@@ -251,6 +256,401 @@ func invocationTargetCount(t *testing.T, agentID string) int {
 		t.Fatalf("count targets: %v", err)
 	}
 	return n
+}
+
+func loadPermissionTestAgent(t *testing.T, agentID string) db.Agent {
+	t.Helper()
+	agent, err := testHandler.Queries.GetAgent(context.Background(), util.MustParseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load agent %s: %v", agentID, err)
+	}
+	return agent
+}
+
+// TestCanInvokeAgent_PublicToAgentWhitelist locks the exact A2A semantics:
+// immediate actor id only, same workspace, active source, and no traversal of
+// other agents' grants.
+func TestCanInvokeAgent_PublicToAgentWhitelist(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	sourceA := createHandlerTestAgent(t, "agent-target-source-a", nil)
+	other := createHandlerTestAgent(t, "agent-target-source-other", nil)
+	middle := createPublicToAgentWithTargets(t, "agent-target-middle", []map[string]any{
+		{"target_type": "agent", "target_id": sourceA},
+	})
+	target := createPublicToAgentWithTargets(t, "agent-target-final", []map[string]any{
+		{"target_type": "agent", "target_id": middle},
+	})
+
+	if !testHandler.canInvokeAgent(ctx, loadPermissionTestAgent(t, middle), "agent", sourceA, "", testWorkspaceID) {
+		t.Fatal("the exact allow-listed source agent should invoke the middle agent")
+	}
+	if testHandler.canInvokeAgent(ctx, loadPermissionTestAgent(t, middle), "agent", other, "", testWorkspaceID) {
+		t.Fatal("an unlisted same-workspace agent must not invoke the middle agent")
+	}
+	if testHandler.canInvokeAgent(ctx, loadPermissionTestAgent(t, target), "agent", sourceA, "", testWorkspaceID) {
+		t.Fatal("A -> middle and middle -> target must not imply A -> target")
+	}
+	if !testHandler.canInvokeAgent(ctx, loadPermissionTestAgent(t, target), "agent", middle, "", testWorkspaceID) {
+		t.Fatal("the immediate middle agent should invoke its exact target")
+	}
+
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET archived_at = now() WHERE id = $1`, middle); err != nil {
+		t.Fatalf("archive source agent: %v", err)
+	}
+	if testHandler.canInvokeAgent(ctx, loadPermissionTestAgent(t, target), "agent", middle, "", testWorkspaceID) {
+		t.Fatal("an archived allow-listed source agent must fail closed immediately")
+	}
+}
+
+// TestCreateAgent_AgentInvocationTargetValidationAndAudit covers the write
+// contract: same-workspace active agent ids only, canonical de-duplication,
+// minimal read shape, and a non-secret activity record in the same create tx.
+func TestCreateAgent_AgentInvocationTargetValidationAndAudit(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	source := createHandlerTestAgent(t, "agent-target-valid-source", nil)
+	foreign := createForeignWorkspaceAgent(t)
+	archived := createHandlerTestAgent(t, "agent-target-archived-source", nil)
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET archived_at = now() WHERE id = $1`, archived); err != nil {
+		t.Fatalf("archive source: %v", err)
+	}
+
+	create := func(name string, targets []map[string]any) (int, AgentResponse) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest("POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
+			"name":               name,
+			"runtime_id":         handlerTestRuntimeID(t),
+			"permission_mode":    "public_to",
+			"invocation_targets": targets,
+		}))
+		var resp AgentResponse
+		if w.Code == http.StatusCreated {
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode create response: %v", err)
+			}
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(), `DELETE FROM activity_log WHERE details->>'agent_id' = $1`, resp.ID)
+				testPool.Exec(context.Background(), `DELETE FROM agent_invocation_target WHERE agent_id = $1`, resp.ID)
+				testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, resp.ID)
+			})
+		}
+		return w.Code, resp
+	}
+
+	code, created := create("agent-target-valid-create", []map[string]any{
+		{"target_type": "agent", "target_id": source},
+		{"target_type": "agent", "target_id": source},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("valid agent target create: got %d, want 201", code)
+	}
+	if len(created.InvocationTargets) != 1 || created.InvocationTargets[0].TargetType != "agent" ||
+		created.InvocationTargets[0].TargetID == nil || *created.InvocationTargets[0].TargetID != source {
+		t.Fatalf("invocation_targets = %+v, want one minimal agent target", created.InvocationTargets)
+	}
+	if created.Visibility != "private" {
+		t.Fatalf("agent-scoped permission widened legacy visibility to %q, want private", created.Visibility)
+	}
+	if n := invocationTargetCount(t, created.ID); n != 1 {
+		t.Fatalf("duplicate agent targets persisted as %d rows, want 1", n)
+	}
+
+	var action, details string
+	if err := testPool.QueryRow(ctx, `
+		SELECT action, details::text FROM activity_log
+		WHERE workspace_id = $1 AND details->>'agent_id' = $2
+		ORDER BY created_at DESC LIMIT 1
+	`, testWorkspaceID, created.ID).Scan(&action, &details); err != nil {
+		t.Fatalf("load permission audit: %v", err)
+	}
+	if action != agentInvocationPermissionActivity {
+		t.Fatalf("audit action = %q, want %q", action, agentInvocationPermissionActivity)
+	}
+	var audit map[string]any
+	if err := json.Unmarshal([]byte(details), &audit); err != nil {
+		t.Fatalf("decode permission audit: %v", err)
+	}
+	for _, forbidden := range []string{"agent_name", "instructions", "custom_env", "mcp_config"} {
+		if _, exists := audit[forbidden]; exists {
+			t.Errorf("permission audit must not contain %q: %s", forbidden, details)
+		}
+	}
+
+	// A human owner can replace agent targets on update. The target rows and
+	// audit event move together, and a rejected update leaves both untouched.
+	replacement := createHandlerTestAgent(t, "agent-target-update-source", nil)
+	w := httptest.NewRecorder()
+	r := withURLParam(newRequest("PUT", "/api/agents/"+created.ID, map[string]any{
+		"permission_mode": "public_to",
+		"invocation_targets": []map[string]any{
+			{"target_type": "agent", "target_id": replacement},
+		},
+	}), "id", created.ID)
+	testHandler.UpdateAgent(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("valid agent target update: got %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var updated AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.InvocationTargets) != 1 || updated.InvocationTargets[0].TargetID == nil ||
+		*updated.InvocationTargets[0].TargetID != replacement {
+		t.Fatalf("updated invocation_targets = %+v, want replacement source", updated.InvocationTargets)
+	}
+	var operation string
+	if err := testPool.QueryRow(ctx, `
+		SELECT details->>'operation' FROM activity_log
+		WHERE workspace_id = $1 AND action = $2 AND details->>'agent_id' = $3
+		ORDER BY created_at DESC, id DESC LIMIT 1
+	`, testWorkspaceID, agentInvocationPermissionActivity, created.ID).Scan(&operation); err != nil {
+		t.Fatalf("load update permission audit: %v", err)
+	}
+	if operation != "update" {
+		t.Fatalf("latest permission audit operation = %q, want update", operation)
+	}
+
+	w = httptest.NewRecorder()
+	r = withURLParam(newRequest("PUT", "/api/agents/"+created.ID, map[string]any{
+		"permission_mode": "public_to",
+		"invocation_targets": []map[string]any{
+			{"target_type": "agent", "target_id": foreign},
+		},
+	}), "id", created.ID)
+	testHandler.UpdateAgent(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("foreign agent target update: got %d, want 400: %s", w.Code, w.Body.String())
+	}
+	var persistedTarget string
+	if err := testPool.QueryRow(ctx, `
+		SELECT target_id::text FROM agent_invocation_target
+		WHERE agent_id = $1 AND target_type = 'agent'
+	`, created.ID).Scan(&persistedTarget); err != nil {
+		t.Fatal(err)
+	}
+	if persistedTarget != replacement {
+		t.Fatalf("rejected update changed persisted target to %s, want %s", persistedTarget, replacement)
+	}
+
+	for name, targets := range map[string][]map[string]any{
+		"cross-workspace": {{"target_type": "agent", "target_id": foreign}},
+		"archived":        {{"target_type": "agent", "target_id": archived}},
+		"missing":         {{"target_type": "agent", "target_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}},
+		"malformed":       {{"target_type": "agent", "target_id": "not-a-uuid"}},
+		"unknown-type":    {{"target_type": "unknown", "target_id": source}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, _ := create("agent-target-invalid-"+name, targets)
+			if code != http.StatusBadRequest {
+				t.Fatalf("invalid agent target create: got %d, want 400", code)
+			}
+			var count int
+			if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, "agent-target-invalid-"+name).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatalf("invalid target left %d partial agent rows", count)
+			}
+		})
+	}
+}
+
+func TestAgentInvocationTarget_IssueAssignmentAndBacklogPromotion(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	source := createHandlerTestAgent(t, "agent-target-issue-source", nil)
+	other := createHandlerTestAgent(t, "agent-target-issue-other", nil)
+	target := createPublicToAgentWithTargets(t, "agent-target-issue-target", []map[string]any{
+		{"target_type": "agent", "target_id": source},
+	})
+	sourceTask := createHandlerTestTaskForAgent(t, source)
+	otherTask := createHandlerTestTaskForAgent(t, other)
+
+	createAsAgent := func(actorID, taskID, title, status string) (int, IssueResponse) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+			"title":         title,
+			"status":        status,
+			"assignee_type": "agent",
+			"assignee_id":   target,
+		})
+		r.Header.Set("X-Agent-ID", actorID)
+		r.Header.Set("X-Task-ID", taskID)
+		testHandler.CreateIssue(w, r)
+		var resp IssueResponse
+		if w.Code == http.StatusCreated {
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, resp.ID)
+				testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, resp.ID)
+			})
+		}
+		return w.Code, resp
+	}
+
+	if code, _ := createAsAgent(other, otherTask, "agent-target-denied-create", "todo"); code != http.StatusForbidden {
+		t.Fatalf("unlisted source create assign: got %d, want 403", code)
+	}
+	var deniedRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = 'agent-target-denied-create'`, testWorkspaceID).Scan(&deniedRows); err != nil {
+		t.Fatal(err)
+	}
+	if deniedRows != 0 {
+		t.Fatalf("denied assignment left %d partial issues", deniedRows)
+	}
+
+	code, backlog := createAsAgent(source, sourceTask, "agent-target-backlog-promote", "backlog")
+	if code != http.StatusCreated {
+		t.Fatalf("allow-listed source backlog create: got %d, want 201", code)
+	}
+	var before int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`, backlog.ID, target).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if before != 0 {
+		t.Fatalf("backlog assignment enqueued %d tasks before promotion", before)
+	}
+
+	w := httptest.NewRecorder()
+	r := newRequest("PATCH", "/api/issues/"+backlog.ID, map[string]any{"status": "todo"})
+	r.Header.Set("X-Agent-ID", source)
+	r.Header.Set("X-Task-ID", sourceTask)
+	r = withURLParam(r, "id", backlog.ID)
+	testHandler.UpdateIssue(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("allow-listed backlog promotion: got %d: %s", w.Code, w.Body.String())
+	}
+	var after int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`, backlog.ID, target).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != 1 {
+		t.Fatalf("backlog promotion enqueued %d tasks, want 1", after)
+	}
+}
+
+func TestAgentInvocationTarget_DoesNotGrantPermissionMutationOrPrivateData(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	source := createHandlerTestAgent(t, "agent-target-private-data-source", nil)
+	sourceTask := createHandlerTestTaskForAgent(t, source)
+	target := createPublicToAgentWithTargets(t, "agent-target-private-data-target", []map[string]any{
+		{"target_type": "agent", "target_id": source},
+	})
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET mcp_config = '{"token":"must-not-leak"}'::jsonb WHERE id = $1`, target); err != nil {
+		t.Fatalf("seed target mcp config: %v", err)
+	}
+
+	agentRequest := func(method, path string, body any) *http.Request {
+		r := newRequest(method, path, body)
+		r.Header.Set("X-Agent-ID", source)
+		r.Header.Set("X-Task-ID", sourceTask)
+		return r
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.CreateAgent(w, agentRequest("POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
+		"name":            "agent-authored-permission-create",
+		"runtime_id":      handlerTestRuntimeID(t),
+		"permission_mode": "public_to",
+		"invocation_targets": []map[string]any{
+			{"target_type": "agent", "target_id": source},
+		},
+	}))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("agent-authored permission create: got %d, want 403: %s", w.Code, w.Body.String())
+	}
+	var createdByAgent int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent WHERE workspace_id = $1 AND name = 'agent-authored-permission-create'`, testWorkspaceID).Scan(&createdByAgent); err != nil {
+		t.Fatal(err)
+	}
+	if createdByAgent != 0 {
+		t.Fatalf("rejected agent-authored permission create left %d rows", createdByAgent)
+	}
+
+	// The exact invocation grant does not let the source rewrite the target's
+	// allow-list, even though both agent tasks use the same backing owner PAT.
+	w = httptest.NewRecorder()
+	r := withURLParam(agentRequest("PUT", "/api/agents/"+target, map[string]any{
+		"permission_mode": "private",
+	}), "id", target)
+	testHandler.UpdateAgent(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("agent-authored permission update: got %d, want 403: %s", w.Code, w.Body.String())
+	}
+	if got := loadPermissionTestAgent(t, target).PermissionMode; got != "public_to" {
+		t.Fatalf("rejected permission update changed mode to %q", got)
+	}
+
+	// Agent metadata stays discoverable for routing, but MCP config is redacted.
+	w = httptest.NewRecorder()
+	r = withURLParam(agentRequest("GET", "/api/agents/"+target, nil), "id", target)
+	testHandler.GetAgent(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("agent metadata read: got %d: %s", w.Code, w.Body.String())
+	}
+	var detail AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.McpConfig != nil || !detail.McpConfigRedacted {
+		t.Fatalf("agent metadata leaked MCP config: config=%s redacted=%v", detail.McpConfig, detail.McpConfigRedacted)
+	}
+
+	// Plaintext env and another agent's run history remain unavailable.
+	for name, handler := range map[string]func(http.ResponseWriter, *http.Request){
+		"env":     testHandler.GetAgentEnv,
+		"history": testHandler.ListAgentTasks,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := withURLParam(agentRequest("GET", "/api/agents/"+target+"/"+name, nil), "id", target)
+			handler(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("allow-listed source read %s: got %d, want 403: %s", name, rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	// A human chat owned by the backing user also stays private to its target
+	// agent; sharing invocation does not share the transcript.
+	var sessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
+		VALUES ($1, $2, $3, 'private target chat', 'active') RETURNING id
+	`, testWorkspaceID, target, testUserID).Scan(&sessionID); err != nil {
+		t.Fatalf("seed target chat: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content)
+		VALUES ($1, 'user', 'private chat content')
+	`, sessionID); err != nil {
+		t.Fatalf("seed target chat message: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, sessionID) })
+
+	w = httptest.NewRecorder()
+	r = agentRequest("GET", "/api/chat/sessions/"+sessionID+"/messages", nil)
+	r = withChatTestWorkspaceCtx(t, r)
+	r = withURLParam(r, "sessionId", sessionID)
+	testHandler.ListChatMessages(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("allow-listed source read target chat: got %d, want 403: %s", w.Code, w.Body.String())
+	}
 }
 
 // TestCanInvokeAgent_MixedMemberAndTeamTargets verifies a public_to agent can

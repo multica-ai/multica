@@ -67,6 +67,7 @@ func registerAgentCopyFlags(cmd *cobra.Command) {
 	cmd.Flags().String("permission-mode", "", "Override invocation permission mode: private or public_to. Authoritative over --visibility.")
 	cmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke the copy.")
 	cmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke the copy. Repeatable.")
+	cmd.Flags().StringSlice("public-to-agent", nil, "public_to: allow the given same-workspace agent id(s) to invoke the copy. Repeatable.")
 	cmd.Flags().Bool("no-skills", false, "Do not copy the source agent's workspace skill assignments.")
 	// Secret / machine-local fields are never copied from the source; these
 	// flags provide fresh values for the copy, mirroring 'agent create'.
@@ -217,6 +218,7 @@ func runAgentCopy(cmd *cobra.Command, args []string) error {
 	permOverride := cmd.Flags().Changed("permission-mode") ||
 		cmd.Flags().Changed("public-to-workspace") ||
 		cmd.Flags().Changed("public-to-member") ||
+		cmd.Flags().Changed("public-to-agent") ||
 		cmd.Flags().Changed("visibility")
 	if permOverride {
 		if cmd.Flags().Changed("visibility") {

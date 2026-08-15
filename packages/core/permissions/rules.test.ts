@@ -249,6 +249,18 @@ describe("canAssignAgentToIssue", () => {
     ).toBe(true);
   });
 
+  it("does not treat an agent target as a human invocation grant", () => {
+    const a = makeAgent({
+      visibility: "private",
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "agent", target_id: "agent-1" }],
+      owner_id: ALICE,
+    });
+    const d = canAssignAgentToIssue(a, { userId: BOB, role: "admin" });
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("private_visibility");
+  });
+
   it("denies logged-out users", () => {
     const a = makeAgent({
       visibility: "workspace",

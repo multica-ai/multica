@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -11,9 +12,9 @@ import (
 )
 
 // AgentInvocationTargetDTO is the wire shape of one invocation allow-list
-// entry (MUL-3963). target_id is null for team placeholders that a client
-// omitted, but is always present for workspace (the workspace id) and member
-// (the user id) rows persisted by the backend.
+// entry (MUL-3963). target_id is always present on rows persisted by the
+// backend: workspace rows carry the workspace id, and member / team / agent
+// rows carry the referenced principal id.
 type AgentInvocationTargetDTO struct {
 	TargetType string  `json:"target_type"`
 	TargetID   *string `json:"target_id"`
@@ -26,6 +27,9 @@ const (
 	invocationTargetWorkspace = "workspace"
 	invocationTargetMember    = "member"
 	invocationTargetTeam      = "team"
+	invocationTargetAgent     = "agent"
+
+	agentInvocationPermissionActivity = "agent_invocation_permission_updated"
 )
 
 // deriveLegacyVisibility maps the permission model back onto the legacy
@@ -91,8 +95,8 @@ func (p resolvedPermission) legacyVisibility() string {
 //   - permissionMode == nil && visibility == nil  -> caller default (returns ok=false, nil)
 //   - permissionMode provided                     -> authoritative
 //   - only legacy visibility provided             -> mapped:
-//       "private"   -> private
-//       "workspace" -> public_to + workspace target
+//     "private"   -> private
+//     "workspace" -> public_to + workspace target
 //
 // workspaceID seeds workspace targets (stored as the workspace id). The
 // returned error is a client-facing 400 message.
@@ -150,7 +154,7 @@ func parsePermissionInput(workspaceID pgtype.UUID, permissionMode *string, targe
 				if err != nil {
 					return resolvedPermission{}, false, fmt.Errorf("member invocation target_id is not a valid uuid")
 				}
-				key := "member:" + *t.TargetID
+				key := "member:" + uuidToString(uid)
 				if _, dup := seen[key]; dup {
 					continue
 				}
@@ -164,14 +168,28 @@ func parsePermissionInput(workspaceID pgtype.UUID, permissionMode *string, targe
 				if err != nil {
 					return resolvedPermission{}, false, fmt.Errorf("team invocation target_id is not a valid uuid")
 				}
-				key := "team:" + *t.TargetID
+				key := "team:" + uuidToString(tid)
 				if _, dup := seen[key]; dup {
 					continue
 				}
 				seen[key] = struct{}{}
 				res.targets = append(res.targets, targetSpec{targetType: invocationTargetTeam, targetID: tid})
+			case invocationTargetAgent:
+				if t.TargetID == nil || *t.TargetID == "" {
+					return resolvedPermission{}, false, fmt.Errorf("agent invocation target requires target_id")
+				}
+				aid, err := util.ParseUUID(*t.TargetID)
+				if err != nil {
+					return resolvedPermission{}, false, fmt.Errorf("agent invocation target_id is not a valid uuid")
+				}
+				key := "agent:" + uuidToString(aid)
+				if _, dup := seen[key]; dup {
+					continue
+				}
+				seen[key] = struct{}{}
+				res.targets = append(res.targets, targetSpec{targetType: invocationTargetAgent, targetID: aid})
 			default:
-				return resolvedPermission{}, false, fmt.Errorf("invocation target_type must be 'workspace', 'member', or 'team'")
+				return resolvedPermission{}, false, fmt.Errorf("invocation target_type must be 'workspace', 'member', 'team', or 'agent'")
 			}
 		}
 	}
@@ -186,10 +204,69 @@ func parsePermissionInput(workspaceID pgtype.UUID, permissionMode *string, targe
 	return res, true, nil
 }
 
-// replaceInvocationTargets rewrites an agent's invocation allow-list wholesale:
-// clear then re-insert. Called inside create/update after the agent row exists.
-func (h *Handler) replaceInvocationTargets(ctx context.Context, agentID pgtype.UUID, createdBy pgtype.UUID, targets []targetSpec) error {
-	return replaceInvocationTargetsWithQueries(ctx, h.Queries, agentID, createdBy, targets)
+// validateInvocationAgentTargets resolves every agent principal before an
+// allow-list is persisted. Agent grants are deliberately narrower than member
+// grants: the source must be a non-archived user agent in the exact same
+// workspace as the target agent. Unknown, archived, system, and cross-workspace
+// ids share one client-facing error so the write surface cannot be used to
+// enumerate private agents in another workspace.
+func validateInvocationAgentTargets(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, targets []targetSpec) error {
+	for _, target := range targets {
+		if target.targetType != invocationTargetAgent {
+			continue
+		}
+		source, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          target.targetID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil || source.ArchivedAt.Valid {
+			return fmt.Errorf("agent invocation target_id does not refer to an active agent in this workspace")
+		}
+	}
+	return nil
+}
+
+// createAgentInvocationPermissionActivity writes a queryable, non-secret audit
+// record for an owner-authored allow-list mutation. It intentionally stores
+// only the target agent id, mode, operation, and principal type/id pairs; agent
+// names, configuration, task history, env, and MCP data never enter the log.
+// Callers execute it in the same transaction as the permission rows so an
+// unaudited permission mutation cannot commit.
+func createAgentInvocationPermissionActivity(
+	ctx context.Context,
+	q *db.Queries,
+	workspaceID pgtype.UUID,
+	agentID pgtype.UUID,
+	actorID pgtype.UUID,
+	operation string,
+	permission resolvedPermission,
+) error {
+	targets := make([]AgentInvocationTargetDTO, 0, len(permission.targets))
+	for _, target := range permission.targets {
+		id := uuidToString(target.targetID)
+		targets = append(targets, AgentInvocationTargetDTO{
+			TargetType: target.targetType,
+			TargetID:   &id,
+		})
+	}
+	details, err := json.Marshal(map[string]any{
+		"agent_id":           uuidToString(agentID),
+		"operation":          operation,
+		"permission_mode":    permission.mode,
+		"invocation_targets": targets,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = q.CreateActivity(ctx, db.CreateActivityParams{
+		WorkspaceID: workspaceID,
+		IssueID:     pgtype.UUID{},
+		ActorType:   pgtype.Text{String: "member", Valid: true},
+		ActorID:     actorID,
+		Action:      agentInvocationPermissionActivity,
+		Details:     details,
+	})
+	return err
 }
 
 // replaceInvocationTargetsWithQueries is the tx-friendly variant: callers that

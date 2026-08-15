@@ -16,6 +16,7 @@ describe("AgentSchema invocation permissions", () => {
       invocation_targets: [
         { target_type: "workspace" },
         { target_type: "member", target_id: "member-1" },
+        { target_type: "agent", target_id: "agent-1" },
       ],
     });
 
@@ -23,6 +24,7 @@ describe("AgentSchema invocation permissions", () => {
     expect(parsed.invocation_targets).toEqual([
       { target_type: "workspace", target_id: null },
       { target_type: "member", target_id: "member-1" },
+      { target_type: "agent", target_id: "agent-1" },
     ]);
   });
 
