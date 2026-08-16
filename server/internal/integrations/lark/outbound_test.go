@@ -146,6 +146,7 @@ func (f *fakeAPIClient) SendBindingPromptCard(ctx context.Context, p BindingProm
 	f.bindingSent = append(f.bindingSent, p)
 	return nil
 }
+func (f *fakeAPIClient) SendDMCard(context.Context, SendDMCardParams) error { return nil }
 func (f *fakeAPIClient) GetBotInfo(ctx context.Context, creds InstallationCredentials) (BotInfo, error) {
 	return BotInfo{}, nil
 }

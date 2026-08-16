@@ -61,6 +61,11 @@ type APIClient interface {
 	// Lark's card schema.
 	SendBindingPromptCard(ctx context.Context, p BindingPromptParams) error
 
+	// SendDMCard proactively sends an already-rendered interactive card to
+	// one bound user's open_id. Unlike chat reply methods, it does not require
+	// an originating chat or message.
+	SendDMCard(ctx context.Context, p SendDMCardParams) error
+
 	// GetBotInfo returns the Bot's per-installation `open_id` (the
 	// `bot_open_id` we persist on lark_installation). RegistrationService
 	// is the only caller — after the device-flow registration returns
@@ -314,6 +319,14 @@ type BindingPromptParams struct {
 	BindURL string
 }
 
+// SendDMCardParams carries one proactive private-card delivery. CardJSON is
+// opaque to the transport; the caller owns safe rendering and deep links.
+type SendDMCardParams struct {
+	InstallationID InstallationCredentials
+	OpenID         OpenID
+	CardJSON       string
+}
+
 // AddReactionParams is the input shape for adding an emoji reaction to
 // a message.
 type AddReactionParams struct {
@@ -408,6 +421,11 @@ func (s *stubAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 
 func (s *stubAPIClient) SendBindingPromptCard(ctx context.Context, p BindingPromptParams) error {
 	s.log.Warn("lark stub client: SendBindingPromptCard called", "open_id", string(p.OpenID))
+	return ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) SendDMCard(context.Context, SendDMCardParams) error {
+	s.log.Warn("lark stub client: SendDMCard called")
 	return ErrAPIClientNotConfigured
 }
 
