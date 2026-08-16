@@ -6327,8 +6327,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentEnvOverrides = task.Agent.CustomEnv
 		agentCustomArgs = task.Agent.CustomArgs
 	}
+	// Registration is the session boundary: preview and process launch must use
+	// the same ownership snapshot even if the shared config changes during
+	// Prepare.
+	codexSandboxPolicy := newCodexWindowsSandboxSessionPolicy(task)
 	// Effective Codex CLI args the task will launch with, normalized through the
-	// same agent.NormalizeCodexLaunchArgs pipeline buildCodexArgs uses (shell
+	// same agent.EffectiveCodexLaunchArgs path buildCodexArgs uses (shell
 	// unquoting + blocked-flag filtering), preserving its ExtraArgs
 	// (profile-fixed + daemon defaults) vs CustomArgs (per-agent custom_args)
 	// split so the filtering matches launch exactly. Threaded into execenv so
@@ -6338,14 +6342,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var codexSandboxArgs []string
 	if provider == "codex" {
 		extraArgs := append(append([]string{}, profileFixedArgs...), defaultArgsForProvider(d.cfg, provider)...)
-		managed := task.Agent != nil && task.Agent.IsCodexWindowsSandboxArgManaged
-		effectiveCustomArgs, _ := agent.NormalizeCodexWindowsSandboxCustomArgs(
-			runtime.GOOS,
-			managed,
-			codexWindowsSandboxLowerPriorityOwns(task, extraArgs),
-			agentCustomArgs,
-		)
-		codexSandboxArgs = agent.NormalizeCodexLaunchArgs(extraArgs, effectiveCustomArgs, effectiveMcpConfig, d.logger)
+		codexSandboxArgs = codexSandboxPolicy.effectiveLaunchArgs(agent.ExecOptions{
+			ExtraArgs:  extraArgs,
+			CustomArgs: agentCustomArgs,
+			GOOS:       runtime.GOOS,
+			McpConfig:  effectiveMcpConfig,
+		}, d.logger)
 	}
 	// Hermes: resolve the overlay source home through one resolver contract —
 	// the selection parsed from custom_args (agent.ParseHermesProfileArgs) plus
@@ -6567,11 +6569,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
-	// Preview and launch share the runtime-registration snapshot. Re-reading the
-	// copied config here would let a mid-session config edit change spawned argv
-	// without updating the already-rendered preview.
-	codexWindowsSandboxConfigOwns :=
-		task.codexWindowsSandboxConfigOwnsAtRegistration
 	// Finalize the worktree on EVERY exit path, success or failure: commit
 	// whatever the agent left uncommitted, then unregister the worktree from
 	// the user's repo. Deferred against the named return so a task that fails
@@ -6954,7 +6951,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if provider == "opencode" {
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
-	execOpts := agent.ExecOptions{
+	execOpts := codexSandboxPolicy.applyToExecOptions(agent.ExecOptions{
 		Cwd:                        env.WorkDir,
 		Model:                      model,
 		ThreadName:                 deriveTaskThreadName(task),
@@ -6975,20 +6972,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// only the daemon knows — hence handing the backend finished text rather
 		// than a flag. Empty when the prompt already carries the notice, so a turn
 		// can never pay for it twice (MUL-5722).
-		ResumeExpected:                  task.PriorSessionID != "",
-		ResumeContinuityNotice:          backendResumeContinuityNotice(task),
-		ExtraArgs:                       extraArgs,
-		CustomArgs:                      customArgs,
-		GOOS:                            runtime.GOOS,
-		IsCodexWindowsSandboxArgManaged: task.Agent != nil && task.Agent.IsCodexWindowsSandboxArgManaged,
-		CodexWindowsSandboxConfigOwns:   codexWindowsSandboxConfigOwns,
-		McpConfig:                       mcpConfig,
-		ThinkingLevel:                   thinkingLevel,
-		ServiceTier:                     serviceTier,
-		OpenclawMode:                    openclawMode,
-		ClaudeSettingsPath:              env.ClaudeSettingsPath,
-		QwenpawWorkspace:                env.QwenpawWorkspace,
-	}
+		ResumeExpected:         task.PriorSessionID != "",
+		ResumeContinuityNotice: backendResumeContinuityNotice(task),
+		ExtraArgs:              extraArgs,
+		CustomArgs:             customArgs,
+		GOOS:                   runtime.GOOS,
+		McpConfig:              mcpConfig,
+		ThinkingLevel:          thinkingLevel,
+		ServiceTier:            serviceTier,
+		OpenclawMode:           openclawMode,
+		ClaudeSettingsPath:     env.ClaudeSettingsPath,
+		QwenpawWorkspace:       env.QwenpawWorkspace,
+	})
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
 	//   - openclaw is pinned to the task workdir via the per-task config we
@@ -8591,9 +8586,26 @@ func codexWindowsSandboxConfigOwnsAtRegistration(registered Runtime) bool {
 	return execenv.SharedCodexWindowsSandboxConfigOwns()
 }
 
-func codexWindowsSandboxLowerPriorityOwns(task Task, extraArgs []string) bool {
-	return agent.HasCodexWindowsSandboxOverride(extraArgs) ||
-		task.codexWindowsSandboxConfigOwnsAtRegistration
+type codexWindowsSandboxSessionPolicy struct {
+	customArgManaged         bool
+	configOwnsAtRegistration bool
+}
+
+func newCodexWindowsSandboxSessionPolicy(task Task) codexWindowsSandboxSessionPolicy {
+	return codexWindowsSandboxSessionPolicy{
+		customArgManaged:         task.Agent != nil && task.Agent.IsCodexWindowsSandboxArgManaged,
+		configOwnsAtRegistration: task.codexWindowsSandboxConfigOwnsAtRegistration,
+	}
+}
+
+func (p codexWindowsSandboxSessionPolicy) applyToExecOptions(opts agent.ExecOptions) agent.ExecOptions {
+	opts.IsCodexWindowsSandboxArgManaged = p.customArgManaged
+	opts.CodexWindowsSandboxConfigOwns = p.configOwnsAtRegistration
+	return opts
+}
+
+func (p codexWindowsSandboxSessionPolicy) effectiveLaunchArgs(opts agent.ExecOptions, logger *slog.Logger) []string {
+	return agent.EffectiveCodexLaunchArgs(p.applyToExecOptions(opts), logger)
 }
 
 // setCodexWindowsSandboxRegistrationMetadata tells persistence and preview

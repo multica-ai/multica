@@ -263,6 +263,13 @@ type codexBackend struct {
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
+	return append(args, EffectiveCodexLaunchArgs(opts, logger)...)
+}
+
+// EffectiveCodexLaunchArgs returns the optional Codex argv after every policy
+// shared by preview and process launch: the managed Windows sandbox default,
+// custom-argument filtering, MCP ownership, and the fast service tier.
+func EffectiveCodexLaunchArgs(opts ExecOptions, logger *slog.Logger) []string {
 	goos := opts.GOOS
 	if goos == "" {
 		goos = runtime.GOOS
@@ -277,25 +284,15 @@ func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if opts.ServiceTier == codexFastServiceTier {
 		launchArgs = enforceCodexFastMode(launchArgs, logger)
 	}
-	return append(args, launchArgs...)
+	return launchArgs
 }
 
 // NormalizeCodexLaunchArgs returns the user-supplied Codex args (extra then
 // custom) after lower-priority normalization: shell quoting stripped,
 // protocol-critical flags removed, and — when a managed
 // mcp_config owns the mcp_servers namespace — stray `-c mcp_servers.*`
-// overrides dropped. buildCodexArgs prepends the fixed
-// `app-server --listen stdio://` transport flags and may append an
-// agent-owned runtime override (currently `--enable fast_mode`) after this
-// result.
-//
-// It is exported so the daemon can reconstruct the *effective* launch args when
-// deciding the Windows sandbox mode. A `-c windows.sandbox=…` opt-in may arrive
-// shell-quoted (users commonly type custom_args with shell syntax, e.g.
-// `'-c' 'windows.sandbox=unelevated'`), and only after this same normalization
-// does it match the `-c windows.sandbox=…` shape the sandbox detector looks
-// for. Reconstructing the args any other way lets the two drift, silently
-// downgrading a user's isolation opt-in (MUL-4957).
+// overrides dropped. EffectiveCodexLaunchArgs layers the managed Windows
+// default and service-tier policy over this lower-priority normalization.
 func NormalizeCodexLaunchArgs(extraArgs, customArgs []string, mcpConfig json.RawMessage, logger *slog.Logger) []string {
 	extra := filterCustomArgs(extraArgs, codexBlockedArgs, logger)
 	custom := filterCustomArgs(customArgs, codexBlockedArgs, logger)

@@ -544,7 +544,7 @@ function normalizeAgentResponse<T extends Agent>(
     AgentWindowsSandboxResponseSchema,
     raw,
     { endpoint, redactReceived: true },
-  ) as T;
+  );
 }
 
 function normalizeAgentListResponse(
@@ -556,7 +556,7 @@ function normalizeAgentListResponse(
     AgentWindowsSandboxListResponseSchema,
     raw,
     { endpoint, redactReceived: true },
-  ) as Agent[];
+  );
 }
 
 export class ApiClient {
