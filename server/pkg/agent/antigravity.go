@@ -423,16 +423,15 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 // buildAntigravityArgs assembles the argv for a daemon-compatible one-shot agy
 // invocation.
 //
-//	agy -p <prompt> --dangerously-skip-permissions [--model <display name>]
+//	agy -p <prompt> --dangerously-skip-permissions [--model <machine ID>]
 //	    --print-timeout <duration> --log-file <tmp>
 //	    [--conversation <id>] [--add-dir <cwd>]
 //
 // agy 1.0.6 added a `--model` flag (MUL-3125), so opts.Model is now wired
-// through when set. The value is the exact human display string `agy models`
-// prints (e.g. "Claude Opus 4.6 (Thinking)"), NOT a provider/model slug —
-// it's passed verbatim as a single exec arg, so spaces and parens need no
-// shell quoting. agy still exposes no --system-prompt; runtime instructions
-// are delivered via AGENTS.md in the task workdir.
+// through when set. The value is the exact machine ID from the first column of
+// `agy models` and is passed verbatim as a single exec arg. agy still exposes
+// no --system-prompt; runtime instructions are delivered via AGENTS.md in the
+// task workdir.
 //
 // agy silently no-ops on a model string it doesn't recognise (empty output,
 // exit 0), so Execute validates opts.Model against the `agy models` catalog
@@ -472,7 +471,7 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 // returns nil otherwise. An empty `available` means discovery couldn't produce
 // a catalog (agy missing, transient failure) — we fail OPEN there and let agy
 // resolve the value, so a discovery hiccup never blocks a run. The match is
-// exact because agy's --model wants the precise display string; a near-miss
+// exact because agy's --model wants the precise machine ID; a near-miss
 // (extra space, dropped suffix) is correctly rejected since agy would silently
 // no-op on it anyway.
 func antigravityModelError(model string, available []Model) error {

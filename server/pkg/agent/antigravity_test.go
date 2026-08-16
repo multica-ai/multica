@@ -32,7 +32,7 @@ func TestBuildAntigravityArgsBasic(t *testing.T) {
 		"--dangerously-skip-permissions",
 		"--print-timeout", "20m0s",
 		"--log-file", "/tmp/agy.log",
-		"--add-dir", "/work",
+		"--add-dir", filepath.Clean("/work"),
 	}
 	if !slices.Equal(args, want) {
 		t.Fatalf("buildAntigravityArgs basic mismatch\n got: %v\nwant: %v", args, want)
@@ -42,24 +42,24 @@ func TestBuildAntigravityArgsBasic(t *testing.T) {
 func TestBuildAntigravityArgsModel(t *testing.T) {
 	t.Parallel()
 
-	// agy 1.0.6's --model takes the exact human display string (spaces +
-	// parens), not a slug. It must ride as a single argv element so no shell
-	// quoting is required, and it must sit before the user's custom args.
+	// agy 1.1.13's --model takes the machine ID from the first column of
+	// `agy models`. It must ride as a single argv element and sit before the
+	// user's custom args.
 	args := buildAntigravityArgs(
 		"hello",
 		"/tmp/agy.log",
 		20*time.Minute,
-		ExecOptions{Cwd: "/work", Model: "Claude Opus 4.6 (Thinking)"},
+		ExecOptions{Cwd: "/work", Model: "gemini-3.1-pro-high"},
 		quietAntigravityLogger(),
 	)
 
 	want := []string{
 		"-p", "hello",
 		"--dangerously-skip-permissions",
-		"--model", "Claude Opus 4.6 (Thinking)",
+		"--model", "gemini-3.1-pro-high",
 		"--print-timeout", "20m0s",
 		"--log-file", "/tmp/agy.log",
-		"--add-dir", "/work",
+		"--add-dir", filepath.Clean("/work"),
 	}
 	if !slices.Equal(args, want) {
 		t.Fatalf("buildAntigravityArgs with model mismatch\n got: %v\nwant: %v", args, want)
@@ -93,7 +93,7 @@ func TestBuildAntigravityArgsNoCapUsesLargePrintTimeout(t *testing.T) {
 		"--dangerously-skip-permissions",
 		"--print-timeout", antigravityFormatTimeout(antigravityNoCapPrintTimeout),
 		"--log-file", "/tmp/agy.log",
-		"--add-dir", "/work",
+		"--add-dir", filepath.Clean("/work"),
 	}
 	if !slices.Equal(args, want) {
 		t.Fatalf("buildAntigravityArgs(timeout=0) mismatch\n got: %v\nwant: %v", args, want)
@@ -509,6 +509,48 @@ func TestAntigravityModelError(t *testing.T) {
 	}
 	if err := antigravityModelError("Claude Opus 4.6", catalog); err == nil {
 		t.Error("near-miss model (dropped suffix) should be rejected")
+	}
+}
+
+func TestAntigravityTSVModelIDFlowsToValidationAndArgs(t *testing.T) {
+	t.Parallel()
+
+	catalog := parseAntigravityModels(strings.Join([]string{
+		"gemini-3.7-flash-high\tGemini 3.7 Flash (High)",
+		"gemini-3.1-pro-high\tGemini 3.1 Pro (High)",
+	}, "\r\n"))
+
+	for _, modelID := range []string{
+		"gemini-3.7-flash-high",
+		"gemini-3.1-pro-high",
+	} {
+		if err := antigravityModelError(modelID, catalog); err != nil {
+			t.Errorf("valid machine ID %q rejected: %v", modelID, err)
+		}
+
+		args := buildAntigravityArgs(
+			"hello",
+			"/tmp/agy.log",
+			20*time.Minute,
+			ExecOptions{Model: modelID},
+			quietAntigravityLogger(),
+		)
+		modelFlag := slices.Index(args, "--model")
+		if modelFlag < 0 || modelFlag+1 >= len(args) {
+			t.Fatalf("--model flag missing from args: %v", args)
+		}
+		if got := args[modelFlag+1]; got != modelID {
+			t.Errorf("--model value = %q, want machine ID %q", got, modelID)
+		}
+	}
+
+	for _, invalid := range []string{
+		"Gemini 3.1 Pro (High)",
+		"gemini-3.1-pro-high\tGemini 3.1 Pro (High)",
+	} {
+		if err := antigravityModelError(invalid, catalog); err == nil {
+			t.Errorf("non-canonical model value %q should be rejected", invalid)
+		}
 	}
 }
 

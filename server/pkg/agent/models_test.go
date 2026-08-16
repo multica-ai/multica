@@ -1821,6 +1821,30 @@ func TestParseAntigravityModelsEmpty(t *testing.T) {
 	}
 }
 
+func TestParseAntigravityModelsTSV(t *testing.T) {
+	t.Parallel()
+
+	out := strings.Join([]string{
+		"Fetching available models...",
+		"gemini-3.7-flash-high\tGemini 3.7 Flash (High)",
+		"gemini-3.1-pro-high\tGemini 3.1 Pro (High)",
+		"",
+		"gemini-3.1-pro-high\tWrong duplicate label",
+		"missing-label\t",
+		"\tmissing-id",
+		"too\tmany\tfields",
+	}, "\r\n")
+
+	got := parseAntigravityModels(out)
+	want := []Model{
+		{ID: "gemini-3.7-flash-high", Label: "Gemini 3.7 Flash (High)", Provider: "antigravity"},
+		{ID: "gemini-3.1-pro-high", Label: "Gemini 3.1 Pro (High)", Provider: "antigravity"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseAntigravityModels TSV mismatch\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
 func TestCachedDiscovery(t *testing.T) {
 	calls := 0
 	fn := func() (Catalog, error) {
