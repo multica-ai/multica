@@ -209,7 +209,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	if !assistant.ID.Valid {
-		normalizedCustomArgs := customArgsForRuntime(runtime, nil)
+		normalizedCustomArgs, codexWindowsSandboxArgManaged := customArgsForRuntime(runtime, nil, false)
 		if normalizedCustomArgs == nil {
 			normalizedCustomArgs = []string{}
 		}
@@ -219,21 +219,22 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		assistant, err = qtx.CreateAgent(r.Context(), db.CreateAgentParams{
-			WorkspaceID:        wsUUID,
-			Name:               onboardingAssistantName,
-			Description:        onboardingAssistantDescription,
-			AvatarUrl:          pgtype.Text{String: onboardingAssistantAvatarURL, Valid: true},
-			RuntimeMode:        runtime.RuntimeMode,
-			RuntimeConfig:      []byte("{}"),
-			RuntimeID:          runtime.ID,
-			Visibility:         "workspace",
-			MaxConcurrentTasks: 6,
-			OwnerID:            parseUUID(userID),
-			Instructions:       onboardingAssistantInstructions,
-			CustomEnv:          []byte("{}"),
-			CustomArgs:         customArgs,
-			McpConfig:          nil,
-			Model:              pgtype.Text{},
+			WorkspaceID:                   wsUUID,
+			Name:                          onboardingAssistantName,
+			Description:                   onboardingAssistantDescription,
+			AvatarUrl:                     pgtype.Text{String: onboardingAssistantAvatarURL, Valid: true},
+			RuntimeMode:                   runtime.RuntimeMode,
+			RuntimeConfig:                 []byte("{}"),
+			RuntimeID:                     runtime.ID,
+			Visibility:                    "workspace",
+			MaxConcurrentTasks:            6,
+			OwnerID:                       parseUUID(userID),
+			Instructions:                  onboardingAssistantInstructions,
+			CustomEnv:                     []byte("{}"),
+			CustomArgs:                    customArgs,
+			CodexWindowsSandboxArgManaged: codexWindowsSandboxArgManaged,
+			McpConfig:                     nil,
+			Model:                         pgtype.Text{},
 		})
 		if err != nil {
 			slog.Warn("bootstrap onboarding (shim): create assistant failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)

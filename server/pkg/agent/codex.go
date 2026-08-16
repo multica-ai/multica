@@ -267,9 +267,10 @@ func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if goos == "" {
 		goos = runtime.GOOS
 	}
-	customArgs := NormalizeCodexWindowsSandboxCustomArgs(
+	customArgs, _ := NormalizeCodexWindowsSandboxCustomArgs(
 		goos,
-		HasCodexWindowsSandboxOverride(opts.ExtraArgs),
+		opts.CodexWindowsSandboxArgManaged,
+		HasCodexWindowsSandboxOverride(opts.ExtraArgs) || opts.CodexWindowsSandboxConfigOwns,
 		opts.CustomArgs,
 	)
 	launchArgs := NormalizeCodexLaunchArgs(opts.ExtraArgs, customArgs, opts.McpConfig, logger)

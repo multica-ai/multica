@@ -144,7 +144,10 @@ describe("CustomArgsTab", () => {
       metadata: { os: "windows" },
     };
     const { onSave } = renderTab(
-      { custom_args: [] },
+      {
+        custom_args: ["-c", 'windows.sandbox="unelevated"'],
+        codex_windows_sandbox_arg_managed: true,
+      },
       vi.fn().mockResolvedValue(undefined),
       windowsRuntime,
     );
@@ -158,6 +161,12 @@ describe("CustomArgsTab", () => {
         'codex app-server -c windows.sandbox="unelevated"',
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /edit argument 1/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /remove argument 2/i }),
+    ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /add argument/i }));
     await user.type(
@@ -174,11 +183,7 @@ describe("CustomArgsTab", () => {
 
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledWith({
-      custom_args: [
-        "-c",
-        'windows.sandbox="unelevated"',
-        "value with spaces",
-      ],
+      custom_args: ["value with spaces"],
     });
   });
 });

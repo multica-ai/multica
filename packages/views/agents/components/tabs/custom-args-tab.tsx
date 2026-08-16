@@ -9,7 +9,10 @@ import {
   Terminal,
   Trash2,
 } from "lucide-react";
-import { ensureCodexWindowsSandboxArgs } from "@multica/core/agents";
+import {
+  CODEX_WINDOWS_SANDBOX_ARGS,
+  ensureCodexWindowsSandboxArgs,
+} from "@multica/core/agents";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
@@ -55,13 +58,16 @@ export function CustomArgsTab({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useT("agents");
-  const originalArgs = ensureCodexWindowsSandboxArgs(
-    agent.custom_args ?? [],
-    runtimeDevice,
-  );
-  const [entries, setEntries] = useState<ArgEntry[]>(
-    argsToEntries(originalArgs),
-  );
+  const storedArgs = agent.custom_args ?? [];
+  const storedManagedPrefix =
+    agent.codex_windows_sandbox_arg_managed === true &&
+    CODEX_WINDOWS_SANDBOX_ARGS.every(
+      (value, index) => storedArgs[index] === value,
+    );
+  const originalArgs = storedManagedPrefix
+    ? storedArgs.slice(CODEX_WINDOWS_SANDBOX_ARGS.length)
+    : storedArgs;
+  const [entries, setEntries] = useState<ArgEntry[]>(argsToEntries(originalArgs));
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorValue, setEditorValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -69,6 +75,14 @@ export function CustomArgsTab({
 
   const editedArgs = entriesToArgs(entries);
   const currentArgs = ensureCodexWindowsSandboxArgs(editedArgs, runtimeDevice);
+  const generatedPrefix =
+    currentArgs.length ===
+      editedArgs.length + CODEX_WINDOWS_SANDBOX_ARGS.length &&
+    CODEX_WINDOWS_SANDBOX_ARGS.every(
+      (value, index) => currentArgs[index] === value,
+    )
+      ? CODEX_WINDOWS_SANDBOX_ARGS
+      : [];
   const dirty = JSON.stringify(editedArgs) !== JSON.stringify(originalArgs);
 
   useEffect(() => {
@@ -118,7 +132,10 @@ export function CustomArgsTab({
   const handleSave = async () => {
     setSaving(true);
     try {
-      await onSave({ custom_args: currentArgs });
+      // Send only editable/user-owned args. The server applies and records the
+      // platform default atomically, which keeps provenance trustworthy and
+      // prevents one managed token from being deleted independently.
+      await onSave({ custom_args: editedArgs });
       toast.success(t(($) => $.tab_body.custom_args.saved_toast));
     } catch (err) {
       toast.error(
@@ -199,7 +216,9 @@ export function CustomArgsTab({
       >
         <SettingsCard>
           <div className="space-y-2 p-3">
-            {entries.length === 0 && editor?.kind !== "add" ? (
+            {entries.length === 0 &&
+              generatedPrefix.length === 0 &&
+              editor?.kind !== "add" ? (
               <div className="flex min-h-28 flex-col items-center justify-center px-4 py-6 text-center">
                 <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                   <Terminal className="size-4" aria-hidden="true" />
@@ -214,14 +233,29 @@ export function CustomArgsTab({
             ) : null}
 
             <div role="list" className="space-y-2">
+              {generatedPrefix.map((value, index) => (
+                <div key={`managed-${value}`} role="listitem">
+                  <div className="flex min-w-0 items-center gap-3 rounded-lg bg-muted/45 px-3 py-2.5">
+                    <span className="w-5 shrink-0 text-center text-micro font-medium tabular-nums text-muted-foreground">
+                      {index + 1}
+                    </span>
+                    <code
+                      className="min-w-0 flex-1 break-all font-mono text-caption leading-5"
+                      translate="no"
+                    >
+                      {value}
+                    </code>
+                  </div>
+                </div>
+              ))}
               {entries.map((entry, index) => (
                 <div key={entry.id} role="listitem">
                   {editor?.kind === "edit" && editor.entryId === entry.id ? (
-                    renderEditor(index + 1)
+                    renderEditor(index + generatedPrefix.length + 1)
                   ) : (
                     <div className="group flex min-w-0 items-center gap-3 rounded-lg bg-muted/45 px-3 py-2.5 transition-colors hover:bg-muted/70">
                       <span className="w-5 shrink-0 text-center text-micro font-medium tabular-nums text-muted-foreground">
-                        {index + 1}
+                        {index + generatedPrefix.length + 1}
                       </span>
                       <code
                         className="min-w-0 flex-1 break-all font-mono text-caption leading-5"
@@ -237,7 +271,7 @@ export function CustomArgsTab({
                           onClick={() => startEditing(entry)}
                           disabled={editor !== null}
                           aria-label={t(($) => $.tab_body.custom_args.edit_aria, {
-                            index: index + 1,
+                            index: index + generatedPrefix.length + 1,
                           })}
                         >
                           <Pencil className="size-3.5" aria-hidden="true" />
@@ -250,7 +284,7 @@ export function CustomArgsTab({
                           disabled={editor !== null}
                           className="text-muted-foreground hover:text-destructive"
                           aria-label={t(($) => $.tab_body.custom_args.remove_aria, {
-                            index: index + 1,
+                            index: index + generatedPrefix.length + 1,
                           })}
                         >
                           <Trash2 className="size-3.5" aria-hidden="true" />

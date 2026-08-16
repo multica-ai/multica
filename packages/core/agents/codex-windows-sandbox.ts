@@ -57,8 +57,12 @@ function isWindowsCodexRuntime(
   );
 }
 
-function withoutManagedSandboxPrefix(args: readonly string[]): string[] {
+function withoutManagedSandboxPrefix(
+  args: readonly string[],
+  managed: boolean,
+): string[] {
   if (
+    managed &&
     args[0] === CODEX_WINDOWS_SANDBOX_ARGS[0] &&
     args[1] === CODEX_WINDOWS_SANDBOX_ARGS[1]
   ) {
@@ -82,8 +86,9 @@ function runtimeArgsOwnWindowsSandbox(
 export function ensureCodexWindowsSandboxArgs(
   customArgs: readonly string[],
   runtime: RuntimeDescriptor | null | undefined,
+  managed = false,
 ): string[] {
-  const result = withoutManagedSandboxPrefix(customArgs);
+  const result = withoutManagedSandboxPrefix(customArgs, managed);
   if (
     !isWindowsCodexRuntime(runtime) ||
     runtimeArgsOwnWindowsSandbox(runtime) ||

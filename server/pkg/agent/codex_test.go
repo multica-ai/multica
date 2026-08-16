@@ -4102,6 +4102,7 @@ func TestBuildCodexArgsExplicitFastOverridesLowerPriorityDisable(t *testing.T) {
 	t.Parallel()
 
 	args := buildCodexArgs(ExecOptions{
+		GOOS:        "linux",
 		ServiceTier: codexFastServiceTier,
 		ExtraArgs: []string{
 			"--disable", codexFastModeFeature,
@@ -4132,6 +4133,7 @@ func TestBuildCodexArgsFutureServiceTierDoesNotForceFastMode(t *testing.T) {
 	t.Parallel()
 
 	args := buildCodexArgs(ExecOptions{
+		GOOS:        "linux",
 		ServiceTier: "future-tier",
 		CustomArgs:  []string{"--disable", codexFastModeFeature},
 	}, slog.Default())

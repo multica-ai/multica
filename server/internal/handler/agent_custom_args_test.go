@@ -15,10 +15,12 @@ func TestCustomArgsForRuntime(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		runtime db.AgentRuntime
-		args    []string
-		want    []string
+		name        string
+		runtime     db.AgentRuntime
+		args        []string
+		managed     bool
+		want        []string
+		wantManaged bool
 	}{
 		{
 			name: "windows codex stores the canonical two-token default",
@@ -26,8 +28,9 @@ func TestCustomArgsForRuntime(t *testing.T) {
 				Provider: "codex",
 				Metadata: []byte(`{"os":"windows"}`),
 			},
-			args: []string{"--profile", "research"},
-			want: []string{"-c", `windows.sandbox="unelevated"`, "--profile", "research"},
+			args:        []string{"--profile", "research"},
+			want:        []string{"-c", `windows.sandbox="unelevated"`, "--profile", "research"},
+			wantManaged: true,
 		},
 		{
 			name: "windows codex preserves an explicit override without a duplicate",
@@ -44,8 +47,18 @@ func TestCustomArgsForRuntime(t *testing.T) {
 				Provider: "codex",
 				Metadata: []byte(`{"os":"windows","codex_windows_sandbox_arg_configured":true}`),
 			},
+			args:    []string{"-c", `windows.sandbox="unelevated"`, "--profile", "research"},
+			managed: true,
+			want:    []string{"--profile", "research"},
+		},
+		{
+			name: "explicit canonical custom setting beats the runtime setting",
+			runtime: db.AgentRuntime{
+				Provider: "codex",
+				Metadata: []byte(`{"os":"windows","codex_windows_sandbox_arg_configured":true}`),
+			},
 			args: []string{"-c", `windows.sandbox="unelevated"`, "--profile", "research"},
-			want: []string{"--profile", "research"},
+			want: []string{"-c", `windows.sandbox="unelevated"`, "--profile", "research"},
 		},
 		{
 			name: "non-windows codex stays unchanged",
@@ -57,22 +70,35 @@ func TestCustomArgsForRuntime(t *testing.T) {
 			want: []string{"--profile", "research"},
 		},
 		{
-			name: "non-codex runtime removes a stale managed prefix",
+			name: "non-codex runtime removes a proven managed prefix",
+			runtime: db.AgentRuntime{
+				Provider: "claude",
+				Metadata: []byte(`{"os":"windows"}`),
+			},
+			args:    []string{"-c", `windows.sandbox="unelevated"`, "--profile", "research"},
+			managed: true,
+			want:    []string{"--profile", "research"},
+		},
+		{
+			name: "non-codex runtime preserves an identical user-owned pair",
 			runtime: db.AgentRuntime{
 				Provider: "claude",
 				Metadata: []byte(`{"os":"windows"}`),
 			},
 			args: []string{"-c", `windows.sandbox="unelevated"`, "--profile", "research"},
-			want: []string{"--profile", "research"},
+			want: []string{"-c", `windows.sandbox="unelevated"`, "--profile", "research"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := customArgsForRuntime(tt.runtime, tt.args)
+			got, gotManaged := customArgsForRuntime(tt.runtime, tt.args, tt.managed)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("customArgsForRuntime() = %v, want %v", got, tt.want)
+			}
+			if gotManaged != tt.wantManaged {
+				t.Fatalf("customArgsForRuntime() managed = %v, want %v", gotManaged, tt.wantManaged)
 			}
 		})
 	}
@@ -142,6 +168,18 @@ func TestAgentCustomArgsPersistenceAcrossRuntimeOnlySwitches(t *testing.T) {
 	agentID := assertArgs(w, http.StatusCreated, []string{
 		"-c", `windows.sandbox="unelevated"`, "--profile", "research",
 	})
+
+	// Runtime deletion intentionally leaves an agent unbound. A custom-args
+	// PATCH must remain valid and remove only the prefix whose persisted
+	// provenance says Multica injected it.
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET runtime_id = NULL WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("unbind agent: %v", err)
+	}
+	unbound := httptest.NewRecorder()
+	testHandler.UpdateAgent(unbound, withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
+		"custom_args": []string{"-c", `windows.sandbox="unelevated"`, "--profile", "research"},
+	}), "id", agentID))
+	assertArgs(unbound, http.StatusOK, []string{"--profile", "research"})
 
 	updateRuntime := func(runtimeID string, want []string) {
 		t.Helper()

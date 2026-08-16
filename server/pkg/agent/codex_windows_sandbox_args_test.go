@@ -12,21 +12,26 @@ func TestNormalizeCodexWindowsSandboxCustomArgs(t *testing.T) {
 	tests := []struct {
 		name              string
 		goos              string
+		managed           bool
 		lowerPriorityOwns bool
 		customArgs        []string
 		want              []string
+		wantManaged       bool
 	}{
 		{
-			name:       "windows prepends two canonical managed tokens",
-			goos:       "windows",
-			customArgs: []string{"--profile", "research"},
-			want:       []string{"-c", sandbox, "--profile", "research"},
+			name:        "windows prepends two canonical managed tokens",
+			goos:        "windows",
+			customArgs:  []string{"--profile", "research"},
+			want:        []string{"-c", sandbox, "--profile", "research"},
+			wantManaged: true,
 		},
 		{
-			name:       "managed prefix is idempotent",
-			goos:       "windows",
-			customArgs: []string{"-c", sandbox, "--profile", "research"},
-			want:       []string{"-c", sandbox, "--profile", "research"},
+			name:        "managed prefix is idempotent",
+			goos:        "windows",
+			managed:     true,
+			customArgs:  []string{"-c", sandbox, "--profile", "research"},
+			want:        []string{"-c", sandbox, "--profile", "research"},
+			wantManaged: true,
 		},
 		{
 			name:       "existing two-token override wins",
@@ -37,6 +42,7 @@ func TestNormalizeCodexWindowsSandboxCustomArgs(t *testing.T) {
 		{
 			name:              "lower priority owner removes a persisted managed prefix",
 			goos:              "windows",
+			managed:           true,
 			lowerPriorityOwns: true,
 			customArgs:        []string{"-c", sandbox, "--profile", "research"},
 			want:              []string{"--profile", "research"},
@@ -44,6 +50,7 @@ func TestNormalizeCodexWindowsSandboxCustomArgs(t *testing.T) {
 		{
 			name:       "explicit custom override removes a persisted managed prefix",
 			goos:       "windows",
+			managed:    true,
 			customArgs: []string{"-c", sandbox, "-c", `windows.sandbox="elevated"`, "--profile", "research"},
 			want:       []string{"-c", `windows.sandbox="elevated"`, "--profile", "research"},
 		},
@@ -60,19 +67,29 @@ func TestNormalizeCodexWindowsSandboxCustomArgs(t *testing.T) {
 			want:       []string{"--profile", "research"},
 		},
 		{
-			name:       "non-windows removes a stale managed prefix",
+			name:       "non-windows removes a proven managed prefix",
 			goos:       "linux",
+			managed:    true,
 			customArgs: []string{"-c", sandbox, "--profile", "research"},
 			want:       []string{"--profile", "research"},
+		},
+		{
+			name:       "non-windows preserves an identical user-owned pair",
+			goos:       "linux",
+			customArgs: []string{"-c", sandbox, "--profile", "research"},
+			want:       []string{"-c", sandbox, "--profile", "research"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := NormalizeCodexWindowsSandboxCustomArgs(tt.goos, tt.lowerPriorityOwns, tt.customArgs)
+			got, gotManaged := NormalizeCodexWindowsSandboxCustomArgs(tt.goos, tt.managed, tt.lowerPriorityOwns, tt.customArgs)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("NormalizeCodexWindowsSandboxCustomArgs() = %v, want %v", got, tt.want)
+			}
+			if gotManaged != tt.wantManaged {
+				t.Fatalf("NormalizeCodexWindowsSandboxCustomArgs() managed = %v, want %v", gotManaged, tt.wantManaged)
 			}
 		})
 	}
@@ -111,25 +128,47 @@ func TestBuildCodexArgsWindowsSandboxPrecedenceAndPlatformTransitions(t *testing
 		{
 			name: "runtime argument owns setting without duplicate",
 			opts: ExecOptions{
-				GOOS:       "windows",
-				ExtraArgs:  []string{"-c", `windows.sandbox="elevated"`},
-				CustomArgs: []string{"-c", managed, "--profile", "research"},
+				GOOS:                          "windows",
+				ExtraArgs:                     []string{"-c", `windows.sandbox="elevated"`},
+				CustomArgs:                    []string{"-c", managed, "--profile", "research"},
+				CodexWindowsSandboxArgManaged: true,
 			},
 			want: []string{"app-server", "--listen", "stdio://", "-c", `windows.sandbox="elevated"`, "--profile", "research"},
 		},
 		{
 			name: "explicit per-agent override owns setting without managed prefix",
 			opts: ExecOptions{
-				GOOS:       "windows",
-				CustomArgs: []string{"-c", managed, "-c", `windows.sandbox="elevated"`, "--profile", "research"},
+				GOOS:                          "windows",
+				CustomArgs:                    []string{"-c", managed, "-c", `windows.sandbox="elevated"`, "--profile", "research"},
+				CodexWindowsSandboxArgManaged: true,
 			},
 			want: []string{"app-server", "--listen", "stdio://", "-c", `windows.sandbox="elevated"`, "--profile", "research"},
 		},
 		{
 			name: "non-windows spawn removes stale managed prefix",
 			opts: ExecOptions{
-				GOOS:       "linux",
+				GOOS:                          "linux",
+				CustomArgs:                    []string{"-c", managed, "--profile", "research"},
+				CodexWindowsSandboxArgManaged: true,
+			},
+			want: []string{"app-server", "--listen", "stdio://", "--profile", "research"},
+		},
+		{
+			name: "explicit canonical custom arg beats lower priority runtime setting",
+			opts: ExecOptions{
+				GOOS:       "windows",
+				ExtraArgs:  []string{"-c", `windows.sandbox="elevated"`},
 				CustomArgs: []string{"-c", managed, "--profile", "research"},
+			},
+			want: []string{"app-server", "--listen", "stdio://", "-c", `windows.sandbox="elevated"`, "-c", managed, "--profile", "research"},
+		},
+		{
+			name: "copied config owns setting over managed default",
+			opts: ExecOptions{
+				GOOS:                          "windows",
+				CustomArgs:                    []string{"-c", managed, "--profile", "research"},
+				CodexWindowsSandboxArgManaged: true,
+				CodexWindowsSandboxConfigOwns: true,
 			},
 			want: []string{"app-server", "--listen", "stdio://", "--profile", "research"},
 		},

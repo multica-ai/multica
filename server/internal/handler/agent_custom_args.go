@@ -13,9 +13,9 @@ import (
 // plus whether fixed arguments already own the setting; the daemon
 // independently applies the same rule from runtime.GOOS and effective argv at
 // launch, so a missing or stale metadata hint cannot weaken execution behavior.
-func customArgsForRuntime(runtime db.AgentRuntime, customArgs []string) []string {
+func customArgsForRuntime(runtime db.AgentRuntime, customArgs []string, managed bool) ([]string, bool) {
 	if !strings.EqualFold(strings.TrimSpace(runtime.Provider), "codex") {
-		return agent.NormalizeCodexWindowsSandboxCustomArgs("", false, customArgs)
+		return agent.NormalizeCodexWindowsSandboxCustomArgs("", managed, false, customArgs)
 	}
 
 	var metadata struct {
@@ -23,10 +23,11 @@ func customArgsForRuntime(runtime db.AgentRuntime, customArgs []string) []string
 		CodexWindowsSandboxArgConfigured bool   `json:"codex_windows_sandbox_arg_configured"`
 	}
 	if err := json.Unmarshal(runtime.Metadata, &metadata); err != nil {
-		return agent.NormalizeCodexWindowsSandboxCustomArgs("", false, customArgs)
+		return agent.NormalizeCodexWindowsSandboxCustomArgs("", managed, false, customArgs)
 	}
 	return agent.NormalizeCodexWindowsSandboxCustomArgs(
 		strings.ToLower(strings.TrimSpace(metadata.OS)),
+		managed,
 		metadata.CodexWindowsSandboxArgConfigured,
 		customArgs,
 	)

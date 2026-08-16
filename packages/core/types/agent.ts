@@ -470,6 +470,8 @@ export interface Agent {
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
   custom_args: string[];
+  /** True only when Multica injected the canonical Windows Codex sandbox pair. */
+  codex_windows_sandbox_arg_managed?: boolean;
   /**
    * Coarse metadata signalling whether the agent has any custom env
    * vars configured, without exposing the keys or values. Reads of

@@ -39,7 +39,7 @@ describe("ensureCodexWindowsSandboxArgs", () => {
       "research",
     ];
     expect(
-      ensureCodexWindowsSandboxArgs(args, runtime("codex", "windows")),
+      ensureCodexWindowsSandboxArgs(args, runtime("codex", "windows"), true),
     ).toEqual(args);
   });
 
@@ -74,6 +74,7 @@ describe("ensureCodexWindowsSandboxArgs", () => {
           "research",
         ],
         runtime("codex", "windows", true),
+        true,
       ),
     ).toEqual(["--profile", "research"]);
   });
@@ -96,10 +97,29 @@ describe("ensureCodexWindowsSandboxArgs", () => {
       "research",
     ];
     expect(
-      ensureCodexWindowsSandboxArgs(args, runtime("codex", "linux")),
+      ensureCodexWindowsSandboxArgs(args, runtime("codex", "linux"), true),
     ).toEqual(["--profile", "research"]);
     expect(
-      ensureCodexWindowsSandboxArgs(args, runtime("claude", "windows")),
+      ensureCodexWindowsSandboxArgs(args, runtime("claude", "windows"), true),
     ).toEqual(["--profile", "research"]);
+  });
+
+  it("preserves an identical user-owned pair on other platforms", () => {
+    const args = [
+      "-c",
+      'windows.sandbox="unelevated"',
+      "--profile",
+      "research",
+    ];
+    expect(
+      ensureCodexWindowsSandboxArgs(args, runtime("codex", "linux"), false),
+    ).toEqual(args);
+    expect(
+      ensureCodexWindowsSandboxArgs(
+        args,
+        runtime("codex", "windows", true),
+        false,
+      ),
+    ).toEqual(args);
   });
 });

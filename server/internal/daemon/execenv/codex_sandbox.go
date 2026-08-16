@@ -80,8 +80,8 @@ func resolveGOOS(goos string) string {
 //   - Windows: workspace-write with Codex's native sandbox. The production
 //     task launch injects `-c windows.sandbox="unelevated"` as a managed,
 //     two-token custom-argv prefix
-//     when neither runtime nor agent arguments already own the setting. An
-//     explicit `unelevated` or `elevated` value is preserved. The
+//     when neither the copied config nor runtime/agent arguments already own
+//     the setting. An explicit `unelevated` or `elevated` value is preserved. The
 //     danger-full-access branch below remains a compatibility fallback for
 //     direct or legacy callers that reach this package without the managed
 //     argument; an undecidable config still fails closed. That logic lives in
@@ -207,6 +207,21 @@ func windowsSandboxFromConfig(config string) windowsSandboxConfig {
 		return windowsSandboxUndecidable
 	}
 	return classifyWindowsSandboxValue(probe.Windows.Sandbox)
+}
+
+// CodexWindowsSandboxConfigOwns reports whether the task config has an
+// explicit (or undecidable) windows.sandbox setting. Launch-time default
+// injection treats unreadable or malformed config as owned so it cannot
+// silently override user intent with a higher-priority CLI value.
+func CodexWindowsSandboxConfigOwns(configFile string) bool {
+	data, err := os.ReadFile(configFile)
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	return windowsSandboxFromConfig(string(data)) != windowsSandboxAbsent
 }
 
 // codexConfigOverrideValueRe matches the value token of a Codex `-c` /

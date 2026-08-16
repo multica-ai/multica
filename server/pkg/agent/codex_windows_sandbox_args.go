@@ -10,22 +10,25 @@ const codexWindowsUnelevatedSandboxArg = `windows.sandbox="unelevated"`
 var codexWindowsSandboxArgRe = regexp.MustCompile(`^\s*windows\s*\.\s*sandbox\s*=`)
 
 // NormalizeCodexWindowsSandboxCustomArgs returns the per-agent custom argv
-// that should be stored or launched for a runtime on goos. Multica reserves
-// the exact leading pair below as its managed representation, which makes the
-// operation idempotent and lets runtime-only edits remove the platform
-// condition when an agent moves away from Windows Codex.
+// that should be stored or launched for a runtime on goos, plus whether the
+// canonical leading pair is owned by Multica. The managed bit is persisted
+// separately: the token values alone cannot distinguish a platform default
+// from the same explicit setting supplied by a user.
 //
 // Runtime/profile arguments have lower argv priority than custom args. When
 // they already own windows.sandbox, lowerPriorityOwns must be true so the
 // managed prefix is removed instead of overriding that explicit setting. An
 // explicit per-agent override likewise owns the setting and is never
 // duplicated.
-func NormalizeCodexWindowsSandboxCustomArgs(goos string, lowerPriorityOwns bool, customArgs []string) []string {
-	result := withoutManagedCodexWindowsSandboxPrefix(customArgs)
-	if goos != "windows" || lowerPriorityOwns || HasCodexWindowsSandboxOverride(result) {
-		return result
+func NormalizeCodexWindowsSandboxCustomArgs(goos string, managed, lowerPriorityOwns bool, customArgs []string) ([]string, bool) {
+	result := append([]string(nil), customArgs...)
+	if managed && hasManagedCodexWindowsSandboxPrefix(result) {
+		result = result[2:]
 	}
-	return append([]string{"-c", codexWindowsUnelevatedSandboxArg}, result...)
+	if goos != "windows" || HasCodexWindowsSandboxOverride(result) || lowerPriorityOwns {
+		return result, false
+	}
+	return append([]string{"-c", codexWindowsUnelevatedSandboxArg}, result...), true
 }
 
 // HasCodexWindowsSandboxOverride reports whether argv contains a Codex -c or
@@ -59,12 +62,8 @@ func HasCodexWindowsSandboxOverride(args []string) bool {
 	return false
 }
 
-func withoutManagedCodexWindowsSandboxPrefix(args []string) []string {
-	start := 0
-	if len(args) >= 2 && args[0] == "-c" && args[1] == codexWindowsUnelevatedSandboxArg {
-		start = 2
-	}
-	return append([]string(nil), args[start:]...)
+func hasManagedCodexWindowsSandboxPrefix(args []string) bool {
+	return len(args) >= 2 && args[0] == "-c" && args[1] == codexWindowsUnelevatedSandboxArg
 }
 
 // normalizeCodexSandboxToken mirrors the one-layer shell-quote cleanup in the

@@ -6337,8 +6337,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var codexSandboxArgs []string
 	if provider == "codex" {
 		extraArgs := append(append([]string{}, profileFixedArgs...), defaultArgsForProvider(d.cfg, provider)...)
-		effectiveCustomArgs := agent.NormalizeCodexWindowsSandboxCustomArgs(
+		managed := task.Agent != nil && task.Agent.CodexWindowsSandboxArgManaged
+		effectiveCustomArgs, _ := agent.NormalizeCodexWindowsSandboxCustomArgs(
 			runtime.GOOS,
+			managed,
 			agent.HasCodexWindowsSandboxOverride(extraArgs),
 			agentCustomArgs,
 		)
@@ -6563,6 +6565,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.RootDir != predictedRoot && env.RootDir != "" {
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
+	}
+	// The copied task config is available only after Prepare/Reuse. Inspect it
+	// before building argv so an explicit windows.sandbox value keeps ownership
+	// instead of being overridden by Multica's higher-priority CLI default.
+	codexWindowsSandboxConfigOwns := false
+	if provider == "codex" && runtime.GOOS == "windows" && env.CodexHome != "" {
+		codexWindowsSandboxConfigOwns = execenv.CodexWindowsSandboxConfigOwns(
+			filepath.Join(env.CodexHome, "config.toml"),
+		)
 	}
 	// Finalize the worktree on EVERY exit path, success or failure: commit
 	// whatever the agent left uncommitted, then unregister the worktree from
@@ -6967,17 +6978,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// only the daemon knows — hence handing the backend finished text rather
 		// than a flag. Empty when the prompt already carries the notice, so a turn
 		// can never pay for it twice (MUL-5722).
-		ResumeExpected:         task.PriorSessionID != "",
-		ResumeContinuityNotice: backendResumeContinuityNotice(task),
-		ExtraArgs:              extraArgs,
-		CustomArgs:             customArgs,
-		GOOS:                   runtime.GOOS,
-		McpConfig:              mcpConfig,
-		ThinkingLevel:          thinkingLevel,
-		ServiceTier:            serviceTier,
-		OpenclawMode:           openclawMode,
-		ClaudeSettingsPath:     env.ClaudeSettingsPath,
-		QwenpawWorkspace:       env.QwenpawWorkspace,
+		ResumeExpected:                task.PriorSessionID != "",
+		ResumeContinuityNotice:        backendResumeContinuityNotice(task),
+		ExtraArgs:                     extraArgs,
+		CustomArgs:                    customArgs,
+		GOOS:                          runtime.GOOS,
+		CodexWindowsSandboxArgManaged: task.Agent != nil && task.Agent.CodexWindowsSandboxArgManaged,
+		CodexWindowsSandboxConfigOwns: codexWindowsSandboxConfigOwns,
+		McpConfig:                     mcpConfig,
+		ThinkingLevel:                 thinkingLevel,
+		ServiceTier:                   serviceTier,
+		OpenclawMode:                  openclawMode,
+		ClaudeSettingsPath:            env.ClaudeSettingsPath,
+		QwenpawWorkspace:              env.QwenpawWorkspace,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
