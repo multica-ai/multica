@@ -2908,6 +2908,50 @@ func codexPatchResultOutput(status string, changes []any, stdout, stderr string)
 	return strings.Join(segments, "\n")
 }
 
+// codexMCPToolInput keeps the remote server visible in the transcript while
+// preserving the provider-native argument shape under a stable key. Redact at
+// the adapter boundary as well as in the daemon: other Message consumers must
+// not have to know that an MCP invocation can carry credentials or private
+// query text in deeply nested arguments.
+func codexMCPToolInput(item map[string]any) map[string]any {
+	input := make(map[string]any, 2)
+	if server, _ := item["server"].(string); strings.TrimSpace(server) != "" {
+		input["server"] = server
+	}
+	if arguments, ok := item["arguments"]; ok {
+		input["arguments"] = arguments
+	}
+	return redact.InputMap(input)
+}
+
+func codexMCPToolName(item map[string]any) string {
+	if tool, _ := item["tool"].(string); strings.TrimSpace(tool) != "" {
+		return tool
+	}
+	return "mcp_tool"
+}
+
+// codexMCPToolResultOutput deliberately excludes result.content and
+// structuredContent. Those values can be large and may contain private data;
+// the Agent Log needs an auditable outcome, not a second copy of the provider
+// payload that Codex already consumed.
+func codexMCPToolResultOutput(item map[string]any) string {
+	status, _ := item["status"].(string)
+	status = codexNormalizePatchStatus(status)
+	if status == "" {
+		status = "completed"
+	}
+
+	segments := []string{status}
+	if durationMS := codexInt64(item, "durationMs", "duration_ms"); durationMS > 0 {
+		segments = append(segments, fmt.Sprintf("duration: %d ms", durationMS))
+	}
+	if errMessage := extractNestedString(item, "error", "message"); strings.TrimSpace(errMessage) != "" {
+		segments = append(segments, "error: "+sanitizeCodexDiagnostic(errMessage))
+	}
+	return strings.Join(segments, "\n")
+}
+
 func codexPatchHeadline(status string, fileCount int) string {
 	switch {
 	case status == "" && fileCount == 0:
@@ -3172,6 +3216,28 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 				Tool:   "patch_apply",
 				CallID: itemID,
 				Output: codexPatchResultOutput(codexNormalizePatchStatus(status), changes, "", ""),
+			})
+		}
+
+	case method == "item/started" && itemType == "mcpToolCall":
+		if c.onMessage != nil {
+			c.onMessage(Message{
+				Type:   MessageToolUse,
+				Tool:   codexMCPToolName(item),
+				CallID: itemID,
+				Input:  codexMCPToolInput(item),
+			})
+		}
+
+	case method == "item/completed" && itemType == "mcpToolCall":
+		status, _ := item["status"].(string)
+		if c.onMessage != nil {
+			c.onMessage(Message{
+				Type:   MessageToolResult,
+				Tool:   codexMCPToolName(item),
+				CallID: itemID,
+				Output: codexMCPToolResultOutput(item),
+				Status: codexNormalizePatchStatus(status),
 			})
 		}
 

@@ -3053,7 +3053,7 @@ func TestShouldRetryWithFreshSession_UnresumableHistoryIsBackendAgnostic(t *test
 	}
 }
 
-func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T) {
+func TestExecuteAndDrain_CodexInactivityReportsMCPToolResultTranscript(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
@@ -3068,8 +3068,8 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 		`read line` + "\n" +
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'` + "\n" +
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-drain","turn":{"id":"turn-drain"}}}'` + "\n" +
-		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-drain","item":{"type":"commandExecution","id":"cmd-1","command":"git status"}}}'` + "\n" +
-		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-drain","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"clean"}}}'` + "\n" +
+		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-drain","item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news"},"status":"inProgress"}}}'` + "\n" +
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-drain","item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news"},"status":"completed","durationMs":1627,"result":{"content":[{"type":"text","text":"private provider payload"}]}}}}'` + "\n" +
 		`sleep 5` + "\n"
 	if err := os.WriteFile(fakePath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake codex: %v", err)
@@ -3124,10 +3124,11 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 		mu.Lock()
 		var gotToolUse, gotToolResult bool
 		for _, msg := range reported {
-			if msg.Seq == 1 && msg.Type == "tool_use" && msg.Tool == "exec_command" {
-				gotToolUse = true
+			if msg.Seq == 1 && msg.Type == "tool_use" && msg.Tool == "web_search_exa" {
+				arguments, _ := msg.Input["arguments"].(map[string]any)
+				gotToolUse = msg.Input["server"] == "plugin-exa-search" && arguments["query"] == "latest Multica news"
 			}
-			if msg.Seq == 2 && msg.Type == "tool_result" && msg.Tool == "exec_command" && msg.Output == "clean" {
+			if msg.Seq == 2 && msg.Type == "tool_result" && msg.Tool == "web_search_exa" && msg.Output == "completed\nduration: 1627 ms" {
 				gotToolResult = true
 			}
 		}
@@ -3138,7 +3139,7 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 		if time.Now().After(deadline) {
 			mu.Lock()
 			defer mu.Unlock()
-			t.Fatalf("expected tool_use seq=1 and tool_result seq=2 in transcript, got %+v", reported)
+			t.Fatalf("expected MCP tool_use seq=1 and tool_result seq=2 in transcript, got %+v", reported)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

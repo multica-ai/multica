@@ -135,6 +135,7 @@
     "fixed": {
       "title": "Fixed system shortcuts",
       "description": "Window and accessibility shortcuts stay fixed so they remain reliable. Zoom and tab controls apply to the desktop app.",
+      "open_settings": "Open Settings",
       "close_tab": "Close active tab",
       "zoom_in": "Zoom in",
       "zoom_out": "Zoom out",
@@ -273,6 +274,66 @@
       "host_api": "Host API",
       "publisher": "Publisher and signing identity",
       "none": "None"
+    },
+    "remote_mcp": {
+      "title": "Remote MCP connection",
+      "endpoint": "HTTPS endpoint",
+      "endpoint_placeholder": "https://mcp.example.com/mcp",
+      "auth": "Authentication",
+      "auth_types": {
+        "none": "None",
+        "oauth": "OAuth (recommended)",
+        "bearer": "Bearer token",
+        "header": "Custom header"
+      },
+      "header_name": "Header name",
+      "credential": "Credential (stored encrypted)",
+      "connect": "Connect",
+      "connected": "Connected",
+      "ready_to_connect": "Ready to connect",
+      "complete_before_enabling": "Connect the MCP and approve at least one tool before enabling a scope.",
+      "advanced": "Advanced configuration",
+      "oauth_scope": "OAuth scopes (automatic when empty)",
+      "oauth_client_id": "OAuth client ID (automatic when empty)",
+      "oauth_client_secret": "OAuth client secret",
+      "oauth_authorization_endpoint": "Authorization endpoint override",
+      "oauth_token_endpoint": "Token endpoint override",
+      "oauth_token_auth_method": "Token endpoint authentication",
+      "oauth_token_auth_methods": {
+        "none": "Public client (PKCE)",
+        "client_secret_basic": "Client secret (HTTP Basic)",
+        "client_secret_post": "Client secret (request body)"
+      },
+      "public_config": "Public configuration (JSON object)",
+      "invalid_public_config": "Public configuration must be a valid JSON object",
+      "failure_policy": "Failure policy",
+      "failure_policies": {
+        "required": "Required — stop the task",
+        "optional": "Optional — continue without tools"
+      },
+      "configure_and_discover": "Save and discover tools",
+      "test": "Test connection",
+      "approve": "Approve selected tools",
+      "revoke": "Revoke credential",
+      "credential_states": {
+        "configured": "Credential configured",
+        "revoked": "Credential revoked",
+        "missing": "Credential missing",
+        "not_required": "No credential required"
+      },
+      "reviewed": "Tools approved",
+      "pending_review": "Approval required",
+      "approved_tools": "Approved tools",
+      "no_tools": "The server did not advertise any tools.",
+      "discovery": "Discovered tools — review access explicitly",
+      "read": "Read",
+      "write": "Write",
+      "configured_success": "Connection saved; review the discovered tools",
+      "oauth_connected_success": "OAuth connection completed; review the discovered tools",
+      "oauth_connect_failed": "OAuth connection could not be completed. Try again.",
+      "test_success": "Connection test succeeded",
+      "approved_success": "Tool access approved",
+      "revoked_success": "Credential revoked and the Plugin disabled"
     }
   },
   "properties": {

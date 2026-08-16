@@ -135,6 +135,7 @@
     "fixed": {
       "title": "고정 시스템 단축키",
       "description": "창 및 접근성 단축키는 안정성을 위해 고정됩니다. 확대/축소 및 탭 제어는 데스크톱 앱에 적용됩니다.",
+      "open_settings": "설정 열기",
       "close_tab": "활성 탭 닫기",
       "zoom_in": "확대",
       "zoom_out": "축소",
@@ -273,6 +274,66 @@
       "host_api": "Host API",
       "publisher": "게시자 및 서명 ID",
       "none": "없음"
+    },
+    "remote_mcp": {
+      "title": "Remote MCP 연결",
+      "endpoint": "HTTPS 엔드포인트",
+      "endpoint_placeholder": "https://mcp.example.com/mcp",
+      "auth": "인증",
+      "auth_types": {
+        "none": "없음",
+        "oauth": "OAuth(권장)",
+        "bearer": "Bearer 토큰",
+        "header": "사용자 지정 헤더"
+      },
+      "header_name": "헤더 이름",
+      "credential": "인증 정보(암호화 저장)",
+      "connect": "연결",
+      "connected": "연결됨",
+      "ready_to_connect": "연결할 수 있음",
+      "complete_before_enabling": "범위를 활성화하기 전에 MCP를 연결하고 도구를 하나 이상 승인하세요.",
+      "advanced": "고급 구성",
+      "oauth_scope": "OAuth 범위(비워두면 자동)",
+      "oauth_client_id": "OAuth 클라이언트 ID(비워두면 자동)",
+      "oauth_client_secret": "OAuth 클라이언트 보안 비밀",
+      "oauth_authorization_endpoint": "인증 엔드포인트 재정의",
+      "oauth_token_endpoint": "토큰 엔드포인트 재정의",
+      "oauth_token_auth_method": "토큰 엔드포인트 인증",
+      "oauth_token_auth_methods": {
+        "none": "공개 클라이언트(PKCE)",
+        "client_secret_basic": "클라이언트 시크릿(HTTP Basic)",
+        "client_secret_post": "클라이언트 시크릿(요청 본문)"
+      },
+      "public_config": "공개 설정(JSON 객체)",
+      "invalid_public_config": "공개 설정은 유효한 JSON 객체여야 합니다",
+      "failure_policy": "실패 정책",
+      "failure_policies": {
+        "required": "필수 — 태스크 중지",
+        "optional": "선택 — 도구 없이 계속"
+      },
+      "configure_and_discover": "저장하고 도구 검색",
+      "test": "연결 테스트",
+      "approve": "선택한 도구 승인",
+      "revoke": "인증 정보 폐기",
+      "credential_states": {
+        "configured": "인증 정보 설정됨",
+        "revoked": "인증 정보 폐기됨",
+        "missing": "인증 정보 없음",
+        "not_required": "인증 정보 필요 없음"
+      },
+      "reviewed": "도구 승인됨",
+      "pending_review": "승인 필요",
+      "approved_tools": "승인된 도구",
+      "no_tools": "서버에서 알린 도구가 없습니다.",
+      "discovery": "검색된 도구 — 접근 권한을 명시적으로 검토하세요",
+      "read": "읽기",
+      "write": "쓰기",
+      "configured_success": "연결을 저장했습니다. 검색된 도구를 검토하세요",
+      "oauth_connected_success": "OAuth 연결이 완료되었습니다. 검색된 도구를 검토하세요",
+      "oauth_connect_failed": "OAuth 연결을 완료하지 못했습니다. 다시 시도하세요.",
+      "test_success": "연결 테스트에 성공했습니다",
+      "approved_success": "도구 접근을 승인했습니다",
+      "revoked_success": "인증 정보를 폐기하고 Plugin을 비활성화했습니다"
     }
   },
   "properties": {

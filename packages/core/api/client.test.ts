@@ -69,6 +69,27 @@ describe("ApiClient pull-request response schema", () => {
   });
 });
 
+describe("ApiClient Remote MCP OAuth response schema", () => {
+  it("degrades a malformed start response without inventing a navigation URL", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ authorization_url: 42 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(new ApiClient("https://api.example.test").startPluginRemoteMCPOAuth(
+      "workspace-1",
+      "installation-1",
+      "search",
+      { public_config: {}, failure_policy: "required" },
+    )).resolves.toEqual({ authorization_url: "" });
+  });
+});
+
 describe("ApiClient server Table query", () => {
   it("posts the canonical query to the group and branch endpoints", async () => {
     const fetchMock = vi

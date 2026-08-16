@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // batchClaimResponse mirrors the {"tasks":[...]} envelope ClaimTasksByRuntime
@@ -254,5 +256,61 @@ func TestClaimTasksByRuntime_CancelsTaskWhenRuntimeOwnerMissing(t *testing.T) {
 	}
 	if status != "cancelled" {
 		t.Fatalf("task status = %s, want cancelled (owner missing)", status)
+	}
+}
+
+// TestFailClaimedTaskBeforeLaunchSettlesDispatchedTask pins the claim-build
+// failure behavior used by required Plugin contributions. A durable rejection
+// must become a visible terminal task instead of remaining dispatched until
+// stale reclaim delivers the same impossible task again.
+func TestFailClaimedTaskBeforeLaunchSettlesDispatchedTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Prelaunch failure rt")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Prelaunch failure agent")
+	taskID := seedQueuedIssueTask(t, ctx, agentID, runtimeID, issueID)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'dispatched', dispatched_at = now()
+		WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("dispatch task: %v", err)
+	}
+	task, err := testHandler.Queries.GetAgentTask(ctx, parseUUID(taskID))
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+
+	failure := testHandler.failClaimedTaskBeforeLaunch(
+		ctx,
+		&task,
+		"Required Remote MCP is unavailable. Test the Plugin connection, then retry.",
+		taskfailure.ReasonAgentMissingConfig,
+		"error_required_remote_mcp",
+		http.StatusConflict,
+		"required Remote MCP contribution is unavailable",
+	)
+	if failure == nil || failure.outcome != "error_required_remote_mcp" || failure.status != http.StatusConflict {
+		t.Fatalf("failure = %+v", failure)
+	}
+
+	var status, errorMessage, failureReason string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, error, failure_reason
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&status, &errorMessage, &failureReason); err != nil {
+		t.Fatalf("read settled task: %v", err)
+	}
+	if status != "failed" {
+		t.Fatalf("task status = %q, want failed", status)
+	}
+	if errorMessage != "Required Remote MCP is unavailable. Test the Plugin connection, then retry." {
+		t.Fatalf("task error = %q", errorMessage)
+	}
+	if failureReason != taskfailure.ReasonAgentMissingConfig.String() {
+		t.Fatalf("failure_reason = %q", failureReason)
 	}
 }

@@ -135,6 +135,7 @@
     "fixed": {
       "title": "固定のシステムショートカット",
       "description": "ウィンドウとアクセシビリティのショートカットは信頼性のため固定されています。ズームとタブ操作はデスクトップアプリに適用されます。",
+      "open_settings": "設定を開く",
       "close_tab": "アクティブなタブを閉じる",
       "zoom_in": "拡大",
       "zoom_out": "縮小",
@@ -273,6 +274,66 @@
       "host_api": "Host API",
       "publisher": "発行元と署名 ID",
       "none": "なし"
+    },
+    "remote_mcp": {
+      "title": "Remote MCP 接続",
+      "endpoint": "HTTPS エンドポイント",
+      "endpoint_placeholder": "https://mcp.example.com/mcp",
+      "auth": "認証",
+      "auth_types": {
+        "none": "なし",
+        "oauth": "OAuth（推奨）",
+        "bearer": "Bearer トークン",
+        "header": "カスタムヘッダー"
+      },
+      "header_name": "ヘッダー名",
+      "credential": "認証情報（暗号化して保存）",
+      "connect": "接続",
+      "connected": "接続済み",
+      "ready_to_connect": "接続できます",
+      "complete_before_enabling": "スコープを有効にする前に MCP に接続し、少なくとも 1 つのツールを承認してください。",
+      "advanced": "詳細設定",
+      "oauth_scope": "OAuth スコープ（空欄は自動）",
+      "oauth_client_id": "OAuth クライアント ID（空欄は自動）",
+      "oauth_client_secret": "OAuth クライアントシークレット",
+      "oauth_authorization_endpoint": "認可エンドポイントの上書き",
+      "oauth_token_endpoint": "トークンエンドポイントの上書き",
+      "oauth_token_auth_method": "トークンエンドポイント認証",
+      "oauth_token_auth_methods": {
+        "none": "パブリッククライアント（PKCE）",
+        "client_secret_basic": "クライアントシークレット（HTTP Basic）",
+        "client_secret_post": "クライアントシークレット（リクエスト本文）"
+      },
+      "public_config": "公開設定（JSON オブジェクト）",
+      "invalid_public_config": "公開設定には有効な JSON オブジェクトを指定してください",
+      "failure_policy": "障害ポリシー",
+      "failure_policies": {
+        "required": "必須 — タスクを停止",
+        "optional": "任意 — ツールなしで続行"
+      },
+      "configure_and_discover": "保存してツールを検出",
+      "test": "接続をテスト",
+      "approve": "選択したツールを承認",
+      "revoke": "認証情報を失効",
+      "credential_states": {
+        "configured": "認証情報を設定済み",
+        "revoked": "認証情報を失効済み",
+        "missing": "認証情報がありません",
+        "not_required": "認証情報は不要"
+      },
+      "reviewed": "ツールを承認済み",
+      "pending_review": "承認が必要",
+      "approved_tools": "承認済みツール",
+      "no_tools": "サーバーからツールが通知されませんでした。",
+      "discovery": "検出されたツール — アクセスを明示的に確認してください",
+      "read": "読み取り",
+      "write": "書き込み",
+      "configured_success": "接続を保存しました。検出されたツールを確認してください",
+      "oauth_connected_success": "OAuth 接続が完了しました。検出されたツールを確認してください",
+      "oauth_connect_failed": "OAuth 接続を完了できませんでした。もう一度お試しください。",
+      "test_success": "接続テストに成功しました",
+      "approved_success": "ツールへのアクセスを承認しました",
+      "revoked_success": "認証情報を失効し、Plugin を無効にしました"
     }
   },
   "properties": {

@@ -83,9 +83,10 @@ type Config struct {
 	VCSIntegrationEnabled bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://multica.ai").
-	// Used only to build webhook_url responses for autopilot webhook triggers
-	// — never for auth, routing, or workspace resolution. Empty when unset,
-	// in which case clients fall back to webhook_path + their own origin.
+	// Used to build webhook_url responses and the fixed Remote MCP OAuth
+	// callback URI — never to decide request identity, routing, or workspace
+	// scope. Empty when unset; webhook clients can fall back to their own origin,
+	// while OAuth Connect fails closed because providers require an exact URI.
 	// Reading the public host from request headers (Host / X-Forwarded-Host)
 	// is intentionally avoided so a misconfigured reverse proxy cannot trick
 	// the server into minting webhook URLs pointing at an attacker-controlled

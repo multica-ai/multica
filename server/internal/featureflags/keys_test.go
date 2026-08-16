@@ -3,8 +3,6 @@ package featureflags
 import (
 	"context"
 	"testing"
-
-	"github.com/multica-ai/multica/server/pkg/featureflag"
 )
 
 func TestResourceLabelsCompatDecisionStaysEnabled(t *testing.T) {
@@ -47,28 +45,11 @@ func TestPluginsV1DefaultsOff(t *testing.T) {
 	}
 }
 
-func TestPrivatePluginsV1DefaultsOff(t *testing.T) {
+func TestPluginSubFlagsAreNotPublished(t *testing.T) {
 	flags := EvaluateFrontendPublicFlags(context.Background(), nil)
-	if flags[PrivatePluginsV1] {
-		t.Fatal("private_plugins_v1 must stay disabled unless explicitly enabled")
-	}
-}
-
-func TestPrivatePluginsV1RequiresBothFlags(t *testing.T) {
-	provider := featureflag.NewStaticProvider()
-	flags := featureflag.NewService(provider)
-	ctx := context.Background()
-
-	provider.Set(PrivatePluginsV1, featureflag.Rule{Default: true})
-	if PrivatePluginsV1Enabled(ctx, flags) {
-		t.Fatal("private_plugins_v1 must stay off while plugins_v1 is off")
-	}
-	provider.Set(PluginsV1, featureflag.Rule{Default: true})
-	if !PrivatePluginsV1Enabled(ctx, flags) {
-		t.Fatal("private_plugins_v1 must be on when both flags are on")
-	}
-	provider.Set(PrivatePluginsV1, featureflag.Rule{Default: false})
-	if PrivatePluginsV1Enabled(ctx, flags) {
-		t.Fatal("private_plugins_v1 must stay off when its own flag is off")
+	for _, retired := range []string{"private_plugins_v1", "remote_mcp_plugins_v1"} {
+		if _, published := flags[retired]; published {
+			t.Fatalf("retired Plugin sub-flag %q must not be published", retired)
+		}
 	}
 }

@@ -82,19 +82,6 @@ multica workspace member invite teammate@example.com
 multica workspace member invite admin@example.com --role admin
 ```
 
-## Private Plugin development
-
-```bash
-multica plugin init ./my-plugin
-multica plugin validate ./my-plugin
-multica plugin pack ./my-plugin --output ./my-plugin.zip
-multica plugin install ./my-plugin.zip --workspace <workspace>
-multica plugin list --workspace <workspace>
-multica plugin status [installation-id|plugin-key] --workspace <workspace>
-```
-
-Private acquisition requires workspace `owner` or `admin` access and both Plugin feature flags. See [Private Skill Plugins](/docs/developers/private-plugins) for the manifest contract, trust model, immutable versions, scope management, and current limits.
-
 ## Common issue operations
 
 ```bash

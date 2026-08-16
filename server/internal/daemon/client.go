@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"sync"
@@ -190,6 +191,7 @@ func daemonClientCapabilities() string {
 		protocol.DaemonCapabilityCoalescedCommentsV1,
 		protocol.DaemonCapabilityExecutionManifestV1,
 		protocol.DaemonCapabilityAgentSkillV1,
+		protocol.DaemonCapabilityRemoteMCPV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilityRPCV1,
 	}, ",")
@@ -213,6 +215,22 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 		return nil, err
 	}
 	return resp.Task, nil
+}
+
+func (c *Client) ResolveRemoteMCPCredential(ctx context.Context, daemonToken, taskID, contributionID string) (http.Header, error) {
+	var response struct {
+		CredentialHeader string `json:"credential_header"`
+		Credential       string `json:"credential"`
+	}
+	path := fmt.Sprintf("/api/daemon/tasks/%s/remote-mcp/%s/credential", url.PathEscape(taskID), url.PathEscape(contributionID))
+	if err := c.getJSONWithToken(ctx, path, daemonToken, &response); err != nil {
+		return nil, err
+	}
+	headers := make(http.Header)
+	if response.CredentialHeader != "" {
+		headers.Set(response.CredentialHeader, response.Credential)
+	}
+	return headers, nil
 }
 
 // batchClaimRequestTimeout is the short, request-scoped deadline for the
@@ -1045,12 +1063,19 @@ func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path 
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
+	return c.getJSONWithToken(ctx, path, c.token, respBody)
+}
+
+// getJSONWithToken performs one GET with an explicit credential. It is used by
+// the Remote MCP broker so its short-lived daemon token cannot replace or race
+// the client's long-lived PAT used by concurrent control-plane requests.
+func (c *Client) getJSONWithToken(ctx context.Context, path, token string, respBody any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return err
 	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	c.setIdentityHeaders(req)
 

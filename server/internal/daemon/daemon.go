@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -6264,6 +6265,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentMcpConfig json.RawMessage
 	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
+	remoteMCPConfig, remoteMCPDiagnostics, remoteMCPBrokers, remoteMCPErr := startTaskRemoteMCPBrokers(
+		prepareCtx, ctx, task.ID, provider, task.RemoteMCPConnections,
+		func(resolveCtx context.Context, contributionID string) (http.Header, error) {
+			return d.client.ResolveRemoteMCPCredential(resolveCtx, task.RemoteMCPDaemonToken, task.ID, contributionID)
+		},
+		taskLog,
+	)
+	if remoteMCPErr != nil {
+		return TaskResult{}, fmt.Errorf("prepare Remote MCP broker: %w", remoteMCPErr)
+	}
+	if remoteMCPBrokers != nil {
+		defer remoteMCPBrokers.Close()
+	}
+	for _, diagnostic := range remoteMCPDiagnostics {
+		taskLog.Warn("Remote MCP degraded", "reason", diagnostic)
+	}
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
 		effectiveMcpConfig = agentMcpConfig
@@ -6273,6 +6290,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				"error", mergeErr,
 			)
 		} else {
+			effectiveMcpConfig = merged
+		}
+		if len(remoteMCPConfig) > 0 {
+			merged, mergeErr := mergeTaskRemoteMCPConfig(effectiveMcpConfig, remoteMCPConfig)
+			if mergeErr != nil {
+				return TaskResult{}, fmt.Errorf("merge Remote MCP broker configuration: %w", mergeErr)
+			}
 			effectiveMcpConfig = merged
 		}
 		if provider == "cursor" {

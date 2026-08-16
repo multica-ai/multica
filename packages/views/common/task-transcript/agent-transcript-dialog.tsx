@@ -4,9 +4,8 @@ import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, for
 import { Virtuoso, type VirtuosoHandle, type Components } from "react-virtuoso";
 import {
   Bot,
-  ChevronRight,
   Brain,
-  AlertCircle,
+  CircleAlert,
   CheckCircle2,
   XCircle,
   X,
@@ -14,19 +13,25 @@ import {
   Clock,
   Copy,
   Check,
+  ChevronRight,
   Filter,
+  FilePen,
+  FileText,
+  Search,
+  Terminal,
+  Wrench,
+  MoreHorizontal,
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
-  ListCollapse,
   Info,
   Coins,
+  GitBranch,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -34,8 +39,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuCheckboxItem,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
@@ -44,7 +47,6 @@ import { RichContent } from "../../rich-content";
 import { api } from "@multica/core/api";
 import {
   useTranscriptViewStore,
-  type TranscriptDetailDensity,
   type TranscriptFilterKey,
   type TranscriptSortDirection,
 } from "@multica/core/agents/stores";
@@ -59,17 +61,39 @@ import {
 } from "./transcript-follow";
 import type { TimelineItem } from "./build-timeline";
 import {
+  buildLanes,
+  buildSteps,
+  groupSteps,
+  isCallStep,
+  isGroupRow,
+  rowCalls,
+  shouldShowTimeline,
+  toolKindTotals,
+  type TraceCallStep,
+  type TraceGroupRow,
+  type TraceMessageStep,
+  type TraceRow,
+  type TraceStep,
+} from "./build-steps";
+import { buildRunOutcome } from "./run-outcome";
+import { RunTimeline } from "./run-timeline";
+import {
+  base64ByteLength,
+  readImageResult,
   traceEventCopyText,
-  traceEventDefaultExpanded,
   traceEventDetail,
-  traceEventHasDetail,
-  traceEventKind,
   traceEventLabel,
   traceEventSummary,
-  traceEventSummaryIsMono,
+  traceToolArgSummary,
 } from "./trace-event-presenter";
-import type { TraceDiffLine, TracePatchFile, TraceSummaryLabels } from "./trace-event-presenter";
-import { highlightBlock, highlightToLines, languageForPath } from "./diff-highlight";
+import type { TraceSummaryLabels } from "./trace-event-presenter";
+import {
+  DiffDetailSurface,
+  FileWriteSurface,
+  PatchDetailSurface,
+  ToolDetailSurface,
+} from "./detail-surfaces";
+import { languageForPath } from "./diff-highlight";
 import { useT } from "../../i18n";
 import {
   formatTokens,
@@ -78,6 +102,11 @@ import {
 } from "../../runtimes/utils";
 import "../../editor/styles/code.css";
 import "./task-transcript.css";
+
+// The run surface, read in four layers: what happened (header), what it
+// produced (outcome), where the time went (timeline), and the evidence (steps).
+// Only one layer is expanded at a time — the inspector opens on demand rather
+// than splitting the surface in two before the reader has asked anything.
 
 interface AgentTranscriptDialogProps {
   open: boolean;
@@ -95,52 +124,11 @@ interface AgentTranscriptDialogProps {
   headerSlot?: React.ReactNode;
 }
 
-// ─── Color mapping for timeline segments ────────────────────────────────────
-
-type EventColor = "agent" | "thinking" | "tool" | "result" | "error";
-
-function getEventColor(item: TimelineItem): EventColor {
-  switch (item.type) {
-    case "text":
-      return "agent";
-    case "thinking":
-      return "thinking";
-    case "tool_use":
-      return "tool";
-    case "tool_result":
-      return "result";
-    case "error":
-      return "error";
-    default:
-      return "result";
-  }
-}
-
-const colorClasses: Record<EventColor, { bg: string; bgActive: string; label: string }> = {
-  agent: { bg: "bg-emerald-400/60", bgActive: "bg-emerald-500", label: "bg-emerald-500" },
-  thinking: { bg: "bg-violet-400/60", bgActive: "bg-violet-500", label: "bg-violet-500/20 text-violet-700 dark:text-violet-300" },
-  tool: { bg: "bg-blue-400/60", bgActive: "bg-blue-500", label: "bg-blue-500/20 text-blue-700 dark:text-blue-300" },
-  result: { bg: "bg-slate-300/60 dark:bg-slate-600/60", bgActive: "bg-slate-400 dark:bg-slate-500", label: "bg-muted text-muted-foreground" },
-  error: { bg: "bg-red-400/60", bgActive: "bg-red-500", label: "bg-red-500/20 text-red-700 dark:text-red-300" },
-};
-
 // ─── Helpers ────────────────────────────────────────────────────────────────
-// Presentation rules (kind/label/summary/default expansion) live in the pure
-// trace-event-presenter module; only view-plumbing helpers remain here.
-
-function getItemFilterKey(item: TimelineItem): TranscriptFilterKey {
-  return item.tool && (item.type === "tool_use" || item.type === "tool_result")
-    ? `tool:${item.tool}`
-    : item.type;
-}
 
 function formatDuration(start: string, end: string): string {
   const ms = new Date(end).getTime() - new Date(start).getTime();
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${minutes}m ${secs}s`;
+  return formatElapsedMs(ms);
 }
 
 function formatElapsedMs(ms: number): string {
@@ -151,6 +139,25 @@ function formatElapsedMs(ms: number): string {
   return `${minutes}m ${secs}s`;
 }
 
+/** A step's own duration, in the compact form the right column carries. */
+function formatStepDuration(ms: number): string {
+  if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
+/** Offset from the run's start, which is what a step's position means. */
+function formatOffset(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return `+${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  const hours = Math.floor(minutes / 60);
+  return `+${hours}:${String(minutes % 60).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 function formatRunTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
     month: "short",
@@ -159,6 +166,45 @@ function formatRunTime(iso: string): string {
     minute: "2-digit",
     second: "2-digit",
   });
+}
+
+function timeMs(iso: string | undefined): number | undefined {
+  if (!iso) return undefined;
+  const ms = new Date(iso).getTime();
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function stepFilterKey(step: TraceStep): TranscriptFilterKey {
+  return step.kind === "call" ? `tool:${step.tool}` : step.kind;
+}
+
+/** Lowercased haystack for the in-run search. Outputs are clipped: a match
+ *  past 4KB of command output is not one anybody is scanning for. */
+function stepHaystack(step: TraceStep): string {
+  if (step.kind !== "call") return (step.item.content ?? "").toLowerCase();
+  const input = step.call?.input ? JSON.stringify(step.call.input) : "";
+  return `${step.tool} ${input} ${(step.result?.output ?? "").slice(0, 4000)}`.toLowerCase();
+}
+
+function StepIcon({ step, className }: { step: TraceStep; className?: string }) {
+  if (!isCallStep(step)) {
+    if (step.kind === "thinking") return <Brain className={className} />;
+    if (step.kind === "error") return <CircleAlert className={className} />;
+    return <Bot className={className} />;
+  }
+
+  // Tool names differ per provider, so the input's shape picks the glyph.
+  const input = step.call?.input;
+  if (input) {
+    if (typeof input.command === "string") return <Terminal className={className} />;
+    if (typeof input.old_string === "string" || typeof input.content === "string" || input.changes)
+      return <FilePen className={className} />;
+    if (typeof input.query === "string" || typeof input.pattern === "string")
+      return <Search className={className} />;
+    if (typeof input.file_path === "string" || typeof input.path === "string")
+      return <FileText className={className} />;
+  }
+  return <Wrench className={className} />;
 }
 
 // ─── Run detail row (ⓘ popover) ─────────────────────────────────────────────
@@ -218,7 +264,7 @@ const VirtuosoList = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElem
     return <div ref={ref} {...props} className="divide-y" />;
   },
 );
-const LIST_COMPONENTS: Components<TimelineItem> = { List: VirtuosoList };
+const LIST_COMPONENTS: Components<TraceRow> = { List: VirtuosoList };
 
 export function AgentTranscriptDialog({
   open,
@@ -231,16 +277,14 @@ export function AgentTranscriptDialog({
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set());
+  const [query, setQuery] = useState("");
   const [elapsed, setElapsed] = useState("");
   const [copied, setCopied] = useState(false);
   const [copiedWorkdir, setCopiedWorkdir] = useState(false);
   const [copiedBranch, setCopiedBranch] = useState(false);
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
-  // Row-level expand overrides. A row the user toggled follows the toggle; any
-  // other row follows the density preference (see traceEventDefaultExpanded).
-  // Switching density or task resets the overrides wholesale.
-  const [rowOverrides, setRowOverrides] = useState<Map<number, boolean>>(() => new Map());
   const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
   const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
   // Filters always persist across opens — a facet a run doesn't have simply
@@ -249,8 +293,6 @@ export function AgentTranscriptDialog({
   const selectedFilterKeys = useTranscriptViewStore((s) => s.selectedFilterKeys);
   const toggleFilterKey = useTranscriptViewStore((s) => s.toggleFilterKey);
   const clearFilters = useTranscriptViewStore((s) => s.clearFilterKeys);
-  const density = useTranscriptViewStore((s) => s.density);
-  const setDensity = useTranscriptViewStore((s) => s.setDensity);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   // Newest-first live follow (#5921): all latch decisions live in the pure
   // controller (see transcript-follow.ts for the model); this component only
@@ -282,7 +324,7 @@ export function AgentTranscriptDialog({
       };
       const onKeyDown = (e: KeyboardEvent) => {
         // Only keys aimed at the scroller itself; Space/arrows bubbling from
-        // row controls (e.g. a collapsible trigger) are not scroll intent.
+        // row controls are not scroll intent.
         if (e.target !== el) return;
         if (e.key === "ArrowDown") followCtl.input(LINE_SCROLL_PX);
         else if (e.key === "ArrowUp") followCtl.input(-LINE_SCROLL_PX);
@@ -333,27 +375,33 @@ export function AgentTranscriptDialog({
 
   useEffect(() => () => detachScrollerRef.current?.(), []);
 
+  // A different run is a different reading position: drop the selection and
+  // any group the reader had opened.
   useEffect(() => {
-    setRowOverrides(new Map());
-  }, [task.id, density]);
+    setSelectedSeq(null);
+    setExpandedGroups(new Set());
+  }, [task.id]);
 
-  // Derive filter options from each item:
-  //   tool_use / tool_result → filter value = tool, display = "tool:Bash"
-  //   other types → display from traceEventLabel
+  // ── Derived model ────────────────────────────────────────────────────────
+
+  // One step per tool call, with its result folded in — see build-steps.ts for
+  // why the pairing is positional.
+  const steps = useMemo(() => buildSteps(items), [items]);
+
   const filterOptions = useMemo(() => {
     const options = new Map<string, string>();
-    for (const item of items) {
-      const key = getItemFilterKey(item);
-      if (item.tool && (item.type === "tool_use" || item.type === "tool_result")) {
-        if (!options.has(key)) options.set(key, key);
-      } else {
-        if (!options.has(key)) {
-          options.set(key, traceEventLabel(item));
-        }
-      }
+    for (const step of steps) {
+      const key = stepFilterKey(step);
+      if (options.has(key)) continue;
+      options.set(
+        key,
+        step.kind === "call"
+          ? key
+          : traceEventLabel({ type: step.item.type, tool: step.item.tool }),
+      );
     }
     return Array.from(options.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [items]);
+  }, [steps]);
 
   const filterOptionKeys = useMemo(
     () => new Set(filterOptions.map(([value]) => value)),
@@ -367,21 +415,61 @@ export function AgentTranscriptDialog({
 
   const activeFilterSet = useMemo(() => new Set(activeFilterKeys), [activeFilterKeys]);
 
-  // Strict filter
-  const filteredItems = useMemo(() => {
-    if (activeFilterSet.size === 0) return items;
-    return items.filter((item) => activeFilterSet.has(getItemFilterKey(item)));
-  }, [items, activeFilterSet]);
+  const trimmedQuery = query.trim().toLowerCase();
+
+  const filteredSteps = useMemo(() => {
+    if (activeFilterSet.size === 0 && trimmedQuery.length === 0) return steps;
+    return steps.filter((step) => {
+      if (activeFilterSet.size > 0 && !activeFilterSet.has(stepFilterKey(step))) return false;
+      if (trimmedQuery.length > 0 && !stepHaystack(step).includes(trimmedQuery)) return false;
+      return true;
+    });
+  }, [steps, activeFilterSet, trimmedQuery]);
+
+  // Grouping runs on what the reader is looking at: filtering breaks adjacency,
+  // and a group that spans a hidden step would be a lie about what ran.
+  const rows = useMemo(() => groupSteps(filteredSteps), [filteredSteps]);
 
   // Apply user-chosen sort direction. Reverse is a pure presentation concern —
-  // the underlying timeline (and its seq numbers) is untouched, so copy/filter
-  // and segment navigation continue to work against the same data.
-  const displayItems = useMemo(
-    () => (sortDirection === "newest_first" ? [...filteredItems].reverse() : filteredItems),
-    [filteredItems, sortDirection],
+  // the underlying steps (and their seq numbers) are untouched.
+  const displayRows = useMemo(
+    () => (sortDirection === "newest_first" ? [...rows].reverse() : rows),
+    [rows, sortDirection],
   );
+
+  const runStart = task.started_at ?? task.dispatched_at ?? steps[0]?.startedAt;
+  const runStartMs = timeMs(runStart);
+  const lastStamp = useMemo(() => {
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const step = steps[i]!;
+      const stamp = step.kind === "call" ? (step.endedAt ?? step.startedAt) : step.startedAt;
+      if (stamp) return stamp;
+    }
+    return undefined;
+  }, [steps]);
+  const runEnd = task.completed_at ?? lastStamp;
+
+  const lanes = useMemo(() => buildLanes(steps, runStart, runEnd), [steps, runStart, runEnd]);
+  // A short run's timeline says less than the durations already on each row,
+  // so it does not render at all.
+  const showTimeline = shouldShowTimeline(steps, lanes);
+  const toolKinds = useMemo(() => toolKindTotals(steps), [steps]);
+  const outcome = useMemo(() => buildRunOutcome(steps), [steps]);
+
+  const selectedStep = useMemo(() => {
+    if (selectedSeq === null) return null;
+    return steps.find((step) => step.seq === selectedSeq) ?? null;
+  }, [steps, selectedSeq]);
+
+  const selectedOffsetMs =
+    selectedStep && runStartMs !== undefined
+      ? Math.max(0, (timeMs(selectedStep.startedAt) ?? runStartMs) - runStartMs)
+      : undefined;
+
+  // Keyed on the run having produced nothing at all, not on the filtered view
+  // being empty — a filter that hides every step is not a runtime limitation.
   const isAntigravityLiveEmpty =
-    isLive && displayItems.length === 0 && runtimeInfo?.provider === "antigravity";
+    isLive && steps.length === 0 && runtimeInfo?.provider === "antigravity";
 
   // Newest-first shows live events as PREPENDS, and Virtuoso items opt out of
   // native scroll anchoring (`overflow-anchor: none`), so without compensation
@@ -391,17 +479,12 @@ export function AgentTranscriptDialog({
   // down from a large base satisfies that while the list only grows. Sort,
   // filter, or task changes can shrink the list, so `listEpoch` remounts the
   // instance (fresh at top) instead of letting firstItemIndex climb.
-  // `scrollToIndex`/`computeItemKey` are unaffected: indices stay data-relative
-  // (verified against scrollToIndexSystem — it never reads firstItemIndex).
   const firstItemIndex =
-    sortDirection === "newest_first" ? 1_000_000 - displayItems.length : 0;
-  const listEpoch = `${task.id}:${sortDirection}:${activeFilterKeys.join(",")}`;
+    sortDirection === "newest_first" ? 1_000_000 - displayRows.length : 0;
+  const listEpoch = `${task.id}:${sortDirection}:${activeFilterKeys.join(",")}:${trimmedQuery}`;
 
-  // Toggling direction is a manual user action; jump the scroll container back
-  // to the top so the newest end of the timeline (per the chosen direction) is
-  // immediately visible. Avoids stranding the user mid-scroll on the wrong end.
   const handleSortDirectionChange = useCallback(
-    (dir: typeof sortDirection) => {
+    (dir: TranscriptSortDirection) => {
       if (dir === sortDirection) return;
       setSortDirection(dir);
       virtuosoRef.current?.scrollTo({ top: 0 });
@@ -424,11 +507,8 @@ export function AgentTranscriptDialog({
   // hold the viewport on the previous first row. Instant (not smooth): a
   // smooth animation spans multiple flushes and its in-flight position reads
   // as user displacement. The scroll-event enforcement in handleScrollerRef
-  // is the authoritative pin (Virtuoso's prepend compensation lands after
-  // React effects); this effect just shortens the first-paint gap.
-  // Chronological live follow is handled natively by Virtuoso's followOutput
-  // below; this pair is its prepend-side counterpart.
-  const displayCount = displayItems.length;
+  // is the authoritative pin; this effect just shortens the first-paint gap.
+  const displayCount = displayRows.length;
   useLayoutEffect(() => {
     if (!followCtl.isFollowing()) return;
     virtuosoRef.current?.scrollToIndex({ index: 0, align: "start", behavior: "auto" });
@@ -466,12 +546,9 @@ export function AgentTranscriptDialog({
     return () => clearInterval(interval);
   }, [isLive, task.started_at, task.dispatched_at]);
 
-  // Rows are virtualized, so an off-screen target is not in the DOM;
-  // navigate by index instead of a node ref.
-  const handleSegmentClick = useCallback(
+  const scrollToStep = useCallback(
     (seq: number) => {
-      setSelectedSeq(seq);
-      const index = displayItems.findIndex((item) => item.seq === seq);
+      const index = displayRows.findIndex((row) => row.seq === seq || rowCalls(row).some((c) => c.seq === seq));
       if (index < 0) return;
       // Explicit navigation away from the live end unlatches the newest-first
       // follow — otherwise the scroll-event enforcement would pin the viewport
@@ -479,11 +556,27 @@ export function AgentTranscriptDialog({
       if (index > 0) followCtl.disengage();
       virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "smooth" });
     },
-    [displayItems, followCtl],
+    [displayRows, followCtl],
   );
 
-  // Copy all events as text. Use the displayed order so users get the same
-  // sequence they see on screen — matters when sort is set to newest-first.
+  // Clicking the timeline lands on the first step at or after that offset.
+  const handleSeek = useCallback(
+    (offsetMs: number) => {
+      if (runStartMs === undefined) return;
+      const target = runStartMs + offsetMs;
+      let best: TraceStep | null = null;
+      for (const step of steps) {
+        const at = timeMs(step.startedAt);
+        if (at === undefined || at < target) continue;
+        if (!best || at < (timeMs(best.startedAt) ?? Infinity)) best = step;
+      }
+      if (!best) return;
+      setSelectedSeq(best.seq);
+      scrollToStep(best.seq);
+    },
+    [steps, runStartMs, scrollToStep],
+  );
+
   const handleCopyWorkdir = useCallback(() => {
     if (!task.relative_work_dir) return;
     void copyText(task.relative_work_dir).then((ok) => {
@@ -506,27 +599,41 @@ export function AgentTranscriptDialog({
 
   const handleCopyAll = useCallback(() => {
     // Copy the full body of each event (not the truncated row summary), with
-    // the same secret redaction the detail view applies.
-    const text = displayItems
-      .map((item) => redactSecrets(traceEventCopyText(item)))
-      .join("\n\n");
+    // the same secret redaction the detail view applies. A step copies as its
+    // call followed by its result, which is the order it happened in.
+    const events: TimelineItem[] = [];
+    for (const row of displayRows) {
+      if (row.kind === "group") {
+        for (const call of row.steps) {
+          if (call.call) events.push(call.call);
+          if (call.result) events.push(call.result);
+        }
+        continue;
+      }
+      if (row.kind === "call") {
+        if (row.call) events.push(row.call);
+        if (row.result) events.push(row.result);
+        continue;
+      }
+      events.push(row.item);
+    }
+    const text = events.map((event) => redactSecrets(traceEventCopyText(event))).join("\n\n");
     void copyText(text).then((ok) => {
       if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [displayItems]);
+  }, [displayRows]);
 
-
-  const handleRowExpandedChange = useCallback((seq: number, expanded: boolean) => {
-    setRowOverrides((prev) => {
-      const next = new Map(prev);
-      next.set(seq, expanded);
+  const handleToggleGroup = useCallback((seq: number) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(seq)) next.delete(seq);
+      else next.add(seq);
       return next;
     });
   }, []);
 
-  // Duration
   const duration =
     task.started_at && task.completed_at
       ? formatDuration(task.started_at, task.completed_at)
@@ -536,7 +643,7 @@ export function AgentTranscriptDialog({
 
   const copyTranscriptLabel = copied
     ? t(($) => $.transcript.copied)
-    : activeFilterKeys.length > 0
+    : activeFilterKeys.length > 0 || trimmedQuery.length > 0
       ? t(($) => $.transcript.copy_filtered)
       : t(($) => $.transcript.copy_all);
 
@@ -610,7 +717,7 @@ export function AgentTranscriptDialog({
   })();
 
   // Trigger source: one word answering "why does this run exist" — more useful
-  // up front than the runtime/provider diagnostics, which move to the ⓘ popover.
+  // up front than the runtime/provider diagnostics, which live in the ⓘ popover.
   const triggerLabel = task.parent_task_id
     ? t(($) => $.transcript.trigger_retry)
     : task.kind === "comment" || task.trigger_comment_id
@@ -631,16 +738,6 @@ export function AgentTranscriptDialog({
   const createdLabel = task.created_at ? formatRunTime(task.created_at) : null;
   const startedLabel = task.started_at ? formatRunTime(task.started_at) : null;
   const completedLabel = task.completed_at ? formatRunTime(task.completed_at) : null;
-  // "When was this run created" — a read-before-you-read fact worth the toolbar
-  // surface (the ⓘ popover keeps the full-precision created/started/completed).
-  const createdShort = task.created_at
-    ? new Date(task.created_at).toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : null;
   const hasTriggeredBy = !!task.attribution?.initiator;
   // This run's own spend. Present on transcripts opened from the issue
   // execution log (the endpoint that hydrates usage); absent elsewhere, where
@@ -664,15 +761,15 @@ export function AgentTranscriptDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="!max-w-4xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
+        className="!max-w-5xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
         showCloseButton={false}
       >
         <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>
 
-        {/* ── Header: identity only ──────────────────────────────────
-            Tier 1 — everything a viewer needs BEFORE reading: outcome
-            (status anchors the left), who ran it, why it exists (trigger),
-            and who's accountable. All diagnostics move to the ⓘ popover. */}
+        {/* ── Header: outcome, identity, spend ─────────────────────────
+            Everything a viewer needs BEFORE reading: how it ended, who ran
+            it, why it exists, how long it took and what it cost. Diagnostics
+            stay in the ⓘ popover. */}
         <div className="border-b px-4 py-3 shrink-0">
           <div className="flex min-w-0 items-center gap-3">
             {statusBadge}
@@ -707,6 +804,14 @@ export function AgentTranscriptDialog({
                 </>
               )}
               <span className="shrink-0">{triggerLabel}</span>
+              {duration && (
+                <>
+                  <FactDot />
+                  <span className="shrink-0 tabular-nums">
+                    {t(($) => $.transcript.fact_took, { duration })}
+                  </span>
+                </>
+              )}
             </div>
 
             {/* What this run cost, in the header of the run you are reading —
@@ -843,150 +948,17 @@ export function AgentTranscriptDialog({
           </div>
         </div>
 
-        {/* ── List toolbar: read-before-you-read summary (left) + controls
-            (right). Duration + event count fill the left, so the row balances
-            instead of leaving dead space. ── */}
-        <div className="flex items-center gap-3 border-b px-4 py-1.5 shrink-0">
-          <div className="flex min-w-0 flex-1 items-center gap-x-1.5 overflow-hidden whitespace-nowrap text-caption text-muted-foreground">
-            {createdShort && (
-              <>
-                <span>{t(($) => $.transcript.fact_created, { time: createdShort })}</span>
-                <FactDot />
-              </>
-            )}
-            {duration && (
-              <>
-                <span className="tabular-nums">{t(($) => $.transcript.fact_took, { duration })}</span>
-                <FactDot />
-              </>
-            )}
-            <span>
-              {activeFilterKeys.length > 0
-                ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
-                : t(($) => $.transcript.events, { count: items.length })}
-            </span>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {items.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={t(($) => $.transcript.density_label)}
-                      className="text-muted-foreground"
-                    />
-                  }
-                >
-                  <ListCollapse className="h-3 w-3" />
-                  <span className="hidden sm:inline">
-                    {density === "smart"
-                      ? t(($) => $.transcript.density_smart)
-                      : density === "expanded"
-                        ? t(($) => $.transcript.density_expanded)
-                        : t(($) => $.transcript.density_collapsed)}
-                  </span>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuRadioGroup
-                    value={density}
-                    onValueChange={(value) => setDensity(value as TranscriptDetailDensity)}
-                  >
-                    {(
-                      [
-                        ["smart", t(($) => $.transcript.density_smart), t(($) => $.transcript.density_smart_desc)],
-                        ["expanded", t(($) => $.transcript.density_expanded), t(($) => $.transcript.density_expanded_desc)],
-                        ["collapsed", t(($) => $.transcript.density_collapsed), t(($) => $.transcript.density_collapsed_desc)],
-                      ] as const
-                    ).map(([value, name, description]) => (
-                      <DropdownMenuRadioItem key={value} value={value} className="items-start">
-                        <span className="flex min-w-0 flex-col gap-0.5">
-                          <span>{name}</span>
-                          <span className="text-micro leading-snug text-muted-foreground">
-                            {description}
-                          </span>
-                        </span>
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            {items.length > 1 && (
-              <SortDirectionToggle
-                value={sortDirection}
-                onChange={handleSortDirectionChange}
-                labels={{
-                  chronological: t(($) => $.transcript.sort_chronological),
-                  newestFirst: t(($) => $.transcript.sort_newest_first),
-                  ariaLabel: t(($) => $.transcript.sort_label),
-                }}
-              />
-            )}
-            {filterOptions.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant={activeFilterKeys.length > 0 ? "brand" : "ghost"}
-                      size="sm"
-                      aria-label={t(($) => $.transcript.filter)}
-                      className={activeFilterKeys.length > 0 ? undefined : "text-muted-foreground"}
-                    />
-                  }
-                >
-                  <Filter className="h-3 w-3" />
-                  <span className="hidden sm:inline">{t(($) => $.transcript.filter)}</span>
-                  {activeFilterKeys.length > 0 && (
-                    <span className="ml-0.5 rounded-full bg-brand-foreground/20 px-1.5 py-0 text-micro font-medium tabular-nums">
-                      {activeFilterKeys.length}
-                    </span>
-                  )}
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-auto">
-                  {filterOptions.map(([value, label]) => (
-                    <DropdownMenuCheckboxItem
-                      key={value}
-                      checked={selectedFilterKeys.includes(value)}
-                      onCheckedChange={() => toggleFilterKey(value)}
-                    >
-                      {label}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                  {selectedFilterKeys.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
-                        {t(($) => $.transcript.clear_filters)}
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleCopyAll}
-              aria-label={copyTranscriptLabel}
-              className="text-muted-foreground"
-            >
-              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-              <span className="hidden sm:inline">{copyTranscriptLabel}</span>
-            </Button>
-          </div>
-        </div>
+        {/* ── What the run produced ──────────────────────────────────── */}
+        <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
 
-        {/* ── Timeline progress bar ─────────────────────────────── */}
-        {displayItems.length > 0 && (
-          <div className="border-b px-4 py-2.5 shrink-0">
-            <TimelineBar
-              items={displayItems}
-              selectedSeq={selectedSeq}
-              onSegmentClick={handleSegmentClick}
-            />
-          </div>
+        {/* ── Where the time went ────────────────────────────────────── */}
+        {showTimeline && lanes && (
+          <RunTimeline
+            lanes={lanes}
+            toolKinds={toolKinds}
+            selectedOffsetMs={selectedOffsetMs}
+            onSeek={handleSeek}
+          />
         )}
 
         {/* ── Optional header slot (e.g. webhook payload preview) ── */}
@@ -996,112 +968,181 @@ export function AgentTranscriptDialog({
           </div>
         )}
 
-        {/* ── Event list ─────────────────────────────────────────── */}
-        <div className="flex-1 min-h-0">
-          {displayItems.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-body text-muted-foreground">
-              {isAntigravityLiveEmpty ? (
-                <div className="flex max-w-md items-center gap-2 px-4 text-center">
-                  <Clock className="h-4 w-4 shrink-0" />
-                  {t(($) => $.transcript.antigravity_live_unavailable)}
-                </div>
-              ) : isLive ? (
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {t(($) => $.transcript.waiting_events)}
-                </div>
-              ) : (
-                t(($) => $.transcript.no_data)
-              )}
-            </div>
-          ) : (
-            // Virtualized so a multi-thousand-event run mounts a bounded number
-            // of DOM rows (#5733). Rows expand/collapse to variable heights;
-            // Virtuoso re-measures them via ResizeObserver.
-            <Virtuoso
-              key={listEpoch}
-              ref={virtuosoRef}
-              style={{ height: "100%" }}
-              data={displayItems}
-              firstItemIndex={firstItemIndex}
-              // Open a live chronological transcript pinned to the newest
-              // event (#5921); the per-listEpoch remount re-applies this after
-              // task / sort / filter changes. Completed tasks keep reading
-              // from the top, and newest-first has its live end there already.
-              initialTopMostItemIndex={
-                isLive && sortDirection !== "newest_first"
-                  ? { index: "LAST", align: "end" }
-                  : 0
-              }
-              // Follow appended events while the reader is at the bottom;
-              // scrolling up suspends the follow until they return (#5921).
-              // Instant, not smooth: transcript flushes append several rows at
-              // a time and a still-animating scroll makes the next evaluation
-              // read "not at bottom", permanently dropping the follow.
-              // Newest-first opts out — its growth is prepends, handled by the
-              // scrollToIndex effect above.
-              followOutput={(atBottom) =>
-                isLive && sortDirection !== "newest_first" && atBottom ? "auto" : false
-              }
-              atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
-              atTopThreshold={FOLLOW_EDGE_THRESHOLD}
-              // Back within the top zone (any way you got there) re-engages
-              // the newest-first follow. Leaving it does NOT disengage:
-              // anchored prepends leave the top zone on their own — only
-              // accumulated user input may break the latch (transcript-follow.ts).
-              atTopStateChange={(atTop) => followCtl.onAtTopChange(atTop)}
-              scrollerRef={handleScrollerRef}
-              computeItemKey={(_, item) => item.seq}
-              components={LIST_COMPONENTS}
-              itemContent={(_, item) => (
-                <TranscriptEventRow
-                  item={item}
-                  isSelected={selectedSeq === item.seq}
-                  expanded={
-                    rowOverrides.get(item.seq) ?? traceEventDefaultExpanded(item, density)
-                  }
-                  onExpandedChange={(expanded) => handleRowExpandedChange(item.seq, expanded)}
+        {/* ── List toolbar: search left, the two menus right ── */}
+        <div className="flex items-center gap-2 border-b px-4 py-1.5 shrink-0">
+          <label className="flex h-7 min-w-0 max-w-xs flex-1 items-center gap-1.5 rounded-md bg-muted px-2 text-caption">
+            <Search aria-hidden className="h-3 w-3 shrink-0 text-faint-foreground" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t(($) => $.transcript.search_placeholder)}
+              aria-label={t(($) => $.transcript.search_placeholder)}
+              className="min-w-0 flex-1 bg-transparent text-caption outline-none placeholder:text-faint-foreground"
+            />
+          </label>
+          <span className="ml-auto shrink-0 whitespace-nowrap text-caption text-muted-foreground">
+            {activeFilterKeys.length > 0 || trimmedQuery.length > 0
+              ? t(($) => $.transcript.steps_filtered, {
+                  shown: filteredSteps.length,
+                  total: steps.length,
+                })
+              : t(($) => $.transcript.steps_count, { count: steps.length })}
+          </span>
+          {filterOptions.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant={activeFilterKeys.length > 0 ? "brand" : "ghost"}
+                    size="sm"
+                    aria-label={t(($) => $.transcript.filter)}
+                    className={activeFilterKeys.length > 0 ? undefined : "text-muted-foreground"}
+                  />
+                }
+              >
+                <Filter className="h-3 w-3" />
+                <span className="hidden sm:inline">{t(($) => $.transcript.filter)}</span>
+                {activeFilterKeys.length > 0 && (
+                  <span className="ml-0.5 rounded-full bg-brand-foreground/20 px-1.5 py-0 text-micro font-medium tabular-nums">
+                    {activeFilterKeys.length}
+                  </span>
+                )}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-auto">
+                {filterOptions.map(([value, label]) => (
+                  <DropdownMenuCheckboxItem
+                    key={value}
+                    checked={selectedFilterKeys.includes(value)}
+                    onCheckedChange={() => toggleFilterKey(value)}
+                  >
+                    {label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+                {selectedFilterKeys.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
+                      {t(($) => $.transcript.clear_filters)}
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          {/* Sort and copy are the run-level actions nobody needs on the way
+              in, so they live behind one overflow control instead of two
+              permanent buttons. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t(($) => $.transcript.more_actions)}
+                  className="text-muted-foreground"
                 />
-              )}
+              }
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem
+                onClick={() =>
+                  handleSortDirectionChange(
+                    sortDirection === "chronological" ? "newest_first" : "chronological",
+                  )
+                }
+              >
+                {sortDirection === "chronological" ? (
+                  <ArrowUpNarrowWide className="h-3.5 w-3.5" />
+                ) : (
+                  <ArrowDownNarrowWide className="h-3.5 w-3.5" />
+                )}
+                {sortDirection === "chronological"
+                  ? t(($) => $.transcript.sort_newest_first)
+                  : t(($) => $.transcript.sort_chronological)}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleCopyAll}>
+                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                {copyTranscriptLabel}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* ── Steps, and the inspector when one is selected ───────────── */}
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            {displayRows.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-body text-muted-foreground">
+                {isAntigravityLiveEmpty ? (
+                  <div className="flex max-w-md items-center gap-2 px-4 text-center">
+                    <Clock className="h-4 w-4 shrink-0" />
+                    {t(($) => $.transcript.antigravity_live_unavailable)}
+                  </div>
+                ) : isLive && steps.length === 0 ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {t(($) => $.transcript.waiting_events)}
+                  </div>
+                ) : steps.length === 0 ? (
+                  t(($) => $.transcript.no_data)
+                ) : (
+                  t(($) => $.transcript.no_matches)
+                )}
+              </div>
+            ) : (
+              // Virtualized so a multi-thousand-step run mounts a bounded
+              // number of DOM rows (#5733).
+              <Virtuoso
+                key={listEpoch}
+                ref={virtuosoRef}
+                style={{ height: "100%" }}
+                data={displayRows}
+                firstItemIndex={firstItemIndex}
+                // Open a live chronological transcript pinned to the newest
+                // step (#5921); the per-listEpoch remount re-applies this after
+                // task / sort / filter changes.
+                initialTopMostItemIndex={
+                  isLive && sortDirection !== "newest_first"
+                    ? { index: "LAST", align: "end" }
+                    : 0
+                }
+                followOutput={(atBottom) =>
+                  isLive && sortDirection !== "newest_first" && atBottom ? "auto" : false
+                }
+                atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
+                atTopThreshold={FOLLOW_EDGE_THRESHOLD}
+                atTopStateChange={(atTop) => followCtl.onAtTopChange(atTop)}
+                scrollerRef={handleScrollerRef}
+                computeItemKey={(_, row) => row.seq}
+                components={LIST_COMPONENTS}
+                itemContent={(_, row) => (
+                  <TranscriptRow
+                    row={row}
+                    agentName={agentName || agentInfo?.name || ""}
+                    agentId={task.agent_id}
+                    runStartMs={runStartMs}
+                    isLive={isLive}
+                    selectedSeq={selectedSeq}
+                    expanded={row.kind === "group" && expandedGroups.has(row.seq)}
+                    onToggleGroup={handleToggleGroup}
+                    onSelect={setSelectedSeq}
+                  />
+                )}
+              />
+            )}
+          </div>
+          {selectedStep && (
+            <StepInspector
+              step={selectedStep}
+              runStartMs={runStartMs}
+              onClose={() => setSelectedSeq(null)}
             />
           )}
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-// ─── Sort direction toggle ──────────────────────────────────────────────────
-
-interface SortDirectionToggleProps {
-  value: TranscriptSortDirection;
-  onChange: (dir: TranscriptSortDirection) => void;
-  labels: { chronological: string; newestFirst: string; ariaLabel: string };
-}
-
-// Sort is a two-state toggle, not a mode picker: one button showing the
-// current direction that flips on click. Shares the toolbar button chassis so
-// it reads as the same control family as density/filter/copy — no tab strip.
-function SortDirectionToggle({ value, onChange, labels }: SortDirectionToggleProps) {
-  const isChronological = value === "chronological";
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={() => onChange(isChronological ? "newest_first" : "chronological")}
-      aria-label={labels.ariaLabel}
-      title={labels.ariaLabel}
-      className="text-muted-foreground"
-    >
-      {isChronological ? (
-        <ArrowDownNarrowWide className="h-3 w-3" />
-      ) : (
-        <ArrowUpNarrowWide className="h-3 w-3" />
-      )}
-      <span className="hidden sm:inline">
-        {isChronological ? labels.chronological : labels.newestFirst}
-      </span>
-    </Button>
   );
 }
 
@@ -1131,91 +1172,167 @@ function FactDot() {
   );
 }
 
-// ─── Timeline bar (colored segments) ────────────────────────────────────────
+// ─── Outcome row ────────────────────────────────────────────────────────────
 
-function TimelineBar({
-  items,
-  selectedSeq,
-  onSegmentClick,
+/**
+ * What the run produced, above the evidence for it. For most readers this is
+ * the whole answer — "it touched these files and ran these commands" settles
+ * "can I trust this" without opening a single step.
+ *
+ * Renders nothing when the run produced nothing nameable; a row of zeroes
+ * would read as "it did nothing" rather than "we have nothing to summarize".
+ */
+function RunOutcomeRow({
+  outcome,
+  branch,
 }: {
-  items: TimelineItem[];
-  selectedSeq: number | null;
-  onSegmentClick: (seq: number) => void;
+  outcome: ReturnType<typeof buildRunOutcome>;
+  branch?: string | null;
 }) {
-  const segments: { startIdx: number; endIdx: number; color: EventColor; count: number }[] = [];
-  let currentColor: EventColor | null = null;
-  let currentStart = 0;
+  const { t } = useT("agents");
+  if (!outcome) return null;
 
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i]!;
-    const color = getEventColor(item);
-    if (color !== currentColor) {
-      if (currentColor !== null) {
-        segments.push({ startIdx: currentStart, endIdx: i - 1, color: currentColor, count: i - currentStart });
-      }
-      currentColor = color;
-      currentStart = i;
-    }
-  }
-  if (currentColor !== null) {
-    segments.push({ startIdx: currentStart, endIdx: items.length - 1, color: currentColor, count: items.length - currentStart });
-  }
-
+  const chip = "inline-flex shrink-0 items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-caption";
   return (
-    <div className="flex gap-0.5 h-5 rounded overflow-hidden" role="navigation" aria-label="Timeline">
-      {segments.map((seg) => {
-        const isSelected = selectedSeq !== null && items.slice(seg.startIdx, seg.endIdx + 1).some((i) => i.seq === selectedSeq);
-        const color = colorClasses[seg.color];
-        const widthPercent = (seg.count / items.length) * 100;
-
-        return (
-          <button
-            type="button"
-            key={seg.startIdx}
-            className={cn(
-              "h-full transition-all duration-150 hover:opacity-80 relative group",
-              isSelected ? color.bgActive : color.bg,
-              "min-w-[4px]",
-            )}
-            style={{ width: `${Math.max(widthPercent, 0.5)}%` }}
-            onClick={() => onSegmentClick(items[seg.startIdx]!.seq)}
-            title={`${traceEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
-          >
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 pointer-events-none">
-              <div className="rounded bg-popover border px-2 py-1 text-micro text-popover-foreground shadow-md whitespace-nowrap">
-                {traceEventLabel(items[seg.startIdx]!)}
-                {seg.count > 1 && <span className="text-muted-foreground ml-1">+{seg.count - 1}</span>}
-              </div>
-            </div>
-          </button>
-        );
-      })}
+    <div className="flex shrink-0 items-center gap-2 overflow-hidden border-b bg-muted/40 px-4 py-1.5">
+      <span className="shrink-0 text-micro text-faint-foreground">
+        {t(($) => $.transcript.outcome_label)}
+      </span>
+      {outcome.paths.length > 0 && (
+        <span className={chip} title={outcome.paths.join("\n")}>
+          <FilePen aria-hidden className="h-3 w-3 text-muted-foreground" />
+          <span className="font-medium">
+            {t(($) => $.transcript.outcome_files, { count: outcome.paths.length })}
+          </span>
+          {outcome.addedLines > 0 && (
+            <span className="tabular-nums text-success">+{outcome.addedLines}</span>
+          )}
+          {outcome.removedLines > 0 && (
+            <span className="tabular-nums text-destructive">−{outcome.removedLines}</span>
+          )}
+        </span>
+      )}
+      {outcome.commandCount > 0 && (
+        <span className={chip}>
+          <Terminal aria-hidden className="h-3 w-3 text-muted-foreground" />
+          <span className="font-medium">
+            {t(($) => $.transcript.outcome_commands, { count: outcome.commandCount })}
+          </span>
+        </span>
+      )}
+      {branch && (
+        <span className={cn(chip, "min-w-0")}>
+          <GitBranch aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <span className="truncate font-mono text-micro">{branch}</span>
+        </span>
+      )}
     </div>
   );
 }
 
-// ─── Transcript event row ───────────────────────────────────────────────────
+// ─── Rows ───────────────────────────────────────────────────────────────────
 
-interface TranscriptEventRowProps {
-  item: TimelineItem;
-  isSelected: boolean;
+interface TranscriptRowProps {
+  row: TraceRow;
+  agentName: string;
+  agentId?: string;
+  runStartMs?: number;
+  isLive: boolean;
+  selectedSeq: number | null;
   expanded: boolean;
-  onExpandedChange: (expanded: boolean) => void;
+  onToggleGroup: (seq: number) => void;
+  onSelect: (seq: number) => void;
 }
 
-const TranscriptEventRow = ({
-  item,
-  isSelected,
-  expanded,
-  onExpandedChange,
-}: TranscriptEventRowProps) => {
+function TranscriptRow(props: TranscriptRowProps) {
+  const { row } = props;
+  if (isGroupRow(row)) return <GroupRow {...props} row={row} />;
+  if (!isCallStep(row) && row.kind === "text") return <ProseRow {...props} row={row} />;
+  return <StepRow {...props} row={row} />;
+}
+
+/** The offset column: where in the run this happened. */
+function OffsetCell({ startedAt, runStartMs }: { startedAt?: string; runStartMs?: number }) {
+  const at = timeMs(startedAt);
+  const label = at !== undefined && runStartMs !== undefined ? formatOffset(at - runStartMs) : "";
+  return (
+    <span
+      className="w-11 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+      title={startedAt ? new Date(startedAt).toLocaleString() : undefined}
+    >
+      {label}
+    </span>
+  );
+}
+
+function DurationCell({ ms, pending }: { ms?: number; pending?: boolean }) {
   const { t } = useT("agents");
-  const kind = traceEventKind(item);
-  const color = getEventColor(item);
-  const label = traceEventLabel(item);
-  // The presenter stays i18n-free, so the localizable phrasing is injected.
-  // `extra` counts files beyond the named one, and is deliberately not called
-  // `count`: i18next reads `count` as a plural selector.
+  if (pending) {
+    return (
+      <span className="shrink-0 pt-0.5 text-micro text-info" title={t(($) => $.transcript.step_running)}>
+        <Loader2 aria-hidden className="h-3 w-3 animate-spin" />
+        <span className="sr-only">{t(($) => $.transcript.step_running)}</span>
+      </span>
+    );
+  }
+  if (ms === undefined) return <span className="w-12 shrink-0" />;
+  return (
+    <span className="w-12 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground">
+      {formatStepDuration(ms)}
+    </span>
+  );
+}
+
+/**
+ * The agent's own words, at body size and in reading measure.
+ *
+ * This is the layer inversion the redesign turns on: the report used to look
+ * exactly like a `Read`, so the one thing worth reading was the hardest thing
+ * to find. Prose is content and stays open; tool calls are evidence and fold.
+ */
+function ProseRow({
+  row,
+  agentName,
+  agentId,
+  runStartMs,
+}: TranscriptRowProps & { row: TraceMessageStep }) {
+  return (
+    <div className="group flex items-start gap-2 px-4 py-2.5">
+      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+      <span aria-hidden className="mt-1 w-0.5 self-stretch rounded-full bg-success" />
+      <div className="mt-0.5 shrink-0">
+        {agentId ? (
+          <ActorAvatar actorType="agent" actorId={agentId} size="sm" />
+        ) : (
+          <div className="flex h-5 w-5 items-center justify-center rounded-full bg-info/10 text-info">
+            <Bot className="h-3 w-3" />
+          </div>
+        )}
+      </div>
+      <div className="min-w-0 flex-1 pr-2">
+        {agentName && (
+          <div className="mb-0.5 text-caption font-semibold">{agentName}</div>
+        )}
+        <RichContent
+          content={row.item.content ?? ""}
+          density="compact"
+          className="transcript-prose max-w-[62rem]"
+        />
+      </div>
+    </div>
+  );
+}
+
+/** One call, one thinking block, or one error: a line, with its detail one
+ *  click away in the inspector. */
+function StepRow({
+  row,
+  runStartMs,
+  isLive,
+  selectedSeq,
+  onSelect,
+}: TranscriptRowProps & { row: TraceStep }) {
+  const { t } = useT("agents");
   const summaryLabels = useMemo<TraceSummaryLabels>(
     () => ({
       morePaths: (path, extraCount) =>
@@ -1223,296 +1340,136 @@ const TranscriptEventRow = ({
     }),
     [t],
   );
-  const summary = traceEventSummary(item, summaryLabels);
-  const date = useMemo(
-    () => (item.created_at ? new Date(item.created_at) : null),
-    [item.created_at],
-  );
 
-  const hasDetail = traceEventHasDetail(item);
-  const detail = useMemo(() => traceEventDetail(item), [item]);
-  // Prose kinds swap the one-line summary for the full body in place when
-  // expanded (no box). Tool kinds keep the summary line and reveal the
-  // params/output surface below it.
-  const isProse = kind !== "tool_use" && kind !== "tool_result";
-  const showInlineBody = isProse && hasDetail && expanded;
+  const call = isCallStep(row) ? row : null;
+  const label = call
+    ? call.tool || t(($) => $.transcript.kind_tool)
+    : row.kind === "thinking"
+      ? t(($) => $.transcript.kind_thinking)
+      : t(($) => $.transcript.kind_error);
+  const summary = call
+    ? callSummary(call, summaryLabels)
+    : firstLineOf((row as TraceMessageStep).item.content);
+  const pending = call !== null && isLive && !call.result;
+  const selected = selectedSeq === row.seq;
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={() => onSelect(row.seq)}
+      aria-current={selected ? "true" : undefined}
       className={cn(
-        "group transition-colors",
-        isSelected && "bg-accent/50",
-        kind === "error" && "bg-destructive/5",
+        "group flex w-full items-start gap-2 px-4 py-1.5 text-left transition-colors",
+        selected ? "bg-brand/8" : "hover:bg-accent/40",
+        row.kind === "error" && "bg-destructive/5",
       )}
     >
-      <Collapsible open={expanded} onOpenChange={onExpandedChange}>
-        <div className="flex items-start gap-2 px-4 py-2">
-          {/* Type label badge */}
-          <span
-            className={cn(
-              "inline-flex items-center shrink-0 rounded px-1.5 py-0.5 text-micro font-medium mt-0.5 min-w-[60px] justify-center",
-              colorClasses[color].label,
-            )}
-          >
-            {item.type === "thinking" && <Brain className="h-3 w-3 mr-1 shrink-0" />}
-            {item.type === "error" && <AlertCircle className="h-3 w-3 mr-1 shrink-0" />}
-            {label}
-          </span>
-
-          {showInlineBody ? (
-            <div className="flex flex-1 items-start gap-1.5 min-w-0">
-              <CollapsibleTrigger
-                aria-label={label}
-                className="shrink-0 mt-0.5 cursor-pointer rounded p-0.5 text-faint-foreground transition-colors hover:text-foreground"
-              >
-                <ChevronRight className="h-3 w-3 rotate-90 transition-transform" />
-              </CollapsibleTrigger>
-              <div className="flex-1 min-w-0">
-                {kind === "agent" ? (
-                  <RichContent
-                    content={item.content ?? ""}
-                    density="compact"
-                    className="transcript-prose"
-                  />
-                ) : (
-                  <div
-                    className={cn(
-                      "whitespace-pre-wrap break-words text-caption leading-relaxed",
-                      kind === "error" ? "text-destructive" : "text-muted-foreground",
-                    )}
-                  >
-                    {item.content ?? ""}
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <CollapsibleTrigger
-              className={cn(
-                "flex-1 text-left text-caption min-w-0 py-0.5 transition-colors",
-                hasDetail ? "cursor-pointer hover:text-foreground" : "cursor-default",
-                kind === "error" ? "text-destructive" : "text-muted-foreground",
-              )}
-              disabled={!hasDetail}
-            >
-              <div className="flex items-start gap-1.5">
-                {hasDetail && (
-                  <ChevronRight
-                    className={cn(
-                      "h-3 w-3 shrink-0 mt-0.5 text-faint-foreground transition-transform",
-                      expanded && "rotate-90",
-                    )}
-                  />
-                )}
-                <span
-                  className={cn(
-                    "truncate",
-                    traceEventSummaryIsMono(kind) && summary && "font-mono text-micro",
-                    !summary && "text-muted-foreground",
-                  )}
-                >
-                  {summary || t(($) => $.transcript.no_output)}
-                </span>
-              </div>
-            </CollapsibleTrigger>
-          )}
-
-          {/* Seq number / index */}
-          <span className="shrink-0 text-micro text-muted-foreground tabular-nums mt-1">
-            #{item.seq}
-          </span>
-
-          {/* Timestamp */}
-          {date && (
-            <span className="shrink-0 text-micro text-muted-foreground tabular-nums mt-1" title={date.toLocaleString()}>
-              {date.toLocaleTimeString(undefined, {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              })}
-            </span>
-          )}
-        </div>
-
-        {/* Expanded params/output for tool kinds — a quiet, borderless surface
-            aligned to the content column. */}
-        {!isProse && hasDetail && (
-          <CollapsibleContent>
-            <div className="px-4 pb-3">
-              <div className="ml-[72px] rounded-md bg-muted/40">
-                {detail.kind === "diff" ? (
-                  <DiffDetailSurface lines={detail.lines} path={detail.path} />
-                ) : detail.kind === "patch" ? (
-                  <PatchDetailSurface files={detail.files} truncated={detail.truncated} />
-                ) : detail.kind === "file" ? (
-                  <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />
-                ) : (
-                  <ToolDetailSurface
-                    text={
-                      detail.text.length > 4000
-                        ? redactSecrets(detail.text.slice(0, 4000)) + "\n... (truncated)"
-                        : redactSecrets(detail.text)
-                    }
-                  />
-                )}
-              </div>
-            </div>
-          </CollapsibleContent>
-        )}
-      </Collapsible>
-    </div>
-  );
-};
-
-// ─── Tool detail surface ────────────────────────────────────────────────────
-
-/**
- * Long content fades out behind a "show all" affordance instead of trapping a
- * nested scrollbar inside the virtualized list.
- */
-type HighlightedSides = Record<"add" | "remove" | "context", string[] | null> | null;
-
-/**
- * Diff rows. Highlighting is looked up per side, since each side was
- * highlighted as its own block; a side that failed to highlight falls back to
- * plain text for that side only.
- */
-function renderDiffRows(lines: TraceDiffLine[], highlighted: HighlightedSides) {
-  const cursor: Record<"add" | "remove" | "context", number> = { add: 0, remove: 0, context: 0 };
-
-  return lines.map((line, index) => {
-    if (line.kind === "gap") {
-      return (
-        // Transcript events are immutable once persisted, so index is stable.
-        <div key={index} className="select-none text-faint-foreground" aria-hidden>
-          {"  ⋯"}
-        </div>
-      );
-    }
-
-    const kind = line.kind;
-    const html = highlighted?.[kind]?.[cursor[kind]];
-    cursor[kind] += 1;
-
-    return (
-      <div
-        key={index}
+      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+      <span
+        aria-hidden
         className={cn(
-          "-mx-1 px-1",
-          kind === "add" && "bg-success/10",
-          kind === "remove" && "bg-destructive/10",
-          // Only tint the gutter for changed rows; the code itself keeps its
-          // syntax colours so a diff reads like the file it came from.
-          !html && kind === "add" && "text-success",
-          !html && kind === "remove" && "text-destructive",
-          !html && kind === "context" && "text-muted-foreground",
+          "mt-0.5 w-0.5 self-stretch rounded-full",
+          selected ? "bg-brand" : row.kind === "error" ? "bg-destructive" : "bg-border",
         )}
-      >
+      />
+      <StepIcon
+        step={row}
+        className={cn(
+          "mt-1 h-3 w-3 shrink-0",
+          row.kind === "error" ? "text-destructive" : "text-muted-foreground",
+        )}
+      />
+      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
         <span
-          aria-hidden
           className={cn(
-            "select-none",
-            kind === "add" && "text-success",
-            kind === "remove" && "text-destructive",
+            "shrink-0 text-caption font-medium",
+            row.kind === "error" ? "text-destructive" : "text-foreground",
           )}
         >
-          {kind === "add" ? "+" : kind === "remove" ? "-" : " "}
-        </span>{" "}
-        {html === undefined ? (
-          redactSecrets(line.text)
-        ) : (
-          // lowlight output only: text is escaped by the hast serializer and
-          // the sole elements are its own `hljs-*` spans.
-          <span className="hljs" dangerouslySetInnerHTML={{ __html: html }} />
-        )}
-      </div>
-    );
-  });
-}
-
-/**
- * A whole-file write has no before side, so it reads as plain content with a
- * line count rather than as an all-additions diff — the `+` gutter would carry
- * no information here.
- */
-function FileWriteSurface({
-  text,
-  lineCount,
-  path,
-}: {
-  text: string;
-  lineCount: number;
-  path: string;
-}) {
-  return (
-    <div>
-      <div className="px-3 pt-2 font-mono text-micro text-success">+{lineCount}</div>
-      <ToolDetailSurface text={redactSecrets(text)} language={languageForPath(path)} />
-    </div>
-  );
-}
-
-/**
- * A multi-file patch: one section per file, each reusing the single-file
- * surfaces. Codex's `patch_apply` routinely touches several files in one call,
- * so collapsing them into a single body would lose which change belongs where.
- */
-function PatchDetailSurface({
-  files,
-  truncated,
-}: {
-  files: TracePatchFile[];
-  truncated: boolean;
-}) {
-  const { t } = useT("agents");
-  return (
-    <div className="divide-y divide-border/40">
-      {files.map((file, index) => (
-        // Transcript events are immutable once persisted, so index is stable.
-        <div key={`${file.path}:${index}`}>
-          <div className="flex items-center gap-2 px-3 pt-2 font-mono text-micro">
-            {file.changeKind && (
-              <span
-                className={cn(
-                  "shrink-0 uppercase",
-                  file.changeKind === "add" && "text-success",
-                  file.changeKind === "delete" && "text-destructive",
-                  file.changeKind === "update" && "text-muted-foreground",
-                )}
-              >
-                {file.changeKind}
-              </span>
-            )}
-            <span className="truncate text-muted-foreground">{file.path}</span>
-            {file.movePath && (
-              <>
-                <span className="shrink-0 text-faint-foreground" aria-hidden>
-                  →
-                </span>
-                <span className="truncate text-muted-foreground">{file.movePath}</span>
-              </>
-            )}
-          </div>
-          {file.body.kind === "diff" ? (
-            <DiffDetailSurface lines={file.body.lines} path={file.path} />
-          ) : file.body.kind === "file" ? (
-            <FileWriteSurface
-              text={file.body.text}
-              lineCount={file.body.lineCount}
-              path={file.path}
-            />
-          ) : (
-            <div className="px-3 pb-2 pt-1 font-mono text-micro text-muted-foreground">
-              {file.truncated
-                ? t(($) => $.transcript.patch_body_truncated)
-                : t(($) => $.transcript.patch_no_content)}
-            </div>
+          {label}
+        </span>
+        <span
+          className={cn(
+            "truncate text-micro text-muted-foreground",
+            call && "font-mono",
           )}
-        </div>
-      ))}
-      {truncated && (
-        <div className="px-3 py-2 font-mono text-micro text-muted-foreground">
-          {t(($) => $.transcript.patch_truncated)}
+        >
+          {summary}
+        </span>
+      </span>
+      <DurationCell ms={call?.durationMs} pending={pending} />
+    </button>
+  );
+}
+
+/** Consecutive same-tool calls, folded to one line until asked. */
+function GroupRow({
+  row,
+  runStartMs,
+  selectedSeq,
+  expanded,
+  onToggleGroup,
+  onSelect,
+}: TranscriptRowProps & { row: TraceGroupRow }) {
+  const { t } = useT("agents");
+  const summaryLabels = useMemo<TraceSummaryLabels>(
+    () => ({
+      morePaths: (path, extraCount) =>
+        t(($) => $.transcript.patch_summary_more, { path, extra: extraCount }),
+    }),
+    [t],
+  );
+
+  return (
+    <div className={cn(selectedSeq !== null && row.steps.some((s) => s.seq === selectedSeq) && "bg-brand/5")}>
+      <button
+        type="button"
+        onClick={() => onToggleGroup(row.seq)}
+        aria-expanded={expanded}
+        className="group flex w-full items-start gap-2 px-4 py-1.5 text-left transition-colors hover:bg-accent/40"
+      >
+        <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+        <span aria-hidden className="mt-0.5 w-0.5 self-stretch rounded-full bg-border" />
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "mt-1 h-3 w-3 shrink-0 text-faint-foreground transition-transform",
+            expanded && "rotate-90",
+          )}
+        />
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+          <span className="shrink-0 text-caption font-medium">{row.tool}</span>
+          {/* Name the first thing it touched, not just how many: "Read · 4
+              calls" hides the one detail that makes a folded group scannable. */}
+          <span className="truncate font-mono text-micro text-muted-foreground">
+            {callSummary(row.steps[0]!, summaryLabels)}
+          </span>
+          <span className="shrink-0 text-micro text-faint-foreground">
+            {t(($) => $.transcript.group_calls, { count: row.steps.length })}
+          </span>
+        </span>
+        <DurationCell ms={row.durationMs} />
+      </button>
+      {expanded && (
+        <div className="ml-[4.4rem] border-l pl-3">
+          {row.steps.map((step) => (
+            <button
+              key={step.seq}
+              type="button"
+              onClick={() => onSelect(step.seq)}
+              className={cn(
+                "flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-micro transition-colors",
+                selectedSeq === step.seq ? "bg-brand/10" : "hover:bg-accent/40",
+              )}
+            >
+              <span className="truncate font-mono text-muted-foreground">
+                {callSummary(step, summaryLabels) || step.tool}
+              </span>
+              <span className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground">
+                {step.durationMs === undefined ? "" : formatStepDuration(step.durationMs)}
+              </span>
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -1520,104 +1477,192 @@ function PatchDetailSurface({
 }
 
 /**
- * A file change reads as a diff rather than two escaped string literals. Same
- * fade/"show all" shell as the text surface so both bodies behave alike inside
- * the virtualized list.
+ * The one line a call is worth in the list: what it was asked to do.
+ *
+ * Deliberately the call's argument, never the result — the result row is where
+ * base64 screenshots and 8KB command dumps used to land in the middle of the
+ * list. Only a call we never saw falls back to its output.
  */
-function DiffDetailSurface({ lines, path }: { lines: TraceDiffLine[]; path: string }) {
-  const { t } = useT("agents");
-  const [showAll, setShowAll] = useState(false);
-  const isLong = lines.length > 14;
-  const added = lines.filter((l) => l.kind === "add").length;
-  const removed = lines.filter((l) => l.kind === "remove").length;
+function callSummary(step: TraceCallStep, labels: TraceSummaryLabels): string {
+  if (step.call) {
+    const summary = traceToolArgSummary(step.call.input, labels);
+    if (summary) return summary;
+  }
+  if (!step.result) return "";
+  if (readImageResult(step.result.output)) return "";
+  return traceEventSummary({ type: "tool_result", output: step.result.output });
+}
 
-  // Each side is highlighted as one block so multi-line strings and comments
-  // keep their grammar, then split back per line to sit in the diff gutter.
-  // Runs only when the row is expanded, which is where this component mounts.
-  const highlighted = useMemo(() => {
-    const language = languageForPath(path);
-    if (!language) return null;
-    const sides: Record<"add" | "remove" | "context", string[] | null> = {
-      add: null,
-      remove: null,
-      context: null,
-    };
-    for (const kind of ["add", "remove", "context"] as const) {
-      const side = lines.filter((l) => l.kind === kind);
-      if (side.length > 0) {
-        sides[kind] = highlightToLines(side.map((l) => l.text).join("\n"), language);
-      }
+function firstLineOf(value: string | undefined): string {
+  return value?.split("\n").find((line) => line.trim().length > 0) ?? "";
+}
+
+// ─── Inspector ──────────────────────────────────────────────────────────────
+
+/**
+ * The evidence for one step, opened on demand.
+ *
+ * Input and result are stacked rather than tabbed: at this width both fit, and
+ * a tab would hide half the evidence behind a click to save nothing.
+ */
+function StepInspector({
+  step,
+  runStartMs,
+  onClose,
+}: {
+  step: TraceStep;
+  runStartMs?: number;
+  onClose: () => void;
+}) {
+  const { t } = useT("agents");
+  const [copied, setCopied] = useState(false);
+
+  const at = timeMs(step.startedAt);
+  const offset = at !== undefined && runStartMs !== undefined ? formatOffset(at - runStartMs) : null;
+
+  const call = isCallStep(step) ? step : null;
+  const message = call ? null : (step as TraceMessageStep);
+
+  const handleCopy = useCallback(() => {
+    const parts: string[] = [];
+    if (call) {
+      if (call.call) parts.push(traceEventCopyText(call.call));
+      if (call.result) parts.push(traceEventCopyText(call.result));
+    } else if (message) {
+      parts.push(traceEventCopyText(message.item));
     }
-    return sides;
-  }, [lines, path]);
+    void copyText(redactSecrets(parts.join("\n\n"))).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [call, message]);
+
+  const title =
+    call
+      ? call.tool || t(($) => $.transcript.kind_tool)
+      : step.kind === "thinking"
+        ? t(($) => $.transcript.kind_thinking)
+        : t(($) => $.transcript.kind_error);
 
   return (
-    <div className="relative">
-      <div className="flex items-center gap-2 px-3 pt-2 font-mono text-micro text-muted-foreground">
-        {added > 0 && <span className="text-success">+{added}</span>}
-        {removed > 0 && <span className="text-destructive">-{removed}</span>}
+    <aside className="flex w-[26rem] shrink-0 flex-col border-l bg-muted/25">
+      <div className="flex items-center gap-2 border-b px-3 py-2">
+        <StepIcon step={step} className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="shrink-0 text-label font-semibold">{title}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-micro text-muted-foreground">
+          {offset && <span className="font-mono tabular-nums">{offset}</span>}
+          {call?.durationMs !== undefined && (
+            <>
+              <FactDot />
+              <span className="font-mono tabular-nums">{formatStepDuration(call.durationMs)}</span>
+            </>
+          )}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={handleCopy}
+          aria-label={t(($) => $.transcript.copy_step)}
+          title={t(($) => $.transcript.copy_step)}
+          className="shrink-0 text-muted-foreground"
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onClose}
+          aria-label={t(($) => $.transcript.close_step)}
+          className="shrink-0 text-muted-foreground"
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
       </div>
-      <pre
-        className={cn(
-          "transcript-code px-3 pb-3 pt-1 font-mono text-micro whitespace-pre-wrap break-all",
-          isLong && !showAll && "max-h-52 overflow-hidden",
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {call ? (
+          <>
+            {call.call && (
+              <InspectorSection label={t(($) => $.transcript.step_input)}>
+                <StepBody item={call.call} />
+              </InspectorSection>
+            )}
+            {call.result && (
+              <InspectorSection label={t(($) => $.transcript.step_result)}>
+                <StepBody item={call.result} />
+              </InspectorSection>
+            )}
+          </>
+        ) : (
+          <InspectorSection label={title}>
+            <ToolDetailSurface text={redactSecrets(message?.item.content ?? "")} />
+          </InspectorSection>
         )}
-      >
-        {renderDiffRows(lines, highlighted)}
-      </pre>
-      {isLong && !showAll && (
-        <div className="absolute inset-x-0 bottom-0 flex h-12 items-end justify-center rounded-b-md bg-gradient-to-b from-transparent to-background">
-          <button
-            type="button"
-            onClick={() => setShowAll(true)}
-            // Opaque: the gradient alone does not clear the clipped line, so a
-            // transparent label lands on top of it and both become unreadable.
-            className="mb-1.5 rounded border bg-background px-2 py-0.5 text-micro text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
-          >
-            {t(($) => $.transcript.show_all)}
-          </button>
-        </div>
-      )}
-    </div>
+      </div>
+    </aside>
   );
 }
 
-function ToolDetailSurface({ text, language }: { text: string; language?: string }) {
-  const { t } = useT("agents");
-  const [showAll, setShowAll] = useState(false);
-  const isLong = text.length > 1600 || text.split("\n").length > 14;
-  // Only file bodies carry a language; command output and JSON stay plain.
-  const html = useMemo(() => (language ? highlightBlock(text, language) : null), [text, language]);
-
+function InspectorSection({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="relative">
-      <pre
-        className={cn(
-          "transcript-code p-3 font-mono text-micro text-muted-foreground whitespace-pre-wrap break-all",
-          isLong && !showAll && "max-h-52 overflow-hidden",
-        )}
-      >
-        {html === null ? (
-          text
-        ) : (
-          // lowlight output only: the hast serializer escapes text and the sole
-          // elements are its own `hljs-*` spans.
-          <code className="hljs" dangerouslySetInnerHTML={{ __html: html }} />
-        )}
-      </pre>
-      {isLong && !showAll && (
-        <div className="absolute inset-x-0 bottom-0 flex h-12 items-end justify-center rounded-b-md bg-gradient-to-b from-transparent to-background">
-          <button
-            type="button"
-            onClick={() => setShowAll(true)}
-            // Opaque: the gradient alone does not clear the clipped line, so a
-            // transparent label lands on top of it and both become unreadable.
-            className="mb-1.5 rounded border bg-background px-2 py-0.5 text-micro text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
-          >
-            {t(($) => $.transcript.show_all)}
-          </button>
-        </div>
-      )}
-    </div>
+    <section className="border-b last:border-b-0">
+      <h3 className="px-3 pt-2 text-micro font-medium uppercase tracking-wide text-faint-foreground">
+        {label}
+      </h3>
+      <div className="px-1 pb-2">{children}</div>
+    </section>
   );
+}
+
+/** One payload, rendered as what it is. */
+function StepBody({ item }: { item: TimelineItem }) {
+  const { t } = useT("agents");
+  const detail = useMemo(() => traceEventDetail(item), [item]);
+  const image = useMemo(() => readImageResult(item.output), [item.output]);
+
+  // A screenshot is a picture, not a 200KB base64 string in a <pre>.
+  if (image) {
+    return (
+      <figure className="px-2 py-1">
+        <img
+          src={`data:${image.mediaType};base64,${image.base64}`}
+          alt={t(($) => $.transcript.image_result)}
+          className="max-h-80 w-full rounded-md border object-contain"
+        />
+        <figcaption className="pt-1 text-micro text-faint-foreground">
+          {t(($) => $.transcript.image_result)} · {formatBytes(base64ByteLength(image.base64))}
+        </figcaption>
+      </figure>
+    );
+  }
+
+  switch (detail.kind) {
+    case "diff":
+      return <DiffDetailSurface lines={detail.lines} path={detail.path} />;
+    case "patch":
+      return <PatchDetailSurface files={detail.files} truncated={detail.truncated} />;
+    case "file":
+      return (
+        <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />
+      );
+    default: {
+      const text = detail.text;
+      const clipped =
+        text.length > 8000 ? `${redactSecrets(text.slice(0, 8000))}\n... (truncated)` : redactSecrets(text);
+      const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
+      return <ToolDetailSurface text={clipped} language={path ? languageForPath(path) : undefined} />;
+    }
+  }
+}
+
+function readPathFromInput(input: Record<string, unknown> | undefined): string | undefined {
+  if (!input) return undefined;
+  const path = input.file_path ?? input.path;
+  return typeof path === "string" ? path : undefined;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

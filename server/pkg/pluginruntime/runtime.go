@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	CompilerVersion = "plugin-compiler-v1"
+	CompilerVersion = "plugin-compiler-v2"
 	ComposerVersion = "plugin-composer-v1"
 	SchemaVersion   = 1
 )
@@ -19,30 +19,82 @@ const (
 // CompiledEntry is one contribution made available at a workspace or agent
 // scope. Execution manifests copy these entries verbatim at enqueue time.
 type CompiledEntry struct {
-	PluginID               string   `json:"plugin_id"`
-	PluginKey              string   `json:"plugin_key"`
-	InstallationID         string   `json:"installation_id"`
-	ReleaseID              string   `json:"release_id"`
-	ReleaseVersion         string   `json:"release_version"`
-	ContributionID         string   `json:"contribution_id"`
-	ContributionKey        string   `json:"contribution_key"`
-	ContributionType       string   `json:"contribution_type"`
-	DisplayName            string   `json:"display_name"`
-	Description            string   `json:"description,omitempty"`
-	SourceKind             string   `json:"source_kind"`
-	ArtifactFileID         string   `json:"artifact_file_id"`
-	ArtifactRef            string   `json:"artifact_ref"`
-	ArtifactDigest         string   `json:"artifact_digest"`
-	EntryPath              string   `json:"entry_path"`
-	EntryDigest            string   `json:"entry_digest"`
-	RequiredDaemonFeatures []string `json:"required_daemon_features"`
-	Ordinal                int32    `json:"ordinal"`
-	ScopeType              string   `json:"scope_type"`
-	ScopeID                string   `json:"scope_id"`
-	ExcludedAgentIDs       []string `json:"excluded_agent_ids,omitempty"`
-	SkillBundleHash        string   `json:"skill_bundle_hash"`
-	SkillSizeBytes         int64    `json:"skill_size_bytes"`
-	SkillFileCount         int      `json:"skill_file_count"`
+	PluginID               string          `json:"plugin_id"`
+	PluginKey              string          `json:"plugin_key"`
+	InstallationID         string          `json:"installation_id"`
+	ReleaseID              string          `json:"release_id"`
+	ReleaseVersion         string          `json:"release_version"`
+	ContributionID         string          `json:"contribution_id"`
+	ContributionKey        string          `json:"contribution_key"`
+	ContributionType       string          `json:"contribution_type"`
+	DisplayName            string          `json:"display_name"`
+	Description            string          `json:"description,omitempty"`
+	SourceKind             string          `json:"source_kind"`
+	ArtifactFileID         string          `json:"artifact_file_id"`
+	ArtifactRef            string          `json:"artifact_ref"`
+	ArtifactDigest         string          `json:"artifact_digest"`
+	EntryPath              string          `json:"entry_path"`
+	EntryDigest            string          `json:"entry_digest"`
+	RequiredDaemonFeatures []string        `json:"required_daemon_features"`
+	Ordinal                int32           `json:"ordinal"`
+	ScopeType              string          `json:"scope_type"`
+	ScopeID                string          `json:"scope_id"`
+	ExcludedAgentIDs       []string        `json:"excluded_agent_ids,omitempty"`
+	SkillBundleHash        string          `json:"skill_bundle_hash,omitempty"`
+	SkillSizeBytes         int64           `json:"skill_size_bytes,omitempty"`
+	SkillFileCount         int             `json:"skill_file_count,omitempty"`
+	SkillFiles             []SkillFile     `json:"skill_files,omitempty"`
+	ConfigID               string          `json:"config_id,omitempty"`
+	ConfigRevision         int64           `json:"config_revision,omitempty"`
+	Endpoint               string          `json:"endpoint,omitempty"`
+	PublicConfig           json.RawMessage `json:"public_config,omitempty"`
+	SecretRef              string          `json:"secret_ref,omitempty"`
+	AuthType               string          `json:"auth_type,omitempty"`
+	AuthHeader             string          `json:"auth_header,omitempty"`
+	ApprovedTools          []RemoteMCPTool `json:"approved_tools,omitempty"`
+	ToolSchemaDigest       string          `json:"tool_schema_digest,omitempty"`
+	FailurePolicy          string          `json:"failure_policy,omitempty"`
+	Transport              string          `json:"transport,omitempty"`
+	ProtocolVersions       []string        `json:"protocol_versions,omitempty"`
+	EndpointAllowedHosts   []string        `json:"endpoint_allowed_hosts,omitempty"`
+}
+
+// SkillFile pins one companion file from an agent.skill.v1 contribution.
+// Path is relative to the contribution's skills/<key>/ root; SKILL.md remains
+// pinned separately by ArtifactFileID, EntryPath, and EntryDigest.
+type SkillFile struct {
+	ArtifactFileID string `json:"artifact_file_id"`
+	Path           string `json:"path"`
+	Digest         string `json:"digest"`
+	SizeBytes      int64  `json:"size_bytes"`
+}
+
+type RemoteMCPTool struct {
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  json.RawMessage `json:"input_schema"`
+	SchemaDigest string          `json:"schema_digest"`
+	Risk         string          `json:"risk,omitempty"`
+}
+
+// RemoteMCPConnection is claim-time, task-scoped connection metadata resolved
+// from a pinned entry. Credentials are intentionally absent from this wire
+// type and are resolved just-in-time by the daemon broker.
+type RemoteMCPConnection struct {
+	InstallationID       string          `json:"installation_id"`
+	ContributionID       string          `json:"contribution_id"`
+	ContributionKey      string          `json:"contribution_key"`
+	ConfigID             string          `json:"config_id"`
+	ConfigRevision       int64           `json:"config_revision"`
+	Endpoint             string          `json:"endpoint"`
+	PublicConfig         json.RawMessage `json:"public_config,omitempty"`
+	Transport            string          `json:"transport"`
+	ProtocolVersions     []string        `json:"protocol_versions"`
+	EndpointAllowedHosts []string        `json:"endpoint_allowed_hosts,omitempty"`
+	CredentialHeader     string          `json:"credential_header,omitempty"`
+	ApprovedTools        []RemoteMCPTool `json:"approved_tools"`
+	ToolSchemaDigest     string          `json:"tool_schema_digest"`
+	FailurePolicy        string          `json:"failure_policy"`
 }
 
 type SnapshotPayload struct {
@@ -56,6 +108,17 @@ func Canonicalize(entries []CompiledEntry) {
 	for i := range entries {
 		sort.Strings(entries[i].ExcludedAgentIDs)
 		sort.Strings(entries[i].RequiredDaemonFeatures)
+		sort.Strings(entries[i].ProtocolVersions)
+		sort.Strings(entries[i].EndpointAllowedHosts)
+		sort.Slice(entries[i].SkillFiles, func(left, right int) bool {
+			if entries[i].SkillFiles[left].Path != entries[i].SkillFiles[right].Path {
+				return entries[i].SkillFiles[left].Path < entries[i].SkillFiles[right].Path
+			}
+			return entries[i].SkillFiles[left].ArtifactFileID < entries[i].SkillFiles[right].ArtifactFileID
+		})
+		sort.Slice(entries[i].ApprovedTools, func(left, right int) bool {
+			return entries[i].ApprovedTools[left].Name < entries[i].ApprovedTools[right].Name
+		})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		left, right := entries[i], entries[j]

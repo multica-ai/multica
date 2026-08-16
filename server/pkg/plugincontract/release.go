@@ -88,7 +88,7 @@ func ValidateReleaseCandidate(candidate ReleaseCandidate, verifier ReleaseVerifi
 	for _, file := range artifact.Files {
 		files[file.Path] = file
 	}
-	contributions := make([]ValidatedContribution, 0, len(artifact.Manifest.Contributes.AgentSkills))
+	contributions := make([]ValidatedContribution, 0, len(artifact.Manifest.Contributes.AgentSkills)+len(artifact.Manifest.Contributes.RemoteMCP))
 	for ordinal, skill := range artifact.Manifest.Contributes.AgentSkills {
 		entry := files[skill.Entry]
 		contributions = append(contributions, ValidatedContribution{
@@ -100,8 +100,23 @@ func ValidateReleaseCandidate(candidate ReleaseCandidate, verifier ReleaseVerifi
 			EntryPath:              skill.Entry,
 			EntryDigest:            entry.Digest,
 			ArtifactDigest:         artifact.ArtifactDigest,
-			RequiredDaemonFeatures: append([]string(nil), artifact.Manifest.Compatibility.RequiredDaemonFeatures...),
+			RequiredDaemonFeatures: []string{DaemonFeatureExecutionManifestV1, DaemonFeatureAgentSkillV1},
 			Ordinal:                int32(ordinal),
+		})
+	}
+	manifestEntry := files[ManifestFilename]
+	for index, remote := range artifact.Manifest.Contributes.RemoteMCP {
+		contributions = append(contributions, ValidatedContribution{
+			Key:                    remote.Key,
+			Type:                   ContributionRemoteMCPV1,
+			SchemaVersion:          1,
+			DisplayName:            remote.Name,
+			Description:            remote.Description,
+			EntryPath:              ManifestFilename,
+			EntryDigest:            manifestEntry.Digest,
+			ArtifactDigest:         artifact.ArtifactDigest,
+			RequiredDaemonFeatures: []string{DaemonFeatureExecutionManifestV1, DaemonFeatureRemoteMCPV1},
+			Ordinal:                int32(len(artifact.Manifest.Contributes.AgentSkills) + index),
 		})
 	}
 

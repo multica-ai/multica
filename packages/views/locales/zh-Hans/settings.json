@@ -135,6 +135,7 @@
     "fixed": {
       "title": "固定的系统快捷键",
       "description": "窗口和无障碍快捷键保持固定，确保始终可靠。缩放和标签页操作仅适用于桌面端。",
+      "open_settings": "打开设置",
       "close_tab": "关闭当前标签页",
       "zoom_in": "放大",
       "zoom_out": "缩小",
@@ -273,6 +274,66 @@
       "host_api": "Host API",
       "publisher": "发布者与签名身份",
       "none": "无"
+    },
+    "remote_mcp": {
+      "title": "Remote MCP 连接",
+      "endpoint": "HTTPS 端点",
+      "endpoint_placeholder": "https://mcp.example.com/mcp",
+      "auth": "身份验证",
+      "auth_types": {
+        "none": "无",
+        "oauth": "OAuth（推荐）",
+        "bearer": "Bearer 令牌",
+        "header": "自定义请求头"
+      },
+      "header_name": "请求头名称",
+      "credential": "凭证（加密存储）",
+      "connect": "连接",
+      "connected": "已连接",
+      "ready_to_connect": "可以连接",
+      "complete_before_enabling": "请先连接 MCP 并批准至少一个工具，再启用作用范围。",
+      "advanced": "高级配置",
+      "oauth_scope": "OAuth scopes（留空自动获取）",
+      "oauth_client_id": "OAuth client ID（留空自动注册）",
+      "oauth_client_secret": "OAuth client secret",
+      "oauth_authorization_endpoint": "Authorization endpoint 覆盖值",
+      "oauth_token_endpoint": "Token endpoint 覆盖值",
+      "oauth_token_auth_method": "Token endpoint 认证方式",
+      "oauth_token_auth_methods": {
+        "none": "公开客户端（PKCE）",
+        "client_secret_basic": "Client secret（HTTP Basic）",
+        "client_secret_post": "Client secret（请求体）"
+      },
+      "public_config": "公开配置（JSON 对象）",
+      "invalid_public_config": "公开配置必须是有效的 JSON 对象",
+      "failure_policy": "失败策略",
+      "failure_policies": {
+        "required": "必需 — 停止任务",
+        "optional": "可选 — 不使用工具并继续"
+      },
+      "configure_and_discover": "保存并发现工具",
+      "test": "测试连接",
+      "approve": "批准所选工具",
+      "revoke": "吊销凭证",
+      "credential_states": {
+        "configured": "已配置凭证",
+        "revoked": "凭证已吊销",
+        "missing": "缺少凭证",
+        "not_required": "无需凭证"
+      },
+      "reviewed": "工具已批准",
+      "pending_review": "需要批准",
+      "approved_tools": "已批准的工具",
+      "no_tools": "服务器未公布任何工具。",
+      "discovery": "已发现的工具 — 请明确审核访问权限",
+      "read": "读取",
+      "write": "写入",
+      "configured_success": "连接已保存；请审核已发现的工具",
+      "oauth_connected_success": "OAuth 连接已完成；请审核已发现的工具",
+      "oauth_connect_failed": "OAuth 连接未能完成，请重试。",
+      "test_success": "连接测试成功",
+      "approved_success": "工具访问权限已批准",
+      "revoked_success": "凭证已吊销，Plugin 已禁用"
     }
   },
   "properties": {
