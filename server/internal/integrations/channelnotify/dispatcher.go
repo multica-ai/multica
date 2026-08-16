@@ -158,7 +158,8 @@ func (d *Dispatcher) deliver(notification Notification) {
 				"inbox_item_id", logUUID(notification.InboxItemID.Bytes),
 				"issue_id", logUUID(notification.IssueID.Bytes),
 				"installation_id", logUUID(target.InstallationID.Bytes),
-				"error", err)
+				"delivery_status", "failed",
+				"failure_category", "sender_error")
 		}
 		cancel()
 	}

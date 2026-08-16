@@ -1,10 +1,12 @@
 package channelnotify
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -168,6 +170,47 @@ func TestDispatcherContinuesAfterOneChannelFails(t *testing.T) {
 	case <-slackDelivered:
 	default:
 		t.Fatal("slack delivery did not run after Feishu failure")
+	}
+}
+
+func TestDispatcherDoesNotLogSenderErrorDetails(t *testing.T) {
+	const (
+		openIDMarker = "ou_sensitive_recipient"
+		titleMarker  = "sensitive Inbox title"
+		bodyMarker   = "sensitive Inbox body"
+		secretMarker = "plaintext-app-secret"
+	)
+
+	resolver := &dispatcherResolverStub{}
+	registry := NewRegistry()
+	registry.Register(channel.TypeFeishu, senderFunc(func(context.Context, Target, Notification) error {
+		return errors.New(strings.Join([]string{openIDMarker, titleMarker, bodyMarker, secretMarker}, " "))
+	}))
+	var logs bytes.Buffer
+	dispatcher := newDispatcherForTest(resolver, registry, func(config *Config) {
+		config.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	})
+	bus := events.New()
+	dispatcher.Register(bus)
+	bus.Publish(dispatcherInboxEvent("11111111-1111-4111-8111-111111111120"))
+	closeDispatcher(t, dispatcher)
+
+	output := logs.String()
+	for _, marker := range []string{openIDMarker, titleMarker, bodyMarker, secretMarker} {
+		if strings.Contains(output, marker) {
+			t.Errorf("sender failure log contains sensitive marker %q: %s", marker, output)
+		}
+	}
+	for _, field := range []string{
+		"channel_type=feishu",
+		"inbox_item_id=11111111-1111-4111-8111-111111111120",
+		"issue_id=44444444-4444-4444-8444-444444444444",
+		"delivery_status=failed",
+		"failure_category=sender_error",
+	} {
+		if !strings.Contains(output, field) {
+			t.Errorf("sender failure log missing %q: %s", field, output)
+		}
 	}
 }
 
