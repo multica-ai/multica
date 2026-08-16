@@ -49,9 +49,10 @@ var zcodeCancelWaitDelay = 10 * time.Second
 // driving ZCode CLI 0.16.3 (desktop 3.7.7):
 //
 //   - `initialize` advertises loadSession plus sessionCapabilities
-//     list/resume/fork; the npm 0.1.0 release predates the ZCode ≥0.16
-//     runtime-preferences handshake fix (william0wang/zcode-acp#38), so a
-//     release including it is required for session creation to work at all.
+//     list/resume/fork. Session creation requires the bridge's runtime-
+//     preferences handshake fix (william0wang/zcode-acp#38), which shipped
+//     in npm 0.2.0 (2026-08-16) — so `zcode-acp-server >= 0.2.0` is the
+//     effective version floor.
 //   - `session/new` returns a session in the bridge's default mode, yolo —
 //     the unattended default this daemon wants, so no mode call is needed.
 //   - `session/resume` accepts {cwd, sessionId, mcpServers} like Kimi and
@@ -283,10 +284,9 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 
 		// bridgeVersion records the agentInfo.version for the known-bad
-		// hint below. Compared eagerly but only REPORTED on failure: builds
-		// from the bridge's main still report 0.1.0 (package.json is only
-		// bumped at release) while already carrying the fix, so an upfront
-		// warning would misfire on exactly the builds that work.
+		// hint below. The hint is reported only on failure (0.2.0 is the
+		// first release carrying the runtime-preferences fix, so an exact
+		// "0.1.0" here means the user installed the stale npm build).
 		bridgeVersion := acpAgentInfoVersion(initResult)
 
 		// Drop MCP entries whose remote transport the runtime didn't
@@ -357,8 +357,8 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				// (william0wang/zcode-acp#38): initialize still succeeds,
 				// then session/new hangs ~15s and fails with a create
 				// timeout. Attach the upgrade hint only when that exact
-				// version reported itself, so main-built 0.1.0 forks are
-				// not falsely flagged.
+				// version reported itself; anything newer (0.2.0+,
+				// a main-built fork, empty) is not falsely flagged.
 				if bridgeVersion == "0.1.0" {
 					createErr += " (bridge 0.1.0 from npm cannot create sessions on ZCode CLI >=0.16; upgrade zcode-acp-server — fixed by william0wang/zcode-acp#38)"
 				}
