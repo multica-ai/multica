@@ -888,6 +888,15 @@ func TestReuseSkillRefreshIsCanonicalAcrossProviders(t *testing.T) {
 	}
 }
 
+func TestMcodeUsesNativeProjectSkillRoot(t *testing.T) {
+	t.Parallel()
+	workDir := t.TempDir()
+	want := filepath.Join(workDir, ".minimax", "skills")
+	if got := skillsDirPath(workDir, "mcode"); got != want {
+		t.Fatalf("skillsDirPath(mcode) = %q, want %q", got, want)
+	}
+}
+
 func TestCleanupPreservesLogs(t *testing.T) {
 	t.Parallel()
 	workspacesRoot := t.TempDir()

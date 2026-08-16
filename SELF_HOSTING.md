@@ -129,6 +129,7 @@ You also need at least one AI agent CLI installed:
 - [Grok Build CLI](https://docs.x.ai/) (`grok` on PATH)
 - Qwen Code (`qwen` on PATH)
 - [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (`qwenpaw` on PATH; pick its model in QwenPaw's own configuration)
+- [MiniMax Code](https://github.com/MiniMax-AI/minimax-code) (`mcode` 0.1.2+ on PATH; run `mcode login` first)
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh` on PATH with the Multica runtime profile installed; set `DEEPSEEK_API_KEY`)
 
 ### b) One-command setup
