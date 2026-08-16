@@ -6328,6 +6328,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var codexSandboxArgs []string
 	if provider == "codex" {
 		extraArgs := append(append([]string{}, profileFixedArgs...), defaultArgsForProvider(d.cfg, provider)...)
+		agentCustomArgs = agent.EnsureCodexWindowsSandboxCustomArgs(runtime.GOOS, extraArgs, agentCustomArgs)
 		codexSandboxArgs = agent.NormalizeCodexLaunchArgs(extraArgs, agentCustomArgs, effectiveMcpConfig, d.logger)
 	}
 	// Hermes: resolve the overlay source home through one resolver contract —
@@ -6842,14 +6843,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	taskStart := time.Now()
 
-	var customArgs []string
+	customArgs := agentCustomArgs
 	extraArgs := defaultArgsForProvider(d.cfg, provider)
 	if len(profileFixedArgs) > 0 {
 		extraArgs = append(append([]string{}, profileFixedArgs...), extraArgs...)
 	}
 	var mcpConfig json.RawMessage
 	if task.Agent != nil {
-		customArgs = task.Agent.CustomArgs
 		mcpConfig = effectiveMcpConfig
 	}
 	if provider == "hermes" {

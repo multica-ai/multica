@@ -9,6 +9,7 @@ import {
   Terminal,
   Trash2,
 } from "lucide-react";
+import { ensureCodexWindowsSandboxArgs } from "@multica/core/agents";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
@@ -54,17 +55,21 @@ export function CustomArgsTab({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useT("agents");
+  const originalArgs = ensureCodexWindowsSandboxArgs(
+    agent.custom_args ?? [],
+    runtimeDevice,
+  );
   const [entries, setEntries] = useState<ArgEntry[]>(
-    argsToEntries(agent.custom_args ?? []),
+    argsToEntries(originalArgs),
   );
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorValue, setEditorValue] = useState("");
   const [saving, setSaving] = useState(false);
   const editorInputRef = useRef<HTMLInputElement>(null);
 
-  const currentArgs = entriesToArgs(entries);
-  const originalArgs = agent.custom_args ?? [];
-  const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
+  const editedArgs = entriesToArgs(entries);
+  const currentArgs = ensureCodexWindowsSandboxArgs(editedArgs, runtimeDevice);
+  const dirty = JSON.stringify(editedArgs) !== JSON.stringify(originalArgs);
 
   useEffect(() => {
     onDirtyChange?.(dirty);

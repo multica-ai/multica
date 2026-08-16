@@ -77,19 +77,13 @@ func resolveGOOS(goos string) string {
 //     filesystem boundary is therefore the boundary the daemon itself runs
 //     inside (VM, container, or dedicated Unix user), matching macOS/Windows.
 //     See MUL-5578 / #6218, and apps/docs security-model.
-//   - Windows: danger-full-access, as a deliberate compatibility choice.
-//     Codex ships a native Windows sandbox (windows.sandbox = "unelevated" via
-//     a Restricted Token, or "elevated"), but it is still experimental with
-//     known reliability limitations, so the daemon does not enable it by
-//     default. When no native windows.sandbox is configured, Codex cannot
-//     enforce workspace-write on Windows (it downgrades to read-only) and then
-//     rejects non-safe mutation commands "by policy" — e.g. `multica issue
-//     create` fails — because under approval_policy = "never" the request never
-//     reaches the daemon's auto-approver. danger-full-access sidesteps that.
-//     Enabling the native sandbox is tracked as separate follow-up work. See
-//     MUL-4957. A user who has opted into windows.sandbox (via config.toml or a
-//     `-c` custom arg) keeps workspace-write instead of this fallback, and an
-//     undecidable config fails closed; that logic lives in
+//   - Windows: workspace-write with Codex's native sandbox. The production
+//     task launch appends `-c windows.sandbox="unelevated"` as two argv tokens
+//     when neither runtime nor agent arguments already own the setting. An
+//     explicit `unelevated` or `elevated` value is preserved. The
+//     danger-full-access branch below remains a compatibility fallback for
+//     direct or legacy callers that reach this package without the managed
+//     argument; an undecidable config still fails closed. That logic lives in
 //     codexSandboxPolicyForConfig / resolveWindowsSandboxState.
 //   - darwin with a version at or above CodexDarwinNetworkAccessFixedVersion:
 //     workspace-write with network access (upstream bug fixed).
@@ -157,9 +151,9 @@ const (
 // workspace-write, and only a confidently absent sandbox gets the
 // danger-full-access compatibility fallback. See MUL-4957.
 //
-// This is intentionally the branch point for the eventual native-sandbox
-// rollout: flipping the Windows default later means writing windows.sandbox
-// ourselves and defaulting winState to native, not restructuring callers.
+// Production task launch supplies the managed native-sandbox argument before
+// reaching this branch. Keeping the absent-state fallback here preserves
+// compatibility for direct callers and older persisted task payloads.
 func codexSandboxPolicyForConfig(goos, detectedVersion string, winState windowsSandboxConfig) codexSandboxPolicy {
 	if goos == "" {
 		goos = runtime.GOOS

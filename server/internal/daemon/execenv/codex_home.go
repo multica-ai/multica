@@ -275,9 +275,10 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 
 	// Write a daemon-managed sandbox block into config.toml. On macOS we may
 	// need to fall back to danger-full-access because of openai/codex#10390,
-	// and on Windows the daemon defaults to danger-full-access unless the user
-	// opted into a native windows.sandbox; see codex_sandbox.go for the full
-	// rationale. On Windows, resolve the native-sandbox state across the copied
+	// and on Windows normal task launch supplies the native unelevated
+	// windows.sandbox default; direct or legacy callers with no setting retain
+	// the compatibility fallback in codex_sandbox.go. On Windows, resolve the
+	// native-sandbox state across the copied
 	// config and the effective custom args so an explicit user opt-in is honored
 	// and an undecidable config fails closed instead of loosening.
 	configFile := filepath.Join(codexHome, "config.toml")

@@ -17,3 +17,4 @@ export * from "./use-workspace-agent-availability";
 export * from "./mcp-support";
 export * from "./openclaw-runtime-config";
 export * from "./runtime-binding";
+export * from "./codex-windows-sandbox";

@@ -433,6 +433,9 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, _, clientOS := middleware.ClientMetadataFromContext(r.Context())
+	clientOS = strings.ToLower(strings.TrimSpace(clientOS))
+
 	resp := make([]AgentRuntimeResponse, 0, len(req.Runtimes))
 	for _, runtime := range req.Runtimes {
 		provider := normalizeProvider(runtime.Type)
@@ -460,12 +463,16 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// live request — the resource-save gate and the UI — decide from the
 		// same signal the claim path uses, instead of re-deriving it from a
 		// version string (MUL-5707).
-		metadata, _ := json.Marshal(map[string]any{
+		runtimeMetadata := map[string]any{
 			"version":      runtime.Version,
 			"cli_version":  req.CLIVersion,
 			"launched_by":  req.LaunchedBy,
 			"capabilities": requestClientCapabilities(r),
-		})
+		}
+		if clientOS != "" {
+			runtimeMetadata["os"] = clientOS
+		}
+		metadata, _ := json.Marshal(runtimeMetadata)
 
 		var registered db.AgentRuntime
 		var inserted bool
@@ -660,14 +667,18 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				if resolvedCommandName == "" {
 					resolvedCommandName = profile.CommandName
 				}
-				metadata, _ := json.Marshal(map[string]any{
+				runtimeMetadata := map[string]any{
 					"version":                            "",
 					"cli_version":                        req.CLIVersion,
 					"launched_by":                        req.LaunchedBy,
 					"runtime_profile_registration_error": true,
 					"runtime_profile_failure_reason":     reason,
 					"command_name":                       resolvedCommandName,
-				})
+				}
+				if clientOS != "" {
+					runtimeMetadata["os"] = clientOS
+				}
+				metadata, _ := json.Marshal(runtimeMetadata)
 				return db.UpsertAgentRuntimeWithProfileParams{
 					WorkspaceID: wsUUID,
 					DaemonID:    strToText(req.DaemonID),

@@ -45,18 +45,21 @@ const baseAgent: Agent = {
 };
 
 const runtimeDevice = {
+  provider: "codex",
   launch_header: "codex app-server",
+  metadata: { os: "linux" },
 } as RuntimeDevice;
 
 function renderTab(
   overrides: Partial<Agent> = {},
   onSave = vi.fn().mockResolvedValue(undefined),
+  selectedRuntime = runtimeDevice,
 ) {
   const result = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <CustomArgsTab
         agent={{ ...baseAgent, ...overrides }}
-        runtimeDevice={runtimeDevice}
+        runtimeDevice={selectedRuntime}
         onSave={onSave}
       />
     </I18nProvider>,
@@ -120,5 +123,50 @@ describe("CustomArgsTab", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     expect(onSave).toHaveBeenCalledWith({ custom_args: ["value with spaces"] });
+  });
+
+  it("previews and saves the Windows Codex sandbox as two argv tokens", async () => {
+    const user = userEvent.setup();
+    const windowsRuntime = {
+      ...runtimeDevice,
+      metadata: { os: "windows" },
+    } as RuntimeDevice;
+    const { onSave } = renderTab(
+      { custom_args: [] },
+      vi.fn().mockResolvedValue(undefined),
+      windowsRuntime,
+    );
+
+    expect(screen.getByText("-c")).toBeInTheDocument();
+    expect(
+      screen.getByText('windows.sandbox="unelevated"'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'codex app-server -c windows.sandbox="unelevated"',
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /add argument/i }));
+    await user.type(
+      screen.getByRole("textbox", { name: /new argument/i }),
+      "value with spaces",
+    );
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+
+    expect(
+      screen.getByText(
+        'codex app-server -c windows.sandbox="unelevated" "value with spaces"',
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: [
+        "-c",
+        'windows.sandbox="unelevated"',
+        "value with spaces",
+      ],
+    });
   });
 });

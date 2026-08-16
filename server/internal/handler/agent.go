@@ -1203,6 +1203,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ce = []byte("{}")
 	}
 
+	req.CustomArgs = customArgsForRuntime(runtime, req.CustomArgs)
 	ca, _ := json.Marshal(req.CustomArgs)
 	if req.CustomArgs == nil {
 		ca = []byte("[]")
@@ -1622,10 +1623,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		rc, _ := json.Marshal(req.RuntimeConfig)
 		params.RuntimeConfig = rc
 	}
-	if req.CustomArgs != nil {
-		ca, _ := json.Marshal(*req.CustomArgs)
-		params.CustomArgs = ca
-	}
+
 	rawMcpConfig, hasMcpConfig := rawFields["mcp_config"]
 	shouldClearMcpConfig := hasMcpConfig && bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null"))
 	if hasMcpConfig && !shouldClearMcpConfig {
@@ -1638,6 +1636,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// runtime to validate a thinking_level change. Resolve once and reuse.
 	targetRuntimeID := existing.RuntimeID
 	targetProvider := ""
+	var targetRuntime *db.AgentRuntime
 	if req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
@@ -1666,6 +1665,24 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
+		targetRuntime = &runtime
+	}
+	if req.CustomArgs != nil {
+		nextCustomArgs := *req.CustomArgs
+		if targetRuntime == nil && targetRuntimeID.Valid {
+			runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+				ID:          targetRuntimeID,
+				WorkspaceID: existing.WorkspaceID,
+			})
+			if err == nil {
+				targetRuntime = &runtime
+			}
+		}
+		if targetRuntime != nil {
+			nextCustomArgs = customArgsForRuntime(*targetRuntime, nextCustomArgs)
+		}
+		ca, _ := json.Marshal(nextCustomArgs)
+		params.CustomArgs = ca
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides
