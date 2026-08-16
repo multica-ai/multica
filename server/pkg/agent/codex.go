@@ -269,7 +269,7 @@ func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	}
 	customArgs, _ := NormalizeCodexWindowsSandboxCustomArgs(
 		goos,
-		opts.CodexWindowsSandboxArgManaged,
+		opts.IsCodexWindowsSandboxArgManaged,
 		HasCodexWindowsSandboxOverride(opts.ExtraArgs) || opts.CodexWindowsSandboxConfigOwns,
 		opts.CustomArgs,
 	)

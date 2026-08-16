@@ -305,7 +305,7 @@ func copiedAgentCustomArgs(src map[string]any) []string {
 		}
 		args = append(args, arg)
 	}
-	managed, _ := src["codex_windows_sandbox_arg_managed"].(bool)
+	managed, _ := src["is_codex_windows_sandbox_arg_managed"].(bool)
 	if managed && agentpkg.HasManagedCodexWindowsSandboxPrefix(args) {
 		return args[2:]
 	}

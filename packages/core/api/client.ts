@@ -214,8 +214,8 @@ import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
-  AgentListSchema,
-  AgentSchema,
+  AgentWindowsSandboxListResponseSchema,
+  AgentWindowsSandboxResponseSchema,
   AgentTaskListSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
@@ -236,8 +236,6 @@ import {
   AgentBuilderSessionSchema,
   AgentBuilderSessionListSchema,
   EMPTY_AGENT_BUILDER_SESSION_LIST,
-  EMPTY_AGENT,
-  EMPTY_MIKA_BOOTSTRAP_RESPONSE,
   agentBuilderRuntimeSwitchFallback,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
@@ -370,12 +368,8 @@ import {
   EMPTY_GITHUB_CONNECT_RESPONSE,
   EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
-  EMPTY_RUNTIME_DEVICE,
   RuntimeModelListRequestSchema,
-  RuntimeDeviceListSchema,
-  RuntimeDeviceSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-  MikaBootstrapResponseSchema,
   SkillSchema,
   EMPTY_SKILL,
   IssueViewSchema,
@@ -539,6 +533,30 @@ function workspaceHeader(
   slug?: string,
 ): Record<string, string> | undefined {
   return slug ? { "X-Workspace-Slug": slug } : undefined;
+}
+
+function normalizeAgentResponse<T extends Agent>(
+  raw: T,
+  endpoint: string,
+): T {
+  return parseWithFallback(
+    raw,
+    AgentWindowsSandboxResponseSchema,
+    raw,
+    { endpoint, redactReceived: true },
+  ) as T;
+}
+
+function normalizeAgentListResponse(
+  raw: Agent[],
+  endpoint: string,
+): Agent[] {
+  return parseWithFallback(
+    raw,
+    AgentWindowsSandboxListResponseSchema,
+    raw,
+    { endpoint, redactReceived: true },
+  ) as Agent[];
 }
 
 export class ApiClient {
@@ -1231,30 +1249,21 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
-    const raw = await this.fetch<unknown>(`/api/agents?${search}`);
-    return parseWithFallback(raw, AgentListSchema, [], {
-      endpoint: "GET /api/agents",
-      redactReceived: true,
-    });
+    const raw = await this.fetch<Agent[]>(`/api/agents?${search}`);
+    return normalizeAgentListResponse(raw, "GET /api/agents");
   }
 
   async getAgent(id: string): Promise<Agent> {
-    const raw = await this.fetch<unknown>(`/api/agents/${id}`);
-    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
-      endpoint: "GET /api/agents/{id}",
-      redactReceived: true,
-    });
+    const raw = await this.fetch<Agent>(`/api/agents/${id}`);
+    return normalizeAgentResponse(raw, "GET /api/agents/{id}");
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {
-    const raw = await this.fetch<unknown>("/api/agents", {
+    const raw = await this.fetch<Agent>("/api/agents", {
       method: "POST",
       body: JSON.stringify(data),
     });
-    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
-      endpoint: "POST /api/agents",
-      redactReceived: true,
-    });
+    return normalizeAgentResponse(raw, "POST /api/agents");
   }
 
   /**
@@ -1279,17 +1288,12 @@ export class ApiClient {
     },
     workspaceSlug?: string,
   ): Promise<MikaBootstrapResponse> {
-    const raw = await this.fetch<unknown>("/api/agents/mika", {
+    const raw = await this.fetch<MikaBootstrapResponse>("/api/agents/mika", {
       method: "POST",
       headers: workspaceHeader(workspaceSlug),
       body: JSON.stringify(data),
     });
-    return parseWithFallback(
-      raw,
-      MikaBootstrapResponseSchema,
-      EMPTY_MIKA_BOOTSTRAP_RESPONSE,
-      { endpoint: "POST /api/agents/mika", redactReceived: true },
-    );
+    return normalizeAgentResponse(raw, "POST /api/agents/mika");
   }
 
   async createAgentBuilderSession(data: {
@@ -1372,24 +1376,27 @@ export class ApiClient {
   }
 
   async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
-    const raw = await this.fetch<unknown>(`/api/agents/${id}`, {
+    const { codexWindowsSandboxArgManaged, ...agentData } = data;
+    const wireData =
+      codexWindowsSandboxArgManaged === undefined
+        ? agentData
+        : {
+            ...agentData,
+            is_codex_windows_sandbox_arg_managed:
+              codexWindowsSandboxArgManaged,
+          };
+    const raw = await this.fetch<Agent>(`/api/agents/${id}`, {
       method: "PUT",
-      body: JSON.stringify(data),
+      body: JSON.stringify(wireData),
     });
-    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
-      endpoint: "PUT /api/agents/{id}",
-      redactReceived: true,
-    });
+    return normalizeAgentResponse(raw, "PUT /api/agents/{id}");
   }
 
   async archiveAgent(id: string): Promise<Agent> {
-    const raw = await this.fetch<unknown>(`/api/agents/${id}/archive`, {
+    const raw = await this.fetch<Agent>(`/api/agents/${id}/archive`, {
       method: "POST",
     });
-    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
-      endpoint: "POST /api/agents/{id}/archive",
-      redactReceived: true,
-    });
+    return normalizeAgentResponse(raw, "POST /api/agents/{id}/archive");
   }
 
   /**
@@ -1418,13 +1425,10 @@ export class ApiClient {
   }
 
   async restoreAgent(id: string): Promise<Agent> {
-    const raw = await this.fetch<unknown>(`/api/agents/${id}/restore`, {
+    const raw = await this.fetch<Agent>(`/api/agents/${id}/restore`, {
       method: "POST",
     });
-    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
-      endpoint: "POST /api/agents/{id}/restore",
-      redactReceived: true,
-    });
+    return normalizeAgentResponse(raw, "POST /api/agents/{id}/restore");
   }
 
   // Bulk-cancel every active task (queued/dispatched/running) for the agent.
@@ -1445,12 +1449,8 @@ export class ApiClient {
     // workspace_id alone is not enough: the server resolves the workspace from
     // the slug header first, so a caller listing another workspace's runtimes
     // must override the header too.
-    const raw = await this.fetch<unknown>(`/api/runtimes?${search}`, {
+    return this.fetch(`/api/runtimes?${search}`, {
       headers: workspaceHeader(workspaceSlug),
-    });
-    return parseWithFallback(raw, RuntimeDeviceListSchema, [], {
-      endpoint: "GET /api/runtimes",
-      redactReceived: true,
     });
   }
 
@@ -1777,13 +1777,9 @@ export class ApiClient {
       apply_to_machine?: boolean;
     },
   ): Promise<AgentRuntime> {
-    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}`, {
+    return this.fetch(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
-    });
-    return parseWithFallback(raw, RuntimeDeviceSchema, EMPTY_RUNTIME_DEVICE, {
-      endpoint: "PATCH /api/runtimes/{id}",
-      redactReceived: true,
     });
   }
 

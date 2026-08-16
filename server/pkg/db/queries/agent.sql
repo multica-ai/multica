@@ -57,13 +57,13 @@ INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
-    service_tier, codex_windows_sandbox_arg_managed,
+    service_tier, is_codex_windows_sandbox_arg_managed,
     composio_toolkit_allowlist, permission_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
-    $17, @codex_windows_sandbox_arg_managed,
+    $17, @is_codex_windows_sandbox_arg_managed,
     sqlc.narg('composio_toolkit_allowlist')::text[],
     COALESCE(sqlc.narg('permission_mode'), 'private')
 )
@@ -142,7 +142,7 @@ UPDATE agent SET
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
-    codex_windows_sandbox_arg_managed = COALESCE(sqlc.narg('codex_windows_sandbox_arg_managed'), codex_windows_sandbox_arg_managed),
+    is_codex_windows_sandbox_arg_managed = COALESCE(sqlc.narg('is_codex_windows_sandbox_arg_managed'), is_codex_windows_sandbox_arg_managed),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
     updated_at = now()
 WHERE id = $1
@@ -1922,11 +1922,11 @@ INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode, runtime_config,
     runtime_id, model, visibility, permission_mode, max_concurrent_tasks,
     owner_id, instructions, custom_env, custom_args,
-    codex_windows_sandbox_arg_managed, kind, system_key
+    is_codex_windows_sandbox_arg_managed, kind, system_key
 ) VALUES (
     @workspace_id, @name, @description, @avatar_url, @runtime_mode, '{}'::jsonb,
     @runtime_id, @model, @visibility, @permission_mode, @max_concurrent_tasks,
     @owner_id, '', '{}'::jsonb, @custom_args,
-    @codex_windows_sandbox_arg_managed, 'user', @system_key
+    @is_codex_windows_sandbox_arg_managed, 'user', @system_key
 )
 RETURNING *;

@@ -763,7 +763,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		body["custom_args"] = ca
-		body["codex_windows_sandbox_arg_managed"] = false
+		body["is_codex_windows_sandbox_arg_managed"] = false
 	}
 	if cmd.Flags().Changed("model") {
 		v, _ := cmd.Flags().GetString("model")

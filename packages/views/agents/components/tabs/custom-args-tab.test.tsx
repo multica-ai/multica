@@ -136,7 +136,7 @@ describe("CustomArgsTab", () => {
 
     expect(onSave).toHaveBeenCalledWith({
       custom_args: ["value with spaces"],
-      codex_windows_sandbox_arg_managed: false,
+      codexWindowsSandboxArgManaged: false,
     });
   });
 
@@ -149,7 +149,7 @@ describe("CustomArgsTab", () => {
     const { onSave } = renderTab(
       {
         custom_args: ["-c", 'windows.sandbox="unelevated"'],
-        codex_windows_sandbox_arg_managed: true,
+        codexWindowsSandboxArgManaged: true,
       },
       vi.fn().mockResolvedValue(undefined),
       windowsRuntime,
@@ -187,7 +187,7 @@ describe("CustomArgsTab", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledWith({
       custom_args: ["value with spaces"],
-      codex_windows_sandbox_arg_managed: false,
+      codexWindowsSandboxArgManaged: false,
     });
   });
 
@@ -202,7 +202,7 @@ describe("CustomArgsTab", () => {
     renderTab(
       {
         custom_args: ["-c", 'windows.sandbox="unelevated"'],
-        codex_windows_sandbox_arg_managed: true,
+        codexWindowsSandboxArgManaged: true,
       },
       vi.fn().mockResolvedValue(undefined),
       windowsRuntime,

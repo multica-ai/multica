@@ -31,10 +31,12 @@ func NormalizeCodexWindowsSandboxCustomArgs(goos string, managed, lowerPriorityO
 	return append([]string{"-c", codexWindowsUnelevatedSandboxArg}, result...), true
 }
 
-// HasCodexWindowsSandboxOverride reports whether argv contains a Codex -c or
-// --config assignment for windows.sandbox. It accepts both inline and
+// LastCodexWindowsSandboxOverride returns the raw value from the last
+// windows.sandbox assignment in Codex -c/--config argv. It accepts inline and
 // two-token forms and mirrors the launch pipeline's one-layer quote cleanup.
-func HasCodexWindowsSandboxOverride(args []string) bool {
+func LastCodexWindowsSandboxOverride(args []string) (string, bool) {
+	var last string
+	found := false
 	for i := 0; i < len(args); i++ {
 		arg := normalizeCodexSandboxToken(args[i])
 		flag := arg
@@ -49,17 +51,28 @@ func HasCodexWindowsSandboxOverride(args []string) bool {
 			continue
 		}
 		if !inline {
-			if i+1 >= len(args) {
+			i++
+			if i >= len(args) {
 				continue
 			}
-			i++
 			value = normalizeCodexSandboxToken(args[i])
 		}
-		if codexWindowsSandboxArgRe.MatchString(value) {
-			return true
+		if !codexWindowsSandboxArgRe.MatchString(value) {
+			continue
+		}
+		if idx := strings.Index(value, "="); idx >= 0 {
+			last = normalizeCodexSandboxToken(value[idx+1:])
+			found = true
 		}
 	}
-	return false
+	return last, found
+}
+
+// HasCodexWindowsSandboxOverride reports whether argv contains a Codex -c or
+// --config assignment for windows.sandbox.
+func HasCodexWindowsSandboxOverride(args []string) bool {
+	_, found := LastCodexWindowsSandboxOverride(args)
+	return found
 }
 
 // HasManagedCodexWindowsSandboxPrefix reports whether args begin with the

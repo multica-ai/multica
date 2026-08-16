@@ -153,7 +153,7 @@ func TestAgentCopyReDerivesManagedCodexSandboxPrefix(t *testing.T) {
 		t.Run(targetRuntime, func(t *testing.T) {
 			source := fullSourceAgent()
 			source["custom_args"] = []any{"-c", "windows.sandbox=\"unelevated\"", "--foo"}
-			source["codex_windows_sandbox_arg_managed"] = true
+			source["is_codex_windows_sandbox_arg_managed"] = true
 
 			var gotBody map[string]any
 			srv := copyMockServer(t, source, &gotBody)
@@ -178,7 +178,7 @@ func TestAgentCopyReDerivesManagedCodexSandboxPrefix(t *testing.T) {
 func TestAgentCopyPreservesIdenticalUserOwnedCodexSandboxPair(t *testing.T) {
 	source := fullSourceAgent()
 	source["custom_args"] = []any{"-c", "windows.sandbox=\"unelevated\"", "--foo"}
-	source["codex_windows_sandbox_arg_managed"] = false
+	source["is_codex_windows_sandbox_arg_managed"] = false
 
 	var gotBody map[string]any
 	srv := copyMockServer(t, source, &gotBody)

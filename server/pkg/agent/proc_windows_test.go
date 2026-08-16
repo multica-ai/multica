@@ -5,11 +5,13 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -268,9 +270,11 @@ func TestCodexWindowsDescendantsDieWithTheOwnedProcessTree(t *testing.T) {
 	sourcePath := filepath.Join(tempDir, "fake_codex.go")
 	exePath := filepath.Join(tempDir, "fake_codex.exe")
 	pidPath := filepath.Join(tempDir, "descendant.pid")
+	argvPath := filepath.Join(tempDir, "argv.json")
 	const source = `package main
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -279,6 +283,9 @@ import (
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--version" { fmt.Println("codex-cli windows-test"); return }
 	if len(os.Args) > 1 && os.Args[1] == "descendant" { time.Sleep(30*time.Second); return }
+	rawArgs, err := json.Marshal(os.Args[1:])
+	if err != nil { panic(err) }
+	if err := os.WriteFile(os.Getenv("CODEX_ARGV_FILE"), rawArgs, 0600); err != nil { panic(err) }
 	s := bufio.NewScanner(os.Stdin)
 	if !s.Scan() { return }
 	fmt.Println("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}")
@@ -317,7 +324,10 @@ func main() {
 	backend, err := New("codex", Config{
 		ExecutablePath: exePath,
 		Logger:         slog.New(slog.NewJSONHandler(&logs, nil)),
-		Env:            map[string]string{"DESCENDANT_PID_FILE": pidPath},
+		Env: map[string]string{
+			"DESCENDANT_PID_FILE": pidPath,
+			"CODEX_ARGV_FILE":     argvPath,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -326,6 +336,7 @@ func main() {
 	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
 		Timeout:          5 * time.Second,
 		HandshakeTimeout: 500 * time.Millisecond,
+		CustomArgs:       []string{"--profile", "research"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -335,6 +346,26 @@ func main() {
 		}
 	}()
 	result := <-session.Result
+	argvJSON, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatalf("read native Windows argv capture: %v", err)
+	}
+	var gotArgv []string
+	if err := json.Unmarshal(argvJSON, &gotArgv); err != nil {
+		t.Fatalf("decode native Windows argv capture: %v", err)
+	}
+	wantArgv := []string{
+		"app-server",
+		"--listen",
+		"stdio://",
+		"-c",
+		`windows.sandbox="unelevated"`,
+		"--profile",
+		"research",
+	}
+	if !reflect.DeepEqual(gotArgv, wantArgv) {
+		t.Fatalf("native Windows argv = %v, want %v", gotArgv, wantArgv)
+	}
 	if elapsed := time.Since(started); elapsed > 3*time.Second {
 		t.Fatalf("cleanup exceeded bound: %s", elapsed)
 	}

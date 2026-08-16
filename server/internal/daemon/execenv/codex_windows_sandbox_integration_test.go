@@ -28,18 +28,14 @@ func TestWindowsSandboxHonorsShellQuotedCustomArg(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			// The raw tokens still carry shell quotes, so scanning them directly
-			// must NOT recognize the opt-in — this is the drift the bug was.
-			if got := windowsSandboxFromCustomArgs(tc.raw); got == windowsSandboxNative {
-				t.Fatalf("raw shell-quoted args unexpectedly recognized without normalization: %v", tc.raw)
-			}
-			// After the daemon's normalization the same args resolve to native,
-			// so the policy keeps workspace-write instead of loosening.
+			// The shared parser owns the same one-layer quote cleanup as launch
+			// normalization, so raw and normalized classification cannot drift.
+			rawState := windowsSandboxFromCustomArgs(tc.raw)
 			norm := agent.NormalizeCodexLaunchArgs(nil, tc.raw, nil, testLogger())
 			missing := filepath.Join(t.TempDir(), "config.toml")
 			state := resolveWindowsSandboxState(missing, nil, sharedConfigAbsent, norm, testLogger())
-			if state != windowsSandboxNative {
-				t.Fatalf("normalized %v -> state %v, want native", norm, state)
+			if rawState != windowsSandboxNative || state != rawState {
+				t.Fatalf("classification drift: raw=%v normalized=%v args=%v", rawState, state, norm)
 			}
 			if p := codexSandboxPolicyForWindows(state); p.Mode != "workspace-write" {
 				t.Fatalf("policy mode = %q, want workspace-write (isolation preserved)", p.Mode)

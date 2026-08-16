@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // Background
@@ -233,50 +235,14 @@ func SharedCodexWindowsSandboxConfigOwns() bool {
 	return CodexWindowsSandboxConfigOwns(filepath.Join(resolveSharedCodexHome(), "config.toml"))
 }
 
-// codexConfigOverrideValueRe matches the value token of a Codex `-c` /
-// `--config` windows.sandbox override, e.g. `windows.sandbox = "unelevated"`.
-// It tolerates whitespace around the dotted key and the `=`, matching Codex's
-// own lenient `-c` parsing.
-var codexWindowsSandboxOverrideRe = regexp.MustCompile(`^\s*windows\s*\.\s*sandbox\s*=`)
-
-// windowsSandboxFromCustomArgs classifies a native Windows sandbox selection
-// passed via Codex `-c windows.sandbox=...` / `--config windows.sandbox=...`
-// args. These never land in config.toml (they stay in argv and are applied on
-// top of it), so config-only detection would miss them — the MUL-4957 review's
-// second must-fix. Mirrors the override-parsing shape in server/pkg/agent's
-// buildCodexArgs: inline (`-c=windows.sandbox=x`) and two-token
-// (`-c windows.sandbox=x`) forms, last occurrence winning (Codex is last-wins).
+// windowsSandboxFromCustomArgs classifies the last native Windows sandbox
+// override using the same shared parser as argv construction.
 func windowsSandboxFromCustomArgs(args []string) windowsSandboxConfig {
-	state := windowsSandboxAbsent
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		flag := arg
-		value := ""
-		hasInlineValue := false
-		if idx := strings.Index(arg, "="); idx > 0 {
-			flag = arg[:idx]
-			value = arg[idx+1:]
-			hasInlineValue = true
-		}
-		if flag != "-c" && flag != "--config" {
-			continue
-		}
-		if !hasInlineValue {
-			if i+1 >= len(args) {
-				continue
-			}
-			i++
-			value = args[i]
-		}
-		if !codexWindowsSandboxOverrideRe.MatchString(value) {
-			continue
-		}
-		// A windows.sandbox override token: take the part after its first `=`.
-		if eq := strings.Index(value, "="); eq >= 0 {
-			state = classifyWindowsSandboxValue(value[eq+1:])
-		}
+	raw, ok := agent.LastCodexWindowsSandboxOverride(args)
+	if !ok {
+		return windowsSandboxAbsent
 	}
-	return state
+	return classifyWindowsSandboxValue(raw)
 }
 
 // classifyWindowsSandboxValue maps a raw windows.sandbox value (from config.toml

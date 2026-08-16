@@ -471,7 +471,7 @@ export interface Agent {
   runtime_config: Record<string, unknown>;
   custom_args: string[];
   /** True only when Multica injected the canonical Windows Codex sandbox pair. */
-  codex_windows_sandbox_arg_managed?: boolean;
+  codexWindowsSandboxArgManaged?: boolean;
   /**
    * Coarse metadata signalling whether the agent has any custom env
    * vars configured, without exposing the keys or values. Reads of
@@ -722,7 +722,7 @@ export interface UpdateAgentRequest {
    * echo semantics; false explicitly declares the submitted list user-owned.
    * True can only retain an already-proven exact managed prefix.
    */
-  codex_windows_sandbox_arg_managed?: boolean;
+  codexWindowsSandboxArgManaged?: boolean;
   /**
    * MCP server configuration. Tri-state semantics (MUL-2764):
    *   - field omitted → no change

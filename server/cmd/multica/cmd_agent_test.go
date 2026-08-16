@@ -729,8 +729,8 @@ func TestAgentUpdateDeclaresExplicitCustomArgsUserOwned(t *testing.T) {
 	if err := runAgentUpdate(cmd, []string{"agent-123"}); err != nil {
 		t.Fatalf("runAgentUpdate: %v", err)
 	}
-	if gotBody["codex_windows_sandbox_arg_managed"] != false {
-		t.Fatalf("provenance hint = %v, want false", gotBody["codex_windows_sandbox_arg_managed"])
+	if gotBody["is_codex_windows_sandbox_arg_managed"] != false {
+		t.Fatalf("provenance hint = %v, want false", gotBody["is_codex_windows_sandbox_arg_managed"])
 	}
 }
 

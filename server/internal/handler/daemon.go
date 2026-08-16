@@ -326,7 +326,7 @@ var errRuntimeProfileDisabled = errors.New("runtime profile is disabled")
 func (h *Handler) upsertRuntimeWithProfile(
 	ctx context.Context,
 	workspaceID, profileID pgtype.UUID,
-	build func(db.RuntimeProfile) db.UpsertAgentRuntimeWithProfileParams,
+	build func(db.RuntimeProfile) (db.UpsertAgentRuntimeWithProfileParams, error),
 ) (db.UpsertAgentRuntimeWithProfileRow, db.RuntimeProfile, error) {
 	var row db.UpsertAgentRuntimeWithProfileRow
 	var profile db.RuntimeProfile
@@ -349,7 +349,11 @@ func (h *Handler) upsertRuntimeWithProfile(
 		return row, profile, errRuntimeProfileDisabled
 	}
 
-	row, err = qtx.UpsertAgentRuntimeWithProfile(ctx, build(profile))
+	params, err := build(profile)
+	if err != nil {
+		return row, profile, fmt.Errorf("build profile runtime registration: %w", err)
+	}
+	row, err = qtx.UpsertAgentRuntimeWithProfile(ctx, params)
 	if err != nil {
 		return row, profile, fmt.Errorf("upsert profile runtime: %w", err)
 	}
@@ -489,7 +493,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				"true",
 			)
 		}
-		metadata, _ := json.Marshal(runtimeMetadata)
+		metadata, err := json.Marshal(runtimeMetadata)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encode runtime metadata")
+			return
+		}
 
 		var registered db.AgentRuntime
 		var inserted bool
@@ -507,7 +515,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				r.Context(),
 				wsUUID,
 				profileUUID,
-				func(profile db.RuntimeProfile) db.UpsertAgentRuntimeWithProfileParams {
+				func(profile db.RuntimeProfile) (db.UpsertAgentRuntimeWithProfileParams, error) {
 					return db.UpsertAgentRuntimeWithProfileParams{
 						WorkspaceID: wsUUID,
 						DaemonID:    strToText(req.DaemonID),
@@ -519,7 +527,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 						Metadata:    metadata,
 						OwnerID:     ownerID,
 						ProfileID:   profileUUID,
-					}
+					}, nil
 				},
 			)
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -675,7 +683,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			r.Context(),
 			wsUUID,
 			profileUUID,
-			func(profile db.RuntimeProfile) db.UpsertAgentRuntimeWithProfileParams {
+			func(profile db.RuntimeProfile) (db.UpsertAgentRuntimeWithProfileParams, error) {
 				name := profile.DisplayName
 				if req.DeviceName != "" {
 					name = fmt.Sprintf("%s (%s)", name, req.DeviceName)
@@ -695,7 +703,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				if clientOS != "" {
 					runtimeMetadata["os"] = clientOS
 				}
-				metadata, _ := json.Marshal(runtimeMetadata)
+				metadata, marshalErr := json.Marshal(runtimeMetadata)
+				if marshalErr != nil {
+					return db.UpsertAgentRuntimeWithProfileParams{},
+						fmt.Errorf("encode failed runtime metadata: %w", marshalErr)
+				}
 				return db.UpsertAgentRuntimeWithProfileParams{
 					WorkspaceID: wsUUID,
 					DaemonID:    strToText(req.DaemonID),
@@ -707,10 +719,12 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 					Metadata:    metadata,
 					OwnerID:     ownerID,
 					ProfileID:   profileUUID,
-				}
+				}, nil
 			},
 		)
 		if err != nil {
+			// This row is diagnostic-only; healthy runtimes above are already
+			// registered, so a diagnostic encode/DB failure must not reject them.
 			slog.Warn("failed to record runtime profile registration failure",
 				"workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID,
 				"profile_id", profileID, "error", err)
@@ -2034,7 +2048,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			Instructions:                  agent.Instructions,
 			CustomEnv:                     customEnv,
 			CustomArgs:                    customArgs,
-			CodexWindowsSandboxArgManaged: agent.CodexWindowsSandboxArgManaged,
+			IsCodexWindowsSandboxArgManaged: agent.IsCodexWindowsSandboxArgManaged,
 			McpConfig:                     mcpConfig,
 			Model:                         agent.Model.String,
 			ThinkingLevel:                 agent.ThinkingLevel.String,

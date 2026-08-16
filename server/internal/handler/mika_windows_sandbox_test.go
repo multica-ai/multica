@@ -52,7 +52,7 @@ func TestCreateMikaAgentPersistsWindowsCodexSandboxArgs(t *testing.T) {
 	var rawArgs []byte
 	var managed bool
 	if err := testPool.QueryRow(ctx,
-		`SELECT custom_args, codex_windows_sandbox_arg_managed FROM agent WHERE id = $1`,
+		`SELECT custom_args, is_codex_windows_sandbox_arg_managed FROM agent WHERE id = $1`,
 		resp.ID,
 	).Scan(&rawArgs, &managed); err != nil {
 		t.Fatalf("load persisted Mika args: %v", err)

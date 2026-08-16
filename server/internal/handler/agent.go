@@ -66,9 +66,9 @@ type AgentResponse struct {
 	RuntimeMode        string   `json:"runtime_mode"`
 	RuntimeConfig      any      `json:"runtime_config"`
 	CustomArgs         []string `json:"custom_args"`
-	// CodexWindowsSandboxArgManaged distinguishes the platform-owned canonical
+	// IsCodexWindowsSandboxArgManaged distinguishes the platform-owned canonical
 	// prefix from the same two tokens explicitly supplied by a user.
-	CodexWindowsSandboxArgManaged bool            `json:"codex_windows_sandbox_arg_managed"`
+	IsCodexWindowsSandboxArgManaged bool            `json:"is_codex_windows_sandbox_arg_managed"`
 	McpConfig                     json.RawMessage `json:"mcp_config"`
 	// custom_env is intentionally NOT serialized on agent resources. The
 	// agent_list/get/create/update/archive/restore responses and WS events
@@ -193,7 +193,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		RuntimeMode:                   a.RuntimeMode,
 		RuntimeConfig:                 rc,
 		CustomArgs:                    customArgs,
-		CodexWindowsSandboxArgManaged: a.CodexWindowsSandboxArgManaged,
+		IsCodexWindowsSandboxArgManaged: a.IsCodexWindowsSandboxArgManaged,
 		McpConfig:                     mcpConfig,
 		HasCustomEnv:                  envKeyCount > 0,
 		CustomEnvKeyCount:             envKeyCount,
@@ -664,7 +664,7 @@ type TaskAgentData struct {
 	SkillRefs                     []service.AgentSkillRefData `json:"skill_refs,omitempty"`
 	CustomEnv                     map[string]string           `json:"custom_env,omitempty"`
 	CustomArgs                    []string                    `json:"custom_args,omitempty"`
-	CodexWindowsSandboxArgManaged bool                        `json:"codex_windows_sandbox_arg_managed,omitempty"`
+	IsCodexWindowsSandboxArgManaged bool                        `json:"is_codex_windows_sandbox_arg_managed,omitempty"`
 	McpConfig                     json.RawMessage             `json:"mcp_config,omitempty"`
 	Model                         string                      `json:"model,omitempty"`
 	ThinkingLevel                 string                      `json:"thinking_level,omitempty"`
@@ -1277,7 +1277,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Model:                         pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:                 pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
 		ServiceTier:                   pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
-		CodexWindowsSandboxArgManaged: codexWindowsSandboxArgManaged,
+		IsCodexWindowsSandboxArgManaged: codexWindowsSandboxArgManaged,
 		ComposioToolkitAllowlist:      allowlist,
 	})
 	if err != nil {
@@ -1361,11 +1361,11 @@ type UpdateAgentRequest struct {
 	// previously-returned masked map cannot silently overwrite real
 	// secret values with literal `****`. See MUL-2600.
 	CustomArgs *[]string `json:"custom_args"`
-	// CodexWindowsSandboxArgManaged is a compatibility-aware provenance hint
+	// IsCodexWindowsSandboxArgManaged is a compatibility-aware provenance hint
 	// for a simultaneous custom_args replacement. Omitted lets legacy clients
 	// echo an existing exact managed prefix without taking ownership; false
 	// explicitly declares the replacement user-owned.
-	CodexWindowsSandboxArgManaged *bool            `json:"codex_windows_sandbox_arg_managed"`
+	IsCodexWindowsSandboxArgManaged *bool            `json:"is_codex_windows_sandbox_arg_managed"`
 	McpConfig                     *json.RawMessage `json:"mcp_config"`
 	Visibility                    *string          `json:"visibility"`
 	// PermissionMode + InvocationTargets are the invocation-permission inputs
@@ -1702,11 +1702,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				targetRuntime = &runtime
 			}
 		}
-		managed := existing.CodexWindowsSandboxArgManaged
+		managed := existing.IsCodexWindowsSandboxArgManaged
 		if req.CustomArgs != nil {
 			switch {
-			case req.CodexWindowsSandboxArgManaged != nil:
-				if *req.CodexWindowsSandboxArgManaged {
+			case req.IsCodexWindowsSandboxArgManaged != nil:
+				if *req.IsCodexWindowsSandboxArgManaged {
 					// A client may echo true only to retain already-proven
 					// ownership of the exact prefix; it cannot manufacture
 					// platform provenance for user-authored arguments.
@@ -1740,7 +1740,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.CustomArgs = ca
-		params.CodexWindowsSandboxArgManaged = pgtype.Bool{Bool: nextManaged, Valid: true}
+		params.IsCodexWindowsSandboxArgManaged = pgtype.Bool{Bool: nextManaged, Valid: true}
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides

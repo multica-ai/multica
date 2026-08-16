@@ -21,12 +21,19 @@ type AgentEntry struct {
 	Model   string // model override (optional)
 }
 
+type RuntimeRegistrationMetadata struct {
+	// Pointer distinguishes an explicit false published by current runtimes from
+	// a missing key returned by a pre-feature server.
+	CodexWindowsSandboxConfigConfigured *bool `json:"codex_windows_sandbox_config_configured,omitempty"`
+}
+
 // Runtime represents a registered daemon runtime.
 type Runtime struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
-	Status   string `json:"status"`
+	ID       string                      `json:"id"`
+	Name     string                      `json:"name"`
+	Provider string                      `json:"provider"`
+	Status   string                      `json:"status"`
+	Metadata RuntimeRegistrationMetadata `json:"metadata,omitempty"`
 	// ProfileID is non-empty when this runtime was registered from a
 	// workspace custom runtime profile (MUL-3284). It links the runtime row
 	// back to the profile so the daemon can resolve the profile's
@@ -130,6 +137,10 @@ type Task struct {
 	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`      // attachments uploaded in the quick-create prompt and bound by issue create
 	HandoffNote                   string                 `json:"handoff_note,omitempty"`                     // assignment handoff instruction; rendered into the opening prompt + issue_context.md
 
+	// Snapshot from the runtime registration response. It is intentionally
+	// unexported so a claim response cannot replace the session's precedence.
+	codexWindowsSandboxConfigOwnsAtRegistration bool
+
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
 	ParentIssueID         string `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
@@ -213,7 +224,7 @@ type AgentData struct {
 	SkillRefs                     []SkillRefData             `json:"skill_refs,omitempty"`
 	CustomEnv                     map[string]string          `json:"custom_env,omitempty"`
 	CustomArgs                    []string                   `json:"custom_args,omitempty"`
-	CodexWindowsSandboxArgManaged bool                       `json:"codex_windows_sandbox_arg_managed,omitempty"`
+	IsCodexWindowsSandboxArgManaged bool                       `json:"is_codex_windows_sandbox_arg_managed,omitempty"`
 	McpConfig                     json.RawMessage            `json:"mcp_config,omitempty"`
 	Model                         string                     `json:"model,omitempty"`
 	ThinkingLevel                 string                     `json:"thinking_level,omitempty"`

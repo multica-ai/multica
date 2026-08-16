@@ -164,7 +164,7 @@ describe("agent draft execution overrides", () => {
             'windows.sandbox="unelevated"',
             "--verbose",
           ],
-          codex_windows_sandbox_arg_managed: true,
+          codexWindowsSandboxArgManaged: true,
         }),
       });
 
@@ -179,7 +179,7 @@ describe("agent draft execution overrides", () => {
       runtimeId: "runtime-2",
       duplicateSource: sourceAgent({
         custom_args: customArgs,
-        codex_windows_sandbox_arg_managed: false,
+        codexWindowsSandboxArgManaged: false,
       }),
     });
 

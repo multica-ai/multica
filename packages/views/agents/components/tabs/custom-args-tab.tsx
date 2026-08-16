@@ -12,6 +12,7 @@ import {
 import {
   CODEX_WINDOWS_SANDBOX_ARGS,
   ensureCodexWindowsSandboxArgs,
+  withoutManagedCodexWindowsSandboxArgs,
 } from "@multica/core/agents";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
@@ -59,14 +60,10 @@ export function CustomArgsTab({
 }) {
   const { t } = useT("agents");
   const storedArgs = agent.custom_args ?? [];
-  const storedManagedPrefix =
-    agent.codex_windows_sandbox_arg_managed === true &&
-    CODEX_WINDOWS_SANDBOX_ARGS.every(
-      (value, index) => storedArgs[index] === value,
-    );
-  const originalArgs = storedManagedPrefix
-    ? storedArgs.slice(CODEX_WINDOWS_SANDBOX_ARGS.length)
-    : storedArgs;
+  const originalArgs = withoutManagedCodexWindowsSandboxArgs(
+    storedArgs,
+    agent.codexWindowsSandboxArgManaged === true,
+  );
   const [entries, setEntries] = useState<ArgEntry[]>(argsToEntries(originalArgs));
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorValue, setEditorValue] = useState("");
@@ -137,7 +134,7 @@ export function CustomArgsTab({
       // prevents one managed token from being deleted independently.
       await onSave({
         custom_args: editedArgs,
-        codex_windows_sandbox_arg_managed: false,
+        codexWindowsSandboxArgManaged: false,
       });
       toast.success(t(($) => $.tab_body.custom_args.saved_toast));
     } catch (err) {

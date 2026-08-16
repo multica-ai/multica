@@ -86,10 +86,10 @@ type ExecOptions struct {
 	ExtraArgs  []string // daemon-wide default CLI arguments appended before CustomArgs
 	CustomArgs []string // per-agent CLI arguments appended after ExtraArgs
 	GOOS       string   // optional launch platform override; empty uses runtime.GOOS (Codex test seam)
-	// CodexWindowsSandboxArgManaged records provenance for the canonical
+	// IsCodexWindowsSandboxArgManaged records provenance for the canonical
 	// custom-args prefix. ConfigOwns prevents the default from overriding an
 	// explicit windows.sandbox value copied into the task's config.toml.
-	CodexWindowsSandboxArgManaged bool
+	IsCodexWindowsSandboxArgManaged bool
 	CodexWindowsSandboxConfigOwns bool
 	QwenpawWorkspace              string          // per-task QwenPaw workspace directory (passed as --workspace to qwenpaw acp); empty when not applicable
 	McpConfig                     json.RawMessage // if non-nil, MCP server config to pass via --mcp-config

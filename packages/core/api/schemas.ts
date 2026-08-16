@@ -1,7 +1,5 @@
 import { z } from "zod";
 import type {
-  Agent,
-  AgentRuntime,
   AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
   AgentBuilderSessionSummary,
@@ -44,7 +42,6 @@ import type {
   GitHubPullRequest,
   InboxItem,
   InboxWorkspaceUnread,
-  MikaBootstrapResponse,
   Label,
   IssueProperty,
   ListPropertiesResponse,
@@ -78,174 +75,23 @@ import type {
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
 
-const AgentInvocationTargetSchema = z.object({
-  // Keep wire enums lenient so a newer backend does not invalidate the whole
-  // response before older clients can reach their defensive default branches.
-  target_type: z.string(),
-  target_id: z.string().nullable(),
-}).loose();
+export const AgentWindowsSandboxResponseSchema = z
+  .object({
+    is_codex_windows_sandbox_arg_managed: z
+      .boolean()
+      .optional()
+      .catch(undefined),
+  })
+  .loose()
+  .transform(({ is_codex_windows_sandbox_arg_managed, ...agent }) => ({
+    ...agent,
+    codexWindowsSandboxArgManaged:
+      is_codex_windows_sandbox_arg_managed,
+  }));
 
-const AgentSkillSummarySchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string(),
-  enabled: z.boolean().optional(),
-}).loose();
-
-const DisabledRuntimeSkillSchema = z.object({
-  runtime_id: z.string(),
-  provider: z.string(),
-  root: z.string(),
-  key: z.string(),
-  name: z.string().optional(),
-  plugin: z.string().optional(),
-}).loose();
-
-export const AgentSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
-  runtime_id: z.string(),
-  runtime_bound: z.boolean().optional(),
-  name: z.string(),
-  description: z.string(),
-  instructions: z.string(),
-  system_key: z.string().optional(),
-  system_instructions: z.string().optional(),
-  avatar_url: z.string().nullable(),
-  runtime_mode: z.string(),
-  // The server intentionally accepts arbitrary JSON here. Keep the response
-  // boundary equally permissive for historical CLI-authored agents.
-  runtime_config: z.unknown(),
-  custom_args: z.array(z.string()),
-  // This additive field is read by the custom-args UI. A malformed value from
-  // a mixed-version backend degrades to unknown/user-owned without discarding
-  // the otherwise valid agent response.
-  codex_windows_sandbox_arg_managed: z.boolean().optional().catch(undefined),
-  has_custom_env: z.boolean().optional(),
-  custom_env_key_count: z.number().optional(),
-  mcp_config: z.unknown().optional(),
-  mcp_config_redacted: z.boolean().optional(),
-  composio_toolkit_allowlist: z.array(z.string()).optional(),
-  composio_toolkit_allowlist_redacted: z.boolean().optional(),
-  visibility: z.string(),
-  permission_mode: z.string(),
-  invocation_targets: z.array(AgentInvocationTargetSchema),
-  status: z.string(),
-  max_concurrent_tasks: z.number(),
-  model: z.string(),
-  thinking_level: z.string().optional(),
-  service_tier: z.string().optional(),
-  owner_id: z.string().nullable(),
-  skills: z.array(AgentSkillSummarySchema),
-  disabled_runtime_skills: z.array(DisabledRuntimeSkillSchema).optional(),
-  created_at: z.string(),
-  updated_at: z.string(),
-  archived_at: z.string().nullable(),
-  archived_by: z.string().nullable(),
-}).loose();
-
-export const EMPTY_AGENT = {
-  id: "",
-  workspace_id: "",
-  runtime_id: "",
-  name: "",
-  description: "",
-  instructions: "",
-  avatar_url: null,
-  runtime_mode: "local",
-  runtime_config: {},
-  custom_args: [],
-  visibility: "private",
-  permission_mode: "private",
-  invocation_targets: [],
-  status: "offline",
-  max_concurrent_tasks: 1,
-  model: "",
-  owner_id: null,
-  skills: [],
-  created_at: "",
-  updated_at: "",
-  archived_at: null,
-  archived_by: null,
-} satisfies Agent;
-
-export const AgentListSchema = z
-  .array(AgentSchema.catch(EMPTY_AGENT))
-  .transform((agents) => agents.filter((agent) => agent.id !== ""));
-
-const OnboardingChatLastMessageSchema = z.object({
-  content: z.string(),
-  role: z.string(),
-  created_at: z.string(),
-  failure_reason: z.string().nullable().optional(),
-  message_kind: z.string().optional(),
-}).loose();
-
-const OnboardingChatSessionSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
-  agent_id: z.string(),
-  creator_id: z.string(),
-  project_id: z.string().nullable().optional(),
-  title: z.string(),
-  status: z.string(),
-  has_unread: z.boolean(),
-  unread_count: z.number().optional(),
-  last_message: OnboardingChatLastMessageSchema.nullable().optional(),
-  pinned: z.boolean().optional(),
-  created_at: z.string(),
-  updated_at: z.string(),
-}).loose();
-
-export const MikaBootstrapResponseSchema = AgentSchema.extend({
-  onboarding_session: OnboardingChatSessionSchema.optional(),
-});
-
-export const EMPTY_MIKA_BOOTSTRAP_RESPONSE: MikaBootstrapResponse = {
-  ...EMPTY_AGENT,
-};
-
-export const RuntimeDeviceSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
-  daemon_id: z.string().nullable(),
-  name: z.string(),
-  custom_name: z.string().nullable().optional(),
-  runtime_mode: z.string(),
-  provider: z.string(),
-  launch_header: z.string(),
-  status: z.string(),
-  device_info: z.string(),
-  metadata: z.record(z.string(), z.unknown()),
-  owner_id: z.string().nullable(),
-  visibility: z.string().default("private"),
-  profile_id: z.string().nullable().optional(),
-  last_seen_at: z.string().nullable(),
-  created_at: z.string(),
-  updated_at: z.string(),
-}).loose();
-
-export const EMPTY_RUNTIME_DEVICE = {
-  id: "",
-  workspace_id: "",
-  daemon_id: null,
-  name: "",
-  runtime_mode: "local",
-  provider: "",
-  launch_header: "",
-  status: "offline",
-  device_info: "",
-  metadata: {},
-  owner_id: null,
-  visibility: "private",
-  last_seen_at: null,
-  created_at: "",
-  updated_at: "",
-} satisfies AgentRuntime;
-
-export const RuntimeDeviceListSchema = z
-  .array(RuntimeDeviceSchema.catch(EMPTY_RUNTIME_DEVICE))
-  .transform((runtimes) => runtimes.filter((runtime) => runtime.id !== ""));
+export const AgentWindowsSandboxListResponseSchema = z.array(
+  AgentWindowsSandboxResponseSchema,
+);
 
 export const PluginBindingSchema = z.object({
   scope_type: z.string().default("workspace"),

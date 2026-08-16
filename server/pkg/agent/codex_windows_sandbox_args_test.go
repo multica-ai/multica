@@ -95,6 +95,24 @@ func TestNormalizeCodexWindowsSandboxCustomArgs(t *testing.T) {
 	}
 }
 
+func TestLastCodexWindowsSandboxOverrideUsesCodexLastWinsSemantics(t *testing.T) {
+	t.Parallel()
+
+	got, ok := LastCodexWindowsSandboxOverride([]string{
+		"'--config=windows.sandbox=\"elevated\"'",
+		"--profile",
+		"research",
+		"-c",
+		`windows . sandbox = "unelevated"`,
+	})
+	if !ok {
+		t.Fatal("LastCodexWindowsSandboxOverride() did not find the override")
+	}
+	if got != ` "unelevated"` {
+		t.Fatalf("LastCodexWindowsSandboxOverride() = %q, want %q", got, ` "unelevated"`)
+	}
+}
+
 func TestBuildCodexArgsAppliesWindowsSandboxAtSpawnSeam(t *testing.T) {
 	t.Parallel()
 
@@ -131,7 +149,7 @@ func TestBuildCodexArgsWindowsSandboxPrecedenceAndPlatformTransitions(t *testing
 				GOOS:                          "windows",
 				ExtraArgs:                     []string{"-c", `windows.sandbox="elevated"`},
 				CustomArgs:                    []string{"-c", managed, "--profile", "research"},
-				CodexWindowsSandboxArgManaged: true,
+				IsCodexWindowsSandboxArgManaged: true,
 			},
 			want: []string{"app-server", "--listen", "stdio://", "-c", `windows.sandbox="elevated"`, "--profile", "research"},
 		},
@@ -140,7 +158,7 @@ func TestBuildCodexArgsWindowsSandboxPrecedenceAndPlatformTransitions(t *testing
 			opts: ExecOptions{
 				GOOS:                          "windows",
 				CustomArgs:                    []string{"-c", managed, "-c", `windows.sandbox="elevated"`, "--profile", "research"},
-				CodexWindowsSandboxArgManaged: true,
+				IsCodexWindowsSandboxArgManaged: true,
 			},
 			want: []string{"app-server", "--listen", "stdio://", "-c", `windows.sandbox="elevated"`, "--profile", "research"},
 		},
@@ -149,7 +167,7 @@ func TestBuildCodexArgsWindowsSandboxPrecedenceAndPlatformTransitions(t *testing
 			opts: ExecOptions{
 				GOOS:                          "linux",
 				CustomArgs:                    []string{"-c", managed, "--profile", "research"},
-				CodexWindowsSandboxArgManaged: true,
+				IsCodexWindowsSandboxArgManaged: true,
 			},
 			want: []string{"app-server", "--listen", "stdio://", "--profile", "research"},
 		},
@@ -167,7 +185,7 @@ func TestBuildCodexArgsWindowsSandboxPrecedenceAndPlatformTransitions(t *testing
 			opts: ExecOptions{
 				GOOS:                          "windows",
 				CustomArgs:                    []string{"-c", managed, "--profile", "research"},
-				CodexWindowsSandboxArgManaged: true,
+				IsCodexWindowsSandboxArgManaged: true,
 				CodexWindowsSandboxConfigOwns: true,
 			},
 			want: []string{"app-server", "--listen", "stdio://", "--profile", "research"},

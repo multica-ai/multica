@@ -57,7 +57,7 @@ function isWindowsCodexRuntime(
   );
 }
 
-function withoutManagedSandboxPrefix(
+export function withoutManagedCodexWindowsSandboxArgs(
   args: readonly string[],
   managed: boolean,
 ): string[] {
@@ -91,7 +91,7 @@ export function ensureCodexWindowsSandboxArgs(
   runtime: RuntimeDescriptor | null | undefined,
   managed = false,
 ): string[] {
-  const result = withoutManagedSandboxPrefix(customArgs, managed);
+  const result = withoutManagedCodexWindowsSandboxArgs(customArgs, managed);
   if (
     !isWindowsCodexRuntime(runtime) ||
     runtimeArgsOwnWindowsSandbox(runtime) ||

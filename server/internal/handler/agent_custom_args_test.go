@@ -179,7 +179,7 @@ func TestAgentCustomArgsPersistenceAcrossRuntimeOnlySwitches(t *testing.T) {
 		"-c", `windows.sandbox="unelevated"`, "--profile", "research",
 	})
 	agentID := createdAgent.ID
-	if !createdAgent.CodexWindowsSandboxArgManaged {
+	if !createdAgent.IsCodexWindowsSandboxArgManaged {
 		t.Fatal("created Windows Codex prefix must be marked managed")
 	}
 
@@ -192,7 +192,7 @@ func TestAgentCustomArgsPersistenceAcrossRuntimeOnlySwitches(t *testing.T) {
 	unbound := httptest.NewRecorder()
 	testHandler.UpdateAgent(unbound, withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
 		"custom_args":                       []string{"--profile", "research"},
-		"codex_windows_sandbox_arg_managed": false,
+		"is_codex_windows_sandbox_arg_managed": false,
 	}), "id", agentID))
 	assertArgs(unbound, http.StatusOK, []string{"--profile", "research"})
 
@@ -222,7 +222,7 @@ func TestAgentCustomArgsPersistenceAcrossRuntimeOnlySwitches(t *testing.T) {
 		},
 	}), "id", agentID))
 	legacyAgent := assertArgs(legacy, http.StatusOK, []string{"--profile", "research"})
-	if legacyAgent.CodexWindowsSandboxArgManaged {
+	if legacyAgent.IsCodexWindowsSandboxArgManaged {
 		t.Fatal("profile-owned setting must clear the legacy managed prefix")
 	}
 	updateRuntime(windowsRuntimeID, []string{
@@ -239,12 +239,12 @@ func TestAgentCustomArgsPersistenceAcrossRuntimeOnlySwitches(t *testing.T) {
 		"custom_args": []string{
 			"-c", `windows.sandbox="unelevated"`, "--profile", "research",
 		},
-		"codex_windows_sandbox_arg_managed": false,
+		"is_codex_windows_sandbox_arg_managed": false,
 	}), "id", agentID))
 	explicitAgent := assertArgs(explicit, http.StatusOK, []string{
 		"-c", `windows.sandbox="unelevated"`, "--profile", "research",
 	})
-	if explicitAgent.CodexWindowsSandboxArgManaged {
+	if explicitAgent.IsCodexWindowsSandboxArgManaged {
 		t.Fatal("explicit custom_args replacement must become user-owned")
 	}
 
@@ -255,12 +255,12 @@ func TestAgentCustomArgsPersistenceAcrossRuntimeOnlySwitches(t *testing.T) {
 		"custom_args": []string{
 			"-c", `windows.sandbox="unelevated"`, "--profile", "research",
 		},
-		"codex_windows_sandbox_arg_managed": true,
+		"is_codex_windows_sandbox_arg_managed": true,
 	}), "id", agentID))
 	untrustedTrueAgent := assertArgs(untrustedTrue, http.StatusOK, []string{
 		"-c", `windows.sandbox="unelevated"`, "--profile", "research",
 	})
-	if untrustedTrueAgent.CodexWindowsSandboxArgManaged {
+	if untrustedTrueAgent.IsCodexWindowsSandboxArgManaged {
 		t.Fatal("true hint must not manufacture managed provenance")
 	}
 	updateRuntime(linuxRuntimeID, []string{

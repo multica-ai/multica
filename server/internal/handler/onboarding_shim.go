@@ -232,7 +232,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			Instructions:                  onboardingAssistantInstructions,
 			CustomEnv:                     []byte("{}"),
 			CustomArgs:                    customArgs,
-			CodexWindowsSandboxArgManaged: codexWindowsSandboxArgManaged,
+			IsCodexWindowsSandboxArgManaged: codexWindowsSandboxArgManaged,
 			McpConfig:                     nil,
 			Model:                         pgtype.Text{},
 		})

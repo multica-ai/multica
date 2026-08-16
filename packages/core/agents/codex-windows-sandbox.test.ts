@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { RuntimeDevice } from "../types";
-import { ensureCodexWindowsSandboxArgs } from "./codex-windows-sandbox";
+import {
+  ensureCodexWindowsSandboxArgs,
+  withoutManagedCodexWindowsSandboxArgs,
+} from "./codex-windows-sandbox";
 
 function runtime(
   provider: string,
@@ -19,6 +22,20 @@ function runtime(
 }
 
 describe("ensureCodexWindowsSandboxArgs", () => {
+  it("removes exactly one trusted managed prefix through the shared helper", () => {
+    expect(
+      withoutManagedCodexWindowsSandboxArgs(
+        [
+          "-c",
+          'windows.sandbox="unelevated"',
+          "-c",
+          'windows.sandbox="unelevated"',
+        ],
+        true,
+      ),
+    ).toEqual(["-c", 'windows.sandbox="unelevated"']);
+  });
+
   it("prepends the Windows Codex default as exactly two managed argv tokens", () => {
     expect(
       ensureCodexWindowsSandboxArgs(

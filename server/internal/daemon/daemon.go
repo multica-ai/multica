@@ -4987,6 +4987,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 	provider := rt.Provider
+	captureCodexWindowsSandboxRegistrationSnapshot(&task, rt)
 
 	// Task-scoped logger with short ID for readable concurrent logs.
 	taskLog := d.logger.With("task", shortID(task.ID))
@@ -6337,11 +6338,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var codexSandboxArgs []string
 	if provider == "codex" {
 		extraArgs := append(append([]string{}, profileFixedArgs...), defaultArgsForProvider(d.cfg, provider)...)
-		managed := task.Agent != nil && task.Agent.CodexWindowsSandboxArgManaged
+		managed := task.Agent != nil && task.Agent.IsCodexWindowsSandboxArgManaged
 		effectiveCustomArgs, _ := agent.NormalizeCodexWindowsSandboxCustomArgs(
 			runtime.GOOS,
 			managed,
-			agent.HasCodexWindowsSandboxOverride(extraArgs),
+			codexWindowsSandboxLowerPriorityOwns(task, extraArgs),
 			agentCustomArgs,
 		)
 		codexSandboxArgs = agent.NormalizeCodexLaunchArgs(extraArgs, effectiveCustomArgs, effectiveMcpConfig, d.logger)
@@ -6566,15 +6567,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
-	// The copied task config is available only after Prepare/Reuse. Inspect it
-	// before building argv so an explicit windows.sandbox value keeps ownership
-	// instead of being overridden by Multica's higher-priority CLI default.
-	codexWindowsSandboxConfigOwns := false
-	if provider == "codex" && runtime.GOOS == "windows" && env.CodexHome != "" {
-		codexWindowsSandboxConfigOwns = execenv.CodexWindowsSandboxConfigOwns(
-			filepath.Join(env.CodexHome, "config.toml"),
-		)
-	}
+	// Preview and launch share the runtime-registration snapshot. Re-reading the
+	// copied config here would let a mid-session config edit change spawned argv
+	// without updating the already-rendered preview.
+	codexWindowsSandboxConfigOwns :=
+		task.codexWindowsSandboxConfigOwnsAtRegistration
 	// Finalize the worktree on EVERY exit path, success or failure: commit
 	// whatever the agent left uncommitted, then unregister the worktree from
 	// the user's repo. Deferred against the named return so a task that fails
@@ -6983,7 +6980,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExtraArgs:                     extraArgs,
 		CustomArgs:                    customArgs,
 		GOOS:                          runtime.GOOS,
-		CodexWindowsSandboxArgManaged: task.Agent != nil && task.Agent.CodexWindowsSandboxArgManaged,
+		IsCodexWindowsSandboxArgManaged: task.Agent != nil && task.Agent.IsCodexWindowsSandboxArgManaged,
 		CodexWindowsSandboxConfigOwns: codexWindowsSandboxConfigOwns,
 		McpConfig:                     mcpConfig,
 		ThinkingLevel:                 thinkingLevel,
@@ -8576,6 +8573,28 @@ const (
 	codexWindowsSandboxArgConfiguredKey    = "codex_windows_sandbox_arg_configured"
 	codexWindowsSandboxConfigConfiguredKey = "codex_windows_sandbox_config_configured"
 )
+
+func captureCodexWindowsSandboxRegistrationSnapshot(task *Task, registered Runtime) {
+	task.codexWindowsSandboxConfigOwnsAtRegistration =
+		codexWindowsSandboxConfigOwnsAtRegistration(registered)
+}
+
+func codexWindowsSandboxConfigOwnsAtRegistration(registered Runtime) bool {
+	if !strings.EqualFold(strings.TrimSpace(registered.Provider), "codex") {
+		return false
+	}
+	if configured := registered.Metadata.CodexWindowsSandboxConfigConfigured; configured != nil {
+		return *configured
+	}
+	// Compatibility with a pre-feature server that did not echo the daemon's
+	// registration metadata. Current servers always persist an explicit bool.
+	return execenv.SharedCodexWindowsSandboxConfigOwns()
+}
+
+func codexWindowsSandboxLowerPriorityOwns(task Task, extraArgs []string) bool {
+	return agent.HasCodexWindowsSandboxOverride(extraArgs) ||
+		task.codexWindowsSandboxConfigOwnsAtRegistration
+}
 
 // setCodexWindowsSandboxRegistrationMetadata tells persistence and preview
 // whether profile/daemon arguments already own windows.sandbox without

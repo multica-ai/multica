@@ -1,26 +1,46 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY } from "./client";
-import { EMPTY_AGENT, EMPTY_RUNTIME_DEVICE } from "./schemas";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("ApiClient agent response schema", () => {
-  it("degrades a malformed additive provenance field without losing the agent", async () => {
+describe("ApiClient Windows Codex agent field boundary", () => {
+  it("maps the additive wire field to camelCase and preserves unrelated fields", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
-            ...EMPTY_AGENT,
             id: "agent-1",
-            codex_windows_sandbox_arg_managed: "yes",
+            unexpected: { kept: true },
+            is_codex_windows_sandbox_arg_managed: true,
           }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const result = await new ApiClient("https://api.example.test").getAgent("agent-1");
+    expect(result).toMatchObject({
+      id: "agent-1",
+      unexpected: { kept: true },
+      codexWindowsSandboxArgManaged: true,
+    });
+    expect(result).not.toHaveProperty("is_codex_windows_sandbox_arg_managed");
+  });
+
+  it("degrades only a malformed additive field and preserves baseline response data", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: 42,
+            custom_args: "legacy-malformed-value",
+            is_codex_windows_sandbox_arg_managed: "yes",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
         ),
       ),
     );
@@ -28,144 +48,54 @@ describe("ApiClient agent response schema", () => {
     await expect(
       new ApiClient("https://api.example.test").getAgent("agent-1"),
     ).resolves.toMatchObject({
-      id: "agent-1",
-      codex_windows_sandbox_arg_managed: undefined,
+      id: 42,
+      custom_args: "legacy-malformed-value",
+      codexWindowsSandboxArgManaged: undefined,
     });
   });
 
-  it("drops only the malformed item from an agent list", async () => {
+  it("falls back to the original list response instead of inventing an empty list", async () => {
+    const raw = { legacy: "not-an-array" };
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify([
-            { ...EMPTY_AGENT, id: "agent-1" },
-            { ...EMPTY_AGENT, id: 42 },
-          ]),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        ),
+        new Response(JSON.stringify(raw), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
       ),
     );
 
     await expect(
       new ApiClient("https://api.example.test").listAgents(),
-    ).resolves.toMatchObject([{ id: "agent-1" }]);
+    ).resolves.toEqual(raw);
   });
 
-  it("validates the restore response before it reaches agent caches", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            ...EMPTY_AGENT,
-            id: "agent-1",
-            codex_windows_sandbox_arg_managed: "not-a-boolean",
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        ),
+  it("translates camelCase updates to the wire and maps the response back", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "agent-1",
+          is_codex_windows_sandbox_arg_managed: true,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
+    vi.stubGlobal("fetch", fetchMock);
 
-    await expect(
-      new ApiClient("https://api.example.test").restoreAgent("agent-1"),
-    ).resolves.toMatchObject({
-      id: "agent-1",
-      codex_windows_sandbox_arg_managed: undefined,
+    const result = await new ApiClient("https://api.example.test").updateAgent(
+      "agent-1",
+      { codexWindowsSandboxArgManaged: false },
+    );
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      is_codex_windows_sandbox_arg_managed: false,
     });
-  });
-});
-
-describe("ApiClient runtime response schema", () => {
-  it("drops a runtime whose metadata is not an object", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify([
-            {
-              ...EMPTY_RUNTIME_DEVICE,
-              id: "runtime-1",
-              metadata: "not-an-object",
-            },
-          ]),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        ),
-      ),
-    );
-
-    await expect(
-      new ApiClient("https://api.example.test").listRuntimes(),
-    ).resolves.toEqual([]);
-  });
-
-  it("keeps unknown metadata values for defensive consumers", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify([
-            {
-              ...EMPTY_RUNTIME_DEVICE,
-              id: "runtime-1",
-              metadata: {
-                os: "windows",
-                codex_windows_sandbox_config_configured: "true",
-              },
-            },
-          ]),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        ),
-      ),
-    );
-
-    await expect(
-      new ApiClient("https://api.example.test").listRuntimes(),
-    ).resolves.toMatchObject([
-      {
-        id: "runtime-1",
-        metadata: {
-          codex_windows_sandbox_config_configured: "true",
-        },
-      },
-    ]);
-  });
-
-  it("validates a runtime update before replacing cached metadata", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            ...EMPTY_RUNTIME_DEVICE,
-            id: "runtime-1",
-            metadata: null,
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        ),
-      ),
-    );
-
-    await expect(
-      new ApiClient("https://api.example.test").updateRuntime("runtime-1", {
-        visibility: "public",
-      }),
-    ).resolves.toEqual(EMPTY_RUNTIME_DEVICE);
+    expect(result).toMatchObject({
+      id: "agent-1",
+      codexWindowsSandboxArgManaged: true,
+    });
   });
 });
 

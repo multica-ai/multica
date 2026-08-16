@@ -11,7 +11,7 @@ import {
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
 } from "./constants";
-import { CODEX_WINDOWS_SANDBOX_ARGS } from "./codex-windows-sandbox";
+import { withoutManagedCodexWindowsSandboxArgs } from "./codex-windows-sandbox";
 
 // Declared with the other agent wire types so `StoredAgentDraft` can name it
 // without types/ having to import from agents/.
@@ -229,13 +229,10 @@ export function buildCreateAgentRequest(options: {
     template,
   };
   if (duplicateSource) {
-    const duplicateCustomArgs =
-      duplicateSource.codex_windows_sandbox_arg_managed === true &&
-      CODEX_WINDOWS_SANDBOX_ARGS.every(
-        (value, index) => duplicateSource.custom_args[index] === value,
-      )
-        ? duplicateSource.custom_args.slice(CODEX_WINDOWS_SANDBOX_ARGS.length)
-        : [...duplicateSource.custom_args];
+    const duplicateCustomArgs = withoutManagedCodexWindowsSandboxArgs(
+      duplicateSource.custom_args,
+      duplicateSource.codexWindowsSandboxArgManaged === true,
+    );
     if (duplicateCustomArgs.length > 0) {
       request.custom_args = duplicateCustomArgs;
     }
