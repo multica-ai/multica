@@ -5,13 +5,15 @@ import { ensureCodexWindowsSandboxArgs } from "./codex-windows-sandbox";
 function runtime(
   provider: string,
   os: string,
-  configured = false,
+  argConfigured = false,
+  configConfigured = false,
 ): Pick<RuntimeDevice, "provider" | "metadata"> {
   return {
     provider,
     metadata: {
       os,
-      codex_windows_sandbox_arg_configured: configured,
+      codex_windows_sandbox_arg_configured: argConfigured,
+      codex_windows_sandbox_config_configured: configConfigured,
     },
   };
 }
@@ -74,6 +76,16 @@ describe("ensureCodexWindowsSandboxArgs", () => {
           "research",
         ],
         runtime("codex", "windows", true),
+        true,
+      ),
+    ).toEqual(["--profile", "research"]);
+  });
+
+  it("removes the managed prefix when the copied config owns the setting", () => {
+    expect(
+      ensureCodexWindowsSandboxArgs(
+        ["-c", 'windows.sandbox="unelevated"', "--profile", "research"],
+        runtime("codex", "windows", false, true),
         true,
       ),
     ).toEqual(["--profile", "research"]);

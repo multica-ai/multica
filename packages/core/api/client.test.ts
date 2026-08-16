@@ -1,8 +1,172 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY } from "./client";
+import { EMPTY_AGENT, EMPTY_RUNTIME_DEVICE } from "./schemas";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("ApiClient agent response schema", () => {
+  it("degrades a malformed additive provenance field without losing the agent", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ...EMPTY_AGENT,
+            id: "agent-1",
+            codex_windows_sandbox_arg_managed: "yes",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").getAgent("agent-1"),
+    ).resolves.toMatchObject({
+      id: "agent-1",
+      codex_windows_sandbox_arg_managed: undefined,
+    });
+  });
+
+  it("drops only the malformed item from an agent list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            { ...EMPTY_AGENT, id: "agent-1" },
+            { ...EMPTY_AGENT, id: 42 },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").listAgents(),
+    ).resolves.toMatchObject([{ id: "agent-1" }]);
+  });
+
+  it("validates the restore response before it reaches agent caches", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ...EMPTY_AGENT,
+            id: "agent-1",
+            codex_windows_sandbox_arg_managed: "not-a-boolean",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").restoreAgent("agent-1"),
+    ).resolves.toMatchObject({
+      id: "agent-1",
+      codex_windows_sandbox_arg_managed: undefined,
+    });
+  });
+});
+
+describe("ApiClient runtime response schema", () => {
+  it("drops a runtime whose metadata is not an object", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              ...EMPTY_RUNTIME_DEVICE,
+              id: "runtime-1",
+              metadata: "not-an-object",
+            },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").listRuntimes(),
+    ).resolves.toEqual([]);
+  });
+
+  it("keeps unknown metadata values for defensive consumers", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              ...EMPTY_RUNTIME_DEVICE,
+              id: "runtime-1",
+              metadata: {
+                os: "windows",
+                codex_windows_sandbox_config_configured: "true",
+              },
+            },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").listRuntimes(),
+    ).resolves.toMatchObject([
+      {
+        id: "runtime-1",
+        metadata: {
+          codex_windows_sandbox_config_configured: "true",
+        },
+      },
+    ]);
+  });
+
+  it("validates a runtime update before replacing cached metadata", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ...EMPTY_RUNTIME_DEVICE,
+            id: "runtime-1",
+            metadata: null,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").updateRuntime("runtime-1", {
+        visibility: "public",
+      }),
+    ).resolves.toEqual(EMPTY_RUNTIME_DEVICE);
+  });
 });
 
 describe("ApiClient pull-request response schema", () => {

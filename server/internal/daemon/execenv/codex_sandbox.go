@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -222,6 +223,14 @@ func CodexWindowsSandboxConfigOwns(configFile string) bool {
 		return true
 	}
 	return windowsSandboxFromConfig(string(data)) != windowsSandboxAbsent
+}
+
+// SharedCodexWindowsSandboxConfigOwns reports whether the config that will be
+// copied into each task already owns windows.sandbox. Runtime registration
+// publishes this bit so persistence and command previews make the same
+// precedence decision as the launch-time backstop.
+func SharedCodexWindowsSandboxConfigOwns() bool {
+	return CodexWindowsSandboxConfigOwns(filepath.Join(resolveSharedCodexHome(), "config.toml"))
 }
 
 // codexConfigOverrideValueRe matches the value token of a Codex `-c` /

@@ -74,14 +74,17 @@ function withoutManagedSandboxPrefix(
 function runtimeArgsOwnWindowsSandbox(
   runtime: RuntimeDescriptor | null | undefined,
 ): boolean {
-  return runtime?.metadata?.codex_windows_sandbox_arg_configured === true;
+  return (
+    runtime?.metadata?.codex_windows_sandbox_arg_configured === true ||
+    runtime?.metadata?.codex_windows_sandbox_config_configured === true
+  );
 }
 
 /**
  * Mirrors the daemon's managed Codex prefix for persisted arguments and UI
- * previews. Runtime metadata carries only whether fixed arguments already own
- * the setting; the daemon independently uses its own GOOS and effective argv
- * before spawning the process.
+ * previews. Runtime metadata carries whether fixed arguments or the shared
+ * config copied into tasks already owns the setting; the daemon independently
+ * uses its own GOOS, copied config, and effective argv before spawning.
  */
 export function ensureCodexWindowsSandboxArgs(
   customArgs: readonly string[],

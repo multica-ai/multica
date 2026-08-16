@@ -134,7 +134,10 @@ describe("CustomArgsTab", () => {
     await user.click(screen.getByRole("button", { name: /^add$/i }));
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
-    expect(onSave).toHaveBeenCalledWith({ custom_args: ["value with spaces"] });
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["value with spaces"],
+      codex_windows_sandbox_arg_managed: false,
+    });
   });
 
   it("previews and saves the Windows Codex sandbox as two argv tokens", async () => {
@@ -184,6 +187,30 @@ describe("CustomArgsTab", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledWith({
       custom_args: ["value with spaces"],
+      codex_windows_sandbox_arg_managed: false,
     });
+  });
+
+  it("omits the managed override when the copied config owns the setting", () => {
+    const windowsRuntime: RuntimeDevice = {
+      ...runtimeDevice,
+      metadata: {
+        os: "windows",
+        codex_windows_sandbox_config_configured: true,
+      },
+    };
+    renderTab(
+      {
+        custom_args: ["-c", 'windows.sandbox="unelevated"'],
+        codex_windows_sandbox_arg_managed: true,
+      },
+      vi.fn().mockResolvedValue(undefined),
+      windowsRuntime,
+    );
+
+    expect(screen.getByText("codex app-server")).toBeInTheDocument();
+    expect(
+      screen.queryByText('windows.sandbox="unelevated"'),
+    ).not.toBeInTheDocument();
   });
 });

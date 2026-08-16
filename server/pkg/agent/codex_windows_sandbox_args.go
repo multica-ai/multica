@@ -22,7 +22,7 @@ var codexWindowsSandboxArgRe = regexp.MustCompile(`^\s*windows\s*\.\s*sandbox\s*
 // duplicated.
 func NormalizeCodexWindowsSandboxCustomArgs(goos string, managed, lowerPriorityOwns bool, customArgs []string) ([]string, bool) {
 	result := append([]string(nil), customArgs...)
-	if managed && hasManagedCodexWindowsSandboxPrefix(result) {
+	if managed && HasManagedCodexWindowsSandboxPrefix(result) {
 		result = result[2:]
 	}
 	if goos != "windows" || HasCodexWindowsSandboxOverride(result) || lowerPriorityOwns {
@@ -62,7 +62,10 @@ func HasCodexWindowsSandboxOverride(args []string) bool {
 	return false
 }
 
-func hasManagedCodexWindowsSandboxPrefix(args []string) bool {
+// HasManagedCodexWindowsSandboxPrefix reports whether args begin with the
+// exact canonical pair. Callers must still have independent provenance before
+// treating that pair as platform-owned; token equality alone is insufficient.
+func HasManagedCodexWindowsSandboxPrefix(args []string) bool {
 	return len(args) >= 2 && args[0] == "-c" && args[1] == codexWindowsUnelevatedSandboxArg
 }
 

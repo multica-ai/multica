@@ -11,6 +11,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/agentconfig"
 	"github.com/multica-ai/multica/server/internal/cli"
+	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // agentCopyCmd forks an existing agent's portable configuration into a brand-new
@@ -157,8 +158,10 @@ func runAgentCopy(cmd *cobra.Command, args []string) error {
 		body["avatar_url"] = av
 	}
 
-	// custom_args: copy when present, override with --custom-args.
-	if ca, ok := src["custom_args"].([]any); ok && len(ca) > 0 {
+	// custom_args: copy user-owned arguments, but re-derive a proven managed
+	// Windows Codex prefix for the target runtime. Otherwise a copy onto Linux
+	// or another provider would turn that platform default into a user override.
+	if ca := copiedAgentCustomArgs(src); len(ca) > 0 {
 		body["custom_args"] = ca
 	}
 	if cmd.Flags().Changed("custom-args") {
@@ -287,6 +290,26 @@ func runAgentCopy(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Agent copied: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
 	return nil
+}
+
+func copiedAgentCustomArgs(src map[string]any) []string {
+	raw, ok := src["custom_args"].([]any)
+	if !ok {
+		return nil
+	}
+	args := make([]string, 0, len(raw))
+	for _, value := range raw {
+		arg, ok := value.(string)
+		if !ok {
+			return nil
+		}
+		args = append(args, arg)
+	}
+	managed, _ := src["codex_windows_sandbox_arg_managed"].(bool)
+	if managed && agentpkg.HasManagedCodexWindowsSandboxPrefix(args) {
+		return args[2:]
+	}
+	return args
 }
 
 func copiedAgentMaxConcurrentTasks(value any) (int32, bool) {

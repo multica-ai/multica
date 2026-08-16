@@ -152,6 +152,40 @@ describe("agent draft execution overrides", () => {
     expect(request.thinking_level).toBe("high");
   });
 
+  it.each(["runtime-1", "runtime-2"])(
+    "drops a proven managed sandbox prefix when duplicating onto %s",
+    (runtimeId) => {
+      const request = buildCreateAgentRequest({
+        draft: draft(),
+        runtimeId,
+        duplicateSource: sourceAgent({
+          custom_args: [
+            "-c",
+            'windows.sandbox="unelevated"',
+            "--verbose",
+          ],
+          codex_windows_sandbox_arg_managed: true,
+        }),
+      });
+
+      expect(request.custom_args).toEqual(["--verbose"]);
+    },
+  );
+
+  it("preserves an identical user-owned sandbox pair when duplicating", () => {
+    const customArgs = ["-c", 'windows.sandbox="unelevated"', "--verbose"];
+    const request = buildCreateAgentRequest({
+      draft: draft(),
+      runtimeId: "runtime-2",
+      duplicateSource: sourceAgent({
+        custom_args: customArgs,
+        codex_windows_sandbox_arg_managed: false,
+      }),
+    });
+
+    expect(request.custom_args).toEqual(customArgs);
+  });
+
   it.each([0, -1, 51])(
     "omits an invalid historical duplicate concurrency of %i",
     (maxConcurrentTasks) => {

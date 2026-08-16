@@ -2587,28 +2587,32 @@ const createSystemUserAgent = `-- name: CreateSystemUserAgent :one
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode, runtime_config,
     runtime_id, model, visibility, permission_mode, max_concurrent_tasks,
-    owner_id, instructions, custom_env, custom_args, kind, system_key
+    owner_id, instructions, custom_env, custom_args,
+    codex_windows_sandbox_arg_managed, kind, system_key
 ) VALUES (
     $1, $2, $3, $4, $5, '{}'::jsonb,
     $6, $7, $8, $9, $10,
-    $11, '', '{}'::jsonb, '[]'::jsonb, 'user', $12
+    $11, '', '{}'::jsonb, $12,
+    $13, 'user', $14
 )
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, codex_windows_sandbox_arg_managed
 `
 
 type CreateSystemUserAgentParams struct {
-	WorkspaceID        pgtype.UUID `json:"workspace_id"`
-	Name               string      `json:"name"`
-	Description        string      `json:"description"`
-	AvatarUrl          pgtype.Text `json:"avatar_url"`
-	RuntimeMode        string      `json:"runtime_mode"`
-	RuntimeID          pgtype.UUID `json:"runtime_id"`
-	Model              pgtype.Text `json:"model"`
-	Visibility         string      `json:"visibility"`
-	PermissionMode     string      `json:"permission_mode"`
-	MaxConcurrentTasks int32       `json:"max_concurrent_tasks"`
-	OwnerID            pgtype.UUID `json:"owner_id"`
-	SystemKey          pgtype.Text `json:"system_key"`
+	WorkspaceID                   pgtype.UUID `json:"workspace_id"`
+	Name                          string      `json:"name"`
+	Description                   string      `json:"description"`
+	AvatarUrl                     pgtype.Text `json:"avatar_url"`
+	RuntimeMode                   string      `json:"runtime_mode"`
+	RuntimeID                     pgtype.UUID `json:"runtime_id"`
+	Model                         pgtype.Text `json:"model"`
+	Visibility                    string      `json:"visibility"`
+	PermissionMode                string      `json:"permission_mode"`
+	MaxConcurrentTasks            int32       `json:"max_concurrent_tasks"`
+	OwnerID                       pgtype.UUID `json:"owner_id"`
+	CustomArgs                    []byte      `json:"custom_args"`
+	CodexWindowsSandboxArgManaged bool        `json:"codex_windows_sandbox_arg_managed"`
+	SystemKey                     pgtype.Text `json:"system_key"`
 }
 
 // Creates a product-defined agent that members can still see, chat with, and
@@ -2636,6 +2640,8 @@ func (q *Queries) CreateSystemUserAgent(ctx context.Context, arg CreateSystemUse
 		arg.PermissionMode,
 		arg.MaxConcurrentTasks,
 		arg.OwnerID,
+		arg.CustomArgs,
+		arg.CodexWindowsSandboxArgManaged,
 		arg.SystemKey,
 	)
 	var i Agent

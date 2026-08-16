@@ -1359,9 +1359,14 @@ type UpdateAgentRequest struct {
 	// actually unchanged, and so a client that round-tripped a
 	// previously-returned masked map cannot silently overwrite real
 	// secret values with literal `****`. See MUL-2600.
-	CustomArgs *[]string        `json:"custom_args"`
-	McpConfig  *json.RawMessage `json:"mcp_config"`
-	Visibility *string          `json:"visibility"`
+	CustomArgs *[]string `json:"custom_args"`
+	// CodexWindowsSandboxArgManaged is a compatibility-aware provenance hint
+	// for a simultaneous custom_args replacement. Omitted lets legacy clients
+	// echo an existing exact managed prefix without taking ownership; false
+	// explicitly declares the replacement user-owned.
+	CodexWindowsSandboxArgManaged *bool            `json:"codex_windows_sandbox_arg_managed"`
+	McpConfig                     *json.RawMessage `json:"mcp_config"`
+	Visibility                    *string          `json:"visibility"`
 	// PermissionMode + InvocationTargets are the invocation-permission inputs
 	// (MUL-3963). Owner-only writes (like composio_toolkit_allowlist): a
 	// non-owner admin passing them is silently ignored, because the invoke
@@ -1696,17 +1701,36 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				targetRuntime = &runtime
 			}
 		}
+		managed := existing.CodexWindowsSandboxArgManaged
+		if req.CustomArgs != nil {
+			switch {
+			case req.CodexWindowsSandboxArgManaged != nil:
+				if *req.CodexWindowsSandboxArgManaged {
+					// A client may echo true only to retain already-proven
+					// ownership of the exact prefix; it cannot manufacture
+					// platform provenance for user-authored arguments.
+					managed = managed && agent.HasManagedCodexWindowsSandboxPrefix(nextCustomArgs)
+				} else {
+					managed = false
+				}
+			default:
+				// Compatibility with installed clients that render and echo the
+				// managed pair but predate the provenance field. Only an existing
+				// managed bit plus the exact prefix retains platform ownership.
+				managed = managed && agent.HasManagedCodexWindowsSandboxPrefix(nextCustomArgs)
+			}
+		}
 		var nextManaged bool
 		if targetRuntime == nil {
 			// Unbound agents are a supported persisted state. With no runtime to
-			// supply a platform condition, preserve explicit user args and remove
-			// only a prefix whose separate provenance bit says Multica owned it.
+			// supply a platform condition, preserve the explicit user replacement
+			// without injecting a platform-owned default.
 			nextCustomArgs, nextManaged = agent.NormalizeCodexWindowsSandboxCustomArgs(
-				"", existing.CodexWindowsSandboxArgManaged, false, nextCustomArgs,
+				"", managed, false, nextCustomArgs,
 			)
 		} else {
 			nextCustomArgs, nextManaged = customArgsForRuntime(
-				*targetRuntime, nextCustomArgs, existing.CodexWindowsSandboxArgManaged,
+				*targetRuntime, nextCustomArgs, managed,
 			)
 		}
 		ca, err := json.Marshal(nextCustomArgs)

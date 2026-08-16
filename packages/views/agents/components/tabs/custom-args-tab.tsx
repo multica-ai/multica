@@ -135,7 +135,10 @@ export function CustomArgsTab({
       // Send only editable/user-owned args. The server applies and records the
       // platform default atomically, which keeps provenance trustworthy and
       // prevents one managed token from being deleted independently.
-      await onSave({ custom_args: editedArgs });
+      await onSave({
+        custom_args: editedArgs,
+        codex_windows_sandbox_arg_managed: false,
+      });
       toast.success(t(($) => $.tab_body.custom_args.saved_toast));
     } catch (err) {
       toast.error(

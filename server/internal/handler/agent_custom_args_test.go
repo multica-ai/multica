@@ -52,6 +52,16 @@ func TestCustomArgsForRuntime(t *testing.T) {
 			want:    []string{"--profile", "research"},
 		},
 		{
+			name: "shared config owned setting removes the managed prefix",
+			runtime: db.AgentRuntime{
+				Provider: "codex",
+				Metadata: []byte(`{"os":"windows","codex_windows_sandbox_config_configured":true}`),
+			},
+			args:    []string{"-c", `windows.sandbox="unelevated"`, "--profile", "research"},
+			managed: true,
+			want:    []string{"--profile", "research"},
+		},
+		{
 			name: "explicit canonical custom setting beats the runtime setting",
 			runtime: db.AgentRuntime{
 				Provider: "codex",
@@ -142,7 +152,7 @@ func TestAgentCustomArgsPersistenceAcrossRuntimeOnlySwitches(t *testing.T) {
 		}
 	})
 
-	assertArgs := func(w *httptest.ResponseRecorder, status int, want []string) string {
+	assertArgs := func(w *httptest.ResponseRecorder, status int, want []string) AgentResponse {
 		t.Helper()
 		if w.Code != status {
 			t.Fatalf("status = %d, want %d: %s", w.Code, status, w.Body.String())
@@ -154,7 +164,7 @@ func TestAgentCustomArgsPersistenceAcrossRuntimeOnlySwitches(t *testing.T) {
 		if !reflect.DeepEqual(resp.CustomArgs, want) {
 			t.Fatalf("custom_args = %v, want %v", resp.CustomArgs, want)
 		}
-		return resp.ID
+		return resp
 	}
 
 	w := httptest.NewRecorder()
@@ -165,19 +175,24 @@ func TestAgentCustomArgsPersistenceAcrossRuntimeOnlySwitches(t *testing.T) {
 		"max_concurrent_tasks": 1,
 		"custom_args":          []string{"--profile", "research"},
 	}))
-	agentID := assertArgs(w, http.StatusCreated, []string{
+	createdAgent := assertArgs(w, http.StatusCreated, []string{
 		"-c", `windows.sandbox="unelevated"`, "--profile", "research",
 	})
+	agentID := createdAgent.ID
+	if !createdAgent.CodexWindowsSandboxArgManaged {
+		t.Fatal("created Windows Codex prefix must be marked managed")
+	}
 
 	// Runtime deletion intentionally leaves an agent unbound. A custom-args
-	// PATCH must remain valid and remove only the prefix whose persisted
-	// provenance says Multica injected it.
+	// PATCH must remain valid. The current UI sends only editable user args,
+	// not the read-only managed pair, and explicitly declares them user-owned.
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET runtime_id = NULL WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("unbind agent: %v", err)
 	}
 	unbound := httptest.NewRecorder()
 	testHandler.UpdateAgent(unbound, withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
-		"custom_args": []string{"-c", `windows.sandbox="unelevated"`, "--profile", "research"},
+		"custom_args":                       []string{"--profile", "research"},
+		"codex_windows_sandbox_arg_managed": false,
 	}), "id", agentID))
 	assertArgs(unbound, http.StatusOK, []string{"--profile", "research"})
 
@@ -195,5 +210,60 @@ func TestAgentCustomArgsPersistenceAcrossRuntimeOnlySwitches(t *testing.T) {
 	updateRuntime(windowsRuntimeID, []string{
 		"-c", `windows.sandbox="unelevated"`, "--profile", "research",
 	})
-	updateRuntime(runtimeOwnedID, []string{"--profile", "research"})
+
+	// Installed clients from before the provenance field echo the visible
+	// managed pair on save. Omission must retain its old ownership rather than
+	// silently turning it into a user override.
+	legacy := httptest.NewRecorder()
+	testHandler.UpdateAgent(legacy, withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
+		"runtime_id": runtimeOwnedID,
+		"custom_args": []string{
+			"-c", `windows.sandbox="unelevated"`, "--profile", "research",
+		},
+	}), "id", agentID))
+	legacyAgent := assertArgs(legacy, http.StatusOK, []string{"--profile", "research"})
+	if legacyAgent.CodexWindowsSandboxArgManaged {
+		t.Fatal("profile-owned setting must clear the legacy managed prefix")
+	}
+	updateRuntime(windowsRuntimeID, []string{
+		"-c", `windows.sandbox="unelevated"`, "--profile", "research",
+	})
+
+	// A current client pairs its wholesale custom_args replacement with an
+	// explicit false provenance hint. Even when byte-for-byte equal to the old
+	// managed pair, it becomes user-owned and keeps custom-args precedence over
+	// a profile-owned setting.
+	explicit := httptest.NewRecorder()
+	testHandler.UpdateAgent(explicit, withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
+		"runtime_id": runtimeOwnedID,
+		"custom_args": []string{
+			"-c", `windows.sandbox="unelevated"`, "--profile", "research",
+		},
+		"codex_windows_sandbox_arg_managed": false,
+	}), "id", agentID))
+	explicitAgent := assertArgs(explicit, http.StatusOK, []string{
+		"-c", `windows.sandbox="unelevated"`, "--profile", "research",
+	})
+	if explicitAgent.CodexWindowsSandboxArgManaged {
+		t.Fatal("explicit custom_args replacement must become user-owned")
+	}
+
+	// A later client cannot manufacture platform provenance by asserting true
+	// for a pair that is already proven user-owned.
+	untrustedTrue := httptest.NewRecorder()
+	testHandler.UpdateAgent(untrustedTrue, withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
+		"custom_args": []string{
+			"-c", `windows.sandbox="unelevated"`, "--profile", "research",
+		},
+		"codex_windows_sandbox_arg_managed": true,
+	}), "id", agentID))
+	untrustedTrueAgent := assertArgs(untrustedTrue, http.StatusOK, []string{
+		"-c", `windows.sandbox="unelevated"`, "--profile", "research",
+	})
+	if untrustedTrueAgent.CodexWindowsSandboxArgManaged {
+		t.Fatal("true hint must not manufacture managed provenance")
+	}
+	updateRuntime(linuxRuntimeID, []string{
+		"-c", `windows.sandbox="unelevated"`, "--profile", "research",
+	})
 }

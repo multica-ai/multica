@@ -141,6 +141,12 @@ func (h *Handler) resolveMikaAgent(w http.ResponseWriter, r *http.Request, works
 		writeError(w, http.StatusForbidden, "you cannot bind an agent to this runtime")
 		return db.Agent{}, false, false
 	}
+	customArgs, customArgsManaged := customArgsForRuntime(runtime, nil, false)
+	customArgsJSON, err := json.Marshal(customArgs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare agent arguments")
+		return db.Agent{}, false, false
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -176,18 +182,20 @@ func (h *Handler) resolveMikaAgent(w http.ResponseWriter, r *http.Request, works
 	}
 
 	created, err := qtx.CreateSystemUserAgent(r.Context(), db.CreateSystemUserAgentParams{
-		WorkspaceID:        wsUUID,
-		Name:               service.MikaDefaultName,
-		Description:        description,
-		AvatarUrl:          pgtype.Text{String: mikaAgentAvatarURL, Valid: true},
-		RuntimeMode:        runtime.RuntimeMode,
-		RuntimeID:          runtime.ID,
-		Model:              pgtype.Text{String: strings.TrimSpace(req.Model), Valid: strings.TrimSpace(req.Model) != ""},
-		Visibility:         mikaAgentVisibility,
-		PermissionMode:     mikaAgentPermissionMode,
-		MaxConcurrentTasks: mikaAgentMaxConcurrency,
-		OwnerID:            parseUUID(userID),
-		SystemKey:          pgtype.Text{String: service.MikaSystemKey, Valid: true},
+		WorkspaceID:                   wsUUID,
+		Name:                          service.MikaDefaultName,
+		Description:                   description,
+		AvatarUrl:                     pgtype.Text{String: mikaAgentAvatarURL, Valid: true},
+		RuntimeMode:                   runtime.RuntimeMode,
+		RuntimeID:                     runtime.ID,
+		Model:                         pgtype.Text{String: strings.TrimSpace(req.Model), Valid: strings.TrimSpace(req.Model) != ""},
+		Visibility:                    mikaAgentVisibility,
+		PermissionMode:                mikaAgentPermissionMode,
+		MaxConcurrentTasks:            mikaAgentMaxConcurrency,
+		OwnerID:                       parseUUID(userID),
+		SystemKey:                     pgtype.Text{String: service.MikaSystemKey, Valid: true},
+		CustomArgs:                    customArgsJSON,
+		CodexWindowsSandboxArgManaged: customArgsManaged,
 	})
 	if err != nil {
 		slog.Warn("create mika agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)

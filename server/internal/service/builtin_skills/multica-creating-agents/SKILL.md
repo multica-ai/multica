@@ -94,6 +94,9 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
   `" (copy)"`), `description`, `instructions`, avatar, `custom_args`,
   `max_concurrent_tasks`, invocation permission (`permission_mode` +
   allow-list), and assigned workspace skills.
+- A proven managed Windows Codex sandbox prefix is removed from the copied
+  `custom_args`; the create handler re-derives the target runtime's platform
+  default, while an identical user-owned pair remains part of the copy.
 - A copied `max_concurrent_tasks` is included only when the source value is
   within 1–50. Historical out-of-range values are omitted so the new agent
   receives the server default (`6`); an explicit out-of-range
@@ -189,10 +192,11 @@ alone never authorizes removal, and the settings UI renders managed tokens as
 read-only while saving only user-owned args. An explicit `-c` or `--config`
 override remains authoritative and is not duplicated. Runtime
 metadata carries the OS plus a boolean ownership hint for fixed profile/daemon
-arguments, so those lower-priority settings are not shadowed by the managed
-prefix. The daemon independently applies the same rule from its actual GOOS
-and effective argv immediately before launch, after inspecting the copied
-`config.toml` so its explicit `windows.sandbox` value is not overridden;
+arguments and another for the shared `config.toml` copied into tasks, so
+those lower-priority settings are not shadowed by the managed prefix and
+preview matches launch. The daemon independently applies the same rule from
+its actual GOOS and effective argv immediately before launch, after inspecting
+the copied `config.toml` so its explicit `windows.sandbox` value is not overridden;
 runtime-only edits normalize the stored prefix when an agent moves between
 Windows and another platform.
 

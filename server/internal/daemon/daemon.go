@@ -8572,7 +8572,10 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 	return append([]string(nil), args...)
 }
 
-const codexWindowsSandboxArgConfiguredKey = "codex_windows_sandbox_arg_configured"
+const (
+	codexWindowsSandboxArgConfiguredKey    = "codex_windows_sandbox_arg_configured"
+	codexWindowsSandboxConfigConfiguredKey = "codex_windows_sandbox_config_configured"
+)
 
 // setCodexWindowsSandboxRegistrationMetadata tells persistence and preview
 // whether profile/daemon arguments already own windows.sandbox without
@@ -8581,6 +8584,14 @@ func setCodexWindowsSandboxRegistrationMetadata(entry map[string]string, provide
 	if !strings.EqualFold(strings.TrimSpace(provider), "codex") {
 		return
 	}
+	setCodexWindowsSandboxRegistrationMetadataWithConfig(
+		entry,
+		execenv.SharedCodexWindowsSandboxConfigOwns(),
+		argGroups...,
+	)
+}
+
+func setCodexWindowsSandboxRegistrationMetadataWithConfig(entry map[string]string, configConfigured bool, argGroups ...[]string) {
 	configured := false
 	for _, args := range argGroups {
 		if agent.HasCodexWindowsSandboxOverride(args) {
@@ -8589,4 +8600,5 @@ func setCodexWindowsSandboxRegistrationMetadata(entry map[string]string, provide
 		}
 	}
 	entry[codexWindowsSandboxArgConfiguredKey] = strconv.FormatBool(configured)
+	entry[codexWindowsSandboxConfigConfiguredKey] = strconv.FormatBool(configConfigured)
 }

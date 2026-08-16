@@ -148,6 +148,52 @@ func TestAgentCopySameRuntimeCopiesPortableFields(t *testing.T) {
 	}
 }
 
+func TestAgentCopyReDerivesManagedCodexSandboxPrefix(t *testing.T) {
+	for _, targetRuntime := range []string{"runtime-1", "runtime-2"} {
+		t.Run(targetRuntime, func(t *testing.T) {
+			source := fullSourceAgent()
+			source["custom_args"] = []any{"-c", "windows.sandbox=\"unelevated\"", "--foo"}
+			source["codex_windows_sandbox_arg_managed"] = true
+
+			var gotBody map[string]any
+			srv := copyMockServer(t, source, &gotBody)
+			defer srv.Close()
+			setCopyTestEnv(t, srv.URL)
+
+			cmd := newAgentCopyTestCmd()
+			if targetRuntime != "runtime-1" {
+				_ = cmd.Flags().Set("runtime-id", targetRuntime)
+				_ = cmd.Flags().Set("model", "")
+			}
+			if err := runAgentCopy(cmd, []string{"agent-src"}); err != nil {
+				t.Fatalf("runAgentCopy: %v", err)
+			}
+			if !reflect.DeepEqual(gotBody["custom_args"], []any{"--foo"}) {
+				t.Fatalf("custom_args = %v, want user-owned suffix", gotBody["custom_args"])
+			}
+		})
+	}
+}
+
+func TestAgentCopyPreservesIdenticalUserOwnedCodexSandboxPair(t *testing.T) {
+	source := fullSourceAgent()
+	source["custom_args"] = []any{"-c", "windows.sandbox=\"unelevated\"", "--foo"}
+	source["codex_windows_sandbox_arg_managed"] = false
+
+	var gotBody map[string]any
+	srv := copyMockServer(t, source, &gotBody)
+	defer srv.Close()
+	setCopyTestEnv(t, srv.URL)
+
+	if err := runAgentCopy(newAgentCopyTestCmd(), []string{"agent-src"}); err != nil {
+		t.Fatalf("runAgentCopy: %v", err)
+	}
+	want := []any{"-c", "windows.sandbox=\"unelevated\"", "--foo"}
+	if !reflect.DeepEqual(gotBody["custom_args"], want) {
+		t.Fatalf("custom_args = %v, want %v", gotBody["custom_args"], want)
+	}
+}
+
 func TestAgentCopyOmitsInvalidHistoricalConcurrency(t *testing.T) {
 	for _, value := range []any{0, -1, 51} {
 		t.Run(fmt.Sprint(value), func(t *testing.T) {

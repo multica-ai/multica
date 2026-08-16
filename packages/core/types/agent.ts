@@ -718,6 +718,12 @@ export interface UpdateAgentRequest {
    */
   custom_args?: string[];
   /**
+   * Provenance for a simultaneous custom_args replacement. Omit for legacy
+   * echo semantics; false explicitly declares the submitted list user-owned.
+   * True can only retain an already-proven exact managed prefix.
+   */
+  codex_windows_sandbox_arg_managed?: boolean;
+  /**
    * MCP server configuration. Tri-state semantics (MUL-2764):
    *   - field omitted → no change
    *   - `null` → clear the column; the daemon falls back to the CLI's

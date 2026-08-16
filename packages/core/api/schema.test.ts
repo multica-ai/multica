@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { noopLogger } from "../logger";
 import { ApiClient } from "./client";
-import { parseWithFallback } from "./schema";
+import { parseWithFallback, setSchemaLogger } from "./schema";
 
 // Helper: stub fetch with a single JSON response. Status defaults to 200.
 function stubFetchJson(body: unknown, status = 200) {
@@ -18,6 +19,7 @@ function stubFetchJson(body: unknown, status = 200) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  setSchemaLogger(noopLogger);
 });
 
 // These tests cover the five failure modes that white-screened the desktop
@@ -828,6 +830,27 @@ describe("parseWithFallback", () => {
     const fallback = { id: "fallback" };
     const out = parseWithFallback(null, schema, fallback, opts);
     expect(out).toBe(fallback);
+  });
+
+  it("omits sensitive response bodies from validation logs", () => {
+    const warn = vi.fn();
+    setSchemaLogger({
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn,
+      error: vi.fn(),
+    });
+
+    parseWithFallback(
+      { id: 123, token: "must-not-be-logged" },
+      z.object({ id: z.string() }),
+      { id: "fallback" },
+      { endpoint: "GET /sensitive", redactReceived: true },
+    );
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]?.[1]).not.toHaveProperty("received");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("must-not-be-logged");
   });
 });
 

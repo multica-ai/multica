@@ -703,6 +703,37 @@ func TestAgentUpdateNoFieldsErrorPointsAtEnvCommand(t *testing.T) {
 	}
 }
 
+func TestAgentUpdateDeclaresExplicitCustomArgsUserOwned(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "Agent"})
+	}))
+	defer srv.Close()
+
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("custom-args", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	_ = cmd.Flags().Set("custom-args", "[\"-c\",\"windows.sandbox=\\\"unelevated\\\"\"]")
+
+	if err := runAgentUpdate(cmd, []string{"agent-123"}); err != nil {
+		t.Fatalf("runAgentUpdate: %v", err)
+	}
+	if gotBody["codex_windows_sandbox_arg_managed"] != false {
+		t.Fatalf("provenance hint = %v, want false", gotBody["codex_windows_sandbox_arg_managed"])
+	}
+}
+
 // TestAgentUpdateDoesNotExposeCustomEnvFlags is the inverse guarantee
 // for the above test: if someone re-adds the --custom-env* flags to
 // `agent update`, this fails loudly. The /env path is the only

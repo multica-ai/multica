@@ -972,6 +972,7 @@ func TestDaemonRegister_PersistsCodexWindowsSandboxOwnershipMetadata(t *testing.
 			"version":                              "1.0.0",
 			"status":                               "online",
 			"codex_windows_sandbox_arg_configured": "true",
+			"codex_windows_sandbox_config_configured": "true",
 		}},
 	}, testWorkspaceID, "test-daemon-codex-sandbox-metadata")
 	req = req.WithContext(middleware.SetClientMetadata(req.Context(), "cli", "1.0.0", "windows"))
@@ -1004,7 +1005,9 @@ func TestDaemonRegister_PersistsCodexWindowsSandboxOwnershipMetadata(t *testing.
 	if err := json.Unmarshal(rawMetadata, &metadata); err != nil {
 		t.Fatalf("decode runtime metadata: %v", err)
 	}
-	if metadata["os"] != "windows" || metadata["codex_windows_sandbox_arg_configured"] != true {
+	if metadata["os"] != "windows" ||
+		metadata["codex_windows_sandbox_arg_configured"] != true ||
+		metadata["codex_windows_sandbox_config_configured"] != true {
 		t.Fatalf("runtime metadata = %#v, want Windows with Codex sandbox ownership", metadata)
 	}
 }

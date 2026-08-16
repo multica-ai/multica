@@ -1921,10 +1921,12 @@ LIMIT 1;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode, runtime_config,
     runtime_id, model, visibility, permission_mode, max_concurrent_tasks,
-    owner_id, instructions, custom_env, custom_args, kind, system_key
+    owner_id, instructions, custom_env, custom_args,
+    codex_windows_sandbox_arg_managed, kind, system_key
 ) VALUES (
     @workspace_id, @name, @description, @avatar_url, @runtime_mode, '{}'::jsonb,
     @runtime_id, @model, @visibility, @permission_mode, @max_concurrent_tasks,
-    @owner_id, '', '{}'::jsonb, '[]'::jsonb, 'user', @system_key
+    @owner_id, '', '{}'::jsonb, @custom_args,
+    @codex_windows_sandbox_arg_managed, 'user', @system_key
 )
 RETURNING *;
