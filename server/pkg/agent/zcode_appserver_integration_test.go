@@ -113,6 +113,11 @@ func TestZcodeRealAppServerSmoke(t *testing.T) {
 		// long-lived process instead of spawning per turn.
 		if resumed := runZcodeResumeTurn(t, backend, result.SessionID, workdir); resumed != "" {
 			t.Logf("real zcode resume OK: resumed_session=%s", resumed)
+
+			// Third turn drives a real tool call: tool.updated phases must
+			// surface as a matched tool_use/tool_result pair on the message
+			// stream (the daemon's in-flight tool window counts on them).
+			runZcodeToolTurn(t, backend, resumed, workdir)
 		}
 	case <-time.After(120 * time.Second):
 		t.Fatal("timeout waiting for real zcode result")
@@ -154,6 +159,72 @@ func runZcodeResumeTurn(t *testing.T, backend Backend, sessionID, workdir string
 	case <-time.After(60 * time.Second):
 		t.Fatal("timeout waiting for resume result")
 		return ""
+	}
+}
+
+// runZcodeToolTurn executes a turn that forces a tool call and asserts the
+// tool.updated lifecycle reached the message stream as a matched
+// tool_use/tool_result pair. Returns after the message channel closed, so the
+// assertions see every message of the turn.
+func runZcodeToolTurn(t *testing.T, backend Backend, sessionID, workdir string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "Run the shell command `echo zcode-tool-smoke-ok` using a tool, then reply with its exact output.", ExecOptions{
+		Cwd:                       workdir,
+		Timeout:                   80 * time.Second,
+		HandshakeTimeout:          20 * time.Second,
+		SemanticInactivityTimeout: 60 * time.Second,
+		ResumeSessionID:           sessionID,
+	})
+	if err != nil {
+		t.Fatalf("tool execute: %v", err)
+	}
+	seen := map[MessageType][]Message{}
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for msg := range session.Messages {
+			seen[msg.Type] = append(seen[msg.Type], msg)
+		}
+	}()
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		<-drained
+		if result.Status != "completed" {
+			t.Fatalf("tool turn did not complete: status=%q error=%q", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Output, "zcode-tool-smoke-ok") {
+			t.Fatalf("expected tool output in response, got %q", result.Output)
+		}
+		uses := seen[MessageToolUse]
+		results := seen[MessageToolResult]
+		if len(uses) == 0 {
+			t.Fatal("no tool_use message observed on a tool-forcing turn")
+		}
+		if len(results) < len(uses) {
+			t.Fatalf("tool_use/tool_result unbalanced: %d uses vs %d results", len(uses), len(results))
+		}
+		byCallID := map[string]Message{}
+		for _, m := range uses {
+			byCallID[m.CallID] = m
+		}
+		for _, m := range results {
+			use, ok := byCallID[m.CallID]
+			if !ok {
+				t.Errorf("tool_result for unknown call %q", m.CallID)
+				continue
+			}
+			if m.Tool == "" || m.Tool != use.Tool {
+				t.Errorf("tool_result %q tool=%q does not match its tool_use tool=%q", m.CallID, m.Tool, use.Tool)
+			}
+		}
+		t.Logf("tool turn OK: %d tool_use, %d tool_result (first: %s)", len(uses), len(results), uses[0].Tool)
+	case <-time.After(90 * time.Second):
+		t.Fatal("timeout waiting for tool turn result")
 	}
 }
 

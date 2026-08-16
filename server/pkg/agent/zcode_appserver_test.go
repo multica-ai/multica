@@ -665,6 +665,96 @@ func TestZcodeExecuteNilLogger(t *testing.T) {
 	}
 }
 
+// TestZcodeExecuteStreamsToolLifecycle pins the tool.updated → tool_use /
+// tool_result mapping, using the phase shapes captured from the real runtime:
+// scheduled must NOT emit (started repeats the id/name pair and the daemon's
+// in-flight window counts one tool_use per call), started emits tool_use,
+// result emits tool_result with the name recovered from state, failure rides
+// the same result event with the error text in content, and the contentless
+// batch summary is ignored.
+func TestZcodeExecuteStreamsToolLifecycle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeZcodeAppServer(t, ""+
+		`read line`+"\n"+ // session/create
+		`echo '{"id":1,"result":{"session":{"sessionId":"sess_tools"}}}'`+"\n"+
+		`read line`+"\n"+ // session/subscribe
+		`echo '{"id":2,"result":{"eventSeq":0,"events":[]}}'`+"\n"+
+		`read line`+"\n"+ // session/send
+		`echo '{"id":3,"result":{"accepted":true,"sessionId":"sess_tools"}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"turn.started","sessionId":"sess_tools","payload":{}}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"tool.updated","sessionId":"sess_tools","payload":{"kind":"scheduled","toolCallId":"call_1","toolName":"Bash","inputOmitted":true}}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"tool.updated","sessionId":"sess_tools","payload":{"kind":"started","toolCallId":"call_1","toolName":"Bash","startedAt":1}}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"tool.updated","sessionId":"sess_tools","payload":{"kind":"started","toolCallId":"call_2","toolName":"Read","startedAt":2}}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"tool.updated","sessionId":"sess_tools","payload":{"kind":"result","toolCallId":"call_1","result":{"content":"tool-probe-ok","success":true}}}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"tool.updated","sessionId":"sess_tools","payload":{"kind":"result","toolCallId":"call_2","result":{"content":"Exit code 1: boom","success":false}}}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"tool.updated","sessionId":"sess_tools","payload":{"kind":"batch","toolCallIds":["call_1","call_2"],"successCount":1,"errorCount":1}}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"turn.completed","sessionId":"sess_tools","payload":{"response":"done","usage":{}}}}'`+"\n"+
+		`while read line; do :; done`+"\n")
+
+	cleanupZcodeProc(t, "rt-exec-tool-lifecycle")
+	b := &zcodeBackend{cfg: Config{ExecutablePath: fakePath, RuntimeID: "rt-exec-tool-lifecycle", Logger: slog.Default()}}
+	session, err := b.Execute(context.Background(), "prompt", ExecOptions{Model: "bigmodel/GLM-5.2"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	// Drain the message stream to close before asserting: the tool messages
+	// are sent before turn.completed, but a snapshot taken at Result-arrival
+	// races the drain goroutine.
+	var messages []Message
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for msg := range session.Messages {
+			messages = append(messages, msg)
+		}
+	}()
+	var result Result
+	select {
+	case r, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		result = r
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+	<-drained
+
+	if result.Status != "completed" || result.Output != "done" {
+		t.Fatalf("expected completed turn, got status=%q output=%q error=%q", result.Status, result.Output, result.Error)
+	}
+
+	var uses, results []Message
+	for _, m := range messages {
+		switch m.Type {
+		case MessageToolUse:
+			uses = append(uses, m)
+		case MessageToolResult:
+			results = append(results, m)
+		}
+	}
+	if len(uses) != 2 {
+		t.Fatalf("expected exactly 2 tool_use (scheduled must not emit), got %d: %+v", len(uses), uses)
+	}
+	if uses[0].Tool != "Bash" || uses[0].CallID != "call_1" {
+		t.Errorf("tool_use #1 = %+v, want Bash/call_1", uses[0])
+	}
+	if uses[1].Tool != "Read" || uses[1].CallID != "call_2" {
+		t.Errorf("tool_use #2 = %+v, want Read/call_2", uses[1])
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected exactly 2 tool_result, got %d: %+v", len(results), results)
+	}
+	if results[0].Tool != "Bash" || results[0].CallID != "call_1" || results[0].Output != "tool-probe-ok" {
+		t.Errorf("tool_result #1 = %+v, want Bash/call_1 with success output", results[0])
+	}
+	if results[1].Tool != "Read" || results[1].CallID != "call_2" || results[1].Output != "Exit code 1: boom" {
+		t.Errorf("tool_result #2 = %+v, want Read/call_2 with failure output", results[1])
+	}
+}
+
 // ── registry / model resolution ───────────────────────────────────────────
 
 func TestZcodeProcRegistryReusesLiveProcess(t *testing.T) {

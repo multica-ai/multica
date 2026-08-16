@@ -660,6 +660,7 @@ func (b *zcodeBackend) runSessionTurn(ctx context.Context, proc *zcodeClient, se
 	trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 	state := &zcodeTurnState{
 		usage:      map[string]TokenUsage{},
+		tools:      map[string]string{},
 		sessionID:  sessionID,
 		providerID: providerID,
 		modelID:    modelID,
@@ -754,6 +755,9 @@ type zcodeTurnState struct {
 	lastText      string
 	finalResponse string
 	usage         map[string]TokenUsage
+	// tools remembers toolCallId → toolName from the "started" phase; the
+	// "result" phase of a tool.updated event does not repeat the name.
+	tools map[string]string
 }
 
 func (b *zcodeBackend) consumeTurn(ctx context.Context, proc *zcodeClient, handler *zcodeSessionHandler, state *zcodeTurnState, timeout, semanticInactivityTimeout time.Duration, msgCh chan<- Message) (status, out, errMsg string) {
@@ -862,6 +866,11 @@ func (b *zcodeBackend) processSessionEvent(params map[string]any, msgCh chan<- M
 				trySend(msgCh, Message{Type: MessageThinking, Content: delta})
 			}
 		}
+	case "tool.updated":
+		// Tool execution proves the turn is live even when turn.started
+		// was dropped, arming the session/read poll fallback.
+		state.turnStarted = true
+		b.processToolUpdated(payload, msgCh, state)
 	case "turn.completed":
 		state.turnStarted = true
 		response, _ := payload["response"].(string)
@@ -879,6 +888,44 @@ func (b *zcodeBackend) processSessionEvent(params map[string]any, msgCh chan<- M
 		return true, "failed", "", msg
 	}
 	return false, "", "", ""
+}
+
+// processToolUpdated maps tool.updated lifecycle notifications onto the
+// daemon's tool_use / tool_result messages. Verified against the real runtime
+// (zcode-app-cli 3.7.6-12): every call reports the same phase sequence, and a
+// failing call rides the same "result" event with the error text in
+// result.content — so the daemon's in-flight tool window stays balanced:
+//
+//	{"kind":"scheduled","toolCallId":"call_…","toolName":"Bash","inputOmitted":true,…}
+//	{"kind":"started","toolCallId":"call_…","toolName":"Bash","startedAt":…}
+//	{"kind":"result","toolCallId":"call_…","result":{"content":"…","success":bool,…}}
+//	{"kind":"batch","toolCallIds":[…],"successCount":N,"errorCount":M}
+//
+// tool_use is emitted once per call, at "started": "scheduled" carries the
+// same id/name pair, and emitting at both would double-count the daemon's
+// in-flight window. "result" does not repeat the tool name, so it is looked
+// up from what "started" recorded. "batch" is a contentless per-turn summary,
+// and "scheduled" carries no input payload (inputOmitted — the input lives in
+// the model stream), so neither produces a message.
+func (b *zcodeBackend) processToolUpdated(payload map[string]any, msgCh chan<- Message, state *zcodeTurnState) {
+	kind, _ := payload["kind"].(string)
+	callID, _ := payload["toolCallId"].(string)
+	if callID == "" {
+		return
+	}
+	switch kind {
+	case "started":
+		name, _ := payload["toolName"].(string)
+		if name == "" {
+			return
+		}
+		state.tools[callID] = name
+		trySend(msgCh, Message{Type: MessageToolUse, Tool: name, CallID: callID})
+	case "result":
+		res, _ := payload["result"].(map[string]any)
+		content, _ := res["content"].(string)
+		trySend(msgCh, Message{Type: MessageToolResult, Tool: state.tools[callID], CallID: callID, Output: content})
+	}
 }
 
 func (b *zcodeBackend) processStateUpdated(params map[string]any, state *zcodeTurnState) (bool, string, string, string) {
