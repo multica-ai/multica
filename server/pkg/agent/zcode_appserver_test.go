@@ -539,6 +539,132 @@ func TestZcodeExecuteRecoversCompletedFromPoll(t *testing.T) {
 	}
 }
 
+// TestZcodeExecutePollFallbackArmedByStreaming pins that model.streaming alone
+// arms the session/read poll fallback: if turn.started is dropped but deltas
+// arrive, the poll must still recover the terminal state instead of waiting
+// out the semantic inactivity timer.
+func TestZcodeExecutePollFallbackArmedByStreaming(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	zcodeTurnPollIntervalNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { zcodeTurnPollIntervalNanos.Store(0) })
+
+	fakePath := writeFakeZcodeAppServer(t, ""+
+		`read line`+"\n"+ // session/create
+		`echo '{"id":1,"result":{"session":{"sessionId":"sess_stream"}}}'`+"\n"+
+		`read line`+"\n"+ // session/subscribe
+		`echo '{"id":2,"result":{"eventSeq":0,"events":[]}}'`+"\n"+
+		`read line`+"\n"+ // session/send
+		`echo '{"id":3,"result":{"accepted":true,"sessionId":"sess_stream"}}'`+"\n"+
+		// turn.started is dropped; only a streaming delta is notified and the
+		// turn completes internally without a terminal notification.
+		`echo '{"method":"session/event","params":{"type":"model.streaming","sessionId":"sess_stream","payload":{"kind":"reasoning_delta","delta":"think"}}}'`+"\n"+
+		`read line`+"\n"+ // poll session/read
+		`echo '{"id":4,"result":{"projection":{"status":"idle"},"messages":[{"info":{"role":"assistant"},"parts":[{"type":"text","text":"poll result"}]}]}}'`+"\n"+
+		`read line`+"\n"+ // readSessionResponse session/read
+		`echo '{"id":5,"result":{"projection":{"status":"idle"},"messages":[{"info":{"role":"assistant"},"parts":[{"type":"text","text":"poll result"}]}]}}'`+"\n"+
+		`while read line; do :; done`+"\n")
+
+	result, _ := executeFakeZcode(t, fakePath, Config{Logger: slog.Default(), RuntimeID: "rt-exec-stream-poll"},
+		ExecOptions{Model: "bigmodel/GLM-5.2"}, 10*time.Second)
+
+	if result.Status != "completed" {
+		t.Fatalf("expected completed via poll, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "poll result" {
+		t.Fatalf("output = %q, want poll result", result.Output)
+	}
+}
+
+// TestZcodeExecuteRecoveryReadIsBounded pins the timeout/abort recovery path:
+// the recovery session/read must carry its own deadline, so an app-server that
+// never answers it still yields a result instead of blocking the turn goroutine
+// forever.
+func TestZcodeExecuteRecoveryReadIsBounded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeZcodeAppServer(t, ""+
+		`read line`+"\n"+ // session/create
+		`echo '{"id":1,"result":{"session":{"sessionId":"sess_hang"}}}'`+"\n"+
+		`read line`+"\n"+ // session/subscribe
+		`echo '{"id":2,"result":{"eventSeq":0,"events":[]}}'`+"\n"+
+		`read line`+"\n"+ // session/send
+		`echo '{"id":3,"result":{"accepted":true,"sessionId":"sess_hang"}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"turn.started","sessionId":"sess_hang","payload":{}}}'`+"\n"+
+		`read line`+"\n"+ // session/stop after the semantic inactivity timeout
+		`echo '{"id":4,"result":{"stopped":true}}'`+"\n"+
+		// recovery session/read is silently never answered
+		`while read line; do :; done`+"\n")
+
+	start := time.Now()
+	result, _ := executeFakeZcode(t, fakePath, Config{Logger: slog.Default(), RuntimeID: "rt-exec-recovery-bound"},
+		ExecOptions{Model: "bigmodel/GLM-5.2", SemanticInactivityTimeout: 500 * time.Millisecond}, 10*time.Second)
+
+	if result.Status != "timeout" {
+		t.Fatalf("status = %q, want timeout (error=%q)", result.Status, result.Error)
+	}
+	// One zcodeStopTimeout for the unanswered recovery read, plus slack.
+	if elapsed := time.Since(start); elapsed > 8*time.Second {
+		t.Fatalf("recovery read ran unbounded: turn returned after %s", elapsed)
+	}
+}
+
+// TestZcodeExecuteNilLogger drives the -32031 fresh-session fallback with a
+// directly constructed backend (no logger defaulting): the turn must finish
+// without touching a nil Config.Logger.
+func TestZcodeExecuteNilLogger(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeZcodeAppServer(t, ""+
+		`read line`+"\n"+ // session/resume -> sess_bad
+		`echo '{"id":1,"result":{"session":{"sessionId":"sess_bad"}}}'`+"\n"+
+		`read line`+"\n"+ // session/subscribe (sess_bad)
+		`echo '{"id":2,"result":{"eventSeq":0,"events":[]}}'`+"\n"+
+		`read line`+"\n"+ // session/send (sess_bad) -> -32031
+		`echo '{"id":3,"error":{"code":-32031,"message":"历史任务使用的模型已不可用"}}'`+"\n"+
+		`read line`+"\n"+ // session/close (sess_bad)
+		`echo '{"id":4,"result":{"closed":true}}'`+"\n"+
+		`read line`+"\n"+ // session/create -> sess_fresh
+		`echo '{"id":5,"result":{"session":{"sessionId":"sess_fresh"}}}'`+"\n"+
+		`read line`+"\n"+ // session/subscribe (sess_fresh)
+		`echo '{"id":6,"result":{"eventSeq":0,"events":[]}}'`+"\n"+
+		`read line`+"\n"+ // session/send (sess_fresh)
+		`echo '{"id":7,"result":{"accepted":true,"sessionId":"sess_fresh"}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"turn.started","sessionId":"sess_fresh","payload":{}}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"turn.completed","sessionId":"sess_fresh","payload":{"response":"ok","usage":{}}}}'`+"\n"+
+		`while read line; do :; done`+"\n")
+	cleanupZcodeProc(t, "rt-exec-nil-logger")
+
+	b := &zcodeBackend{cfg: Config{ExecutablePath: fakePath, RuntimeID: "rt-exec-nil-logger"}}
+	session, err := b.Execute(context.Background(), "prompt", ExecOptions{
+		Model:                  "bigmodel/GLM-5.2",
+		ResumeSessionID:        "sess_bad",
+		ResumeExpected:         true,
+		ResumeContinuityNotice: "[continuity lost] ",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" || result.SessionID != "sess_fresh" {
+			t.Fatalf("expected fresh completed session, got status=%q session=%q error=%q", result.Status, result.SessionID, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 // ── registry / model resolution ───────────────────────────────────────────
 
 func TestZcodeProcRegistryReusesLiveProcess(t *testing.T) {

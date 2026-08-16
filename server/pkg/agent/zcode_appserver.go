@@ -607,8 +607,10 @@ func (b *zcodeBackend) runTurn(ctx context.Context, prompt string, opts ExecOpti
 	// so abandon it and retry the turn once on a fresh session instead of
 	// failing the task.
 	if isZcodeModelUnavailable(rpcErr) {
-		b.cfg.Logger.Warn("zcode: resumed session's model unavailable (-32031); retrying on a fresh session",
-			"session_id", sessionID, "error", rpcErr)
+		if b.cfg.Logger != nil {
+			b.cfg.Logger.Warn("zcode: resumed session's model unavailable (-32031); retrying on a fresh session",
+				"session_id", sessionID, "error", rpcErr)
+		}
 		zcodeCloseSession(proc, sessionID)
 		freshID, cerr := b.createFreshSession(runCtx, proc, providerID, modelID, handshakeTimeout, opts.Cwd)
 		if cerr == nil {
@@ -622,7 +624,9 @@ func (b *zcodeBackend) runTurn(ctx context.Context, prompt string, opts ExecOpti
 		}
 	}
 
-	b.cfg.Logger.Info("zcode turn finished", "pid", proc.pid(), "session_id", sessionID, "status", status, "duration", time.Since(startTime).Round(time.Millisecond).String())
+	if b.cfg.Logger != nil {
+		b.cfg.Logger.Info("zcode turn finished", "pid", proc.pid(), "session_id", sessionID, "status", status, "duration", time.Since(startTime).Round(time.Millisecond).String())
+	}
 	resCh <- Result{
 		Status:     status,
 		Output:     out,
@@ -692,8 +696,10 @@ func (b *zcodeBackend) ensureSession(ctx context.Context, proc *zcodeClient, opt
 			if sid := zcodeResultSessionID(resp); sid == opts.ResumeSessionID {
 				return sid, true, nil
 			}
-			b.cfg.Logger.Warn("zcode session/resume returned a different session id; starting fresh",
-				"requested", opts.ResumeSessionID, "returned", zcodeResultSessionID(resp))
+			if b.cfg.Logger != nil {
+				b.cfg.Logger.Warn("zcode session/resume returned a different session id; starting fresh",
+					"requested", opts.ResumeSessionID, "returned", zcodeResultSessionID(resp))
+			}
 		} else if b.cfg.Logger != nil {
 			b.cfg.Logger.Info("zcode session/resume unavailable; starting fresh", "session_id", opts.ResumeSessionID, "error", rerr)
 		}
@@ -804,7 +810,12 @@ func (b *zcodeBackend) consumeTurn(ctx context.Context, proc *zcodeClient, handl
 	// finished just as the deadline fired, or notifications were dropped).
 	// Recover it so a completed turn is not reported as a failure.
 	if status == "timeout" || status == "aborted" {
-		if recovered := b.readSessionResponse(context.Background(), proc, state); recovered != "" {
+		// readSessionResponse bounds only a nil ctx, so the recovery read must
+		// carry its own deadline or it blocks forever on a hung app-server.
+		rctx, rcancel := context.WithTimeout(context.Background(), zcodeStopTimeout)
+		recovered := b.readSessionResponse(rctx, proc, state)
+		rcancel()
+		if recovered != "" {
 			status = "completed"
 			out = recovered
 			errMsg = ""
@@ -835,6 +846,9 @@ func (b *zcodeBackend) processSessionEvent(params map[string]any, msgCh chan<- M
 		state.turnStarted = true
 		trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 	case "model.streaming":
+		// Streaming proves the turn is live even when turn.started was
+		// dropped, arming the session/read poll fallback.
+		state.turnStarted = true
 		kind, _ := payload["kind"].(string)
 		delta, _ := payload["delta"].(string)
 		switch kind {
