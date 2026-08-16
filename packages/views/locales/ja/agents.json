@@ -219,6 +219,21 @@
     "description_label": "説明",
     "description_placeholder": "このエージェントは何をしますか？",
     "visibility_label": "公開範囲",
+    "mode_label": "モード",
+    "mode": {
+      "coding": {
+        "label": "コーディング",
+        "description": "コードを書き、リポジトリをチェックアウト"
+      },
+      "operational": {
+        "label": "オペレーション",
+        "description": "MCPツールで業務タスクを実行"
+      },
+      "hybrid": {
+        "label": "ハイブリッド",
+        "description": "コードと業務タスク"
+      }
+    },
     "runtime_label": "ランタイム",
     "runtime_filter_mine": "自分のもの",
     "runtime_filter_all": "すべて",

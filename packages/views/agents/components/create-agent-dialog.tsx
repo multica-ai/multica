@@ -330,7 +330,9 @@ export function CreateAgentDialog({
             </div>
 
             <div>
-              <Label className="text-xs text-muted-foreground">Mode</Label>
+              <Label className="text-xs text-muted-foreground">
+                {t(($) => $.create_dialog.mode_label)}
+              </Label>
               <div className="mt-1.5 flex gap-2">
                 <button
                   type="button"
@@ -343,9 +345,11 @@ export function CreateAgentDialog({
                 >
                   <Code className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="text-left">
-                    <div className="font-medium">Coding</div>
+                    <div className="font-medium">
+                      {t(($) => $.create_dialog.mode.coding.label)}
+                    </div>
                     <div className="text-xs text-muted-foreground">
-                      Writes code, checks out repos
+                      {t(($) => $.create_dialog.mode.coding.description)}
                     </div>
                   </div>
                 </button>
@@ -360,9 +364,11 @@ export function CreateAgentDialog({
                 >
                   <Briefcase className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="text-left">
-                    <div className="font-medium">Operational</div>
+                    <div className="font-medium">
+                      {t(($) => $.create_dialog.mode.operational.label)}
+                    </div>
                     <div className="text-xs text-muted-foreground">
-                      Business tasks via MCP tools
+                      {t(($) => $.create_dialog.mode.operational.description)}
                     </div>
                   </div>
                 </button>
@@ -377,9 +383,11 @@ export function CreateAgentDialog({
                 >
                   <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="text-left">
-                    <div className="font-medium">Hybrid</div>
+                    <div className="font-medium">
+                      {t(($) => $.create_dialog.mode.hybrid.label)}
+                    </div>
                     <div className="text-xs text-muted-foreground">
-                      Code + operational tasks
+                      {t(($) => $.create_dialog.mode.hybrid.description)}
                     </div>
                   </div>
                 </button>

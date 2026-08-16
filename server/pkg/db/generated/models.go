@@ -57,6 +57,8 @@ type AgentActionLog struct {
 	ResultSummary pgtype.Text        `json:"result_summary"`
 	Status        pgtype.Text        `json:"status"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	TaskID        pgtype.Text        `json:"task_id"`
+	MessageSeq    pgtype.Int4        `json:"message_seq"`
 }
 
 type AgentRuntime struct {

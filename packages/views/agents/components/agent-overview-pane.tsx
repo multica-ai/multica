@@ -9,6 +9,8 @@ import {
   ListTodo,
   Plug,
   Router,
+  ScrollText,
+  ShieldCheck,
   Terminal,
   Webhook,
 } from "lucide-react";
@@ -36,6 +38,8 @@ import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
+import { ActionsTab } from "./tabs/actions-tab";
+import { AllowedToolsTab } from "./tabs/allowed-tools-tab";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 
@@ -48,9 +52,13 @@ export type DetailTab =
   | "custom_args"
   | "mcp_config"
   | "integrations"
-  | "runtime_config";
+  | "runtime_config"
+  | "actions"
+  | "allowed_tools";
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args" | "mcp_config" | "integrations" | "runtime_config"> = {
+type TranslatedDetailTab = Exclude<DetailTab, "actions" | "allowed_tools">;
+
+const TAB_LABEL_KEY: Record<TranslatedDetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args" | "mcp_config" | "integrations" | "runtime_config"> = {
   activity: "activity",
   tasks: "tasks",
   instructions: "instructions",
@@ -75,6 +83,8 @@ const detailTabs: {
   { id: "mcp_config", icon: Plug },
   { id: "integrations", icon: Webhook },
   { id: "runtime_config", icon: Router },
+  { id: "actions", icon: ScrollText },
+  { id: "allowed_tools", icon: ShieldCheck },
 ];
 
 interface AgentOverviewPaneProps {
@@ -234,7 +244,11 @@ export function AgentOverviewPane({
             }`}
           >
             <tab.icon className="h-3.5 w-3.5" />
-            {t(($) => $.tabs[TAB_LABEL_KEY[tab.id]])}
+            {tab.id === "actions"
+              ? "Audit"
+              : tab.id === "allowed_tools"
+                ? "Allowed tools"
+                : t(($) => $.tabs[TAB_LABEL_KEY[tab.id as TranslatedDetailTab]])}
           </button>
         ))}
       </div>
@@ -295,6 +309,20 @@ export function AgentOverviewPane({
         {effectiveTab === "runtime_config" && (
           <TabContent>
             <RuntimeConfigTab
+              agent={agent}
+              onSave={(updates) => onUpdate(agent.id, updates)}
+              onDirtyChange={setActiveDirty}
+            />
+          </TabContent>
+        )}
+        {effectiveTab === "actions" && (
+          <TabContent>
+            <ActionsTab agent={agent} />
+          </TabContent>
+        )}
+        {effectiveTab === "allowed_tools" && (
+          <TabContent>
+            <AllowedToolsTab
               agent={agent}
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}

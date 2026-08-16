@@ -45,6 +45,52 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeArgsIncludesAllowedTools(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{
+		AllowedTools: []string{"mcp__builderlync__get_contact", "Bash(multica issue *)"},
+	}, slog.Default())
+
+	for i, arg := range args {
+		if arg != "--allowedTools" && arg != "--allowed-tools" {
+			continue
+		}
+		if i+1 >= len(args) {
+			t.Fatal("--allowedTools has no value")
+		}
+		if args[i+1] != "mcp__builderlync__get_contact,Bash(multica issue *)" {
+			t.Fatalf("allowed tools = %q, want comma-separated tool patterns", args[i+1])
+		}
+		return
+	}
+	t.Fatal("expected --allowedTools in Claude args")
+}
+
+func TestBuildClaudeArgsBlocksAllowedToolsOverride(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{
+		AllowedTools:           []string{"mcp__builderlync__get_contact"},
+		AllowedToolsConfigured: true,
+		CustomArgs:             []string{"--allowed-tools", "Bash(rm -rf *)"},
+	}, slog.Default())
+
+	count := 0
+	for i, arg := range args {
+		if arg != "--allowedTools" {
+			continue
+		}
+		count++
+		if i+1 >= len(args) || args[i+1] != "mcp__builderlync__get_contact" {
+			t.Fatalf("unexpected allowed tools args: %v", args)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one --allowedTools flag, got %d in %v", count, args)
+	}
+}
+
 func TestClaudeHandleAssistantToolUse(t *testing.T) {
 	t.Parallel()
 

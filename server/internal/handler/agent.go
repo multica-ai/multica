@@ -687,6 +687,7 @@ type CreateAgentRequest struct {
 	CustomEnv          map[string]string `json:"custom_env"`
 	CustomArgs         []string          `json:"custom_args"`
 	McpConfig          json.RawMessage   `json:"mcp_config"`
+	AllowedTools       json.RawMessage   `json:"allowed_tools"`
 	Visibility         string            `json:"visibility"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
@@ -761,6 +762,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "mode must be one of: coding, operational, hybrid")
 		return
 	}
+	allowedTools, allowedToolsConfigured, err := parseAllowedTools(rawFields["allowed_tools"])
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
 	if !ok {
@@ -833,8 +839,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var allowedRaw []byte
-	if rawAllowed, ok := rawFields["allowed_tools"]; ok && !bytes.Equal(bytes.TrimSpace(rawAllowed), []byte("null")) {
-		allowedRaw = append([]byte(nil), rawAllowed...)
+	if allowedToolsConfigured {
+		allowedRaw, _ = json.Marshal(allowedTools)
 	}
 
 	created, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
@@ -912,6 +918,7 @@ type UpdateAgentRequest struct {
 	// secret values with literal `****`. See MUL-2600.
 	CustomArgs         *[]string        `json:"custom_args"`
 	McpConfig          *json.RawMessage `json:"mcp_config"`
+	AllowedTools       *json.RawMessage `json:"allowed_tools"`
 	Visibility         *string          `json:"visibility"`
 	Status             *string          `json:"status"`
 	MaxConcurrentTasks *int32           `json:"max_concurrent_tasks"`
@@ -1092,9 +1099,18 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
 	rawAllowed, hasAllowed := rawFields["allowed_tools"]
-	shouldClearAllowed := hasAllowed && bytes.Equal(bytes.TrimSpace(rawAllowed), []byte("null"))
-	if hasAllowed && !shouldClearAllowed {
-		params.AllowedTools = append([]byte(nil), rawAllowed...)
+	shouldClearAllowed := false
+	if hasAllowed {
+		allowedTools, configured, parseErr := parseAllowedTools(rawAllowed)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, parseErr.Error())
+			return
+		}
+		if configured {
+			params.AllowedTools, _ = json.Marshal(allowedTools)
+		} else {
+			shouldClearAllowed = true
+		}
 	}
 
 	// Resolve the runtime that will be in force after this update so the
@@ -1246,6 +1262,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
+			return
+		}
+	}
+	if shouldClearAllowed {
+		updated, err = h.Queries.ClearAgentAllowedTools(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent allowed_tools failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear allowed_tools: "+err.Error())
 			return
 		}
 	}

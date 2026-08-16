@@ -146,6 +146,7 @@ type AgentData struct {
 	// gateway endpoint, see issue #3260); other backends ignore it.
 	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
 	Mode          string          `json:"mode,omitempty"`
+	AllowedTools  json.RawMessage `json:"allowed_tools,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.

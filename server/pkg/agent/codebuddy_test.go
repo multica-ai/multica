@@ -74,6 +74,30 @@ func TestBuildCodebuddyArgs_OmitsEffortWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestBuildCodebuddyArgsBlocksAllowedToolsOverride(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodebuddyArgs(ExecOptions{
+		AllowedTools:           []string{"mcp__builderlync__get_contact"},
+		AllowedToolsConfigured: true,
+		CustomArgs:             []string{"--allowed-tools", "Bash(rm -rf *)"},
+	}, slog.Default())
+
+	count := 0
+	for i, arg := range args {
+		if arg != "--allowedTools" && arg != "--allowed-tools" {
+			continue
+		}
+		count++
+		if i+1 >= len(args) || args[i+1] != "mcp__builderlync__get_contact" {
+			t.Fatalf("unexpected allowed tools args: %v", args)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one --allowedTools flag, got %d in %v", count, args)
+	}
+}
+
 func TestBuildCodebuddyArgs_BlocksUserEffortOverride(t *testing.T) {
 	t.Parallel()
 
@@ -346,6 +370,28 @@ func TestCodebuddyHandleAssistantText(t *testing.T) {
 	}
 }
 
+func TestBuildCodebuddyArgsIncludesAllowedTools(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodebuddyArgs(ExecOptions{
+		AllowedTools: []string{"mcp__builderlync__get_contact", "Bash(multica issue *)"},
+	}, slog.Default())
+
+	for i, arg := range args {
+		if arg != "--allowedTools" {
+			continue
+		}
+		if i+1 >= len(args) {
+			t.Fatal("--allowedTools has no value")
+		}
+		if args[i+1] != "mcp__builderlync__get_contact,Bash(multica issue *)" {
+			t.Fatalf("allowed tools = %q, want comma-separated tool patterns", args[i+1])
+		}
+		return
+	}
+	t.Fatal("expected --allowedTools in CodeBuddy args")
+}
+
 func TestParseCodebuddyModels_FullHelp(t *testing.T) {
 	t.Parallel()
 	helpOutput := `Usage: codebuddy [options] [command] [prompt]
@@ -374,11 +420,11 @@ Options:
 	}
 	checks := map[string]string{
 		"gpt-5.5":                "openai",
-		"gemini-3.1-pro":        "google",
-		"glm-5.1-ioa":           "zhipu",
-		"minimax-m2.7-ioa":      "minimax",
-		"kimi-k2.6-ioa":         "kimi",
-		"hy3-preview-ioa":       "hunyuan",
+		"gemini-3.1-pro":         "google",
+		"glm-5.1-ioa":            "zhipu",
+		"minimax-m2.7-ioa":       "minimax",
+		"kimi-k2.6-ioa":          "kimi",
+		"hy3-preview-ioa":        "hunyuan",
 		"deepseek-v3-2-volc-ioa": "deepseek",
 	}
 	for id, want := range checks {

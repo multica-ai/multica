@@ -3489,6 +3489,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
 	}
 
+	var allowedToolsRaw json.RawMessage
+	if task.Agent != nil {
+		allowedToolsRaw = task.Agent.AllowedTools
+	}
+	allowedTools, allowedToolsConfigured, err := decodeAllowedTools(allowedToolsRaw)
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("agent tool allowlist is invalid: %w", err)
+	}
+	if allowedToolsConfigured && !agent.SupportsToolAllowlist(provider) {
+		return TaskResult{}, fmt.Errorf("agent tool allowlist is not supported by provider %q", provider)
+	}
+
 	stopPrepareLease := d.startTaskPrepareLeaseExtender(ctx, task, taskLog)
 	defer stopPrepareLease()
 
@@ -3871,6 +3883,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
+		AllowedTools:              allowedTools,
+		AllowedToolsConfigured:    allowedToolsConfigured,
 		ThinkingLevel:             thinkingLevel,
 		OpenclawMode:              openclawMode,
 	}

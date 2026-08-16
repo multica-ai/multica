@@ -303,6 +303,8 @@ export interface Agent {
    * Older backends omit this field; treat undefined as "coding".
    */
   mode?: 'coding' | 'operational' | 'hybrid';
+  /** Provider-native tool allowlist. null or omitted means unrestricted. */
+  allowed_tools?: string[] | null;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   created_at: string;
@@ -343,6 +345,8 @@ export interface CreateAgentRequest {
   template?: string;
   /** Agent operating mode. "coding" (default) | "operational" | "hybrid". */
   mode?: 'coding' | 'operational' | 'hybrid';
+  /** Provider-native tool allowlist. null means unrestricted. */
+  allowed_tools?: string[] | null;
 }
 
 /** Agent template summary — fields needed by the picker grid. Does NOT
@@ -456,6 +460,21 @@ export interface UpdateAgentRequest {
   thinking_level?: string;
   /** Agent operating mode. See `Agent.mode`. */
   mode?: 'coding' | 'operational' | 'hybrid';
+  /** Provider-native tool allowlist. null clears the restriction. */
+  allowed_tools?: string[] | null;
+}
+
+export interface AgentAction {
+  id: number;
+  agent_id: string;
+  issue_id?: string;
+  task_id?: string;
+  message_seq?: number;
+  tool_name: string;
+  args_summary?: string;
+  result_summary?: string;
+  status?: string;
+  created_at: string;
 }
 
 /**

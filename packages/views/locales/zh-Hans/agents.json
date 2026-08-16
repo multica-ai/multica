@@ -227,6 +227,21 @@
     "description_label": "描述",
     "description_placeholder": "这个智能体做什么？",
     "visibility_label": "可见性",
+    "mode_label": "模式",
+    "mode": {
+      "coding": {
+        "label": "编程",
+        "description": "编写代码并检出代码仓库"
+      },
+      "operational": {
+        "label": "运营",
+        "description": "通过 MCP 工具处理业务任务"
+      },
+      "hybrid": {
+        "label": "混合",
+        "description": "代码和运营任务"
+      }
+    },
     "runtime_label": "运行时",
     "runtime_filter_mine": "我的",
     "runtime_filter_all": "全部",

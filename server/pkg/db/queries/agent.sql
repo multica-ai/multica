@@ -61,6 +61,11 @@ UPDATE agent SET mcp_config = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: ClearAgentAllowedTools :one
+UPDATE agent SET allowed_tools = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: UpdateAgentCustomEnv :one
 -- Replaces an agent's custom_env map wholesale. Used by the dedicated
 -- env-management endpoint (POST/PUT /api/agents/{id}/env), which is the

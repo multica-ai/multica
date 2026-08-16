@@ -36,6 +36,11 @@ type ExecOptions struct {
 	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
 	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
 	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	// AllowedTools is a provider-native allowlist of tool names or patterns.
+	// Providers that cannot enforce this list must reject the execution rather
+	// than silently treating the setting as advisory.
+	AllowedTools           []string
+	AllowedToolsConfigured bool
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
 	// medium|high|xhigh", OpenCode's model variant names). Empty means
@@ -130,6 +135,12 @@ type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+}
+
+// SupportsToolAllowlist reports whether a backend has a native mechanism for
+// restricting the tools exposed to an execution.
+func SupportsToolAllowlist(agentType string) bool {
+	return agentType == "claude" || agentType == "codebuddy"
 }
 
 // New creates a Backend for the given agent type.

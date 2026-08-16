@@ -1324,6 +1324,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			ThinkingLevel: agent.ThinkingLevel.String,
 			RuntimeConfig: runtimeConfig,
 			Mode:          agent.Mode,
+			AllowedTools:  json.RawMessage(agent.AllowedTools),
 		}
 		if useSkillRefs {
 			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
@@ -2214,6 +2215,7 @@ func (h *Handler) logAgentAction(ctx context.Context, agentID, issueID pgtype.UU
 	if h.Queries == nil {
 		return
 	}
+	resultSummary = truncateAgentActionSummary(redact.Text(resultSummary))
 	if _, err := h.Queries.CreateAgentActionLog(ctx, db.CreateAgentActionLogParams{
 		AgentID:       pgtype.Text{String: uuidToString(agentID), Valid: agentID.Valid},
 		IssueID:       pgtype.Text{String: uuidToString(issueID), Valid: issueID.Valid},
@@ -2520,6 +2522,25 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			slog.Error("failed to create task message", "task_id", taskID, "seq", msg.Seq, "error", createErr)
 			writeError(w, http.StatusInternalServerError, "failed to persist task message")
 			return
+		}
+
+		if argsSummary, resultSummary, status, ok := taskMessageAuditSummary(msg); ok {
+			toolName := msg.Tool
+			if toolName == "" {
+				toolName = "unknown"
+			}
+			if err := h.Queries.CreateAgentToolActionLog(r.Context(), db.CreateAgentToolActionLogParams{
+				AgentID:       pgtype.Text{String: uuidToString(task.AgentID), Valid: task.AgentID.Valid},
+				IssueID:       pgtype.Text{String: uuidToString(task.IssueID), Valid: task.IssueID.Valid},
+				TaskID:        pgtype.Text{String: taskID, Valid: taskID != ""},
+				MessageSeq:    pgtype.Int4{Int32: int32(msg.Seq), Valid: true},
+				ToolName:      toolName,
+				ArgsSummary:   pgtype.Text{String: argsSummary, Valid: argsSummary != ""},
+				ResultSummary: pgtype.Text{String: resultSummary, Valid: resultSummary != ""},
+				Status:        pgtype.Text{String: status, Valid: status != ""},
+			}); err != nil {
+				slog.Warn("audit tool action write failed", "task_id", taskID, "seq", msg.Seq, "tool", toolName, "error", err)
+			}
 		}
 
 		if workspaceID != "" {

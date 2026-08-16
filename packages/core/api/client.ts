@@ -21,6 +21,7 @@ import type {
   AgentEnvResponse,
   UpdateAgentEnvRequest,
   AgentTask,
+  AgentAction,
   AgentActivityBucket,
   AgentRunCount,
   AgentRuntime,
@@ -1421,6 +1422,10 @@ export class ApiClient {
 
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {
     return this.fetch(`/api/agents/${agentId}/tasks`);
+  }
+
+  async listAgentActions(agentId: string, limit = 100): Promise<AgentAction[]> {
+    return this.fetch(`/api/agents/${agentId}/actions?limit=${limit}`);
   }
 
   // Workspace-scoped agent task snapshot: every active task

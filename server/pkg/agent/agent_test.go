@@ -23,6 +23,21 @@ func TestNewReturnsClaudeBackend(t *testing.T) {
 	}
 }
 
+func TestSupportsToolAllowlist(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{"claude", "codebuddy"} {
+		if !SupportsToolAllowlist(provider) {
+			t.Errorf("SupportsToolAllowlist(%q) = false, want true", provider)
+		}
+	}
+	for _, provider := range []string{"codex", "cursor", "openclaw"} {
+		if SupportsToolAllowlist(provider) {
+			t.Errorf("SupportsToolAllowlist(%q) = true, want false", provider)
+		}
+	}
+}
+
 func TestNewReturnsCodexBackend(t *testing.T) {
 	t.Parallel()
 	b, err := New("codex", Config{ExecutablePath: "/nonexistent/codex"})

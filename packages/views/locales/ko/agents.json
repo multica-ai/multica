@@ -227,6 +227,21 @@
     "description_label": "설명",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
     "visibility_label": "공개 범위",
+    "mode_label": "모드",
+    "mode": {
+      "coding": {
+        "label": "코딩",
+        "description": "코드를 작성하고 저장소를 체크아웃합니다"
+      },
+      "operational": {
+        "label": "운영",
+        "description": "MCP 도구로 업무를 처리합니다"
+      },
+      "hybrid": {
+        "label": "하이브리드",
+        "description": "코드 및 운영 작업"
+      }
+    },
     "runtime_label": "런타임",
     "runtime_filter_mine": "내 것",
     "runtime_filter_all": "전체",

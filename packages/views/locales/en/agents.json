@@ -235,6 +235,21 @@
     "description_label": "Description",
     "description_placeholder": "What does this agent do?",
     "visibility_label": "Visibility",
+    "mode_label": "Mode",
+    "mode": {
+      "coding": {
+        "label": "Coding",
+        "description": "Writes code, checks out repos"
+      },
+      "operational": {
+        "label": "Operational",
+        "description": "Business tasks via MCP tools"
+      },
+      "hybrid": {
+        "label": "Hybrid",
+        "description": "Code + operational tasks"
+      }
+    },
     "runtime_label": "Runtime",
     "runtime_filter_mine": "Mine",
     "runtime_filter_all": "All",

@@ -15,7 +15,7 @@ const createAgentActionLog = `-- name: CreateAgentActionLog :one
 INSERT INTO agent_action_log (
     agent_id, issue_id, tool_name, args_summary, result_summary, status
 ) VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, agent_id, issue_id, tool_name, args_summary, result_summary, status, created_at
+RETURNING id, agent_id, issue_id, tool_name, args_summary, result_summary, status, created_at, task_id, message_seq
 `
 
 type CreateAgentActionLogParams struct {
@@ -46,12 +46,48 @@ func (q *Queries) CreateAgentActionLog(ctx context.Context, arg CreateAgentActio
 		&i.ResultSummary,
 		&i.Status,
 		&i.CreatedAt,
+		&i.TaskID,
+		&i.MessageSeq,
 	)
 	return i, err
 }
 
+const createAgentToolActionLog = `-- name: CreateAgentToolActionLog :exec
+INSERT INTO agent_action_log (
+    agent_id, issue_id, task_id, message_seq, tool_name,
+    args_summary, result_summary, status
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (task_id, message_seq) WHERE task_id IS NOT NULL AND message_seq IS NOT NULL
+DO NOTHING
+`
+
+type CreateAgentToolActionLogParams struct {
+	AgentID       pgtype.Text `json:"agent_id"`
+	IssueID       pgtype.Text `json:"issue_id"`
+	TaskID        pgtype.Text `json:"task_id"`
+	MessageSeq    pgtype.Int4 `json:"message_seq"`
+	ToolName      string      `json:"tool_name"`
+	ArgsSummary   pgtype.Text `json:"args_summary"`
+	ResultSummary pgtype.Text `json:"result_summary"`
+	Status        pgtype.Text `json:"status"`
+}
+
+func (q *Queries) CreateAgentToolActionLog(ctx context.Context, arg CreateAgentToolActionLogParams) error {
+	_, err := q.db.Exec(ctx, createAgentToolActionLog,
+		arg.AgentID,
+		arg.IssueID,
+		arg.TaskID,
+		arg.MessageSeq,
+		arg.ToolName,
+		arg.ArgsSummary,
+		arg.ResultSummary,
+		arg.Status,
+	)
+	return err
+}
+
 const listAgentActionsByAgent = `-- name: ListAgentActionsByAgent :many
-SELECT id, agent_id, issue_id, tool_name, args_summary, result_summary, status, created_at FROM agent_action_log
+SELECT id, agent_id, issue_id, tool_name, args_summary, result_summary, status, created_at, task_id, message_seq FROM agent_action_log
 WHERE agent_id = $1
 ORDER BY created_at DESC
 LIMIT $2
@@ -80,6 +116,8 @@ func (q *Queries) ListAgentActionsByAgent(ctx context.Context, arg ListAgentActi
 			&i.ResultSummary,
 			&i.Status,
 			&i.CreatedAt,
+			&i.TaskID,
+			&i.MessageSeq,
 		); err != nil {
 			return nil, err
 		}
@@ -92,7 +130,7 @@ func (q *Queries) ListAgentActionsByAgent(ctx context.Context, arg ListAgentActi
 }
 
 const listRecentAgentActions = `-- name: ListRecentAgentActions :many
-SELECT id, agent_id, issue_id, tool_name, args_summary, result_summary, status, created_at FROM agent_action_log
+SELECT id, agent_id, issue_id, tool_name, args_summary, result_summary, status, created_at, task_id, message_seq FROM agent_action_log
 ORDER BY created_at DESC
 LIMIT $1
 `
@@ -115,6 +153,8 @@ func (q *Queries) ListRecentAgentActions(ctx context.Context, limit int32) ([]Ag
 			&i.ResultSummary,
 			&i.Status,
 			&i.CreatedAt,
+			&i.TaskID,
+			&i.MessageSeq,
 		); err != nil {
 			return nil, err
 		}
