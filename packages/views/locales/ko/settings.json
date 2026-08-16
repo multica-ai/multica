@@ -959,6 +959,8 @@
     "group_routes_agents_error_description": "에이전트 목록을 불러올 때까지 그룹 재할당을 사용할 수 없어요.",
     "group_routes_agents_retry": "에이전트 다시 불러오기",
     "group_routes_agent_label": "이 그룹의 에이전트",
+    "group_routes_bot_identity": "{{agent}}의 봇 · {{id}}",
+    "group_routes_unknown_bot": "알 수 없는 봇 · {{id}}",
     "group_routes_unknown_agent": "알 수 없는 에이전트",
     "group_routes_updated": "그룹 에이전트를 업데이트했어요",
     "group_routes_update_failed": "그룹 에이전트를 업데이트하지 못했어요",

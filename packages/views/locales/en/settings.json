@@ -855,6 +855,8 @@
     "group_routes_agents_error_description": "Group reassignment is unavailable until the Agent list loads.",
     "group_routes_agents_retry": "Retry Agents",
     "group_routes_agent_label": "Agent for this group",
+    "group_routes_bot_identity": "Bot for {{agent}} · {{id}}",
+    "group_routes_unknown_bot": "Unknown bot · {{id}}",
     "group_routes_unknown_agent": "Unknown Agent",
     "group_routes_updated": "Group Agent updated",
     "group_routes_update_failed": "Could not update the Group Agent",

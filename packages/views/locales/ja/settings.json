@@ -854,6 +854,8 @@
     "group_routes_agents_error_description": "エージェント一覧が読み込まれるまで、グループの再割り当ては利用できません。",
     "group_routes_agents_retry": "エージェントを再読み込み",
     "group_routes_agent_label": "このグループのエージェント",
+    "group_routes_bot_identity": "{{agent}} のボット · {{id}}",
+    "group_routes_unknown_bot": "不明なボット · {{id}}",
     "group_routes_unknown_agent": "不明なエージェント",
     "group_routes_updated": "グループのエージェントを更新しました",
     "group_routes_update_failed": "グループのエージェントを更新できませんでした",

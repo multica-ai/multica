@@ -171,6 +171,36 @@ function setConnectedGroupRoute() {
   };
 }
 
+function setSharedGroupRoutes() {
+  installationsRef.current = {
+    installations: [
+      { id: "installation-alpha-111111", agent_id: "agent-1", status: "active" },
+      { id: "installation-beta-222222", agent_id: "agent-2", status: "active" },
+    ],
+    configured: true,
+    install_supported: true,
+    group_routing_supported: true,
+  };
+  groupRoutesRef.current = {
+    routes: [
+      {
+        id: "route-1",
+        installation_id: "installation-alpha-111111",
+        conversation_id: "cid-shared",
+        conversation_title: "Shared group",
+        agent_id: "agent-2",
+      },
+      {
+        id: "route-2",
+        installation_id: "installation-beta-222222",
+        conversation_id: "cid-shared",
+        conversation_title: "Shared group",
+        agent_id: "agent-1",
+      },
+    ],
+  };
+}
+
 describe("DingTalkAgentBindButton", () => {
   beforeEach(resetFixtures);
 
@@ -288,6 +318,63 @@ describe("DingTalkTab", () => {
     expect(screen.getByText("Platform team")).toBeTruthy();
     expect(screen.getByText("cid-platform")).toBeTruthy();
     expect(screen.getByText("Agent Two")).toBeTruthy();
+  });
+
+  it("distinguishes two bot installations that observe the same group", () => {
+    setSharedGroupRoutes();
+
+    renderUI(<DingTalkTab />);
+
+    expect(screen.getAllByText("Shared group")).toHaveLength(2);
+    expect(screen.getByText("Bot for Agent One · 111111")).toBeTruthy();
+    expect(screen.getByText("Bot for Agent Two · 222222")).toBeTruthy();
+    expect(screen.getAllByText("cid-shared")).toHaveLength(2);
+  });
+
+  it("updates the selected route when two bots share a group", async () => {
+    setSharedGroupRoutes();
+    mockUpdateGroupRoute.mockResolvedValue({ id: "route-2", agent_id: "agent-2" });
+    const user = userEvent.setup();
+    renderUI(<DingTalkTab />);
+
+    const selectors = screen.getAllByRole("combobox", { name: "Agent for this group" });
+    await user.click(selectors[1]!);
+    await user.click(await screen.findByRole("option", { name: "Agent Two" }));
+
+    await waitFor(() => {
+      expect(mockUpdateGroupRoute).toHaveBeenCalledWith(
+        "workspace-1",
+        "route-2",
+        { agent_id: "agent-2" },
+      );
+    });
+  });
+
+  it("keeps the bot identity separate from the Agent selected for the group", () => {
+    setConnectedGroupRoute();
+    renderUI(<DingTalkTab />);
+
+    expect(screen.getByText("Bot for Agent One · i1")).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Agent for this group" }).textContent)
+      .toContain("Agent Two");
+  });
+
+  it("shows a safe bot fallback when the route installation is unavailable", () => {
+    setConnectedGroupRoute();
+    groupRoutesRef.current = {
+      routes: [{
+        id: "route-1",
+        installation_id: "missing-installation-abc123",
+        conversation_id: "cid-platform",
+        conversation_title: "Platform team",
+        agent_id: "agent-2",
+      }],
+    };
+
+    renderUI(<DingTalkTab />);
+
+    expect(screen.getByText("Unknown bot · abc123")).toBeTruthy();
+    expect(screen.getByText("Platform team")).toBeTruthy();
   });
 
   it("lets an owner reassign a group and invalidates the route query", async () => {

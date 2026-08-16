@@ -101,7 +101,7 @@ Only **members of the workspace** can use the bot. If you aren't a member, or yo
 Workspace-wide management lives in **Settings → Integrations**:
 
 - **Connected bots** lists every bot in the workspace and the agent each is bound to (visible to all members).
-- **Group routing** lists every group discovered by a bot. Owners and admins can select one fixed agent per group; all members can see the current routes.
+- **Group routing** lists every group discovered by a bot and identifies the bot by its default Agent plus a short installation ID. Routes remain distinguishable when multiple bots share a group. Owners and admins can select one fixed Agent per group; all members can see the current routes.
 - Every route change starts a new chat session for the selected agent. Routing Agent A → Agent B → Agent A does not resume A's earlier session. Archiving an assigned agent preserves the route but pauses processing with an unavailable notice until that agent is restored or the group is reassigned.
 - **Disconnect** is **owner / admin only**. It stops the bot from receiving DingTalk messages and tears down its connection; the installation record is kept for audit, and you can re-connect later.
 

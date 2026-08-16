@@ -58,6 +58,11 @@ function formatInstalledAt(value: string): string {
   return new Date(t).toLocaleString();
 }
 
+function shortInstallationId(id: string): string {
+  if (!id) return "—";
+  return id.length <= 6 ? id : id.slice(-6);
+}
+
 // DingTalkTab is the workspace settings panel for DingTalk robot installations.
 // Listing is member-visible; the disconnect action is admin-only (the backend
 // enforces it; the UI hides the button for non-admins to match).
@@ -69,6 +74,7 @@ function formatInstalledAt(value: string): string {
 // re-create the Agent page's picker.
 export function DingTalkTab() {
   const { t } = useT("settings");
+  const { getAgentName } = useActorName();
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
@@ -288,18 +294,29 @@ export function DingTalkTab() {
                     </p>
                   </div>
                 ) : null}
-                {groupRoutes.map((route) => (
-                  <GroupRouteRow
-                    key={route.id}
-                    route={route}
-                    agents={activeAgents}
-                    selectedAgentName={agents?.find((agent) => agent.id === route.agent_id)?.name}
-                    canManage={canManage}
-                    selectorAvailable={agentsLoaded && activeAgents.length > 0}
-                    updating={updatingRouteId !== null}
-                    onAgentChange={(agentId) => handleRouteAgentChange(route, agentId)}
-                  />
-                ))}
+                {groupRoutes.map((route) => {
+                  const installation = installations.find(
+                    (candidate) => candidate.id === route.installation_id,
+                  );
+                  const botAgentName = installation
+                    ? agents?.find((agent) => agent.id === installation.agent_id)?.name ??
+                      getAgentName(installation.agent_id)
+                    : undefined;
+
+                  return (
+                    <GroupRouteRow
+                      key={route.id}
+                      route={route}
+                      agents={activeAgents}
+                      botAgentName={botAgentName}
+                      selectedAgentName={agents?.find((agent) => agent.id === route.agent_id)?.name}
+                      canManage={canManage}
+                      selectorAvailable={agentsLoaded && activeAgents.length > 0}
+                      updating={updatingRouteId !== null}
+                      onAgentChange={(agentId) => handleRouteAgentChange(route, agentId)}
+                    />
+                  );
+                })}
               </CardContent>
             </Card>
           )}
@@ -340,6 +357,7 @@ export function DingTalkTab() {
 function GroupRouteRow({
   route,
   agents,
+  botAgentName,
   selectedAgentName,
   canManage,
   selectorAvailable,
@@ -348,6 +366,7 @@ function GroupRouteRow({
 }: {
   route: DingTalkGroupRoute;
   agents: Array<{ id: string; name: string }>;
+  botAgentName?: string;
   selectedAgentName?: string;
   canManage: boolean;
   selectorAvailable: boolean;
@@ -361,11 +380,21 @@ function GroupRouteRow({
     selectedAgentName ??
     selectedAgent?.name ??
     t(($) => $.dingtalk.group_routes_unknown_agent);
+  const installationId = shortInstallationId(route.installation_id);
+  const botIdentity = botAgentName
+    ? t(($) => $.dingtalk.group_routes_bot_identity, {
+        agent: botAgentName,
+        id: installationId,
+      })
+    : t(($) => $.dingtalk.group_routes_unknown_bot, { id: installationId });
 
   return (
     <div className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 space-y-1">
         <p className="truncate text-body font-medium">{title}</p>
+        <p className="truncate text-caption text-muted-foreground" translate="no">
+          {botIdentity}
+        </p>
         <p className="truncate font-mono text-micro text-muted-foreground">
           {route.conversation_id}
         </p>

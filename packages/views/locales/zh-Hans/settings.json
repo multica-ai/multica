@@ -854,6 +854,8 @@
     "group_routes_agents_error_description": "加载智能体列表前，群路由重新分配不可用。",
     "group_routes_agents_retry": "重试加载智能体",
     "group_routes_agent_label": "此群绑定的智能体",
+    "group_routes_bot_identity": "{{agent}} 的机器人 · {{id}}",
+    "group_routes_unknown_bot": "未知机器人 · {{id}}",
     "group_routes_unknown_agent": "未知智能体",
     "group_routes_updated": "已更新群智能体",
     "group_routes_update_failed": "无法更新群智能体",
