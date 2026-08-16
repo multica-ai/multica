@@ -110,12 +110,12 @@ func TestCodexWindowsSandboxRegistrationSnapshotSurvivesConfigChanges(t *testing
 			task := Task{}
 			captureCodexWindowsSandboxRegistrationSnapshot(&task, registered)
 
-			previewArgs, previewManaged := agent.NormalizeCodexWindowsSandboxCustomArgs(
-				"windows",
-				false,
-				registeredConfigOwns,
-				[]string{"--profile", "research"},
-			)
+			policy := newCodexWindowsSandboxSessionPolicy(task)
+			opts := agent.ExecOptions{
+				GOOS:       "windows",
+				CustomArgs: []string{"--profile", "research"},
+			}
+			previewArgs := policy.effectiveLaunchArgs(opts, nil)
 			if !reflect.DeepEqual(previewArgs, tt.wantPreview) {
 				t.Fatalf("preview args = %v, want %v", previewArgs, tt.wantPreview)
 			}
@@ -127,14 +127,17 @@ func TestCodexWindowsSandboxRegistrationSnapshotSurvivesConfigChanges(t *testing
 				t.Fatalf("test setup did not change live config ownership: got %v", live)
 			}
 
-			launchArgs, _ := agent.NormalizeCodexWindowsSandboxCustomArgs(
-				"windows",
-				previewManaged,
-				codexWindowsSandboxLowerPriorityOwns(task, nil),
-				previewArgs,
-			)
+			launchOpts := policy.applyToExecOptions(opts)
+			launchArgs := agent.EffectiveCodexLaunchArgs(launchOpts, nil)
 			if !reflect.DeepEqual(launchArgs, previewArgs) {
 				t.Fatalf("spawn args drifted after config change: preview=%v launch=%v", previewArgs, launchArgs)
+			}
+			if launchOpts.CodexWindowsSandboxConfigOwns != registeredConfigOwns {
+				t.Fatalf(
+					"spawn config ownership = %v, want registration snapshot %v",
+					launchOpts.CodexWindowsSandboxConfigOwns,
+					registeredConfigOwns,
+				)
 			}
 		})
 	}
