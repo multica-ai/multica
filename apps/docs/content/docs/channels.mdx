@@ -64,6 +64,22 @@ Multica only runs the agent after binding completes. Every message re-checks acc
 Account binding only confirms who the sender is. Other members on the chat platform are not automatically added to the Multica workspace.
 </Callout>
 
+## Inbox notification forwarding
+
+Self-hosted operators can opt in to private delivery of issue-backed Inbox notifications:
+
+```dotenv
+MULTICA_INBOX_FORWARD_CHANNELS=feishu
+```
+
+The setting is empty by default. The initial implementation supports Feishu; future proactive-DM adapters can implement the same contract for other Channel types. When several supported types are listed, Multica attempts one delivery through each type.
+
+Multica forwards only after its normal Inbox logic has created a member notification. This automatically covers assignments, subscribed activity, reactions, failures, and member or `@all` mentions without a second set of notification rules. An `@agent` mention still triggers Agent work and does not become a human notification.
+
+For each Channel type, Multica prefers the issue's current assignee when that assignee is an Agent with an active Bot and the recipient is bound to that exact installation. Otherwise, it checks other participating Agent subscribers in stable order. It never uses an unrelated workspace Bot or a binding from another installation. If the item has no issue, no eligible Bot, or no matching binding, the durable Inbox item remains available and no Channel message is sent.
+
+Forwarding is best-effort and uses a bounded in-memory queue. A full queue, process restart, or Channel API failure can lose the external delivery, but never the Inbox item.
+
 ## Manage connections
 
 Workspace owners and admins can connect or disconnect Bots; for Feishu/Lark Bots, connecting and disconnecting is also open to the agent's owner. Regular members can view connected integrations and use the agents they have access to.

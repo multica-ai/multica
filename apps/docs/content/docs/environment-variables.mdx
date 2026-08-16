@@ -165,6 +165,7 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | GitHub | `GITHUB_APP_ID` | Needed for CI status and mergeability on PR cards and the "pick from GitHub" repository picker |
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | Full PEM private key paired with the App ID; same uses as above |
 | Lark | `MULTICA_LARK_SECRET_KEY` | Base64-encoded 32-byte credential encryption key |
+| Channel notifications | `MULTICA_INBOX_FORWARD_CHANNELS` | Comma-separated allowlist for private forwarding of issue-backed Inbox items; empty disables it, and the initial sender supports `feishu` |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Base64-encoded 32-byte token encryption key |
 | Composio | `COMPOSIO_API_KEY` | Enables Composio tool connections |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | Callback API URL; can fall back to `MULTICA_PUBLIC_URL` |
@@ -173,6 +174,16 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | Self-hosted Git | `MULTICA_VCS_SECRET_KEY` | Base64-encoded 32-byte encryption key (`openssl rand -base64 32`); the feature is entirely unavailable without it |
 
 Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and trigger merge-to-done normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
+
+To forward Inbox notifications to Feishu, configure the Lark integration and opt in explicitly:
+
+```dotenv
+MULTICA_INBOX_FORWARD_CHANNELS=feishu
+```
+
+Forwarding begins from committed member Inbox items, so it does not recreate assignment, subscription, preference, or mention rules. For an issue-backed item, Multica first tries the current assignee Agent's active Bot, then active Agent subscribers in stable participation order. The recipient must be bound to that exact Bot installation. Member and `@all` mentions flow through their normal `mentioned` Inbox items; `@agent` remains an Agent execution trigger and does not create a human notification.
+
+Items without an issue, without an eligible participating Bot, or without a same-installation member binding remain Inbox-only. Delivery is private and best-effort: queue saturation or a Channel API failure never rolls back the Inbox item. Listing multiple Channel types requests one delivery per supported type; it is explicit fan-out, not a fallback priority. The initial implementation provides only the `feishu` sender.
 
 For setup steps, see [GitHub integration](/github-integration#self-hosting-setup), [Lark bot](/lark-bot-integration#self-hosting-setup), and [Slack bot](/slack-bot-integration#self-hosting-setup).
 
