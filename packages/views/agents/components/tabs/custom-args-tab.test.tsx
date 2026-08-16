@@ -44,11 +44,23 @@ const baseAgent: Agent = {
   archived_by: null,
 };
 
-const runtimeDevice = {
+const runtimeDevice: RuntimeDevice = {
+  id: "runtime-1",
+  workspace_id: "ws-1",
+  daemon_id: "daemon-1",
+  name: "Codex",
+  runtime_mode: "local",
   provider: "codex",
   launch_header: "codex app-server",
+  status: "online",
+  device_info: "test-device",
   metadata: { os: "linux" },
-} as RuntimeDevice;
+  owner_id: "user-1",
+  visibility: "private",
+  last_seen_at: null,
+  created_at: "2026-05-28T00:00:00Z",
+  updated_at: "2026-05-28T00:00:00Z",
+};
 
 function renderTab(
   overrides: Partial<Agent> = {},
@@ -127,10 +139,10 @@ describe("CustomArgsTab", () => {
 
   it("previews and saves the Windows Codex sandbox as two argv tokens", async () => {
     const user = userEvent.setup();
-    const windowsRuntime = {
+    const windowsRuntime: RuntimeDevice = {
       ...runtimeDevice,
       metadata: { os: "windows" },
-    } as RuntimeDevice;
+    };
     const { onSave } = renderTab(
       { custom_args: [] },
       vi.fn().mockResolvedValue(undefined),
