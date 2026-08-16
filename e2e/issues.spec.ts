@@ -178,6 +178,11 @@ test.describe("Issues", () => {
     await expect(
       page.locator("a", { hasText: "Issues" }).first(),
     ).toBeVisible();
+    // The browser tab must name the issue, so several open at once stay
+    // distinguishable without clicking into each (MUL-6222).
+    await expect(page).toHaveTitle(
+      `${issue.identifier}: ${issue.title} | Multica`,
+    );
   });
 
   test("can dismiss issue creation", async ({ page }) => {

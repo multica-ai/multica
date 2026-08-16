@@ -44,6 +44,8 @@ The daemon runs in the background by default. Common commands:
 | `multica daemon stop` | Stop the daemon |
 | `multica daemon start --foreground` | Run in the current terminal, for debugging |
 
+To place task workspaces on another disk, persist a root for the current profile with `multica config set workspaces_root <path>`, or pass `--workspaces-root <path>` to `daemon start` or `daemon restart`. The flag overrides `MULTICA_WORKSPACES_ROOT`, which overrides the profile config. Existing task directories are not moved when the root changes.
+
 On startup, the daemon detects supported AI coding tools on `PATH` and registers runtimes for the workspaces you are allowed to connect. If a tool was just installed or signed in, restart the daemon to detect it again.
 
 The daemon needs at least one built-in supported AI coding tool detected before it will start. Install methods and executable names are in [Install AI coding tools](/install-agent-runtime).

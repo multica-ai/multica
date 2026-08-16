@@ -21,6 +21,7 @@ Multica は現在、次のコマンドを検出します。
 | Codex CLI | `codex` | [Codex CLI](https://developers.openai.com/codex/cli/) |
 | GitHub Copilot CLI | `copilot` | [Copilot CLI のインストール](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) |
 | Cursor Agent | `cursor-agent` | [Cursor CLI のインストール](https://docs.cursor.com/en/cli/installation) |
+| DeepSeek Harness | `dsh` | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) |
 | DevEco Code | `deveco` | [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) |
 | Grok Build | `grok` | [Grok Build クイックスタート](https://docs.x.ai/build/overview) |
 | Hermes Agent | `hermes` | [Hermes クイックスタート](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
@@ -46,6 +47,8 @@ Multica は現在、次のコマンドを検出します。
 Reasonix を使う場合は、デーモンを起動する前に `reasonix setup` を実行し、デフォルトのプロバイダーとモデルを設定してください。
 
 QwenPaw を使う場合は、QwenPaw 側の設定でプロバイダーとモデルを選んでください。Multica が実行時に QwenPaw のモデルを上書きすることはできません。
+
+DeepSeek Harness を使う場合は、Node.js 20+ をインストールして `npm install -g @deepseek-ai/dsh` を実行し、Multica ランタイムプロファイルを追加してください（`dsh plugin --profile multica add <bundle>`）。デーモンは `dsh --profile multica --probe` が成功した場合のみ DeepSeek Harness を登録します。デーモンを起動する前に `DEEPSEEK_API_KEY` を設定（または dsh の設定に保存）してください。
 
 ログイン情報はツールがローカル環境に保存します。Multica が Claude、Codex、Cursor などの CLI のログイントークンを受け取ることはありません。
 

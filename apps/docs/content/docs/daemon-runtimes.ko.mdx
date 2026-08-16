@@ -44,6 +44,8 @@ multica daemon start
 | `multica daemon stop` | 데몬 중지 |
 | `multica daemon start --foreground` | 디버깅을 위해 현재 터미널에서 실행 |
 
+태스크 작업 디렉터리를 다른 디스크에 두려면 `multica config set workspaces_root <path>`로 현재 profile의 루트를 저장하거나 `daemon start` 또는 `daemon restart`에 `--workspaces-root <path>`를 전달합니다. flag는 `MULTICA_WORKSPACES_ROOT`보다 우선하고, 환경 변수는 profile 설정보다 우선합니다. 루트를 변경해도 기존 태스크 디렉터리는 이동되지 않습니다.
+
 시작할 때 데몬은 `PATH`에서 지원되는 AI 코딩 도구를 감지하고 사용자가 연결할 권한이 있는 워크스페이스에 런타임을 등록합니다. 도구를 방금 설치하거나 로그인했다면 데몬을 다시 시작해 다시 감지할 수 있습니다.
 
 데몬을 시작하려면 기본 지원 AI 코딩 도구를 하나 이상 감지해야 합니다. 설치 방법과 실행 파일 이름은 [AI 코딩 도구 설치](/install-agent-runtime)를 참고하세요.

@@ -26,6 +26,7 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Codex | `codex` | ✓ | ✓ | `$CODEX_HOME/skills/` |
 | GitHub Copilot CLI | `copilot` | ✓ | — | `.github/skills/` |
 | Cursor Agent | `cursor-agent` | ✓ | ✓ | `.cursor/skills/` |
+| DeepSeek Harness | `dsh` | ✓ | ✓ | `.dsh/skills/` |
 | DevEco Code | `deveco` | ✓ | — | `.deveco/skills/` |
 | Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
 | Hermes | `hermes` | ✓ | ✓ | per-task `HERMES_HOME/skills/` |
@@ -51,6 +52,8 @@ When you create an agent, the model list comes from the corresponding runtime. S
 If you do not pick a model, Multica uses the tool's own default. If the list is empty, confirm the runtime is online and the tool is signed in, then refresh the model list.
 
 QwenPaw is the one exception: it does not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in QwenPaw's own configuration instead. An empty model list is expected there and is not a sign that the runtime is offline.
+
+DeepSeek Harness advertises its model catalog from the runtime itself (`dsh --profile multica --list-models`). Its model ids use the `provider/model` form (for example `deepseek-official/deepseek-chat`), so select the full id from the list.
 
 <Callout type="info">
 Different tools may use different model names. After switching AI coding tools, the previous model value is invalid in the new tool and needs to be selected again.

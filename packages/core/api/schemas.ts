@@ -25,6 +25,9 @@ import type {
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPrices,
+  CreateWorkspaceSubscriptionCheckoutResponse,
+  WorkspaceSubscriptionSeatReconcileResult,
+  CreateWorkspaceSubscriptionPortalResponse,
   CronPreviewResponse,
   DingTalkGroupRoute,
   DingTalkInstallation,
@@ -67,6 +70,7 @@ import type {
   TimelineEntry,
   User,
   WebhookDelivery,
+  WorkspaceMcpServer,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
@@ -77,6 +81,53 @@ export const PluginBindingSchema = z.object({
   enabled: z.boolean().default(false),
   revision: z.number().default(0),
 }).loose();
+
+export const RemoteMCPToolSchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  input_schema: z.record(z.string(), z.unknown()).default({}),
+  schema_digest: z.string().default(""),
+  risk: z.string().optional(),
+});
+
+export const PluginRemoteMCPConfigSchema = z.object({
+  contribution_key: z.string(),
+  default_endpoint: z.string().optional(),
+  preferred_auth: z.string().optional(),
+  supported_auth: z.array(z.string()).default([]),
+  config_revision: z.number().optional(),
+  endpoint: z.string().optional(),
+  endpoint_domain: z.string().optional(),
+  auth_type: z.string().optional(),
+  auth_header: z.string().optional(),
+  public_config: z.record(z.string(), z.unknown()).optional(),
+  connection_scope: z.string().optional(),
+  connected_by: z.string().optional(),
+  credential_state: z.string().default("missing"),
+  credential_hint: z.string().optional(),
+  failure_policy: z.string().optional(),
+  approved_tools: z.array(RemoteMCPToolSchema).default([]),
+  discovered_tools: z.array(RemoteMCPToolSchema).default([]),
+  discovered_schema_digest: z.string().optional(),
+  schema_digest: z.string().optional(),
+  reviewed: z.boolean().default(false),
+  ready: z.boolean().default(false),
+});
+
+export const RemoteMCPDiscoveryResponseSchema = z.object({
+  ok: z.boolean().optional(),
+  config_revision: z.number().default(0),
+  credential_state: z.string().optional(),
+  reviewed: z.boolean().optional(),
+  discovered_tools: z.array(RemoteMCPToolSchema).default([]),
+  discovered_schema_digest: z.string().default(""),
+});
+
+export const RemoteMCPOAuthStartResponseSchema = z.object({
+  authorization_url: z.string().url(),
+});
+
+export const EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE = { authorization_url: "" };
 
 export const PluginInstallationSchema = z.object({
   id: z.string(),
@@ -113,6 +164,7 @@ export const PluginInstallationSchema = z.object({
     entry_digest: z.string().default(""),
   }).loose()).default([]),
   bindings: z.array(PluginBindingSchema).default([]),
+  remote_mcp: z.array(PluginRemoteMCPConfigSchema).default([]),
 }).loose();
 
 export const EMPTY_PLUGIN_INSTALLATION: PluginInstallation = {
@@ -138,6 +190,7 @@ export const EMPTY_PLUGIN_INSTALLATION: PluginInstallation = {
   contributions: [],
   contribution_details: [],
   bindings: [],
+  remote_mcp: [],
 };
 
 export const PluginInstallationListResponseSchema = z.object({
@@ -2178,6 +2231,15 @@ export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSe
 
 const WorkspaceSubscriptionIntervalSchema = z.enum(["month", "year"]);
 
+// Stripe hosts Checkout and Portal, so those URLs leave the app. `z.string()
+// .url()` is not enough on its own — `new URL("javascript:...")` parses — and
+// the caller hands this value to location.assign, so the scheme is pinned here.
+const StripeHostedURLSchema = z.string().url().refine(
+  (value) => value.startsWith("https://"),
+  { message: "Stripe hosted URL must use HTTPS" },
+);
+
+
 export const WorkspaceSubscriptionEntitlementsSchema = z
   .object({
     workspace_id: z.string(),
@@ -2248,7 +2310,7 @@ const WorkspaceSubscriptionPriceSchema = (
       // quote a yearly amount as a monthly one — the schema is an independent
       // boundary, so it checks the correspondence itself.
       interval: z.literal(expected),
-      interval_count: z.number().int().positive(),
+      interval_count: z.literal(1),
     })
     .loose()
     .transform(
@@ -2270,6 +2332,49 @@ export const WorkspaceSubscriptionPricesSchema = z
     (value): WorkspaceSubscriptionPrices => ({
       month: value.month,
       year: value.year,
+    }),
+  );
+
+export const CreateWorkspaceSubscriptionCheckoutResponseSchema = z
+  .object({
+    request_id: z.string(),
+    session_id: z.string(),
+    url: StripeHostedURLSchema,
+  })
+  .loose()
+  .transform(
+    (value): CreateWorkspaceSubscriptionCheckoutResponse => ({
+      requestId: value.request_id,
+      sessionId: value.session_id,
+      url: value.url,
+    }),
+  );
+
+export const WorkspaceSubscriptionSeatReconcileResultSchema = z
+  .object({
+    workspace_id: z.string(),
+    billed_seats: z.number().int().nonnegative(),
+    actual_seats: z.number().int().nonnegative(),
+    action: z.string(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceSubscriptionSeatReconcileResult => ({
+      workspaceId: value.workspace_id,
+      billedSeats: value.billed_seats,
+      actualSeats: value.actual_seats,
+      action: value.action,
+    }),
+  );
+
+export const CreateWorkspaceSubscriptionPortalResponseSchema = z
+  .object({
+    url: StripeHostedURLSchema,
+  })
+  .loose()
+  .transform(
+    (value): CreateWorkspaceSubscriptionPortalResponse => ({
+      url: value.url,
     }),
   );
 
@@ -2510,4 +2615,38 @@ export const EMPTY_SKILL: Skill = {
   created_at: "",
   updated_at: "",
   files: [],
+};
+
+/**
+ * Read shape of one workspace MCP server.
+ *
+ * This is the ONLY schema in this file that must not be `.loose()`. Everywhere
+ * else, keeping unknown fields is forward-compatibility; here it would be a
+ * hole in the write-only boundary — a server that regressed to returning the
+ * stored entry (or a `url` / `headers` on the summary) would have it land in
+ * the parsed object and in the query cache. zod strips unknown keys by
+ * default, so the client only ever holds the safe summary.
+ *
+ * `transport` stays a plain string (not an enum) so an unknown value from a
+ * newer backend still parses — the UI has a default branch for it.
+ */
+export const WorkspaceMcpServerSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  name: z.string().default(""),
+  transport: z.string().default("unknown"),
+  enabled: z.boolean().optional(),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+});
+
+export const WorkspaceMcpServerListSchema = z.array(WorkspaceMcpServerSchema);
+
+export const EMPTY_WORKSPACE_MCP_SERVER: WorkspaceMcpServer = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  transport: "unknown",
+  created_at: "",
+  updated_at: "",
 };

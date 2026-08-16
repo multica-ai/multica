@@ -40,6 +40,7 @@ oauth_config:
     bot:
       - app_mentions:read
       - channels:history
+      - files:read
       - groups:history
       - im:history
       - mpim:history
@@ -63,6 +64,10 @@ settings:
 ```
 
 Before creating, you can replace both occurrences of `Multica` with the agent's name. Do not remove scopes or events from the manifest, or DMs, channel mentions, replies, or `/issue` may stop working.
+
+<Callout type="warning">
+If this Slack app was installed before attachment support was available, add the `files:read` Bot scope and reinstall the app to the workspace. Slack does not apply newly added scopes to the existing Bot token until the app is reinstalled.
+</Callout>
 
 The Bot connects out to Slack over Socket Mode, so no public Request URL or OAuth Redirect URL is needed.
 
@@ -116,6 +121,12 @@ Run `/invite @your-bot` to add the Bot to the channel first, then send `@your-bo
 
 The Bot only responds to channel messages that explicitly @-mention it. When it runs, it reads the thread's recent context within the scopes its permissions allow.
 
+### Send files
+
+Attach files to a DM, or to a channel message that @-mentions the Bot. They arrive as attachments on the same piece of work, so the agent reads them together with your request.
+
+This needs the `files:read` scope — if the app was installed before attachment support existed, see the note in step 1. Each file must be 20 MiB or smaller, and one message carries at most 10. Files that are larger, still uploading, or hosted outside Slack (a Google Drive or Dropbox link, for example) are skipped; the message text still reaches the agent.
+
 ### Create issues with `/issue`
 
 In a channel or DM, type:
@@ -157,6 +168,7 @@ Account binding links use `MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN` w
 - **No DM entry point**: confirm `app_home.messages_tab_enabled` is `true`.
 - **No reply in a channel**: confirm the Bot has been invited to the channel and the message @-mentions it.
 - **`/issue` doesn't exist**: confirm the manifest includes the slash command and the `commands` scope, then reinstall the app.
+- **Files don't reach the agent**: confirm the manifest includes `files:read` and that the app was reinstalled after the scope was added, and check the file is 20 MiB or smaller.
 - **The Bot doesn't run**: check whether the agent is archived and whether the [runtime](/daemon-runtimes) it uses is online.
 
 ## Next steps

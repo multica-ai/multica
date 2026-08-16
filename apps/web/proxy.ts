@@ -76,10 +76,17 @@ export function proxy(req: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    // Logged-in but no cookie yet (first login since slug migration, or
-    // cookie cleared). Bounce to root; the root-path logic below picks a
-    // workspace and writes the cookie, then future hits short-circuit here.
-    url.pathname = "/";
+    // Logged-in but no cookie yet (never opened a workspace, or the cookie was
+    // cleared). Root is the wrong destination: the root-path rule below leaves
+    // `/` on the public site for the official marketing hosts even with a
+    // session, so bouncing there dead-ends on the landing page instead of
+    // reaching the app. /login already resolves an authenticated visitor
+    // against their workspace list — including pending invitations and the
+    // no-workspace-yet case — and replaces to the right destination. Deep-link
+    // path and query are dropped rather than passed as `next`: they are legacy
+    // segments themselves, so feeding one back would land here again.
+    url.pathname = "/login";
+    url.search = "";
     return NextResponse.redirect(url);
   }
 

@@ -44,6 +44,8 @@ multica daemon start
 | `multica daemon stop` | デーモンを停止する |
 | `multica daemon start --foreground` | デバッグ用に現在のターミナルで実行する |
 
+タスクの作業ディレクトリを別のディスクに置くには、`multica config set workspaces_root <path>` で現在のプロファイルにルートを保存するか、`daemon start` または `daemon restart` に `--workspaces-root <path>` を渡します。フラグは `MULTICA_WORKSPACES_ROOT` より優先され、環境変数はプロファイル設定より優先されます。ルートを変更しても既存のタスクディレクトリは移動されません。
+
 起動時、デーモンは `PATH` 上の対応する AI コーディングツールを検出し、あなたが接続を許可されているワークスペースにランタイムを登録します。ツールをインストールまたはログインした直後の場合は、デーモンを再起動すると再検出されます。
 
 デーモンは、組み込みで対応している AI コーディングツールを少なくとも 1 つ検出できないと起動しません。インストール方法と実行コマンド名は [AI コーディングツールのインストール](/install-agent-runtime)を参照してください。

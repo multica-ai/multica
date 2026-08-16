@@ -38,6 +38,22 @@ const SIDEBAR_DRAG_THRESHOLD = 2
 // header's trigger brings it back.
 const SIDEBAR_AUTO_COLLAPSE_QUERY = "(min-width: 1024px) and (max-width: 1279px)"
 
+/**
+ * Paints an element with whatever the sidebar wrapper is currently filled with.
+ *
+ * A descendant that has to lay down an opaque layer over the wrapper — rather
+ * than over its own parent — must match the wrapper's fill exactly, and that
+ * fill is conditional: `bg-sidebar` while an inset-variant sidebar is mounted,
+ * the consumer's own background otherwise. Naming a token at the descendant
+ * reproduces that condition in a second place, which then drifts (#6874). Use
+ * this class instead: the wrapper publishes its fill as `--sidebar-wrapper-fill`
+ * under the same `:has()` condition that paints it, so the two cannot disagree.
+ *
+ * Consumers that give the wrapper a background must declare the matching
+ * non-inset half, e.g. `bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]`.
+ */
+const SIDEBAR_WRAPPER_FILL_CLASS = "bg-(--sidebar-wrapper-fill)"
+
 function clampSidebarWidth(width: number) {
   return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, width))
 }
@@ -55,6 +71,17 @@ type SidebarContextProps = {
    */
   isCompact: boolean
   toggleSidebar: () => void
+  /**
+   * The app shell keeps a `SidebarTrigger` of its own on screen, outside the
+   * page chrome — the desktop window toolbar does, beside the traffic lights.
+   *
+   * Surfaces that would otherwise supply a fallback trigger read this and
+   * supply nothing: the shell's own is always reachable, so a second one is
+   * duplicate chrome rather than a way back to a nav that had none (MUL-6218).
+   * It describes the shell, not the current viewport, so it does not track
+   * whether that trigger happens to be mounted this render.
+   */
+  hasExternalTrigger: boolean
 }
 
 type SidebarResizeContextProps = {
@@ -92,6 +119,7 @@ function SidebarProvider({
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
+  hasExternalTrigger = false,
   className,
   style,
   children,
@@ -100,6 +128,15 @@ function SidebarProvider({
   defaultOpen?: boolean
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  /**
+   * Declare that this shell keeps its own always-reachable `SidebarTrigger`
+   * outside the page chrome. See `SidebarContextProps.hasExternalTrigger`.
+   *
+   * Defaults to false, and the default is the safe one: a shell that forgets
+   * to opt out shows one redundant icon, while a shell that has to opt in and
+   * forgets leaves a collapsed nav with no way back.
+   */
+  hasExternalTrigger?: boolean
 }) {
   const isCompact = useIsCompact()
   const [openMobile, setOpenMobile] = React.useState(false)
@@ -195,8 +232,18 @@ function SidebarProvider({
       openMobile,
       setOpenMobile,
       toggleSidebar,
+      hasExternalTrigger,
     }),
-    [state, open, setOpen, isCompact, openMobile, setOpenMobile, toggleSidebar]
+    [
+      state,
+      open,
+      setOpen,
+      isCompact,
+      openMobile,
+      setOpenMobile,
+      toggleSidebar,
+      hasExternalTrigger,
+    ]
   )
   const resizeContextValue = React.useMemo<SidebarResizeContextProps>(
     () => ({
@@ -218,7 +265,14 @@ function SidebarProvider({
             } as React.CSSProperties
           }
           className={cn(
-            "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
+            "group/sidebar-wrapper flex min-h-svh w-full",
+            // Both halves of the inset branch carry the identical :has()
+            // condition, so SIDEBAR_WRAPPER_FILL_CLASS can never name a colour
+            // this element is not actually painted with. The non-inset fill is
+            // the consumer's (this component paints nothing then), so the
+            // consumer declares that half of the variable next to its own
+            // background class.
+            "has-data-[variant=inset]:bg-sidebar has-data-[variant=inset]:[--sidebar-wrapper-fill:var(--sidebar)]",
             className
           )}
           {...props}
@@ -908,6 +962,7 @@ function SidebarMenuSubButton({
 }
 
 export {
+  SIDEBAR_WRAPPER_FILL_CLASS,
   Sidebar,
   SidebarContent,
   SidebarFooter,

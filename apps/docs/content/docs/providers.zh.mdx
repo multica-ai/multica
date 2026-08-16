@@ -26,6 +26,7 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 | Codex | `codex` | ✓ | ✓ | `$CODEX_HOME/skills/` |
 | GitHub Copilot CLI | `copilot` | ✓ | — | `.github/skills/` |
 | Cursor Agent | `cursor-agent` | ✓ | ✓ | `.cursor/skills/` |
+| DeepSeek Harness | `dsh` | ✓ | ✓ | `.dsh/skills/` |
 | DevEco Code | `deveco` | ✓ | — | `.deveco/skills/` |
 | Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
 | Hermes | `hermes` | ✓ | ✓ | 单次执行的 `HERMES_HOME/skills/` |
@@ -51,6 +52,8 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 不选择模型时，Multica 使用该工具的默认设置。列表为空时，先确认运行时在线并且工具已经登录，再刷新模型列表。
 
 QwenPaw 是唯一的例外：它不接受在 Multica 侧选择的模型，因此选择框不可用，显示为"由运行时管理"。请改在 QwenPaw 自身的配置里选择模型。它的模型列表为空属于正常情况，并不表示运行时离线。
+
+DeepSeek Harness 的模型目录由运行时自身提供（`dsh --profile multica --list-models`）。它的模型 id 采用 `provider/model` 形式（例如 `deepseek-official/deepseek-chat`），请从列表中选择完整 id。
 
 <Callout type="info">
 不同工具可能使用不同的模型名称。更换 AI 编程工具后，原有的模型值在新工具中无效，需要重新选择。

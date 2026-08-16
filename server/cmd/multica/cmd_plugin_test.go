@@ -78,3 +78,20 @@ func TestPluginInitRefusesNonEmptyDirectory(t *testing.T) {
 		t.Fatal("plugin init unexpectedly replaced a non-empty directory")
 	}
 }
+
+func TestPluginInitRemoteMCPTemplate(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "plugin")
+	cmd := pluginInitTestCommand(&bytes.Buffer{})
+	cmd.Flags().String("contribution", "remote-mcp", "")
+	cmd.Flags().String("endpoint-host", "tools.example.com", "")
+	if err := runPluginInit(cmd, []string{root}); err != nil {
+		t.Fatalf("plugin init remote-mcp: %v", err)
+	}
+	_, artifact, err := loadPluginSource(root)
+	if err != nil {
+		t.Fatalf("load remote-mcp template: %v", err)
+	}
+	if len(artifact.Manifest.Contributes.RemoteMCP) != 1 || len(artifact.Files) != 1 {
+		t.Fatalf("remote-mcp template = %+v", artifact.Manifest.Contributes)
+	}
+}

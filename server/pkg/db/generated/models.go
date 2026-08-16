@@ -71,6 +71,13 @@ type AgentInvocationTarget struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type AgentMcpServer struct {
+	AgentID   pgtype.UUID        `json:"agent_id"`
+	ServerID  pgtype.UUID        `json:"server_id"`
+	Enabled   bool               `json:"enabled"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type AgentRuntime struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -1012,6 +1019,28 @@ type PluginInstallation struct {
 	UninstalledAt     pgtype.Timestamptz `json:"uninstalled_at"`
 }
 
+type PluginInstallationConfig struct {
+	ID                     pgtype.UUID        `json:"id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	InstallationID         pgtype.UUID        `json:"installation_id"`
+	ContributionID         pgtype.UUID        `json:"contribution_id"`
+	Revision               int64              `json:"revision"`
+	Endpoint               string             `json:"endpoint"`
+	PublicConfig           []byte             `json:"public_config"`
+	AuthType               string             `json:"auth_type"`
+	AuthHeader             string             `json:"auth_header"`
+	SecretRef              pgtype.UUID        `json:"secret_ref"`
+	ApprovedTools          []byte             `json:"approved_tools"`
+	SchemaDigest           pgtype.Text        `json:"schema_digest"`
+	FailurePolicy          string             `json:"failure_policy"`
+	ReviewedBy             pgtype.UUID        `json:"reviewed_by"`
+	ReviewedAt             pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedBy              pgtype.UUID        `json:"created_by"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	DiscoveredTools        []byte             `json:"discovered_tools"`
+	DiscoveredSchemaDigest pgtype.Text        `json:"discovered_schema_digest"`
+}
+
 type PluginRelease struct {
 	ID               pgtype.UUID        `json:"id"`
 	PluginID         pgtype.UUID        `json:"plugin_id"`
@@ -1030,6 +1059,41 @@ type PluginRelease struct {
 	RevokedAt        pgtype.Timestamptz `json:"revoked_at"`
 	RevocationReason pgtype.Text        `json:"revocation_reason"`
 	PublishedAt      pgtype.Timestamptz `json:"published_at"`
+}
+
+type PluginRemoteMcpOauthState struct {
+	StateHash             []byte             `json:"state_hash"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	InstallationID        pgtype.UUID        `json:"installation_id"`
+	ContributionID        pgtype.UUID        `json:"contribution_id"`
+	ActorID               pgtype.UUID        `json:"actor_id"`
+	Endpoint              string             `json:"endpoint"`
+	PublicConfig          []byte             `json:"public_config"`
+	FailurePolicy         string             `json:"failure_policy"`
+	AuthorizationEndpoint string             `json:"authorization_endpoint"`
+	TokenEndpoint         string             `json:"token_endpoint"`
+	ClientID              string             `json:"client_id"`
+	Scope                 string             `json:"scope"`
+	RedirectUri           string             `json:"redirect_uri"`
+	ReturnTo              string             `json:"return_to"`
+	SecretCiphertext      []byte             `json:"secret_ciphertext"`
+	ExpiresAt             pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt            pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
+type PluginRemoteMcpSecret struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ContributionID pgtype.UUID        `json:"contribution_id"`
+	Version        int64              `json:"version"`
+	Ciphertext     []byte             `json:"ciphertext"`
+	Hint           string             `json:"hint"`
+	Status         string             `json:"status"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	RevokedAt      pgtype.Timestamptz `json:"revoked_at"`
 }
 
 type PluginWorkspaceCapabilityState struct {
@@ -1407,4 +1471,14 @@ type WorkspaceInvitation struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}
+
+type WorkspaceMcpServer struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Config      []byte             `json:"config"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }

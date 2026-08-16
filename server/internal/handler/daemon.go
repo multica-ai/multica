@@ -890,10 +890,28 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings))
 }
 
+// setRuntimeOffline flips a runtime offline, recording the daemon's reason when
+// it sent one. An absent or unusable reason falls back to the plain offline
+// write: a malformed payload must never cost the caller the state change it
+// actually asked for.
+func (h *Handler) setRuntimeOffline(ctx context.Context, runtimeID pgtype.UUID, reason json.RawMessage) error {
+	if len(reason) > 0 && json.Valid(reason) {
+		return h.Queries.SetAgentRuntimeOfflineWithReason(ctx, db.SetAgentRuntimeOfflineWithReasonParams{
+			ID:            runtimeID,
+			OfflineReason: reason,
+		})
+	}
+	return h.Queries.SetAgentRuntimeOffline(ctx, runtimeID)
+}
+
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
 func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RuntimeIDs []string `json:"runtime_ids"`
+		// OfflineReasons is optional and keyed by runtime id. Present only for
+		// causes the user must repair — a daemon shutting down sends none, so an
+		// older daemon simply keeps today's behaviour (MUL-6164).
+		OfflineReasons map[string]json.RawMessage `json:"offline_reasons"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -926,7 +944,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if err := h.Queries.SetAgentRuntimeOffline(r.Context(), rt.ID); err != nil {
+		if err := h.setRuntimeOffline(r.Context(), rt.ID, req.OfflineReasons[rid]); err != nil {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
 			continue
 		}
@@ -1702,6 +1720,16 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
+		remoteMCPToken, daemonTokens, derr := remoteMCPDaemonTokenForClaim(resp, rt)
+		if derr != nil {
+			slog.Error("batch claim: generate Remote MCP daemon token failed; requeueing claim",
+				"task_id", uuidToString(task.ID), "error", derr)
+			if _, rerr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), task); rerr != nil {
+				slog.Error("batch claim: requeue after Remote MCP token failure failed",
+					"task_id", uuidToString(task.ID), "error", rerr)
+			}
+			continue
+		}
 		// Route through the SAME finalization as the per-runtime endpoint so the
 		// token and the comment-delivery receipt (delivered_comment_ids for
 		// comment/coalesced-comment tasks) are persisted atomically; on failure
@@ -1714,7 +1742,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: parseUUID(resp.WorkspaceID),
 			UserID:      rt.OwnerID,
 			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-		}, deliveredCommentIDs, commentBackedTask)
+		}, deliveredCommentIDs, commentBackedTask, daemonTokens...)
 		if ferr != nil {
 			slog.Error("batch claim: finalize task claim failed; requeueing claim",
 				"task_id", uuidToString(task.ID), "error", ferr)
@@ -1725,6 +1753,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		resp.AuthToken = tokenStr
+		resp.RemoteMCPDaemonToken = remoteMCPToken
 		resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
 		out = append(out, resp)
 	}
@@ -1746,6 +1775,75 @@ type claimBuildFailure struct {
 	outcome string
 	status  int
 	message string
+}
+
+// remoteMCPDaemonTokenForClaim prepares the short-lived credential the daemon
+// uses to resolve write-only Remote MCP secrets for this task. The raw token is
+// returned only in the claim response; its hash is committed atomically with
+// the task-scoped agent token by FinalizeTaskClaim.
+func remoteMCPDaemonTokenForClaim(resp AgentTaskResponse, runtime db.AgentRuntime) (string, []db.CreateDaemonTokenParams, error) {
+	if len(resp.RemoteMCPConnections) == 0 {
+		return "", nil, nil
+	}
+	if !runtime.DaemonID.Valid || strings.TrimSpace(runtime.DaemonID.String) == "" {
+		return "", nil, errors.New("runtime daemon_id is required for Remote MCP")
+	}
+	raw, err := auth.GenerateDaemonToken()
+	if err != nil {
+		return "", nil, fmt.Errorf("generate Remote MCP daemon token: %w", err)
+	}
+	return raw, []db.CreateDaemonTokenParams{{
+		TokenHash:   auth.HashToken(raw),
+		WorkspaceID: runtime.WorkspaceID,
+		DaemonID:    runtime.DaemonID.String,
+		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+	}}, nil
+}
+
+// failClaimedTaskBeforeLaunch settles a durable claim-time rejection before
+// the daemon ever receives the task. Leaving these failures in dispatched
+// makes the stale-claim reaper deliver the same impossible task forever and
+// leaves chat showing "starting" with no actionable outcome. If settlement
+// itself fails, release the exact claim so a later attempt can retry the gate.
+func (h *Handler) failClaimedTaskBeforeLaunch(
+	ctx context.Context,
+	task *db.AgentTaskQueue,
+	userMessage string,
+	failureReason taskfailure.Reason,
+	outcome string,
+	status int,
+	claimMessage string,
+) *claimBuildFailure {
+	if _, err := h.TaskService.FailTask(
+		ctx,
+		task.ID,
+		userMessage,
+		"",
+		"",
+		"",
+		failureReason.String(),
+		false,
+		"",
+	); err != nil {
+		slog.Error("task claim: fail rejected task failed; requeueing claim",
+			"task_id", uuidToString(task.ID),
+			"outcome", outcome,
+			"error", err,
+		)
+		if _, requeueErr := h.TaskService.RequeueTaskAfterClaimFailure(ctx, *task); requeueErr != nil {
+			slog.Error("task claim: requeue after rejected-task settlement failure failed; stale reclaim will recover it",
+				"task_id", uuidToString(task.ID),
+				"outcome", outcome,
+				"error", requeueErr,
+			)
+		}
+		return &claimBuildFailure{
+			outcome: outcome + "_settle",
+			status:  http.StatusInternalServerError,
+			message: "failed to settle a task rejected before launch",
+		}
+	}
+	return &claimBuildFailure{outcome: outcome, status: status, message: claimMessage}
 }
 
 // buildClaimedTaskResponse assembles the full daemon claim payload for a
@@ -1777,13 +1875,69 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	_, pluginSkillRefs, pluginManifest, pluginErr := h.TaskService.LoadTaskPluginSkillBundles(r.Context(), task.ID)
 	if pluginErr != nil {
 		slog.Error("daemon claim: load pinned plugin contributions failed", "task_id", uuidToString(task.ID), "error", pluginErr)
-		return resp, deliveredCommentIDs, 0, 0, &claimBuildFailure{status: http.StatusInternalServerError, message: "pinned plugin contributions are unavailable"}
+		failure := h.failClaimedTaskBeforeLaunch(
+			r.Context(),
+			task,
+			"This task could not start because its pinned Plugin contributions are unavailable. Retry the task; if it fails again, reinstall or re-enable the Plugin.",
+			taskfailure.ReasonSkillBundleUnavailable,
+			"error_plugin_contributions",
+			http.StatusInternalServerError,
+			"pinned plugin contributions are unavailable",
+		)
+		return resp, deliveredCommentIDs, 0, 0, failure
 	}
 	resp.PluginExecutionManifest = pluginManifest
+	remoteConnections, remoteDiagnostics, remoteErr := h.PluginService.ResolveTaskRemoteMCPConnections(r.Context(), task.ID)
+	if remoteErr != nil {
+		slog.Error("daemon claim: resolve pinned Remote MCP contribution failed", "task_id", uuidToString(task.ID), "error", remoteErr)
+		failure := h.failClaimedTaskBeforeLaunch(
+			r.Context(),
+			task,
+			"This task could not start because a required Remote MCP contribution is unavailable. Test the Plugin connection or update its configuration, then retry.",
+			taskfailure.ReasonAgentMissingConfig,
+			"error_required_remote_mcp",
+			http.StatusConflict,
+			"required Remote MCP contribution is unavailable",
+		)
+		return resp, deliveredCommentIDs, 0, 0, failure
+	}
+	if pluginManifest != nil && len(remoteDiagnostics) > 0 {
+		pluginManifest.Diagnostics = append(pluginManifest.Diagnostics, remoteDiagnostics...)
+	}
+	if len(remoteConnections) > 0 && !requestHasClientCapability(r, protocol.DaemonCapabilityRemoteMCPV1) {
+		for _, connection := range remoteConnections {
+			if connection.FailurePolicy == "required" {
+				failure := h.failClaimedTaskBeforeLaunch(
+					r.Context(),
+					task,
+					"This task could not start because its runtime does not support the required Remote MCP contribution. Update the runtime, then retry.",
+					taskfailure.ReasonAgentRuntimeVersionUnsupported,
+					"error_remote_mcp_runtime_incompatible",
+					http.StatusConflict,
+					"runtime does not support this task's required Remote MCP contribution",
+				)
+				return resp, deliveredCommentIDs, 0, 0, failure
+			}
+		}
+		if pluginManifest != nil {
+			pluginManifest.Diagnostics = append(pluginManifest.Diagnostics, "optional Remote MCP contributions omitted because the runtime is incompatible")
+		}
+		remoteConnections = nil
+	}
+	resp.RemoteMCPConnections = remoteConnections
 	if len(pluginSkillRefs) > 0 && (!requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1) ||
 		!requestHasClientCapability(r, protocol.DaemonCapabilityExecutionManifestV1) ||
 		!requestHasClientCapability(r, protocol.DaemonCapabilityAgentSkillV1)) {
-		return resp, deliveredCommentIDs, 0, 0, &claimBuildFailure{status: http.StatusConflict, message: "runtime does not support this task's plugin execution manifest"}
+		failure := h.failClaimedTaskBeforeLaunch(
+			r.Context(),
+			task,
+			"This task could not start because its runtime does not support the Plugin's Skill contribution. Update the runtime, then retry.",
+			taskfailure.ReasonAgentRuntimeVersionUnsupported,
+			"error_plugin_skill_runtime_incompatible",
+			http.StatusConflict,
+			"runtime does not support this task's plugin execution manifest",
+		)
+		return resp, deliveredCommentIDs, 0, 0, failure
 	}
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
@@ -1802,6 +1956,28 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		var mcpConfig json.RawMessage
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
+		}
+		// Fold in the workspace MCP servers this agent has been explicitly
+		// given (GH #6062). Only bound AND enabled servers are read, so a
+		// workspace library entry nobody added reaches nothing. Read on every
+		// claim, exactly like the agent column, so an admin's edit or a toggle
+		// lands on the agent's next task with nothing to restart. Errors —
+		// including a failed read — leave the agent config untouched: a broken
+		// shared entry must never take away servers the agent runs with today.
+		if bound, err := h.Queries.ListEnabledAgentMcpServers(r.Context(), agent.ID); err != nil {
+			slog.Warn("daemon claim: load agent mcp servers failed; using agent mcp_config",
+				"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
+		} else if len(bound) > 0 {
+			bindings := make([]WorkspaceMcpBinding, 0, len(bound))
+			for _, server := range bound {
+				bindings = append(bindings, WorkspaceMcpBinding{Name: server.Name, Config: json.RawMessage(server.Config)})
+			}
+			if resolved, err := ResolveAgentMcpConfig(bindings, mcpConfig); err != nil {
+				slog.Warn("daemon claim: resolve agent mcp servers failed; falling back to agent mcp_config",
+					"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
+			} else {
+				mcpConfig = resolved
+			}
 		}
 		// Layer the per-task overlay (set at enqueue from the initiator
 		// user's active integrations — currently Composio) on top of the
@@ -2711,6 +2887,37 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
+	// Surface a bounded snapshot of the same agent's other in-flight issue
+	// tasks. Queued tasks cannot coordinate yet and are intentionally omitted.
+	// This is advisory context, not a queue gate: cross-issue parallelism and
+	// serial handoffs remain valid, while the prompt can stop an unaware second
+	// run from opening a duplicate PR. Scope the query to the already-validated
+	// runtime workspace so corrupt cross-tenant task links never leak.
+	if siblings, err := h.Queries.ListActiveSiblingIssueTasks(r.Context(), db.ListActiveSiblingIssueTasksParams{
+		AgentID:     task.AgentID,
+		TaskID:      task.ID,
+		WorkspaceID: parseUUID(resp.WorkspaceID),
+	}); err == nil {
+		resp.ActiveSiblingRuns = make([]ActiveSiblingRunData, 0, len(siblings))
+		for _, sibling := range siblings {
+			resp.ActiveSiblingRuns = append(resp.ActiveSiblingRuns, ActiveSiblingRunData{
+				TaskID:          uuidToString(sibling.TaskID),
+				IssueID:         uuidToString(sibling.IssueID),
+				IssueIdentifier: fmt.Sprintf("%s-%d", sibling.IssuePrefix, sibling.IssueNumber),
+				IssueTitle:      sibling.IssueTitle,
+				Status:          sibling.Status,
+				CreatedAt:       timestampToString(sibling.CreatedAt),
+				StartedAt:       timestampToString(sibling.StartedAt),
+			})
+		}
+	} else {
+		slog.Warn("task claim: failed to load active sibling runs",
+			"task_id", uuidToString(task.ID),
+			"agent_id", uuidToString(task.AgentID),
+			"error", err,
+		)
+	}
+
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
 	// system prompt that workspace owners set in Settings → General. Inject it
 	// into the brief regardless of task kind (issue / chat / autopilot /
@@ -2954,6 +3161,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to mint task token")
 		return
 	}
+	remoteMCPToken, daemonTokens, derr := remoteMCPDaemonTokenForClaim(resp, runtime)
+	if derr != nil {
+		outcome = "error_remote_mcp_token"
+		slog.Error("task claim: failed to generate Remote MCP daemon token",
+			"task_id", uuidToString(task.ID), "error", derr)
+		requeueFailedClaim("remote_mcp_token_generation")
+		writeError(w, http.StatusInternalServerError, "failed to mint Remote MCP daemon token")
+		return
+	}
 	receipt, ferr := h.TaskService.FinalizeTaskClaim(r.Context(), *task, db.CreateTaskTokenParams{
 		TokenHash:   auth.HashToken(tokenStr),
 		TaskID:      task.ID,
@@ -2961,7 +3177,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: parseUUID(resp.WorkspaceID),
 		UserID:      runtime.OwnerID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-	}, deliveredCommentIDs, commentBackedTask)
+	}, deliveredCommentIDs, commentBackedTask, daemonTokens...)
 	if ferr != nil {
 		outcome = "error_claim_finalize"
 		slog.Error("task claim: failed to finalize token and comment delivery receipt",
@@ -2975,6 +3191,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp.AuthToken = tokenStr
+	resp.RemoteMCPDaemonToken = remoteMCPToken
 	task.DeliveredCommentIds = receipt
 	resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
 

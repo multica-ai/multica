@@ -17,13 +17,18 @@ import {
   ListTodo,
   Zap,
   Blocks,
+  CreditCard,
+  Server,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
-import { PLUGINS_V1_FLAG } from "@multica/core/feature-flags";
+import {
+  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+  PLUGINS_V1_FLAG,
+} from "@multica/core/feature-flags";
 import { useNavigation } from "../../navigation";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
@@ -42,6 +47,8 @@ import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
+import { McpTab } from "./mcp-tab";
+import { BillingTab } from "./billing-tab";
 import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
@@ -63,9 +70,11 @@ const WORKSPACE_TAB_KEYS = [
   "integrations",
   "labs",
   "members",
+  "billing",
   "labels",
   "properties",
   "quick_actions",
+  "mcp",
   "plugins",
 ] as const;
 const WORKSPACE_TAB_VALUES = {
@@ -75,9 +84,11 @@ const WORKSPACE_TAB_VALUES = {
   integrations: "integrations",
   labs: "labs",
   members: "members",
+  billing: "billing",
   labels: "labels",
   properties: "properties",
   quick_actions: "quick-actions",
+  mcp: "mcp",
   plugins: "plugins",
 } as const;
 const WORKSPACE_TAB_ICONS = {
@@ -87,9 +98,11 @@ const WORKSPACE_TAB_ICONS = {
   integrations: Plug,
   labs: FlaskConical,
   members: Users,
+  billing: CreditCard,
   labels: Tags,
   properties: SlidersHorizontal,
   quick_actions: Zap,
+  mcp: Server,
   plugins: Blocks,
 } as const;
 
@@ -125,10 +138,19 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   const navigation = useNavigation();
   const isMobile = useIsMobile();
   const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
+  const billingEnabled = useFeatureEnabled(
+    BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+    false,
+  );
 
   const visibleWorkspaceTabKeys = React.useMemo(
-    () => WORKSPACE_TAB_KEYS.filter((key) => key !== "plugins" || pluginsEnabled),
-    [pluginsEnabled],
+    () =>
+      WORKSPACE_TAB_KEYS.filter(
+        (key) =>
+          (key !== "plugins" || pluginsEnabled) &&
+          (key !== "billing" || billingEnabled),
+      ),
+    [billingEnabled, pluginsEnabled],
   );
 
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
@@ -146,7 +168,9 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
 
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
   const candidateTab = tabFromUrl
-    ? LEGACY_WORKSPACE_TAB_REDIRECTS[tabFromUrl] ?? tabFromUrl
+    ? tabFromUrl === "billing" && !billingEnabled
+      ? "workspace"
+      : LEGACY_WORKSPACE_TAB_REDIRECTS[tabFromUrl] ?? tabFromUrl
     : null;
   const activeTab =
     candidateTab && validTabs.has(candidateTab) ? candidateTab : DEFAULT_TAB;
@@ -251,9 +275,13 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
           <TabsContent value="labs"><LabsTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
+          {billingEnabled ? (
+            <TabsContent value="billing"><BillingTab /></TabsContent>
+          ) : null}
           <TabsContent value="labels"><LabelsTab /></TabsContent>
           <TabsContent value="properties"><PropertiesTab /></TabsContent>
           <TabsContent value="quick-actions"><QuickActionsTab /></TabsContent>
+          <TabsContent value="mcp"><McpTab /></TabsContent>
           {pluginsEnabled ? <TabsContent value="plugins"><PluginsTab /></TabsContent> : null}
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>

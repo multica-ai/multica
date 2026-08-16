@@ -295,6 +295,13 @@ function installWindowShortcutHandler(window: BrowserWindow): void {
     if (result === "close-tab") {
       event.preventDefault();
       window.webContents.send("tab:close-active");
+    } else if (result === "open-settings") {
+      event.preventDefault();
+      // Settings is a tab, so it can only live in the tabbed main window.
+      // Routing through the queue means the chord also works from a
+      // dedicated issue window — and from one that outlived the main window,
+      // which is recreated and only then handed the request.
+      dispatchToMainRenderer("settings:open", null);
     } else if (result) {
       event.preventDefault();
     }

@@ -1,5 +1,8 @@
 import { queryOptions } from "@tanstack/react-query";
+import type { WorkspaceSubscriptionPrices } from "../types";
 import { api } from "../api";
+
+const WORKSPACE_SUBSCRIPTION_PRICES_STALE_TIME_MS = 10 * 60 * 1000;
 
 /**
  * Workspace subscription reads.
@@ -47,22 +50,36 @@ export function workspaceSubscriptionSummaryOptions(wsId: string) {
 }
 
 /**
+ * A validated price snapshot is stable deployment configuration, but a null
+ * parse fallback is not a snapshot. Keeping null fresh made one transient
+ * contract/deployment failure suppress prices for ten minutes with no way to
+ * recover from the Billing tab.
+ */
+export function workspaceSubscriptionPricesStaleTime(
+  prices: WorkspaceSubscriptionPrices | null | undefined,
+): number {
+  return prices ? WORKSPACE_SUBSCRIPTION_PRICES_STALE_TIME_MS : 0;
+}
+
+/**
  * Prices are deployment configuration, not workspace state: they change only
- * when an operator repoints a Stripe Price. Cache them for much longer than the
- * summary and do not refetch on focus — cloud already caches them and each miss
- * costs a Stripe round trip.
+ * when an operator repoints a Stripe Price. Cache validated values for much
+ * longer than the summary. Missing/malformed values stay stale so a remount or
+ * window focus can recover after a backend rollout or transient dependency
+ * failure; cloud already caches Stripe reads, so revalidation is inexpensive.
  *
  * Retry is disabled because the failure mode here is a misconfigured or
- * unvalidatable Price, which retrying cannot fix; the caller shows "price
- * confirmed at Checkout" instead.
+ * unvalidatable Price, which immediate retries cannot fix. The caller keeps
+ * Checkout available and exposes an explicit price-only retry instead.
  */
 export function workspaceSubscriptionPricesOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceSubscriptionKeys.prices(wsId),
     queryFn: () => api.getWorkspaceSubscriptionPrices(),
     enabled: wsId.length > 0,
-    staleTime: 10 * 60 * 1000,
-    refetchOnWindowFocus: false,
+    staleTime: (query) =>
+      workspaceSubscriptionPricesStaleTime(query.state.data),
+    refetchOnWindowFocus: true,
     retry: false,
   });
 }

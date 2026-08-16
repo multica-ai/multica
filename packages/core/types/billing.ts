@@ -245,3 +245,26 @@ export interface WorkspaceSubscriptionPrices {
   month: WorkspaceSubscriptionPrice;
   year: WorkspaceSubscriptionPrice;
 }
+
+export interface CreateWorkspaceSubscriptionCheckoutRequest {
+  interval: WorkspaceSubscriptionInterval;
+  idempotencyKey: string;
+  customerEmail?: string;
+}
+
+export interface CreateWorkspaceSubscriptionCheckoutResponse {
+  requestId: string;
+  sessionId: string;
+  url: string;
+}
+
+export interface WorkspaceSubscriptionSeatReconcileResult {
+  workspaceId: string;
+  billedSeats: number;
+  actualSeats: number;
+  action: string;
+}
+
+export interface CreateWorkspaceSubscriptionPortalResponse {
+  url: string;
+}

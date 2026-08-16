@@ -21,6 +21,7 @@ Multica 当前会检测以下命令：
 | Codex CLI | `codex` | [Codex CLI](https://developers.openai.com/codex/cli/) |
 | GitHub Copilot CLI | `copilot` | [安装 Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) |
 | Cursor Agent | `cursor-agent` | [安装 Cursor CLI](https://docs.cursor.com/en/cli/installation) |
+| DeepSeek Harness | `dsh` | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) |
 | DevEco Code | `deveco` | [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) |
 | Grok Build | `grok` | [Grok Build 快速开始](https://docs.x.ai/build/overview) |
 | Hermes Agent | `hermes` | [Hermes 快速开始](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
@@ -46,6 +47,8 @@ Multica 当前会检测以下命令：
 使用 Reasonix 时，请先运行 `reasonix setup`，配置默认的模型服务和模型，再启动守护进程。
 
 使用 QwenPaw 时，请在 QwenPaw 自身的配置里选择模型服务和模型。Multica 无法在执行时覆盖 QwenPaw 的模型。
+
+使用 DeepSeek Harness 时，请先安装 Node.js 20+ 并运行 `npm install -g @deepseek-ai/dsh`，然后为它安装 Multica 运行时 profile（`dsh plugin --profile multica add <bundle>`）。守护进程只有在 `dsh --profile multica --probe` 成功后才注册 DeepSeek Harness。启动守护进程前请设置 `DEEPSEEK_API_KEY`（或在 dsh 自身设置中保存）。
 
 这些登录凭据由工具保存在本机。Multica 不会接收 Claude、Codex、Cursor 或其他 CLI 的登录 token。
 

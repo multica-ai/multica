@@ -73,6 +73,10 @@
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}"
   },
+  "toasts": {
+    "archived": "Notification archived",
+    "unarchived": "Notification restored"
+  },
   "errors": {
     "mark_read_failed": "Failed to mark as read",
     "mark_unread_failed": "Failed to mark as unread",

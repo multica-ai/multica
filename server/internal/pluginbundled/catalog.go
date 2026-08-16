@@ -278,6 +278,7 @@ func CompatibleWithV1Host(manifest plugincontract.Manifest) (bool, string) {
 	supported := map[string]bool{
 		plugincontract.DaemonFeatureExecutionManifestV1: true,
 		plugincontract.DaemonFeatureAgentSkillV1:        true,
+		plugincontract.DaemonFeatureRemoteMCPV1:         true,
 	}
 	for _, feature := range manifest.Compatibility.RequiredDaemonFeatures {
 		if !supported[feature] {

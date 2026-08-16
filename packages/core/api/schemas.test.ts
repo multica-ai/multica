@@ -50,6 +50,9 @@ import {
   EMPTY_PLUGIN_CATALOG,
   PluginCatalogResponseSchema,
   PluginInstallationSchema,
+  RemoteMCPDiscoveryResponseSchema,
+  RemoteMCPOAuthStartResponseSchema,
+  EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE,
 } from "./schemas";
 import { IssueViewSchema, IssueViewListSchema } from "./schemas";
 import { parseWithFallback } from "./schema";
@@ -1386,6 +1389,54 @@ describe("Plugin catalog schemas", () => {
     expect(parsed.trust_tier).toBe("");
     expect(parsed.signature_verified).toBe(false);
     expect(parsed.contribution_details).toEqual([]);
+    expect(parsed.remote_mcp).toEqual([]);
+  });
+
+  it("parses Remote MCP status without accepting secret-shaped response fields", () => {
+    const parsed = PluginInstallationSchema.parse({
+      id: "installation-1",
+      remote_mcp: [{
+        contribution_key: "search",
+        credential_state: "configured",
+        credential_hint: "••••1234",
+        credential: "must-not-be-modeled",
+        approved_tools: [{
+          name: "search.read",
+          input_schema: { type: "object" },
+          schema_digest: "sha256:fixture",
+          risk: "read",
+        }],
+        reviewed: true,
+        ready: true,
+      }],
+    });
+    expect(parsed.remote_mcp[0]?.credential_state).toBe("configured");
+    expect(parsed.remote_mcp[0]?.approved_tools[0]?.name).toBe("search.read");
+    expect(parsed.remote_mcp[0]?.ready).toBe(true);
+    expect(parsed.remote_mcp[0]).not.toHaveProperty("credential");
+  });
+
+  it("defaults a malformed Remote MCP discovery response without inventing tools", () => {
+    const fallback = { config_revision: 0, discovered_tools: [], discovered_schema_digest: "" };
+    const parsed = parseWithFallback(
+      { config_revision: "bad", discovered_tools: { name: "search" } },
+      RemoteMCPDiscoveryResponseSchema,
+      fallback,
+      { endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/remote-mcp/{key}/test" },
+    );
+    expect(parsed).toEqual(fallback);
+  });
+
+  it("rejects a malformed Remote MCP OAuth start response", () => {
+    expect(parseWithFallback(
+      { authorization_url: undefined },
+      RemoteMCPOAuthStartResponseSchema,
+      EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE,
+      { endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/remote-mcp/{key}/oauth/start" },
+    )).toEqual(EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE);
+    expect(RemoteMCPOAuthStartResponseSchema.parse({
+      authorization_url: "https://auth.example.test/authorize?state=opaque",
+    }).authorization_url).toContain("auth.example.test");
   });
 
   it("degrades a malformed catalog response to unsupported and empty", () => {
