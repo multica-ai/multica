@@ -195,8 +195,8 @@ func (h *Handler) resolveMikaAgent(w http.ResponseWriter, r *http.Request, works
 		OwnerID:                       parseUUID(userID),
 		SystemKey:                     pgtype.Text{String: service.MikaSystemKey, Valid: true},
 		CustomArgs:                    customArgsJSON,
-			IsCodexWindowsSandboxArgManaged: customArgsManaged,
-})
+		IsCodexWindowsSandboxArgManaged: customArgsManaged,
+	})
 	if err != nil {
 		slog.Warn("create mika agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create the workspace agent")
