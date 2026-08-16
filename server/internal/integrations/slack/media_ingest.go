@@ -86,7 +86,19 @@ func NewMediaResolver(decrypt Decrypter, storage mediaStorage, ledger engine.Med
 			// Validate every redirect before net/http follows it. This host check
 			// prevents redirected requests from leaving Slack's domains regardless
 			// of how net/http propagates the Authorization header.
-			return r.validateDownloadURL(req.URL)
+			if err := r.validateDownloadURL(req.URL); err != nil {
+				return err
+			}
+			// net/http forwards Authorization only to the same host or a
+			// subdomain of it, so a hop to a sibling such as
+			// files-origin.slack.com arrives unauthenticated and Slack answers
+			// with its HTML login page — indistinguishable from a missing
+			// scope, and the file would be dropped. The check above already
+			// proved this destination is Slack-owned, so restore the token.
+			if auth := via[0].Header.Get("Authorization"); auth != "" {
+				req.Header.Set("Authorization", auth)
+			}
+			return nil
 		},
 	}
 	return r
@@ -97,6 +109,18 @@ func NewMediaResolver(decrypt Decrypter, storage mediaStorage, ledger engine.Med
 func isSlackFileHost(host string) bool {
 	host = strings.ToLower(host)
 	return host == "slack.com" || strings.HasSuffix(host, ".slack.com")
+}
+
+// isFetchableSlackFileURL is the pure form of validateDownloadURL, pinned to
+// the production host predicate instead of the resolver's test seam. The
+// inbound translation uses it to drop files the resolver could never fetch
+// before they ever reach the envelope.
+func isFetchableSlackFileURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Scheme, "https") && isSlackFileHost(parsed.Hostname())
 }
 
 // HasMedia is a pure decode of the already-translated event payload. It runs
@@ -134,7 +158,15 @@ func (r *slackMediaResolver) ResolveMedia(ctx context.Context, inst engine.Resol
 		files = files[:maxFilesPerMessage]
 	}
 	for i, f := range files {
-		ref, err := r.ingestOne(ctx, inst, chatMessageID, i, f, creds.BotToken)
+		if err := ctx.Err(); err != nil {
+			// The Router discards every ref once the media deadline passes, so
+			// there is nothing left to win by starting another file.
+			r.logWarn(msg, fmt.Errorf("media budget spent after %d of %d files: %w", i, len(files), err))
+			break
+		}
+		fileCtx, cancel := context.WithTimeout(ctx, fileFetchBudget(ctx, len(files)-i))
+		ref, err := r.ingestOne(fileCtx, inst, chatMessageID, i, f, creds.BotToken)
+		cancel()
 		if err != nil {
 			r.logger.Warn("slack media ingest failed",
 				"installation_id", util.UUIDToString(inst.ID),
@@ -148,10 +180,36 @@ func (r *slackMediaResolver) ResolveMedia(ctx context.Context, inst engine.Resol
 	return msg
 }
 
+// fileFetchBudget caps one file's download and upload. The flat timeout bounds
+// a single stalled transfer, but maxFilesPerMessage of them in series would run
+// far past the Router's media deadline — and the Router drops EVERY ref once
+// that deadline passes, so one slow file would cost the whole message its
+// attachments. Sharing what is left of the budget over the files still to fetch
+// keeps a slow early file from starving the rest; files that finish quickly
+// hand their unused share back to the ones behind them.
+func fileFetchBudget(ctx context.Context, remainingFiles int) time.Duration {
+	if remainingFiles < 1 {
+		remainingFiles = 1
+	}
+	budget := fileFetchTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if share := time.Until(deadline) / time.Duration(remainingFiles); share < budget {
+			budget = share
+		}
+	}
+	return budget
+}
+
 // ingestOne carries a single file from URL to MediaRef. The ledger row goes
 // first: from that point on every failure — download, upload, a crash — leaves
 // an intent the reconciler settles, and nothing here deletes anything.
 func (r *slackMediaResolver) ingestOne(ctx context.Context, inst engine.ResolvedInstallation, chatMessageID pgtype.UUID, index int, f slackRawFile, botToken string) (channel.MediaRef, error) {
+	// Slack states the size up front, so an oversized file is refused before it
+	// costs an intent row and a full transfer. A file that under-reports still
+	// hits the byte cap in download.
+	if f.Size > maxInboundFileBytes {
+		return channel.MediaRef{}, fmt.Errorf("file size %d exceeds the %d MiB limit", f.Size, maxInboundFileBytes>>20)
+	}
 	key := slackMediaObjectKey(inst, chatMessageID, f, index)
 	link := r.storage.ObjectURL(key)
 	owned, err := r.ledger.RecordPendingMediaObject(ctx, engine.RecordPendingMediaObjectParams{
@@ -201,9 +259,9 @@ func (r *slackMediaResolver) download(ctx context.Context, rawURL, botToken stri
 	if err := r.validateDownloadURL(parsed); err != nil {
 		return nil, "", err
 	}
-	fetchCtx, cancel := context.WithTimeout(ctx, fileFetchTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, parsed.String(), nil)
+	// The per-file budget is already on ctx (see fileFetchBudget), which also
+	// covers the upload that follows.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
 		return nil, "", errors.New("build file download request failed")
 	}
@@ -227,7 +285,7 @@ func (r *slackMediaResolver) download(ctx context.Context, rawURL, botToken stri
 		return nil, "", fmt.Errorf("read file: %w", err)
 	}
 	if len(data) > maxInboundFileBytes {
-		return nil, "", fmt.Errorf("file exceeds the %d MB limit", maxInboundFileBytes>>20)
+		return nil, "", fmt.Errorf("file exceeds the %d MiB limit", maxInboundFileBytes>>20)
 	}
 	contentType := resp.Header.Get("Content-Type")
 	if semi := strings.IndexByte(contentType, ';'); semi >= 0 {

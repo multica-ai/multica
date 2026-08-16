@@ -41,17 +41,21 @@ type slackRawFile struct {
 	DownloadURL string `json:"download_url"`
 }
 
-// rawFilesFrom maps the event's file objects to the raw envelope. Files with
-// no downloadable URL (external files, uploads still processing) are skipped —
-// there is nothing the resolver could fetch.
+// rawFilesFrom maps the event's file objects to the raw envelope, keeping only
+// files the media resolver could actually fetch: ones with a downloadable URL
+// on a Slack host. That drops uploads still processing (no URL yet) and remote
+// "external" files whose url_private points at Google Drive or Dropbox — the
+// resolver refuses to send the bot token off-domain, so carrying them would
+// only make HasMedia promise media the pipeline can never bind, costing the
+// message a deferred run and an intent-ledger row per doomed download.
 func rawFilesFrom(files []slack.File) []slackRawFile {
 	var out []slackRawFile
 	for _, f := range files {
-		url := f.URLPrivateDownload
-		if url == "" {
-			url = f.URLPrivate
+		downloadURL := f.URLPrivateDownload
+		if downloadURL == "" {
+			downloadURL = f.URLPrivate
 		}
-		if url == "" {
+		if !isFetchableSlackFileURL(downloadURL) {
 			continue
 		}
 		out = append(out, slackRawFile{
@@ -59,7 +63,7 @@ func rawFilesFrom(files []slack.File) []slackRawFile {
 			Name:        f.Name,
 			Mimetype:    f.Mimetype,
 			Size:        int64(f.Size),
-			DownloadURL: url,
+			DownloadURL: downloadURL,
 		})
 	}
 	return out
