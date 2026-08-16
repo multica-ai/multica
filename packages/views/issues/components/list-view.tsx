@@ -280,6 +280,7 @@ function ListViewImpl({
           {
             ...getMoveUpdates(finalGroup, currentIssue.position),
             ...getMoveAnchors(targetIds, activeId),
+            expected_revision: currentIssue.revision,
           },
           beginSettle(),
         );
@@ -306,6 +307,7 @@ function ListViewImpl({
         {
           ...getMoveUpdates(finalGroup, newPosition),
           ...getMoveAnchors(finalIds, activeId),
+          expected_revision: currentIssue?.revision,
         },
         beginSettle(),
       );

@@ -26,7 +26,7 @@ func (h *Handler) noteRuntimeUnusable(ctx context.Context, issue db.Issue, agent
 	content := service.RuntimeUnusableNotice(agent.Name, verdict)
 	// author_type='system', author_id=zero UUID — same shape as the sub-issue
 	// completion notice; clients branch on author_type, not the UUID value.
-	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		AuthorType:  "system",
@@ -42,11 +42,13 @@ func (h *Handler) noteRuntimeUnusable(ctx context.Context, issue db.Issue, agent
 			"agent_id", uuidToString(agent.ID))
 		return
 	}
+	comment := created.Comment()
 	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
 		"comment":             commentToResponse(comment, nil, nil),
 		"issue_title":         issue.Title,
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
+		"issue_revision":      created.IssueRevision,
 	})
 }

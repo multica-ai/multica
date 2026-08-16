@@ -75,11 +75,16 @@ export const BoardCardContent = memo(function BoardCardContent({
   const surfaceActions = useIssueSurfaceActionsOptional();
   const handleUpdate = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
-      surfaceActions?.updateIssue(issue.id, updates, {
+      surfaceActions?.updateIssue(issue.id, {
+        ...updates,
+        ...(updates.expected_revision === undefined && issue.revision !== undefined
+          ? { expected_revision: issue.revision }
+          : {}),
+      }, {
         errorMessage: t(($) => $.card.update_failed),
       });
     },
-    [issue.id, surfaceActions, t],
+    [issue.id, issue.revision, surfaceActions, t],
   );
   const canEdit = editable && !!surfaceActions;
 

@@ -516,6 +516,7 @@ function BoardViewImpl({
           {
             ...getMoveUpdates(finalGroup, currentIssue.position),
             ...getMoveAnchors(targetIds, activeId),
+            expected_revision: currentIssue.revision,
           },
           beginSettle(),
         );
@@ -545,6 +546,7 @@ function BoardViewImpl({
         {
           ...getMoveUpdates(finalGroup, newPosition),
           ...getMoveAnchors(finalIds, activeId),
+          expected_revision: currentIssue?.revision,
         },
         beginSettle(),
       );

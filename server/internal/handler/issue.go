@@ -62,6 +62,7 @@ type IssueResponse struct {
 	DueDate   *string `json:"due_date"`
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
+	Revision  int64   `json:"revision"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -293,6 +294,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		DueDate:        dateToPtr(i.DueDate),
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
+		Revision:       i.Revision,
 		Metadata:       parseIssueMetadata(i.Metadata),
 		Properties:     parseIssueProperties(i.Properties),
 	}
@@ -328,6 +330,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		DueDate:        dateToPtr(i.DueDate),
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
+		Revision:       i.Revision,
 		Metadata:       parseIssueMetadata(i.Metadata),
 		Properties:     parseIssueProperties(i.Properties),
 	}
@@ -395,6 +398,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		DueDate:        dateToPtr(i.DueDate),
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
+		Revision:       i.Revision,
 		Metadata:       parseIssueMetadata(i.Metadata),
 		Properties:     parseIssueProperties(i.Properties),
 	}
@@ -822,6 +826,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id,
+		i.revision,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source,
 		%s AS matched_comment_content
@@ -909,6 +914,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 				&sr.issue.UpdatedAt,
 				&sr.issue.Number,
 				&sr.issue.ProjectID,
+				&sr.issue.Revision,
 				&sr.totalCount,
 				&sr.matchSource,
 				&sr.matchedCommentContent,
@@ -1435,7 +1441,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
+	   i.revision
 FROM issue i
 WHERE %s
 ORDER BY %s
@@ -1474,6 +1481,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Metadata,
 			&row.Stage,
 			&row.Properties,
+			&row.Revision,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -2984,8 +2992,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
+	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
+	Title            *string `json:"title"`
+	Description      *string `json:"description"`
 	// DescriptionBase is the authoritative Markdown the editor had adopted
 	// before producing Description. It lets the server preserve channel media
 	// that landed asynchronously after that base without making media already
@@ -3190,6 +3199,17 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ProjectID:     prevIssue.ProjectID,
 		Stage:         prevIssue.Stage,
 	}
+	if req.ExpectedRevision != nil {
+		if *req.ExpectedRevision < 1 {
+			writeError(w, http.StatusBadRequest, "expected_revision must be a positive integer")
+			return
+		}
+		if prevIssue.Revision != *req.ExpectedRevision {
+			writeRevisionConflict(w, "issue", prevIssue.ID, *req.ExpectedRevision, prevIssue.Revision)
+			return
+		}
+		params.ExpectedRevision = pgtype.Int8{Int64: *req.ExpectedRevision, Valid: true}
+	}
 
 	// COALESCE fields — only set when explicitly provided
 	if req.Title != nil {
@@ -3374,13 +3394,34 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if writeIssueStatusRaceError(w, err) {
 			return
 		}
+		if errors.Is(err, pgx.ErrNoRows) && req.ExpectedRevision != nil {
+			current, reloadErr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: prevIssue.ID, WorkspaceID: prevIssue.WorkspaceID})
+			if reloadErr == nil {
+				writeRevisionConflict(w, "issue", current.ID, *req.ExpectedRevision, current.Revision)
+				return
+			}
+		}
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
 	}
 
+	// Determine actor identity: agent (via X-Agent-ID header) or member.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	attachmentsChanged := false
 	if len(attachmentIDs) > 0 {
-		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
+		linked, linkErr := h.linkAttachmentsByIssueIDs(
+			r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs, issue.Revision == prevIssue.Revision,
+		)
+		if linkErr != nil {
+			slog.Warn("link issue attachments failed", append(logger.RequestAttrs(r), "error", linkErr, "issue_id", id, "workspace_id", workspaceID)...)
+		} else if linked.LinkedCount > 0 {
+			attachmentsChanged = true
+			if linked.IssueRevision > 0 {
+				issue.Revision = linked.IssueRevision
+			}
+		}
 	}
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
@@ -3406,9 +3447,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
 		"assignee_changed":    assigneeChanged,
@@ -3430,6 +3468,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
 	})
+	if attachmentsChanged {
+		// The full owner snapshot must be admitted before an auxiliary event at
+		// the same revision. Otherwise clients advance only the revision here and
+		// reject issue:updated as non-increasing, stranding the old issue fields.
+		h.publish(protocol.EventIssueAttachmentsChanged, workspaceID, actorType, actorID, map[string]any{
+			"issue_id":       uuidToString(issue.ID),
+			"issue_revision": issue.Revision,
+		})
+	}
 
 	// Reconcile the task queue. Whether this write starts an agent run — and
 	// for whom (agent assignee or squad leader) — is decided by the single

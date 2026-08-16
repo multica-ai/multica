@@ -52,14 +52,16 @@ RETURNING *;
 -- on different property keys never clobber each other.
 UPDATE issue
 SET properties = jsonb_set(properties, ARRAY[sqlc.arg('key')::text], sqlc.arg('value')::jsonb, true),
-    updated_at = now()
+    revision = revision + CASE WHEN properties -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN 1 ELSE 0 END,
+    updated_at = CASE WHEN properties -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN now() ELSE updated_at END
 WHERE id = sqlc.arg('id')::uuid AND workspace_id = sqlc.arg('workspace_id')::uuid
 RETURNING *;
 
 -- name: DeleteIssuePropertyValue :one
 UPDATE issue
 SET properties = properties - sqlc.arg('key')::text,
-    updated_at = now()
+    revision = revision + CASE WHEN properties ? sqlc.arg('key')::text THEN 1 ELSE 0 END,
+    updated_at = CASE WHEN properties ? sqlc.arg('key')::text THEN now() ELSE updated_at END
 WHERE id = sqlc.arg('id')::uuid AND workspace_id = sqlc.arg('workspace_id')::uuid
 RETURNING *;
 

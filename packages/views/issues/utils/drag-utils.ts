@@ -10,7 +10,7 @@ import type { BoardColumnGroup } from "../components/board-column";
 
 export type DragMoveTargetUpdates = Pick<
   UpdateIssueRequest,
-  "status" | "assignee_type" | "assignee_id" | "position"
+  "status" | "assignee_type" | "assignee_id" | "position" | "expected_revision"
 >;
 
 export type DragMoveUpdates = DragMoveTargetUpdates & {

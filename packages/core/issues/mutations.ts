@@ -35,6 +35,7 @@ import type {
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
+import { patchIssueRevision } from "./ws-updaters";
 
 // ---------------------------------------------------------------------------
 // Shared mutation variable types — used by both mutation hooks and
@@ -104,9 +105,13 @@ export function useUpdateIssue() {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({ id, move_intent: moveIntent, ...data }: UpdateIssueMutationInput) => {
-      if (!moveIntent) return api.updateIssue(id, data);
+      const cachedRevision = qc.getQueryData<Issue>(issueKeys.detail(wsId, id))?.revision;
+      const request = data.expected_revision === undefined && cachedRevision !== undefined
+        ? { ...data, expected_revision: cachedRevision }
+        : data;
+      if (!moveIntent) return api.updateIssue(id, request);
       const { position: _optimisticPosition, ...target } = data;
-      return api.moveIssue(id, { ...target, ...moveIntent });
+      return api.moveIssue(id, { ...target, ...(request.expected_revision !== undefined ? { expected_revision: request.expected_revision } : {}), ...moveIntent });
     },
     onMutate: ({ id, move_intent: _moveIntent, ...data }) => {
       // suppress_run / handoff_note are write-time control fields, not Issue
@@ -120,6 +125,7 @@ export function useUpdateIssue() {
         handoff_note: _handoffNote,
         description: _description,
         description_base: _descriptionBase,
+        expected_revision: _expectedRevision,
         ...patch
       } = data;
       // Fire-and-forget cancelQueries — keeps onMutate synchronous so the
@@ -190,7 +196,7 @@ export function useUpdateIssue() {
       }
       return { change, prevChildren, parentId, id };
     },
-    onError: (_err, _vars, ctx) => {
+    onError: (_err, vars, ctx) => {
       if (ctx) {
         rollbackIssueChange(qc, wsId, ctx.id, ctx.change);
       }
@@ -200,6 +206,16 @@ export function useUpdateIssue() {
           ctx.prevChildren,
         );
       }
+      // A remote revision may have landed through WS after onMutate captured
+      // its rollback snapshot. Restoring that snapshot on any failed request
+      // can therefore transiently put an older entity back into cache; refresh
+      // every loaded owner projection after rollback. A revision conflict is
+      // the common case, but transport/5xx failures have the same interleave.
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
     },
     onSuccess: (serverIssue, vars) => {
       // Reconcile with the authoritative server entity by patching the one card
@@ -231,6 +247,14 @@ export function useUpdateIssue() {
       const reconcile = applyIssueChange(qc, wsId, serverIssue.id, reconcilable as typeof serverIssue, {
         changed: issueChangedDims(intent, serverIssue),
         baseIssue: serverIssue,
+        // The HTTP response can arrive after a newer WS event. Reconcile the
+        // committed snapshot only into projections that have not already
+        // advanced beyond it; otherwise an older successful response would
+        // undo a later remote write in cache.
+        acceptCurrent: (current) =>
+          current.revision === undefined ||
+          (serverIssue.revision !== undefined &&
+            serverIssue.revision > current.revision),
       });
       // The server has committed — safe to flush any drift it reported now.
       invalidateStaleListKeys(qc, reconcile.staleKeys);
@@ -685,6 +709,7 @@ type TimelineCache = TimelineEntry[];
 
 export function useCreateComment(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({
       content,
@@ -700,6 +725,7 @@ export function useCreateComment(issueId: string) {
       suppressAgentIds?: string[];
     }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds),
     onSuccess: (comment) => {
+      patchIssueRevision(qc, wsId, issueId, comment.issue_revision);
       const entry: TimelineEntry = {
         type: "comment",
         id: comment.id,
@@ -744,12 +770,14 @@ export function useUpdateComment(issueId: string) {
       content,
       attachmentIds,
       suppressAgentIds,
+      expectedRevision,
     }: {
       commentId: string;
       content: string;
       attachmentIds: string[];
       suppressAgentIds?: string[];
-    }) => api.updateComment(commentId, content, attachmentIds, suppressAgentIds),
+      expectedRevision?: number;
+    }) => api.updateComment(commentId, content, attachmentIds, suppressAgentIds, expectedRevision),
     onMutate: async ({ commentId, content, attachmentIds }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
@@ -933,6 +961,7 @@ export function useToggleCommentReaction(issueId: string) {
 
 export function useToggleIssueReaction(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationKey: ["toggleIssueReaction", issueId] as const,
     mutationFn: async ({
@@ -944,6 +973,9 @@ export function useToggleIssueReaction(issueId: string) {
         return null;
       }
       return api.addIssueReaction(issueId, emoji);
+    },
+    onSuccess: (reaction) => {
+      patchIssueRevision(qc, wsId, issueId, reaction?.issue_revision);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });

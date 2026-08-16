@@ -8,6 +8,7 @@ import {
   useBatchUpdateIssues,
   useUpdateIssue,
 } from "@multica/core/issues/mutations";
+import { errorCode } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import {
   type IssueSurfaceActions,
@@ -24,6 +25,7 @@ export type MoveIssueUpdates = Pick<
   | "position"
   | "parent_issue_id"
   | "project_id"
+  | "expected_revision"
 > & {
   before_id: string | null;
   after_id: string | null;
@@ -45,6 +47,7 @@ export function useIssueSurfaceActions({
   createDefaults: IssueCreateDefaults;
 }): IssueSurfaceActionController {
   const { t } = useT("projects");
+  const { t: tIssues } = useT("issues");
   const updateIssueMutation = useUpdateIssue();
   const batchUpdateMutation = useBatchUpdateIssues();
   const batchDeleteMutation = useBatchDeleteIssues();
@@ -61,7 +64,9 @@ export function useIssueSurfaceActions({
           onSuccess: () => options?.onSuccess?.(),
           onError: (err) => {
             toast.error(
-              err instanceof Error && err.message
+              errorCode(err) === "revision_conflict"
+                ? tIssues(($) => $.revision.conflict)
+                : err instanceof Error && err.message
                 ? err.message
                 : (options?.errorMessage ??
                     t(($) => $.detail.toast_move_issue_failed)),
@@ -72,7 +77,7 @@ export function useIssueSurfaceActions({
         },
       );
     },
-    [t, updateIssueMutation],
+    [t, tIssues, updateIssueMutation],
   );
 
   const moveIssue = useCallback(
@@ -91,7 +96,9 @@ export function useIssueSurfaceActions({
         {
           onError: (err) => {
             toast.error(
-              err instanceof Error && err.message
+              errorCode(err) === "revision_conflict"
+                ? tIssues(($) => $.revision.conflict)
+                : err instanceof Error && err.message
                 ? err.message
                 : t(($) => $.detail.toast_move_issue_failed),
             );
@@ -100,7 +107,7 @@ export function useIssueSurfaceActions({
         },
       );
     },
-    [t, updateIssueMutation],
+    [t, tIssues, updateIssueMutation],
   );
 
   const openCreateIssue = useCallback(

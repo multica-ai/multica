@@ -4,6 +4,16 @@
     "hint": "没有它就无法应用状态筛选，因此暂时不显示议题。",
     "retry": "重试"
   },
+  "revision": {
+    "conflict": "任务或评论已发生变化。已刷新到最新版本，请比较后重新保存。",
+    "compare_title": "标题存在并发修改，请比较两个版本。",
+    "compare_description": "描述存在并发修改，请比较两个版本。",
+    "compare_comment": "评论存在并发修改，请比较两个版本。",
+    "server_version": "服务端最新版本",
+    "local_version": "你的本地版本",
+    "keep_local": "采用本地版本并保存",
+    "save_again": "确认后再次点击“保存”即可采用本地版本。"
+  },
   "page": {
     "breadcrumb_title": "任务",
     "breadcrumb_workspace_fallback": "工作区",

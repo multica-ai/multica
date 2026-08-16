@@ -175,6 +175,36 @@ describe("onIssueLabelsChanged", () => {
     ).toEqual({ labels: [labelB] });
   });
 
+  it("uses the picker cache revision to reject an older label snapshot", () => {
+    const labelKey = labelKeys.byIssue(WS_ID, ISSUE_ID);
+    qc.setQueryData<IssueLabelsResponse>(labelKey, {
+      labels: [labelA],
+      issue_revision: 3,
+    });
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], 2);
+
+    expect(qc.getQueryData<IssueLabelsResponse>(labelKey)).toEqual({
+      labels: [labelA],
+      issue_revision: 3,
+    });
+  });
+
+  it("advances the picker cache labels and revision together", () => {
+    const labelKey = labelKeys.byIssue(WS_ID, ISSUE_ID);
+    qc.setQueryData<IssueLabelsResponse>(labelKey, {
+      labels: [labelA],
+      issue_revision: 3,
+    });
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], 4);
+
+    expect(qc.getQueryData<IssueLabelsResponse>(labelKey)).toEqual({
+      labels: [labelB],
+      issue_revision: 4,
+    });
+  });
+
   it("leaves the per-issue label cache untouched when the picker has not fetched", () => {
     onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
 

@@ -49,8 +49,20 @@ export function AddChildIssueModal({
       excludeIds={excludeIds}
       onSelect={(selected) => {
         updateIssue.mutate(
-          { id: selected.id, parent_issue_id: issueId },
           {
+            id: selected.id,
+            parent_issue_id: issueId,
+            ...(selected.revision !== undefined
+              ? { expected_revision: selected.revision }
+              : {}),
+          },
+          {
+            onSuccess: () =>
+              toast.success(
+                t(($) => $.add_child.toast_success, {
+                  identifier: selected.identifier,
+                }),
+              ),
             onError: (err) =>
               toast.error(
                 err instanceof Error && err.message
@@ -59,7 +71,6 @@ export function AddChildIssueModal({
               ),
           },
         );
-        toast.success(t(($) => $.add_child.toast_success, { identifier: selected.identifier }));
       }}
     />
   );

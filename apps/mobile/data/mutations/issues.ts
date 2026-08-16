@@ -30,6 +30,11 @@ import { inboxKeys } from "@/data/queries/inbox";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useFailedCommentsStore } from "@/data/stores/failed-comments-store";
+import {
+  commentRevisionFromTimeline,
+  shouldAcceptServerRevision,
+  withCachedIssueRevision,
+} from "@/data/revision";
 
 export type ToggleCommentReactionVars = {
   commentId: string;
@@ -235,7 +240,17 @@ export function useEditComment(issueId: string) {
       commentId: string;
       content: string;
       attachmentIds?: string[];
-    }) => api.updateComment(commentId, content, attachmentIds),
+    }) => {
+      const timeline = qc.getQueryData<TimelineEntry[]>(
+        issueKeys.timeline(wsId, issueId),
+      );
+      return api.updateComment(
+        commentId,
+        content,
+        attachmentIds,
+        commentRevisionFromTimeline(timeline, commentId),
+      );
+    },
     onMutate: async ({ commentId, content }) => {
       const key = issueKeys.timeline(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
@@ -426,7 +441,15 @@ export function useUpdateIssue(issueId: string) {
 
   return useMutation({
     mutationKey: ["updateIssue", issueId] as const,
-    mutationFn: (patch: UpdateIssueRequest) => api.updateIssue(issueId, patch),
+    mutationFn: (patch: UpdateIssueRequest) => {
+      const cachedRevision = qc.getQueryData<Issue>(
+        issueKeys.detail(wsId, issueId),
+      )?.revision;
+      return api.updateIssue(
+        issueId,
+        withCachedIssueRevision(patch, cachedRevision),
+      );
+    },
     onMutate: async (patch) => {
       const key = issueKeys.detail(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
@@ -435,6 +458,7 @@ export function useUpdateIssue(issueId: string) {
         const {
           description: _description,
           description_base: _descriptionBase,
+          expected_revision: _expectedRevision,
           ...optimisticPatch
         } = patch;
         qc.setQueryData<Issue>(key, { ...prev, ...optimisticPatch });
@@ -447,7 +471,11 @@ export function useUpdateIssue(issueId: string) {
       }
     },
     onSuccess: (server) => {
-      qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), server);
+      qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (current) =>
+        !current || shouldAcceptServerRevision(current.revision, server.revision)
+          ? server
+          : current,
+      );
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });

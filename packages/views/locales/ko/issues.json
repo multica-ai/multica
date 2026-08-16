@@ -4,6 +4,16 @@
     "hint": "이것 없이는 상태 필터를 적용할 수 없어 이슈를 표시하지 않습니다.",
     "retry": "다시 시도"
   },
+  "revision": {
+    "conflict": "태스크 또는 댓글이 변경되었습니다. 최신 버전으로 새로 고쳤으니 비교한 후 다시 저장하세요.",
+    "compare_title": "제목이 동시에 변경되었습니다. 두 버전을 비교하세요.",
+    "compare_description": "설명이 동시에 변경되었습니다. 두 버전을 비교하세요.",
+    "compare_comment": "댓글이 동시에 변경되었습니다. 두 버전을 비교하세요.",
+    "server_version": "서버의 최신 버전",
+    "local_version": "내 로컬 버전",
+    "keep_local": "로컬 버전으로 저장",
+    "save_again": "두 버전을 확인한 후 저장을 다시 클릭하면 로컬 버전을 사용할 수 있습니다."
+  },
   "page": {
     "breadcrumb_title": "태스크",
     "breadcrumb_workspace_fallback": "워크스페이스",

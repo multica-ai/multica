@@ -9,15 +9,20 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { errorCode } from "@multica/core/api";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
+import type { IssueSurfaceMutationOptions } from "../surface/actions-context";
 
 export interface UseIssueActionsResult {
   isPinned: boolean;
-  updateField: (updates: Partial<UpdateIssueRequest>) => void;
+  updateField: (
+    updates: Partial<UpdateIssueRequest>,
+    options?: IssueSurfaceMutationOptions,
+  ) => void;
   openInNewTab: () => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
@@ -64,10 +69,18 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const issueAssigneeType = issue?.assignee_type ?? null;
   const issueAssigneeId = issue?.assignee_id ?? null;
   const issueStatus = issue?.status ?? null;
+  const issueRevision = issue?.revision;
 
   const updateField = useCallback(
-    (updates: Partial<UpdateIssueRequest>) => {
+    (
+      updates: Partial<UpdateIssueRequest>,
+      options?: IssueSurfaceMutationOptions,
+    ) => {
       if (!issueId) return;
+      const revisionedUpdates =
+        updates.expected_revision === undefined && issueRevision !== undefined
+          ? { ...updates, expected_revision: issueRevision }
+          : updates;
       // Assigning to an agent/squad may start a run. Route through the
       // pre-trigger confirm modal (preview + optional handoff note + "暂不开始"),
       // which applies the change itself — the four entry points share this one
@@ -79,37 +92,45 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       // an empty "won't start" box with a single Apply button. Apply directly,
       // matching the batch backlog short-circuit in BatchActionToolbar.
       if (
-        (updates.assignee_type === "agent" || updates.assignee_type === "squad") &&
-        updates.assignee_id &&
+        (revisionedUpdates.assignee_type === "agent" || revisionedUpdates.assignee_type === "squad") &&
+        revisionedUpdates.assignee_id &&
         issueStatus !== "backlog"
       ) {
         openModal("issue-run-confirm", {
           issueIds: [issueId],
           mode: "assign",
-          assigneeType: updates.assignee_type,
-          assigneeId: updates.assignee_id,
+          assigneeType: revisionedUpdates.assignee_type,
+          assigneeId: revisionedUpdates.assignee_id,
+          ...(issueRevision !== undefined ? { issueRevision } : {}),
         });
         return;
       }
       if (surfaceActions) {
-        surfaceActions.updateIssue(issueId, updates, {
+        surfaceActions.updateIssue(issueId, revisionedUpdates, {
           errorMessage: t(($) => $.detail.update_failed),
+          ...options,
         });
       } else {
         updateIssue.mutate(
-          { id: issueId, ...updates },
+          { id: issueId, ...revisionedUpdates },
           {
-            onError: (err) =>
+            onSuccess: options?.onSuccess,
+            onError: (err) => {
               toast.error(
-                err instanceof Error && err.message
+                errorCode(err) === "revision_conflict"
+                  ? t(($) => $.revision.conflict)
+                  : err instanceof Error && err.message
                   ? err.message
                   : t(($) => $.detail.update_failed),
-              ),
+              );
+              options?.onError?.(err);
+            },
+            onSettled: () => options?.onSettled?.(),
           },
         );
       }
     },
-    [issueId, issueStatus, surfaceActions, updateIssue, openModal, t],
+    [issueId, issueRevision, issueStatus, surfaceActions, updateIssue, openModal, t],
   );
 
   // Explicit "open it somewhere else" CTA, so the new tab takes focus
@@ -205,7 +226,13 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     if (surfaceActions) {
       surfaceActions.updateIssue(
         issueId,
-        { parent_issue_id: null, stage: null },
+        {
+          parent_issue_id: null,
+          stage: null,
+          ...(issueRevision !== undefined
+            ? { expected_revision: issueRevision }
+            : {}),
+        },
         {
           onSuccess: () =>
             toast.success(t(($) => $.actions.remove_parent_issue_success)),
@@ -214,7 +241,14 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       );
     } else {
       updateIssue.mutate(
-        { id: issueId, parent_issue_id: null, stage: null },
+        {
+          id: issueId,
+          parent_issue_id: null,
+          stage: null,
+          ...(issueRevision !== undefined
+            ? { expected_revision: issueRevision }
+            : {}),
+        },
         {
           onSuccess: () =>
             toast.success(t(($) => $.actions.remove_parent_issue_success)),
@@ -227,7 +261,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         },
       );
     }
-  }, [issueId, surfaceActions, updateIssue, t]);
+  }, [issueId, issueRevision, surfaceActions, updateIssue, t]);
 
   const openAddChild = useCallback(() => {
     if (!issueId) return;

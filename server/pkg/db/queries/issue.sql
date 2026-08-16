@@ -7,7 +7,8 @@
 -- "Assigned to me"), and the two filters must produce disjoint result sets.
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
+       i.revision
 FROM issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -110,6 +111,7 @@ SET description = CASE
         WHEN description IS NULL OR description = '' THEN sqlc.arg(markdown)
         ELSE description || E'\n\n' || sqlc.arg(markdown)
     END,
+    revision = revision + 1,
     updated_at = now()
 WHERE id = sqlc.arg(id)
   AND workspace_id = sqlc.arg(workspace_id)
@@ -153,15 +155,42 @@ UPDATE issue SET
     parent_issue_id = sqlc.narg('parent_issue_id'),
     project_id = sqlc.narg('project_id'),
     stage = sqlc.narg('stage'),
-    updated_at = now()
+    revision = revision + CASE WHEN ROW(
+        title, description, status, priority, assignee_type, assignee_id,
+        position, start_date, due_date, parent_issue_id, project_id, stage
+    ) IS DISTINCT FROM ROW(
+        COALESCE(sqlc.narg('title'), title),
+        COALESCE(sqlc.narg('description'), description),
+        COALESCE(sqlc.narg('status'), status),
+        COALESCE(sqlc.narg('priority'), priority),
+        sqlc.narg('assignee_type'), sqlc.narg('assignee_id'),
+        COALESCE(sqlc.narg('position'), position),
+        sqlc.narg('start_date'), sqlc.narg('due_date'),
+        sqlc.narg('parent_issue_id'), sqlc.narg('project_id'), sqlc.narg('stage')
+    ) THEN 1 ELSE 0 END,
+    updated_at = CASE WHEN ROW(
+        title, description, status, priority, assignee_type, assignee_id,
+        position, start_date, due_date, parent_issue_id, project_id, stage
+    ) IS DISTINCT FROM ROW(
+        COALESCE(sqlc.narg('title'), title),
+        COALESCE(sqlc.narg('description'), description),
+        COALESCE(sqlc.narg('status'), status),
+        COALESCE(sqlc.narg('priority'), priority),
+        sqlc.narg('assignee_type'), sqlc.narg('assignee_id'),
+        COALESCE(sqlc.narg('position'), position),
+        sqlc.narg('start_date'), sqlc.narg('due_date'),
+        sqlc.narg('parent_issue_id'), sqlc.narg('project_id'), sqlc.narg('stage')
+    ) THEN now() ELSE updated_at END
 WHERE id = $1
+  AND (sqlc.narg('expected_revision')::bigint IS NULL OR revision = sqlc.narg('expected_revision')::bigint)
 RETURNING *;
 
 -- name: UpdateIssueStatus :one
 -- Workspace_id in the WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
 UPDATE issue SET
     status = $2,
-    updated_at = now()
+    revision = revision + CASE WHEN status IS DISTINCT FROM $2 THEN 1 ELSE 0 END,
+    updated_at = CASE WHEN status IS DISTINCT FROM $2 THEN now() ELSE updated_at END
 WHERE id = $1 AND workspace_id = $3
 RETURNING *;
 
@@ -238,7 +267,8 @@ DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 -- filter; member-direct assignment is intentionally excluded).
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
+       i.revision
 FROM issue i
 WHERE i.workspace_id = $1
   AND issue_effective_status(i.workspace_id, i.status) NOT IN ('done', 'cancelled')
@@ -411,7 +441,8 @@ GROUP BY parent_issue_id;
 -- issue first so this is also the tenant check.
 UPDATE issue SET
     metadata = jsonb_set(metadata, ARRAY[sqlc.arg('key')::text], sqlc.arg('value')::jsonb),
-    updated_at = now()
+    revision = revision + CASE WHEN metadata -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN 1 ELSE 0 END,
+    updated_at = CASE WHEN metadata -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN now() ELSE updated_at END
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
 RETURNING *;
 
@@ -420,7 +451,8 @@ RETURNING *;
 -- Deleting a missing key is a no-op (still returns the row).
 UPDATE issue SET
     metadata = metadata - sqlc.arg('key')::text,
-    updated_at = now()
+    revision = revision + CASE WHEN metadata ? sqlc.arg('key')::text THEN 1 ELSE 0 END,
+    updated_at = CASE WHEN metadata ? sqlc.arg('key')::text THEN now() ELSE updated_at END
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
 RETURNING *;
 

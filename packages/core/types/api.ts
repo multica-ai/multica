@@ -23,6 +23,8 @@ export interface CreateIssueRequest {
 }
 
 export interface UpdateIssueRequest {
+  /** Revision captured when the editor or move gesture started. */
+  expected_revision?: number;
   title?: string;
   description?: string;
   /** Authoritative description the editor had adopted before producing this
@@ -66,6 +68,7 @@ export interface MoveIssueRequest
     | "assignee_id"
     | "parent_issue_id"
     | "project_id"
+    | "expected_revision"
   > {
   before_id: string | null;
   after_id: string | null;

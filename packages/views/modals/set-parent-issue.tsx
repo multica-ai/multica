@@ -3,7 +3,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { childIssuesOptions } from "@multica/core/issues/queries";
+import {
+  childIssuesOptions,
+  issueDetailOptions,
+} from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
@@ -19,6 +22,11 @@ export function SetParentIssueModal({
   const issueId = (data?.issueId as string) || "";
   const wsId = useWorkspaceId();
   const updateIssue = useUpdateIssue();
+
+  const { data: issue = null } = useQuery({
+    ...issueDetailOptions(wsId, issueId),
+    enabled: !!issueId,
+  });
 
   const { data: children = [] } = useQuery({
     ...childIssuesOptions(wsId, issueId),
@@ -38,8 +46,20 @@ export function SetParentIssueModal({
       excludeIds={excludeIds}
       onSelect={(selected) => {
         updateIssue.mutate(
-          { id: issueId, parent_issue_id: selected.id },
           {
+            id: issueId,
+            parent_issue_id: selected.id,
+            ...(issue?.revision !== undefined
+              ? { expected_revision: issue.revision }
+              : {}),
+          },
+          {
+            onSuccess: () =>
+              toast.success(
+                t(($) => $.set_parent.toast_success, {
+                  identifier: selected.identifier,
+                }),
+              ),
             onError: (err) =>
               toast.error(
                 err instanceof Error && err.message
@@ -48,7 +68,6 @@ export function SetParentIssueModal({
               ),
           },
         );
-        toast.success(t(($) => $.set_parent.toast_success, { identifier: selected.identifier }));
       }}
     />
   );
