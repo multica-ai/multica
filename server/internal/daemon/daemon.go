@@ -2490,12 +2490,14 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		runtimes = append(runtimes, map[string]string{
+		entry := map[string]string{
 			"name":    displayName,
 			"type":    r.name,
 			"version": r.version,
 			"status":  "online",
-		})
+		}
+		setCodexWindowsSandboxRegistrationMetadata(entry, r.name, defaultArgsForProvider(d.cfg, r.name))
+		runtimes = append(runtimes, entry)
 	}
 	return runtimes, demotable, unavailable
 }
@@ -2807,13 +2809,20 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		d.logger.Info("registering custom runtime profile",
 			"workspace_id", workspaceID, "profile_id", profile.ID,
 			"protocol_family", profile.ProtocolFamily, "command_path", resolved)
-		*runtimes = append(*runtimes, map[string]string{
+		entry := map[string]string{
 			"name":       displayName,
 			"type":       profile.ProtocolFamily,
 			"version":    version,
 			"status":     "online",
 			"profile_id": profile.ID,
-		})
+		}
+		setCodexWindowsSandboxRegistrationMetadata(
+			entry,
+			profile.ProtocolFamily,
+			profile.FixedArgs,
+			defaultArgsForProvider(d.cfg, profile.ProtocolFamily),
+		)
+		*runtimes = append(*runtimes, entry)
 	}
 	return profileSetSignature(resp.RuntimeProfiles)
 }
@@ -6328,8 +6337,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var codexSandboxArgs []string
 	if provider == "codex" {
 		extraArgs := append(append([]string{}, profileFixedArgs...), defaultArgsForProvider(d.cfg, provider)...)
-		agentCustomArgs = agent.EnsureCodexWindowsSandboxCustomArgs(runtime.GOOS, extraArgs, agentCustomArgs)
-		codexSandboxArgs = agent.NormalizeCodexLaunchArgs(extraArgs, agentCustomArgs, effectiveMcpConfig, d.logger)
+		effectiveCustomArgs := agent.NormalizeCodexWindowsSandboxCustomArgs(
+			runtime.GOOS,
+			agent.HasCodexWindowsSandboxOverride(extraArgs),
+			agentCustomArgs,
+		)
+		codexSandboxArgs = agent.NormalizeCodexLaunchArgs(extraArgs, effectiveCustomArgs, effectiveMcpConfig, d.logger)
 	}
 	// Hermes: resolve the overlay source home through one resolver contract —
 	// the selection parsed from custom_args (agent.ParseHermesProfileArgs) plus
@@ -6958,6 +6971,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ResumeContinuityNotice: backendResumeContinuityNotice(task),
 		ExtraArgs:              extraArgs,
 		CustomArgs:             customArgs,
+		GOOS:                   runtime.GOOS,
 		McpConfig:              mcpConfig,
 		ThinkingLevel:          thinkingLevel,
 		ServiceTier:            serviceTier,
@@ -8543,4 +8557,23 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		return nil
 	}
 	return append([]string(nil), args...)
+}
+
+const codexWindowsSandboxArgConfiguredKey = "codex_windows_sandbox_arg_configured"
+
+// setCodexWindowsSandboxRegistrationMetadata tells persistence and preview
+// whether profile/daemon arguments already own windows.sandbox without
+// exposing the arguments themselves through runtime metadata.
+func setCodexWindowsSandboxRegistrationMetadata(entry map[string]string, provider string, argGroups ...[]string) {
+	if !strings.EqualFold(strings.TrimSpace(provider), "codex") {
+		return
+	}
+	configured := false
+	for _, args := range argGroups {
+		if agent.HasCodexWindowsSandboxOverride(args) {
+			configured = true
+			break
+		}
+	}
+	entry[codexWindowsSandboxArgConfiguredKey] = strconv.FormatBool(configured)
 }

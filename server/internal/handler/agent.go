@@ -1667,21 +1667,37 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		targetProvider = runtime.Provider
 		targetRuntime = &runtime
 	}
-	if req.CustomArgs != nil {
-		nextCustomArgs := *req.CustomArgs
-		if targetRuntime == nil && targetRuntimeID.Valid {
+	if req.CustomArgs != nil || req.RuntimeID != nil {
+		nextCustomArgs := []string{}
+		if req.CustomArgs != nil {
+			nextCustomArgs = append(nextCustomArgs, (*req.CustomArgs)...)
+		} else if len(bytes.TrimSpace(existing.CustomArgs)) > 0 {
+			if err := json.Unmarshal(existing.CustomArgs, &nextCustomArgs); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to decode existing custom_args")
+				return
+			}
+		}
+		if targetRuntime == nil {
+			if !targetRuntimeID.Valid {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for custom_args")
+				return
+			}
 			runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 				ID:          targetRuntimeID,
 				WorkspaceID: existing.WorkspaceID,
 			})
-			if err == nil {
-				targetRuntime = &runtime
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for custom_args")
+				return
 			}
+			targetRuntime = &runtime
 		}
-		if targetRuntime != nil {
-			nextCustomArgs = customArgsForRuntime(*targetRuntime, nextCustomArgs)
+		nextCustomArgs = customArgsForRuntime(*targetRuntime, nextCustomArgs)
+		ca, err := json.Marshal(nextCustomArgs)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encode custom_args")
+			return
 		}
-		ca, _ := json.Marshal(nextCustomArgs)
 		params.CustomArgs = ca
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one

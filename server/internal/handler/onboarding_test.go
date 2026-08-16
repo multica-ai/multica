@@ -207,6 +207,18 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	}
 
 	ctx := context.Background()
+	var onboardingRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, last_seen_at, owner_id
+		)
+		VALUES ($1, NULL, 'Onboarding Windows Codex', 'cloud', 'codex', 'online',
+			'onboarding sandbox test runtime', '{"os":"windows"}'::jsonb, now(), $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&onboardingRuntimeID); err != nil {
+		t.Fatalf("create onboarding Windows Codex runtime: %v", err)
+	}
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `
 			DELETE FROM agent_task_queue
@@ -227,6 +239,7 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 			`UPDATE "user" SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
 			testUserID,
 		)
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, onboardingRuntimeID)
 	})
 	testPool.Exec(ctx,
 		`DELETE FROM issue WHERE workspace_id = $1 AND title = $2`,
@@ -243,7 +256,7 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 
 	body := map[string]string{
 		"workspace_id": testWorkspaceID,
-		"runtime_id":   testRuntimeID,
+		"runtime_id":   onboardingRuntimeID,
 	}
 	w := httptest.NewRecorder()
 	testHandler.BootstrapOnboardingRuntime(w, newRequest(http.MethodPost, "/api/me/onboarding/runtime-bootstrap", body))
@@ -264,25 +277,34 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 		agentRuntime string
 		instructions string
 		avatarURL    *string
+		customArgs   []byte
 	)
 	if err := testPool.QueryRow(ctx, `
-		SELECT name, runtime_id, instructions, avatar_url
+		SELECT name, runtime_id, instructions, avatar_url, custom_args
 		  FROM agent
 		 WHERE id = $1
-	`, resp.AgentID).Scan(&agentName, &agentRuntime, &instructions, &avatarURL); err != nil {
+	`, resp.AgentID).Scan(&agentName, &agentRuntime, &instructions, &avatarURL, &customArgs); err != nil {
 		t.Fatalf("lookup assistant: %v", err)
 	}
 	if agentName != onboardingAssistantName {
 		t.Fatalf("agent name = %q, want %q", agentName, onboardingAssistantName)
 	}
-	if agentRuntime != testRuntimeID {
-		t.Fatalf("agent runtime = %q, want %q", agentRuntime, testRuntimeID)
+	if agentRuntime != onboardingRuntimeID {
+		t.Fatalf("agent runtime = %q, want %q", agentRuntime, onboardingRuntimeID)
 	}
 	if !strings.Contains(instructions, "built-in AI assistant") {
 		t.Fatalf("assistant instructions were not seeded with the new identity: %q", instructions)
 	}
 	if avatarURL == nil || *avatarURL != onboardingAssistantAvatarURL {
 		t.Fatalf("agent avatar_url = %v, want seeded Multica Helper avatar", avatarURL)
+	}
+	var storedCustomArgs []string
+	if err := json.Unmarshal(customArgs, &storedCustomArgs); err != nil {
+		t.Fatalf("decode assistant custom_args: %v", err)
+	}
+	wantCustomArgs := []string{"-c", `windows.sandbox="unelevated"`}
+	if len(storedCustomArgs) != len(wantCustomArgs) || storedCustomArgs[0] != wantCustomArgs[0] || storedCustomArgs[1] != wantCustomArgs[1] {
+		t.Fatalf("assistant custom_args = %v, want %v", storedCustomArgs, wantCustomArgs)
 	}
 
 	var (

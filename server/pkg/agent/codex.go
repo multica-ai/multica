@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -262,7 +263,16 @@ type codexBackend struct {
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
-	launchArgs := NormalizeCodexLaunchArgs(opts.ExtraArgs, opts.CustomArgs, opts.McpConfig, logger)
+	goos := opts.GOOS
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	customArgs := NormalizeCodexWindowsSandboxCustomArgs(
+		goos,
+		HasCodexWindowsSandboxOverride(opts.ExtraArgs),
+		opts.CustomArgs,
+	)
+	launchArgs := NormalizeCodexLaunchArgs(opts.ExtraArgs, customArgs, opts.McpConfig, logger)
 	if opts.ServiceTier == codexFastServiceTier {
 		launchArgs = enforceCodexFastMode(launchArgs, logger)
 	}

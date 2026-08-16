@@ -186,6 +186,10 @@ type DaemonRegisterRequest struct {
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
 		Status  string `json:"status"`
+		// CodexWindowsSandboxArgConfigured is "true" when fixed profile or
+		// daemon arguments already own windows.sandbox. Runtime payloads use
+		// map[string]string, so this remains a string on the wire.
+		CodexWindowsSandboxArgConfigured string `json:"codex_windows_sandbox_arg_configured"`
 		// ProfileID, when non-empty, marks this as an instance of a custom
 		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
 		// Type carries the protocol family for both built-in and custom rows
@@ -471,6 +475,12 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		if clientOS != "" {
 			runtimeMetadata["os"] = clientOS
+		}
+		if provider == "codex" {
+			runtimeMetadata["codex_windows_sandbox_arg_configured"] = strings.EqualFold(
+				strings.TrimSpace(runtime.CodexWindowsSandboxArgConfigured),
+				"true",
+			)
 		}
 		metadata, _ := json.Marshal(runtimeMetadata)
 

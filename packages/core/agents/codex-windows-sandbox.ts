@@ -57,21 +57,39 @@ function isWindowsCodexRuntime(
   );
 }
 
+function withoutManagedSandboxPrefix(args: readonly string[]): string[] {
+  if (
+    args[0] === CODEX_WINDOWS_SANDBOX_ARGS[0] &&
+    args[1] === CODEX_WINDOWS_SANDBOX_ARGS[1]
+  ) {
+    return args.slice(CODEX_WINDOWS_SANDBOX_ARGS.length);
+  }
+  return [...args];
+}
+
+function runtimeArgsOwnWindowsSandbox(
+  runtime: RuntimeDescriptor | null | undefined,
+): boolean {
+  return runtime?.metadata?.codex_windows_sandbox_arg_configured === true;
+}
+
 /**
- * Mirrors the daemon's managed Codex default for persisted arguments and UI
- * previews. Runtime metadata is only a display/persistence hint; the daemon
- * independently uses its own GOOS before spawning the process.
+ * Mirrors the daemon's managed Codex prefix for persisted arguments and UI
+ * previews. Runtime metadata carries only whether fixed arguments already own
+ * the setting; the daemon independently uses its own GOOS and effective argv
+ * before spawning the process.
  */
 export function ensureCodexWindowsSandboxArgs(
   customArgs: readonly string[],
   runtime: RuntimeDescriptor | null | undefined,
 ): string[] {
-  const result = [...customArgs];
+  const result = withoutManagedSandboxPrefix(customArgs);
   if (
     !isWindowsCodexRuntime(runtime) ||
-    hasWindowsSandboxOverride(customArgs)
+    runtimeArgsOwnWindowsSandbox(runtime) ||
+    hasWindowsSandboxOverride(result)
   ) {
     return result;
   }
-  return [...result, ...CODEX_WINDOWS_SANDBOX_ARGS];
+  return [...CODEX_WINDOWS_SANDBOX_ARGS, ...result];
 }

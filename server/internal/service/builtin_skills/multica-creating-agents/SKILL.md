@@ -121,7 +121,7 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 | `model` | `agent.model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |
 | `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum/safe-token gate; unknown literal → 400. Pi accepts only `off|minimal|low|medium|high|xhigh|max`, then the daemon checks the selected model's RPC-discovered subset. ACP runtimes that advertise an effort selector in `session/new` (currently `reasonix` and `hermes`) take the safe-token path and are checked against the discovered catalog by the daemon; that catalog covers only the model the discovery session was on, so other models show no picker until per-model probing exists. `hermes` covers two binaries — jcode advertises and applies an effort, Hermes Agent advertises none and gets no picker — so the answer there comes from the runtime's discovered catalog, not the provider name. Because that catalog is only written once a client requests a model list, a `hermes` runtime that has never been discovered is refused with a distinct "has not reported a model catalog yet" 400 rather than being assumed capable; `reasonix`, whose provider name does determine the binary, is allowed in that state. A runtime with no reasoning control at all (e.g. `copilot`, which executes outside ACP) rejects EVERY non-empty value and says so — that 400 is a capability answer, not a bad token | daemon; empty = runtime default |
 | `service_tier` | `agent.service_tier` (nullable) | Codex-only safe token; other providers reject; exact model/tier pair checked by daemon | daemon → Codex app-server; empty = local Codex config |
-| `custom_args` | `agent.custom_args` (JSON array) | JSON shape checked CLI-side; Windows Codex runtimes append the managed `-c`, `windows.sandbox="unelevated"` pair unless an explicit override exists; other runtimes store as-is | daemon (extra CLI switches); defaults to `[]` outside Windows Codex |
+| `custom_args` | `agent.custom_args` (JSON array) | JSON shape checked CLI-side; Windows Codex runtimes use the managed `-c`, `windows.sandbox="unelevated"` prefix unless fixed runtime/profile arguments or an explicit per-agent override already own the setting; runtime-only edits add or remove the prefix as the platform changes | daemon (extra CLI switches); defaults to `[]` outside Windows Codex |
 | `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
 | `custom_env` | `agent.custom_env` (JSON object) | — | daemon (process env); see Env & secrets |
 | `mcp_config` | `agent.mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the column | daemon → provider (provider-specific MCP handling); redacted on read |
@@ -182,11 +182,14 @@ time: `--thinking` in `custom_args` is filtered because the first-class
 `thinking_level` field owns that flag and must be the only source of its value.
 
 Windows Codex has one platform-owned default: when no `windows.sandbox`
-override exists, persistence and preview append the two literal argv elements
-`-c` and `windows.sandbox="unelevated"`. An explicit `-c` or `--config`
-override remains authoritative and is not duplicated. Runtime metadata's `os`
-value drives persistence and display only; the daemon independently applies
-the same rule from its actual GOOS immediately before launch.
+override exists, persistence and preview use the two literal argv elements
+`-c` and `windows.sandbox="unelevated"` as a managed prefix. An explicit `-c`
+or `--config` override remains authoritative and is not duplicated. Runtime
+metadata carries the OS plus a boolean ownership hint for fixed profile/daemon
+arguments, so those lower-priority settings are not shadowed by the managed
+prefix. The daemon independently applies the same rule from its actual GOOS
+and effective argv immediately before launch; runtime-only edits normalize the
+stored prefix when an agent moves between Windows and another platform.
 
 ## Env & secrets
 

@@ -10,23 +10,24 @@ import (
 
 // customArgsForRuntime applies platform-owned defaults immediately before the
 // agent custom_args JSON is persisted. Runtime metadata carries the daemon OS
-// for display and persistence decisions; the daemon independently applies the
-// same default from runtime.GOOS at launch, so a missing or stale metadata hint
-// cannot weaken execution behavior.
+// plus whether fixed arguments already own the setting; the daemon
+// independently applies the same rule from runtime.GOOS and effective argv at
+// launch, so a missing or stale metadata hint cannot weaken execution behavior.
 func customArgsForRuntime(runtime db.AgentRuntime, customArgs []string) []string {
 	if !strings.EqualFold(strings.TrimSpace(runtime.Provider), "codex") {
-		return append([]string(nil), customArgs...)
+		return agent.NormalizeCodexWindowsSandboxCustomArgs("", false, customArgs)
 	}
 
 	var metadata struct {
-		OS string `json:"os"`
+		OS                               string `json:"os"`
+		CodexWindowsSandboxArgConfigured bool   `json:"codex_windows_sandbox_arg_configured"`
 	}
 	if err := json.Unmarshal(runtime.Metadata, &metadata); err != nil {
-		return append([]string(nil), customArgs...)
+		return agent.NormalizeCodexWindowsSandboxCustomArgs("", false, customArgs)
 	}
-	return agent.EnsureCodexWindowsSandboxCustomArgs(
+	return agent.NormalizeCodexWindowsSandboxCustomArgs(
 		strings.ToLower(strings.TrimSpace(metadata.OS)),
-		nil,
+		metadata.CodexWindowsSandboxArgConfigured,
 		customArgs,
 	)
 }

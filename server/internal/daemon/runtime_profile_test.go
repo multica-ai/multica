@@ -201,6 +201,53 @@ func TestRegisterRuntimes_IncludesBuiltInQoderCN(t *testing.T) {
 	}
 }
 
+func TestRegisterRuntimes_ReportsBuiltInCodexSandboxArgumentOwnership(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	fx := newProfileRegisterFixture(t, nil, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"codex": {Path: "/usr/bin/true", Command: "codex"},
+	}
+	d.cfg.CodexArgs = []string{"--config", `windows.sandbox="elevated"`}
+
+	if _, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	if len(fx.sentRuntimes) != 1 {
+		t.Fatalf("sent runtimes = %d, want 1: %+v", len(fx.sentRuntimes), fx.sentRuntimes)
+	}
+	if got := fx.sentRuntimes[0][codexWindowsSandboxArgConfiguredKey]; got != "true" {
+		t.Fatalf("sandbox ownership metadata = %v, want true", got)
+	}
+}
+
+func TestRegisterRuntimes_ReportsProfileCodexSandboxArgumentOwnership(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{"company-codex": "/opt/bin/company-codex"})
+	profiles := []RuntimeProfile{{
+		ID:             "prof-sandbox",
+		WorkspaceID:    "ws-1",
+		DisplayName:    "Company Codex",
+		ProtocolFamily: "codex",
+		CommandName:    "company-codex",
+		FixedArgs:      []string{"-c", `windows.sandbox="elevated"`},
+		Visibility:     "workspace",
+		Enabled:        true,
+	}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	fx.daemon.cfg.Agents = map[string]AgentEntry{}
+
+	if _, _, _, err := fx.daemon.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	if len(fx.sentRuntimes) != 1 {
+		t.Fatalf("sent runtimes = %d, want 1: %+v", len(fx.sentRuntimes), fx.sentRuntimes)
+	}
+	if got := fx.sentRuntimes[0][codexWindowsSandboxArgConfiguredKey]; got != "true" {
+		t.Fatalf("sandbox ownership metadata = %v, want true", got)
+	}
+}
+
 func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{"company-codex": "/opt/bin/company-codex"})

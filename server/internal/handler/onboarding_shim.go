@@ -209,6 +209,15 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	if !assistant.ID.Valid {
+		normalizedCustomArgs := customArgsForRuntime(runtime, nil)
+		if normalizedCustomArgs == nil {
+			normalizedCustomArgs = []string{}
+		}
+		customArgs, marshalErr := json.Marshal(normalizedCustomArgs)
+		if marshalErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encode onboarding assistant custom_args")
+			return
+		}
 		assistant, err = qtx.CreateAgent(r.Context(), db.CreateAgentParams{
 			WorkspaceID:        wsUUID,
 			Name:               onboardingAssistantName,
@@ -222,7 +231,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			OwnerID:            parseUUID(userID),
 			Instructions:       onboardingAssistantInstructions,
 			CustomEnv:          []byte("{}"),
-			CustomArgs:         []byte("[]"),
+			CustomArgs:         customArgs,
 			McpConfig:          nil,
 			Model:              pgtype.Text{},
 		})

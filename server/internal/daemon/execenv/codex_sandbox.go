@@ -78,7 +78,8 @@ func resolveGOOS(goos string) string {
 //     inside (VM, container, or dedicated Unix user), matching macOS/Windows.
 //     See MUL-5578 / #6218, and apps/docs security-model.
 //   - Windows: workspace-write with Codex's native sandbox. The production
-//     task launch appends `-c windows.sandbox="unelevated"` as two argv tokens
+//     task launch injects `-c windows.sandbox="unelevated"` as a managed,
+//     two-token custom-argv prefix
 //     when neither runtime nor agent arguments already own the setting. An
 //     explicit `unelevated` or `elevated` value is preserved. The
 //     danger-full-access branch below remains a compatibility fallback for

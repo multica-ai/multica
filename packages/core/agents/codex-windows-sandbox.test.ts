@@ -5,23 +5,42 @@ import { ensureCodexWindowsSandboxArgs } from "./codex-windows-sandbox";
 function runtime(
   provider: string,
   os: string,
+  configured = false,
 ): Pick<RuntimeDevice, "provider" | "metadata"> {
-  return { provider, metadata: { os } };
+  return {
+    provider,
+    metadata: {
+      os,
+      codex_windows_sandbox_arg_configured: configured,
+    },
+  };
 }
 
 describe("ensureCodexWindowsSandboxArgs", () => {
-  it("appends the Windows Codex default as exactly two argv tokens", () => {
+  it("prepends the Windows Codex default as exactly two managed argv tokens", () => {
     expect(
       ensureCodexWindowsSandboxArgs(
         ["--profile", "research"],
         runtime("codex", "windows"),
       ),
     ).toEqual([
-      "--profile",
-      "research",
       "-c",
       'windows.sandbox="unelevated"',
+      "--profile",
+      "research",
     ]);
+  });
+
+  it("keeps the managed prefix idempotent", () => {
+    const args = [
+      "-c",
+      'windows.sandbox="unelevated"',
+      "--profile",
+      "research",
+    ];
+    expect(
+      ensureCodexWindowsSandboxArgs(args, runtime("codex", "windows")),
+    ).toEqual(args);
   });
 
   it("preserves an explicit override without adding a duplicate", () => {
@@ -45,7 +64,21 @@ describe("ensureCodexWindowsSandboxArgs", () => {
     ).toEqual(args);
   });
 
-  it("leaves non-Windows and non-Codex arguments unchanged", () => {
+  it("removes the managed prefix when runtime arguments own the setting", () => {
+    expect(
+      ensureCodexWindowsSandboxArgs(
+        [
+          "-c",
+          'windows.sandbox="unelevated"',
+          "--profile",
+          "research",
+        ],
+        runtime("codex", "windows", true),
+      ),
+    ).toEqual(["--profile", "research"]);
+  });
+
+  it("leaves unrelated non-Windows and non-Codex arguments unchanged", () => {
     const args = ["--profile", "research"];
     expect(
       ensureCodexWindowsSandboxArgs(args, runtime("codex", "linux")),
@@ -53,5 +86,20 @@ describe("ensureCodexWindowsSandboxArgs", () => {
     expect(
       ensureCodexWindowsSandboxArgs(args, runtime("claude", "windows")),
     ).toEqual(args);
+  });
+
+  it("removes a stale managed prefix outside Windows Codex", () => {
+    const args = [
+      "-c",
+      'windows.sandbox="unelevated"',
+      "--profile",
+      "research",
+    ];
+    expect(
+      ensureCodexWindowsSandboxArgs(args, runtime("codex", "linux")),
+    ).toEqual(["--profile", "research"]);
+    expect(
+      ensureCodexWindowsSandboxArgs(args, runtime("claude", "windows")),
+    ).toEqual(["--profile", "research"]);
   });
 });

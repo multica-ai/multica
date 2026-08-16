@@ -956,6 +956,59 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
 }
 
+func TestDaemonRegister_PersistsCodexWindowsSandboxOwnershipMetadata(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-daemon-codex-sandbox-metadata",
+		"device_name":  "test-device",
+		"runtimes": []map[string]any{{
+			"name":                                 "test-codex-runtime",
+			"type":                                 "codex",
+			"version":                              "1.0.0",
+			"status":                               "online",
+			"codex_windows_sandbox_arg_configured": "true",
+		}},
+	}, testWorkspaceID, "test-daemon-codex-sandbox-metadata")
+	req = req.WithContext(middleware.SetClientMetadata(req.Context(), "cli", "1.0.0", "windows"))
+
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Runtimes) != 1 {
+		t.Fatalf("runtimes = %d, want 1", len(resp.Runtimes))
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, resp.Runtimes[0].ID)
+	})
+
+	var rawMetadata []byte
+	if err := testPool.QueryRow(context.Background(), `SELECT metadata FROM agent_runtime WHERE id = $1`, resp.Runtimes[0].ID).Scan(&rawMetadata); err != nil {
+		t.Fatalf("read runtime metadata: %v", err)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(rawMetadata, &metadata); err != nil {
+		t.Fatalf("decode runtime metadata: %v", err)
+	}
+	if metadata["os"] != "windows" || metadata["codex_windows_sandbox_arg_configured"] != true {
+		t.Fatalf("runtime metadata = %#v, want Windows with Codex sandbox ownership", metadata)
+	}
+}
+
 func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
