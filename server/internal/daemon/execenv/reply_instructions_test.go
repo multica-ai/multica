@@ -209,7 +209,7 @@ func TestInjectRuntimeConfigKeepsTriggerCommentOutOfBrief(t *testing.T) {
 		// a further compression that drops the one-block rule or the
 		// no-mode-line fallback must fail here (stage-1 review).
 		"**Turn mode.**",
-		"Steps 1–6 are shared",
+		"Steps 1–5 are shared",
 		"apply exactly one mode block",
 		"differ on issue status",
 		// The full fallback MAPPING, not its halves: "No mode line" and

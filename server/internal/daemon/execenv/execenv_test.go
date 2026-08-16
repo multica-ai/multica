@@ -5752,15 +5752,15 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			provider: "claude",
 			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
-				"Read the metadata bag (`multica issue metadata list`)",
-				// Platform failure semantics, not tool mechanics: a failed
-				// metadata read must never block the main task (MUL-5442
-				// stage-1 review).
-				"CLI failures are normal",
+				// MUL-2017 + #7016: the separate metadata-list read step was
+				// folded into step 1 — `issue get` already carries the
+				// metadata bag, so the agent reads it once from the issue
+				// JSON instead of paying a second HTTP + tool round-trip.
+				"its JSON already carries the issue's `metadata` bag",
+				"What to look for: `## Issue Metadata`",
 				// Both steps point at the section instead of restating its
 				// rules (MUL-5442); the entry step names what to look for,
 				// the exit step names the write bar.
-				"What to look for: `## Issue Metadata`",
 				"the bar in `## Issue Metadata`",
 				// Exit step must show both write and delete, not just
 				// "set" — stale-key cleanup is the half that keeps
@@ -5768,6 +5768,11 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 				"multica issue metadata set",
 				"multica issue metadata delete",
 				"Before exiting",
+			},
+			workflowAbsent: []string{
+				// The redundant separate read must not reappear in issue
+				// contexts (#7016).
+				"Read the metadata bag (`multica issue metadata list`)",
 			},
 			want: withSection,
 		},
@@ -5777,12 +5782,15 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			provider: "claude",
 			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
-				"Read the metadata bag (`multica issue metadata list`)",
+				"its JSON already carries the issue's `metadata` bag",
 				"What to look for: `## Issue Metadata`",
 				"the bar in `## Issue Metadata`",
 				"multica issue metadata set",
 				"multica issue metadata delete",
 				"Before exiting",
+			},
+			workflowAbsent: []string{
+				"Read the metadata bag (`multica issue metadata list`)",
 			},
 			want: withSection,
 		},
@@ -5897,8 +5905,13 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 		if !strings.Contains(s, "## Issue Metadata") {
 			t.Fatalf("Issue Metadata section missing\n---\n%s", s)
 		}
-		if !strings.Contains(s, "Read the metadata bag (`multica issue metadata list`)") {
-			t.Fatalf("metadata list step missing\n---\n%s", s)
+		if !strings.Contains(s, "its JSON already carries the issue's `metadata` bag") {
+			t.Fatalf("metadata-in-issue-get step missing\n---\n%s", s)
+		}
+		// The redundant separate read was folded into step 1 (#7016): it
+		// must not reappear as a standalone workflow step.
+		if strings.Contains(s, "Read the metadata bag (`multica issue metadata list`)") {
+			t.Fatalf("redundant metadata-list read step present\n---\n%s", s)
 		}
 		// ...AND the post-#4182 file-first rule is still emitted on Linux.
 		if !strings.Contains(s, "always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`") {
