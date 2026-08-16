@@ -94,7 +94,7 @@ type Config struct {
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -117,15 +117,21 @@ type Config struct {
 	HeartbeatInterval              time.Duration
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
-	CodexHandshakeTimeout          time.Duration
-	OpenCodeIdleWatchdog           time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
-	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
-	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
-	ClaudeArgs                     []string
-	CodexArgs                      []string
-	CodebuddyArgs                  []string
-	QwenArgs                       []string
-	QwenpawArgs                    []string
+	// CodexFirstTurnNoProgressTimeout is an explicit override for the Codex
+	// first-turn no-progress ceiling (MULTICA_CODEX_FIRST_TURN_TIMEOUT). 0 means
+	// unset: the backend keeps its default ceiling, which CodexSemanticInactivityTimeout
+	// can only shrink. A positive value raises (or lowers) that ceiling outright,
+	// for app-servers that are legitimately slow to their first event (GH #3262).
+	CodexFirstTurnNoProgressTimeout time.Duration
+	CodexHandshakeTimeout           time.Duration
+	OpenCodeIdleWatchdog            time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
+	AgentIdleWatchdog               time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
+	AgentToolWatchdog               time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
+	ClaudeArgs                      []string
+	CodexArgs                       []string
+	CodebuddyArgs                   []string
+	QwenArgs                        []string
+	QwenpawArgs                     []string
 
 	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
 	// executable path to use for that profile on THIS machine (MUL-3284).
@@ -231,7 +237,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// can re-run the same discovery on a live daemon (MUL-5439).
 	agents := probeAgentCLIs()
 	if len(agents) == 0 && !overrides.AllowNoAgents {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, or qwenpaw and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, or qwenpaw and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -292,6 +298,36 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if overrides.CodexSemanticInactivityTimeout > 0 {
 		codexSemanticInactivityTimeout = overrides.CodexSemanticInactivityTimeout
+	}
+
+	// 0 = unset: the codex backend keeps its default first-turn ceiling. A
+	// positive value is an explicit operator override (GH #3262 / #5959).
+	codexFirstTurnNoProgressTimeout, err := durationFromEnv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", 0)
+	if err != nil {
+		return Config{}, err
+	}
+	// The first-turn override only raises the first-turn watchdog, not the
+	// concurrent semantic-inactivity timer that the same first status:running
+	// arms — and the semantic timer is armed FIRST (codex.go resets it before
+	// creating the first-turn timer). When the override is >= the semantic
+	// timeout the effective first-item wait is truncated to the semantic
+	// timeout: at equal durations the semantic deadline is reached first, and
+	// even when both fire together Go's select does not deterministically
+	// favour the first-turn branch. The failure is then classified as semantic
+	// inactivity rather than first-turn no-progress, which disables the
+	// transient model-catalog startup retry (GH #3291). Warn unless the semantic
+	// timeout is set strictly above the first-turn timeout.
+	if codexFirstTurnNoProgressTimeout > 0 {
+		effectiveSemanticTimeout := codexSemanticInactivityTimeout
+		if effectiveSemanticTimeout <= 0 {
+			effectiveSemanticTimeout = DefaultCodexSemanticInactivityTimeout
+		}
+		if codexFirstTurnNoProgressTimeout >= effectiveSemanticTimeout {
+			slog.Warn("MULTICA_CODEX_FIRST_TURN_TIMEOUT is greater than or equal to the semantic-inactivity timeout; the effective first-turn wait is truncated to the semantic timeout and the model-catalog startup retry is disabled. Because the semantic timer is armed first and equal durations do not deterministically favour the first-turn deadline, set MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT strictly above MULTICA_CODEX_FIRST_TURN_TIMEOUT (with some margin) to preserve it.",
+				"first_turn_timeout", codexFirstTurnNoProgressTimeout.String(),
+				"semantic_inactivity_timeout", effectiveSemanticTimeout.String(),
+			)
+		}
 	}
 
 	codexHandshakeTimeout, err := durationFromEnv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", DefaultCodexHandshakeTimeout)
@@ -473,45 +509,46 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 
 	return Config{
-		ServerBaseURL:                  serverBaseURL,
-		DaemonID:                       daemonID,
-		LegacyDaemonIDs:                legacyDaemonIDs,
-		DeviceName:                     deviceName,
-		RuntimeName:                    runtimeName,
-		Profile:                        profile,
-		Agents:                         agents,
-		WorkspacesRoot:                 workspacesRoot,
-		KeepEnvAfterTask:               keepEnv,
-		GCEnabled:                      gcEnabled,
-		GCInterval:                     gcInterval,
-		GCTTL:                          gcTTL,
-		GCOrphanTTL:                    gcOrphanTTL,
-		GCArtifactTTL:                  gcArtifactTTL,
-		GCArtifactPatterns:             gcArtifactPatterns,
-		GCRepoTTL:                      gcRepoTTL,
-		GCRepoMaintenanceEnabled:       gcRepoMaintenanceEnabled,
-		GCCodexSessionTTL:              gcCodexSessionTTL,
-		GCHermesMemoryTTL:              gcHermesMemoryTTL,
-		GCHermesSessionTTL:             gcHermesSessionTTL,
-		AutoUpdateEnabled:              autoUpdateEnabled,
-		AutoUpdateCheckInterval:        autoUpdateInterval,
-		AutoReloadEnabled:              autoReloadEnabled,
-		HealthPort:                     healthPort,
-		MaxConcurrentTasks:             maxConcurrentTasks,
-		PollInterval:                   pollInterval,
-		HeartbeatInterval:              heartbeatInterval,
-		AgentTimeout:                   agentTimeout,
-		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
-		CodexHandshakeTimeout:          codexHandshakeTimeout,
-		OpenCodeIdleWatchdog:           openCodeIdleWatchdog,
-		AgentIdleWatchdog:              agentIdleWatchdog,
-		AgentToolWatchdog:              agentToolWatchdog,
-		ClaudeArgs:                     claudeArgs,
-		CodexArgs:                      codexArgs,
-		CodebuddyArgs:                  codebuddyArgs,
-		QwenArgs:                       qwenArgs,
-		QwenpawArgs:                    qwenpawArgs,
-		ProfileCommandOverrides:        profileCommandOverrides,
+		ServerBaseURL:                   serverBaseURL,
+		DaemonID:                        daemonID,
+		LegacyDaemonIDs:                 legacyDaemonIDs,
+		DeviceName:                      deviceName,
+		RuntimeName:                     runtimeName,
+		Profile:                         profile,
+		Agents:                          agents,
+		WorkspacesRoot:                  workspacesRoot,
+		KeepEnvAfterTask:                keepEnv,
+		GCEnabled:                       gcEnabled,
+		GCInterval:                      gcInterval,
+		GCTTL:                           gcTTL,
+		GCOrphanTTL:                     gcOrphanTTL,
+		GCArtifactTTL:                   gcArtifactTTL,
+		GCArtifactPatterns:              gcArtifactPatterns,
+		GCRepoTTL:                       gcRepoTTL,
+		GCRepoMaintenanceEnabled:        gcRepoMaintenanceEnabled,
+		GCCodexSessionTTL:               gcCodexSessionTTL,
+		GCHermesMemoryTTL:               gcHermesMemoryTTL,
+		GCHermesSessionTTL:              gcHermesSessionTTL,
+		AutoUpdateEnabled:               autoUpdateEnabled,
+		AutoUpdateCheckInterval:         autoUpdateInterval,
+		AutoReloadEnabled:               autoReloadEnabled,
+		HealthPort:                      healthPort,
+		MaxConcurrentTasks:              maxConcurrentTasks,
+		PollInterval:                    pollInterval,
+		HeartbeatInterval:               heartbeatInterval,
+		AgentTimeout:                    agentTimeout,
+		CodexSemanticInactivityTimeout:  codexSemanticInactivityTimeout,
+		CodexFirstTurnNoProgressTimeout: codexFirstTurnNoProgressTimeout,
+		CodexHandshakeTimeout:           codexHandshakeTimeout,
+		OpenCodeIdleWatchdog:            openCodeIdleWatchdog,
+		AgentIdleWatchdog:               agentIdleWatchdog,
+		AgentToolWatchdog:               agentToolWatchdog,
+		ClaudeArgs:                      claudeArgs,
+		CodexArgs:                       codexArgs,
+		CodebuddyArgs:                   codebuddyArgs,
+		QwenArgs:                        qwenArgs,
+		QwenpawArgs:                     qwenpawArgs,
+		ProfileCommandOverrides:         profileCommandOverrides,
 	}, nil
 }
 
@@ -792,7 +829,7 @@ func isExecutableFile(path string) bool {
 // doesn't require editing this list by hand.
 var defaultAgentCommandNames = append([]string{
 	"claude", "codex", "opencode", "deveco", "openclaw", "hermes",
-	"pi", "cursor-agent", "copilot", "kimi", "reasonix", "kiro-cli", "codebuddy", "agy", "qodercli", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw",
+	"pi", "cursor-agent", "copilot", "kimi", "reasonix", "dsh", "kiro-cli", "codebuddy", "agy", "qodercli", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw",
 }, agent.BuiltinRuntimeCommands()...)
 
 // codexDesktopAppBundlePaths returns candidate macOS app-bundle locations for

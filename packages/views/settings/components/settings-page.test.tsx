@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { configStore } from "@multica/core/config";
-import { PLUGINS_V1_FLAG } from "@multica/core/feature-flags";
+import {
+  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+  PLUGINS_V1_FLAG,
+} from "@multica/core/feature-flags";
 import { renderWithI18n } from "../../test/i18n";
 
 // This file tests the settings SHELL — the chrome around the tabs — so every
@@ -28,6 +31,7 @@ vi.mock("./properties-tab", stub("PropertiesTab"));
 vi.mock("./quick-actions-tab", stub("QuickActionsTab"));
 vi.mock("./keyboard-shortcuts-tab", stub("KeyboardShortcutsTab"));
 vi.mock("./plugins-tab", stub("PluginsTab"));
+vi.mock("./billing-tab", stub("BillingTab"));
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ name: "Acme" }),
@@ -131,5 +135,31 @@ describe("SettingsPage Plugin feature flag", () => {
 
     expect(screen.getByRole("tab", { name: "Plugins" })).toBeInTheDocument();
     expect(screen.getByText("PluginsTab")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage workspace subscription feature flag", () => {
+  it("hides Billing and falls back to Workspace General from a direct URL", () => {
+    navigationState.search = "tab=billing";
+
+    renderWithI18n(<SettingsPage />);
+
+    expect(
+      screen.queryByRole("tab", { name: "Billing" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("BillingTab")).not.toBeInTheDocument();
+    expect(screen.getByText("WorkspaceTab")).toBeInTheDocument();
+  });
+
+  it("shows and mounts Billing only when explicitly enabled", () => {
+    navigationState.search = "tab=billing";
+    configStore.getState().setFeatureFlags({
+      [BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG]: true,
+    });
+
+    renderWithI18n(<SettingsPage />);
+
+    expect(screen.getByRole("tab", { name: "Billing" })).toBeInTheDocument();
+    expect(screen.getByText("BillingTab")).toBeInTheDocument();
   });
 });

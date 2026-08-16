@@ -104,6 +104,11 @@ var concurrentIndexCleanups = map[string]string{
 	"306_dingtalk_group_route_workspace_index":                  "idx_dingtalk_group_route_workspace",
 	"307_dingtalk_group_route_id_unique":                        "idx_dingtalk_group_route_id_unique",
 	"311_plugin_identity_scoped_key_index":                      "idx_plugin_identity_scoped_key",
+	"320_plugin_installation_config_revision_index":             "idx_plugin_installation_config_contribution_revision",
+	"321_plugin_installation_config_workspace_index":            "idx_plugin_installation_config_workspace",
+	"322_plugin_remote_mcp_secret_revision_index":               "idx_plugin_remote_mcp_secret_revision",
+	"323_plugin_remote_mcp_secret_workspace_index":              "idx_plugin_remote_mcp_secret_workspace",
+	"324_plugin_remote_mcp_one_active_secret_index":             "idx_plugin_remote_mcp_one_active_secret",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

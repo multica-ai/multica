@@ -300,7 +300,7 @@ export function SquadDetailPage() {
 function SquadDetailSkeleton() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="px-5">
+      <PageHeader>
         <Skeleton className="h-5 w-48" />
       </PageHeader>
       <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">

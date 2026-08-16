@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
@@ -582,7 +583,21 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
 		return pgtype.UUID{}
 	}
-	if s.shouldEnqueueAgentTask(ctx, issue) {
+	// Backlog is the parking lot: nothing runs from it, so nothing here needs
+	// explaining either.
+	if issue.Status == "backlog" {
+		return pgtype.UUID{}
+	}
+	verdict, admitted := agentAssigneeVerdict(ctx, s.Queries, issue)
+	if !admitted && verdict.Reason == dispatch.ReasonRuntimeUnusable {
+		// Assignment has no response the assigner reads for this outcome, so the
+		// refusal explains itself on the issue instead of vanishing (MUL-6164).
+		// Only here, not in the create-with-assignee path above: that one runs
+		// inside the issue's transaction, and a notice about a machine has no
+		// business deciding whether the issue itself commits.
+		s.noteRuntimeUnusable(ctx, issue, verdict)
+	}
+	if admitted {
 		var task db.AgentTaskQueue
 		var err error
 		if agentRunFireAt.IsZero() {
@@ -604,15 +619,15 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 	return pgtype.UUID{}
 }
 
-// shouldEnqueueAgentTask returns true when an issue create or assignment
-// should trigger the assigned agent. Backlog issues are skipped — backlog
-// acts as a parking lot for pre-assigning without immediate execution.
+// shouldEnqueueAgentTaskWithQueries returns true when an issue create should
+// trigger the assigned agent. Backlog issues are skipped — backlog acts as a
+// parking lot for pre-assigning without immediate execution. The assignment
+// path does the same test through agentAssigneeVerdict, which also tells it
+// WHY a refusal happened; this one runs inside the create transaction, where
+// there is nothing to tell anyone yet.
+//
 // Mirrors handler.shouldEnqueueAgentTask; kept here to make the service
 // self-contained, since both code paths must move together.
-func (s *IssueService) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
-	return s.shouldEnqueueAgentTaskWithQueries(ctx, s.Queries, issue)
-}
-
 func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
 	if issue.Status == "backlog" {
 		return false
@@ -621,14 +636,29 @@ func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q 
 }
 
 func isAgentAssigneeReadyWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
+	_, ok := agentAssigneeVerdict(ctx, q, issue)
+	return ok
+}
+
+// agentAssigneeVerdict resolves the issue's agent assignee through the shared
+// readiness check and reports whether work may be enqueued for it, plus the
+// verdict when it may not.
+//
+// Only a BLOCKED verdict stops the enqueue. A merely offline machine still
+// queues: that work runs when the laptop comes back, and people rely on it.
+func agentAssigneeVerdict(ctx context.Context, q *db.Queries, issue db.Issue) (AgentVerdict, bool) {
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
-		return false
+		return AgentVerdict{}, false
 	}
 	agent, err := q.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-		return false
+	if err != nil {
+		return AgentVerdict{}, false
 	}
-	return true
+	verdict, err := AgentReadiness(ctx, q, agent)
+	if err != nil {
+		return AgentVerdict{}, false
+	}
+	return verdict, !verdict.Blocked()
 }
 
 func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
@@ -653,11 +683,11 @@ func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) b
 	if err != nil {
 		return false
 	}
-	ready, _, err := AgentReadiness(ctx, s.Queries, agent)
+	verdict, err := AgentReadiness(ctx, s.Queries, agent)
 	if err != nil {
 		return false
 	}
-	return ready
+	return verdict.Ready()
 }
 
 func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {

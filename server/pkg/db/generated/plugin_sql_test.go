@@ -160,6 +160,24 @@ func TestPluginLifecycleQueries(t *testing.T) {
 		t.Fatalf("binding revisions = %d, %d", firstBinding.BindingRevision, secondBinding.BindingRevision)
 	}
 
+	oauthStateHash := make([]byte, 32)
+	copy(oauthStateHash, []byte(suffix))
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO plugin_remote_mcp_oauth_state (
+			state_hash, workspace_id, installation_id, contribution_id, actor_id,
+			endpoint, authorization_endpoint, token_endpoint, client_id,
+			redirect_uri, secret_ciphertext, expires_at
+		)
+		VALUES (
+			$1, $2, $3, $4, $2,
+			'https://mcp.example/mcp', 'https://mcp.example/authorize',
+			'https://mcp.example/token', 'plugin-query-test',
+			'https://multica.example/oauth/callback', $5, now() + interval '10 minutes'
+		)
+	`, oauthStateHash, workspaceID, installation.ID, contribution.ID, []byte("encrypted-state")); err != nil {
+		t.Fatalf("create Remote MCP OAuth state: %v", err)
+	}
+
 	updated, err := queries.SetPluginInstallationDesiredState(ctx, db.SetPluginInstallationDesiredStateParams{
 		WorkspaceID:      workspaceID,
 		DesiredReleaseID: release.ID,
@@ -198,6 +216,15 @@ func TestPluginLifecycleQueries(t *testing.T) {
 	}
 	if _, err := queries.GetPluginInstallation(ctx, installation.ID); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("installation after workspace cleanup error = %v", err)
+	}
+	var oauthStateCount int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*) FROM plugin_remote_mcp_oauth_state WHERE workspace_id = $1
+	`, workspaceID).Scan(&oauthStateCount); err != nil {
+		t.Fatalf("count Remote MCP OAuth states after workspace cleanup: %v", err)
+	}
+	if oauthStateCount != 0 {
+		t.Fatalf("Remote MCP OAuth states after workspace cleanup = %d, want 0", oauthStateCount)
 	}
 	remainingContributions, err := queries.ListPluginContributionsByRelease(ctx, release.ID)
 	if err != nil {

@@ -202,6 +202,7 @@ API key 与 base URL 都为空时，服务端 LLM 生成关闭，调用方会使
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 单个工具调用持续静默的上限 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 专用静默阈值 |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex 语义静默阈值 |
+| `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | 显式覆盖 Codex 首轮无进展上限；`0` 保持默认值。实际首轮等待仍受 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 和总执行超时限制——需将 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 设为严格大于此值（并留出余量），否则等待会被截断至该值，且会跳过模型目录启动重试。设为相等还不够：语义计时器先启动，两者相等时仍可能丢失该重试 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server 启动握手上限 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自托管 `false` | 是否自动检查并更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 检查更新的间隔 |
@@ -210,7 +211,7 @@ API key 与 base URL 都为空时，服务端 LLM 生成关闭，调用方会使
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | 仅适用于 Linux/macOS。私有 task 临时目录的父目录；必须是现有、可写的绝对路径，无效值会使 task 启动失败，不会回退到 `/tmp`。请选择较短的路径——子工具可能会在其中绑定 AF_UNIX socket；Linux 的 `sun_path` 上限为 108 字节，macOS 为 104 字节 |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 保留执行任务目录用于调试 |
 
-各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 和 `MULTICA_<PROVIDER>_MODEL` 覆盖命令路径与默认模型。QwenPaw 是例外：它没有 `MULTICA_QWENPAW_MODEL`，因为 Multica 不会向它传模型，详见 [AI 编程工具对比](/providers#模型来源)。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
+各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 和 `MULTICA_<PROVIDER>_MODEL` 覆盖命令路径与默认模型。QwenPaw 是例外：它没有 `MULTICA_QWENPAW_MODEL`，因为 Multica 不会向它传模型，详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -237,6 +238,7 @@ multica config show
 | `workspace_id` | 空 | 默认工作区 |
 | `device_name` | 主机名 | 运行时列表中的设备名 |
 | `runtime_name` | `Local Agent` | 运行时显示名 |
+| `workspaces_root` | `~` 下按 profile 区分的路径 | 执行任务工作目录的根目录 |
 | `max_concurrent_tasks` | `20` | 并发执行任务上限；`0` 或留空表示未设置 |
 | `poll_interval` | `30s` | 执行任务轮询间隔 |
 | `heartbeat_interval` | `15s` | 心跳间隔 |
@@ -252,6 +254,7 @@ multica config show
 - duration 类键接受正的 Go duration（如 `10s`、`2h`），`0s` 和负值会被拒绝。唯一例外是 `agent_timeout`：`0s` 合法，表示明确关闭执行时限。
 - 传空字符串清除已持久化的值，回到环境变量或内置默认，例如 `multica config set poll_interval ""`。
 - `max_concurrent_tasks` 要求非负整数。
+- 相对的 `workspaces_root` 值在保存时会转换为绝对路径。
 
 ## 观测与统计
 

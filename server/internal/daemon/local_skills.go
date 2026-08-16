@@ -174,6 +174,12 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				reasonixHome = filepath.Join(home, ".reasonix")
 			}
 			providerRoot = filepath.Join(reasonixHome, "skills")
+		case "dsh":
+			dshHome := strings.TrimSpace(os.Getenv("DSH_HOME"))
+			if dshHome == "" {
+				dshHome = filepath.Join(home, ".dsh")
+			}
+			providerRoot = filepath.Join(dshHome, "skills")
 		case "kiro":
 			providerRoot = filepath.Join(home, ".kiro", "skills")
 		case "qoder":

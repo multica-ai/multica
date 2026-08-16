@@ -26,6 +26,7 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 | Codex | `codex` | ✓ | ✓ | `$CODEX_HOME/skills/` |
 | GitHub Copilot CLI | `copilot` | ✓ | — | `.github/skills/` |
 | Cursor Agent | `cursor-agent` | ✓ | ✓ | `.cursor/skills/` |
+| DeepSeek Harness | `dsh` | ✓ | ✓ | `.dsh/skills/` |
 | DevEco Code | `deveco` | ✓ | — | `.deveco/skills/` |
 | Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
 | Hermes | `hermes` | ✓ | ✓ | 실행별 `HERMES_HOME/skills/` |
@@ -51,6 +52,8 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 모델을 선택하지 않으면 Multica가 해당 도구의 기본 설정을 사용합니다. 목록이 비어 있다면 런타임이 온라인이고 도구에 로그인되어 있는지 확인한 뒤 모델 목록을 새로 고치세요.
 
 QwenPaw만 예외입니다. Multica에서 고른 모델을 받아들이지 않으므로 선택 상자가 비활성 상태로 "런타임에서 관리"라고 표시됩니다. 모델은 QwenPaw 자체 설정에서 선택하세요. QwenPaw의 모델 목록이 비어 있는 것은 정상이며 런타임이 오프라인이라는 뜻이 아닙니다.
+
+DeepSeek Harness의 모델 카탈로그는 런타임 자체가 제공합니다(`dsh --profile multica --list-models`). 모델 ID는 `provider/model` 형식(예: `deepseek-official/deepseek-chat`)이므로 목록에서 전체 ID를 선택하세요.
 
 <Callout type="info">
 도구마다 모델 이름이 다를 수 있습니다. AI 코딩 도구를 바꾸면 기존 모델 값은 새 도구에서 유효하지 않으므로 다시 선택해야 합니다.

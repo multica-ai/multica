@@ -131,6 +131,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // Cursor:      skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:        skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
 // Reasonix:    skills → {workDir}/.reasonix/skills/{name}/SKILL.md  (native discovery)
+// DSH:         skills → {workDir}/.dsh/skills/{name}/SKILL.md  (native discovery)
 // Kiro:        skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
 // Qoder/Qoder CN: skills → {workDir}/.qoder/skills/{name}/SKILL.md  (project-level; see the provider docs)
 // Qwen Code:    skills → {workDir}/.qwen/skills/{name}/SKILL.md  (native project-level discovery)
@@ -393,6 +394,10 @@ func skillsDirPath(workDir, provider string) string {
 		// Reasonix discovers project skills from .reasonix/skills/ and loads
 		// AGENTS.md independently, so repository memory and task skills coexist.
 		return filepath.Join(workDir, ".reasonix", "skills")
+	case "dsh":
+		// DSH scans both .dsh/skills and .agents/skills. Prefer its branded
+		// project root so runtime-specific skills stay isolated.
+		return filepath.Join(workDir, ".dsh", "skills")
 	case "kiro":
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.

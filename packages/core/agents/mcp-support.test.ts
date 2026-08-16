@@ -11,6 +11,7 @@ describe("providerSupportsMcpConfig", () => {
     expect(providerSupportsMcpConfig("hermes")).toBe(true);
     expect(providerSupportsMcpConfig("kimi")).toBe(true);
     expect(providerSupportsMcpConfig("reasonix")).toBe(true);
+    expect(providerSupportsMcpConfig("dsh")).toBe(true);
     expect(providerSupportsMcpConfig("kiro")).toBe(true);
     expect(providerSupportsMcpConfig("opencode")).toBe(true);
     expect(providerSupportsMcpConfig("openclaw")).toBe(true);

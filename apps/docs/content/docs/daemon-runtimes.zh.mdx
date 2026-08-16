@@ -44,6 +44,8 @@ multica daemon start
 | `multica daemon stop` | 停止守护进程 |
 | `multica daemon start --foreground` | 在当前终端中运行，便于调试 |
 
+如需把 task 工作目录放到其他磁盘，可用 `multica config set workspaces_root <path>` 为当前 profile 持久化根目录，也可在 `daemon start` 或 `daemon restart` 中传入 `--workspaces-root <path>`。flag 的优先级高于 `MULTICA_WORKSPACES_ROOT`，环境变量又高于 profile 配置。修改根目录不会迁移已有的 task 目录。
+
 启动时，守护进程会检测 `PATH` 中受支持的 AI 编程工具，并为你有权连接的工作区注册运行时。如果一款工具刚刚安装或登录，重启守护进程即可重新检测。
 
 守护进程至少需要检测到一款内置支持的 AI 编程工具才能启动。安装方法和可执行文件名见[安装 AI 编程工具](/install-agent-runtime)。

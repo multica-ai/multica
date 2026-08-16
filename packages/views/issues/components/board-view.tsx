@@ -43,6 +43,7 @@ import type {
   IssueGroupPageState,
 } from "../surface/use-issue-group-branches";
 import { useDragSettle } from "./use-drag-settle";
+import { useBoardDragPan } from "./use-board-drag-pan";
 import { useT } from "../../i18n";
 import {
   type DragMoveUpdates,
@@ -393,6 +394,10 @@ function BoardViewImpl({
     })
   );
 
+  // #6700: drag empty board background with the left button to pan horizontally
+  // (Trello/Linear). Card drags start on `[data-board-card]` and are ignored.
+  const pan = useBoardDragPan<HTMLDivElement>();
+
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
       isDraggingRef.current = true;
@@ -548,6 +553,16 @@ function BoardViewImpl({
     [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue],
   );
 
+  // An aborted drag (pointercancel, window resize, tab hide, Escape) fires
+  // onDragCancel instead of onDragEnd. Releasing the drag lock here keeps the
+  // column mirror resyncing with the cache afterwards — see the same handler in
+  // list-view for the touch path that makes this routine (MUL-6240).
+  const handleDragCancel = useCallback(() => {
+    isDraggingRef.current = false;
+    setActiveIssue(null);
+    setColumns(buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
+  }, [groupedIssues, groups, grouping, groupingOptionIds, setColumns, isDraggingRef]);
+
   return (
     <DndContext
       sensors={sensors}
@@ -555,8 +570,17 @@ function BoardViewImpl({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
-      <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-2">
+      <div
+        ref={pan.ref}
+        onPointerDown={pan.onPointerDown}
+        onPointerMove={pan.onPointerMove}
+        onPointerUp={pan.onPointerUp}
+        onPointerCancel={pan.onPointerCancel}
+        onLostPointerCapture={pan.onLostPointerCapture}
+        className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-2"
+      >
         {groups.length === 0 ? (
           groupBranches?.isError ? (
             <button

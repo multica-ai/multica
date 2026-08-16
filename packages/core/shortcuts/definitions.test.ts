@@ -93,6 +93,12 @@ describe("keyboard shortcut definitions", () => {
     expect(action.allowInEditable).toBe(true);
   });
 
+  it("keeps the inbox archive key out of editable controls", () => {
+    const action = SHORTCUT_ACTION_BY_ID.archiveInboxItem;
+    expect(action.defaultShortcut).toEqual(createShortcutChord("E"));
+    expect(action.allowInEditable).toBe(false);
+  });
+
   it("strictly distinguishes Command and Control on macOS", () => {
     const commandF = createShortcutChord("F", { primary: true });
     const controlF = createShortcutChord("F", { control: true });
@@ -176,6 +182,19 @@ describe("keyboard shortcut definitions", () => {
     expect(
       isReservedShortcut(createShortcutChord("K", { primary: true }), "windows"),
     ).toBe(false);
+  });
+
+  it("reserves the preferences chord on every runtime", () => {
+    // Desktop opens Settings from the main process (before-input-event) and
+    // browsers open their own settings, so Mod+, can never be recorded for a
+    // product action.
+    const chord = createShortcutChord(",", { primary: true });
+    expect(isReservedShortcut(chord, "macos", "desktop")).toBe(true);
+    expect(isReservedShortcut(chord, "macos", "web")).toBe(true);
+    expect(isReservedShortcut(chord, "windows", "desktop")).toBe(true);
+    expect(isShortcutAllowedForAction("goSettings", chord, "macos", "desktop")).toBe(false);
+    // Only with the primary modifier — a bare comma stays typeable.
+    expect(isReservedShortcut(createShortcutChord(","), "macos", "desktop")).toBe(false);
   });
 
   it("reserves browser-owned accelerators on web but frees the bare chords on desktop", () => {

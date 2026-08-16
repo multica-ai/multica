@@ -11,6 +11,13 @@ const mockSetEnabled = vi.hoisted(() => vi.fn());
 const mockUpgrade = vi.hoisted(() => vi.fn());
 const mockRollback = vi.hoisted(() => vi.fn());
 const mockUninstall = vi.hoisted(() => vi.fn());
+const mockConfigureRemoteMCP = vi.hoisted(() => vi.fn());
+const mockTestRemoteMCP = vi.hoisted(() => vi.fn());
+const mockApproveRemoteMCP = vi.hoisted(() => vi.fn());
+const mockRevokeRemoteMCP = vi.hoisted(() => vi.fn());
+const mockStartRemoteMCPOAuth = vi.hoisted(() => vi.fn());
+const mockOpenExternal = vi.hoisted(() => vi.fn());
+const mockRefetch = vi.hoisted(() => vi.fn());
 
 const data = vi.hoisted(() => ({
   catalog: {
@@ -54,10 +61,10 @@ const data = vi.hoisted(() => ({
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey?: readonly string[] }) => {
     const key = options.queryKey?.join(":") ?? "";
-    if (key.includes("catalog")) return { data: data.catalog, isPending: false, isError: false };
-    if (key.includes("installed")) return { data: data.installed, isPending: false, isError: false };
-    if (key.includes("members")) return { data: data.members, isPending: false, isError: false };
-    return { data: data.agents, isPending: false, isError: false };
+    if (key.includes("catalog")) return { data: data.catalog, isPending: false, isError: false, refetch: mockRefetch };
+    if (key.includes("installed")) return { data: data.installed, isPending: false, isError: false, refetch: mockRefetch };
+    if (key.includes("members")) return { data: data.members, isPending: false, isError: false, refetch: mockRefetch };
+    return { data: data.agents, isPending: false, isError: false, refetch: mockRefetch };
   },
 }));
 
@@ -70,7 +77,15 @@ vi.mock("@multica/core/plugins", () => ({
   useUpgradePlugin: () => ({ mutateAsync: mockUpgrade, isPending: false }),
   useRollbackPlugin: () => ({ mutateAsync: mockRollback, isPending: false }),
   useUninstallPlugin: () => ({ mutateAsync: mockUninstall, isPending: false }),
+  useConfigurePluginRemoteMCP: () => ({ mutateAsync: mockConfigureRemoteMCP, isPending: false }),
+  useTestPluginRemoteMCP: () => ({ mutateAsync: mockTestRemoteMCP, isPending: false }),
+  useApprovePluginRemoteMCPTools: () => ({ mutateAsync: mockApproveRemoteMCP, isPending: false }),
+  useRevokePluginRemoteMCPCredential: () => ({ mutateAsync: mockRevokeRemoteMCP, isPending: false }),
+  useStartPluginRemoteMCPOAuth: () => ({ mutateAsync: mockStartRemoteMCPOAuth, isPending: false }),
 }));
+
+vi.mock("../../platform/open-external", () => ({ openExternal: mockOpenExternal }));
+vi.mock("../../platform/local-directory", () => ({ isDesktopShell: () => true }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
@@ -98,6 +113,7 @@ function Wrapper({ children }: { children: ReactNode }) {
 describe("PluginsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, "", "/");
     data.role = "owner";
     data.catalog.releases[0]!.compatible = true;
     data.catalog.releases[0]!.signature_verified = true;
@@ -105,6 +121,7 @@ describe("PluginsTab", () => {
     mockInstall.mockResolvedValue({});
     mockSetEnabled.mockResolvedValue({});
     mockUninstall.mockResolvedValue({});
+    mockStartRemoteMCPOAuth.mockResolvedValue({ authorization_url: "https://auth.example.test/authorize" });
   });
 
   it("renders the install review and keeps installation disabled by default", async () => {
@@ -137,6 +154,7 @@ describe("PluginsTab", () => {
       lifecycle_status: "installed",
       contributions: ["review-readiness"],
       bindings: [],
+      remote_mcp: [],
     }];
     render(<PluginsTab />, { wrapper: Wrapper });
 
@@ -202,6 +220,7 @@ describe("PluginsTab", () => {
         entry_digest: "sha256:entry",
       }],
       bindings: [],
+      remote_mcp: [],
     }];
     render(<PluginsTab />, { wrapper: Wrapper });
 
@@ -212,5 +231,73 @@ describe("PluginsTab", () => {
     expect(screen.queryByText(/member-1/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Uninstall" }));
     await waitFor(() => expect(mockUninstall).toHaveBeenCalledWith("private-installation-1"));
+  });
+
+  it("opens OAuth in the platform browser and restores saved advanced configuration", async () => {
+    const user = userEvent.setup();
+    data.installed.plugins = [{
+      id: "private-remote-1",
+      plugin_key: "dev.acme.search",
+      display_name: "Search",
+      desired_version: "0.1.0",
+      active_version: "0.1.0",
+      enabled: false,
+      desired_generation: 1,
+      active_generation: 1,
+      lifecycle_status: "installed",
+      publisher: "acme.internal",
+      publisher_type: "private_dev",
+      trust_tier: "private_dev",
+      source_kind: "private_dev",
+      source_ref: "private://sha256:search",
+      signature_verified: false,
+      requested_capabilities: ["tool.remote-mcp.connect"],
+      available_versions: ["0.1.0"],
+      contributions: ["search"],
+      contribution_details: [],
+      bindings: [],
+      remote_mcp: [{
+        contribution_key: "search",
+        default_endpoint: "https://default.example.test/mcp",
+        preferred_auth: "oauth",
+        supported_auth: ["oauth"],
+        endpoint: "https://saved.example.test/mcp",
+        auth_type: "oauth",
+        public_config: { locale: "en" },
+        failure_policy: "optional",
+        credential_state: "missing",
+        approved_tools: [],
+        discovered_tools: [],
+        reviewed: false,
+        ready: false,
+      }],
+    }];
+    render(<PluginsTab />, { wrapper: Wrapper });
+
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(mockStartRemoteMCPOAuth).toHaveBeenCalledWith(expect.objectContaining({
+      installationId: "private-remote-1",
+      contributionKey: "search",
+      request: expect.objectContaining({
+        endpoint: "https://saved.example.test/mcp",
+        public_config: { locale: "en" },
+        failure_policy: "optional",
+      }),
+    })));
+    expect(mockOpenExternal).toHaveBeenCalledWith("https://auth.example.test/authorize");
+
+    await user.click(screen.getByText("Advanced configuration"));
+    expect(screen.getByLabelText("HTTPS endpoint")).toHaveValue("https://saved.example.test/mcp");
+    expect(screen.getByLabelText("Public configuration (JSON object)")).toHaveValue('{\n  "locale": "en"\n}');
+  });
+
+  it("consumes a successful OAuth callback and refreshes installation state", async () => {
+    window.history.replaceState({}, "", "/settings?tab=plugins&remote_mcp_connected=1#plugins");
+
+    render(<PluginsTab />, { wrapper: Wrapper });
+
+    await waitFor(() => expect(mockRefetch).toHaveBeenCalled());
+    expect(window.location.search).toBe("?tab=plugins");
+    expect(window.location.hash).toBe("#plugins");
   });
 });

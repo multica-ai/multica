@@ -115,6 +115,7 @@
       "toggleChat": { "label": "채팅 창 전환", "description": "플로팅 채팅 창을 열거나 닫습니다. 열면 메시지 입력란에 포커스합니다." },
       "findInIssue": { "label": "태스크에서 찾기", "description": "열린 태스크 상세 내용에서 검색합니다." },
       "openThreadNav": { "label": "스레드 내비게이터 열기", "description": "열린 태스크의 댓글 스레드를 나열하고 검색해 이동합니다." },
+      "archiveInboxItem": { "label": "알림 보관", "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다." },
       "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 태스크를 만듭니다." },
       "goBack": { "label": "뒤로 가기", "description": "브라우저처럼 기록을 따라 뒤로 이동합니다." },
       "goForward": { "label": "앞으로 가기", "description": "브라우저처럼 기록을 따라 앞으로 이동합니다." },
@@ -134,6 +135,7 @@
     "fixed": {
       "title": "고정 시스템 단축키",
       "description": "창 및 접근성 단축키는 안정성을 위해 고정됩니다. 확대/축소 및 탭 제어는 데스크톱 앱에 적용됩니다.",
+      "open_settings": "설정 열기",
       "close_tab": "활성 탭 닫기",
       "zoom_in": "확대",
       "zoom_out": "축소",
@@ -162,6 +164,28 @@
       "start_date": "시작일"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "이 워크스페이스의 MCP 서버 라이브러리입니다. 여기에 추가해도 어떤 에이전트에도 할당되지 않으며, 에이전트 소유자가 해당 에이전트의 MCP 탭에서 할당하고 에이전트별로 켜고 끌 수 있습니다.",
+    "servers_title": "공유 서버",
+    "write_only_note": "저장된 설정은 쓰기 전용이라 url, 명령, 헤더, 환경 변수는 다시 표시되지 않으므로 서버 편집은 설정을 교체하는 것입니다. 이름 변경은 안전하며 할당은 유지됩니다.",
+    "add_server": "서버 추가",
+    "edit_server": "서버 편집",
+    "remove_server": "서버 제거",
+    "empty_title": "공유 MCP 서버가 없습니다",
+    "empty_description": "여기에 서버를 추가한 뒤, 사용할 에이전트의 MCP 탭에서 할당하세요.",
+    "disabled_badge": "비활성화됨",
+    "admin_only_note": "공유 MCP 서버는 워크스페이스 owner와 admin만 변경할 수 있습니다.",
+    "delete_title": "공유 서버를 제거할까요?",
+    "delete_description": "{{name}}은(는) 라이브러리와 할당된 모든 에이전트에서 제거되며 각 에이전트의 다음 작업부터 적용됩니다.",
+    "delete_confirm": "제거",
+    "cancel": "취소",
+    "added_toast": "공유 MCP 서버를 추가했습니다",
+    "updated_toast": "공유 MCP 서버를 업데이트했습니다",
+    "removed_toast": "공유 MCP 서버를 제거했습니다",
+    "save_failed_toast": "공유 MCP 서버를 저장하지 못했습니다",
+    "remove_failed_toast": "공유 MCP 서버를 제거하지 못했습니다"
+  },
   "page": {
     "title": "설정",
     "my_account": "내 계정",
@@ -183,7 +207,9 @@
       "labels": "레이블",
       "properties": "속성",
       "quick_actions": "퀵 액션",
-      "plugins": "Plugins"
+    "plugins": "Plugins",
+    "mcp": "MCP",
+    "billing": "결제 및 요금제"
     }
   },
   "plugins": {
@@ -248,6 +274,66 @@
       "host_api": "Host API",
       "publisher": "게시자 및 서명 ID",
       "none": "없음"
+    },
+    "remote_mcp": {
+      "title": "Remote MCP 연결",
+      "endpoint": "HTTPS 엔드포인트",
+      "endpoint_placeholder": "https://mcp.example.com/mcp",
+      "auth": "인증",
+      "auth_types": {
+        "none": "없음",
+        "oauth": "OAuth(권장)",
+        "bearer": "Bearer 토큰",
+        "header": "사용자 지정 헤더"
+      },
+      "header_name": "헤더 이름",
+      "credential": "인증 정보(암호화 저장)",
+      "connect": "연결",
+      "connected": "연결됨",
+      "ready_to_connect": "연결할 수 있음",
+      "complete_before_enabling": "범위를 활성화하기 전에 MCP를 연결하고 도구를 하나 이상 승인하세요.",
+      "advanced": "고급 구성",
+      "oauth_scope": "OAuth 범위(비워두면 자동)",
+      "oauth_client_id": "OAuth 클라이언트 ID(비워두면 자동)",
+      "oauth_client_secret": "OAuth 클라이언트 보안 비밀",
+      "oauth_authorization_endpoint": "인증 엔드포인트 재정의",
+      "oauth_token_endpoint": "토큰 엔드포인트 재정의",
+      "oauth_token_auth_method": "토큰 엔드포인트 인증",
+      "oauth_token_auth_methods": {
+        "none": "공개 클라이언트(PKCE)",
+        "client_secret_basic": "클라이언트 시크릿(HTTP Basic)",
+        "client_secret_post": "클라이언트 시크릿(요청 본문)"
+      },
+      "public_config": "공개 설정(JSON 객체)",
+      "invalid_public_config": "공개 설정은 유효한 JSON 객체여야 합니다",
+      "failure_policy": "실패 정책",
+      "failure_policies": {
+        "required": "필수 — 태스크 중지",
+        "optional": "선택 — 도구 없이 계속"
+      },
+      "configure_and_discover": "저장하고 도구 검색",
+      "test": "연결 테스트",
+      "approve": "선택한 도구 승인",
+      "revoke": "인증 정보 폐기",
+      "credential_states": {
+        "configured": "인증 정보 설정됨",
+        "revoked": "인증 정보 폐기됨",
+        "missing": "인증 정보 없음",
+        "not_required": "인증 정보 필요 없음"
+      },
+      "reviewed": "도구 승인됨",
+      "pending_review": "승인 필요",
+      "approved_tools": "승인된 도구",
+      "no_tools": "서버에서 알린 도구가 없습니다.",
+      "discovery": "검색된 도구 — 접근 권한을 명시적으로 검토하세요",
+      "read": "읽기",
+      "write": "쓰기",
+      "configured_success": "연결을 저장했습니다. 검색된 도구를 검토하세요",
+      "oauth_connected_success": "OAuth 연결이 완료되었습니다. 검색된 도구를 검토하세요",
+      "oauth_connect_failed": "OAuth 연결을 완료하지 못했습니다. 다시 시도하세요.",
+      "test_success": "연결 테스트에 성공했습니다",
+      "approved_success": "도구 접근을 승인했습니다",
+      "revoked_success": "인증 정보를 폐기하고 Plugin을 비활성화했습니다"
     }
   },
   "properties": {

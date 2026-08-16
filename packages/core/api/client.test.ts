@@ -69,6 +69,27 @@ describe("ApiClient pull-request response schema", () => {
   });
 });
 
+describe("ApiClient Remote MCP OAuth response schema", () => {
+  it("degrades a malformed start response without inventing a navigation URL", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ authorization_url: 42 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(new ApiClient("https://api.example.test").startPluginRemoteMCPOAuth(
+      "workspace-1",
+      "installation-1",
+      "search",
+      { public_config: {}, failure_policy: "required" },
+    )).resolves.toEqual({ authorization_url: "" });
+  });
+});
+
 describe("ApiClient server Table query", () => {
   it("posts the canonical query to the group and branch endpoints", async () => {
     const fetchMock = vi
@@ -2066,5 +2087,133 @@ describe("ApiClient refreshSkill response schema", () => {
       content: "",
       files: [],
     });
+  });
+});
+
+describe("ApiClient workspace MCP servers", () => {
+  function stubJSON(body: unknown) {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const server = {
+    id: "srv-1",
+    workspace_id: "ws-1",
+    name: "linear",
+    transport: "http",
+    created_at: "2026-08-14T00:00:00Z",
+    updated_at: "2026-08-14T00:00:00Z",
+  };
+
+  it("parses the workspace library", async () => {
+    stubJSON([server]);
+
+    const result = await new ApiClient("https://api.example.test")
+      .listWorkspaceMcpServers("ws-1");
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: "srv-1", name: "linear", transport: "http" });
+    // No binding in the library listing, so no toggle to report.
+    expect(result[0]?.enabled).toBeUndefined();
+  });
+
+  it("falls back safely when the library response is malformed", async () => {
+    stubJSON({ nope: true });
+
+    const result = await new ApiClient("https://api.example.test")
+      .listWorkspaceMcpServers("ws-1");
+
+    expect(result).toEqual([]);
+  });
+
+  // The write-only boundary is enforced on the client too: a server that
+  // regressed to returning the stored entry must not have it land in the
+  // parsed object or the query cache.
+  it("strips secret-bearing fields the server should never have sent", async () => {
+    stubJSON([{
+      ...server,
+      config: { headers: { Authorization: "Bearer sk-live-doc" } },
+      url: "https://mcp.example/sk-live-url",
+      headers: { Authorization: "Bearer sk-live-header" },
+    }]);
+
+    const result = await new ApiClient("https://api.example.test")
+      .listWorkspaceMcpServers("ws-1");
+
+    expect(JSON.stringify(result)).not.toContain("sk-live");
+    expect(result[0]).toEqual(server);
+  });
+
+  it("keeps an unknown transport rather than dropping the server", async () => {
+    // Enum drift from a newer backend must degrade, not disappear: the row
+    // still renders and the UI's default branch labels it.
+    stubJSON([{ ...server, transport: "websocket" }]);
+
+    const result = await new ApiClient("https://api.example.test")
+      .listWorkspaceMcpServers("ws-1");
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.transport).toBe("websocket");
+  });
+
+  it("POSTs a name and entry when creating a library server", async () => {
+    const fetchMock = stubJSON(server);
+
+    await new ApiClient("https://api.example.test")
+      .createWorkspaceMcpServer("ws-1", "linear", { url: "https://mcp.example" });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/workspaces/ws-1/mcp-servers");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({
+      name: "linear",
+      config: { url: "https://mcp.example" },
+    });
+  });
+
+  it("sends only what changed when updating a library server", async () => {
+    const fetchMock = stubJSON(server);
+
+    await new ApiClient("https://api.example.test")
+      .updateWorkspaceMcpServer("ws-1", "srv-1", { name: "linear-v2" });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/workspaces/ws-1/mcp-servers/srv-1");
+    expect(init.method).toBe("PUT");
+    // A rename must not blank the stored entry.
+    expect(JSON.parse(String(init.body))).toEqual({ name: "linear-v2" });
+  });
+
+  it("assigns and un-assigns a server on the agent routes", async () => {
+    const assigned = [{ ...server, enabled: true }];
+    let fetchMock = stubJSON(assigned);
+
+    const added = await new ApiClient("https://api.example.test")
+      .addAgentMcpServer("agent-1", "srv-1");
+    expect(added[0]?.enabled).toBe(true);
+    let [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/agents/agent-1/mcp-servers");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ server_id: "srv-1" });
+
+    fetchMock = stubJSON([{ ...server, enabled: false }]);
+    const toggled = await new ApiClient("https://api.example.test")
+      .setAgentMcpServerEnabled("agent-1", "srv-1", false);
+    expect(toggled[0]?.enabled).toBe(false);
+    [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/agents/agent-1/mcp-servers/srv-1/enabled");
+    expect(init.method).toBe("PUT");
+
+    fetchMock = stubJSON([]);
+    await new ApiClient("https://api.example.test").removeAgentMcpServer("agent-1", "srv-1");
+    [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/agents/agent-1/mcp-servers/srv-1");
+    expect(init.method).toBe("DELETE");
   });
 });

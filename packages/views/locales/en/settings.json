@@ -115,6 +115,7 @@
       "toggleChat": { "label": "Toggle chat window", "description": "Open or close the floating chat window. Opening it focuses the message input." },
       "findInIssue": { "label": "Find in issue", "description": "Search within the open issue detail." },
       "openThreadNav": { "label": "Open thread navigator", "description": "List, search, and jump between the comment threads of the open issue." },
+      "archiveInboxItem": { "label": "Archive notification", "description": "Archive the open inbox notification, or restore it while reading the archive." },
       "send": { "label": "Send", "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog." },
       "goBack": { "label": "Go back", "description": "Navigate back through history, like a browser." },
       "goForward": { "label": "Go forward", "description": "Navigate forward through history, like a browser." },
@@ -134,6 +135,7 @@
     "fixed": {
       "title": "Fixed system shortcuts",
       "description": "Window and accessibility shortcuts stay fixed so they remain reliable. Zoom and tab controls apply to the desktop app.",
+      "open_settings": "Open Settings",
       "close_tab": "Close active tab",
       "zoom_in": "Zoom in",
       "zoom_out": "Zoom out",
@@ -162,6 +164,28 @@
       "start_date": "Start date"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "A library of MCP servers for this workspace. Adding one here gives it to no agent — an agent owner assigns it on the agent's own MCP tab, where it also gets a per-agent on/off toggle.",
+    "servers_title": "Shared servers",
+    "write_only_note": "Saved configurations are write-only — urls, commands, headers, and environment values are never shown again, so editing a server replaces its configuration. Renaming is safe: agents keep their assignment.",
+    "add_server": "Add server",
+    "edit_server": "Edit server",
+    "remove_server": "Remove server",
+    "empty_title": "No shared MCP servers",
+    "empty_description": "Add a server here, then assign it to the agents that should use it from their own MCP tab.",
+    "disabled_badge": "Disabled",
+    "admin_only_note": "Only workspace owners and admins can change the shared MCP servers.",
+    "delete_title": "Remove shared server?",
+    "delete_description": "{{name}} will be removed from the library and from every agent it is assigned to, taking effect on their next task.",
+    "delete_confirm": "Remove",
+    "cancel": "Cancel",
+    "added_toast": "Shared MCP server added",
+    "updated_toast": "Shared MCP server updated",
+    "removed_toast": "Shared MCP server removed",
+    "save_failed_toast": "Could not save the shared MCP server",
+    "remove_failed_toast": "Could not remove the shared MCP server"
+  },
   "page": {
     "title": "Settings",
     "my_account": "My Account",
@@ -183,7 +207,9 @@
       "labels": "Labels",
       "properties": "Properties",
       "quick_actions": "Quick Actions",
-      "plugins": "Plugins"
+    "plugins": "Plugins",
+    "mcp": "MCP",
+    "billing": "Billing"
     }
   },
   "plugins": {
@@ -248,6 +274,66 @@
       "host_api": "Host API",
       "publisher": "Publisher and signing identity",
       "none": "None"
+    },
+    "remote_mcp": {
+      "title": "Remote MCP connection",
+      "endpoint": "HTTPS endpoint",
+      "endpoint_placeholder": "https://mcp.example.com/mcp",
+      "auth": "Authentication",
+      "auth_types": {
+        "none": "None",
+        "oauth": "OAuth (recommended)",
+        "bearer": "Bearer token",
+        "header": "Custom header"
+      },
+      "header_name": "Header name",
+      "credential": "Credential (stored encrypted)",
+      "connect": "Connect",
+      "connected": "Connected",
+      "ready_to_connect": "Ready to connect",
+      "complete_before_enabling": "Connect the MCP and approve at least one tool before enabling a scope.",
+      "advanced": "Advanced configuration",
+      "oauth_scope": "OAuth scopes (automatic when empty)",
+      "oauth_client_id": "OAuth client ID (automatic when empty)",
+      "oauth_client_secret": "OAuth client secret",
+      "oauth_authorization_endpoint": "Authorization endpoint override",
+      "oauth_token_endpoint": "Token endpoint override",
+      "oauth_token_auth_method": "Token endpoint authentication",
+      "oauth_token_auth_methods": {
+        "none": "Public client (PKCE)",
+        "client_secret_basic": "Client secret (HTTP Basic)",
+        "client_secret_post": "Client secret (request body)"
+      },
+      "public_config": "Public configuration (JSON object)",
+      "invalid_public_config": "Public configuration must be a valid JSON object",
+      "failure_policy": "Failure policy",
+      "failure_policies": {
+        "required": "Required — stop the task",
+        "optional": "Optional — continue without tools"
+      },
+      "configure_and_discover": "Save and discover tools",
+      "test": "Test connection",
+      "approve": "Approve selected tools",
+      "revoke": "Revoke credential",
+      "credential_states": {
+        "configured": "Credential configured",
+        "revoked": "Credential revoked",
+        "missing": "Credential missing",
+        "not_required": "No credential required"
+      },
+      "reviewed": "Tools approved",
+      "pending_review": "Approval required",
+      "approved_tools": "Approved tools",
+      "no_tools": "The server did not advertise any tools.",
+      "discovery": "Discovered tools — review access explicitly",
+      "read": "Read",
+      "write": "Write",
+      "configured_success": "Connection saved; review the discovered tools",
+      "oauth_connected_success": "OAuth connection completed; review the discovered tools",
+      "oauth_connect_failed": "OAuth connection could not be completed. Try again.",
+      "test_success": "Connection test succeeded",
+      "approved_success": "Tool access approved",
+      "revoked_success": "Credential revoked and the Plugin disabled"
     }
   },
   "properties": {

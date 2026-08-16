@@ -313,6 +313,21 @@ function ListViewImpl({
     [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef],
   );
 
+  // dnd-kit fires onDragCancel — never onDragEnd — when an active drag is
+  // aborted: pointercancel, window resize, tab hide, or Escape. Touch browsers
+  // hit that path constantly, because a scroll gesture that starts on a row
+  // moves past the 5px activation distance and *then* the browser takes the
+  // gesture over for native scrolling and cancels the pointer. Without this
+  // handler `isDraggingRef` stayed true for the rest of the session, which
+  // froze the column mirror against cache updates and — because the accordion's
+  // onValueChange is guarded by the same ref — made tapping a status header a
+  // no-op, so groups could no longer be collapsed at all (MUL-6240).
+  const handleDragCancel = useCallback(() => {
+    isDraggingRef.current = false;
+    setActiveIssue(null);
+    setColumns(buildColumns(issues, groups, "status"));
+  }, [issues, groups, setColumns, isDraggingRef]);
+
   // The single scroll container is shared by every status panel's Virtuoso as
   // its customScrollParent, so a callback ref hands the element to the panels
   // once it mounts. Keeping one scroller (rather than one per panel) preserves
@@ -385,6 +400,7 @@ function ListViewImpl({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
       <div ref={attachScroller} data-tab-scroll-root="list" className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
         {content}

@@ -119,6 +119,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "cursor",
   "kimi",
   "reasonix",
+  "dsh",
   "kiro",
   "antigravity",
   "qoder",

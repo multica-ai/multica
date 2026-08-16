@@ -1,0 +1,66 @@
+{
+  "api_version": "multica.plugin/v1",
+  "kind": "Plugin",
+  "metadata": {
+    "key": "dev.multica.exa-search",
+    "name": "Exa Search",
+    "description": "Reference Exa Plugin with research guidance and hosted web search tools",
+    "version": "0.3.0",
+    "publisher": "multica.examples"
+  },
+  "compatibility": {
+    "host_api": ">=1.0.0 <2.0.0",
+    "required_daemon_features": [
+      "execution-manifest-v1",
+      "agent-skill-v1",
+      "remote-mcp-v1"
+    ]
+  },
+  "requested_capabilities": [
+    "agent.skill.contribute",
+    "tool.remote-mcp.connect"
+  ],
+  "contributes": {
+    "agent_skills": [
+      {
+        "key": "exa-research",
+        "name": "Exa Research Guidance",
+        "description": "Use Exa for current web research, deep dives, competitive analysis, lead discovery, and source-backed investigation.",
+        "entry": "skills/exa-research/SKILL.md"
+      }
+    ],
+    "remote_mcp": [
+      {
+        "key": "exa-search",
+        "name": "Exa Search",
+        "description": "Search the public web and fetch page content through Exa's hosted MCP server",
+        "transport": "streamable-http",
+        "protocol_versions": ["2025-03-26", "2024-11-05"],
+        "endpoint_policy": {
+          "default_endpoint": "https://mcp.exa.ai/mcp",
+          "allowed_hosts": ["mcp.exa.ai"]
+        },
+        "authentication": {
+          "preferred": "none",
+          "supported": ["none", "bearer"]
+        },
+        "tool_intent": [
+          {
+            "name": "web_search_exa",
+            "description": "Search the web for a topic and return relevant content",
+            "risk": "read"
+          },
+          {
+            "name": "web_fetch_exa",
+            "description": "Fetch webpage content as clean markdown",
+            "risk": "read"
+          }
+        ],
+        "configuration_schema": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      }
+    ]
+  }
+}
