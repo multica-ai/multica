@@ -741,6 +741,107 @@ func (q *Queries) FindChannelBindingForMember(ctx context.Context, arg FindChann
 	return i, err
 }
 
+const findIssueChannelNotificationTarget = `-- name: FindIssueChannelNotificationTarget :one
+WITH candidate_agents AS (
+    SELECT
+        i.workspace_id,
+        i.assignee_id AS agent_id,
+        0::int AS candidate_rank,
+        NULL::timestamptz AS subscribed_at
+    FROM issue i
+    WHERE i.id = $3
+      AND i.workspace_id = $4
+      AND i.assignee_type = 'agent'
+      AND i.assignee_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        i.workspace_id,
+        s.user_id AS agent_id,
+        1::int AS candidate_rank,
+        s.created_at AS subscribed_at
+    FROM issue i
+    JOIN issue_subscriber s ON s.issue_id = i.id
+    WHERE i.id = $3
+      AND i.workspace_id = $4
+      AND s.user_type = 'agent'
+      AND s.unsubscribed_at IS NULL
+      AND NOT (
+          i.assignee_type = 'agent'
+          AND i.assignee_id IS NOT NULL
+          AND i.assignee_id = s.user_id
+      )
+)
+SELECT
+    ci.id AS installation_id,
+    ci.agent_id AS agent_id,
+    ci.channel_type AS channel_type,
+    cub.channel_user_id AS channel_user_id,
+    w.slug AS workspace_slug
+FROM candidate_agents candidate
+JOIN agent a
+  ON a.id = candidate.agent_id
+ AND a.workspace_id = candidate.workspace_id
+ AND a.archived_at IS NULL
+JOIN member m
+  ON m.workspace_id = candidate.workspace_id
+ AND m.user_id = $1
+JOIN channel_installation ci
+  ON ci.workspace_id = candidate.workspace_id
+ AND ci.agent_id = candidate.agent_id
+ AND ci.channel_type = $2
+ AND ci.status = 'active'
+JOIN channel_user_binding cub
+  ON cub.workspace_id = candidate.workspace_id
+ AND cub.multica_user_id = m.user_id
+ AND cub.installation_id = ci.id
+ AND cub.channel_type = ci.channel_type
+JOIN workspace w ON w.id = candidate.workspace_id
+ORDER BY candidate.candidate_rank,
+         candidate.subscribed_at ASC NULLS FIRST,
+         candidate.agent_id
+LIMIT 1
+`
+
+type FindIssueChannelNotificationTargetParams struct {
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	ChannelType string      `json:"channel_type"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type FindIssueChannelNotificationTargetRow struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	AgentID        pgtype.UUID `json:"agent_id"`
+	ChannelType    string      `json:"channel_type"`
+	ChannelUserID  string      `json:"channel_user_id"`
+	WorkspaceSlug  string      `json:"workspace_slug"`
+}
+
+// Resolve the Bot installation that may privately forward an issue-backed
+// Inbox item. The current agent assignee wins when eligible; active agent
+// subscribers provide a deterministic fallback. Eligibility is applied before
+// ranking so an assignee without an active installation or an exact recipient
+// binding does not block a participating subscriber.
+func (q *Queries) FindIssueChannelNotificationTarget(ctx context.Context, arg FindIssueChannelNotificationTargetParams) (FindIssueChannelNotificationTargetRow, error) {
+	row := q.db.QueryRow(ctx, findIssueChannelNotificationTarget,
+		arg.RecipientID,
+		arg.ChannelType,
+		arg.IssueID,
+		arg.WorkspaceID,
+	)
+	var i FindIssueChannelNotificationTargetRow
+	err := row.Scan(
+		&i.InstallationID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.WorkspaceSlug,
+	)
+	return i, err
+}
+
 const findLiveChannelBindingToken = `-- name: FindLiveChannelBindingToken :one
 SELECT token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at, consumed_at, created_at FROM channel_binding_token
 WHERE installation_id = $1
