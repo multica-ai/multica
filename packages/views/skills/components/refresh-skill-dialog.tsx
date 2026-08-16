@@ -26,7 +26,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { midTruncate } from "../../common/github-url";
 import { useT } from "../../i18n";
-import type { OriginInfo } from "../lib/origin";
+import { originSourceUrl, type OriginInfo } from "../lib/origin";
 
 /** Human name of the hosted source a refresh re-downloads from. */
 export function useRefreshSourceLabel(origin: OriginInfo | null): string {
@@ -62,6 +62,9 @@ export function RefreshSkillDialog({
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const source = useRefreshSourceLabel(origin);
+  // Only a validated URL becomes a link; an injected or mismatched
+  // source_url renders nothing rather than a live anchor in a confirm dialog.
+  const sourceUrl = originSourceUrl(origin);
 
   const handleConfirm = async () => {
     setRefreshing(true);
@@ -109,21 +112,21 @@ export function RefreshSkillDialog({
             })}
           </DialogDescription>
         </DialogHeader>
-        {typeof origin?.source_url === "string" && origin.source_url.length > 0 && (
+        {sourceUrl && (
           <Tooltip>
             <TooltipTrigger
               render={
                 <a
-                  href={origin.source_url}
+                  href={sourceUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-fit max-w-full truncate text-caption text-muted-foreground hover:underline"
                 >
-                  {midTruncate(origin.source_url, 60)}
+                  {midTruncate(sourceUrl, 60)}
                 </a>
               }
             />
-            <TooltipContent side="top">{origin.source_url}</TooltipContent>
+            <TooltipContent side="top">{sourceUrl}</TooltipContent>
           </Tooltip>
         )}
         <div className="rounded-md bg-warning/10 px-3 py-2 text-caption text-muted-foreground">

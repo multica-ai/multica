@@ -462,4 +462,18 @@ describe("SkillDetailPage origin link", () => {
       screen.queryByRole("link", { name: "Imported · GitHub" }),
     ).toBeNull();
   });
+
+  it("does not link a source_url whose host does not match the origin type", async () => {
+    skillRef.current = {
+      ...baseSkill,
+      config: {
+        origin: { type: "github", source_url: "https://evil.example/skills" },
+      },
+    };
+    renderPage();
+    expect(await screen.findByText("Imported · GitHub")).toBeTruthy();
+    expect(
+      screen.queryByRole("link", { name: "Imported · GitHub" }),
+    ).toBeNull();
+  });
 });

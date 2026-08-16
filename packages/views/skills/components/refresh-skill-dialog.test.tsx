@@ -77,4 +77,19 @@ describe("RefreshSkillDialog source URL", () => {
     renderDialog({ type: "manual" });
     expect(screen.queryByRole("link")).toBeNull();
   });
+
+  // config.origin is persisted verbatim through the skill update API, so an
+  // injected source_url must never surface as a live anchor in the dialog.
+  it("renders no link when a non-import origin carries an injected source_url", () => {
+    renderDialog({ type: "manual", source_url: SOURCE_URL });
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("renders no link when the source_url host does not match the origin type", () => {
+    renderDialog({
+      type: "github",
+      source_url: "https://evil.example/anthropics/skills",
+    });
+    expect(screen.queryByRole("link")).toBeNull();
+  });
 });

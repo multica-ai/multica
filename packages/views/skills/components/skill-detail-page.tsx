@@ -72,6 +72,7 @@ import { useSkillPermissions } from "@multica/core/permissions";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
 import {
   isRefreshableOrigin,
+  originSourceUrl,
   readOrigin,
   totalFileCount,
   type OriginInfo,
@@ -307,10 +308,7 @@ function SkillIdentity({
   const timeAgo = useTimeAgo();
   const originLabel = useOriginLabel(origin, originRuntime);
   const isRuntimeOrigin = origin?.type === "runtime_local";
-  const sourceUrl =
-    origin && isRefreshableOrigin(origin) && typeof origin.source_url === "string"
-      ? origin.source_url
-      : null;
+  const sourceUrl = originSourceUrl(origin);
 
   return (
     <div className="shrink-0 border-b px-4 py-3 sm:px-6">

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { NavigationProvider } from "./context";
-import { useRowLink } from "./use-row-link";
+import { rowLinkInteractiveProps, useRowLink } from "./use-row-link";
 import type { NavigationAdapter } from "./types";
 
 function makeAdapter(
@@ -174,5 +174,51 @@ describe("useRowLink", () => {
       "noopener,noreferrer",
     );
     expect(push).not.toHaveBeenCalled();
+  });
+
+  // Nested interactive elements must stop auxclick too, not just click: the
+  // row's auxclick handler calls preventDefault(), which would cancel a
+  // nested anchor's native middle-click open and background-tab the row
+  // instead of the link's destination.
+  it("rowLinkInteractiveProps shields a nested anchor from the row's handlers", () => {
+    const push = vi.fn();
+    const openInNewTab = vi.fn();
+    const adapter = makeAdapter({ push, openInNewTab });
+
+    function NestedProbe() {
+      const rowLink = useRowLink();
+      return (
+        <div role="row" {...rowLink("/acme/projects/p1")}>
+          <a
+            href="https://example.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            {...rowLinkInteractiveProps}
+          >
+            source
+          </a>
+        </div>
+      );
+    }
+    render(
+      <NavigationProvider value={adapter}>
+        <NestedProbe />
+      </NavigationProvider>,
+    );
+
+    const anchor = screen.getByRole("link");
+    fireEvent.click(anchor);
+    const aux = new MouseEvent("auxclick", {
+      bubbles: true,
+      button: 1,
+      cancelable: true,
+    });
+    anchor.dispatchEvent(aux);
+
+    // Neither event reached the row, and the anchor's native behaviour
+    // survives (no preventDefault from the row's middle-click handler).
+    expect(aux.defaultPrevented).toBe(false);
+    expect(push).not.toHaveBeenCalled();
+    expect(openInNewTab).not.toHaveBeenCalled();
   });
 });

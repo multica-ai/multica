@@ -50,14 +50,18 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
-import { useNavigation, useRowLink } from "../../navigation";
+import {
+  rowLinkInteractiveProps,
+  useNavigation,
+  useRowLink,
+} from "../../navigation";
 import {
   CollectionPageHeader,
   CollectionPageHeaderAction,
   CollectionPageState,
 } from "../../layout/collection-page";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
-import { isRefreshableOrigin, readOrigin, type OriginInfo } from "../lib/origin";
+import { originSourceUrl, readOrigin, type OriginInfo } from "../lib/origin";
 import { CreateSkillDialog } from "./create-skill-dialog";
 import {
   useSkillsViewStore,
@@ -349,11 +353,8 @@ function SourceCell({
   }
 
   // Imported skills link to their upstream page; the anchor must not bubble
-  // its click into the row's whole-row navigation.
-  const sourceUrl =
-    isRefreshableOrigin(origin) && typeof origin.source_url === "string"
-      ? origin.source_url
-      : null;
+  // its click OR auxclick into the row's whole-row navigation.
+  const sourceUrl = originSourceUrl(origin);
 
   return (
     <ListGridCell className="hidden gap-1.5 text-caption text-muted-foreground @2xl:flex">
@@ -366,7 +367,7 @@ function SourceCell({
                 href={sourceUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
+                {...rowLinkInteractiveProps}
                 className="min-w-0 truncate hover:underline"
               >
                 {label}

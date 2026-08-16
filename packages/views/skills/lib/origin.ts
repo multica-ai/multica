@@ -45,6 +45,49 @@ export function isRefreshableOrigin(origin: OriginInfo): boolean {
   );
 }
 
+// Hosts each hosted origin type may legitimately point at — the client-side
+// mirror of the server's `detectImportSource` allowlist (skill.go). Keyed by
+// origin type so a hand-edited config can't dress an arbitrary host up as a
+// GitHub / Skills.sh / ClawHub link.
+const ORIGIN_SOURCE_HOSTS: Partial<Record<OriginInfo["type"], readonly string[]>> = {
+  github: ["github.com", "www.github.com"],
+  skills_sh: ["skills.sh", "www.skills.sh"],
+  clawhub: ["clawhub.ai", "www.clawhub.ai"],
+};
+
+/**
+ * The origin's `source_url` validated for use as a link destination, or null.
+ *
+ * `origin` is persisted JSONB that anyone able to update the skill can write
+ * verbatim (`PATCH /api/skills/:id` does not validate `config`), so before a
+ * value becomes an `href` it must survive being treated as a destination:
+ * http(s) only, and the host must match the declared origin type. Everything
+ * else — manual/runtime_local origins, missing or malformed URLs, `data:` and
+ * other schemes, host/type mismatches — returns null so callers fall back to
+ * plain text.
+ *
+ * Deliberately stricter than `isRefreshableOrigin`: the server's refresh path
+ * re-validates provenance itself and also accepts scheme-less values (e.g. a
+ * bare ClawHub slug), which are refreshable but meaningless as an `href`.
+ */
+export function originSourceUrl(origin: OriginInfo | null): string | null {
+  if (!origin) return null;
+  const hosts = ORIGIN_SOURCE_HOSTS[origin.type];
+  if (!hosts) return null;
+  if (typeof origin.source_url !== "string" || origin.source_url.length === 0) {
+    return null;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(origin.source_url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  if (!hosts.includes(parsed.hostname.toLowerCase())) return null;
+  return origin.source_url;
+}
+
 /**
  * SKILL.md is always present plus any additional attached files. Accepts a
  * `SkillSummary` because list endpoints don't return the `files` array — in
