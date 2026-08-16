@@ -182,19 +182,19 @@ func (h *Handler) resolveMikaAgent(w http.ResponseWriter, r *http.Request, works
 	}
 
 	created, err := qtx.CreateSystemUserAgent(r.Context(), db.CreateSystemUserAgentParams{
-		WorkspaceID:                   wsUUID,
-		Name:                          service.MikaDefaultName,
-		Description:                   description,
-		AvatarUrl:                     pgtype.Text{String: mikaAgentAvatarURL, Valid: true},
-		RuntimeMode:                   runtime.RuntimeMode,
-		RuntimeID:                     runtime.ID,
-		Model:                         pgtype.Text{String: strings.TrimSpace(req.Model), Valid: strings.TrimSpace(req.Model) != ""},
-		Visibility:                    mikaAgentVisibility,
-		PermissionMode:                mikaAgentPermissionMode,
-		MaxConcurrentTasks:            mikaAgentMaxConcurrency,
-		OwnerID:                       parseUUID(userID),
-		SystemKey:                     pgtype.Text{String: service.MikaSystemKey, Valid: true},
-		CustomArgs:                    customArgsJSON,
+		WorkspaceID:                     wsUUID,
+		Name:                            service.MikaDefaultName,
+		Description:                     description,
+		AvatarUrl:                       pgtype.Text{String: mikaAgentAvatarURL, Valid: true},
+		RuntimeMode:                     runtime.RuntimeMode,
+		RuntimeID:                       runtime.ID,
+		Model:                           pgtype.Text{String: strings.TrimSpace(req.Model), Valid: strings.TrimSpace(req.Model) != ""},
+		Visibility:                      mikaAgentVisibility,
+		PermissionMode:                  mikaAgentPermissionMode,
+		MaxConcurrentTasks:              mikaAgentMaxConcurrency,
+		OwnerID:                         parseUUID(userID),
+		SystemKey:                       pgtype.Text{String: service.MikaSystemKey, Valid: true},
+		CustomArgs:                      customArgsJSON,
 		IsCodexWindowsSandboxArgManaged: customArgsManaged,
 	})
 	if err != nil {

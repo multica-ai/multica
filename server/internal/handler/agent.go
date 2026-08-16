@@ -69,7 +69,7 @@ type AgentResponse struct {
 	// IsCodexWindowsSandboxArgManaged distinguishes the platform-owned canonical
 	// prefix from the same two tokens explicitly supplied by a user.
 	IsCodexWindowsSandboxArgManaged bool            `json:"is_codex_windows_sandbox_arg_managed"`
-	McpConfig                     json.RawMessage `json:"mcp_config"`
+	McpConfig                       json.RawMessage `json:"mcp_config"`
 	// custom_env is intentionally NOT serialized on agent resources. The
 	// agent_list/get/create/update/archive/restore responses and WS events
 	// only expose coarse metadata (has_custom_env, custom_env_key_count) so
@@ -180,39 +180,39 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 	composioAllowlist := a.ComposioToolkitAllowlist
 
 	return AgentResponse{
-		ID:                            uuidToString(a.ID),
-		WorkspaceID:                   uuidToString(a.WorkspaceID),
-		RuntimeID:                     uuidToString(a.RuntimeID),
-		RuntimeBound:                  a.RuntimeID.Valid,
-		Name:                          a.Name,
-		Description:                   a.Description,
-		Instructions:                  a.Instructions,
-		SystemKey:                     a.SystemKey.String,
-		SystemInstructions:            systemInstructionsFor(a),
-		AvatarURL:                     h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
-		RuntimeMode:                   a.RuntimeMode,
-		RuntimeConfig:                 rc,
-		CustomArgs:                    customArgs,
+		ID:                              uuidToString(a.ID),
+		WorkspaceID:                     uuidToString(a.WorkspaceID),
+		RuntimeID:                       uuidToString(a.RuntimeID),
+		RuntimeBound:                    a.RuntimeID.Valid,
+		Name:                            a.Name,
+		Description:                     a.Description,
+		Instructions:                    a.Instructions,
+		SystemKey:                       a.SystemKey.String,
+		SystemInstructions:              systemInstructionsFor(a),
+		AvatarURL:                       h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
+		RuntimeMode:                     a.RuntimeMode,
+		RuntimeConfig:                   rc,
+		CustomArgs:                      customArgs,
 		IsCodexWindowsSandboxArgManaged: a.IsCodexWindowsSandboxArgManaged,
-		McpConfig:                     mcpConfig,
-		HasCustomEnv:                  envKeyCount > 0,
-		CustomEnvKeyCount:             envKeyCount,
-		Visibility:                    a.Visibility,
-		PermissionMode:                a.PermissionMode,
-		InvocationTargets:             []AgentInvocationTargetDTO{},
-		Status:                        a.Status,
-		MaxConcurrentTasks:            a.MaxConcurrentTasks,
-		Model:                         a.Model.String,
-		ThinkingLevel:                 a.ThinkingLevel.String,
-		ServiceTier:                   a.ServiceTier.String,
-		ComposioToolkitAllowlist:      composioAllowlist,
-		OwnerID:                       uuidToPtr(a.OwnerID),
-		Skills:                        []AgentSkillSummary{},
-		DisabledRuntimeSkills:         decodeDisabledRuntimeSkills(a.DisabledRuntimeSkills),
-		CreatedAt:                     timestampToString(a.CreatedAt),
-		UpdatedAt:                     timestampToString(a.UpdatedAt),
-		ArchivedAt:                    timestampToPtr(a.ArchivedAt),
-		ArchivedBy:                    uuidToPtr(a.ArchivedBy),
+		McpConfig:                       mcpConfig,
+		HasCustomEnv:                    envKeyCount > 0,
+		CustomEnvKeyCount:               envKeyCount,
+		Visibility:                      a.Visibility,
+		PermissionMode:                  a.PermissionMode,
+		InvocationTargets:               []AgentInvocationTargetDTO{},
+		Status:                          a.Status,
+		MaxConcurrentTasks:              a.MaxConcurrentTasks,
+		Model:                           a.Model.String,
+		ThinkingLevel:                   a.ThinkingLevel.String,
+		ServiceTier:                     a.ServiceTier.String,
+		ComposioToolkitAllowlist:        composioAllowlist,
+		OwnerID:                         uuidToPtr(a.OwnerID),
+		Skills:                          []AgentSkillSummary{},
+		DisabledRuntimeSkills:           decodeDisabledRuntimeSkills(a.DisabledRuntimeSkills),
+		CreatedAt:                       timestampToString(a.CreatedAt),
+		UpdatedAt:                       timestampToString(a.UpdatedAt),
+		ArchivedAt:                      timestampToPtr(a.ArchivedAt),
+		ArchivedBy:                      uuidToPtr(a.ArchivedBy),
 	}
 }
 
@@ -657,19 +657,19 @@ type TaskUsageData struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID                            string                      `json:"id"`
-	Name                          string                      `json:"name"`
-	Instructions                  string                      `json:"instructions"`
-	Skills                        []service.AgentSkillData    `json:"skills,omitempty"`
-	SkillRefs                     []service.AgentSkillRefData `json:"skill_refs,omitempty"`
-	CustomEnv                     map[string]string           `json:"custom_env,omitempty"`
-	CustomArgs                    []string                    `json:"custom_args,omitempty"`
+	ID                              string                      `json:"id"`
+	Name                            string                      `json:"name"`
+	Instructions                    string                      `json:"instructions"`
+	Skills                          []service.AgentSkillData    `json:"skills,omitempty"`
+	SkillRefs                       []service.AgentSkillRefData `json:"skill_refs,omitempty"`
+	CustomEnv                       map[string]string           `json:"custom_env,omitempty"`
+	CustomArgs                      []string                    `json:"custom_args,omitempty"`
 	IsCodexWindowsSandboxArgManaged bool                        `json:"is_codex_windows_sandbox_arg_managed,omitempty"`
-	McpConfig                     json.RawMessage             `json:"mcp_config,omitempty"`
-	Model                         string                      `json:"model,omitempty"`
-	ThinkingLevel                 string                      `json:"thinking_level,omitempty"`
-	ServiceTier                   string                      `json:"service_tier,omitempty"`
-	DisabledRuntimeSkills         []DisabledRuntimeSkill      `json:"disabled_runtime_skills,omitempty"`
+	McpConfig                       json.RawMessage             `json:"mcp_config,omitempty"`
+	Model                           string                      `json:"model,omitempty"`
+	ThinkingLevel                   string                      `json:"thinking_level,omitempty"`
+	ServiceTier                     string                      `json:"service_tier,omitempty"`
+	DisabledRuntimeSkills           []DisabledRuntimeSkill      `json:"disabled_runtime_skills,omitempty"`
 	// RuntimeConfig is the agent's saved runtime_config JSON as-is. The
 	// daemon decodes it per-provider — e.g. the openclaw backend reads
 	// `mode` + `gateway.*` to choose between embedded and gateway routing
@@ -1259,26 +1259,26 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	qtx := h.Queries.WithTx(tx)
 
 	created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
-		WorkspaceID:                   wsUUID,
-		Name:                          req.Name,
-		Description:                   req.Description,
-		Instructions:                  req.Instructions,
-		AvatarUrl:                     avatarURL,
-		RuntimeMode:                   runtime.RuntimeMode,
-		RuntimeConfig:                 rc,
-		RuntimeID:                     runtime.ID,
-		Visibility:                    perm.legacyVisibility(),
-		PermissionMode:                perm.mode,
-		MaxConcurrentTasks:            req.MaxConcurrentTasks,
-		OwnerID:                       parseUUID(ownerID),
-		CustomEnv:                     ce,
-		CustomArgs:                    ca,
-		McpConfig:                     mc,
-		Model:                         pgtype.Text{String: req.Model, Valid: req.Model != ""},
-		ThinkingLevel:                 pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
-		ServiceTier:                   pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
+		WorkspaceID:                     wsUUID,
+		Name:                            req.Name,
+		Description:                     req.Description,
+		Instructions:                    req.Instructions,
+		AvatarUrl:                       avatarURL,
+		RuntimeMode:                     runtime.RuntimeMode,
+		RuntimeConfig:                   rc,
+		RuntimeID:                       runtime.ID,
+		Visibility:                      perm.legacyVisibility(),
+		PermissionMode:                  perm.mode,
+		MaxConcurrentTasks:              req.MaxConcurrentTasks,
+		OwnerID:                         parseUUID(ownerID),
+		CustomEnv:                       ce,
+		CustomArgs:                      ca,
+		McpConfig:                       mc,
+		Model:                           pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		ThinkingLevel:                   pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		ServiceTier:                     pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
 		IsCodexWindowsSandboxArgManaged: codexWindowsSandboxArgManaged,
-		ComposioToolkitAllowlist:      allowlist,
+		ComposioToolkitAllowlist:        allowlist,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -1366,8 +1366,8 @@ type UpdateAgentRequest struct {
 	// echo an existing exact managed prefix without taking ownership; false
 	// explicitly declares the replacement user-owned.
 	IsCodexWindowsSandboxArgManaged *bool            `json:"is_codex_windows_sandbox_arg_managed"`
-	McpConfig                     *json.RawMessage `json:"mcp_config"`
-	Visibility                    *string          `json:"visibility"`
+	McpConfig                       *json.RawMessage `json:"mcp_config"`
+	Visibility                      *string          `json:"visibility"`
 	// PermissionMode + InvocationTargets are the invocation-permission inputs
 	// (MUL-3963). Owner-only writes (like composio_toolkit_allowlist): a
 	// non-owner admin passing them is silently ignored, because the invoke

@@ -1701,26 +1701,26 @@ RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visi
 `
 
 type CreateAgentParams struct {
-	WorkspaceID                   pgtype.UUID `json:"workspace_id"`
-	Name                          string      `json:"name"`
-	Description                   string      `json:"description"`
-	AvatarUrl                     pgtype.Text `json:"avatar_url"`
-	RuntimeMode                   string      `json:"runtime_mode"`
-	RuntimeConfig                 []byte      `json:"runtime_config"`
-	RuntimeID                     pgtype.UUID `json:"runtime_id"`
-	Visibility                    string      `json:"visibility"`
-	MaxConcurrentTasks            int32       `json:"max_concurrent_tasks"`
-	OwnerID                       pgtype.UUID `json:"owner_id"`
-	Instructions                  string      `json:"instructions"`
-	CustomEnv                     []byte      `json:"custom_env"`
-	CustomArgs                    []byte      `json:"custom_args"`
-	McpConfig                     []byte      `json:"mcp_config"`
-	Model                         pgtype.Text `json:"model"`
-	ThinkingLevel                 pgtype.Text `json:"thinking_level"`
-	ServiceTier                   pgtype.Text `json:"service_tier"`
+	WorkspaceID                     pgtype.UUID `json:"workspace_id"`
+	Name                            string      `json:"name"`
+	Description                     string      `json:"description"`
+	AvatarUrl                       pgtype.Text `json:"avatar_url"`
+	RuntimeMode                     string      `json:"runtime_mode"`
+	RuntimeConfig                   []byte      `json:"runtime_config"`
+	RuntimeID                       pgtype.UUID `json:"runtime_id"`
+	Visibility                      string      `json:"visibility"`
+	MaxConcurrentTasks              int32       `json:"max_concurrent_tasks"`
+	OwnerID                         pgtype.UUID `json:"owner_id"`
+	Instructions                    string      `json:"instructions"`
+	CustomEnv                       []byte      `json:"custom_env"`
+	CustomArgs                      []byte      `json:"custom_args"`
+	McpConfig                       []byte      `json:"mcp_config"`
+	Model                           pgtype.Text `json:"model"`
+	ThinkingLevel                   pgtype.Text `json:"thinking_level"`
+	ServiceTier                     pgtype.Text `json:"service_tier"`
 	IsCodexWindowsSandboxArgManaged bool        `json:"is_codex_windows_sandbox_arg_managed"`
-	ComposioToolkitAllowlist      []string    `json:"composio_toolkit_allowlist"`
-	PermissionMode                interface{} `json:"permission_mode"`
+	ComposioToolkitAllowlist        []string    `json:"composio_toolkit_allowlist"`
+	PermissionMode                  interface{} `json:"permission_mode"`
 }
 
 func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error) {
@@ -2599,20 +2599,20 @@ RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visi
 `
 
 type CreateSystemUserAgentParams struct {
-	WorkspaceID                   pgtype.UUID `json:"workspace_id"`
-	Name                          string      `json:"name"`
-	Description                   string      `json:"description"`
-	AvatarUrl                     pgtype.Text `json:"avatar_url"`
-	RuntimeMode                   string      `json:"runtime_mode"`
-	RuntimeID                     pgtype.UUID `json:"runtime_id"`
-	Model                         pgtype.Text `json:"model"`
-	Visibility                    string      `json:"visibility"`
-	PermissionMode                string      `json:"permission_mode"`
-	MaxConcurrentTasks            int32       `json:"max_concurrent_tasks"`
-	OwnerID                       pgtype.UUID `json:"owner_id"`
-	CustomArgs                    []byte      `json:"custom_args"`
+	WorkspaceID                     pgtype.UUID `json:"workspace_id"`
+	Name                            string      `json:"name"`
+	Description                     string      `json:"description"`
+	AvatarUrl                       pgtype.Text `json:"avatar_url"`
+	RuntimeMode                     string      `json:"runtime_mode"`
+	RuntimeID                       pgtype.UUID `json:"runtime_id"`
+	Model                           pgtype.Text `json:"model"`
+	Visibility                      string      `json:"visibility"`
+	PermissionMode                  string      `json:"permission_mode"`
+	MaxConcurrentTasks              int32       `json:"max_concurrent_tasks"`
+	OwnerID                         pgtype.UUID `json:"owner_id"`
+	CustomArgs                      []byte      `json:"custom_args"`
 	IsCodexWindowsSandboxArgManaged bool        `json:"is_codex_windows_sandbox_arg_managed"`
-	SystemKey                     pgtype.Text `json:"system_key"`
+	SystemKey                       pgtype.Text `json:"system_key"`
 }
 
 // Creates a product-defined agent that members can still see, chat with, and
@@ -6848,26 +6848,26 @@ RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visi
 `
 
 type UpdateAgentParams struct {
-	ID                            pgtype.UUID `json:"id"`
-	Name                          pgtype.Text `json:"name"`
-	Description                   pgtype.Text `json:"description"`
-	AvatarUrl                     pgtype.Text `json:"avatar_url"`
-	RuntimeConfig                 []byte      `json:"runtime_config"`
-	RuntimeMode                   pgtype.Text `json:"runtime_mode"`
-	RuntimeID                     pgtype.UUID `json:"runtime_id"`
-	Visibility                    pgtype.Text `json:"visibility"`
-	PermissionMode                pgtype.Text `json:"permission_mode"`
-	Status                        pgtype.Text `json:"status"`
-	MaxConcurrentTasks            pgtype.Int4 `json:"max_concurrent_tasks"`
-	Instructions                  pgtype.Text `json:"instructions"`
-	CustomEnv                     []byte      `json:"custom_env"`
-	CustomArgs                    []byte      `json:"custom_args"`
-	McpConfig                     []byte      `json:"mcp_config"`
-	Model                         pgtype.Text `json:"model"`
-	ThinkingLevel                 pgtype.Text `json:"thinking_level"`
-	ServiceTier                   pgtype.Text `json:"service_tier"`
+	ID                              pgtype.UUID `json:"id"`
+	Name                            pgtype.Text `json:"name"`
+	Description                     pgtype.Text `json:"description"`
+	AvatarUrl                       pgtype.Text `json:"avatar_url"`
+	RuntimeConfig                   []byte      `json:"runtime_config"`
+	RuntimeMode                     pgtype.Text `json:"runtime_mode"`
+	RuntimeID                       pgtype.UUID `json:"runtime_id"`
+	Visibility                      pgtype.Text `json:"visibility"`
+	PermissionMode                  pgtype.Text `json:"permission_mode"`
+	Status                          pgtype.Text `json:"status"`
+	MaxConcurrentTasks              pgtype.Int4 `json:"max_concurrent_tasks"`
+	Instructions                    pgtype.Text `json:"instructions"`
+	CustomEnv                       []byte      `json:"custom_env"`
+	CustomArgs                      []byte      `json:"custom_args"`
+	McpConfig                       []byte      `json:"mcp_config"`
+	Model                           pgtype.Text `json:"model"`
+	ThinkingLevel                   pgtype.Text `json:"thinking_level"`
+	ServiceTier                     pgtype.Text `json:"service_tier"`
 	IsCodexWindowsSandboxArgManaged pgtype.Bool `json:"is_codex_windows_sandbox_arg_managed"`
-	ComposioToolkitAllowlist      []string    `json:"composio_toolkit_allowlist"`
+	ComposioToolkitAllowlist        []string    `json:"composio_toolkit_allowlist"`
 }
 
 // composio_toolkit_allowlist is set wholesale: the API layer is responsible

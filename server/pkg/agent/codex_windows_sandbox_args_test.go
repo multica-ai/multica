@@ -146,9 +146,9 @@ func TestBuildCodexArgsWindowsSandboxPrecedenceAndPlatformTransitions(t *testing
 		{
 			name: "runtime argument owns setting without duplicate",
 			opts: ExecOptions{
-				GOOS:                          "windows",
-				ExtraArgs:                     []string{"-c", `windows.sandbox="elevated"`},
-				CustomArgs:                    []string{"-c", managed, "--profile", "research"},
+				GOOS:                            "windows",
+				ExtraArgs:                       []string{"-c", `windows.sandbox="elevated"`},
+				CustomArgs:                      []string{"-c", managed, "--profile", "research"},
 				IsCodexWindowsSandboxArgManaged: true,
 			},
 			want: []string{"app-server", "--listen", "stdio://", "-c", `windows.sandbox="elevated"`, "--profile", "research"},
@@ -156,8 +156,8 @@ func TestBuildCodexArgsWindowsSandboxPrecedenceAndPlatformTransitions(t *testing
 		{
 			name: "explicit per-agent override owns setting without managed prefix",
 			opts: ExecOptions{
-				GOOS:                          "windows",
-				CustomArgs:                    []string{"-c", managed, "-c", `windows.sandbox="elevated"`, "--profile", "research"},
+				GOOS:                            "windows",
+				CustomArgs:                      []string{"-c", managed, "-c", `windows.sandbox="elevated"`, "--profile", "research"},
 				IsCodexWindowsSandboxArgManaged: true,
 			},
 			want: []string{"app-server", "--listen", "stdio://", "-c", `windows.sandbox="elevated"`, "--profile", "research"},
@@ -165,8 +165,8 @@ func TestBuildCodexArgsWindowsSandboxPrecedenceAndPlatformTransitions(t *testing
 		{
 			name: "non-windows spawn removes stale managed prefix",
 			opts: ExecOptions{
-				GOOS:                          "linux",
-				CustomArgs:                    []string{"-c", managed, "--profile", "research"},
+				GOOS:                            "linux",
+				CustomArgs:                      []string{"-c", managed, "--profile", "research"},
 				IsCodexWindowsSandboxArgManaged: true,
 			},
 			want: []string{"app-server", "--listen", "stdio://", "--profile", "research"},
@@ -183,10 +183,10 @@ func TestBuildCodexArgsWindowsSandboxPrecedenceAndPlatformTransitions(t *testing
 		{
 			name: "copied config owns setting over managed default",
 			opts: ExecOptions{
-				GOOS:                          "windows",
-				CustomArgs:                    []string{"-c", managed, "--profile", "research"},
+				GOOS:                            "windows",
+				CustomArgs:                      []string{"-c", managed, "--profile", "research"},
 				IsCodexWindowsSandboxArgManaged: true,
-				CodexWindowsSandboxConfigOwns: true,
+				CodexWindowsSandboxConfigOwns:   true,
 			},
 			want: []string{"app-server", "--listen", "stdio://", "--profile", "research"},
 		},

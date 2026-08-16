@@ -2043,18 +2043,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 		}
 		resp.Agent = &TaskAgentData{
-			ID:                            uuidToString(agent.ID),
-			Name:                          agent.Name,
-			Instructions:                  agent.Instructions,
-			CustomEnv:                     customEnv,
-			CustomArgs:                    customArgs,
+			ID:                              uuidToString(agent.ID),
+			Name:                            agent.Name,
+			Instructions:                    agent.Instructions,
+			CustomEnv:                       customEnv,
+			CustomArgs:                      customArgs,
 			IsCodexWindowsSandboxArgManaged: agent.IsCodexWindowsSandboxArgManaged,
-			McpConfig:                     mcpConfig,
-			Model:                         agent.Model.String,
-			ThinkingLevel:                 agent.ThinkingLevel.String,
-			ServiceTier:                   agent.ServiceTier.String,
-			RuntimeConfig:                 runtimeConfig,
-			DisabledRuntimeSkills:         disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
+			McpConfig:                       mcpConfig,
+			Model:                           agent.Model.String,
+			ThinkingLevel:                   agent.ThinkingLevel.String,
+			ServiceTier:                     agent.ServiceTier.String,
+			RuntimeConfig:                   runtimeConfig,
+			DisabledRuntimeSkills:           disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 		}
 		// System agents carry a product-owned instruction layer that ships with
 		// this binary instead of being copied into their row at creation. That

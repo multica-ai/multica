@@ -47,11 +47,11 @@ type Agent struct {
 	// Composio toolkit slugs this agent is allowed to mount as MCP. NULL or empty array = no MCP overlay. Mounted for any run that passes the agent invocation-permission gate (MUL-3963); the overlay uses the agent OWNER's active Composio connection, so sharing the agent (public_to) shares these apps with whoever may invoke it. No longer gated on originator == owner. Stored as TEXT[] so the dispatch path can intersect against the owner's active connections with a single SQL ANY() filter.
 	ComposioToolkitAllowlist []string `json:"composio_toolkit_allowlist"`
 	// Agent invocation permission mode (MUL-3963). private = owner only; public_to = allow-list in agent_invocation_target. Replaces visibility as the authorization source for triggering runs; visibility is now a derived legacy field. Default private = deny-by-default.
-	PermissionMode                string      `json:"permission_mode"`
-	Kind                          string      `json:"kind"`
-	SystemKey                     pgtype.Text `json:"system_key"`
-	DisabledRuntimeSkills         []byte      `json:"disabled_runtime_skills"`
-	ServiceTier                   pgtype.Text `json:"service_tier"`
+	PermissionMode                  string      `json:"permission_mode"`
+	Kind                            string      `json:"kind"`
+	SystemKey                       pgtype.Text `json:"system_key"`
+	DisabledRuntimeSkills           []byte      `json:"disabled_runtime_skills"`
+	ServiceTier                     pgtype.Text `json:"service_tier"`
 	IsCodexWindowsSandboxArgManaged bool        `json:"is_codex_windows_sandbox_arg_managed"`
 }
 
