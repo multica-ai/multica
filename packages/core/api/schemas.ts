@@ -144,7 +144,7 @@ export const AgentSchema = z.object({
   archived_by: z.string().nullable(),
 }).loose();
 
-export const EMPTY_AGENT: Agent = {
+export const EMPTY_AGENT = {
   id: "",
   workspace_id: "",
   runtime_id: "",
@@ -167,7 +167,7 @@ export const EMPTY_AGENT: Agent = {
   updated_at: "",
   archived_at: null,
   archived_by: null,
-};
+} satisfies Agent;
 
 export const AgentListSchema = z
   .array(AgentSchema.catch(EMPTY_AGENT))
@@ -225,7 +225,7 @@ export const RuntimeDeviceSchema = z.object({
   updated_at: z.string(),
 }).loose();
 
-export const EMPTY_RUNTIME_DEVICE: AgentRuntime = {
+export const EMPTY_RUNTIME_DEVICE = {
   id: "",
   workspace_id: "",
   daemon_id: null,
@@ -241,7 +241,7 @@ export const EMPTY_RUNTIME_DEVICE: AgentRuntime = {
   last_seen_at: null,
   created_at: "",
   updated_at: "",
-};
+} satisfies AgentRuntime;
 
 export const RuntimeDeviceListSchema = z
   .array(RuntimeDeviceSchema.catch(EMPTY_RUNTIME_DEVICE))

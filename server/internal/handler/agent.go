@@ -1208,7 +1208,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ce = []byte("{}")
 	}
 
-	req.CustomArgs, codexWindowsSandboxArgManaged := customArgsForRuntime(runtime, req.CustomArgs, false)
+	var codexWindowsSandboxArgManaged bool
+	req.CustomArgs, codexWindowsSandboxArgManaged = customArgsForRuntime(runtime, req.CustomArgs, false)
 	ca, _ := json.Marshal(req.CustomArgs)
 	if req.CustomArgs == nil {
 		ca = []byte("[]")
