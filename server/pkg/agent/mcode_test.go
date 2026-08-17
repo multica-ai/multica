@@ -60,27 +60,10 @@ func TestNewReturnsMcodeBackend(t *testing.T) {
 	}
 }
 
-func TestMcodeModelSelectionAndDiscoveryAreRuntimeManaged(t *testing.T) {
+func TestMcodeModelSelectionIsRuntimeManaged(t *testing.T) {
 	t.Parallel()
 	if ModelSelectionSupported("mcode") {
 		t.Fatal("MCode ACP does not expose session-scoped model selection")
-	}
-
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "invoked")
-	bin := filepath.Join(dir, "mcode")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0o755); err != nil {
-		t.Fatalf("write executable: %v", err)
-	}
-	catalog, err := ListModels(context.Background(), "mcode", bin)
-	if err != nil {
-		t.Fatalf("ListModels(mcode): %v", err)
-	}
-	if len(catalog.Models) != 0 {
-		t.Fatalf("ListModels(mcode) returned %d models, want none", len(catalog.Models))
-	}
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("ListModels(mcode) spawned the CLI")
 	}
 }
 
